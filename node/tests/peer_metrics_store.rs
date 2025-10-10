@@ -2,7 +2,7 @@
 use std::thread;
 use std::time::Duration;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{peer_metrics_store, PeerMetrics};
 
 #[test]

@@ -1034,6 +1034,7 @@ mod tests {
     use super::hash::{self, Blake3Hasher, BLAKE3_KEY_LEN};
     use super::math::{self, Complex};
     use super::rng::OsRng;
+    use crypto_suite::hex;
 
     const BLAKE3_KEY: [u8; BLAKE3_KEY_LEN] = *b"whats the Elvish word for friend";
     const BLAKE3_CONTEXT: &str = "BLAKE3 2019-12-27 16:29:52 test vectors context";
@@ -1122,24 +1123,8 @@ mod tests {
         }
     }
 
-    fn decode_hex<const N: usize>(hex: &str) -> [u8; N] {
-        assert_eq!(hex.len(), N * 2, "unexpected hex length");
-        let mut out = [0u8; N];
-        for (idx, byte) in out.iter_mut().enumerate() {
-            let hi = hex_value(hex.as_bytes()[2 * idx]);
-            let lo = hex_value(hex.as_bytes()[2 * idx + 1]);
-            *byte = (hi << 4) | lo;
-        }
-        out
-    }
-
-    fn hex_value(b: u8) -> u8 {
-        match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => b - b'A' + 10,
-            _ => panic!("invalid hex"),
-        }
+    fn decode_hex<const N: usize>(value: &str) -> [u8; N] {
+        hex::decode_array::<N>(value).expect("valid fixture hex")
     }
 
     fn patterned_input(len: usize) -> Vec<u8> {

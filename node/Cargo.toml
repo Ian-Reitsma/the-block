@@ -11,14 +11,13 @@ python_bridge = { path = "../crates/python_bridge", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 inflation = { path = "../inflation" }
-hex = "0.4"
 rand = { path = "../crates/rand" }
 dkg = { path = "../dkg" }
 histogram_fp = { path = "../crates/histogram_fp" }
 subtle = "2"
 time = "0.3"
 diagnostics = { path = "../crates/diagnostics" }
-concurrency = { path = "../crates/concurrency" }
+concurrency = { path = "../crates/concurrency", features = ["serde"] }
 # Wallet framework
 wallet = { path = "../crates/wallet" }
 # Async runtime facade
@@ -33,13 +32,13 @@ privacy = { path = "../privacy", optional = true }
 cli_core = { path = "../crates/cli_core" }
 serde_bytes = "0.11"
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_regex = { path = "../crates/foundation_regex" }
 foundation_rpc = { path = "../crates/foundation_rpc" }
 foundation_telemetry = { path = "../crates/foundation_telemetry" }
 icu_normalizer = "2"
 static_assertions = "1"
 tar = "0.4"
 flate2 = "1"
-indexmap = "2"
 colored = "2"
 base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }
@@ -71,11 +70,7 @@ coding = { path = "../crates/coding" }
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
 pprof = { version = "0.13", features = ["flamegraph"] }
-bytes = "1"
-lru = "0.11"
 transport = { path = "../crates/transport", optional = true, default-features = false, features = ["quinn", "s2n-quic"] }
-regex = "1"
-terminal_size = "0.2"
 sys = { path = "../crates/sys" }
 
 [features]

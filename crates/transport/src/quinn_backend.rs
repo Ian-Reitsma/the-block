@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use concurrency::Bytes;
 use dashmap::DashMap;
 use diagnostics::{anyhow, Result, TbError};
 use foundation_lazy::sync::{Lazy, OnceCell};
@@ -12,7 +13,7 @@ use rcgen::generate_simple_self_signed;
 use rustls::client::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier, WebPkiVerifier,
 };
-pub use rustls::Certificate;
+use rustls::Certificate as RustlsCertificate;
 use rustls::{ClientConfig, PrivateKey, RootCertStore};
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
 use std::sync::RwLock;
@@ -152,19 +153,60 @@ pub const CAPABILITIES: &[ProviderCapability] = &[
 
 pub const PROVIDER_ID: &str = "quinn";
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Certificate {
+    der: Bytes,
+}
+
+impl Certificate {
+    pub fn from_der(der: impl Into<Bytes>) -> Self {
+        Self { der: der.into() }
+    }
+
+    pub fn der(&self) -> &Bytes {
+        &self.der
+    }
+
+    pub fn into_bytes(self) -> Bytes {
+        self.der
+    }
+
+    pub fn as_rustls(&self) -> RustlsCertificate {
+        RustlsCertificate(self.der.clone().into_vec())
+    }
+}
+
+impl From<Vec<u8>> for Certificate {
+    fn from(value: Vec<u8>) -> Self {
+        Certificate::from_der(value)
+    }
+}
+
+impl From<&[u8]> for Certificate {
+    fn from(value: &[u8]) -> Self {
+        Certificate::from_der(value)
+    }
+}
+
+impl AsRef<[u8]> for Certificate {
+    fn as_ref(&self) -> &[u8] {
+        self.der.as_ref()
+    }
+}
+
 pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
     let cert = generate_simple_self_signed(["the-block".to_string()]).map_err(|e| anyhow!(e))?;
-    let cert_der = cert.serialize_der().map_err(|e| anyhow!(e))?;
+    let cert_der = Bytes::from(cert.serialize_der().map_err(|e| anyhow!(e))?);
     let key_der = cert.serialize_private_key_der();
-    let cert = Certificate(cert_der.clone());
+    let certificate = Certificate::from_der(cert_der.clone());
     let key = PrivateKey(key_der);
-    let server_config =
-        quinn::ServerConfig::with_single_cert(vec![cert.clone()], key).map_err(|e| anyhow!(e))?;
+    let server_config = quinn::ServerConfig::with_single_cert(vec![certificate.as_rustls()], key)
+        .map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
     let mut attempts = 0usize;
     loop {
         match Endpoint::server(server_config.clone(), addr) {
-            Ok(endpoint) => return Ok((endpoint, cert)),
+            Ok(endpoint) => return Ok((endpoint, certificate)),
             Err(_e) if attempts < policy.attempts => {
                 attempts += 1;
                 runtime::sleep(policy.backoff).await;
@@ -177,13 +219,15 @@ pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
 
 pub async fn listen_with_cert(
     addr: SocketAddr,
-    cert_der: &[u8],
-    key_der: &[u8],
+    cert_der: &Bytes,
+    key_der: &Bytes,
 ) -> Result<Endpoint> {
-    let cert = Certificate(cert_der.to_vec());
-    let key = PrivateKey(key_der.to_vec());
-    let server_config =
-        quinn::ServerConfig::with_single_cert(vec![cert], key).map_err(|e| anyhow!(e))?;
+    let key = PrivateKey(key_der.clone().into_vec());
+    let server_config = quinn::ServerConfig::with_single_cert(
+        vec![RustlsCertificate(cert_der.clone().into_vec())],
+        key,
+    )
+    .map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
     let mut attempts = 0usize;
     loop {
@@ -201,11 +245,12 @@ pub async fn listen_with_cert(
 
 pub async fn connect(
     addr: SocketAddr,
-    cert: Certificate,
+    cert: &Certificate,
 ) -> std::result::Result<Connection, ConnectError> {
     let mut roots = RootCertStore::empty();
+    let rustls_cert = cert.as_rustls();
     roots
-        .add(&cert)
+        .add(&rustls_cert)
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
     let crypto = ClientConfig::builder()
         .with_safe_defaults()
@@ -255,7 +300,7 @@ pub async fn connect(
 
 pub async fn get_connection(
     addr: SocketAddr,
-    cert: Certificate,
+    cert: &Certificate,
 ) -> std::result::Result<Connection, ConnectError> {
     if let Some(existing) = CONNECTIONS.get(&addr) {
         if existing.close_reason().is_none() {
@@ -440,8 +485,8 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
     impl ServerCertVerifier for SkipCertVerification {
         fn verify_server_cert(
             &self,
-            _end_entity: &Certificate,
-            _intermediates: &[Certificate],
+            _end_entity: &RustlsCertificate,
+            _intermediates: &[RustlsCertificate],
             _server_name: &ServerName,
             _scts: &mut dyn Iterator<Item = &[u8]>,
             _ocsp_response: &[u8],
@@ -453,7 +498,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         fn verify_tls12_signature(
             &self,
             _message: &[u8],
-            _cert: &Certificate,
+            _cert: &RustlsCertificate,
             _dss: &DigitallySignedStruct,
         ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())
@@ -462,7 +507,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         fn verify_tls13_signature(
             &self,
             _message: &[u8],
-            _cert: &Certificate,
+            _cert: &RustlsCertificate,
             _dss: &DigitallySignedStruct,
         ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())

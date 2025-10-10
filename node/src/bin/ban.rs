@@ -23,7 +23,7 @@ enum Command {
 }
 
 fn parse_pk(hexstr: &str) -> [u8; 32] {
-    let bytes = hex::decode(hexstr).unwrap_or_else(|e| panic!("hex pk: {e}"));
+    let bytes = crypto_suite::hex::decode(hexstr).unwrap_or_else(|e| panic!("hex pk: {e}"));
     let arr: [u8; 32] = bytes.try_into().unwrap_or_else(|_| panic!("pk length"));
     arr
 }
@@ -171,7 +171,8 @@ mod tests {
             BANNED_PEER_EXPIRATION.reset();
             for (k, v) in map.iter() {
                 BANNED_PEER_EXPIRATION
-                    .with_label_values(&[&hex::encode(k)])
+                    .ensure_handle_for_label_values(&[&crypto_suite::hex::encode(k)])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(*v as i64);
             }
         }
@@ -205,7 +206,7 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .iter()
-                .map(|(k, v)| (hex::encode(k), *v))
+                .map(|(k, v)| (crypto_suite::hex::encode(k), *v))
                 .collect()
         }
     }
@@ -219,7 +220,7 @@ mod tests {
     fn ban_and_unban_update_metrics() {
         reset_metrics();
         let store = MockStore::default();
-        let pk = hex::encode([1u8; 32]);
+        let pk = crypto_suite::hex::encode([1u8; 32]);
         run(
             &store,
             Command::Ban {

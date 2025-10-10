@@ -97,8 +97,8 @@ impl MobileCacheConfig {
         let key_hex = std::env::var("TB_MOBILE_CACHE_KEY_HEX")
             .or_else(|_| std::env::var("TB_NODE_KEY_HEX"))
             .map_err(|_| MobileCacheError::MissingKey)?;
-        let key_bytes =
-            hex::decode(key_hex.trim()).map_err(|_| MobileCacheError::InvalidKeyLength)?;
+        let key_bytes = crypto_suite::hex::decode(key_hex.trim())
+            .map_err(|_| MobileCacheError::InvalidKeyLength)?;
         let encryption_key: [u8; 32] = key_bytes
             .try_into()
             .map_err(|_| MobileCacheError::InvalidKeyLength)?;

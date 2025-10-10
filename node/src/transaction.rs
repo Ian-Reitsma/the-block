@@ -6,7 +6,7 @@
 use crate::py::{PyError, PyResult};
 use crate::{to_array_32, to_array_64};
 use codec::{self, profiles};
-use concurrency::{Lazy, MutexExt};
+use concurrency::{cache::LruCache, Lazy, MutexExt};
 #[cfg(feature = "quantum")]
 use crypto::dilithium;
 use crypto_suite::hashing::blake3::{self, Hasher};
@@ -15,9 +15,7 @@ use crypto_suite::transactions::{
     canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
 };
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use ledger::address::{self, ShardId};
-use lru::LruCache;
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
@@ -421,8 +419,8 @@ impl BlobTx {
         format!(
             "BlobTx(owner='{}', blob_id={}, blob_root={}, blob_size={}, fractal_lvl={}, expiry={:?})",
             self.owner,
-            hex::encode(self.blob_id),
-            hex::encode(self.blob_root),
+            crypto_suite::hex::encode(self.blob_id),
+            crypto_suite::hex::encode(self.blob_root),
             self.blob_size,
             self.fractal_lvl,
             self.expiry

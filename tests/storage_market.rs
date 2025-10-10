@@ -37,10 +37,10 @@ fn retrieval_challenge_and_slash() {
     let proof = contract.expected_proof(0);
     let ok = rpc::storage::challenge(&contract.object_id, 0, proof, 5);
     assert_eq!(ok["status"], "ok");
-    assert_eq!(telemetry::RETRIEVAL_SUCCESS_TOTAL.get(), 1);
+    assert_eq!(telemetry::RETRIEVAL_SUCCESS_TOTAL.value(), 1);
     let bad = rpc::storage::challenge(&contract.object_id, 0, [0u8; 32], 5);
     assert_eq!(bad["error"], "challenge_failed");
-    assert_eq!(telemetry::RETRIEVAL_FAILURE_TOTAL.get(), 1);
+    assert_eq!(telemetry::RETRIEVAL_FAILURE_TOTAL.value(), 1);
 }
 
 #[test]

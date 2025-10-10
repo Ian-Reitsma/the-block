@@ -26,7 +26,7 @@ fn init() {
     });
 }
 
-fn load_fixture(name: &str) -> tempfile::TempDir {
+fn load_fixture(name: &str) -> sys::tempfile::TempDir {
     let dir = temp_dir("chain_db");
     let src = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -182,10 +182,12 @@ fn startup_ttl_purge_increments_metrics() {
         telemetry::TTL_DROP_TOTAL.reset();
         telemetry::STARTUP_TTL_DROP_TOTAL.reset();
         telemetry::MEMPOOL_SIZE
-            .with_label_values(&["consumer"])
+            .ensure_handle_for_label_values(&["consumer"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .set(0);
         telemetry::MEMPOOL_SIZE
-            .with_label_values(&["industrial"])
+            .ensure_handle_for_label_values(&["industrial"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .set(0);
     }
     {
@@ -224,7 +226,8 @@ fn startup_ttl_purge_increments_metrics() {
         assert_eq!(
             0,
             telemetry::MEMPOOL_SIZE
-                .with_label_values(&["consumer"])
+                .ensure_handle_for_label_values(&["consumer"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
     }
@@ -244,10 +247,12 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         telemetry::STARTUP_TTL_DROP_TOTAL.reset();
         telemetry::ORPHAN_SWEEP_TOTAL.reset();
         telemetry::MEMPOOL_SIZE
-            .with_label_values(&["consumer"])
+            .ensure_handle_for_label_values(&["consumer"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .set(0);
         telemetry::MEMPOOL_SIZE
-            .with_label_values(&["industrial"])
+            .ensure_handle_for_label_values(&["industrial"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .set(0);
     }
     {

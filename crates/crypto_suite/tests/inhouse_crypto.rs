@@ -15,14 +15,14 @@ const IDENTITY_COMPRESSED: [u8; 32] = {
 };
 
 fn vector_seed(hex: &str) -> [u8; 32] {
-    let bytes = hex::decode(hex).expect("hex");
+    let bytes = crypto_suite::hex::decode(hex).expect("hex");
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&bytes);
     arr
 }
 
 fn vector_signature(hex: &str) -> Signature {
-    let bytes = hex::decode(hex).expect("hex");
+    let bytes = crypto_suite::hex::decode(hex).expect("hex");
     let mut arr = [0u8; 64];
     arr.copy_from_slice(&bytes);
     Signature::from_bytes(&arr)
@@ -31,8 +31,10 @@ fn vector_signature(hex: &str) -> Signature {
 #[test]
 fn rfc8032_vector1() {
     let seed = vector_seed("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-    let expected_public =
-        hex::decode("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a").unwrap();
+    let expected_public = crypto_suite::hex::decode(
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+    )
+    .unwrap();
     let expected_signature = vector_signature("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
 
     let signing_key = SigningKey::from_bytes(&seed);
@@ -52,9 +54,11 @@ fn rfc8032_vector1() {
 #[test]
 fn rfc8032_vector2() {
     let seed = vector_seed("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
-    let expected_public =
-        hex::decode("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c").unwrap();
-    let message = hex::decode("72").unwrap();
+    let expected_public = crypto_suite::hex::decode(
+        "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+    )
+    .unwrap();
+    let message = crypto_suite::hex::decode("72").unwrap();
     let expected_signature = vector_signature("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00");
 
     let signing_key = SigningKey::from_bytes(&seed);
@@ -152,7 +156,7 @@ fn pkcs8_roundtrip_matches() {
 fn sha512_rfc6234_empty() {
     let digest = Sha512::digest(b"");
     assert_eq!(
-        hex::encode(digest),
+        crypto_suite::hex::encode(digest),
         "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
     );
 }
@@ -161,7 +165,7 @@ fn sha512_rfc6234_empty() {
 fn sha512_rfc6234_abc() {
     let digest = Sha512::digest(b"abc");
     assert_eq!(
-        hex::encode(digest),
+        crypto_suite::hex::encode(digest),
         "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
     );
 }
@@ -176,7 +180,7 @@ fn hkdf_matches_rfc5869_case1() {
     let mut okm = [0u8; 42];
     kdf_inhouse::derive_key_material(Some(&salt), &info, &ikm, &mut okm);
     assert_eq!(
-        hex::encode(okm),
+        crypto_suite::hex::encode(okm),
         "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
     );
 }
@@ -208,19 +212,19 @@ fn blake3_vectors_match_spec() {
             input[i] = (i % 251) as u8;
         }
         let digest = blake3::hash(&input);
-        assert_eq!(hex::encode(digest.as_bytes()), expected);
+        assert_eq!(crypto_suite::hex::encode(digest.as_bytes()), expected);
     }
 
     let key_bytes: [u8; blake3::KEY_LEN] = *b"whats the Elvish word for friend";
     let keyed = blake3::keyed_hash(&key_bytes, b"");
     assert_eq!(
-        hex::encode(keyed.as_bytes()),
+        crypto_suite::hex::encode(keyed.as_bytes()),
         "92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"
     );
 
     let derived = blake3::derive_key("BLAKE3 2019-12-27 16:29:52 test vectors context", b"");
     assert_eq!(
-        hex::encode(derived),
+        crypto_suite::hex::encode(derived),
         "2cc39783c223154fea8dfb7c1b1660f2ac2dcbd1c1de8277b0b0dd39b7e50d7d"
     );
 }
@@ -245,6 +249,6 @@ fn sha3_vectors_match_spec() {
         let mut hasher = Sha3_256::new();
         hasher.update(message);
         let digest = hasher.finalize();
-        assert_eq!(hex::encode(digest.as_slice()), expected);
+        assert_eq!(crypto_suite::hex::encode(digest.as_slice()), expected);
     }
 }

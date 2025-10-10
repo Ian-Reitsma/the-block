@@ -171,7 +171,9 @@ impl Hash {
 
 impl core::fmt::Debug for Hash {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Hash").field(&hex::encode(self.0)).finish()
+        f.debug_tuple("Hash")
+            .field(&crate::hex::encode(self.0))
+            .finish()
     }
 }
 
@@ -191,13 +193,13 @@ pub struct HexOutput([u8; OUT_LEN]);
 
 impl HexOutput {
     pub fn to_string(&self) -> String {
-        hex::encode(self.0)
+        crate::hex::encode(self.0)
     }
 }
 
 impl core::fmt::Display for HexOutput {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
+        write!(f, "{}", crate::hex::encode(self.0))
     }
 }
 
@@ -465,7 +467,7 @@ mod tests {
                 input[i] = (i % 251) as u8;
             }
             let digest = hash(&input);
-            assert_eq!(hex::encode(digest.0), expected_hex);
+            assert_eq!(crate::hex::encode(digest.0), expected_hex);
         }
     }
 
@@ -478,13 +480,13 @@ mod tests {
         let key: [u8; KEY_LEN] = *b"whats the Elvish word for friend";
         let keyed = keyed_hash(&key, &input);
         assert_eq!(
-            hex::encode(keyed.0),
+            crate::hex::encode(keyed.0),
             "ba8ced36f327700d213f120b1a207a3b8c04330528586f414d09f2f7d9ccb7e6"
         );
 
         let derived = derive_key("BLAKE3 2019-12-27 16:29:52 test vectors context", &input);
         assert_eq!(
-            hex::encode(derived),
+            crate::hex::encode(derived),
             "a5c4a7053fa86b64746d4bb688d06ad1f02a18fce9afd3e818fefaa7126bf73e"
         );
     }

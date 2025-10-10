@@ -151,7 +151,7 @@ impl From<Signature> for [u8; SIGNATURE_LENGTH] {
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Signature")
-            .field(&hex::encode(self.bytes))
+            .field(&crate::hex::encode(self.bytes))
             .finish()
     }
 }
@@ -273,7 +273,7 @@ mod tests {
     use super::*;
 
     fn hex_to_array<const N: usize>(hex_str: &str) -> [u8; N] {
-        let bytes = hex::decode(hex_str).expect("hex");
+        let bytes = crate::hex::decode(hex_str).expect("hex");
         let mut arr = [0u8; N];
         arr.copy_from_slice(&bytes);
         arr

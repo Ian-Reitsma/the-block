@@ -309,8 +309,8 @@ fn migrate_legacy_if_needed(base: &Path, data_path: &Path) -> Result<()> {
     let engine = InhouseEngine::open(path_to_str(data_path)?)?;
     for name in legacy_db.tree_names() {
         let name_bytes = name.to_vec();
-        let name_str =
-            String::from_utf8(name_bytes.clone()).unwrap_or_else(|_| hex::encode(&name_bytes));
+        let name_str = String::from_utf8(name_bytes.clone())
+            .unwrap_or_else(|_| crypto_suite::hex::encode(&name_bytes));
         engine.ensure_cf(&name_str)?;
         let tree = legacy_db.open_tree(&name_bytes)?;
         let mut iter = tree.iter();

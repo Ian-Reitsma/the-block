@@ -1,9 +1,10 @@
 #![cfg(feature = "integration-tests")]
+use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{BlobChunk, Message, Payload, PeerSet, REQUIRED_FEATURES, SUPPORTED_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 use the_block::Blockchain;
@@ -50,7 +51,7 @@ fn shard_rate_limiting() {
         root: [1u8; 32],
         index: 0,
         total: 1,
-        data: vec![0; 256],
+        data: Bytes::from(vec![0; 256]),
     };
     peers.handle_message(
         Message::new(Payload::BlobChunk(chunk.clone()), &sk),
@@ -64,7 +65,7 @@ fn shard_rate_limiting() {
         root: [1u8; 32],
         index: 1,
         total: 2,
-        data: vec![0; 400],
+        data: Bytes::from(vec![0; 400]),
     };
     peers.handle_message(
         Message::new(Payload::BlobChunk(chunk2), &sk),

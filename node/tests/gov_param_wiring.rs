@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     compute_market::admission,
     generate_keypair,
@@ -95,7 +95,8 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         PARAM_CHANGE_PENDING
-            .with_label_values(&["consumer_fee_comfort_p90_microunits"])
+            .ensure_handle_for_label_values(&["consumer_fee_comfort_p90_microunits"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         1
     );
@@ -109,13 +110,15 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     {
         assert_eq!(
             PARAM_CHANGE_PENDING
-                .with_label_values(&["consumer_fee_comfort_p90_microunits"])
+                .ensure_handle_for_label_values(&["consumer_fee_comfort_p90_microunits"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             0
         );
         assert_eq!(
             PARAM_CHANGE_ACTIVE
-                .with_label_values(&["consumer_fee_comfort_p90_microunits"])
+                .ensure_handle_for_label_values(&["consumer_fee_comfort_p90_microunits"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             4_000
         );
@@ -179,7 +182,8 @@ fn industrial_min_capacity_param_wires_and_rollback() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         PARAM_CHANGE_ACTIVE
-            .with_label_values(&["industrial_admission_min_capacity"])
+            .ensure_handle_for_label_values(&["industrial_admission_min_capacity"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         20
     );
@@ -191,7 +195,8 @@ fn industrial_min_capacity_param_wires_and_rollback() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         PARAM_CHANGE_ACTIVE
-            .with_label_values(&["industrial_admission_min_capacity"])
+            .ensure_handle_for_label_values(&["industrial_admission_min_capacity"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         10
     );
@@ -349,7 +354,8 @@ fn snapshot_interval_param_updates_runtime() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         PARAM_CHANGE_ACTIVE
-            .with_label_values(&["snapshot_interval_secs"])
+            .ensure_handle_for_label_values(&["snapshot_interval_secs"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         60
     );

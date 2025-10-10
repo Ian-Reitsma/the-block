@@ -135,10 +135,12 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
             {
                 use crate::telemetry::ACTIVE_BURST_QUOTA;
                 ACTIVE_BURST_QUOTA
-                    .with_label_values(&[buyer])
+                    .ensure_handle_for_label_values(&[buyer])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(bq.remaining as i64);
                 ACTIVE_BURST_QUOTA
-                    .with_label_values(&[provider])
+                    .ensure_handle_for_label_values(&[provider])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(pq.remaining as i64);
             }
         } else if bq.remaining == 0.0 || pq.remaining == 0.0 {

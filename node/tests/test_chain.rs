@@ -35,7 +35,7 @@ fn init() {
     });
     let _ = fs::remove_dir_all("chain_db");
 }
-fn load_fixture(name: &str) -> tempfile::TempDir {
+fn load_fixture(name: &str) -> sys::tempfile::TempDir {
     let dir = temp_dir("chain_db");
     let src = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

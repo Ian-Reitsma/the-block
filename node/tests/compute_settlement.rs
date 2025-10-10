@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{AuditRecord, SettleMode, Settlement};
 
 fn teardown() {

@@ -7,7 +7,6 @@ use concurrency::Lazy;
 use crypto_suite::hashing::blake3;
 #[cfg(feature = "telemetry")]
 use crypto_suite::{self, signatures::ed25519};
-use hex;
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
@@ -15,8 +14,9 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
+    self, Encoder, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec, IntCounter,
+    IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle, IntGaugeVec, Opts, Registry,
+    TextEncoder,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +39,8 @@ pub mod summary;
 pub use bridges::{BRIDGE_CHALLENGES_TOTAL, BRIDGE_SLASHES_TOTAL};
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+pub const LABEL_REGISTRATION_ERR: &str = "telemetry label set not registered";
 
 #[cfg(feature = "telemetry")]
 static SAMPLE_RATE: AtomicU64 = AtomicU64::new(1_000_000); // parts per million
@@ -314,7 +316,7 @@ fn sample_weight() -> u64 {
 }
 
 #[cfg(feature = "telemetry")]
-pub fn sampled_inc(counter: &IntCounter) {
+pub fn sampled_inc(counter: &IntCounterHandle) {
     if should_sample() {
         counter.inc_by(sample_weight());
     }
@@ -323,12 +325,15 @@ pub fn sampled_inc(counter: &IntCounter) {
 #[cfg(feature = "telemetry")]
 pub fn sampled_inc_vec(counter: &IntCounterVec, labels: &[&str]) {
     if should_sample() {
-        counter.with_label_values(labels).inc_by(sample_weight());
+        counter
+            .ensure_handle_for_label_values(labels)
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc_by(sample_weight());
     }
 }
 
 #[cfg(feature = "telemetry")]
-pub fn sampled_observe(hist: &Histogram, v: f64) {
+pub fn sampled_observe(hist: &HistogramHandle, v: f64) {
     if should_sample() {
         hist.observe(v);
     }
@@ -337,14 +342,17 @@ pub fn sampled_observe(hist: &Histogram, v: f64) {
 #[cfg(feature = "telemetry")]
 pub fn sampled_observe_vec(hist: &HistogramVec, labels: &[&str], v: f64) {
     if should_sample() {
-        hist.with_label_values(labels).observe(v);
+        hist.ensure_handle_for_label_values(labels)
+            .expect(LABEL_REGISTRATION_ERR)
+            .observe(v);
     }
 }
 
 #[cfg(feature = "telemetry")]
 pub fn record_coding_result(stage: &str, algorithm: &str, result: &str) {
     STORAGE_CODING_OPERATIONS_TOTAL
-        .with_label_values(&[stage, algorithm, result])
+        .ensure_handle_for_label_values(&[stage, algorithm, result])
+        .expect(LABEL_REGISTRATION_ERR)
         .inc();
 }
 
@@ -359,7 +367,8 @@ fn compiled_transport_providers() -> &'static [&'static str] {
 #[cfg(feature = "telemetry")]
 fn set_coding_metric(component: &str, algorithm: &str, mode: &str, value: i64) {
     CODING_ALGORITHM_INFO
-        .with_label_values(&[component, algorithm, mode])
+        .ensure_handle_for_label_values(&[component, algorithm, mode])
+        .expect(LABEL_REGISTRATION_ERR)
         .set(value);
 }
 
@@ -443,12 +452,14 @@ pub fn record_runtime_backend(active: &str) {
         };
         let value = if backend == active { 1 } else { 0 };
         RUNTIME_BACKEND_INFO
-            .with_label_values(&[backend, compiled_flag])
+            .ensure_handle_for_label_values(&[backend, compiled_flag])
+            .expect(LABEL_REGISTRATION_ERR)
             .set(value);
     }
     if !KNOWN_RUNTIME_BACKENDS.contains(&active) {
         RUNTIME_BACKEND_INFO
-            .with_label_values(&[active, "true"])
+            .ensure_handle_for_label_values(&[active, "true"])
+            .expect(LABEL_REGISTRATION_ERR)
             .set(1);
     }
 }
@@ -471,7 +482,8 @@ pub fn record_dependency_policy(kind: &str, allowed: &[String]) {
             0.0
         };
         GOV_DEPENDENCY_POLICY_ALLOWED
-            .with_label_values(&[kind, label])
+            .ensure_handle_for_label_values(&[kind, label])
+            .expect(LABEL_REGISTRATION_ERR)
             .set(value);
     }
     if crate::telemetry::should_log("governance") {
@@ -496,12 +508,14 @@ pub fn record_transport_backend(active: &str) {
         };
         let value = if provider == active { 1 } else { 0 };
         TRANSPORT_PROVIDER_INFO
-            .with_label_values(&[provider, compiled_flag])
+            .ensure_handle_for_label_values(&[provider, compiled_flag])
+            .expect(LABEL_REGISTRATION_ERR)
             .set(value);
     }
     if !KNOWN_TRANSPORT_PROVIDERS.contains(&active) {
         TRANSPORT_PROVIDER_INFO
-            .with_label_values(&[active, "true"])
+            .ensure_handle_for_label_values(&[active, "true"])
+            .expect(LABEL_REGISTRATION_ERR)
             .set(1);
     }
 }
@@ -574,11 +588,12 @@ pub fn record_coding_algorithms(_algorithms: &crate::storage::settings::Algorith
 #[cfg(feature = "telemetry")]
 pub fn record_crypto_backend() {
     CRYPTO_BACKEND_INFO
-        .with_label_values(&[
+        .ensure_handle_for_label_values(&[
             ed25519::ALGORITHM,
             ed25519::BACKEND,
             ed25519::BACKEND_VERSION,
         ])
+        .expect(LABEL_REGISTRATION_ERR)
         .set(1);
 }
 
@@ -592,18 +607,28 @@ fn codec_metrics_hook(codec: Codec, direction: Direction, size: Option<usize>) {
     match size {
         Some(len) => {
             CODEC_PAYLOAD_BYTES
-                .with_label_values(&[codec_label, dir_label, profile_label, codec::VERSION])
+                .ensure_handle_for_label_values(&[
+                    codec_label,
+                    dir_label,
+                    profile_label,
+                    codec::VERSION,
+                ])
+                .expect(LABEL_REGISTRATION_ERR)
                 .observe(len as f64);
         }
         None => {
             let labels = [codec_label, profile_label, codec::VERSION];
             match direction {
                 Direction::Serialize => {
-                    CODEC_SERIALIZE_FAIL_TOTAL.with_label_values(&labels).inc();
+                    CODEC_SERIALIZE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&labels)
+                        .expect(LABEL_REGISTRATION_ERR)
+                        .inc();
                 }
                 Direction::Deserialize => {
                     CODEC_DESERIALIZE_FAIL_TOTAL
-                        .with_label_values(&labels)
+                        .ensure_handle_for_label_values(&labels)
+                        .expect(LABEL_REGISTRATION_ERR)
                         .inc();
                 }
             }
@@ -620,13 +645,14 @@ fn crypto_metrics_hook(
 ) {
     let result = if success { "ok" } else { "error" };
     CRYPTO_OPERATION_TOTAL
-        .with_label_values(&[
+        .ensure_handle_for_label_values(&[
             algorithm,
             backend,
             ed25519::BACKEND_VERSION,
             operation,
             result,
         ])
+        .expect(LABEL_REGISTRATION_ERR)
         .inc();
 }
 
@@ -641,9 +667,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         } else {
             "false"
         };
-        if let Ok(gauge) =
-            RUNTIME_BACKEND_INFO.get_metric_with_label_values(&[backend, compiled_flag])
-        {
+        if let Ok(gauge) = RUNTIME_BACKEND_INFO.handle_for_label_values(&[backend, compiled_flag]) {
             push_metric(
                 &mut metrics,
                 "runtime_backend_info",
@@ -661,7 +685,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
             "false"
         };
         if let Ok(gauge) =
-            TRANSPORT_PROVIDER_INFO.get_metric_with_label_values(&[provider, compiled_flag])
+            TRANSPORT_PROVIDER_INFO.handle_for_label_values(&[provider, compiled_flag])
         {
             push_metric(
                 &mut metrics,
@@ -670,9 +694,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
                 gauge.get() as f64,
             );
         }
-        if let Ok(counter) =
-            TRANSPORT_PROVIDER_CONNECT_TOTAL.get_metric_with_label_values(&[provider])
-        {
+        if let Ok(counter) = TRANSPORT_PROVIDER_CONNECT_TOTAL.handle_for_label_values(&[provider]) {
             push_metric(
                 &mut metrics,
                 "transport_provider_connect_total",
@@ -685,7 +707,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
     if let Ok(guard) = CODING_PREVIOUS.lock() {
         for (component, algorithm) in guard.iter() {
             for mode in ["active", "fallback", "emergency"] {
-                if let Ok(gauge) = CODING_ALGORITHM_INFO.get_metric_with_label_values(&[
+                if let Ok(gauge) = CODING_ALGORITHM_INFO.handle_for_label_values(&[
                     component,
                     algorithm.as_str(),
                     mode,
@@ -707,7 +729,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
 
     for (codec_name, profiles) in KNOWN_CODEC_PROFILES {
         for profile in *profiles {
-            if let Ok(counter) = CODEC_SERIALIZE_FAIL_TOTAL.get_metric_with_label_values(&[
+            if let Ok(counter) = CODEC_SERIALIZE_FAIL_TOTAL.handle_for_label_values(&[
                 codec_name,
                 profile,
                 codec::VERSION,
@@ -723,7 +745,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
                     counter.get() as f64,
                 );
             }
-            if let Ok(counter) = CODEC_DESERIALIZE_FAIL_TOTAL.get_metric_with_label_values(&[
+            if let Ok(counter) = CODEC_DESERIALIZE_FAIL_TOTAL.handle_for_label_values(&[
                 codec_name,
                 profile,
                 codec::VERSION,
@@ -744,7 +766,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
 
     for operation in ["sign", "verify", "verify_strict"] {
         for result in ["ok", "error"] {
-            if let Ok(counter) = CRYPTO_OPERATION_TOTAL.get_metric_with_label_values(&[
+            if let Ok(counter) = CRYPTO_OPERATION_TOTAL.handle_for_label_values(&[
                 ed25519::ALGORITHM,
                 ed25519::BACKEND,
                 ed25519::BACKEND_VERSION,
@@ -767,7 +789,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         }
     }
 
-    if let Ok(gauge) = CRYPTO_BACKEND_INFO.get_metric_with_label_values(&[
+    if let Ok(gauge) = CRYPTO_BACKEND_INFO.handle_for_label_values(&[
         ed25519::ALGORITHM,
         ed25519::BACKEND,
         ed25519::BACKEND_VERSION,
@@ -795,7 +817,8 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
 #[cfg(feature = "telemetry")]
 pub fn record_compression_ratio(algorithm: &str, ratio: f64) {
     STORAGE_COMPRESSION_RATIO
-        .with_label_values(&[algorithm])
+        .ensure_handle_for_label_values(&[algorithm])
+        .expect(LABEL_REGISTRATION_ERR)
         .observe(ratio);
 }
 
@@ -946,11 +969,11 @@ pub fn compaction_interval_secs() -> u64 {
 pub fn record_log_correlation_fail() {}
 
 #[cfg(not(feature = "telemetry"))]
-pub fn sampled_inc(_c: &IntCounter) {}
+pub fn sampled_inc(_c: &IntCounterHandle) {}
 #[cfg(not(feature = "telemetry"))]
 pub fn sampled_inc_vec(_c: &IntCounterVec, _l: &[&str]) {}
 #[cfg(not(feature = "telemetry"))]
-pub fn sampled_observe(_h: &Histogram, _v: f64) {}
+pub fn sampled_observe(_h: &HistogramHandle, _v: f64) {}
 #[cfg(not(feature = "telemetry"))]
 pub fn sampled_observe_vec(_h: &HistogramVec, _l: &[&str], _v: f64) {}
 
@@ -980,7 +1003,7 @@ pub fn log_context() -> diagnostics::tracing::Span {
     use rand::RngCore;
     let mut buf = [0u8; 8];
     rand::thread_rng().fill_bytes(&mut buf);
-    crate::logging::info_span_with_field("trace", "trace_id", hex::encode(buf))
+    crate::logging::info_span_with_field("trace", "trace_id", crypto_suite::hex::encode(buf))
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -992,54 +1015,54 @@ pub fn log_context() -> diagnostics::tracing::Span {
     )
 }
 
-pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+pub static HAAR_ETA_MILLI: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("haar_eta_milli", "eta parameter for burst veto x1000").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static UTIL_VAR_THRESHOLD_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+pub static UTIL_VAR_THRESHOLD_MILLI: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "util_var_threshold_milli",
         "utilisation variance threshold x1000",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static FIB_WINDOW_BASE_SECS: Lazy<IntGauge> = Lazy::new(|| {
+pub static FIB_WINDOW_BASE_SECS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "fib_window_base_secs",
         "base seconds for Fibonacci smoothing",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static HEURISTIC_MU_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+pub static HEURISTIC_MU_MILLI: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("heuristic_mu_milli", "A* heuristic mu x1000").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static ACTIVE_MINERS: Lazy<IntGauge> = Lazy::new(|| {
+pub static ACTIVE_MINERS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("active_miners", "effective active miners").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static BASE_FEE: Lazy<IntGauge> = Lazy::new(|| {
+pub static BASE_FEE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("base_fee", "current base fee").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static BASE_REWARD_CT: Lazy<IntGauge> = Lazy::new(|| {
+pub static BASE_REWARD_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("base_reward_ct", "base reward after logistic factor").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
 pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -1048,12 +1071,16 @@ pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g.with_label_values(&["consumer"]).set(0);
-    g.with_label_values(&["industrial"]).set(0);
+    g.ensure_handle_for_label_values(&["consumer"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .set(0);
+    g.ensure_handle_for_label_values(&["industrial"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .set(0);
     g
 });
 
-pub static MEMPOOL_EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MEMPOOL_EVICTIONS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "mempool_evictions_total",
         "Total transactions evicted from the mempool",
@@ -1062,10 +1089,10 @@ pub static MEMPOOL_EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mempool evictions: {e}"));
-    c
+    c.handle()
 });
 
-pub static FEE_FLOOR_CURRENT: Lazy<IntGauge> = Lazy::new(|| {
+pub static FEE_FLOOR_CURRENT: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "fee_floor_current",
         "Current dynamically computed fee floor",
@@ -1074,10 +1101,10 @@ pub static FEE_FLOOR_CURRENT: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry fee floor current: {e}"));
-    g
+    g.handle()
 });
 
-pub static FEE_FLOOR_WINDOW_CHANGED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static FEE_FLOOR_WINDOW_CHANGED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "fee_floor_window_changed_total",
         "Total governance-triggered fee floor policy reconfigurations",
@@ -1086,7 +1113,7 @@ pub static FEE_FLOOR_WINDOW_CHANGED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry fee floor window changed: {e}"));
-    c
+    c.handle()
 });
 
 pub static FEE_FLOOR_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -1101,8 +1128,12 @@ pub static FEE_FLOOR_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry fee floor warning: {e}"));
-    c.with_label_values(&["consumer"]).inc_by(0);
-    c.with_label_values(&["industrial"]).inc_by(0);
+    c.ensure_handle_for_label_values(&["consumer"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .inc_by(0);
+    c.ensure_handle_for_label_values(&["industrial"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .inc_by(0);
     c
 });
 
@@ -1118,30 +1149,34 @@ pub static FEE_FLOOR_OVERRIDE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry fee floor override: {e}"));
-    c.with_label_values(&["consumer"]).inc_by(0);
-    c.with_label_values(&["industrial"]).inc_by(0);
+    c.ensure_handle_for_label_values(&["consumer"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .inc_by(0);
+    c.ensure_handle_for_label_values(&["industrial"])
+        .expect(LABEL_REGISTRATION_ERR)
+        .inc_by(0);
     c
 });
 
-pub static DID_ANCHOR_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DID_ANCHOR_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("did_anchor_total", "Total number of anchored DID documents")
         .unwrap_or_else(|e| panic!("counter did anchor: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry did anchor: {e}"));
-    c
+    c.handle()
 });
 
-pub static PROOF_REBATES_CLAIMED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static PROOF_REBATES_CLAIMED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("proof_rebates_claimed_total", "Total proof rebate claims")
         .unwrap_or_else(|e| panic!("counter proof rebates claimed: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry proof rebates claimed: {e}"));
-    c
+    c.handle()
 });
 
-pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "proof_rebates_amount_total",
         "Total CT awarded via proof rebates",
@@ -1150,10 +1185,10 @@ pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry proof rebates amount: {e}"));
-    c
+    c.handle()
 });
 
-pub static PROOF_REBATES_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static PROOF_REBATES_PENDING_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "proof_rebates_pending_total",
         "Pending CT rebates awaiting claim",
@@ -1162,28 +1197,28 @@ pub static PROOF_REBATES_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry proof rebates pending: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_CACHE_HIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_HIT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("mobile_cache_hit_total", "Total mobile cache hits")
         .unwrap_or_else(|e| panic!("counter mobile cache hit: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache hit: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_MISS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("mobile_cache_miss_total", "Total mobile cache misses")
         .unwrap_or_else(|e| panic!("counter mobile cache miss: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache miss: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_EVICT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "mobile_cache_evict_total",
         "Expired or purged mobile cache entries",
@@ -1192,10 +1227,10 @@ pub static MOBILE_CACHE_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache evict: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_STALE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_STALE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "mobile_cache_stale_total",
         "Mobile cache entries dropped due to TTL expiry",
@@ -1204,10 +1239,10 @@ pub static MOBILE_CACHE_STALE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache stale: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "mobile_cache_reject_total",
         "Mobile cache insertions rejected by limits",
@@ -1216,19 +1251,19 @@ pub static MOBILE_CACHE_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache reject: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_ENTRY_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_CACHE_ENTRY_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("mobile_cache_entry_total", "Active mobile cache entries")
         .unwrap_or_else(|e| panic!("gauge mobile cache entry total: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache entry total: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_CACHE_ENTRY_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_CACHE_ENTRY_BYTES: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_cache_entry_bytes",
         "Total bytes stored in the mobile cache",
@@ -1237,10 +1272,10 @@ pub static MOBILE_CACHE_ENTRY_BYTES: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache entry bytes: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_CACHE_QUEUE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_CACHE_QUEUE_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_cache_queue_total",
         "Offline transactions queued for replay",
@@ -1249,10 +1284,10 @@ pub static MOBILE_CACHE_QUEUE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache queue total: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_CACHE_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_CACHE_QUEUE_BYTES: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_cache_queue_bytes",
         "Bytes buffered in the mobile offline queue",
@@ -1261,10 +1296,10 @@ pub static MOBILE_CACHE_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache queue bytes: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_CACHE_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MOBILE_CACHE_SWEEP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "mobile_cache_sweep_total",
         "Number of mobile cache TTL sweeps",
@@ -1273,10 +1308,10 @@ pub static MOBILE_CACHE_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache sweep: {e}"));
-    c
+    c.handle()
 });
 
-pub static MOBILE_CACHE_SWEEP_WINDOW_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_CACHE_SWEEP_WINDOW_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_cache_sweep_window_seconds",
         "Configured sweep interval for the mobile cache",
@@ -1285,10 +1320,10 @@ pub static MOBILE_CACHE_SWEEP_WINDOW_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile cache sweep window: {e}"));
-    g
+    g.handle()
 });
 
-pub static MOBILE_TX_QUEUE_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
+pub static MOBILE_TX_QUEUE_DEPTH: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_tx_queue_depth",
         "Queued mobile transactions awaiting send",
@@ -1297,37 +1332,37 @@ pub static MOBILE_TX_QUEUE_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry mobile tx queue depth: {e}"));
-    g
+    g.handle()
 });
 
-pub static SNAPSHOT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SNAPSHOT_CREATED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("snapshot_created_total", "Total snapshots created")
         .unwrap_or_else(|e| panic!("counter snapshot created: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot created: {e}"));
-    c
+    c.handle()
 });
 
-pub static SNAPSHOT_RESTORE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SNAPSHOT_RESTORE_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("snapshot_restore_fail_total", "Failed snapshot restores")
         .unwrap_or_else(|e| panic!("counter snapshot restore fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot restore fail: {e}"));
-    c
+    c.handle()
 });
 
-pub static SNAPSHOT_INTERVAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static SNAPSHOT_INTERVAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("snapshot_interval", "Snapshot interval in blocks")
         .unwrap_or_else(|e| panic!("gauge snapshot interval: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot interval: {e}"));
-    g
+    g.handle()
 });
 
-pub static SNAPSHOT_INTERVAL_CHANGED: Lazy<IntGauge> = Lazy::new(|| {
+pub static SNAPSHOT_INTERVAL_CHANGED: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "snapshot_interval_changed",
         "Last requested snapshot interval",
@@ -1336,26 +1371,26 @@ pub static SNAPSHOT_INTERVAL_CHANGED: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot interval changed: {e}"));
-    g
+    g.handle()
 });
 
-pub static SNAPSHOT_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static SNAPSHOT_DURATION_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new("snapshot_duration_seconds", "Snapshot operation duration");
     let h =
         Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram snapshot duration: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot duration: {e}"));
-    h
+    h.handle()
 });
 
-pub static SNAPSHOT_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SNAPSHOT_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("snapshot_fail_total", "Total snapshot operation failures")
         .unwrap_or_else(|e| panic!("counter snapshot fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot fail: {e}"));
-    c
+    c.handle()
 });
 
 pub static SUBSIDY_MULTIPLIER: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -1382,14 +1417,14 @@ pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static TELEMETRY_ALLOC_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+pub static TELEMETRY_ALLOC_BYTES: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "telemetry_alloc_bytes",
         "Telemetry memory allocation in bytes",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
 pub static RUNTIME_BACKEND_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -1527,7 +1562,15 @@ mod tests {
     use codec::{BincodeProfile, JsonProfile};
 
     fn reset_wrapper_metrics() {
-        CODEC_PAYLOAD_BYTES.reset();
+        for labels in [
+            ["json", "serialize", CODEC_NONE_PROFILE, codec::VERSION],
+            ["bincode", "serialize", CODEC_NONE_PROFILE, codec::VERSION],
+            ["bincode", "deserialize", CODEC_NONE_PROFILE, codec::VERSION],
+            ["bincode", "serialize", "transaction", codec::VERSION],
+            ["bincode", "deserialize", "transaction", codec::VERSION],
+        ] {
+            CODEC_PAYLOAD_BYTES.remove_label_values(&labels);
+        }
         CODEC_SERIALIZE_FAIL_TOTAL.reset();
         CODEC_DESERIALIZE_FAIL_TOTAL.reset();
         CRYPTO_OPERATION_TOTAL.reset();
@@ -1567,13 +1610,13 @@ mod tests {
             Some(128),
         );
         let hist = CODEC_PAYLOAD_BYTES
-            .get_metric_with_label_values(&[
+            .ensure_handle_for_label_values(&[
                 "json",
                 "serialize",
                 CODEC_NONE_PROFILE,
                 codec::VERSION,
             ])
-            .unwrap();
+            .expect(LABEL_REGISTRATION_ERR);
         assert_eq!(hist.get_sample_count(), 1);
 
         codec_metrics_hook(
@@ -1582,7 +1625,7 @@ mod tests {
             None,
         );
         let serialize_fail = CODEC_SERIALIZE_FAIL_TOTAL
-            .get_metric_with_label_values(&["bincode", "transaction", codec::VERSION])
+            .handle_for_label_values(&["bincode", "transaction", codec::VERSION])
             .unwrap();
         assert_eq!(serialize_fail.get(), 1);
 
@@ -1592,7 +1635,7 @@ mod tests {
             None,
         );
         let deserialize_fail = CODEC_DESERIALIZE_FAIL_TOTAL
-            .get_metric_with_label_values(&["bincode", "transaction", codec::VERSION])
+            .handle_for_label_values(&["bincode", "transaction", codec::VERSION])
             .unwrap();
         assert_eq!(deserialize_fail.get(), 1);
     }
@@ -1606,7 +1649,7 @@ mod tests {
         record_crypto_backend();
 
         let ok_counter = CRYPTO_OPERATION_TOTAL
-            .get_metric_with_label_values(&[
+            .handle_for_label_values(&[
                 ed25519::ALGORITHM,
                 ed25519::BACKEND,
                 ed25519::BACKEND_VERSION,
@@ -1617,7 +1660,7 @@ mod tests {
         assert_eq!(ok_counter.get(), 1);
 
         let error_counter = CRYPTO_OPERATION_TOTAL
-            .get_metric_with_label_values(&[
+            .handle_for_label_values(&[
                 ed25519::ALGORITHM,
                 ed25519::BACKEND,
                 ed25519::BACKEND_VERSION,
@@ -1628,7 +1671,7 @@ mod tests {
         assert_eq!(error_counter.get(), 1);
 
         let backend_gauge = CRYPTO_BACKEND_INFO
-            .get_metric_with_label_values(&[
+            .handle_for_label_values(&[
                 ed25519::ALGORITHM,
                 ed25519::BACKEND,
                 ed25519::BACKEND_VERSION,
@@ -1644,7 +1687,8 @@ mod tests {
         record_runtime_backend("inhouse");
         record_transport_backend("quinn");
         TRANSPORT_PROVIDER_CONNECT_TOTAL
-            .with_label_values(&["quinn"])
+            .ensure_handle_for_label_values(&["quinn"])
+            .expect(LABEL_REGISTRATION_ERR)
             .inc();
         record_coding_algorithms(&crate::storage::settings::algorithms());
         codec_metrics_hook(
@@ -1657,13 +1701,14 @@ mod tests {
         let summary = wrapper_metrics_snapshot();
         assert!(summary.metrics.len() > 3);
 
-        let runtime_value = metric_value(&summary, "runtime_backend_info", &["backend", "inhouse"]);
+        let runtime_value =
+            metric_value(&summary, "runtime_backend_info", &[("backend", "inhouse")]);
         assert_eq!(runtime_value, Some(1.0));
 
         let transport_connect = metric_value(
             &summary,
             "transport_provider_connect_total",
-            &["provider", "quinn"],
+            &[("provider", "quinn")],
         )
         .unwrap();
         assert_eq!(transport_connect, 1.0);
@@ -1671,7 +1716,7 @@ mod tests {
         let codec_failure = metric_value(
             &summary,
             "codec_serialize_fail_total",
-            &["codec", "bincode", "profile", "transaction"],
+            &[("codec", "bincode"), ("profile", "transaction")],
         )
         .unwrap();
         assert_eq!(codec_failure, 1.0);
@@ -1679,7 +1724,7 @@ mod tests {
         let crypto_counter = metric_value(
             &summary,
             "crypto_operation_total",
-            &["operation", "sign", "result", "ok"],
+            &[("operation", "sign"), ("result", "ok")],
         )
         .unwrap();
         assert_eq!(crypto_counter, 1.0);
@@ -1708,59 +1753,59 @@ pub static CRYPTO_OPERATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static INDUSTRIAL_BACKLOG: Lazy<IntGauge> = Lazy::new(|| {
+pub static INDUSTRIAL_BACKLOG: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("industrial_backlog", "Pending industrial compute slices").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static INDUSTRIAL_UTILIZATION: Lazy<IntGauge> = Lazy::new(|| {
+pub static INDUSTRIAL_UTILIZATION: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "industrial_utilization",
         "Industrial compute utilisation percentage",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static INDUSTRIAL_MULTIPLIER: Lazy<IntGauge> = Lazy::new(|| {
+pub static INDUSTRIAL_MULTIPLIER: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "industrial_multiplier",
         "Current industrial subsidy multiplier",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static INDUSTRIAL_UNITS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static INDUSTRIAL_UNITS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "industrial_units_total",
         "Total normalized compute units processed",
     )
     .unwrap();
     REGISTRY.register(Box::new(c.clone())).unwrap();
-    c
+    c.handle()
 });
 
-pub static INDUSTRIAL_PRICE_PER_UNIT: Lazy<IntGauge> = Lazy::new(|| {
+pub static INDUSTRIAL_PRICE_PER_UNIT: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("industrial_price_per_unit", "Latest price per compute unit").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "price_weight_applied_total",
         "Total price entries adjusted by reputation weight",
     )
     .unwrap();
     REGISTRY.register(Box::new(c.clone())).unwrap();
-    c
+    c.handle()
 });
 
-pub static PARALLEL_EXECUTE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static PARALLEL_EXECUTE_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let buckets = telemetry::exponential_buckets(0.001, 2.0, 12);
     let opts = HistogramOpts::new(
         "parallel_execute_seconds",
@@ -1772,29 +1817,29 @@ pub static PARALLEL_EXECUTE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry parallel execute seconds: {e}"));
-    h
+    h.handle()
 });
 
-pub static DEX_ESCROW_LOCKED: Lazy<IntGauge> = Lazy::new(|| {
+pub static DEX_ESCROW_LOCKED: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("dex_escrow_locked", "Total funds locked in DEX escrow").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static DEX_ESCROW_PENDING: Lazy<IntGauge> = Lazy::new(|| {
+pub static DEX_ESCROW_PENDING: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("dex_escrow_pending", "Number of pending DEX escrows").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
-pub static DEX_LIQUIDITY_LOCKED_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static DEX_LIQUIDITY_LOCKED_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "dex_liquidity_locked_total",
         "Total liquidity currently locked in DEX escrow",
     )
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
-    g
+    g.handle()
 });
 
 pub static DEX_ORDERS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -1809,7 +1854,7 @@ pub static DEX_ORDERS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static DEX_TRADE_VOLUME: Lazy<IntCounter> = Lazy::new(|| {
+pub static DEX_TRADE_VOLUME: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "dex_trade_volume",
         "Total matched trade quantity across all DEX pairs",
@@ -1818,19 +1863,19 @@ pub static DEX_TRADE_VOLUME: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry dex trade volume: {e}"));
-    c
+    c.handle()
 });
 
-pub static TOKENS_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static TOKENS_CREATED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("tokens_created_total", "Total number of registered tokens")
         .unwrap_or_else(|e| panic!("counter tokens created: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry tokens created: {e}"));
-    c
+    c.handle()
 });
 
-pub static TOKEN_BRIDGE_VOLUME_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static TOKEN_BRIDGE_VOLUME_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "token_bridge_volume_total",
         "Volume bridged via token bridge",
@@ -1839,25 +1884,25 @@ pub static TOKEN_BRIDGE_VOLUME_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry token bridge volume: {e}"));
-    c
+    c.handle()
 });
 
-pub static HTLC_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static HTLC_CREATED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("htlc_created_total", "HTLC contracts created")
         .unwrap_or_else(|e| panic!("counter htlc created: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry htlc created: {e}"));
-    c
+    c.handle()
 });
 
-pub static HTLC_REFUNDED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static HTLC_REFUNDED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("htlc_refunded_total", "HTLC contracts refunded")
         .unwrap_or_else(|e| panic!("counter htlc refunded: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry htlc refunded: {e}"));
-    c
+    c.handle()
 });
 
 pub static TX_BY_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -1875,7 +1920,7 @@ pub static TX_BY_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static STATE_STREAM_SUBSCRIBERS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STATE_STREAM_SUBSCRIBERS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "state_stream_subscribers_total",
         "Total websocket state stream subscribers",
@@ -1884,10 +1929,10 @@ pub static STATE_STREAM_SUBSCRIBERS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry state stream subs: {e}"));
-    c
+    c.handle()
 });
 
-pub static STATE_STREAM_LAG_ALERT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STATE_STREAM_LAG_ALERT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "state_stream_lag_alert_total",
         "Clients falling behind alert count",
@@ -1896,16 +1941,16 @@ pub static STATE_STREAM_LAG_ALERT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry state stream lag: {e}"));
-    c
+    c.handle()
 });
 
-pub static VM_TRACE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static VM_TRACE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("vm_trace_total", "Total VM trace sessions")
         .unwrap_or_else(|e| panic!("counter vm trace: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry vm trace: {e}"));
-    c
+    c.handle()
 });
 
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -1920,7 +1965,7 @@ pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static SUBSIDY_CPU_MS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SUBSIDY_CPU_MS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "subsidy_cpu_ms_total",
         "Total subsidized compute time in ms",
@@ -1929,19 +1974,19 @@ pub static SUBSIDY_CPU_MS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry subsidy cpu: {e}"));
-    c
+    c.handle()
 });
 
-pub static VM_GAS_USED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static VM_GAS_USED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("vm_gas_used_total", "Total gas consumed by VM executions")
         .unwrap_or_else(|e| panic!("counter vm gas used: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry vm gas used: {e}"));
-    c
+    c.handle()
 });
 
-pub static WASM_CONTRACT_EXECUTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static WASM_CONTRACT_EXECUTIONS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "wasm_contract_executions_total",
         "Total WASM contract executions",
@@ -1950,10 +1995,10 @@ pub static WASM_CONTRACT_EXECUTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry wasm exec: {e}"));
-    c
+    c.handle()
 });
 
-pub static WASM_GAS_CONSUMED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static WASM_GAS_CONSUMED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "wasm_gas_consumed_total",
         "Total gas used by WASM contracts",
@@ -1962,37 +2007,37 @@ pub static WASM_GAS_CONSUMED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry wasm gas: {e}"));
-    c
+    c.handle()
 });
 
-pub static VM_OUT_OF_GAS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static VM_OUT_OF_GAS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("vm_out_of_gas_total", "VM executions that ran out of gas")
         .unwrap_or_else(|e| panic!("counter vm out of gas: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry vm out of gas: {e}"));
-    c
+    c.handle()
 });
 
-pub static BADGE_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BADGE_ISSUED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("badge_issued_total", "Service badges issued")
         .unwrap_or_else(|e| panic!("counter badge issued: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry badge issued: {e}"));
-    c
+    c.handle()
 });
 
-pub static BADGE_REVOKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BADGE_REVOKED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("badge_revoked_total", "Service badges revoked")
         .unwrap_or_else(|e| panic!("counter badge revoked: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry badge revoked: {e}"));
-    c
+    c.handle()
 });
 
-pub static ANOMALY_LABEL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static ANOMALY_LABEL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "anomaly_labels_total",
         "Anomaly labels submitted for model feedback",
@@ -2001,19 +2046,19 @@ pub static ANOMALY_LABEL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry anomaly labels: {e}"));
-    c
+    c.handle()
 });
 
-pub static DKG_ROUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DKG_ROUND_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("dkg_round_total", "Completed DKG rounds")
         .unwrap_or_else(|e| panic!("counter dkg round: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry dkg round: {e}"));
-    c
+    c.handle()
 });
 
-pub static THRESHOLD_SIGNATURE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static THRESHOLD_SIGNATURE_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "threshold_signature_fail_total",
         "Failed threshold signature verifications",
@@ -2022,7 +2067,7 @@ pub static THRESHOLD_SIGNATURE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry threshold sig fail: {e}"));
-    c
+    c.handle()
 });
 
 #[cfg(feature = "telemetry")]
@@ -2038,7 +2083,7 @@ pub fn export_dataset<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<()>
     Ok(())
 }
 
-pub static SUBSIDY_AUTO_REDUCED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SUBSIDY_AUTO_REDUCED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "subsidy_auto_reduced_total",
         "Multiplier auto-reduction events due to inflation guard",
@@ -2047,10 +2092,10 @@ pub static SUBSIDY_AUTO_REDUCED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry subsidy auto reduced: {e}"));
-    c
+    c.handle()
 });
 
-pub static KILL_SWITCH_TRIGGER_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static KILL_SWITCH_TRIGGER_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "kill_switch_trigger_total",
         "Times the subsidy kill switch was activated",
@@ -2059,10 +2104,10 @@ pub static KILL_SWITCH_TRIGGER_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry kill switch trigger: {e}"));
-    c
+    c.handle()
 });
 
-pub static MINER_REWARD_RECALC_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static MINER_REWARD_RECALC_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "miner_reward_recalc_total",
         "Times the miner reward logistic factor was recalculated",
@@ -2071,10 +2116,10 @@ pub static MINER_REWARD_RECALC_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry miner reward recalc: {e}"));
-    c
+    c.handle()
 });
 
-pub static DIFFICULTY_RETARGET_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DIFFICULTY_RETARGET_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "difficulty_retarget_total",
         "Number of difficulty retarget calculations",
@@ -2083,10 +2128,10 @@ pub static DIFFICULTY_RETARGET_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry difficulty retarget: {e}"));
-    c
+    c.handle()
 });
 
-pub static DIFFICULTY_CLAMP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DIFFICULTY_CLAMP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "difficulty_clamp_total",
         "Retarget calculations clamped to bounds",
@@ -2095,10 +2140,10 @@ pub static DIFFICULTY_CLAMP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry difficulty clamp: {e}"));
-    c
+    c.handle()
 });
 
-pub static DIFFICULTY_WINDOW_SHORT: Lazy<IntGauge> = Lazy::new(|| {
+pub static DIFFICULTY_WINDOW_SHORT: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "difficulty_window_short",
         "Short-term EMA of block intervals in ms",
@@ -2107,10 +2152,10 @@ pub static DIFFICULTY_WINDOW_SHORT: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry difficulty window short: {e}"));
-    g
+    g.handle()
 });
 
-pub static DIFFICULTY_WINDOW_MED: Lazy<IntGauge> = Lazy::new(|| {
+pub static DIFFICULTY_WINDOW_MED: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "difficulty_window_med",
         "Medium-term EMA of block intervals in ms",
@@ -2119,10 +2164,10 @@ pub static DIFFICULTY_WINDOW_MED: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry difficulty window med: {e}"));
-    g
+    g.handle()
 });
 
-pub static DIFFICULTY_WINDOW_LONG: Lazy<IntGauge> = Lazy::new(|| {
+pub static DIFFICULTY_WINDOW_LONG: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "difficulty_window_long",
         "Long-term EMA of block intervals in ms",
@@ -2131,10 +2176,10 @@ pub static DIFFICULTY_WINDOW_LONG: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry difficulty window long: {e}"));
-    g
+    g.handle()
 });
 
-pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "rent_escrow_locked_ct_total",
         "Total CT locked in rent escrow",
@@ -2143,10 +2188,10 @@ pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry rent escrow: {e}"));
-    g
+    g.handle()
 });
 
-pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "rent_escrow_refunded_ct_total",
         "Total CT refunded from rent escrow",
@@ -2155,10 +2200,10 @@ pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry rent escrow refunded: {e}"));
-    c
+    c.handle()
 });
 
-pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "rent_escrow_burned_ct_total",
         "Total CT burned from rent escrow",
@@ -2167,10 +2212,10 @@ pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry rent escrow burned: {e}"));
-    c
+    c.handle()
 });
 
-pub static SLASHING_BURN_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SLASHING_BURN_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "slashing_burn_ct_total",
         "Total CT burned from slashing penalties",
@@ -2179,28 +2224,28 @@ pub static SLASHING_BURN_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry slashing burn: {e}"));
-    c
+    c.handle()
 });
 
-pub static EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static EVICTIONS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("evictions_total", "Total mempool evictions")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static SHARD_CACHE_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SHARD_CACHE_EVICT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("shard_cache_evict_total", "Total shard cache evictions")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static INTER_SHARD_REPLAY_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static INTER_SHARD_REPLAY_EVICT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "inter_shard_replay_evict_total",
         "Total inter-shard replay cache evictions",
@@ -2209,10 +2254,10 @@ pub static INTER_SHARD_REPLAY_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry inter_shard_replay_evict_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "fee_floor_reject_total",
         "Transactions rejected for low fee",
@@ -2221,10 +2266,10 @@ pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static INDUSTRIAL_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static INDUSTRIAL_ADMITTED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "industrial_admitted_total",
         "Industrial lane transactions admitted",
@@ -2233,10 +2278,10 @@ pub static INDUSTRIAL_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static INDUSTRIAL_DEFERRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static INDUSTRIAL_DEFERRED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "industrial_deferred_total",
         "Industrial lane submissions deferred",
@@ -2245,7 +2290,7 @@ pub static INDUSTRIAL_DEFERRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static INDUSTRIAL_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2290,7 +2335,7 @@ pub static ACTIVE_BURST_QUOTA: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static PARTITION_EVENTS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static PARTITION_EVENTS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "partition_events_total",
         "Number of detected network partitions",
@@ -2299,10 +2344,10 @@ pub static PARTITION_EVENTS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static PARTITION_RECOVER_BLOCKS: Lazy<IntCounter> = Lazy::new(|| {
+pub static PARTITION_RECOVER_BLOCKS: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "partition_recover_blocks",
         "Blocks replayed during partition recovery",
@@ -2311,7 +2356,7 @@ pub static PARTITION_RECOVER_BLOCKS: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static ADMISSION_MODE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -2356,22 +2401,22 @@ pub static PARAM_CHANGE_ACTIVE: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static CONSUMER_FEE_P50: Lazy<IntGauge> = Lazy::new(|| {
+pub static CONSUMER_FEE_P50: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("consumer_fee_p50", "Median consumer fee")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static CONSUMER_FEE_P90: Lazy<IntGauge> = Lazy::new(|| {
+pub static CONSUMER_FEE_P90: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("consumer_fee_p90", "p90 consumer fee")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static READ_DENIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2386,7 +2431,7 @@ pub static READ_DENIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
+pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",
         "Size of chunks put into storage",
@@ -2395,7 +2440,7 @@ pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    h.handle()
 });
 
 pub static STORAGE_CODING_OPERATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2472,7 +2517,7 @@ pub static STORAGE_PROVIDER_LOSS_RATE: Lazy<HistogramVec> = Lazy::new(|| {
     hv
 });
 
-pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "storage_repair_bytes_total",
         "Total bytes reconstructed by repair loop",
@@ -2481,7 +2526,7 @@ pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static STORAGE_REPAIR_ATTEMPTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2514,7 +2559,7 @@ pub static STORAGE_REPAIR_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static STORAGE_INITIAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+pub static STORAGE_INITIAL_CHUNK_SIZE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "storage_initial_chunk_size",
         "Initial chunk size used for object upload",
@@ -2523,10 +2568,10 @@ pub static STORAGE_INITIAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static STORAGE_FINAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+pub static STORAGE_FINAL_CHUNK_SIZE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "storage_final_chunk_size",
         "Final preferred chunk size after upload",
@@ -2535,10 +2580,10 @@ pub static STORAGE_FINAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static STORAGE_PUT_ETA_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+pub static STORAGE_PUT_ETA_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "storage_put_eta_seconds",
         "Estimated time to upload object in seconds",
@@ -2547,10 +2592,10 @@ pub static STORAGE_PUT_ETA_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static STORAGE_DISK_FULL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STORAGE_DISK_FULL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "storage_disk_full_total",
         "Number of storage writes that failed due to disk exhaustion",
@@ -2559,10 +2604,10 @@ pub static STORAGE_DISK_FULL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry storage_disk_full_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "storage_compaction_total",
         "Number of RocksDB compaction operations",
@@ -2571,7 +2616,7 @@ pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry storage_compaction_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static STORAGE_ENGINE_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -2679,7 +2724,7 @@ pub static STORAGE_ENGINE_SIZE_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "storage_contract_created_total",
         "Total number of storage contracts created",
@@ -2688,10 +2733,10 @@ pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry storage_contract_created_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "retrieval_failure_total",
         "Total failed proof-of-retrievability challenges",
@@ -2700,10 +2745,10 @@ pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry retrieval_failure_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static RETRIEVAL_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RETRIEVAL_SUCCESS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "retrieval_success_total",
         "Total successful proof-of-retrievability challenges",
@@ -2712,7 +2757,7 @@ pub static RETRIEVAL_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry retrieval_success_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2727,7 +2772,7 @@ pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static SNARK_VERIFICATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SNARK_VERIFICATIONS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "snark_verifications_total",
         "Successfully verified SNARK proofs",
@@ -2736,28 +2781,28 @@ pub static SNARK_VERIFICATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snark_verifications_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SNARK_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SNARK_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("snark_fail_total", "Failed SNARK proof verifications")
         .unwrap_or_else(|e| panic!("counter snark_fail_total: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snark_fail_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SHIELDED_TX_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SHIELDED_TX_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("shielded_tx_total", "Total shielded transactions accepted")
         .unwrap_or_else(|e| panic!("counter shielded_tx_total: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry shielded_tx_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SHIELDED_POOL_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+pub static SHIELDED_POOL_SIZE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "shielded_pool_size",
         "Number of pending shielded nullifiers",
@@ -2766,7 +2811,7 @@ pub static SHIELDED_POOL_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry shielded_pool_size: {e}"));
-    g
+    g.handle()
 });
 
 pub static SCHEDULER_MATCH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2784,7 +2829,7 @@ pub static SCHEDULER_MATCH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static SCHEDULER_MATCH_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static SCHEDULER_MATCH_LATENCY_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "scheduler_match_latency_seconds",
         "Time to perform a scheduler match",
@@ -2794,7 +2839,7 @@ pub static SCHEDULER_MATCH_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler match latency: {e}"));
-    h
+    h.handle()
 });
 
 pub static SCHEDULER_CLASS_WAIT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
@@ -2810,7 +2855,7 @@ pub static SCHEDULER_CLASS_WAIT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     h
 });
 
-pub static SCHEDULER_REPUTATION_SCORE: Lazy<Histogram> = Lazy::new(|| {
+pub static SCHEDULER_REPUTATION_SCORE: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "scheduler_provider_reputation",
         "Distribution of provider reputation scores",
@@ -2820,19 +2865,19 @@ pub static SCHEDULER_REPUTATION_SCORE: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler provider reputation: {e}"));
-    h
+    h.handle()
 });
 
-pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGauge> = Lazy::new(|| {
+pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("scheduler_active_jobs", "Number of currently assigned jobs")
         .unwrap_or_else(|e| panic!("gauge scheduler_active_jobs: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_active_jobs: {e}"));
-    g
+    g.handle()
 });
 
-pub static SCHEDULER_THREAD_COUNT: Lazy<IntGauge> = Lazy::new(|| {
+pub static SCHEDULER_THREAD_COUNT: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "scheduler_thread_count",
         "Current compute scheduler worker threads",
@@ -2841,10 +2886,10 @@ pub static SCHEDULER_THREAD_COUNT: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_thread_count: {e}"));
-    g
+    g.handle()
 });
 
-pub static HASH_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static HASH_OPS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "hash_ops_total",
         "Total number of hash operations measured via perf counters",
@@ -2853,10 +2898,10 @@ pub static HASH_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry hash_ops_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SIGVERIFY_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SIGVERIFY_OPS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "sigverify_ops_total",
         "Total number of signature verifications measured via perf counters",
@@ -2865,10 +2910,10 @@ pub static SIGVERIFY_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry sigverify_ops_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static LIGHT_CLIENT_STREAM_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
+pub static LIGHT_CLIENT_STREAM_OVERHEAD: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "light_client_stream_overhead_bytes_total",
         "Bytes of overhead for light-client streaming",
@@ -2877,10 +2922,10 @@ pub static LIGHT_CLIENT_STREAM_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry light_client_stream_overhead_bytes_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static STATE_SYNC_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
+pub static STATE_SYNC_OVERHEAD: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "state_sync_overhead_bytes_total",
         "Bytes of overhead for state sync streaming",
@@ -2889,7 +2934,7 @@ pub static STATE_SYNC_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry state_sync_overhead_bytes_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static RPC_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
@@ -2902,7 +2947,7 @@ pub static RPC_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
     hv
 });
 
-pub static ANOMALY_ALARM_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static ANOMALY_ALARM_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "anomaly_alarm_total",
         "Total number of anomaly alarms raised",
@@ -2911,7 +2956,7 @@ pub static ANOMALY_ALARM_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry anomaly_alarm_total: {e}"));
-    c
+    c.handle()
 });
 
 pub fn trigger_anomaly(reason: &str) {
@@ -2924,13 +2969,19 @@ pub fn trigger_anomaly(reason: &str) {
 
 pub fn record_rpc_latency(module: &str, secs: f64) {
     #[cfg(feature = "telemetry")]
-    RPC_LATENCY.with_label_values(&[module]).observe(secs);
+    RPC_LATENCY
+        .ensure_handle_for_label_values(&[module])
+        .expect(LABEL_REGISTRATION_ERR)
+        .observe(secs);
 }
 
 pub fn rpc_latency_count(module: &str) -> u64 {
     #[cfg(feature = "telemetry")]
     {
-        RPC_LATENCY.with_label_values(&[module]).get_sample_count()
+        RPC_LATENCY
+            .ensure_handle_for_label_values(&[module])
+            .expect(LABEL_REGISTRATION_ERR)
+            .get_sample_count()
     }
     #[cfg(not(feature = "telemetry"))]
     {
@@ -2946,7 +2997,7 @@ pub fn auto_tune() {
     }
 }
 
-pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_priority_miss_total",
         "High-priority jobs exceeding wait threshold",
@@ -2955,10 +3006,10 @@ pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_priority_miss_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SCHEDULER_JOB_AGE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static SCHEDULER_JOB_AGE_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let h = Histogram::with_opts(HistogramOpts::new(
         "job_age_seconds",
         "Time a job waited in the scheduler queue",
@@ -2967,10 +3018,10 @@ pub static SCHEDULER_JOB_AGE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry job_age_seconds: {e}"));
-    h
+    h.handle()
 });
 
-pub static SCHEDULER_PRIORITY_BOOST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SCHEDULER_PRIORITY_BOOST_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "priority_boost_total",
         "Jobs whose priority was boosted due to aging",
@@ -2979,7 +3030,7 @@ pub static SCHEDULER_PRIORITY_BOOST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry priority_boost_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static SCHEDULER_EFFECTIVE_PRICE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -3024,7 +3075,7 @@ pub static SCHEDULER_CANCEL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static COMPUTE_JOB_TIMEOUT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static COMPUTE_JOB_TIMEOUT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "compute_job_timeout_total",
         "Jobs exceeding declared deadlines",
@@ -3033,10 +3084,10 @@ pub static COMPUTE_JOB_TIMEOUT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry compute_job_timeout_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "job_resubmitted_total",
         "Jobs resubmitted after provider failure",
@@ -3045,7 +3096,7 @@ pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry job_resubmitted_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3063,7 +3114,7 @@ pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static COMPUTE_SLA_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static COMPUTE_SLA_PENDING_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "compute_sla_pending_total",
         "Number of compute jobs with active SLA tracking",
@@ -3072,10 +3123,10 @@ pub static COMPUTE_SLA_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry compute_sla_pending_total: {e}"));
-    g
+    g.handle()
 });
 
-pub static COMPUTE_SLA_NEXT_DEADLINE_TS: Lazy<IntGauge> = Lazy::new(|| {
+pub static COMPUTE_SLA_NEXT_DEADLINE_TS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "compute_sla_next_deadline_ts",
         "Unix timestamp of the next pending compute SLA deadline",
@@ -3084,10 +3135,10 @@ pub static COMPUTE_SLA_NEXT_DEADLINE_TS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry compute_sla_next_deadline_ts: {e}"));
-    g
+    g.handle()
 });
 
-pub static COMPUTE_SLA_AUTOMATED_SLASH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static COMPUTE_SLA_AUTOMATED_SLASH_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "compute_sla_automated_slash_total",
         "Count of SLA penalties applied automatically by the settlement engine",
@@ -3096,7 +3147,7 @@ pub static COMPUTE_SLA_AUTOMATED_SLASH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry compute_sla_automated_slash_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -3114,7 +3165,7 @@ pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_miss_total",
         "Jobs requiring accelerators that could not be matched",
@@ -3123,10 +3174,10 @@ pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_accelerator_miss_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SCHEDULER_ACCELERATOR_UTIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SCHEDULER_ACCELERATOR_UTIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_util_total",
         "Jobs requiring accelerators that started successfully",
@@ -3135,10 +3186,10 @@ pub static SCHEDULER_ACCELERATOR_UTIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_accelerator_util_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static SCHEDULER_ACCELERATOR_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SCHEDULER_ACCELERATOR_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_fail_total",
         "Accelerator jobs that failed or were cancelled",
@@ -3147,7 +3198,7 @@ pub static SCHEDULER_ACCELERATOR_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_accelerator_fail_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static REPUTATION_ADJUST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3177,13 +3228,13 @@ pub static PROVIDER_REPUTATION_SCORE: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static RECEIPT_PERSIST_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RECEIPT_PERSIST_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("receipt_persist_fail_total", "Receipt persistence failures")
         .unwrap_or_else(|e| panic!("counter receipt persist fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry receipt persist fail: {e}"));
-    c
+    c.handle()
 });
 
 pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
@@ -3196,13 +3247,13 @@ pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     h
 });
 
-pub static SETTLE_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SETTLE_APPLIED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("settle_applied_total", "Receipts applied")
         .unwrap_or_else(|e| panic!("counter settle_applied_total: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry settle_applied_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static SETTLE_FAILED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3229,7 +3280,7 @@ pub static SETTLE_MODE_CHANGE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static SETTLE_AUDIT_MISMATCH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SETTLE_AUDIT_MISMATCH_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "settle_audit_mismatch_total",
         "Receipts failing settlement audit",
@@ -3238,7 +3289,7 @@ pub static SETTLE_AUDIT_MISMATCH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry settle_audit_mismatch_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static GOV_PROPOSALS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3277,7 +3328,7 @@ pub static RELEASE_VOTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static RELEASE_INSTALLS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RELEASE_INSTALLS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "release_installs_total",
         "Nodes booted with governance-approved releases",
@@ -3286,10 +3337,10 @@ pub static RELEASE_INSTALLS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry release_installs_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static RELEASE_QUORUM_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RELEASE_QUORUM_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "release_quorum_fail_total",
         "Release submissions rejected due to insufficient provenance signatures",
@@ -3298,7 +3349,7 @@ pub static RELEASE_QUORUM_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry release_quorum_fail_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static GOV_ACTIVATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3368,16 +3419,16 @@ pub fn governance_webhook(event: &str, proposal_id: u64) {
     }
 }
 
-pub static GOV_OPEN_PROPOSALS: Lazy<IntGauge> = Lazy::new(|| {
+pub static GOV_OPEN_PROPOSALS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("gov_open_proposals", "Open governance proposals")
         .unwrap_or_else(|e| panic!("gauge gov_open_proposals: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry gov_open_proposals: {e}"));
-    g
+    g.handle()
 });
 
-pub static GOV_PROPOSALS_PENDING: Lazy<IntGauge> = Lazy::new(|| {
+pub static GOV_PROPOSALS_PENDING: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "gov_proposals_pending",
         "Governance proposals pending activation",
@@ -3386,28 +3437,28 @@ pub static GOV_PROPOSALS_PENDING: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry gov_proposals_pending: {e}"));
-    g
+    g.handle()
 });
 
-pub static GOV_QUORUM_REQUIRED: Lazy<IntGauge> = Lazy::new(|| {
+pub static GOV_QUORUM_REQUIRED: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("gov_quorum_required", "Governance quorum")
         .unwrap_or_else(|e| panic!("gauge gov_quorum_required: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry gov_quorum_required: {e}"));
-    g
+    g.handle()
 });
 
-pub static RECEIPT_CORRUPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RECEIPT_CORRUPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("receipt_corrupt_total", "Corrupted receipt entries on load")
         .unwrap_or_else(|e| panic!("counter receipt corrupt: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry receipt corrupt: {e}"));
-    c
+    c.handle()
 });
 
-pub static WAL_CORRUPT_RECOVERY_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static WAL_CORRUPT_RECOVERY_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "wal_corrupt_recovery_total",
         "WAL entries skipped due to checksum mismatch",
@@ -3416,7 +3467,7 @@ pub static WAL_CORRUPT_RECOVERY_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry wal corrupt recovery: {e}"));
-    c
+    c.handle()
 });
 
 pub static IDENTITY_REGISTRATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3434,7 +3485,7 @@ pub static IDENTITY_REGISTRATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static IDENTITY_REPLAYS_BLOCKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static IDENTITY_REPLAYS_BLOCKED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "identity_replays_blocked_total",
         "Rejected identity replay attempts",
@@ -3443,10 +3494,10 @@ pub static IDENTITY_REPLAYS_BLOCKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static IDENTITY_NONCE_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static IDENTITY_NONCE_SKIPS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "identity_nonce_skips_total",
         "Non-contiguous nonce submissions",
@@ -3455,34 +3506,34 @@ pub static IDENTITY_NONCE_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static DUP_TX_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DUP_TX_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("dup_tx_reject_total", "Transactions rejected as duplicate")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static TX_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static TX_ADMITTED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("tx_admitted_total", "Total admitted transactions")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static TX_SUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static TX_SUBMITTED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("tx_submitted_total", "Total submitted transactions")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3509,16 +3560,16 @@ pub static TX_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static BLOCK_MINED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BLOCK_MINED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("block_mined_total", "Total mined blocks")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static BLOCK_APPLY_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BLOCK_APPLY_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "block_apply_fail_total",
         "Blocks that failed atomic application",
@@ -3527,10 +3578,10 @@ pub static BLOCK_APPLY_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static GOSSIP_CONVERGENCE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static GOSSIP_CONVERGENCE_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "gossip_convergence_seconds",
         "Time for all peers to agree on the network tip",
@@ -3539,7 +3590,7 @@ pub static GOSSIP_CONVERGENCE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    h.handle()
 });
 
 pub static FORK_REORG_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3554,7 +3605,7 @@ pub static FORK_REORG_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static TTL_DROP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "ttl_drop_total",
         "Transactions dropped due to TTL expiration",
@@ -3563,10 +3614,10 @@ pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static GOSSIP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static GOSSIP_TTL_DROP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "gossip_ttl_drop_total",
         "Gossip dedup entries removed due to TTL expiry",
@@ -3575,10 +3626,10 @@ pub static GOSSIP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "startup_ttl_drop_total",
         "Expired mempool entries dropped during startup",
@@ -3587,19 +3638,19 @@ pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static SESSION_KEY_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SESSION_KEY_ISSUED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("session_key_issued_total", "Session keys issued")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static SESSION_KEY_EXPIRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static SESSION_KEY_EXPIRED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "session_key_expired_total",
         "Expired session keys encountered",
@@ -3608,10 +3659,10 @@ pub static SESSION_KEY_EXPIRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static LOCK_POISON_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "lock_poison_total",
         "Lock acquisition failures due to poisoning",
@@ -3620,16 +3671,16 @@ pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static BANNED_PEERS_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static BANNED_PEERS_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("banned_peers_total", "Total peers currently banned")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static BANNED_PEER_EXPIRATION: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -3647,7 +3698,7 @@ pub static BANNED_PEER_EXPIRATION: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static COURIER_FLUSH_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static COURIER_FLUSH_ATTEMPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "courier_flush_attempt_total",
         "Total courier receipt flush attempts",
@@ -3656,10 +3707,10 @@ pub static COURIER_FLUSH_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static COURIER_FLUSH_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static COURIER_FLUSH_FAILURE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "courier_flush_failure_total",
         "Failed courier receipt flush attempts",
@@ -3668,10 +3719,10 @@ pub static COURIER_FLUSH_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "orphan_sweep_total",
         "Transactions dropped because the sender account is missing",
@@ -3680,10 +3731,10 @@ pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static INVALID_SELECTOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static INVALID_SELECTOR_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "invalid_selector_reject_total",
         "Transactions rejected for invalid fee selector",
@@ -3692,10 +3743,10 @@ pub static INVALID_SELECTOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static BALANCE_OVERFLOW_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BALANCE_OVERFLOW_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "balance_overflow_reject_total",
         "Transactions rejected due to balance overflow",
@@ -3704,10 +3755,10 @@ pub static BALANCE_OVERFLOW_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "drop_not_found_total",
         "drop_transaction failures for missing entries",
@@ -3716,7 +3767,7 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3818,7 +3869,7 @@ pub static PEER_RATE_LIMIT_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
+pub static PEER_METRICS_ACTIVE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "peer_metrics_active",
         "Number of peers currently tracked for telemetry",
@@ -3827,7 +3878,7 @@ pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static OVERLAY_BACKEND_ACTIVE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -3875,7 +3926,7 @@ pub static OVERLAY_PEER_PERSISTED_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGauge> = Lazy::new(|| {
+pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "peer_metrics_subscribers",
         "Active peer metrics websocket subscribers",
@@ -3884,10 +3935,10 @@ pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static PEER_METRICS_MEM_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+pub static PEER_METRICS_MEM_BYTES: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "peer_metrics_memory_bytes",
         "Approximate memory used by peer metrics map",
@@ -3896,7 +3947,7 @@ pub static PEER_METRICS_MEM_BYTES: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -3914,7 +3965,7 @@ pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static REPUTATION_GOSSIP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static REPUTATION_GOSSIP_LATENCY_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let h = Histogram::with_opts(HistogramOpts::new(
         "reputation_gossip_latency_seconds",
         "Propagation latency for reputation updates",
@@ -3923,10 +3974,10 @@ pub static REPUTATION_GOSSIP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry reputation_gossip_latency_seconds: {e}"));
-    h
+    h.handle()
 });
 
-pub static REPUTATION_GOSSIP_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REPUTATION_GOSSIP_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "reputation_gossip_fail_total",
         "Reputation updates that failed verification or were stale",
@@ -3935,18 +3986,18 @@ pub static REPUTATION_GOSSIP_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry reputation_gossip_fail_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static AMM_SWAP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static AMM_SWAP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("amm_swap_total", "Total AMM swaps executed").unwrap();
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry amm_swap_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static LIQUIDITY_REWARDS_DISBURSED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static LIQUIDITY_REWARDS_DISBURSED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "liquidity_rewards_disbursed_total",
         "Liquidity mining rewards distributed",
@@ -3955,26 +4006,26 @@ pub static LIQUIDITY_REWARDS_DISBURSED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry liquidity_rewards_disbursed_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static REBATE_CLAIMS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REBATE_CLAIMS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("rebate_claims_total", "Peer rebate claims submitted").unwrap();
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry rebate_claims_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static REBATE_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REBATE_ISSUED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("rebate_issued_total", "Rebate vouchers issued").unwrap();
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry rebate_issued_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static BUILD_PROVENANCE_VALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BUILD_PROVENANCE_VALID_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "build_provenance_valid_total",
         "Build provenance checks that succeeded",
@@ -3983,10 +4034,10 @@ pub static BUILD_PROVENANCE_VALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry build_provenance_valid_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static BUILD_PROVENANCE_INVALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static BUILD_PROVENANCE_INVALID_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "build_provenance_invalid_total",
         "Build provenance checks that failed",
@@ -3995,10 +4046,10 @@ pub static BUILD_PROVENANCE_INVALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry build_provenance_invalid_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static PEER_METRICS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
+pub static PEER_METRICS_DROPPED: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "peer_metrics_dropped_total",
         "Websocket peer metrics frames dropped",
@@ -4007,18 +4058,18 @@ pub static PEER_METRICS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static AGGREGATOR_INGEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static AGGREGATOR_INGEST_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("aggregator_ingest_total", "Total peer metric ingests").unwrap();
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static CLUSTER_PEER_ACTIVE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+pub static CLUSTER_PEER_ACTIVE_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "cluster_peer_active_total",
         "Unique peers tracked by aggregator",
@@ -4027,7 +4078,7 @@ pub static CLUSTER_PEER_ACTIVE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4233,13 +4284,13 @@ pub static PEER_KEY_ROTATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static KEY_ROTATION_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("key_rotation_total", "Successful peer key rotations")
         .unwrap_or_else(|e| panic!("counter key rotation: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry key rotation: {e}"));
-    c
+    c.handle()
 });
 
 pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4257,7 +4308,7 @@ pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static CONFIG_RELOAD_LAST_TS: Lazy<IntGauge> = Lazy::new(|| {
+pub static CONFIG_RELOAD_LAST_TS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "config_reload_last_ts",
         "Unix timestamp of the last successful config reload",
@@ -4266,7 +4317,7 @@ pub static CONFIG_RELOAD_LAST_TS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4284,7 +4335,7 @@ pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static DNS_VERIFICATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static DNS_VERIFICATION_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "dns_verification_fail_total",
         "Total DNS verification failures",
@@ -4293,10 +4344,10 @@ pub static DNS_VERIFICATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static GOSSIP_DUPLICATE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static GOSSIP_DUPLICATE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "gossip_duplicate_total",
         "Duplicate gossip messages dropped",
@@ -4305,19 +4356,19 @@ pub static GOSSIP_DUPLICATE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static GOSSIP_FANOUT_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
+pub static GOSSIP_FANOUT_GAUGE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("gossip_fanout_gauge", "Current gossip fanout")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static GOSSIP_LATENCY_BUCKETS: Lazy<Histogram> = Lazy::new(|| {
+pub static GOSSIP_LATENCY_BUCKETS: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "gossip_latency_seconds",
         "Observed latency hints used for adaptive gossip fanout",
@@ -4329,7 +4380,7 @@ pub static GOSSIP_LATENCY_BUCKETS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    h.handle()
 });
 
 pub static GOSSIP_PEER_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4362,7 +4413,7 @@ pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "remote_signer_request_total",
         "Total remote signer requests",
@@ -4371,10 +4422,10 @@ pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static REMOTE_SIGNER_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static REMOTE_SIGNER_LATENCY_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let h = Histogram::with_opts(HistogramOpts::new(
         "remote_signer_latency_seconds",
         "Remote signer latency",
@@ -4383,10 +4434,10 @@ pub static REMOTE_SIGNER_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    h.handle()
 });
 
-pub static REMOTE_SIGNER_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REMOTE_SIGNER_SUCCESS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "remote_signer_success_total",
         "Successful remote signer responses",
@@ -4395,10 +4446,10 @@ pub static REMOTE_SIGNER_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static REMOTE_SIGNER_KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static REMOTE_SIGNER_KEY_ROTATION_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "remote_signer_key_rotation_total",
         "Remote signer key rotations",
@@ -4407,15 +4458,15 @@ pub static REMOTE_SIGNER_KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
-pub static PRIVACY_SANITIZATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static PRIVACY_SANITIZATION_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("privacy_sanitization_total", "Total sanitized payloads")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static REMOTE_SIGNER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4447,16 +4498,16 @@ pub static RPC_TOKENS: Lazy<GaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static RPC_BANS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RPC_BANS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("rpc_bans_total", "Total RPC bans issued")
         .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static RPC_RATE_LIMIT_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RPC_RATE_LIMIT_ATTEMPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "rpc_rate_limit_attempt_total",
         "RPC requests checked against the rate limiter",
@@ -4465,10 +4516,10 @@ pub static RPC_RATE_LIMIT_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
-pub static RPC_RATE_LIMIT_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static RPC_RATE_LIMIT_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "rpc_rate_limit_reject_total",
         "RPC requests rejected by the rate limiter",
@@ -4477,7 +4528,7 @@ pub static RPC_RATE_LIMIT_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    c
+    c.handle()
 });
 
 pub static P2P_HANDSHAKE_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4510,7 +4561,7 @@ pub static P2P_HANDSHAKE_ACCEPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static QUIC_CONN_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static QUIC_CONN_LATENCY_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "quic_conn_latency_seconds",
         "QUIC connection handshake latency",
@@ -4519,25 +4570,25 @@ pub static QUIC_CONN_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry quic latency: {e}"));
-    h
+    h.handle()
 });
 
-pub static QUIC_BYTES_SENT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static QUIC_BYTES_SENT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("quic_bytes_sent_total", "Total bytes sent over QUIC")
         .unwrap_or_else(|e| panic!("counter quic bytes sent: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic bytes sent: {e}"));
-    c
+    c.handle()
 });
 
-pub static QUIC_BYTES_RECV_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static QUIC_BYTES_RECV_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("quic_bytes_recv_total", "Total bytes received over QUIC")
         .unwrap_or_else(|e| panic!("counter quic bytes recv: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic bytes recv: {e}"));
-    c
+    c.handle()
 });
 
 pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4585,13 +4636,13 @@ pub static QUIC_CERT_ROTATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static QUIC_RETRANSMIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static QUIC_RETRANSMIT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("quic_retransmit_total", "Total QUIC packet retransmissions")
         .unwrap_or_else(|e| panic!("counter quic retransmit: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic retransmit: {e}"));
-    c
+    c.handle()
 });
 
 pub static QUIC_DISCONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4606,7 +4657,7 @@ pub static QUIC_DISCONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static QUIC_ENDPOINT_REUSE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static QUIC_ENDPOINT_REUSE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "quic_endpoint_reuse_total",
         "Total QUIC endpoint reuse count",
@@ -4615,10 +4666,10 @@ pub static QUIC_ENDPOINT_REUSE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic endpoint reuse: {e}"));
-    c
+    c.handle()
 });
 
-pub static QUIC_FALLBACK_TCP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static QUIC_FALLBACK_TCP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "quic_fallback_tcp_total",
         "Total times QUIC connections fell back to TCP",
@@ -4627,19 +4678,19 @@ pub static QUIC_FALLBACK_TCP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic fallback tcp: {e}"));
-    c
+    c.handle()
 });
 
-pub static BADGE_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
+pub static BADGE_ACTIVE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("badge_active", "Whether a service badge is active (1/0)")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
-pub static BADGE_LAST_CHANGE_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+pub static BADGE_LAST_CHANGE_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "badge_last_change_seconds",
         "Unix timestamp of the last badge mint/burn",
@@ -4648,7 +4699,7 @@ pub static BADGE_LAST_CHANGE_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    g
+    g.handle()
 });
 
 pub struct Recorder;
@@ -4659,7 +4710,10 @@ impl Recorder {
     }
 
     pub fn tx_rejected(&self, reason: &str) {
-        TX_REJECTED_TOTAL.with_label_values(&[reason]).inc();
+        TX_REJECTED_TOTAL
+            .ensure_handle_for_label_values(&[reason])
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc();
     }
 
     pub fn block_mined(&self) {
@@ -4667,7 +4721,10 @@ impl Recorder {
     }
 
     pub fn tx_jurisdiction(&self, j: &str) {
-        TX_JURISDICTION_TOTAL.with_label_values(&[j]).inc();
+        TX_JURISDICTION_TOTAL
+            .ensure_handle_for_label_values(&[j])
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc();
     }
 }
 
@@ -4707,7 +4764,7 @@ pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "log_entries_indexed_total",
         "Total JSON log entries processed by the offline indexer",
@@ -4716,7 +4773,7 @@ pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry log_entries_indexed_total: {e}"));
-    c
+    c.handle()
 });
 
 pub static LOG_CORRELATION_INDEX_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -4734,7 +4791,7 @@ pub static LOG_CORRELATION_INDEX_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "log_correlation_fail_total",
         "Correlation lookups that returned no matching log entries",
@@ -4743,17 +4800,17 @@ pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry log_correlation_fail_total: {e}"));
-    c
+    c.handle()
 });
 
-pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
+pub static LOG_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new("log_size_bytes", "Size of serialized log events in bytes")
         .buckets(telemetry::exponential_buckets(64.0, 2.0, 8));
     let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    h.handle()
 });
 
 static LOG_SEC: AtomicU64 = AtomicU64::new(0);
@@ -4768,7 +4825,10 @@ pub const LOG_SAMPLE_STRIDE: u64 = 100;
 pub fn should_log(subsystem: &str) -> bool {
     if let Some(enabled) = LOG_TOGGLES.read().unwrap().get(subsystem) {
         if !*enabled {
-            LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
+            LOG_DROP_TOTAL
+                .ensure_handle_for_label_values(&[subsystem])
+                .expect(LABEL_REGISTRATION_ERR)
+                .inc();
             return false;
         }
     }
@@ -4783,10 +4843,16 @@ pub fn should_log(subsystem: &str) -> bool {
     }
     let count = LOG_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     if count <= LOG_LIMIT || count % LOG_SAMPLE_STRIDE == 0 {
-        LOG_EMIT_TOTAL.with_label_values(&[subsystem]).inc();
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&[subsystem])
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc();
         true
     } else {
-        LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&[subsystem])
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc();
         false
     }
 }
@@ -4807,8 +4873,14 @@ pub fn reset_log_counters() {
     LOG_SEC.store(0, Ordering::Relaxed);
     LOG_COUNT.store(0, Ordering::Relaxed);
     for sub in ["mempool", "storage", "p2p", "compute"] {
-        LOG_EMIT_TOTAL.with_label_values(&[sub]).reset();
-        LOG_DROP_TOTAL.with_label_values(&[sub]).reset();
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&[sub])
+            .expect(LABEL_REGISTRATION_ERR)
+            .reset();
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&[sub])
+            .expect(LABEL_REGISTRATION_ERR)
+            .reset();
     }
 }
 
@@ -4844,8 +4916,12 @@ fn gather() -> String {
     // Ensure all metrics are registered even if they haven't been used yet so
     // `gather_metrics` always exposes a stable set of counters.
     let _ = (
-        MEMPOOL_SIZE.with_label_values(&["consumer"]),
-        MEMPOOL_SIZE.with_label_values(&["industrial"]),
+        MEMPOOL_SIZE
+            .ensure_handle_for_label_values(&["consumer"])
+            .expect(LABEL_REGISTRATION_ERR),
+        MEMPOOL_SIZE
+            .ensure_handle_for_label_values(&["industrial"])
+            .expect(LABEL_REGISTRATION_ERR),
         &*EVICTIONS_TOTAL,
         &*FEE_FLOOR_REJECT_TOTAL,
         &*DUP_TX_REJECT_TOTAL,
@@ -4855,7 +4931,9 @@ fn gather() -> String {
         &*BLOCK_MINED_TOTAL,
         &*BLOCK_APPLY_FAIL_TOTAL,
         &*GOSSIP_CONVERGENCE_SECONDS,
-        FORK_REORG_TOTAL.with_label_values(&["0"]),
+        FORK_REORG_TOTAL
+            .ensure_handle_for_label_values(&["0"])
+            .expect(LABEL_REGISTRATION_ERR),
         &*TTL_DROP_TOTAL,
         &*STARTUP_TTL_DROP_TOTAL,
         &*GOSSIP_TTL_DROP_TOTAL,
@@ -4864,30 +4942,64 @@ fn gather() -> String {
         &*GOSSIP_DUPLICATE_TOTAL,
         &*GOSSIP_FANOUT_GAUGE,
         &*GOSSIP_LATENCY_BUCKETS,
-        GOSSIP_PEER_FAILURE_TOTAL.with_label_values(&["__"]),
+        GOSSIP_PEER_FAILURE_TOTAL
+            .ensure_handle_for_label_values(&["__"])
+            .expect(LABEL_REGISTRATION_ERR),
         &*SHARD_CACHE_EVICT_TOTAL,
         &*PARTITION_EVENTS_TOTAL,
         &*PARTITION_RECOVER_BLOCKS,
-        DEX_ORDERS_TOTAL.with_label_values(&["buy"]),
-        DEX_ORDERS_TOTAL.with_label_values(&["sell"]),
+        DEX_ORDERS_TOTAL
+            .ensure_handle_for_label_values(&["buy"])
+            .expect(LABEL_REGISTRATION_ERR),
+        DEX_ORDERS_TOTAL
+            .ensure_handle_for_label_values(&["sell"])
+            .expect(LABEL_REGISTRATION_ERR),
         &*DEX_TRADE_VOLUME,
-        COMPUTE_SLA_VIOLATIONS_TOTAL.with_label_values(&["__"]),
-        COMPUTE_PROVIDER_UPTIME.with_label_values(&["__"]),
-        P2P_REQUEST_LIMIT_HITS_TOTAL.with_label_values(&[""]),
-        PEER_RATE_LIMIT_TOTAL.with_label_values(&["__"]),
+        COMPUTE_SLA_VIOLATIONS_TOTAL
+            .ensure_handle_for_label_values(&["__"])
+            .expect(LABEL_REGISTRATION_ERR),
+        COMPUTE_PROVIDER_UPTIME
+            .ensure_handle_for_label_values(&["__"])
+            .expect(LABEL_REGISTRATION_ERR),
+        P2P_REQUEST_LIMIT_HITS_TOTAL
+            .ensure_handle_for_label_values(&[""])
+            .expect(LABEL_REGISTRATION_ERR),
+        PEER_RATE_LIMIT_TOTAL
+            .ensure_handle_for_label_values(&["__"])
+            .expect(LABEL_REGISTRATION_ERR),
         &*INVALID_SELECTOR_REJECT_TOTAL,
         &*BALANCE_OVERFLOW_REJECT_TOTAL,
         &*DROP_NOT_FOUND_TOTAL,
-        LOG_EMIT_TOTAL.with_label_values(&["mempool"]),
-        LOG_EMIT_TOTAL.with_label_values(&["storage"]),
-        LOG_EMIT_TOTAL.with_label_values(&["p2p"]),
-        LOG_EMIT_TOTAL.with_label_values(&["compute"]),
-        LOG_EMIT_TOTAL.with_label_values(&["consensus"]),
-        LOG_DROP_TOTAL.with_label_values(&["mempool"]),
-        LOG_DROP_TOTAL.with_label_values(&["storage"]),
-        LOG_DROP_TOTAL.with_label_values(&["p2p"]),
-        LOG_DROP_TOTAL.with_label_values(&["compute"]),
-        LOG_DROP_TOTAL.with_label_values(&["consensus"]),
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&["mempool"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&["storage"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&["p2p"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&["compute"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_EMIT_TOTAL
+            .ensure_handle_for_label_values(&["consensus"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&["mempool"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&["storage"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&["p2p"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&["compute"])
+            .expect(LABEL_REGISTRATION_ERR),
+        LOG_DROP_TOTAL
+            .ensure_handle_for_label_values(&["consensus"])
+            .expect(LABEL_REGISTRATION_ERR),
     );
 
     REGISTRY.render()

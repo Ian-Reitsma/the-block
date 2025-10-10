@@ -6,7 +6,6 @@ build = "build.rs"
 
 [dependencies]
 wallet = { path = "../crates/wallet", optional = true, features = ["dilithium"] }
-hex = "0.4"
 the_block = { path = "../node" }
 governance = { path = "../governance" }
 bridges = { path = "../bridges" }

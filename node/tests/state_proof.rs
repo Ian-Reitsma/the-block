@@ -33,7 +33,7 @@ fn account_proof_roundtrip() {
     h.update(&acc.nonce.to_le_bytes());
     let mut leaf = *h.finalize().as_bytes();
     for (sib_hex, is_left) in proof {
-        let sib = hex::decode(sib_hex).unwrap();
+        let sib = crypto_suite::hex::decode(sib_hex).unwrap();
         let mut hh = Hasher::new();
         if is_left {
             hh.update(&sib);
@@ -44,5 +44,5 @@ fn account_proof_roundtrip() {
         }
         leaf = *hh.finalize().as_bytes();
     }
-    assert_eq!(hex::encode(leaf), root);
+    assert_eq!(crypto_suite::hex::encode(leaf), root);
 }

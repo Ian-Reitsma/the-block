@@ -8,7 +8,7 @@ pub fn corr_id_height(height: u64) -> String {
 /// Derive a short correlation ID from a hash value.
 pub fn corr_id_hash(hash: &[u8]) -> String {
     let h = blake3::hash(hash);
-    hex::encode(&h.as_bytes()[0..8])
+    crypto_suite::hex::encode(&h.as_bytes()[0..8])
 }
 
 /// Generate a random correlation identifier for ad-hoc requests.
@@ -16,7 +16,7 @@ pub fn corr_id_random() -> String {
     use rand::{rngs::OsRng, RngCore};
     let mut bytes = [0u8; 8];
     OsRng::default().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    crypto_suite::hex::encode(bytes)
 }
 
 pub(crate) fn info_span_with_field(

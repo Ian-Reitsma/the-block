@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{rngs::OsRng, RngCore};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{self, Message, Payload, PeerSet, SUPPORTED_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 use the_block::Blockchain;

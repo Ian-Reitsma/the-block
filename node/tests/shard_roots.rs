@@ -9,7 +9,7 @@ use the_block::{
 
 #[test]
 fn shard_roots_persist() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
 
     let addr1 = address::encode(1, "alice");

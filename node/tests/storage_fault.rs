@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::os::unix::fs::PermissionsExt;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::SimpleDb;
 
 #[test]

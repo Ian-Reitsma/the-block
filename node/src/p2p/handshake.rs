@@ -5,7 +5,7 @@ use crate::net::peer::HandshakeError;
 use crate::net::transport_quic;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
-use concurrency::Lazy;
+use concurrency::{Bytes, Lazy};
 #[cfg(all(feature = "telemetry", feature = "quic"))]
 use diagnostics::tracing::warn;
 use foundation_serialization::{Deserialize, Serialize};
@@ -43,11 +43,11 @@ pub struct Hello {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_addr: Option<std::net::SocketAddr>,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub quic_cert: Option<Vec<u8>>,
+    pub quic_cert: Option<Bytes>,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub quic_fingerprint: Option<Vec<u8>>,
+    pub quic_fingerprint: Option<Bytes>,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub quic_fingerprint_previous: Vec<Vec<u8>>,
+    pub quic_fingerprint_previous: Vec<Bytes>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_provider: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -76,11 +76,11 @@ pub struct PeerInfo {
     pub features: u32,
     pub transport: Transport,
     pub quic_addr: Option<std::net::SocketAddr>,
-    pub quic_cert: Option<Vec<u8>>,
+    pub quic_cert: Option<Bytes>,
     pub quic_provider: Option<String>,
     pub quic_capabilities: Vec<String>,
-    pub quic_fingerprint: Option<Vec<u8>>,
-    pub quic_fingerprint_previous: Vec<Vec<u8>>,
+    pub quic_fingerprint: Option<Bytes>,
+    pub quic_fingerprint_previous: Vec<Bytes>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,13 +165,14 @@ pub fn validate_quic_certificate(
         let provider_kind = infer_quic_provider_kind(hello).ok_or_else(|| {
             #[cfg(feature = "telemetry")]
             {
-                let peer = hex::encode(peer_key);
+                let peer = crypto_suite::hex::encode(peer_key);
                 telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                    .with_label_values(&[&peer, "certificate"])
+                    .ensure_handle_for_label_values(&[&peer, "certificate"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 warn!(
                     target: "p2p",
-                    peer = %hex::encode(peer_key),
+                    peer = %crypto_suite::hex::encode(peer_key),
                     "QUIC certificate presented without a supported provider"
                 );
             }
@@ -183,13 +184,14 @@ pub fn validate_quic_certificate(
                 |err| {
                     #[cfg(feature = "telemetry")]
                     {
-                        let peer = hex::encode(peer_key);
+                        let peer = crypto_suite::hex::encode(peer_key);
                         telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                            .with_label_values(&[&peer, "certificate"])
+                            .ensure_handle_for_label_values(&[&peer, "certificate"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         warn!(
                             target: "p2p",
-                            peer = %hex::encode(peer_key),
+                            peer = %crypto_suite::hex::encode(peer_key),
                             provider = provider_id.as_str(),
                             error = %err,
                             "QUIC certificate validation failed"
@@ -204,15 +206,16 @@ pub fn validate_quic_certificate(
             if expected.len() != 32 || expected.as_slice() != fingerprint.as_slice() {
                 #[cfg(feature = "telemetry")]
                 {
-                    let peer = hex::encode(peer_key);
+                    let peer = crypto_suite::hex::encode(peer_key);
                     telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[&peer, "fingerprint_mismatch"])
+                        .ensure_handle_for_label_values(&[&peer, "fingerprint_mismatch"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     warn!(
                         target: "p2p",
-                        peer = %hex::encode(peer_key),
-                        expected = %hex::encode(expected),
-                        actual = %hex::encode(fingerprint),
+                        peer = %crypto_suite::hex::encode(peer_key),
+                        expected = %crypto_suite::hex::encode(expected),
+                        actual = %crypto_suite::hex::encode(fingerprint),
                         "QUIC fingerprint mismatch"
                     );
                 }
@@ -223,7 +226,7 @@ pub fn validate_quic_certificate(
         for fp in &hello.quic_fingerprint_previous {
             if fp.len() == 32 {
                 let mut arr = [0u8; 32];
-                arr.copy_from_slice(fp);
+                arr.copy_from_slice(fp.as_ref());
                 previous.push(arr);
             }
         }
@@ -259,7 +262,8 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     if hello.network_id != cfg.network_id {
         #[cfg(feature = "telemetry")]
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["bad_network"])
+            .ensure_handle_for_label_values(&["bad_network"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
         return HelloAck {
             ok: false,
@@ -272,7 +276,8 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     if hello.proto_version < cfg.min_proto {
         #[cfg(feature = "telemetry")]
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["old_proto"])
+            .ensure_handle_for_label_values(&["old_proto"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
         return HelloAck {
             ok: false,
@@ -285,7 +290,8 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     if hello.proto_version > SUPPORTED_VERSION {
         #[cfg(feature = "telemetry")]
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["new_proto"])
+            .ensure_handle_for_label_values(&["new_proto"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
         return HelloAck {
             ok: false,
@@ -298,7 +304,8 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     if hello.feature_bits & cfg.required_features != cfg.required_features {
         #[cfg(feature = "telemetry")]
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["missing_features"])
+            .ensure_handle_for_label_values(&["missing_features"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
         return HelloAck {
             ok: false,
@@ -311,7 +318,8 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     let accepted = hello.feature_bits & cfg.supported_features;
     #[cfg(feature = "telemetry")]
     telemetry::P2P_HANDSHAKE_ACCEPT_TOTAL
-        .with_label_values(&[&format!("{accepted:#x}")])
+        .ensure_handle_for_label_values(&[&format!("{accepted:#x}")])
+        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
         .inc();
     let mut peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
     peers.insert(
@@ -344,13 +352,13 @@ pub fn list_peers() -> Vec<(String, PeerInfo)> {
 
 pub fn peer_provider(peer: &[u8; 32]) -> Option<String> {
     let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
-    let key = hex::encode(peer);
+    let key = crypto_suite::hex::encode(peer);
     peers.get(&key).and_then(|info| info.quic_provider.clone())
 }
 
 pub fn peer_capabilities(peer: &[u8; 32]) -> Vec<String> {
     let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
-    let key = hex::encode(peer);
+    let key = crypto_suite::hex::encode(peer);
     peers
         .get(&key)
         .map(|info| info.quic_capabilities.clone())
@@ -411,7 +419,7 @@ mod tests {
     }
 
     #[cfg(feature = "quic")]
-    fn quic_hello(cert: Vec<u8>, fingerprint: Option<Vec<u8>>) -> Hello {
+    fn quic_hello(cert: Bytes, fingerprint: Option<Bytes>) -> Hello {
         let mut hello = base_hello();
         hello.transport = Transport::Quic;
         hello.quic_cert = Some(cert);
@@ -422,7 +430,7 @@ mod tests {
     }
 
     #[cfg(feature = "quic")]
-    fn sample_quic_certificate() -> ([u8; 32], Vec<u8>, [u8; 32]) {
+    fn sample_quic_certificate() -> ([u8; 32], Bytes, [u8; 32]) {
         use rcgen::{Certificate, CertificateParams, KeyPair, PKCS_ED25519};
 
         let key_pair = KeyPair::generate_for(&PKCS_ED25519).expect("ed25519 keypair");
@@ -436,7 +444,7 @@ mod tests {
         let cert = Certificate::from_params(params).expect("certificate");
         let cert_der = cert.serialize_der().expect("serialize cert");
         let fingerprint = transport_quic::fingerprint(&cert_der);
-        (peer_key, cert_der, fingerprint)
+        (peer_key, Bytes::from(cert_der), fingerprint)
     }
 
     #[cfg(feature = "quic")]
@@ -445,7 +453,7 @@ mod tests {
         let (peer_key, cert, fingerprint) = sample_quic_certificate();
         let mut wrong_key = peer_key;
         wrong_key[0] ^= 0x01;
-        let hello = quic_hello(cert, Some(fingerprint.to_vec()));
+        let hello = quic_hello(cert, Some(Bytes::from(fingerprint.to_vec())));
         let err = validate_quic_certificate(&wrong_key, &hello).unwrap_err();
         assert_eq!(err, HandshakeError::Certificate);
     }
@@ -456,7 +464,7 @@ mod tests {
         let (peer_key, cert, fingerprint) = sample_quic_certificate();
         let mut mismatched = fingerprint.to_vec();
         mismatched[0] ^= 0x01;
-        let hello = quic_hello(cert, Some(mismatched));
+        let hello = quic_hello(cert, Some(Bytes::from(mismatched)));
         let err = validate_quic_certificate(&peer_key, &hello).unwrap_err();
         assert_eq!(err, HandshakeError::Certificate);
     }

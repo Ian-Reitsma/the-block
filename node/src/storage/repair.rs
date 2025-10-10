@@ -38,14 +38,16 @@ pub fn spawn(path: String, period: Duration) {
                     {
                         let algorithms = settings::algorithms();
                         STORAGE_REPAIR_FAILURES_TOTAL
-                            .with_label_values(&[
+                            .ensure_handle_for_label_values(&[
                                 err.label(),
                                 algorithms.erasure(),
                                 algorithms.compression(),
                             ])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         STORAGE_REPAIR_ATTEMPTS_TOTAL
-                            .with_label_values(&["fatal"])
+                            .ensure_handle_for_label_values(&["fatal"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                     }
                 }
@@ -352,7 +354,7 @@ pub fn run_once(
     for key in keys {
         if let Some(filter) = request.manifest {
             let hex = key.trim_start_matches("manifest/");
-            if let Ok(bytes) = hex::decode(hex) {
+            if let Ok(bytes) = crypto_suite::hex::decode(hex) {
                 if bytes != filter {
                     continue;
                 }
@@ -466,7 +468,7 @@ pub fn run_once(
                 let mut missing = Vec::new();
                 let mut integrity_error = None;
                 for (slot, ch) in group.iter().enumerate() {
-                    let chunk_key = format!("chunk/{}", hex::encode(ch.id));
+                    let chunk_key = format!("chunk/{}", crypto_suite::hex::encode(ch.id));
                     let blob = db.get(&chunk_key);
                     if let Some(ref data) = blob {
                         let computed = compute_shard_id(slot, data);
@@ -640,7 +642,7 @@ fn process_job(job: ScheduledJob) -> RepairOutcome {
                             };
                         }
                         writes.push(ShardWrite {
-                            key: format!("chunk/{}", hex::encode(shard_id)),
+                            key: format!("chunk/{}", crypto_suite::hex::encode(shard_id)),
                             value: shard.clone(),
                         });
                         bytes = bytes.saturating_add(shard.len() as u64);
@@ -717,14 +719,16 @@ fn handle_outcome(
                 {
                     let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
                     STORAGE_REPAIR_ATTEMPTS_TOTAL
-                        .with_label_values(&["failure"])
+                        .ensure_handle_for_label_values(&["failure"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     STORAGE_REPAIR_FAILURES_TOTAL
-                        .with_label_values(&[
+                        .ensure_handle_for_label_values(&[
                             RepairErrorKind::Database.label(),
                             erasure_alg.as_str(),
                             compression_alg.as_str(),
                         ])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                 }
                 log.append(&RepairLogEntry {
@@ -745,7 +749,8 @@ fn handle_outcome(
                 #[cfg(feature = "telemetry")]
                 {
                     STORAGE_REPAIR_ATTEMPTS_TOTAL
-                        .with_label_values(&["success"])
+                        .ensure_handle_for_label_values(&["success"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     if bytes > 0 {
                         STORAGE_REPAIR_BYTES_TOTAL.inc_by(bytes);
@@ -785,14 +790,16 @@ fn handle_outcome(
             {
                 let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
                 STORAGE_REPAIR_ATTEMPTS_TOTAL
-                    .with_label_values(&["failure"])
+                    .ensure_handle_for_label_values(&["failure"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 STORAGE_REPAIR_FAILURES_TOTAL
-                    .with_label_values(&[
+                    .ensure_handle_for_label_values(&[
                         error.label(),
                         erasure_alg.as_str(),
                         compression_alg.as_str(),
                     ])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             log.append(&RepairLogEntry {
@@ -815,7 +822,8 @@ fn handle_outcome(
             #[cfg(feature = "telemetry")]
             {
                 STORAGE_REPAIR_ATTEMPTS_TOTAL
-                    .with_label_values(&["skipped"])
+                    .ensure_handle_for_label_values(&["skipped"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             match reason {

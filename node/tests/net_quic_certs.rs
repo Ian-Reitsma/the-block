@@ -3,13 +3,13 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use runtime;
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{
     peer_cert_history, record_peer_certificate, refresh_peer_cert_store_from_disk, transport_quic,
 };
 use transport::{Config as TransportConfig, ProviderKind};
 
-fn setup_env(dir: &tempfile::TempDir) {
+fn setup_env(dir: &sys::tempfile::TempDir) {
     let cert_store = dir.path().join("peer_certs.json");
     let net_key = dir.path().join("net_key");
     let quic_store = dir.path().join("quic_local.json");
@@ -53,10 +53,10 @@ fn encrypts_and_reloads_quic_peer_certs() {
 
     let history = peer_cert_history();
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].peer, hex::encode(peer));
+    assert_eq!(history[0].peer, crypto_suite::hex::encode(peer));
     assert_eq!(
         history[0].current.fingerprint,
-        hex::encode(advert.fingerprint)
+        crypto_suite::hex::encode(advert.fingerprint)
     );
 
     std::fs::write(&store_path, "[]").expect("truncate store");

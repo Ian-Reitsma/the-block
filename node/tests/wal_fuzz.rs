@@ -38,12 +38,12 @@ fn apply_ops(ops: &[Op], trunc: Option<u64>) -> HashMap<String, Vec<u8>> {
     for op in ops {
         match op {
             Op::Put(k, v) => {
-                let key = hex::encode(k);
+                let key = crypto_suite::hex::encode(k);
                 db.insert(&key, v.clone());
                 mirror.insert(key, v.clone());
             }
             Op::Del(k) => {
-                let key = hex::encode(k);
+                let key = crypto_suite::hex::encode(k);
                 db.remove(&key);
                 mirror.remove(&key);
             }

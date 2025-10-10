@@ -159,7 +159,7 @@ pub fn repair_chunk(
     chunk_idx: u32,
     force: bool,
 ) -> foundation_serialization::json::Value {
-    let bytes = match hex::decode(manifest_hex) {
+    let bytes = match crypto_suite::hex::decode(manifest_hex) {
         Ok(bytes) => bytes,
         Err(err) => {
             return foundation_serialization::json!({
@@ -292,8 +292,8 @@ mod tests {
         assert_eq!(response["status"], foundation_serialization::json!("ok"));
         let providers_json = response["providers"].as_array().expect("providers array");
         assert_eq!(providers_json.len(), 2);
-        assert!(providers_json.iter().any(|p| p == "prov-a"));
-        assert!(providers_json.iter().any(|p| p == "prov-b"));
+        assert!(providers_json.iter().any(|p| p.as_str() == Some("prov-a")));
+        assert!(providers_json.iter().any(|p| p.as_str() == Some("prov-b")));
 
         let stored = CONTRACTS.lock().unwrap();
         let stored_contract = stored.get(&object_id).expect("contract stored");
@@ -365,7 +365,7 @@ mod tests {
     fn repair_chunk_with_unknown_manifest_returns_ok() {
         let dir = tempdir().expect("dir");
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
-        let manifest_hex = hex::encode([0u8; 32]);
+        let manifest_hex = crypto_suite::hex::encode([0u8; 32]);
         let resp = repair_chunk(&manifest_hex, 0, true);
         assert_eq!(resp["status"], foundation_serialization::json!("ok"));
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");

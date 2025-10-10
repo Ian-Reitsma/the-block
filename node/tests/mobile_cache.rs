@@ -2,7 +2,7 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use std::thread::sleep;
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gateway::mobile_cache::{MobileCache, MobileCacheConfig};
 
 fn persistent_config(dir: &std::path::Path, key: [u8; 32]) -> MobileCacheConfig {
@@ -59,18 +59,18 @@ fn mobile_cache_updates_telemetry_counters() {
     let cfg = persistent_config(tmp.path(), key);
 
     let mut cache = MobileCache::open(cfg).expect("open cache");
-    let base_hits = MOBILE_CACHE_HIT_TOTAL.get();
-    let base_miss = MOBILE_CACHE_MISS_TOTAL.get();
+    let base_hits = MOBILE_CACHE_HIT_TOTAL.value();
+    let base_miss = MOBILE_CACHE_MISS_TOTAL.value();
     let _ = cache.get("unknown").expect("cache miss lookup");
-    assert!(MOBILE_CACHE_MISS_TOTAL.get() >= base_miss + 1);
+    assert!(MOBILE_CACHE_MISS_TOTAL.value() >= base_miss + 1);
     cache
         .insert("tracked".into(), "value".into())
         .expect("insert tracked");
     let _ = cache.get("tracked").expect("cache hit");
-    assert!(MOBILE_CACHE_HIT_TOTAL.get() >= base_hits + 1);
-    assert!(MOBILE_CACHE_ENTRY_TOTAL.get() >= 1);
+    assert!(MOBILE_CACHE_HIT_TOTAL.value() >= base_hits + 1);
+    assert!(MOBILE_CACHE_ENTRY_TOTAL.value() >= 1);
     cache.queue_tx("queued".into()).expect("queue tx");
-    assert!(MOBILE_CACHE_QUEUE_TOTAL.get() >= 1);
+    assert!(MOBILE_CACHE_QUEUE_TOTAL.value() >= 1);
 }
 
 #[test]

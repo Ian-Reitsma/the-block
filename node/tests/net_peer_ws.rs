@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use hex;
 use std::time::Duration;
 use the_block::net::peer::{broadcast_metrics, subscribe_peer_metrics, PeerMetrics};
 
@@ -15,7 +14,7 @@ fn broadcast_updates() {
             .await
             .expect("recv")
             .expect("snapshot");
-        assert_eq!(snap.peer_id, hex::encode(pk));
+        assert_eq!(snap.peer_id, crypto_suite::hex::encode(pk));
         assert_eq!(snap.metrics.requests, 1);
     });
 }

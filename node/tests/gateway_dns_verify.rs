@@ -1,12 +1,12 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gateway::dns::{
     clear_verify_cache, dns_lookup, gateway_policy, publish_record, set_allow_external,
     set_txt_resolver,
 };
 
-fn setup(domain: &str) -> (tempfile::TempDir, String, SigningKey) {
+fn setup(domain: &str) -> (sys::tempfile::TempDir, String, SigningKey) {
     let dir = tempdir().unwrap();
     std::env::set_var("TB_DNS_DB_PATH", dir.path().join("dns").to_str().unwrap());
     clear_verify_cache();
@@ -24,11 +24,11 @@ fn setup(domain: &str) -> (tempfile::TempDir, String, SigningKey) {
     let params = foundation_serialization::json!({
         "domain":domain,
         "txt":txt,
-        "pubkey":hex::encode(pk.to_bytes()),
-        "sig":hex::encode(sig.to_bytes()),
+        "pubkey":crypto_suite::hex::encode(pk.to_bytes()),
+        "sig":crypto_suite::hex::encode(sig.to_bytes()),
     });
     let _ = publish_record(&params);
-    (dir, hex::encode(pk.to_bytes()), sk)
+    (dir, crypto_suite::hex::encode(pk.to_bytes()), sk)
 }
 
 #[testkit::tb_serial]

@@ -3,7 +3,6 @@ use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
-use hex;
 use std::convert::TryInto;
 use std::fs;
 use std::path::Path;
@@ -73,7 +72,7 @@ fn parse_signer_list(input: &str) -> Option<Vec<VerifyingKey>> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
-        if let Ok(bytes) = hex::decode(token) {
+        if let Ok(bytes) = crypto_suite::hex::decode(token) {
             if bytes.len() == PUBLIC_KEY_LENGTH {
                 if let Ok(arr) = bytes.as_slice().try_into() {
                     if let Ok(vk) = VerifyingKey::from_bytes(&arr) {
@@ -91,7 +90,7 @@ fn parse_signer_list(input: &str) -> Option<Vec<VerifyingKey>> {
 }
 
 fn decode_signature(sig_hex: &str) -> Option<Signature> {
-    let bytes = hex::decode(sig_hex).ok()?;
+    let bytes = crypto_suite::hex::decode(sig_hex).ok()?;
     if bytes.len() != SIGNATURE_LENGTH {
         return None;
     }
@@ -144,13 +143,13 @@ pub fn release_signer_keys() -> Vec<VerifyingKey> {
 pub fn release_signer_hexes() -> Vec<String> {
     signer_list()
         .iter()
-        .map(|vk| hex::encode(vk.to_bytes()))
+        .map(|vk| crypto_suite::hex::encode(vk.to_bytes()))
         .collect()
 }
 
 /// Parse a verifying key from a lowercase hex string.
 pub fn parse_signer_hex(input: &str) -> Option<VerifyingKey> {
-    let bytes = hex::decode(input).ok()?;
+    let bytes = crypto_suite::hex::decode(input).ok()?;
     if bytes.len() != PUBLIC_KEY_LENGTH {
         return None;
     }

@@ -10,7 +10,7 @@ use the_block::{
 
 #[test]
 fn recovers_from_crash_during_import() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().to_str().unwrap().to_string();
     {
         let mut bc = Blockchain::new(&path);

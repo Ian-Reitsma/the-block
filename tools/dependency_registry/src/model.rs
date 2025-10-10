@@ -1,8 +1,8 @@
 use std::{cmp::Ordering, fmt};
 
 use chrono::{DateTime, Utc};
+use concurrency::OrderedMap;
 use foundation_serialization::{Deserialize, Serialize};
-use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct CrateRef {
@@ -149,4 +149,4 @@ impl fmt::Display for RiskTier {
     }
 }
 
-pub type DependencyMap = IndexMap<String, DependencyEntry>;
+pub type DependencyMap = OrderedMap<String, DependencyEntry>;

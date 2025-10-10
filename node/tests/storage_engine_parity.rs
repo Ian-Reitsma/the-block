@@ -1,12 +1,11 @@
 #![cfg(feature = "integration-tests")]
 
 use concurrency::Lazy;
-use hex;
 use ledger::address::ShardId;
 use state::{MerkleTrie, SnapshotManager};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::gossip::{config::GossipConfig, relay::Relay};
 use the_block::simple_db::{self, EngineConfig, EngineKind};
@@ -46,7 +45,7 @@ fn gossip_relay_engine_parity() {
         drop(relay);
         let relay = Relay::new(cfg);
         let status = relay.status();
-        let expected = hex::encode(peer);
+        let expected = crypto_suite::hex::encode(peer);
         let peers = status
             .shard_affinity
             .into_iter()

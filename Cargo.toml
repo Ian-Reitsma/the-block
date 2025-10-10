@@ -56,6 +56,7 @@ members = [
   "crates/testkit",
   "crates/cli_core",
   "crates/foundation_serialization",
+  "crates/foundation_regex",
   "crates/foundation_rpc",
   "crates/foundation_math",
   "crates/foundation_telemetry",

@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::config::OverlayConfig;
 use the_block::net;
 use the_block::net::discovery::{self, PeerId};

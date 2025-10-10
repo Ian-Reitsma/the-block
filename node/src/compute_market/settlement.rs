@@ -341,7 +341,8 @@ impl SettlementState {
                         {
                             SLASHING_BURN_CT_TOTAL.inc_by(burned);
                             COMPUTE_SLA_VIOLATIONS_TOTAL
-                                .with_label_values(&[record.provider.as_str()])
+                                .ensure_handle_for_label_values(&[record.provider.as_str()])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .inc();
                             if automated {
                                 COMPUTE_SLA_AUTOMATED_SLASH_TOTAL.inc();
@@ -350,7 +351,10 @@ impl SettlementState {
                     }
                     Err(_) => {
                         #[cfg(feature = "telemetry")]
-                        SETTLE_FAILED_TOTAL.with_label_values(&["penalize"]).inc();
+                        SETTLE_FAILED_TOTAL
+                            .ensure_handle_for_label_values(&["penalize"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                            .inc();
                         self.record_event(&record.provider, &format!("{memo}_failed"), 0, 0);
                     }
                 }
@@ -536,7 +540,8 @@ impl Settlement {
                 {
                     SLASHING_BURN_CT_TOTAL.inc_by(amount);
                     COMPUTE_SLA_VIOLATIONS_TOTAL
-                        .with_label_values(&[provider])
+                        .ensure_handle_for_label_values(&[provider])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     SETTLE_APPLIED_TOTAL.inc();
                 }
@@ -545,7 +550,10 @@ impl Settlement {
             }
             Err(_) => {
                 #[cfg(feature = "telemetry")]
-                SETTLE_FAILED_TOTAL.with_label_values(&["penalize"]).inc();
+                SETTLE_FAILED_TOTAL
+                    .ensure_handle_for_label_values(&["penalize"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
                 Err(())
             }
         })
@@ -666,7 +674,10 @@ impl Settlement {
             }
             Err(_) => {
                 #[cfg(feature = "telemetry")]
-                SETTLE_FAILED_TOTAL.with_label_values(&["spend"]).inc();
+                SETTLE_FAILED_TOTAL
+                    .ensure_handle_for_label_values(&["spend"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
                 Err(())
             }
         })
@@ -695,7 +706,10 @@ impl Settlement {
             state.metadata.armed_delay = Some(delay);
             state.metadata.last_cancel_reason = None;
             #[cfg(feature = "telemetry")]
-            SETTLE_MODE_CHANGE_TOTAL.with_label_values(&["armed"]).inc();
+            SETTLE_MODE_CHANGE_TOTAL
+                .ensure_handle_for_label_values(&["armed"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
             state.persist_all();
         });
     }
@@ -707,7 +721,8 @@ impl Settlement {
             state.metadata.armed_delay = None;
             #[cfg(feature = "telemetry")]
             SETTLE_MODE_CHANGE_TOTAL
-                .with_label_values(&["dryrun"])
+                .ensure_handle_for_label_values(&["dryrun"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
             state.persist_all();
         });
@@ -721,7 +736,8 @@ impl Settlement {
             state.metadata.armed_delay = None;
             #[cfg(feature = "telemetry")]
             SETTLE_MODE_CHANGE_TOTAL
-                .with_label_values(&["dryrun"])
+                .ensure_handle_for_label_values(&["dryrun"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
             state.persist_all();
         });

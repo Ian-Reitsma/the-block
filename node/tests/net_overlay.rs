@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use p2p_overlay::{OverlayService, PeerEndpoint};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::config::{ensure_overlay_sanity, OverlayBackend, OverlayConfig};
 use the_block::gossip::{config::GossipConfig, relay::Relay};
 use the_block::net::{self, discovery, uptime, OverlayAddress, OverlayPeerId};

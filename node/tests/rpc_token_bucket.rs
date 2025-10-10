@@ -14,6 +14,6 @@ fn limiter_counts_once() {
     telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.reset();
     assert!(check_client(&addr, &clients, 1.0, 1, 60).is_ok());
     assert!(check_client(&addr, &clients, 1.0, 1, 60).is_err());
-    assert_eq!(telemetry::RPC_RATE_LIMIT_ATTEMPT_TOTAL.get(), 2);
-    assert_eq!(telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.get(), 1);
+    assert_eq!(telemetry::RPC_RATE_LIMIT_ATTEMPT_TOTAL.value(), 2);
+    assert_eq!(telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.value(), 1);
 }

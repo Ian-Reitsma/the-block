@@ -10,6 +10,7 @@ diagnostics = { path = "../diagnostics" }
 foundation_serialization = { path = "../foundation_serialization" }
 rand = { path = "../rand" }
 runtime = { path = "../runtime" }
+foundation_regex = { path = "../foundation_regex" }
 
 [dev-dependencies]
 sys = { path = "../sys" }

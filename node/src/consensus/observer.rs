@@ -13,6 +13,7 @@ pub fn observe_convergence(start: Instant) {
 /// Increment the reorg counter for a given depth.
 pub fn record_reorg(depth: u64) {
     FORK_REORG_TOTAL
-        .with_label_values(&[&depth.to_string()])
+        .ensure_handle_for_label_values(&[&depth.to_string()])
+        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
         .inc();
 }

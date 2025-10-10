@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 light-client = { path = "../../crates/light-client" }
 wallet = { path = "../../crates/wallet" }
-hex = "0.4"
+crypto_suite = { path = "../../crates/crypto_suite" }
 serde = { version = "1", features=["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 the_block = { path = "../../node" }

@@ -7,7 +7,7 @@ build = "build.rs"
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
 the_block = { path = "../../node" }
-hex = "0.4"
+crypto_suite = { path = "../../crates/crypto_suite" }
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

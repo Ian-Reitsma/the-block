@@ -6,7 +6,7 @@ use std::process::Command;
 
 #[test]
 fn support_bundle_redacts_tokens() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = sys::tempfile::tempdir().unwrap();
     let config = tmp.path().join("config.toml");
     fs::write(&config, "admin_token=\"SECRET\"\nprivate_key=\"ABC\"\n").unwrap();
     let datadir = tmp.path().join("data");

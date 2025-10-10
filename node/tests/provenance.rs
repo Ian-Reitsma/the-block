@@ -5,7 +5,7 @@ use std::io::Write;
 
 #[test]
 fn detects_tampered_binary() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("bin");
     let mut f = File::create(&path).unwrap();
     write!(f, "hello").unwrap();

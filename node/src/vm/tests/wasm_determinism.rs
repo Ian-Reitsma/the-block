@@ -29,7 +29,7 @@ fn wasm_runs_deterministically() {
     let module = sample_module();
     let id = vm.deploy_wasm(module, vec![]);
     let mut balance = 1_000_000;
-    let mut input = 5i64.to_le_bytes().to_vec();
+    let input = 5i64.to_le_bytes().to_vec();
     let first = vm
         .execute(id, &input, 1_000_000, 1, &mut balance)
         .expect("executes");

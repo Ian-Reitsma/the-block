@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use hex::encode;
+use crypto_suite::hex::encode;
 use std::collections::VecDeque;
 
 /// Intent to perform a cross-chain swap via HTLC.

@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
-use hex;
 use rand::{thread_rng, RngCore};
 use runtime::{io::read_to_end, net::TcpStream};
 use std::convert::TryInto;
@@ -8,7 +7,7 @@ use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{self, set_max_peer_metrics, simulate_handshake_fail, HandshakeError};
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
@@ -21,7 +20,7 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-fn init_env() -> tempfile::TempDir {
+fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     the_block::net::clear_peer_metrics();
@@ -103,7 +102,7 @@ fn peer_stats_rpc() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let val = rpc(
             &addr,
             &format!(
@@ -177,7 +176,10 @@ fn peer_stats_all_rpc() {
             .iter()
             .map(|e| e["peer_id"].as_str().unwrap().to_string())
             .collect();
-        assert!(ids.contains(&hex::encode(pk1)) && ids.contains(&hex::encode(pk2)));
+        assert!(
+            ids.contains(&crypto_suite::hex::encode(pk1))
+                && ids.contains(&crypto_suite::hex::encode(pk2))
+        );
 
         handle.abort();
         Settlement::shutdown();
@@ -225,7 +227,7 @@ fn peer_stats_reset_rpc() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let _ = rpc(
             &addr,
             &format!(
@@ -294,7 +296,7 @@ fn peer_stats_export_rpc() {
 
         the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
         let path = "export.json";
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let body = format!(
         "{{\"method\":\"net.peer_stats_export\",\"params\":{{\"peer_id\":\"{}\",\"path\":\"{}\"}}}}",
         peer_id,
@@ -438,7 +440,7 @@ fn peer_stats_export_all_rpc_map() {
         let addr = expect_timeout(rx).await.unwrap();
 
         let val = rpc(&addr, "{\"method\":\"net.peer_stats_export_all\"}").await;
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         assert!(val["result"][peer_id].is_object());
 
         handle.abort();
@@ -605,7 +607,7 @@ fn peer_stats_export_all_filter_reputation() {
     the_block::net::export_all_peer_stats("dump", Some(0.8), None).unwrap();
     let map = the_block::net::peer_stats_map(Some(0.8), None);
     assert_eq!(map.len(), 1);
-    assert!(map.contains_key(&hex::encode(pk1)));
+    assert!(map.contains_key(&crypto_suite::hex::encode(pk1)));
     Settlement::shutdown();
 }
 
@@ -668,7 +670,7 @@ fn peer_stats_export_all_filter_activity() {
     the_block::net::export_all_peer_stats("dump", None, Some(1)).unwrap();
     let map = the_block::net::peer_stats_map(None, Some(1));
     assert_eq!(map.len(), 1);
-    assert!(map.contains_key(&hex::encode(pk2)));
+    assert!(map.contains_key(&crypto_suite::hex::encode(pk2)));
     Settlement::shutdown();
 }
 
@@ -737,7 +739,7 @@ fn peer_stats_cli_show_and_reputation() {
         simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
         net::set_track_handshake_fail(false);
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let peer_id_clone = peer_id.clone();
         let rpc_url = format!("http://{}", addr);
         let output = the_block::spawn_blocking(move || {
@@ -826,7 +828,7 @@ fn peer_stats_cli_show_table_snapshot() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let rpc_url = format!("http://{}", addr);
         let peer_id_clone = peer_id.clone();
         let output = the_block::spawn_blocking(move || {
@@ -897,7 +899,7 @@ fn peer_stats_cli_show_json_snapshot() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let rpc_url = format!("http://{}", addr);
         let peer_id_clone = peer_id.clone();
         let output = the_block::spawn_blocking(move || {
@@ -1052,7 +1054,7 @@ fn peer_stats_cli_sort_filter_snapshot() {
             .all(|p| p.get("reputation").and_then(|v| v.as_f64()) == Some(1.0)));
 
         // filter by first peer prefix
-        let prefix = &hex::encode(pk1)[..4];
+        let prefix = &crypto_suite::hex::encode(pk1)[..4];
         let output2 = the_block::spawn_blocking({
             let rpc_url = rpc_url.clone();
             let patt = format!("^{}", prefix);
@@ -1147,7 +1149,7 @@ fn peer_stats_unknown_peer() {
         let addr = expect_timeout(rx).await.unwrap();
         let mut rand_bytes = [0u8; 32];
         thread_rng().fill_bytes(&mut rand_bytes);
-        let peer_id = hex::encode(rand_bytes);
+        let peer_id = crypto_suite::hex::encode(rand_bytes);
         let val = rpc(
             &addr,
             &format!(
@@ -1209,7 +1211,7 @@ fn peer_stats_drop_counter_rpc() {
             tx,
         ));
         let addr_rpc = expect_timeout(rx).await.unwrap();
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let val = rpc(
             &addr_rpc,
             &format!(
@@ -1271,7 +1273,7 @@ fn peer_stats_cli_reset() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk);
         let output = Command::new(env!("CARGO_BIN_EXE_net"))
             .args([
                 "stats",
@@ -1320,7 +1322,7 @@ fn peer_stats_all_pagination_rpc() {
             };
             let msg = Message::new(Payload::Handshake(hello), &sk);
             peers.handle_message(msg, None, &bc);
-            pks.push(hex::encode(pk));
+            pks.push(crypto_suite::hex::encode(pk));
         }
 
         let mining = Arc::new(AtomicBool::new(false));

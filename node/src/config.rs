@@ -851,7 +851,10 @@ pub fn reload() -> bool {
             crate::storage::settings::configure_from_dir(&dir);
             #[cfg(feature = "telemetry")]
             {
-                CONFIG_RELOAD_TOTAL.with_label_values(&["ok"]).inc();
+                CONFIG_RELOAD_TOTAL
+                    .ensure_handle_for_label_values(&["ok"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -864,7 +867,10 @@ pub fn reload() -> bool {
             #[cfg(feature = "telemetry")]
             {
                 diagnostics::log::warn!("config_reload_failed: {e}");
-                CONFIG_RELOAD_TOTAL.with_label_values(&["err"]).inc();
+                CONFIG_RELOAD_TOTAL
+                    .ensure_handle_for_label_values(&["err"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
             }
             #[cfg(not(feature = "telemetry"))]
             eprintln!("config_reload_failed: {e}");

@@ -264,11 +264,12 @@ fn drop_lock_poisoned_error_and_recovery() {
     );
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.value());
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["lock_poison"])
+                .ensure_handle_for_label_values(&["lock_poison"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
     }
@@ -297,11 +298,12 @@ fn submit_lock_poisoned_error_and_recovery() {
     );
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.value());
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["lock_poison"])
+                .ensure_handle_for_label_values(&["lock_poison"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
     }

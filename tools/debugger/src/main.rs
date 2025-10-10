@@ -55,7 +55,7 @@ fn run() -> Result<(), RunError> {
         "get" => {
             let key = positional(sub_matches, "key")?;
             if let Some(v) = db.get(&key) {
-                println!("{}", hex::encode(v));
+                println!("{}", crypto_suite::hex::encode(v));
             } else {
                 eprintln!("key not found");
             }

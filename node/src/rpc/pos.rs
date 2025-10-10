@@ -44,11 +44,11 @@ fn get_sig(params: &Value) -> Result<Vec<u8>, RpcError> {
         .get("sig")
         .and_then(|v| v.as_str())
         .ok_or_else(|| RpcError::new(-32602, "missing sig"))?;
-    hex::decode(sig_hex).map_err(|_| RpcError::new(-32602, "invalid sig"))
+    crypto_suite::hex::decode(sig_hex).map_err(|_| RpcError::new(-32602, "invalid sig"))
 }
 
 fn parse_key(hex: &str, err: &'static str) -> Result<VerifyingKey, RpcError> {
-    let bytes = hex::decode(hex).map_err(|_| RpcError::new(-32602, err))?;
+    let bytes = crypto_suite::hex::decode(hex).map_err(|_| RpcError::new(-32602, err))?;
     let raw: [u8; 32] = bytes.try_into().map_err(|_| RpcError::new(-32602, err))?;
     VerifyingKey::from_bytes(&raw).map_err(|_| RpcError::new(-32602, err))
 }
@@ -72,8 +72,8 @@ fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload,
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RpcError::new(-32602, "invalid signers"))?;
             let pk = parse_key(pk_hex, "invalid signer pk")?;
-            let sig_bytes =
-                hex::decode(sig_hex).map_err(|_| RpcError::new(-32602, "invalid sig"))?;
+            let sig_bytes = crypto_suite::hex::decode(sig_hex)
+                .map_err(|_| RpcError::new(-32602, "invalid sig"))?;
             let arr: [u8; SIGNATURE_LENGTH] = sig_bytes
                 .as_slice()
                 .try_into()
@@ -192,7 +192,7 @@ pub fn role(params: &Value) -> Result<Value, RpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+    use crypto_suite::signatures::ed25519::SigningKey;
 
     fn reset_state() {
         let mut state = POS_STATE.lock().unwrap();
@@ -213,10 +213,10 @@ mod tests {
         let msg = format!("bond:{role}:{amount}");
         let sig = sk.sign(msg.as_bytes());
         let params = foundation_serialization::json!({
-            "id": hex::encode(pk.to_bytes()),
+            "id": crypto_suite::hex::encode(pk.to_bytes()),
             "role": role,
             "amount": amount,
-            "sig": hex::encode(sig.to_bytes()),
+            "sig": crypto_suite::hex::encode(sig.to_bytes()),
         });
         let res = bond(&params).expect("bond succeeds");
         assert_eq!(res["stake"].as_u64().unwrap(), amount);
@@ -237,14 +237,14 @@ mod tests {
             (&signer_c, signer_c.sign(b"other")),
         ];
         let params = foundation_serialization::json!({
-            "id": hex::encode(signer_a.verifying_key().to_bytes()),
+            "id": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
             "role": role,
             "amount": amount,
             "threshold": 2,
             "signers": [
-                {"pk": hex::encode(approvals[0].0.verifying_key().to_bytes()), "sig": hex::encode(approvals[0].1.to_bytes())},
-                {"pk": hex::encode(approvals[1].0.verifying_key().to_bytes()), "sig": hex::encode(approvals[1].1.to_bytes())},
-                {"pk": hex::encode(approvals[2].0.verifying_key().to_bytes()), "sig": hex::encode(approvals[2].1.to_bytes())},
+                {"pk": crypto_suite::hex::encode(approvals[0].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[0].1.to_bytes())},
+                {"pk": crypto_suite::hex::encode(approvals[1].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[1].1.to_bytes())},
+                {"pk": crypto_suite::hex::encode(approvals[2].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[2].1.to_bytes())},
             ],
         });
         let res = bond(&params).expect("multisig bond");
@@ -253,13 +253,13 @@ mod tests {
         // Fails when fewer than threshold signatures are valid.
         reset_state();
         let bad_params = foundation_serialization::json!({
-            "id": hex::encode(signer_a.verifying_key().to_bytes()),
+            "id": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
             "role": role,
             "amount": amount,
             "threshold": 2,
             "signers": [
-                {"pk": hex::encode(signer_a.verifying_key().to_bytes()), "sig": hex::encode(approvals[0].1.to_bytes())},
-                {"pk": hex::encode(signer_b.verifying_key().to_bytes()), "sig": "00"},
+                {"pk": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[0].1.to_bytes())},
+                {"pk": crypto_suite::hex::encode(signer_b.verifying_key().to_bytes()), "sig": "00"},
             ],
         });
         assert!(matches!(bond(&bad_params), Err(_)));

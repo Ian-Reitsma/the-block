@@ -1,7 +1,8 @@
+use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use sys::temp;
+use sys::tempfile as temp;
 use testkit::tb_prop_test;
 use the_block::gossip::config::GossipConfig;
 use the_block::gossip::relay::Relay;
@@ -77,7 +78,7 @@ tb_prop_test!(fanout_respects_configuration, |runner| {
             let (relay, _dir) = relay_with_config(cfg);
             let sk = SigningKey::from_bytes(&[9u8; 32]);
             let msg = Message::new(Payload::Hello(vec![]), &sk);
-            let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..peers_count)
+            let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..peers_count)
                 .map(|i| {
                     (
                         format!("127.0.0.1:{}", 16000 + i).parse().unwrap(),

@@ -50,7 +50,10 @@ fn take(map: &Mutex<HashMap<String, Bucket>>, key: &str, cfg: &RateConfig, now: 
     } else {
         #[cfg(feature = "telemetry")]
         {
-            READ_DENIED_TOTAL.with_label_values(&["limit"]).inc();
+            READ_DENIED_TOTAL
+                .ensure_handle_for_label_values(&["limit"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
         }
         false
     }

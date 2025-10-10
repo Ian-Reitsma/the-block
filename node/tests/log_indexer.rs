@@ -2,7 +2,7 @@
 use sled;
 use std::fs::File;
 use std::io::Write;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::log_indexer::{
     index_logs, index_logs_with_options, search_logs, IndexOptions, LogFilter, LogIndexerError,
 };

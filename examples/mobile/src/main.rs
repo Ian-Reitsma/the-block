@@ -86,14 +86,14 @@ fn main() {
             .route(Method::Post, "/sign", |req| async move {
                 let state = req.state().clone();
                 let payload: SignRequest = req.json()?;
-                let msg = hex::decode(payload.msg)
+                let msg = crypto_suite::hex::decode(payload.msg)
                     .map_err(|err| HttpError::Handler(format!("invalid hex payload: {err}")))?;
                 let sig = state
                     .wallet
                     .sign(&msg)
                     .map_err(|err| HttpError::Handler(err.to_string()))?;
                 Response::new(StatusCode::OK).json(&SignResponse {
-                    sig: hex::encode(sig.to_bytes()),
+                    sig: crypto_suite::hex::encode(sig.to_bytes()),
                 })
             });
 
@@ -111,7 +111,7 @@ fn main() {
     let signer = RemoteSigner::connect(&addr).expect("connect");
     let message = b"mobile-wallet-demo";
     let sig = signer.sign(message).expect("sign");
-    println!("signature: {}", hex::encode(sig.to_bytes()));
+    println!("signature: {}", crypto_suite::hex::encode(sig.to_bytes()));
 
     notify_tx("demo-tx");
     show_trust_lines();

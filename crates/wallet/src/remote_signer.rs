@@ -7,7 +7,6 @@ use crypto_suite::{
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use httpd::{join_path, BlockingClient, Method, Uri};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
@@ -346,7 +345,8 @@ impl RemoteSigner {
             resp.json()
                 .map_err(|e| WalletError::Failure(e.to_string()))?
         };
-        let bytes = hex::decode(pk.pubkey).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let bytes = crypto_suite::hex::decode(pk.pubkey)
+            .map_err(|e| WalletError::Failure(e.to_string()))?;
         if bytes.len() != 32 {
             return Err(WalletError::Failure("invalid pubkey length".into()));
         }
@@ -437,8 +437,8 @@ impl RemoteSigner {
             match res {
                 Ok(resp) => match resp.json::<SignResp>() {
                     Ok(r) => {
-                        let sig_bytes =
-                            hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
+                        let sig_bytes = crypto_suite::hex::decode(r.sig)
+                            .map_err(|e| WalletError::Failure(e.to_string()))?;
                         if sig_bytes.len() != SIGNATURE_LENGTH {
                             return Err(WalletError::Failure("invalid signature length".into()));
                         }
@@ -507,7 +507,8 @@ impl RemoteSigner {
             .read_text()
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         let r: SignResp = json::from_str(&txt).map_err(|e| WalletError::Failure(e.to_string()))?;
-        let sig_bytes = hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let sig_bytes =
+            crypto_suite::hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
         if sig_bytes.len() != SIGNATURE_LENGTH {
             return Err(WalletError::Failure("invalid signature length".into()));
         }
@@ -670,7 +671,7 @@ impl WalletSigner for RemoteSigner {
         increment_counter!("remote_signer_request_total");
         let start = Instant::now();
         let tagged = remote_tag(msg);
-        let msg_hex = hex::encode(&tagged);
+        let msg_hex = crypto_suite::hex::encode(&tagged);
         let trace_id = Uuid::new_v4();
         let payload = SignReq {
             trace: &trace_id.to_string(),

@@ -1,7 +1,4 @@
-use foundation_serialization::{
-    hex,
-    json::{Map, Value},
-};
+use foundation_serialization::json::{Map, Value};
 
 use ledger::{Emission, TokenRegistry};
 
@@ -27,7 +24,7 @@ pub enum Error {
     },
     Hex {
         field: &'static str,
-        source: hex::Error,
+        source: crypto_suite::hex::Error,
     },
 }
 
@@ -113,17 +110,17 @@ fn object(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
 
 fn decode_hex_field<const N: usize>(value: &Value, field: &'static str) -> Result<[u8; N], Error> {
     let hex_str = require_string(value, field)?;
-    hex::decode_array::<N>(hex_str).map_err(|source| Error::Hex { field, source })
+    crypto_suite::hex::decode_array::<N>(hex_str).map_err(|source| Error::Hex { field, source })
 }
 
 fn encode_hex(bytes: &[u8]) -> Value {
-    Value::String(hex::encode(bytes))
+    Value::String(crypto_suite::hex::encode(bytes))
 }
 
 fn encode_hex_array(items: &[[u8; 32]]) -> Value {
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        out.push(Value::String(hex::encode(item)));
+        out.push(Value::String(crypto_suite::hex::encode(item)));
     }
     Value::Array(out)
 }

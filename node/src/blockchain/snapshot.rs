@@ -1,7 +1,6 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{SNAPSHOT_DURATION_SECONDS, SNAPSHOT_FAIL_TOTAL};
 use crate::{Account, TokenBalance};
-use hex;
 use state::MerkleTrie;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -250,7 +249,7 @@ fn merkle_root(accounts: &[SnapshotAccount]) -> String {
         data.extend_from_slice(&a.nonce.to_le_bytes());
         trie.insert(a.address.as_bytes(), &data);
     }
-    hex::encode(trie.root_hash())
+    crypto_suite::hex::encode(trie.root_hash())
 }
 
 pub fn state_root(accounts: &HashMap<String, Account>) -> String {
@@ -533,7 +532,7 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
         })?
         .parse::<u64>()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok((height, accounts, hex::encode(root)))
+    Ok((height, accounts, crypto_suite::hex::encode(root)))
 }
 
 pub fn account_proof(
@@ -553,7 +552,7 @@ pub fn account_proof(
         proof
             .0
             .into_iter()
-            .map(|(h, is_left)| (hex::encode(h), is_left))
+            .map(|(h, is_left)| (crypto_suite::hex::encode(h), is_left))
             .collect(),
     )
 }
@@ -561,7 +560,30 @@ pub fn account_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use state::Snapshot;
     use sys::tempfile::tempdir;
+
+    fn encode_state_snapshot(snapshot: &Snapshot) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&snapshot.root);
+        bytes.extend_from_slice(&(snapshot.entries.len() as u32).to_be_bytes());
+        for (key, value) in &snapshot.entries {
+            bytes.extend_from_slice(&(key.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(key);
+            bytes.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(value);
+        }
+        match &snapshot.engine_backend {
+            Some(engine) => {
+                bytes.push(1);
+                let engine_bytes = engine.as_bytes();
+                bytes.extend_from_slice(&(engine_bytes.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(engine_bytes);
+            }
+            None => bytes.push(0),
+        }
+        bytes
+    }
 
     #[test]
     fn load_file_rebuilds_accounts_from_entries() {
@@ -582,12 +604,12 @@ mod tests {
             entries: vec![(b"alice".to_vec(), value)],
             engine_backend: None,
         };
-        let bytes = bincode::serialize(&snapshot).expect("serialize snapshot");
+        let bytes = encode_state_snapshot(&snapshot);
         fs::write(&path, bytes).expect("write snapshot");
 
         let (height, accounts, root_hex) = load_file(path.to_str().unwrap()).expect("load");
         assert_eq!(height, 42);
-        assert_eq!(root_hex, hex::encode(root));
+        assert_eq!(root_hex, crypto_suite::hex::encode(root));
         let alice = accounts.get("alice").expect("alice present");
         assert_eq!(alice.address, "alice");
         assert_eq!(alice.balance.consumer, 11);

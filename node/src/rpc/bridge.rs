@@ -83,7 +83,7 @@ pub fn verify_deposit(
     Ok(foundation_serialization::json!({
         "status": "ok",
         "nonce": receipt.nonce,
-        "commitment": hex::encode(receipt.relayer_commitment),
+        "commitment": crypto_suite::hex::encode(receipt.relayer_commitment),
         "recorded_at": receipt.recorded_at,
     }))
 }
@@ -105,7 +105,7 @@ pub fn request_withdrawal(
         .map_err(convert_err)?;
     Ok(foundation_serialization::json!({
         "status": "pending",
-        "commitment": hex::encode(commitment),
+        "commitment": crypto_suite::hex::encode(commitment),
     }))
 }
 
@@ -114,8 +114,8 @@ pub fn challenge_withdrawal(
     commitment_hex: &str,
     challenger: &str,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    let bytes =
-        hex::decode(commitment_hex).map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
+    let bytes = crypto_suite::hex::decode(commitment_hex)
+        .map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
     if bytes.len() != 32 {
         return Err(RpcError::new(-32602, "invalid commitment"));
     }
@@ -136,8 +136,8 @@ pub fn finalize_withdrawal(
     asset: &str,
     commitment_hex: &str,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    let bytes =
-        hex::decode(commitment_hex).map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
+    let bytes = crypto_suite::hex::decode(commitment_hex)
+        .map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
     if bytes.len() != 32 {
         return Err(RpcError::new(-32602, "invalid commitment"));
     }
@@ -169,7 +169,7 @@ pub fn active_challenges(
         .map(|c| {
             foundation_serialization::json!({
                 "asset": c.asset,
-                "commitment": hex::encode(c.commitment),
+                "commitment": crypto_suite::hex::encode(c.commitment),
                 "challenger": c.challenger,
                 "timestamp": c.challenged_at,
             })
@@ -201,9 +201,9 @@ pub fn deposit_history(
                 "user": r.user,
                 "amount": r.amount,
                 "relayer": r.relayer,
-                "header_hash": hex::encode(r.header_hash),
-                "commitment": hex::encode(r.relayer_commitment),
-                "fingerprint": hex::encode(r.proof_fingerprint),
+                "header_hash": crypto_suite::hex::encode(r.header_hash),
+                "commitment": crypto_suite::hex::encode(r.relayer_commitment),
+                "fingerprint": crypto_suite::hex::encode(r.proof_fingerprint),
                 "relayers": r.bundle_relayers,
                 "recorded_at": r.recorded_at,
             })

@@ -589,7 +589,10 @@ impl GovStore {
                 VoteChoice::No => "no",
                 VoteChoice::Abstain => "abstain",
             };
-            GOV_VOTES_TOTAL.with_label_values(&[choice]).inc();
+            GOV_VOTES_TOTAL
+                .ensure_handle_for_label_values(&[choice])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
             governance_webhook("vote", proposal_id);
         }
         Ok(())
@@ -617,7 +620,8 @@ impl GovStore {
                 VoteChoice::Abstain => "abstain",
             };
             RELEASE_VOTES_TOTAL
-                .with_label_values(&[label])
+                .ensure_handle_for_label_values(&[label])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc_by(v.weight);
         }
         Ok(())
@@ -676,7 +680,8 @@ impl GovStore {
             #[cfg(feature = "telemetry")]
             {
                 PARAM_CHANGE_PENDING
-                    .with_label_values(&[key_name(prop.key)])
+                    .ensure_handle_for_label_values(&[key_name(prop.key)])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(1);
             }
         } else {
@@ -684,7 +689,8 @@ impl GovStore {
             #[cfg(feature = "telemetry")]
             {
                 PARAM_CHANGE_PENDING
-                    .with_label_values(&[key_name(prop.key)])
+                    .ensure_handle_for_label_values(&[key_name(prop.key)])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(0);
             }
         }
@@ -922,15 +928,18 @@ impl GovStore {
                             #[cfg(feature = "telemetry")]
                             {
                                 PARAM_CHANGE_PENDING
-                                    .with_label_values(&[key_name(prop.key)])
+                                    .ensure_handle_for_label_values(&[key_name(prop.key)])
+                                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                     .set(0);
                                 PARAM_CHANGE_ACTIVE
-                                    .with_label_values(&[key_name(prop.key)])
+                                    .ensure_handle_for_label_values(&[key_name(prop.key)])
+                                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                     .set(prop.new_value);
                                 let sched = prop.activation_epoch.unwrap_or(current_epoch);
                                 let delay = current_epoch.saturating_sub(sched);
                                 GOV_ACTIVATION_DELAY_SECONDS
-                                    .with_label_values(&[key_name(prop.key)])
+                                    .ensure_handle_for_label_values(&[key_name(prop.key)])
+                                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                     .observe(delay as f64);
                                 governance_webhook("activate", prop.id);
                                 if crate::telemetry::should_log("governance") {
@@ -1005,10 +1014,12 @@ impl GovStore {
             #[cfg(feature = "telemetry")]
             {
                 PARAM_CHANGE_ACTIVE
-                    .with_label_values(&[key_name(last.key)])
+                    .ensure_handle_for_label_values(&[key_name(last.key)])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(last.old_value);
                 GOV_ROLLBACK_TOTAL
-                    .with_label_values(&[key_name(last.key)])
+                    .ensure_handle_for_label_values(&[key_name(last.key)])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 governance_webhook("rollback", last.proposal_id);
             }
@@ -1140,7 +1151,8 @@ impl GovStore {
         #[cfg(feature = "telemetry")]
         {
             GOV_ROLLBACK_TOTAL
-                .with_label_values(&[key_name(prop.key)])
+                .ensure_handle_for_label_values(&[key_name(prop.key)])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
             governance_webhook("rollback", proposal_id);
             self.update_pending_gauge()?;

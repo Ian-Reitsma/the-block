@@ -10,7 +10,6 @@ thiserror = "1"
 httpd = { path = "../httpd" }
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../foundation_serialization" }
-hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 ledger = { path = "../../ledger" }

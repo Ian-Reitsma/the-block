@@ -10,17 +10,18 @@ use crate::net::peer::is_throttled_addr;
 use crate::net::peer::ReputationUpdate;
 use crate::net::{record_ip_drop, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
+use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 
 /// Deterministic fanout tree inspired by Turbine gossip.
-pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
+pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Bytes>)]) {
     broadcast_with(msg, peers, |(addr, transport, cert), m| match transport {
         Transport::Tcp => {
             let _ = send_msg(addr, m);
         }
         Transport::Quic => {
             if let Some(c) = cert {
-                let _ = send_quic_msg(addr, &c, m);
+                let _ = send_quic_msg(addr, c, m);
             } else {
                 let _ = send_msg(addr, m);
             }
@@ -32,7 +33,7 @@ pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>
 pub fn broadcast_chunk(
     chunk: &BlobChunk,
     sk: &SigningKey,
-    peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+    peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
     let msg = Message::new(crate::net::message::Payload::BlobChunk(chunk.clone()), sk);
     broadcast(&msg, peers);
@@ -42,7 +43,7 @@ pub fn broadcast_chunk(
 pub fn broadcast_reputation(
     entries: &[ReputationUpdate],
     sk: &SigningKey,
-    peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+    peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
     let msg = Message::new(
         crate::net::message::Payload::Reputation(entries.to_vec()),
@@ -54,10 +55,10 @@ pub fn broadcast_reputation(
 /// Broadcast with a custom send function, useful for tests.
 pub fn broadcast_with<F>(
     msg: &Message,
-    peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+    peers: &[(SocketAddr, Transport, Option<Bytes>)],
     mut send: F,
 ) where
-    F: FnMut((SocketAddr, Transport, Option<&[u8]>), &Message),
+    F: FnMut((SocketAddr, Transport, Option<&Bytes>), &Message),
 {
     static SEEN: Lazy<Mutex<(HashSet<[u8; 32]>, VecDeque<[u8; 32]>)>> =
         Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
@@ -98,7 +99,7 @@ pub fn broadcast_with<F>(
         }
         seen[idx] = true;
         if !is_throttled_addr(&peers[idx].0) {
-            let cert = peers[idx].2.as_deref();
+            let cert = peers[idx].2.as_ref();
             send((peers[idx].0, peers[idx].1, cert), msg);
         }
         for i in 1..=fanout {

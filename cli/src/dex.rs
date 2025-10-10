@@ -218,7 +218,12 @@ pub fn handle(cmd: DexCmd) {
                     );
                     for (idx, amount) in e.payments.iter().enumerate() {
                         if let Some(p) = esc.escrow.proof(id, idx) {
-                            println!("payment {}: {} amount:{}", idx, hex::encode(p.leaf), amount);
+                            println!(
+                                "payment {}: {} amount:{}",
+                                idx,
+                                crypto_suite::hex::encode(p.leaf),
+                                amount
+                            );
                         }
                     }
                 } else {
@@ -237,7 +242,10 @@ pub fn handle(cmd: DexCmd) {
                 match esc.escrow.release(id, amount) {
                     Some(proof) => {
                         store.save_escrow_state(&esc);
-                        println!("released with proof: {}", hex::encode(proof.leaf));
+                        println!(
+                            "released with proof: {}",
+                            crypto_suite::hex::encode(proof.leaf)
+                        );
                     }
                     None => eprintln!("release failed"),
                 }

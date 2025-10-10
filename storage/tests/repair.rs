@@ -20,7 +20,7 @@ fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] 
     manifest.blake3 = manifest_hash;
     let manifest_bytes = bincode::serialize(manifest).expect("serialize final");
     db.try_insert(
-        &format!("manifest/{}", hex::encode(manifest_hash)),
+        &format!("manifest/{}", crypto_suite::hex::encode(manifest_hash)),
         manifest_bytes,
     )
     .expect("store manifest");
@@ -29,7 +29,7 @@ fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] 
 
 fn write_shards(db: &mut SimpleDb, manifest: &ObjectManifest, shards: &[Vec<u8>]) {
     for (idx, chunk_ref) in manifest.chunks.iter().enumerate() {
-        let key = format!("chunk/{}", hex::encode(chunk_ref.id));
+        let key = format!("chunk/{}", crypto_suite::hex::encode(chunk_ref.id));
         db.try_insert(&key, shards[idx].clone())
             .expect("store shard");
     }
@@ -93,7 +93,10 @@ fn repairs_missing_shards_and_logs_success() {
     let log = RepairLog::new(dir.path().join("repair_log"));
     // Remove a few shards to force reconstruction.
     for idx in [0usize, 3, 7] {
-        let key = format!("chunk/{}", hex::encode(manifest.chunks[idx].id));
+        let key = format!(
+            "chunk/{}",
+            crypto_suite::hex::encode(manifest.chunks[idx].id)
+        );
         db.remove(&key);
     }
 
@@ -104,7 +107,10 @@ fn repairs_missing_shards_and_logs_success() {
 
     // Ensure shards were rewritten.
     for idx in [0usize, 3, 7] {
-        let key = format!("chunk/{}", hex::encode(manifest.chunks[idx].id));
+        let key = format!(
+            "chunk/{}",
+            crypto_suite::hex::encode(manifest.chunks[idx].id)
+        );
         assert!(db.get(&key).is_some());
     }
 
@@ -116,13 +122,14 @@ fn repairs_missing_shards_and_logs_success() {
     #[cfg(feature = "telemetry")]
     {
         let attempts = the_block::telemetry::STORAGE_REPAIR_ATTEMPTS_TOTAL
-            .with_label_values(&["success"])
+            .ensure_handle_for_label_values(&["success"])
+            .expect(the_block::telemetry::LABEL_REGISTRATION_ERR)
             .get();
         assert!(attempts >= 1);
     }
 
     // Ensure manifest hash key exists
-    let manifest_key = format!("manifest/{}", hex::encode(manifest_hash));
+    let manifest_key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
     assert!(db.get(&manifest_key).is_some());
 }
 
@@ -136,7 +143,7 @@ fn detects_corrupt_manifest_and_logs_failure() {
     write_shards(&mut db, &manifest, &shards);
 
     // Corrupt the stored manifest hash field.
-    let manifest_key = format!("manifest/{}", hex::encode(manifest_hash));
+    let manifest_key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
     let mut stored = db.get(&manifest_key).expect("manifest stored");
     stored[10] ^= 0xFF;
     db.insert(&manifest_key, stored);
@@ -167,7 +174,10 @@ fn applies_backoff_after_repeated_failures() {
     // Remove enough shards to force reconstruction failure (all data shards).
     let (rs_data, _) = erasure::reed_solomon_counts();
     for idx in 0..rs_data {
-        let key = format!("chunk/{}", hex::encode(manifest.chunks[idx].id));
+        let key = format!(
+            "chunk/{}",
+            crypto_suite::hex::encode(manifest.chunks[idx].id)
+        );
         db.remove(&key);
     }
 
@@ -185,11 +195,12 @@ fn applies_backoff_after_repeated_failures() {
     {
         let algorithms = settings::algorithms();
         let failures = the_block::telemetry::STORAGE_REPAIR_FAILURES_TOTAL
-            .with_label_values(&[
+            .ensure_handle_for_label_values(&[
                 "reconstruct",
                 algorithms.erasure(),
                 algorithms.compression(),
             ])
+            .expect(the_block::telemetry::LABEL_REGISTRATION_ERR)
             .get();
         assert!(failures >= 1);
     }

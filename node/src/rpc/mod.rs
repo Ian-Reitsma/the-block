@@ -23,7 +23,6 @@ use foundation_rpc::{
 use foundation_serialization::binary;
 #[cfg(feature = "telemetry")]
 use foundation_serialization::Deserialize;
-use hex;
 use httpd::{
     form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -306,7 +305,7 @@ fn parse_overlay_peer_param(id: &str) -> Result<[u8; 32], RpcError> {
         out.copy_from_slice(peer.as_bytes());
         return Ok(out);
     }
-    if let Ok(bytes) = hex::decode(id) {
+    if let Ok(bytes) = crypto_suite::hex::decode(id) {
         if let Ok(peer) = net::overlay_peer_from_bytes(&bytes) {
             let mut out = [0u8; 32];
             out.copy_from_slice(peer.as_bytes());
@@ -360,7 +359,8 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::RPC_CLIENT_ERROR_TOTAL
-            .with_label_values(&[code.as_str()])
+            .ensure_handle_for_label_values(&[code.as_str()])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
     }
     #[cfg(not(feature = "telemetry"))]
@@ -627,7 +627,7 @@ async fn handle_vm_trace(
     }
     let code = request
         .query_param("code")
-        .and_then(|hex| hex::decode(hex).ok())
+        .and_then(|hex| crypto_suite::hex::decode(hex).ok())
         .unwrap_or_default();
     #[cfg(feature = "telemetry")]
     crate::telemetry::VM_TRACE_TOTAL.inc();
@@ -969,7 +969,7 @@ fn dispatch(
                 .get("receipt")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = match hex::decode(hex) {
+            let bytes = match crypto_suite::hex::decode(hex) {
                 Ok(b) => b,
                 Err(_) => return Err(rpc_error(-32602, "invalid params")),
             };
@@ -1088,9 +1088,15 @@ fn dispatch(
             {
                 use crate::telemetry::{FEE_FLOOR_OVERRIDE_TOTAL, FEE_FLOOR_WARNING_TOTAL};
                 let labels = [lane];
-                FEE_FLOOR_WARNING_TOTAL.with_label_values(&labels).inc();
+                FEE_FLOOR_WARNING_TOTAL
+                    .ensure_handle_for_label_values(&labels)
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
                 if event == "override" {
-                    FEE_FLOOR_OVERRIDE_TOTAL.with_label_values(&labels).inc();
+                    FEE_FLOOR_OVERRIDE_TOTAL
+                        .ensure_handle_for_label_values(&labels)
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                        .inc();
                 }
                 diagnostics::tracing::info!(
                     target: "mempool",
@@ -1258,11 +1264,14 @@ fn dispatch(
                 let key = crate::net::load_net_key();
                 match crate::net::transport_quic::rotate(&key) {
                     Ok(advert) => {
-                        let previous: Vec<String> =
-                            advert.previous.iter().map(|fp| hex::encode(fp)).collect();
+                        let previous: Vec<String> = advert
+                            .previous
+                            .iter()
+                            .map(|fp| crypto_suite::hex::encode(fp))
+                            .collect();
                         foundation_serialization::json!({
                             "status": "ok",
-                            "fingerprint": hex::encode(advert.fingerprint),
+                            "fingerprint": crypto_suite::hex::encode(advert.fingerprint),
                             "previous": previous,
                         })
                     }
@@ -1296,11 +1305,12 @@ fn dispatch(
                 .get("signature")
                 .and_then(|v| v.as_str())
                 .ok_or(rpc_error(-32602, "invalid params"))?;
-            let old_bytes = hex::decode(id).map_err(|_| rpc_error(-32602, "invalid params"))?;
-            let new_bytes =
-                hex::decode(new_key).map_err(|_| rpc_error(-32602, "invalid params"))?;
-            let sig_bytes =
-                hex::decode(sig_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let old_bytes =
+                crypto_suite::hex::decode(id).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let new_bytes = crypto_suite::hex::decode(new_key)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let sig_bytes = crypto_suite::hex::decode(sig_hex)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let old_pk: [u8; 32] = old_bytes
                 .try_into()
                 .map_err(|_| rpc_error(-32602, "invalid params"))?;
@@ -1316,20 +1326,23 @@ fn dispatch(
             if vk.verify(&new_pk, &sig).is_err() {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
-                    .with_label_values(&["bad_sig"])
+                    .ensure_handle_for_label_values(&["bad_sig"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 return Err(rpc_error(-32602, "bad signature"));
             }
             if net::rotate_peer_key(&old_pk, new_pk) {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
-                    .with_label_values(&["ok"])
+                    .ensure_handle_for_label_values(&["ok"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 foundation_serialization::json!({"status":"ok"})
             } else {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
-                    .with_label_values(&["missing"])
+                    .ensure_handle_for_label_values(&["missing"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 return Err(rpc_error(-32602, "unknown peer"));
             }
@@ -1380,8 +1393,9 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default())
-                .map_err(|_| rpc_error(-32602, "bad peer"))?;
+            let pk =
+                net::uptime::peer_from_bytes(&crypto_suite::hex::decode(peer).unwrap_or_default())
+                    .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
             foundation_serialization::json!({"eligible": eligible})
         }
@@ -1406,8 +1420,9 @@ fn dispatch(
                 .get("reward")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default())
-                .map_err(|_| rpc_error(-32602, "bad peer"))?;
+            let pk =
+                net::uptime::peer_from_bytes(&crypto_suite::hex::decode(peer).unwrap_or_default())
+                    .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
             foundation_serialization::json!({"voucher": voucher})
         }
@@ -1436,9 +1451,9 @@ fn dispatch(
             // simplistic template: zero prev/merkle
             let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1, 0);
             foundation_serialization::json!({
-                "prev_hash": hex::encode(tmpl.prev_hash),
-                "merkle_root": hex::encode(tmpl.merkle_root),
-                "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
+                "prev_hash": crypto_suite::hex::encode(tmpl.prev_hash),
+                "merkle_root": crypto_suite::hex::encode(tmpl.merkle_root),
+                "checkpoint_hash": crypto_suite::hex::encode(tmpl.checkpoint_hash),
                 "difficulty": tmpl.difficulty,
                 "base_fee": tmpl.base_fee,
                 "timestamp_millis": tmpl.timestamp_millis
@@ -1455,7 +1470,8 @@ fn dispatch(
             let parse32 =
                 |v: &foundation_serialization::json::Value| -> Result<[u8; 32], RpcError> {
                     let s = v.as_str().ok_or(rpc_error(-32602, "bad hex"))?;
-                    let bytes = hex::decode(s).map_err(|_| rpc_error(-32602, "bad hex"))?;
+                    let bytes =
+                        crypto_suite::hex::decode(s).map_err(|_| rpc_error(-32602, "bad hex"))?;
                     let arr: [u8; 32] =
                         bytes.try_into().map_err(|_| rpc_error(-32602, "bad hex"))?;
                     Ok(arr)
@@ -1566,7 +1582,7 @@ fn dispatch(
         }
         "light_client.rebate_history" => {
             let relayer = if let Some(hex) = req.params.get("relayer").and_then(|v| v.as_str()) {
-                match hex::decode(hex) {
+                match crypto_suite::hex::decode(hex) {
                     Ok(bytes) => Some(bytes),
                     Err(_) => {
                         return Err(rpc_error(-32602, "invalid relayer id".into()));
@@ -1909,7 +1925,7 @@ fn dispatch(
         "submit_tx" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let tx_hex = req.params.get("tx").and_then(|v| v.as_str()).unwrap_or("");
-            match hex::decode(tx_hex)
+            match crypto_suite::hex::decode(tx_hex)
                 .ok()
                 .and_then(|b| binary::decode::<SignedTransaction>(&b).ok())
             {
@@ -2174,7 +2190,7 @@ fn dispatch(
                 .get("proof")
                 .and_then(|v| v.as_str())
                 .map(|s| {
-                    let bytes = hex::decode(s).unwrap_or_default();
+                    let bytes = crypto_suite::hex::decode(s).unwrap_or_default();
                     let mut arr = [0u8; 32];
                     arr.copy_from_slice(&bytes[..32.min(bytes.len())]);
                     arr
@@ -2361,7 +2377,8 @@ fn dispatch(
                 .get("code")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let code = hex::decode(code_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let code = crypto_suite::hex::decode(code_hex)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let gas = vm::estimate_gas(code);
             foundation_serialization::json!({"gas_used": gas})
         }
@@ -2371,14 +2388,15 @@ fn dispatch(
                 .get("code")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let code = hex::decode(code_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let code = crypto_suite::hex::decode(code_hex)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let trace = vm::exec_trace(code);
             foundation_serialization::json!({"trace": trace})
         }
         "vm.storage_read" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let data = vm::storage_read(id).unwrap_or_default();
-            foundation_serialization::json!({"data": hex::encode(data)})
+            foundation_serialization::json!({"data": crypto_suite::hex::encode(data)})
         }
         "vm.storage_write" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2387,7 +2405,8 @@ fn dispatch(
                 .get("data")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = hex::decode(data_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let bytes = crypto_suite::hex::decode(data_hex)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             vm::storage_write(id, bytes);
             foundation_serialization::json!({"status": "ok"})
         }

@@ -4,7 +4,7 @@ use the_block::vm::{set_vm_debug_enabled, Debugger};
 
 pub fn run(code_hex: String) {
     set_vm_debug_enabled(true);
-    let code = hex::decode(code_hex).expect("invalid hex code");
+    let code = crypto_suite::hex::decode(code_hex).expect("invalid hex code");
     let mut dbg = Debugger::new(code);
     println!("VM debugger. Commands: s=step, c=continue, q=quit");
     let mut input = String::new();

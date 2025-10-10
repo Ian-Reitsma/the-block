@@ -1,6 +1,5 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::release_view::{paginated_release_history, ReleaseHistoryFilter};
-use hex;
 use rand::rngs::OsRng;
 use sys::tempfile;
 use the_block::governance::{
@@ -18,8 +17,8 @@ fn release_api_paginates_and_filters() {
     let signer_b = SigningKey::generate(&mut rng);
     let signer_env = format!(
         "{},{}",
-        hex::encode(signer_a.verifying_key().to_bytes()),
-        hex::encode(signer_b.verifying_key().to_bytes())
+        crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
+        crypto_suite::hex::encode(signer_b.verifying_key().to_bytes())
     );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_env);
     provenance::refresh_release_signers();
@@ -27,12 +26,12 @@ fn release_api_paginates_and_filters() {
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
     let msg = format!("release:{hash}");
     let att_a = ReleaseAttestation {
-        signer: hex::encode(signer_a.verifying_key().to_bytes()),
-        signature: hex::encode(signer_a.sign(msg.as_bytes()).to_bytes()),
+        signer: crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
+        signature: crypto_suite::hex::encode(signer_a.sign(msg.as_bytes()).to_bytes()),
     };
     let att_b = ReleaseAttestation {
-        signer: hex::encode(signer_b.verifying_key().to_bytes()),
-        signature: hex::encode(signer_b.sign(msg.as_bytes()).to_bytes()),
+        signer: crypto_suite::hex::encode(signer_b.verifying_key().to_bytes()),
+        signature: crypto_suite::hex::encode(signer_b.sign(msg.as_bytes()).to_bytes()),
     };
     let proposal = ReleaseVote::new(hash.clone(), vec![att_a, att_b], 2, "tester".into(), 0, 0);
     let id = controller::submit_release(&store, proposal).unwrap();

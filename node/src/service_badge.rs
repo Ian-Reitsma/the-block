@@ -47,7 +47,8 @@ impl ServiceBadgeTracker {
         self.latency_samples.push(latency);
         #[cfg(feature = "telemetry")]
         crate::telemetry::COMPUTE_PROVIDER_UPTIME
-            .with_label_values(&[provider])
+            .ensure_handle_for_label_values(&[provider])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(self.uptime_percent().round() as i64);
         #[cfg(not(feature = "telemetry"))]
         let _ = provider;

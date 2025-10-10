@@ -2,7 +2,7 @@
 use governance_spec::{
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
 };
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
     ACTIVATION_DELAY,

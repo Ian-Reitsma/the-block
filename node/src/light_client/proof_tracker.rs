@@ -113,7 +113,7 @@ impl ProofTracker {
     }
 
     fn relayer_key(id: &[u8]) -> String {
-        format!("{}{}", RELAYER_PREFIX, hex::encode(id))
+        format!("{}{}", RELAYER_PREFIX, crypto_suite::hex::encode(id))
     }
 
     fn receipt_key(height: u64) -> String {
@@ -200,7 +200,7 @@ impl ProofTracker {
                 continue;
             }
             let id_hex = key.trim_start_matches(RELAYER_PREFIX);
-            if let Ok(id) = hex::decode(id_hex) {
+            if let Ok(id) = crypto_suite::hex::decode(id_hex) {
                 receipt.relayers.push(RelayerClaim {
                     id,
                     amount: entry.pending,
@@ -256,7 +256,7 @@ impl ProofTracker {
         for key in keys {
             let entry = self.load_relayer(&key);
             let hex_id = key.trim_start_matches(RELAYER_PREFIX);
-            if let Ok(bytes) = hex::decode(hex_id) {
+            if let Ok(bytes) = crypto_suite::hex::decode(hex_id) {
                 relayers.push((
                     bytes,
                     RelayerInfo {

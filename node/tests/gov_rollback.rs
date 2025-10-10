@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::governance::{GovStore, Params, ProposalStatus, Runtime, ACTIVATION_DELAY};
 use the_block::rpc::governance::{gov_propose, gov_vote};

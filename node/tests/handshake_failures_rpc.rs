@@ -11,8 +11,8 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-fn init_env() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn init_env() -> sys::tempfile::TempDir {
+    let dir = sys::tempfile::tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     std::env::remove_var("HTTP_PROXY");

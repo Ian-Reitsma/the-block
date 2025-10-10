@@ -1323,10 +1323,12 @@ async fn async_main() -> std::process::ExitCode {
                             .expect("write key");
                         kf.write_all(&key_der).expect("write key");
                     }
-                    let cert_der = std::fs::read(&cert_path).expect("read cert");
-                    let key_der = std::fs::read(&key_path).expect("read key");
+                    let cert_der =
+                        concurrency::Bytes::from(std::fs::read(&cert_path).expect("read cert"));
+                    let key_der =
+                        concurrency::Bytes::from(std::fs::read(&key_path).expect("read key"));
                     let addr: std::net::SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
-                    let _ = quic::listen_with_cert(addr, &cert_der, &key_der).await;
+                    let _ = quic::listen_with_cert(addr, cert_der, key_der).await;
                     {
                         let mut guard = bc.lock().unwrap();
                         guard.config.quic = Some(QuicConfig {
@@ -1358,7 +1360,10 @@ async fn async_main() -> std::process::ExitCode {
             let sk = SigningKey::from_bytes(&sk_bytes.try_into().expect("sk bytes"));
             fs::create_dir_all(key_dir()).expect("key dir");
             write_pem(&key_path(&key_id), &sk).expect("write key");
-            println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            println!(
+                "{}",
+                crypto_suite::hex::encode(sk.verifying_key().to_bytes())
+            );
             std::process::ExitCode::SUCCESS
         }
         Commands::ImportKey { file } => {
@@ -1377,12 +1382,18 @@ async fn async_main() -> std::process::ExitCode {
                 .and_then(|s| s.to_str())
                 .unwrap_or("imported");
             fs::write(key_path(key_id), data).expect("write key");
-            println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            println!(
+                "{}",
+                crypto_suite::hex::encode(sk.verifying_key().to_bytes())
+            );
             std::process::ExitCode::SUCCESS
         }
         Commands::ShowAddress { key_id } => {
             let sk = load_key(&key_id);
-            println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            println!(
+                "{}",
+                crypto_suite::hex::encode(sk.verifying_key().to_bytes())
+            );
             std::process::ExitCode::SUCCESS
         }
         Commands::SignTx { key_id, tx_json } => {
@@ -1390,7 +1401,7 @@ async fn async_main() -> std::process::ExitCode {
             let payload: RawTxPayload = json::from_str(&tx_json).expect("parse tx payload");
             let signed = sign_tx(sk.to_bytes().to_vec(), payload).expect("sign tx");
             let bytes = bincode::serialize(&signed).expect("serialize tx");
-            println!("{}", hex::encode(bytes));
+            println!("{}", crypto_suite::hex::encode(bytes));
             std::process::ExitCode::SUCCESS
         }
         Commands::Compute { cmd } => match cmd {

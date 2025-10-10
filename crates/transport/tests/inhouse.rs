@@ -3,6 +3,8 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
+use concurrency::Bytes;
+
 use sys::tempfile::tempdir;
 use transport::{
     available_providers, inhouse_certificate_store, CertificateHandle, CertificateStore, Config,
@@ -69,7 +71,7 @@ fn handshake_rejects_mismatched_certificate() {
         let (_listener, cert) = adapter.listen(addr).await.expect("listen");
 
         // Derive an unrelated certificate to trigger the mismatch path.
-        let bogus = adapter.certificate_from_der(vec![1, 2, 3, 4]);
+        let bogus = adapter.certificate_from_der(Bytes::from(vec![1, 2, 3, 4]));
         let err = adapter
             .connect(addr, &bogus)
             .await

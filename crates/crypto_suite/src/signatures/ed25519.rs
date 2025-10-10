@@ -160,7 +160,7 @@ impl fmt::Debug for SigningKey {
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Signature")
-            .field(&hex::encode(self.0.to_bytes()))
+            .field(&crate::hex::encode(self.0.to_bytes()))
             .finish()
     }
 }

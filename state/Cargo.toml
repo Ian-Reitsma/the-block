@@ -7,7 +7,6 @@ build = "build.rs"
 [dependencies]
 crypto_suite = { path = "../crates/crypto_suite" }
 thiserror = "1"
-hex = "0.4"
 storage_engine = { path = "../crates/storage_engine", default-features = false }
 sys = { path = "../crates/sys" }
 

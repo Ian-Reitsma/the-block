@@ -19,6 +19,7 @@ use crate::consensus::observer;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
+use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
 use crypto_suite::hashing::blake3;
@@ -27,10 +28,8 @@ use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use diagnostics::tracing::info;
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::warn;
-use hex;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
-use lru::LruCache;
 mod legacy_cbor;
 mod py;
 
@@ -293,7 +292,7 @@ impl From<TxAdmissionError> for PyError {
 #[cfg(feature = "telemetry")]
 fn scrub(s: &str) -> String {
     let h = blake3::hash(s.as_bytes());
-    hex::encode(h.as_bytes())
+    crypto_suite::hex::encode(h.as_bytes())
 }
 
 #[cfg(feature = "telemetry-json")]
@@ -369,7 +368,7 @@ pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
 #[allow(clippy::expect_used)]
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     // Utility used by tests and examples
-    hex::decode(hex).unwrap_or_else(|_| panic!("Invalid hex string"))
+    crypto_suite::hex::decode(hex).unwrap_or_else(|_| panic!("Invalid hex string"))
 }
 
 fn snapshot_interval_from_env() -> u64 {
@@ -697,7 +696,7 @@ pub struct Blockchain {
     /// Latest height per shard.
     pub shard_heights: HashMap<ShardId, u64>,
     /// LRU cache for recent shard state entries keyed by `(ShardId, key)`.
-    pub shard_cache: Mutex<lru::LruCache<(ShardId, Vec<u8>), Vec<u8>>>,
+    pub shard_cache: Mutex<LruCache<(ShardId, Vec<u8>), Vec<u8>>>,
     pub difficulty: u64,
     /// Hint from previous retune summarizing hash-rate trend
     pub retune_hint: i8,
@@ -1040,7 +1039,8 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         {
             telemetry::MEMPOOL_SIZE
-                .with_label_values(&[lane.as_str()])
+                .ensure_handle_for_label_values(&[lane.as_str()])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(size as i64);
             telemetry::update_memory_usage(MemoryComponent::Mempool);
         }
@@ -2353,7 +2353,7 @@ impl Blockchain {
                     "fee_too_low",
                     TxAdmissionError::FeeTooLow.code(),
                     Some(fee_per_byte),
-                    Some(&hex::encode(tx_hash)),
+                    Some(&crypto_suite::hex::encode(tx_hash)),
                 );
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 if telemetry::should_log("mempool") {
@@ -2415,7 +2415,7 @@ impl Blockchain {
                     "invalid_selector",
                     TxAdmissionError::InvalidSelector.code(),
                     None,
-                    Some(&hex::encode(tx_hash)),
+                    Some(&crypto_suite::hex::encode(tx_hash)),
                 );
             }
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -2581,7 +2581,7 @@ impl Blockchain {
                         "priority",
                         ERR_OK,
                         None,
-                        Some(&hex::encode(ev_hash)),
+                        Some(&crypto_suite::hex::encode(ev_hash)),
                     );
                 }
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -2607,7 +2607,7 @@ impl Blockchain {
                         "mempool_full",
                         TxAdmissionError::MempoolFull.code(),
                         None,
-                        Some(&hex::encode(tx_hash)),
+                        Some(&crypto_suite::hex::encode(tx_hash)),
                     );
                 }
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -2634,7 +2634,7 @@ impl Blockchain {
                         "duplicate",
                         TxAdmissionError::Duplicate.code(),
                         None,
-                        Some(&hex::encode(tx_hash)),
+                        Some(&crypto_suite::hex::encode(tx_hash)),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     if telemetry::should_log("mempool") {
@@ -2667,7 +2667,7 @@ impl Blockchain {
                                 "unknown_sender",
                                 TxAdmissionError::UnknownSender.code(),
                                 None,
-                                Some(&hex::encode(tx_hash)),
+                                Some(&crypto_suite::hex::encode(tx_hash)),
                             );
                         }
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -2708,7 +2708,7 @@ impl Blockchain {
                                 "pending_limit",
                                 TxAdmissionError::PendingLimitReached.code(),
                                 None,
-                                Some(&hex::encode(tx_hash)),
+                                Some(&crypto_suite::hex::encode(tx_hash)),
                             );
                             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                             if telemetry::should_log("mempool") {
@@ -2764,7 +2764,7 @@ impl Blockchain {
                             "insufficient_balance",
                             TxAdmissionError::InsufficientBalance.code(),
                             None,
-                            Some(&hex::encode(tx_hash)),
+                            Some(&crypto_suite::hex::encode(tx_hash)),
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
@@ -2790,7 +2790,7 @@ impl Blockchain {
                             "duplicate",
                             TxAdmissionError::Duplicate.code(),
                             None,
-                            Some(&hex::encode(tx_hash)),
+                            Some(&crypto_suite::hex::encode(tx_hash)),
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
@@ -2816,7 +2816,7 @@ impl Blockchain {
                             "nonce_gap",
                             TxAdmissionError::NonceGap.code(),
                             None,
-                            Some(&hex::encode(tx_hash)),
+                            Some(&crypto_suite::hex::encode(tx_hash)),
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
@@ -2832,26 +2832,32 @@ impl Blockchain {
                     let is_tight = crate::fees::policy::consumer_p90() > self.comfort_threshold_p90;
                     if is_tight {
                         telemetry::ADMISSION_MODE
-                            .with_label_values(&["tight"])
+                            .ensure_handle_for_label_values(&["tight"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .set(1);
                         telemetry::ADMISSION_MODE
-                            .with_label_values(&["normal"])
+                            .ensure_handle_for_label_values(&["normal"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .set(0);
                     } else {
                         telemetry::ADMISSION_MODE
-                            .with_label_values(&["normal"])
+                            .ensure_handle_for_label_values(&["normal"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .set(1);
                         telemetry::ADMISSION_MODE
-                            .with_label_values(&["tight"])
+                            .ensure_handle_for_label_values(&["tight"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .set(0);
                     }
                     telemetry::ADMISSION_MODE
-                        .with_label_values(&["brownout"])
+                        .ensure_handle_for_label_values(&["brownout"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .set(0);
                     if matches!(lane, FeeLane::Industrial) && is_tight {
                         telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
                         telemetry::INDUSTRIAL_REJECTED_TOTAL
-                            .with_label_values(&["comfort_guard"])
+                            .ensure_handle_for_label_values(&["comfort_guard"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         self.record_reject("comfort_guard");
                         return Err(TxAdmissionError::FeeTooLow);
@@ -2871,7 +2877,7 @@ impl Blockchain {
                             "bad_signature",
                             TxAdmissionError::BadSignature.code(),
                             None,
-                            Some(&hex::encode(tx_hash)),
+                            Some(&crypto_suite::hex::encode(tx_hash)),
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
@@ -2896,7 +2902,7 @@ impl Blockchain {
                             "pending_limit",
                             TxAdmissionError::PendingLimitReached.code(),
                             None,
-                            Some(&hex::encode(tx_hash)),
+                            Some(&crypto_suite::hex::encode(tx_hash)),
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
@@ -2951,7 +2957,7 @@ impl Blockchain {
                         "ok",
                         ERR_OK,
                         Some(fee_per_byte),
-                        Some(&hex::encode(tx_hash)),
+                        Some(&crypto_suite::hex::encode(tx_hash)),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     if telemetry::should_log("mempool") {
@@ -2961,7 +2967,7 @@ impl Blockchain {
                             "tx accepted sender={} nonce={} reason=accepted id={}",
                             scrub(&sender_addr),
                             nonce,
-                            scrub(&hex::encode(tx_hash))
+                            scrub(&crypto_suite::hex::encode(tx_hash))
                         );
                     }
                 }
@@ -3069,7 +3075,7 @@ impl Blockchain {
                 "dropped",
                 ERR_OK,
                 None,
-                Some(&hex::encode(tx_hash)),
+                Some(&crypto_suite::hex::encode(tx_hash)),
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("mempool") {
@@ -3123,7 +3129,7 @@ impl Blockchain {
                 "dropped",
                 ERR_OK,
                 None,
-                Some(&hex::encode(tx_hash)),
+                Some(&crypto_suite::hex::encode(tx_hash)),
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("mempool") {
@@ -3178,7 +3184,7 @@ impl Blockchain {
             if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.value() < u64::MAX {
-                    telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
+                    telemetry::sampled_inc(&*telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
             } else if !self.accounts.contains_key(&sender) {
@@ -3192,7 +3198,7 @@ impl Blockchain {
             if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.value() < u64::MAX {
-                    telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
+                    telemetry::sampled_inc(&*telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
             } else if !self.accounts.contains_key(&sender) {
@@ -5006,7 +5012,7 @@ impl PyRemoteSigner {
     }
 
     pub fn public_key(&self) -> String {
-        hex::encode(self.inner.public_key().to_bytes())
+        crypto_suite::hex::encode(self.inner.public_key().to_bytes())
     }
 
     pub fn sign(&self, msg: &[u8]) -> PyResult<Vec<u8>> {
@@ -5021,7 +5027,7 @@ impl PyRemoteSigner {
 
 #[cfg(feature = "telemetry")]
 fn record_remote_signer_result(outcome: &Result<(), String>) {
-    crate::telemetry::sampled_inc(&crate::telemetry::REMOTE_SIGNER_REQUEST_TOTAL);
+    crate::telemetry::sampled_inc(&*crate::telemetry::REMOTE_SIGNER_REQUEST_TOTAL);
     if let Err(reason) = outcome {
         crate::telemetry::sampled_inc_vec(
             &crate::telemetry::REMOTE_SIGNER_ERROR_TOTAL,
@@ -5076,7 +5082,7 @@ mod shard_cache_tests {
 
         let cache_key = (shard, key.as_bytes().to_vec());
         {
-            let cache = bc.shard_cache_guard();
+            let mut cache = bc.shard_cache_guard();
             assert_eq!(cache.peek(&cache_key).cloned(), Some(initial.clone()));
         }
 
@@ -5087,7 +5093,7 @@ mod shard_cache_tests {
 
         let cache_key = (shard, key.as_bytes().to_vec());
         {
-            let cache = bc.shard_cache_guard();
+            let mut cache = bc.shard_cache_guard();
             assert_eq!(cache.peek(&cache_key).cloned(), Some(updated.clone()));
         }
 

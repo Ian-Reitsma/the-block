@@ -55,6 +55,8 @@ impl std::error::Error for MetricError {}
 
 pub type Result<T> = std::result::Result<T, MetricError>;
 
+pub const LABEL_REGISTRATION_ERR: &str = "telemetry label set not registered";
+
 /// Trait implemented by all telemetry collectors registered in the registry.
 pub trait Collector: Send + Sync {
     fn name(&self) -> &str;
@@ -353,6 +355,10 @@ impl Counter {
     pub fn get(&self) -> u64 {
         self.value()
     }
+
+    pub fn handle(&self) -> IntCounterHandle {
+        IntCounterHandle::new(Ok(self.clone()))
+    }
 }
 
 impl Collector for Counter {
@@ -451,6 +457,24 @@ impl CounterVec {
 
     pub fn with_label_values(&self, values: &[&str]) -> IntCounterHandle {
         IntCounterHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn handle_for_label_values(&self, values: &[&str]) -> Result<IntCounterHandle> {
+        self.get_metric_with_label_values(values)
+            .map(|counter| counter.handle())
+    }
+
+    /// Returns a handle for the provided label values, registering the set if
+    /// it has not been seen before.
+    pub fn ensure_handle_for_label_values(&self, values: &[&str]) -> Result<IntCounterHandle> {
+        match self.handle_for_label_values(values) {
+            Ok(handle) => Ok(handle),
+            Err(MetricError::MissingLabelSet) => {
+                self.try_with_label_values(values)?;
+                self.handle_for_label_values(values)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub fn try_with_label_values(&self, values: &[&str]) -> Result<IntCounter> {
@@ -614,6 +638,10 @@ impl Gauge {
     pub fn get(&self) -> f64 {
         f64::from_bits(self.inner.value.load(Ordering::Relaxed))
     }
+
+    pub fn handle(&self) -> GaugeHandle {
+        GaugeHandle::new(Ok(self.clone()))
+    }
 }
 
 impl Collector for Gauge {
@@ -684,6 +712,10 @@ impl IntGauge {
 
     pub fn get(&self) -> i64 {
         self.value()
+    }
+
+    pub fn handle(&self) -> IntGaugeHandle {
+        IntGaugeHandle::new(Ok(self.clone()))
     }
 }
 
@@ -784,6 +816,24 @@ impl IntGaugeVec {
 
     pub fn with_label_values(&self, values: &[&str]) -> IntGaugeHandle {
         IntGaugeHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn handle_for_label_values(&self, values: &[&str]) -> Result<IntGaugeHandle> {
+        self.get_metric_with_label_values(values)
+            .map(|gauge| gauge.handle())
+    }
+
+    /// Returns a handle for the provided label values, registering the set if
+    /// it has not been seen before.
+    pub fn ensure_handle_for_label_values(&self, values: &[&str]) -> Result<IntGaugeHandle> {
+        match self.handle_for_label_values(values) {
+            Ok(handle) => Ok(handle),
+            Err(MetricError::MissingLabelSet) => {
+                self.try_with_label_values(values)?;
+                self.handle_for_label_values(values)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub fn try_with_label_values(&self, values: &[&str]) -> Result<IntGauge> {
@@ -903,6 +953,39 @@ impl GaugeVec {
 
     pub fn with_label_values(&self, values: &[&str]) -> GaugeHandle {
         GaugeHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn handle_for_label_values(&self, values: &[&str]) -> Result<GaugeHandle> {
+        if values.len() != self.inner.label_names.len() {
+            return Err(MetricError::InconsistentCardinality {
+                expected: self.inner.label_names.len(),
+                actual: values.len(),
+            });
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner
+            .values
+            .get(&key)
+            .map(|inner| {
+                Gauge {
+                    inner: inner.clone(),
+                }
+                .handle()
+            })
+            .ok_or(MetricError::MissingLabelSet)
+    }
+
+    /// Returns a handle for the provided label values, registering the set if
+    /// it has not been seen before.
+    pub fn ensure_handle_for_label_values(&self, values: &[&str]) -> Result<GaugeHandle> {
+        match self.handle_for_label_values(values) {
+            Ok(handle) => Ok(handle),
+            Err(MetricError::MissingLabelSet) => {
+                self.try_with_label_values(values)?;
+                self.handle_for_label_values(values)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub fn try_with_label_values(&self, values: &[&str]) -> Result<Gauge> {
@@ -1092,6 +1175,10 @@ impl Histogram {
             }),
         }
     }
+
+    pub fn handle(&self) -> HistogramHandle {
+        HistogramHandle::new(Ok(self.clone()))
+    }
 }
 
 impl Collector for Histogram {
@@ -1184,6 +1271,39 @@ impl HistogramVec {
 
     pub fn with_label_values(&self, values: &[&str]) -> HistogramHandle {
         HistogramHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn handle_for_label_values(&self, values: &[&str]) -> Result<HistogramHandle> {
+        if values.len() != self.inner.label_names.len() {
+            return Err(MetricError::InconsistentCardinality {
+                expected: self.inner.label_names.len(),
+                actual: values.len(),
+            });
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner
+            .values
+            .get(&key)
+            .map(|inner| {
+                Histogram {
+                    inner: inner.clone(),
+                }
+                .handle()
+            })
+            .ok_or(MetricError::MissingLabelSet)
+    }
+
+    /// Returns a handle for the provided label values, registering the set if
+    /// it has not been seen before.
+    pub fn ensure_handle_for_label_values(&self, values: &[&str]) -> Result<HistogramHandle> {
+        match self.handle_for_label_values(values) {
+            Ok(handle) => Ok(handle),
+            Err(MetricError::MissingLabelSet) => {
+                self.try_with_label_values(values)?;
+                self.handle_for_label_values(values)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub fn try_with_label_values(&self, values: &[&str]) -> Result<Histogram> {
@@ -1355,15 +1475,19 @@ mod tests {
     #[test]
     fn counter_handle_ignores_cardinality_errors() {
         let vec = CounterVec::new(Opts::new("sample_total", "Sample counter"), &["label"]).unwrap();
-        let invalid = vec.with_label_values(&[]);
+        let invalid = vec
+            .ensure_handle_for_label_values(&[])
+            .expect(LABEL_REGISTRATION_ERR);
         invalid.inc();
         invalid.inc_by(5);
         assert!(matches!(
-            vec.get_metric_with_label_values(&["ok"]),
+            vec.handle_for_label_values(&["ok"]),
             Err(MetricError::MissingLabelSet)
         ));
 
-        let valid = vec.with_label_values(&["ok"]);
+        let valid = vec
+            .ensure_handle_for_label_values(&["ok"])
+            .expect(LABEL_REGISTRATION_ERR);
         valid.inc();
         assert_eq!(valid.get(), 1);
     }
@@ -1371,16 +1495,20 @@ mod tests {
     #[test]
     fn int_gauge_handle_ignores_cardinality_errors() {
         let vec = IntGaugeVec::new(Opts::new("sample_gauge", "Sample gauge"), &["label"]).unwrap();
-        let invalid = vec.with_label_values(&[]);
+        let invalid = vec
+            .ensure_handle_for_label_values(&[])
+            .expect(LABEL_REGISTRATION_ERR);
         invalid.set(10);
         invalid.add(5);
         invalid.sub(3);
         assert!(matches!(
-            vec.get_metric_with_label_values(&["present"]),
+            vec.handle_for_label_values(&["present"]),
             Err(MetricError::MissingLabelSet)
         ));
 
-        let valid = vec.with_label_values(&["present"]);
+        let valid = vec
+            .ensure_handle_for_label_values(&["present"])
+            .expect(LABEL_REGISTRATION_ERR);
         valid.set(10);
         valid.add(5);
         valid.sub(3);
@@ -1391,9 +1519,13 @@ mod tests {
     fn histogram_handle_ignores_cardinality_errors() {
         let vec = HistogramVec::new(HistogramOpts::new("latency_seconds", "Latency"), &["label"])
             .unwrap();
-        let invalid = vec.with_label_values(&[]);
+        let invalid = vec
+            .ensure_handle_for_label_values(&[])
+            .expect(LABEL_REGISTRATION_ERR);
         invalid.observe(1.0);
-        let valid = vec.with_label_values(&["ok"]);
+        let valid = vec
+            .ensure_handle_for_label_values(&["ok"])
+            .expect(LABEL_REGISTRATION_ERR);
         assert_eq!(valid.get_sample_count(), 0);
         valid.observe(1.0);
         assert_eq!(valid.get_sample_count(), 1);

@@ -18,7 +18,6 @@ use cli_core::{
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_serialization::json::Value;
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use light_client::{self, SyncOptions};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
@@ -873,7 +872,7 @@ fn prepare_anchor_inputs(args: &DidAnchorArgs) -> Result<(Value, AnchorKeyMateri
 fn decode_secret(input: &str) -> Result<Vec<u8>> {
     let trimmed = input.trim();
     let normalized = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-    let bytes = hex::decode(normalized).context("secret key must be hex encoded")?;
+    let bytes = crypto_suite::hex::decode(normalized).context("secret key must be hex encoded")?;
     if bytes.len() != 32 && bytes.len() != 64 {
         return Err(anyhow!("secret key must be 32 or 64 bytes"));
     }
@@ -934,7 +933,7 @@ pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Re
     let address = material
         .address
         .clone()
-        .unwrap_or_else(|| hex::encode(owner_public));
+        .unwrap_or_else(|| crypto_suite::hex::encode(owner_public));
 
     let mut tx = TxDidAnchor {
         address,
@@ -949,7 +948,7 @@ pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Re
 
     if let Some(remote_secret) = &material.remote_secret {
         let remote_key = key_from_bytes(remote_secret)?;
-        let derived = hex::encode(remote_key.verifying_key().to_bytes());
+        let derived = crypto_suite::hex::encode(remote_key.verifying_key().to_bytes());
         let signer_hex = material
             .remote_signer_hex
             .clone()
@@ -961,7 +960,7 @@ pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Re
         let att_sig = remote_key.sign(tx.remote_digest().as_ref());
         tx.remote_attestation = Some(TxDidAnchorAttestation {
             signer: signer_hex,
-            signature: hex::encode(att_sig.to_bytes()),
+            signature: crypto_suite::hex::encode(att_sig.to_bytes()),
         });
     }
 

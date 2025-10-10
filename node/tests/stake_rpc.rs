@@ -10,7 +10,7 @@ fn bond_and_unbond_via_rpc() {
     let amount = 7u64;
     let sig = w.sign_stake(role, amount, false).unwrap();
     let pk_hex = w.public_key_hex();
-    let sig_hex = hex::encode(sig.to_bytes());
+    let sig_hex = crypto_suite::hex::encode(sig.to_bytes());
     let params = foundation_serialization::json!({
         "id": pk_hex.clone(),
         "role": role,
@@ -22,7 +22,7 @@ fn bond_and_unbond_via_rpc() {
     let res = pos::bond(&params).expect("bond");
     assert_eq!(res["stake"].as_u64().unwrap(), amount);
     let sig_u = w.sign_stake(role, amount, true).unwrap();
-    let sig_u_hex = hex::encode(sig_u.to_bytes());
+    let sig_u_hex = crypto_suite::hex::encode(sig_u.to_bytes());
     let params_u = foundation_serialization::json!({
         "id": pk_hex.clone(),
         "role": role,

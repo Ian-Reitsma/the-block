@@ -4,7 +4,7 @@ use crate::Bridge;
 #[cfg(feature = "telemetry")]
 use crate::BRIDGE_INVALID_PROOF_TOTAL;
 use crate::{light_client::Proof, relayer::RelayerSet, RelayerBundle};
-use foundation_serialization::{hex, json};
+use foundation_serialization::json;
 
 pub fn lock(
     bridge: &mut Bridge,
@@ -57,7 +57,7 @@ pub fn lock(
     // Persist the full header for audit and replay protection.
     let dir = &bridge.cfg.headers_dir;
     let _ = std::fs::create_dir_all(dir);
-    let path = std::path::Path::new(dir).join(format!("{}.json", hex::encode(&hh)));
+    let path = std::path::Path::new(dir).join(format!("{}.json", crypto_suite::hex::encode(&hh)));
     let header_value = header.to_value();
     let rendered = json::to_string_value_pretty(&header_value);
     let _ = std::fs::write(&path, rendered.as_bytes());

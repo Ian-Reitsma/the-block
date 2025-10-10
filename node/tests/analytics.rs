@@ -7,7 +7,7 @@ use the_block::{
 
 #[test]
 fn read_stats_reflect_append() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = sys::tempfile::tempdir().unwrap();
     std::env::set_var("TB_GATEWAY_RECEIPTS", tmp.path());
     gateway::read_receipt::append("example.com", "gateway", 123, false, true).unwrap();
     let q = AnalyticsQuery {

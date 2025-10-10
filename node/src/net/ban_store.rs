@@ -29,7 +29,7 @@ impl BanStore {
             .unwrap_or_else(|e| panic!("store ban {key}: {e}"));
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-        diagnostics::tracing::info!(peer = %hex::encode(pk), until, "peer banned");
+        diagnostics::tracing::info!(peer = %crypto_suite::hex::encode(pk), until, "peer banned");
         self.update_metric();
     }
 
@@ -39,7 +39,7 @@ impl BanStore {
         let _ = db.try_remove(&key);
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-        diagnostics::tracing::info!(peer = %hex::encode(pk), "peer unbanned");
+        diagnostics::tracing::info!(peer = %crypto_suite::hex::encode(pk), "peer unbanned");
         self.update_metric();
     }
 
@@ -86,7 +86,8 @@ impl BanStore {
             crate::telemetry::BANNED_PEER_EXPIRATION.reset();
             for (peer, ts) in entries {
                 crate::telemetry::BANNED_PEER_EXPIRATION
-                    .with_label_values(&[&peer])
+                    .ensure_handle_for_label_values(&[&peer])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(ts as i64);
             }
         }
@@ -123,7 +124,7 @@ fn current_ts() -> u64 {
 }
 
 fn key_for(pk: &[u8; 32]) -> String {
-    hex::encode(pk)
+    crypto_suite::hex::encode(pk)
 }
 
 fn as_timestamp(bytes: Vec<u8>) -> Option<u64> {

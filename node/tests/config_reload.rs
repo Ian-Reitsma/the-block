@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     config::{rate_limit_cfg, reputation_cfg, set_current, watch, NodeConfig},
     net::{p2p_max_per_sec, peer_reputation_decay, set_p2p_max_per_sec, set_peer_reputation_decay},

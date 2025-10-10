@@ -1113,28 +1113,36 @@ pub fn retune_multipliers(
     {
         use crate::telemetry::{SUBSIDY_MULTIPLIER, SUBSIDY_MULTIPLIER_RAW};
         SUBSIDY_MULTIPLIER
-            .with_label_values(&["storage"])
+            .ensure_handle_for_label_values(&["storage"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(params.beta_storage_sub_ct);
         SUBSIDY_MULTIPLIER
-            .with_label_values(&["read"])
+            .ensure_handle_for_label_values(&["read"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(params.gamma_read_sub_ct);
         SUBSIDY_MULTIPLIER
-            .with_label_values(&["cpu"])
+            .ensure_handle_for_label_values(&["cpu"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(params.kappa_cpu_sub_ct);
         SUBSIDY_MULTIPLIER
-            .with_label_values(&["bytes_out"])
+            .ensure_handle_for_label_values(&["bytes_out"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(params.lambda_bytes_out_sub_ct);
         SUBSIDY_MULTIPLIER_RAW
-            .with_label_values(&["storage"])
+            .ensure_handle_for_label_values(&["storage"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(raw[0]);
         SUBSIDY_MULTIPLIER_RAW
-            .with_label_values(&["read"])
+            .ensure_handle_for_label_values(&["read"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(raw[1]);
         SUBSIDY_MULTIPLIER_RAW
-            .with_label_values(&["cpu"])
+            .ensure_handle_for_label_values(&["cpu"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(raw[2]);
         SUBSIDY_MULTIPLIER_RAW
-            .with_label_values(&["bytes_out"])
+            .ensure_handle_for_label_values(&["bytes_out"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(raw[3]);
     }
     raw

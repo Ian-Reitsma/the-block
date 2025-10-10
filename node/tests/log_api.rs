@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::log_indexer::{index_logs_with_options, IndexOptions};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

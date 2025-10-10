@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(feature = "test-telemetry")]
 use std::time::{Duration, Instant};
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 #[cfg(feature = "test-telemetry")]
 use the_block::compute_market::price_board::init_with_clock;
 use the_block::compute_market::price_board::{

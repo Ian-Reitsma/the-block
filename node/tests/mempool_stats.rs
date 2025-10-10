@@ -2,7 +2,7 @@
 use runtime::{io::read_to_end, net::TcpStream};
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
     generate_keypair,

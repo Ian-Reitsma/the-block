@@ -64,12 +64,12 @@ fn dns_publish_invalid_sig_rejected() {
         let (sk_bytes, _) = generate_keypair();
         let sk_arr: [u8; 32] = sk_bytes.try_into().unwrap();
         let sk = SigningKey::from_bytes(&sk_arr);
-        let pk_hex = hex::encode(sk.verifying_key().to_bytes());
+        let pk_hex = crypto_suite::hex::encode(sk.verifying_key().to_bytes());
         let bad_sig = vec![0u8; 64];
         let body = format!(
             r#"{{"method":"dns.publish_record","params":{{"domain":"example.com","txt":"hello","pubkey":"{}","sig":"{}"}}}}"#,
             pk_hex,
-            hex::encode(bad_sig)
+            crypto_suite::hex::encode(bad_sig)
         );
         let val = expect_timeout(rpc(&addr, &body)).await;
         assert_eq!(val["error"]["message"], "ERR_DNS_SIG_INVALID");

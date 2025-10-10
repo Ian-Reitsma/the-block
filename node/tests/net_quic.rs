@@ -3,7 +3,7 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use std::io::Read;
 #[cfg(feature = "s2n-quic")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gossip::relay::Relay;
 #[cfg(feature = "s2n-quic")]
 use the_block::net::transport_quic;
@@ -27,7 +27,7 @@ fn sample_sk() -> SigningKey {
 
 #[cfg(feature = "s2n-quic")]
 struct S2nTransportGuard {
-    _dir: tempfile::TempDir,
+    _dir: sys::tempfile::TempDir,
 }
 
 #[cfg(feature = "s2n-quic")]
@@ -79,7 +79,8 @@ fn quic_handshake_roundtrip() {
         });
         #[cfg(feature = "telemetry")]
         let before = QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "certificate"])
+            .ensure_handle_for_label_values(&["unknown", "certificate"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         let conn = quic::connect(listen_addr, cert).await.unwrap();
         let hello = Hello {
@@ -107,7 +108,8 @@ fn quic_handshake_roundtrip() {
         #[cfg(feature = "telemetry")]
         assert_eq!(
             QUIC_HANDSHAKE_FAIL_TOTAL
-                .with_label_values(&["unknown", "certificate"])
+                .ensure_handle_for_label_values(&["unknown", "certificate"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             before
         );
@@ -139,7 +141,8 @@ fn quic_gossip_roundtrip() {
         });
         #[cfg(feature = "telemetry")]
         let before = QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "certificate"])
+            .ensure_handle_for_label_values(&["unknown", "certificate"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         let conn = quic::connect(listen_addr, cert).await.unwrap();
         let hello = Hello {
@@ -175,7 +178,8 @@ fn quic_gossip_roundtrip() {
         #[cfg(feature = "telemetry")]
         assert_eq!(
             QUIC_HANDSHAKE_FAIL_TOTAL
-                .with_label_values(&["unknown", "certificate"])
+                .ensure_handle_for_label_values(&["unknown", "certificate"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             before
         );
@@ -350,7 +354,8 @@ fn quic_handshake_failure_metric() {
         let bad = generate_simple_self_signed(["bad".into()]).unwrap();
         let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
         let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "certificate"])
+            .ensure_handle_for_label_values(&["unknown", "certificate"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         let res = quic::connect(listen_addr, bad_cert).await;
         assert!(res.is_err());
@@ -358,7 +363,8 @@ fn quic_handshake_failure_metric() {
         #[cfg(feature = "telemetry")]
         assert!(
             the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                .with_label_values(&["unknown", "certificate"])
+                .ensure_handle_for_label_values(&["unknown", "certificate"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
                 >= before + 1
         );
@@ -379,14 +385,16 @@ fn quic_handshake_timeout() {
         let cert = rustls::Certificate(cert);
         #[cfg(feature = "telemetry")]
         let before = QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "timeout"])
+            .ensure_handle_for_label_values(&["unknown", "timeout"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         let res = quic::connect(addr, cert).await;
         assert!(res.is_err());
         #[cfg(feature = "telemetry")]
         assert!(
             QUIC_HANDSHAKE_FAIL_TOTAL
-                .with_label_values(&["unknown", "timeout"])
+                .ensure_handle_for_label_values(&["unknown", "timeout"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
                 >= before + 1
         );
@@ -442,7 +450,8 @@ fn quic_version_mismatch() {
         #[cfg(feature = "telemetry")]
         assert!(
             the_block::telemetry::HANDSHAKE_FAIL_TOTAL
-                .with_label_values(&["protocol"])
+                .ensure_handle_for_label_values(&["protocol"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
                 >= 1
         );

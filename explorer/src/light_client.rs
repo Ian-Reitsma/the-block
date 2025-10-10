@@ -44,7 +44,7 @@ pub fn top_relayers(path: impl AsRef<Path>, limit: usize) -> Result<Vec<RelayerL
         .relayers
         .into_iter()
         .map(|(id, info)| RelayerLeaderboardEntry {
-            id: hex::encode(id),
+            id: crypto_suite::hex::encode(id),
             pending: info.pending,
             total_proofs: info.total_proofs,
             total_claimed: info.total_claimed,
@@ -71,7 +71,10 @@ pub fn recent_rebate_history(
 ) -> Result<RebateHistoryPage> {
     let tracker = open_tracker(path);
     let relayer_bytes = if let Some(id) = relayer {
-        Some(hex::decode(id).with_context(|| format!("invalid relayer hex string: {id}"))?)
+        Some(
+            crypto_suite::hex::decode(id)
+                .with_context(|| format!("invalid relayer hex string: {id}"))?,
+        )
     } else {
         None
     };
@@ -86,7 +89,7 @@ pub fn recent_rebate_history(
                 .relayers
                 .into_iter()
                 .map(|rel| RebateReceiptRelayerRow {
-                    id: hex::encode(rel.id),
+                    id: crypto_suite::hex::encode(rel.id),
                     amount: rel.amount,
                 })
                 .collect(),
@@ -115,7 +118,7 @@ mod tests {
         }
         let leaders = top_relayers(&path, 5).expect("leaders");
         assert_eq!(leaders.len(), 2);
-        assert_eq!(leaders[0].id, hex::encode(b"alpha"));
+        assert_eq!(leaders[0].id, crypto_suite::hex::encode(b"alpha"));
         assert_eq!(leaders[0].total_claimed, 10);
 
         let history = recent_rebate_history(&path, None, None, 5).expect("history");

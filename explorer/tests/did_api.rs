@@ -1,6 +1,5 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::{did_view, Explorer, MetricPoint};
-use hex;
 use std::convert::TryInto;
 use sys::tempfile;
 use the_block::generate_keypair;
@@ -12,7 +11,7 @@ fn build_anchor(doc: &str, nonce: u64, sk: &SigningKey) -> TxDidAnchor {
     let pk = sk.verifying_key();
     let pk_bytes = pk.to_bytes();
     let mut tx = TxDidAnchor {
-        address: hex::encode(pk_bytes),
+        address: crypto_suite::hex::encode(pk_bytes),
         public_key: pk_bytes.to_vec(),
         document: doc.to_string(),
         nonce,
@@ -33,7 +32,7 @@ fn explorer_indexes_recent_dids_and_metrics() {
 
     let (sk_bytes, pk_bytes) = generate_keypair();
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
-    let address = hex::encode(pk_bytes);
+    let address = crypto_suite::hex::encode(pk_bytes);
 
     let explorer_db = dir.path().join("explorer.db");
 

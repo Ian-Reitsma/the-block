@@ -8,7 +8,6 @@ use crypto_suite::signatures::ed25519::{
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::warn;
 use foundation_serialization::json::Value;
-use hex;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{
@@ -86,8 +85,12 @@ pub fn publish_record(params: &Value) -> Result<Value, DnsError> {
     let txt = params.get("txt").and_then(|v| v.as_str()).unwrap_or("");
     let pk_hex = params.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
     let sig_hex = params.get("sig").and_then(|v| v.as_str()).unwrap_or("");
-    let pk_vec = hex::decode(pk_hex).ok().ok_or(DnsError::SigInvalid)?;
-    let sig_vec = hex::decode(sig_hex).ok().ok_or(DnsError::SigInvalid)?;
+    let pk_vec = crypto_suite::hex::decode(pk_hex)
+        .ok()
+        .ok_or(DnsError::SigInvalid)?;
+    let sig_vec = crypto_suite::hex::decode(sig_hex)
+        .ok()
+        .ok_or(DnsError::SigInvalid)?;
     let pk: [u8; PUBLIC_KEY_LENGTH] = pk_vec
         .as_slice()
         .try_into()
@@ -141,7 +144,10 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
     #[cfg(feature = "telemetry")]
     {
         let status = if ok { "verified" } else { "rejected" };
-        GATEWAY_DNS_LOOKUP_TOTAL.with_label_values(&[status]).inc();
+        GATEWAY_DNS_LOOKUP_TOTAL
+            .ensure_handle_for_label_values(&[status])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+            .inc();
         if !ok {
             DNS_VERIFICATION_FAIL_TOTAL.inc();
         }

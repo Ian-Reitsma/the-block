@@ -11,10 +11,7 @@ use bridges::{
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::{
-    hex,
-    json::{self, Map, Value},
-};
+use foundation_serialization::json::{self, Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fs;
@@ -287,12 +284,12 @@ mod state_codec {
         }
         let mut pending_map = Map::new();
         for (commitment, pending) in &snapshot.pending_withdrawals {
-            pending_map.insert(hex::encode(commitment), pending.to_value());
+            pending_map.insert(crypto_suite::hex::encode(commitment), pending.to_value());
         }
         let verified = snapshot
             .verified_headers
             .iter()
-            .map(|h| Value::String(hex::encode(h)))
+            .map(|h| Value::String(crypto_suite::hex::encode(h)))
             .collect();
         let mut map = Map::new();
         map.insert("locked".to_string(), Value::Object(locked_map));
@@ -315,9 +312,11 @@ mod state_codec {
         let mut verified = HashSet::new();
         for entry in verified_values {
             let hex_str = require_string(entry, "verified_headers")?;
-            let hash = hex::decode_array::<32>(hex_str).map_err(|source| CodecError::Hex {
-                field: "verified_headers",
-                source,
+            let hash = crypto_suite::hex::decode_array::<32>(hex_str).map_err(|source| {
+                CodecError::Hex {
+                    field: "verified_headers",
+                    source,
+                }
             })?;
             verified.insert(hash);
         }
@@ -325,9 +324,11 @@ mod state_codec {
         let mut pending = HashMap::new();
         for (commitment_hex, value) in pending_obj.iter() {
             let commitment =
-                hex::decode_array::<32>(commitment_hex).map_err(|source| CodecError::Hex {
-                    field: "pending_withdrawals",
-                    source,
+                crypto_suite::hex::decode_array::<32>(commitment_hex).map_err(|source| {
+                    CodecError::Hex {
+                        field: "pending_withdrawals",
+                        source,
+                    }
                 })?;
             let withdrawal = PendingWithdrawal::from_value(value)?;
             pending.insert(commitment, withdrawal);
@@ -346,9 +347,9 @@ mod state_codec {
             "user": receipt.user.clone(),
             "amount": receipt.amount,
             "relayer": receipt.relayer.clone(),
-            "header_hash": hex::encode(&receipt.header_hash),
-            "relayer_commitment": hex::encode(&receipt.relayer_commitment),
-            "proof_fingerprint": hex::encode(&receipt.proof_fingerprint),
+            "header_hash": crypto_suite::hex::encode(&receipt.header_hash),
+            "relayer_commitment": crypto_suite::hex::encode(&receipt.relayer_commitment),
+            "proof_fingerprint": crypto_suite::hex::encode(&receipt.proof_fingerprint),
             "bundle_relayers": receipt.bundle_relayers.clone(),
             "recorded_at": receipt.recorded_at,
         })
@@ -368,7 +369,7 @@ mod state_codec {
             user: require_string(get(obj, "user")?, "user")?.to_string(),
             amount: require_u64(get(obj, "amount")?, "amount")?,
             relayer: require_string(get(obj, "relayer")?, "relayer")?.to_string(),
-            header_hash: hex::decode_array::<32>(require_string(
+            header_hash: crypto_suite::hex::decode_array::<32>(require_string(
                 get(obj, "header_hash")?,
                 "header_hash",
             )?)
@@ -376,7 +377,7 @@ mod state_codec {
                 field: "header_hash",
                 source,
             })?,
-            relayer_commitment: hex::decode_array::<32>(require_string(
+            relayer_commitment: crypto_suite::hex::decode_array::<32>(require_string(
                 get(obj, "relayer_commitment")?,
                 "relayer_commitment",
             )?)
@@ -384,7 +385,7 @@ mod state_codec {
                 field: "relayer_commitment",
                 source,
             })?,
-            proof_fingerprint: hex::decode_array::<32>(require_string(
+            proof_fingerprint: crypto_suite::hex::decode_array::<32>(require_string(
                 get(obj, "proof_fingerprint")?,
                 "proof_fingerprint",
             )?)
@@ -400,7 +401,7 @@ mod state_codec {
     fn encode_challenge(record: &ChallengeRecord) -> Value {
         foundation_serialization::json!({
             "asset": record.asset.clone(),
-            "commitment": hex::encode(&record.commitment),
+            "commitment": crypto_suite::hex::encode(&record.commitment),
             "challenger": record.challenger.clone(),
             "challenged_at": record.challenged_at,
         })
@@ -410,7 +411,7 @@ mod state_codec {
         let obj = require_object(value, "challenge_record")?;
         Ok(ChallengeRecord {
             asset: require_string(get(obj, "asset")?, "asset")?.to_string(),
-            commitment: hex::decode_array::<32>(require_string(
+            commitment: crypto_suite::hex::decode_array::<32>(require_string(
                 get(obj, "commitment")?,
                 "commitment",
             )?)
@@ -450,7 +451,7 @@ mod state_codec {
         let fingerprints = channel
             .seen_fingerprints
             .iter()
-            .map(|fp| Value::String(hex::encode(fp)))
+            .map(|fp| Value::String(crypto_suite::hex::encode(fp)))
             .collect();
         foundation_serialization::json!({
             "config": encode_config(&channel.config),
@@ -485,9 +486,11 @@ mod state_codec {
         let mut seen = HashSet::new();
         for entry in fingerprint_values {
             let hex_str = require_string(entry, "seen_fingerprints")?;
-            let fp = hex::decode_array::<32>(hex_str).map_err(|source| CodecError::Hex {
-                field: "seen_fingerprints",
-                source,
+            let fp = crypto_suite::hex::decode_array::<32>(hex_str).map_err(|source| {
+                CodecError::Hex {
+                    field: "seen_fingerprints",
+                    source,
+                }
             })?;
             seen.insert(fp);
         }
@@ -748,7 +751,7 @@ impl Bridge {
         asset: &str,
         commitment: &[u8; 32],
     ) -> Result<(), BridgeError> {
-        let hash = hex::encode(commitment);
+        let hash = crypto_suite::hex::encode(commitment);
         let payload = format!("bridge:{asset}:{hash}");
         governance::ensure_release_authorized(&payload)
             .map_err(|_| BridgeError::UnauthorizedRelease)
@@ -928,7 +931,7 @@ impl Bridge {
                 map.insert("asset".to_string(), Value::String(chan_asset.clone()));
                 map.insert(
                     "commitment".to_string(),
-                    Value::String(hex::encode(commitment)),
+                    Value::String(crypto_suite::hex::encode(commitment)),
                 );
                 map.insert("user".to_string(), Value::String(pending.user.clone()));
                 map.insert("amount".to_string(), Value::from(pending.amount));

@@ -370,20 +370,23 @@ impl Market {
                 match reason {
                     Capacity => {
                         telemetry::INDUSTRIAL_REJECTED_TOTAL
-                            .with_label_values(&["capacity"])
+                            .ensure_handle_for_label_values(&["capacity"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
                         return Err(MarketError::Capacity);
                     }
                     FairShare => {
                         telemetry::INDUSTRIAL_REJECTED_TOTAL
-                            .with_label_values(&["fair_share"])
+                            .ensure_handle_for_label_values(&["fair_share"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         return Err(MarketError::FairShare);
                     }
                     BurstExhausted => {
                         telemetry::INDUSTRIAL_REJECTED_TOTAL
-                            .with_label_values(&["burst_exhausted"])
+                            .ensure_handle_for_label_values(&["burst_exhausted"])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
                         return Err(MarketError::BurstExhausted);
                     }
@@ -416,7 +419,8 @@ impl Market {
         let effective = (offer.price_per_unit as f64 * offer.reputation_multiplier).round() as u64;
         #[cfg(feature = "telemetry")]
         telemetry::SCHEDULER_EFFECTIVE_PRICE
-            .with_label_values(&[&offer.provider])
+            .ensure_handle_for_label_values(&[&offer.provider])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(effective as i64);
         let state = JobState {
             job,
@@ -767,13 +771,12 @@ mod tests {
     use super::*;
     use crypto_suite::hashing::blake3::Hasher;
     use std::sync::{Mutex, MutexGuard, OnceLock};
-    use sys::tempfile;
 
     static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct SettlementGuard {
         _lock: MutexGuard<'static, ()>,
-        _dir: tempfile::TempDir,
+        _dir: sys::tempfile::TempDir,
     }
 
     impl SettlementGuard {
@@ -782,7 +785,7 @@ mod tests {
                 .get_or_init(|| Mutex::new(()))
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner());
-            let dir = tempfile::tempdir().expect("settlement tempdir");
+            let dir = sys::tempfile::tempdir().expect("settlement tempdir");
             let path = dir.path().join("settlement");
             let path_str = path.to_str().expect("settlement path str");
             settlement::Settlement::init(path_str, settlement::SettleMode::DryRun);
@@ -844,7 +847,7 @@ mod tests {
     #[test]
     fn courier_store_forward() {
         use crate::compute_market::courier::CourierStore;
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("create temp dir: {e}"));
+        let dir = sys::tempfile::tempdir().unwrap_or_else(|e| panic!("create temp dir: {e}"));
         let store = CourierStore::open(
             dir.path()
                 .to_str()
@@ -1028,7 +1031,7 @@ mod tests {
         settlement.prefund("prov", 1_000_000);
         settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = sys::tempfile::tempdir().unwrap();
         std::env::set_var(
             "TB_CANCEL_PATH",
             tmp.path().join("cancel.log").to_str().unwrap(),

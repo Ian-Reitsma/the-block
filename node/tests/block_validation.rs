@@ -10,7 +10,7 @@ use the_block::{
 
 #[test]
 fn rejects_nonce_gap() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.accounts.insert(
         "alice".into(),
@@ -95,7 +95,7 @@ fn rejects_nonce_gap() {
 
 #[test]
 fn rollback_on_mid_block_panic() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.accounts.insert(
         "alice".into(),

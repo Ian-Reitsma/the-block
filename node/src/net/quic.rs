@@ -21,8 +21,8 @@ pub async fn listen(addr: SocketAddr) -> Result<(ListenerHandle, CertificateHand
 
 pub async fn listen_with_cert(
     addr: SocketAddr,
-    cert_der: &[u8],
-    key_der: &[u8],
+    cert_der: concurrency::Bytes,
+    key_der: concurrency::Bytes,
 ) -> Result<ListenerHandle> {
     let adapter = quinn_adapter()?;
     adapter
@@ -79,7 +79,7 @@ pub async fn connect_insecure(
     adapter.connect_insecure(addr).await
 }
 
-pub fn certificate_from_der(cert: Vec<u8>) -> Result<CertificateHandle> {
+pub fn certificate_from_der(cert: concurrency::Bytes) -> Result<CertificateHandle> {
     let adapter = quinn_adapter()?;
     Ok(adapter.certificate_from_der(cert))
 }

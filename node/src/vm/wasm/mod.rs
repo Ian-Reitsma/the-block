@@ -4,21 +4,21 @@ pub use super::gas::GasMeter;
 
 mod interpreter;
 pub use interpreter::{
-    analyze, disassemble, execute, Instruction, ModuleMetadata, MAGIC, VERSION_V1,
+    analyze, disassemble, execute, opcodes, Instruction, ModuleMetadata, MAGIC, VERSION_V1,
 };
 
 pub mod gas;
 
 #[cfg(test)]
 mod tests {
-    use super::{execute, GasMeter};
+    use super::{execute, opcodes, GasMeter, MAGIC, VERSION_V1};
 
     fn sample_module() -> Vec<u8> {
         let mut buf = Vec::new();
         buf.extend_from_slice(&MAGIC);
         buf.push(VERSION_V1);
         buf.extend_from_slice(&[
-            interpreter::opcodes::PUSH_I64,
+            opcodes::PUSH_I64,
             5,
             0,
             0,
@@ -27,7 +27,7 @@ mod tests {
             0,
             0,
             0,
-            interpreter::opcodes::PUSH_I64,
+            opcodes::PUSH_I64,
             7,
             0,
             0,
@@ -36,8 +36,8 @@ mod tests {
             0,
             0,
             0,
-            interpreter::opcodes::ADD_I64,
-            interpreter::opcodes::RETURN,
+            opcodes::ADD_I64,
+            opcodes::RETURN,
             1,
         ]);
         buf

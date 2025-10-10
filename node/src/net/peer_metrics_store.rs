@@ -5,7 +5,6 @@ use crate::net::peer::PeerMetrics;
 use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
 use concurrency::{MutexExt, OnceCell};
 #[cfg(feature = "telemetry")]
-use hex;
 use sled::Tree;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -40,9 +39,10 @@ impl PeerMetricsStore {
         #[cfg(feature = "telemetry")]
         if verbose() {
             if let Some(cnt) = metrics.drops.get(&DropReason::RateLimit) {
-                let peer_hex = hex::encode(pk);
+                let peer_hex = crypto_suite::hex::encode(pk);
                 PEER_RATE_LIMIT_TOTAL
-                    .with_label_values(&[peer_hex.as_str()])
+                    .ensure_handle_for_label_values(&[peer_hex.as_str()])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(*cnt as i64);
             }
         }

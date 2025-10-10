@@ -4,7 +4,7 @@ use runtime::{io::read_to_end, net::TcpStream};
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{generate_keypair, rpc::run_rpc_server, transaction::TxDidAnchor, Blockchain};
 use util::timeout::expect_timeout;
 
@@ -65,7 +65,7 @@ fn rpc_request(
 fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> foundation_serialization::json::Value {
     let pk_bytes = sk.verifying_key().to_bytes();
     let mut tx = TxDidAnchor {
-        address: hex::encode(pk_bytes),
+        address: crypto_suite::hex::encode(pk_bytes),
         public_key: pk_bytes.to_vec(),
         document: doc.to_string(),
         nonce,

@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 mod util;
-use tempfile::TempDir;
+use sys::tempfile::TempDir;
 use util::temp::temp_dir;
 
 #[cfg(feature = "telemetry")]

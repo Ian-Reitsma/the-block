@@ -3,7 +3,6 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
 use foundation_serialization::json::Value;
-use hex;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
@@ -204,7 +203,7 @@ fn rpc_light_client_rebate_status() {
         let relayers = result["relayers"].as_array().expect("array");
         assert_eq!(relayers.len(), 1);
         let relayer = &relayers[0];
-        let expected_id = hex::encode(b"relay");
+        let expected_id = crypto_suite::hex::encode(b"relay");
         assert_eq!(relayer["id"].as_str(), Some(expected_id.as_str()));
         assert_eq!(relayer["pending"].as_u64().unwrap(), 3);
         assert_eq!(relayer["total_proofs"].as_u64().unwrap(), 3);
@@ -265,14 +264,17 @@ fn rpc_light_client_rebate_history() {
         let relayers = receipt["relayers"].as_array().expect("relayers");
         assert_eq!(relayers.len(), 1);
         let relayer = &relayers[0];
-        assert_eq!(relayer["id"].as_str().unwrap(), hex::encode(b"relay"));
+        assert_eq!(
+            relayer["id"].as_str().unwrap(),
+            crypto_suite::hex::encode(b"relay")
+        );
         assert_eq!(relayer["amount"].as_u64().unwrap(), 5);
 
         let filtered = expect_timeout(rpc(
         &addr,
         &format!(
             "{{\"method\":\"light_client.rebate_history\",\"params\":{{\"relayer\":\"{}\",\"limit\":10}}}}",
-            hex::encode(b"relay")
+            crypto_suite::hex::encode(b"relay")
         ),
         None,
     ))
@@ -329,7 +331,7 @@ fn rpc_concurrent_controls() {
             memo: Vec::new(),
         };
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
-        let tx_hex = hex::encode(bincode::serialize(&tx).unwrap());
+        let tx_hex = crypto_suite::hex::encode(bincode::serialize(&tx).unwrap());
         let tx_arc = Arc::new(tx_hex);
 
         let mut handles = Vec::new();

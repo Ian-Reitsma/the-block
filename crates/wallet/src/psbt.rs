@@ -24,6 +24,7 @@ impl Psbt {
 
     /// Append an Ed25519 signature to the container.
     pub fn add_signature(&mut self, sig: Signature) {
-        self.signatures.push(hex::encode(sig.to_bytes()));
+        self.signatures
+            .push(crypto_suite::hex::encode(sig.to_bytes()));
     }
 }

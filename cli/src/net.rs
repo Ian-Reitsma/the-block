@@ -10,7 +10,6 @@ use cli_core::{
 };
 use foundation_serialization::json::Value;
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
 
 #[derive(Deserialize)]
@@ -547,7 +546,7 @@ pub fn handle(cmd: NetCmd) {
             url,
         } => {
             let sk = the_block::net::load_net_key();
-            let new_bytes = hex::decode(&new_key).expect("invalid new key hex");
+            let new_bytes = crypto_suite::hex::decode(&new_key).expect("invalid new key hex");
             let sig = sk.sign(&new_bytes);
             let client = RpcClient::from_env();
             #[derive(Serialize)]
@@ -566,7 +565,7 @@ pub fn handle(cmd: NetCmd) {
                 params: foundation_serialization::json!({
                     "peer_id": peer_id,
                     "new_key": new_key,
-                    "signature": hex::encode(sig.to_bytes()),
+                    "signature": crypto_suite::hex::encode(sig.to_bytes()),
                 }),
                 auth: None,
             };
