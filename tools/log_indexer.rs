@@ -22,7 +22,7 @@ use foundation_serialization::{json, Deserialize, Error as SerializationError, S
 use sled::{self, Db, Tree};
 
 #[cfg(feature = "sqlite-migration")]
-use rusqlite::{Connection, Row};
+use foundation_sqlite::{params, Connection, Row};
 
 const ENTRIES_TREE: &str = "entries";
 const META_TREE: &str = "meta";
@@ -187,7 +187,7 @@ pub enum LogIndexerError {
     Encryption(String),
     MigrationRequired(PathBuf),
     #[cfg(feature = "sqlite-migration")]
-    Sqlite(rusqlite::Error),
+    Sqlite(foundation_sqlite::Error),
 }
 
 impl fmt::Display for LogIndexerError {
@@ -241,8 +241,8 @@ impl From<SerializationError> for LogIndexerError {
 }
 
 #[cfg(feature = "sqlite-migration")]
-impl From<rusqlite::Error> for LogIndexerError {
-    fn from(err: rusqlite::Error) -> Self {
+impl From<foundation_sqlite::Error> for LogIndexerError {
+    fn from(err: foundation_sqlite::Error) -> Self {
         LogIndexerError::Sqlite(err)
     }
 }
@@ -524,19 +524,23 @@ fn migrate_sqlite(store: &LogStore, legacy_path: &Path) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs ORDER BY id ASC",
     )?;
-    let mut rows = stmt.query([])?;
+    let rows = stmt.query_map(params![], |row| row_to_stored_entry(row))?;
     let mut max_id = store.load_next_id()?;
-    while let Some(row) = rows.next()? {
-        let entry = row_to_stored_entry(row)?;
+    for row in rows {
+        let entry = row?;
         max_id = max_id.max(entry.id);
         store.store_entry(&entry)?;
     }
     let mut offset_stmt = conn.prepare("SELECT source, offset, updated_at FROM ingest_state")?;
-    let mut offset_rows = offset_stmt.query([])?;
-    while let Some(row) = offset_rows.next()? {
-        let source: String = row.get(0)?;
-        let offset: i64 = row.get(1)?;
-        let updated_at: i64 = row.get(2)?;
+    let offset_rows = offset_stmt.query_map(params![], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in offset_rows {
+        let (source, offset, updated_at) = row?;
         store.save_offset_with_timestamp(
             &source,
             offset.max(0) as u64,
@@ -568,7 +572,7 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
             encrypted INTEGER NOT NULL DEFAULT 0,
             nonce BLOB
         )",
-        [],
+        params![],
     )?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ingest_state (
@@ -576,13 +580,13 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
             offset INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         )",
-        [],
+        params![],
     )?;
     Ok(())
 }
 
 #[cfg(feature = "sqlite-migration")]
-fn row_to_stored_entry(row: &Row<'_>) -> Result<StoredEntry> {
+fn row_to_stored_entry(row: &Row<'_>) -> foundation_sqlite::Result<StoredEntry> {
     let encrypted: i64 = row.get("encrypted")?;
     let nonce: Option<Vec<u8>> = row.get("nonce")?;
     let message: String = row.get("message")?;

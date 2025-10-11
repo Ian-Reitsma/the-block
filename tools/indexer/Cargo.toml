@@ -7,7 +7,7 @@ build = "build.rs"
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
-rusqlite = { version = "0.30", features=["bundled"] }
+foundation_sqlite = { path = "../../crates/foundation_sqlite" }
 httpd = { path = "../../crates/httpd" }
 runtime = { path = "../../crates/runtime" }
 the_block = { path = "../../node", default-features = false }

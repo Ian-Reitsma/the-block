@@ -10,6 +10,8 @@ the_block = { path = "../node" }
 governance = { path = "../governance" }
 bridges = { path = "../bridges" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_unicode = { path = "../crates/foundation_unicode" }
+foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
 serde = { version = "1", features = ["derive"] }
 dkg = { path = "../dkg", optional = true }
 anyhow = "1"
@@ -22,7 +24,6 @@ crypto_suite = { path = "../crates/crypto_suite" }
 codec = { path = "../crates/codec" }
 cli_core = { path = "../crates/cli_core" }
 base64_fp = { path = "../crates/base64_fp" }
-rusqlite = { version = "0.30", features = ["bundled"], optional = true }
 rpassword = "7"
 rand = { path = "../crates/rand" }
 sys = { path = "../crates/sys" }
@@ -34,10 +35,11 @@ coding = { path = "../crates/coding" }
 [features]
 default = []
 wallet = ["dep:wallet"]
-quantum = ["wallet"]
+quantum = ["wallet", "the_block/pq-crypto"]
+pq-crypto = ["quantum"]
 telemetry = ["the_block/telemetry"]
 wasm-metadata = []
-sqlite-storage = ["dep:rusqlite"]
+sqlite-storage = ["dep:foundation_sqlite"]
 full = ["sqlite-storage"]
 
 [dev-dependencies]

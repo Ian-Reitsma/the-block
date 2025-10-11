@@ -1,8 +1,184 @@
 # System-Wide Economic Changes
-> **Review (2025-09-25):** Synced System-Wide Economic Changes guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-10):** Added the `foundation_sqlite`, `foundation_time`, and `foundation_tui` entries, keeping the dependency-sovereignty log current while the codec/telemetry rewrites proceed.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and TUI facades are live with governance overrides enforced (2025-10-10).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
+
+## First-Party SQLite Facade (2025-10-10)
+
+### Rationale
+
+- **Dependency sovereignty:** Explorer, CLI, and log/indexer tooling depended
+  directly on `rusqlite`, preventing `FIRST_PARTY_ONLY=1` builds from compiling
+  and complicating efforts to stub or replace the backend.
+- **Unified ergonomics:** Ad-hoc parameter macros and per-tool helpers made it
+  easy to drift between positional vs. named parameters and inconsistent error
+  handling; a shared facade normalises values, parameters, and optional
+  backends.
+
+### Implementation Summary
+
+- Added `crates/foundation_sqlite` exporting `Connection`, `Statement`, `Row`,
+  `params!`/`params_from_iter!`, and a lightweight `Value` enum covering the
+  rusqlite types we use today.
+- Default builds enable the `rusqlite-backend` feature, delegating to the
+  existing engine while unifying parameter conversion and query helpers.
+- Introduced a first-party `FromValue` decoding trait plus
+  `ValueConversionError`, letting the facade translate rows without depending on
+  `rusqlite::types::FromSql` so stub and future native engines share identical
+  call sites.
+- `foundation_sqlite` exposes a stub backend when the feature is disabled,
+  returning `backend_unavailable` errors so `FIRST_PARTY_ONLY=1 cargo check`
+  surfaces missing implementations without pulling third-party code.
+- Migrated explorer query helpers, the CLI `logs` command, and the
+  indexer/log-indexer tooling to call the facade (including the new
+  `query_map` collector) instead of `rusqlite` directly.
+
+### Operator & Developer Impact
+
+- Tooling builds continue to work with SQLite when the default feature is
+  enabled, while first-party-only builds now fail fast with clear errors rather
+  than missing symbols.
+- Shared parameter/value handling removes subtle differences between tools,
+  making it easier to audit SQL statements and extend coverage.
+- Future work can swap the backend (or add an embedded engine) inside
+  `foundation_sqlite` without touching downstream crates.
+
+### Migration Notes
+
+- Downstream tooling must depend on `foundation_sqlite` instead of `rusqlite`.
+- Keep the `rusqlite-backend` feature enabled for production until the in-house
+  engine lands; tests can exercise the stub by setting `FIRST_PARTY_ONLY=1` or
+  disabling the feature.
+- Follow-up work will replace the stub with a native engine so
+  `FIRST_PARTY_ONLY=1` builds succeed end-to-end.
+
+## Foundation Time Facade (2025-10-10)
+
+### Rationale
+
+- **Timestamp determinism:** Storage repair logging, S3 snapshot signing, and
+  transport certificate rotation all encoded ad-hoc `time` crate calls with
+  inconsistent formatting and error handling.
+- **First-party builds:** The direct dependency on the upstream `time` crate
+  blocked `FIRST_PARTY_ONLY=1` builds and complicated efforts to audit
+  formatting changes across runtime and tooling.
+
+### Implementation Summary
+
+- Added `crates/foundation_time` with an in-house `UtcDateTime`/`Duration`
+  implementation, deterministic calendar math, and helpers to emit ISO-8601 and
+  AWS-style compact timestamps.
+- Replaced metrics aggregator S3 signing, storage repair file naming, and the
+  QUIC certificate generator with the new facade so runtime/tooling code no
+  longer imports `time` directly.
+- Landed the first-party `foundation_tls` certificate builder so QUIC rotation
+  and test tooling construct Ed25519 X.509 certificates without `rcgen`, using
+  facade validity windows end-to-end.
+
+### Operator & Developer Impact
+
+- Timestamp formatting is now consistent across runtime and tooling, reducing
+  the odds of drift between logging, signing, and certificate validity windows.
+- `FIRST_PARTY_ONLY` builds can compile these surfaces without linking the
+  upstream crate; the QUIC stack now signs certificates exclusively through the
+  foundation TLS facade.
+- Future features (e.g., governance snapshot formatting or log timestamp
+  normalization) can extend the facade without reintroducing external
+  dependencies.
+
+## Foundation TUI Facade (2025-10-10)
+
+### Rationale
+
+- **Dependency parity:** The node's networking CLI relied on the third-party
+  `colored` crate for ANSI output, blocking `FIRST_PARTY_ONLY=1` builds and
+  preventing consistent colour policies across tooling.
+- **Operator control:** Colour output needed to respect environment overrides
+  (`NO_COLOR`, `CLICOLOR`) and TTY detection without depending on crates we aim
+  to remove from production builds.
+
+### Implementation Summary
+
+- Added `crates/foundation_tui` with ANSI colour helpers, a `Colorize` trait,
+  and environment-aware detection that honours `TB_COLOR`, `NO_COLOR`, and
+  terminal detection via `sys::tty`.
+- Swapped the node networking CLI (`node/src/bin/net.rs`) to call the new
+  helpers, removing the direct `colored` dependency from the workspace.
+- Extended `sys::tty` with `stdout_is_terminal`/`stderr_is_terminal`/`stdin_is_terminal`
+  helpers so other tooling can reuse the detection logic without reimplementing
+  platform-specific checks.
+
+### Operator & Developer Impact
+
+- CLI colour output is now consistent across platforms, respects operator
+  overrides, and no longer depends on crates.io packages.
+- `FIRST_PARTY_ONLY` builds compile without the `colored` crate while keeping
+  familiar `line.red()` ergonomics for downstream tooling.
+- Additional styling (bold, underline, background colours) can be added to the
+  facade without reintroducing external dependencies.
+
+## Foundation Unicode Normalizer (2025-10-10)
+
+### Rationale
+
+- **First-party input hygiene:** Handle registration, DID validation, and CLI
+  helpers previously called into ICU via `icu_normalizer`, blocking
+  `FIRST_PARTY_ONLY=1` builds and inflating the dependency surface with large
+  Unicode data tables.
+- **Deterministic behaviour:** The team needs a predictable, auditable
+  normalizer with a clear ASCII fast-path so operator tooling and governance
+  flows can agree on canonical forms without relying on opaque upstream tables.
+
+### Implementation Summary
+
+- Introduced `crates/foundation_unicode` with an `nfkc` normalizer that
+  short-circuits ASCII inputs, provides compatibility mappings for common
+  compatibility characters, and exposes accuracy flags for non-ASCII fallbacks.
+- Swapped the node handle registry and integration tests to the facade,
+  removing the `icu_normalizer` and `icu_normalizer_data` crates from the
+  workspace.
+- Documented the facade in the dependency audit so future Unicode work can
+  extend the mapping tables without reintroducing third-party code.
+
+### Operator & Developer Impact
+
+- Handle normalisation is now controlled entirely by first-party code; future
+  tweaks can land alongside governance decisions instead of waiting on ICU
+  updates.
+- `FIRST_PARTY_ONLY` builds link the light-weight facade instead of the ICU
+  ecosystem, dramatically shrinking the dependency tree for identity tooling.
+- The accuracy flag allows downstream callers to detect when non-ASCII fallback
+  mappings are used and add additional validation as needed.
+
+## Xtask Git Diff Rewrite (2025-10-10)
+
+### Rationale
+
+- **Remove libgit2 stack:** The `xtask summary` helper depended on the
+  third-party `git2` bindings which pulled in libgit2, `url`, `idna`, and the
+  ICU normalization crates even after the runtime/CLI migrations, keeping
+  `FIRST_PARTY_ONLY=1` builds from linking cleanly.
+- **Stabilise tooling behaviour:** Shelling out to the git CLI mirrors the
+  commands operators and CI already run, avoids binding-specific corner cases,
+  and dramatically shrinks the transitive dependency graph for release checks.
+
+### Implementation Summary
+
+- Replaced the libgit2-backed diff logic with thin wrappers around `git
+  rev-parse` and `git diff --patch`, preserving the JSON summary output while
+  leaning on the existing CLI.
+- Dropped the `git2` dependency from `tools/xtask`, allowing the workspace to
+  remove the `url`/`idna_adapter`/ICU stack that the bindings required.
+- Updated the first-party manifest and dependency snapshot so `FIRST_PARTY_ONLY`
+  guards now pass without whitelisting libgit2.
+
+### Operator & Developer Impact
+
+- Developer tooling no longer links against libgit2, closing another gap on the
+  path to all-first-party builds.
+- CI summary jobs use the same git CLI output developers see locally, reducing
+  surprises when reviewers validate PR summaries or dependency guard output.
 
 ## Wrapper Telemetry Integration (2025-09-25)
 
@@ -198,3 +374,75 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 - Nodes upgrading from the in-memory shim should point `settlement_dir` (or the default data directory) at persistent storage before enabling `Real` mode. The first startup migrates balances into RocksDB with a zeroed sequence.
 - Automation that previously scraped in-process metrics must switch to the RPC surfaces described above. CLI invocations use the default build; enable the optional `sqlite-migration` feature only when importing legacy SQLite snapshots before returning to the minimal configuration.
 - Backups should include `compute_settlement.db` and the `audit.log` file written by `state::append_audit` so post-incident reviews retain both ledger state and anchor evidence.
+## Unicode Handle Telemetry and CLI Surfacing (2025-10-10)
+
+### Rationale
+
+- **Dependency sovereignty:** Identity normalization now runs entirely through
+  the first-party `foundation_unicode` facade. Latin-1 and Greek letters map to
+  ASCII fallbacks so operators no longer depend on ICU tables to register common
+  names.
+- **Operational visibility:** Registrations now emit
+  `identity_handle_normalization_total{accuracy}` so clusters can quantify how
+  many handles relied on approximate transliteration and adjust onboarding flows
+  accordingly.
+- **Operator tooling:** The CLI gained `contract identity register|resolve|normalize`
+  commands that show both local and remote normalization results, ensuring human
+  operators can detect mismatches before the registry persists a handle.
+
+### Implementation Summary
+
+- Added transliteration tables for accented Latin-1 and Greek characters to the
+  Unicode facade. The registry records `NormalizationAccuracy` alongside each
+  registration and propagates it through the RPC layer.
+- Instrumented the registry with the `identity_handle_normalization_total`
+  counter and surfaced accuracy in the RPC response schema.
+- Built a dedicated CLI identity module that displays accuracy labels and warns
+  when the node accepted an approximate normalization.
+- Extended the CLI `identity register` subcommand with an optional
+  `--pq-pubkey` flag gated behind the `pq-crypto`/`quantum` features so Dilithium
+  registrants can forward their post-quantum key material alongside Ed25519
+  payloads.
+
+### Operational Impact
+
+- **Operators** should watch the new counter for spikes in approximate
+  normalizations and coach users toward handles that normalize exactly.
+- **Support tooling** can invoke the CLI’s `identity normalize` command to audit
+  handles offline and reproduce the registry’s transliteration decisions.
+
+## Deterministic TLS Rotation Plans (2025-10-10)
+
+### Rationale
+
+- **Pre-computable rotations:** QUIC and s2n listeners now schedule certificates
+  via a deterministic `RotationPolicy`, allowing rotation daemons to prepare
+  leaf certificates in advance without relying on randomness.
+- **Chain issuance:** The transport layer can bind QUIC listeners with complete
+  CA chains, unblocking deployments that terminate on intermediate CAs or need
+  to present both leaf and issuer certificates during handshake.
+- **Interoperability tests:** Integration suites verify both Quinn and s2n
+  providers against CA-signed paths using the new builder, guarding against
+  regressions as we extend the TLS facade.
+
+### Implementation Summary
+
+- Introduced `RotationPolicy`/`RotationPlan` in `foundation_tls` and wired the
+  certificate builders to derive validity windows and serial numbers from a
+  deterministic schedule.
+- Updated QUIC and s2n backends to consume rotation plans instead of random
+  serials and to expose helpers for installing certificate chains.
+- Added CA-signed integration tests for both providers and exposed a listener
+  helper (`listen_with_chain`) so nodes can bind endpoints with full chains.
+- Implemented provider-specific `ListenerHandle::as_*`/`into_*` helpers for
+  Quinn, s2n-quic, and in-house backends, and taught `listen_with_chain` to
+  borrow certificate slices, eliminating unnecessary vector clones when
+  installing large chains in tests or runtime wiring.
+
+### Operational Impact
+
+- **Rotation jobs** can reuse the shared policy to stage certificates ahead of
+  time and coordinate rollouts across multiple nodes.
+- **Deployments** issuing certificates from internal CAs can feed chain
+  artifacts directly into the QUIC adapter without patching the transport
+  crate.

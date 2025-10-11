@@ -179,6 +179,8 @@ pub mod random {
 }
 
 pub mod tty {
+    use std::io::{self, IsTerminal};
+
     #[cfg(unix)]
     pub fn dimensions() -> Option<(u16, u16)> {
         use libc::{ioctl, winsize, STDIN_FILENO, STDOUT_FILENO, TIOCGWINSZ};
@@ -204,6 +206,21 @@ pub mod tty {
     #[cfg(not(unix))]
     pub fn dimensions() -> Option<(u16, u16)> {
         None
+    }
+
+    /// Returns `true` when standard output is connected to a terminal.
+    pub fn stdout_is_terminal() -> bool {
+        io::stdout().is_terminal()
+    }
+
+    /// Returns `true` when standard error is connected to a terminal.
+    pub fn stderr_is_terminal() -> bool {
+        io::stderr().is_terminal()
+    }
+
+    /// Returns `true` when standard input is connected to a terminal.
+    pub fn stdin_is_terminal() -> bool {
+        io::stdin().is_terminal()
     }
 }
 

@@ -1,6 +1,6 @@
 mod support;
 
-use crypto_suite::signatures::ed25519::{Signature, SIGNATURE_LENGTH};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, SIGNATURE_LENGTH};
 use httpd::{ServerTlsConfig, StatusCode};
 use ledger::crypto::remote_tag;
 use std::time::Duration;
@@ -90,35 +90,90 @@ fn remote_signer_timeout() {
 #[test]
 #[testkit::tb_serial]
 fn remote_signer_mtls_ws() {
-    use rcgen::{BasicConstraints, Certificate, CertificateParams, IsCa};
+    use base64_fp::encode_standard;
+    use foundation_time::{Duration as TimeDuration, UtcDateTime};
+    use foundation_tls::{sign_self_signed_ed25519, sign_with_ca_ed25519, SelfSignedCertParams};
+    use rand::rngs::OsRng;
+    use rand::RngCore;
 
-    let mut ca_params = CertificateParams::default();
-    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    let ca = Certificate::from_params(ca_params).unwrap();
+    fn der_to_pem(label: &str, der: &[u8]) -> String {
+        let mut pem = String::new();
+        pem.push_str(&format!("-----BEGIN {label}-----\n"));
+        let encoded = encode_standard(der);
+        for chunk in encoded.as_bytes().chunks(64) {
+            pem.push_str(std::str::from_utf8(chunk).unwrap());
+            pem.push('\n');
+        }
+        pem.push_str(&format!("-----END {label}-----\n"));
+        pem
+    }
 
-    let server_params = CertificateParams::new(vec!["127.0.0.1".to_string()]);
-    let server_cert = Certificate::from_params(server_params).unwrap();
-    let client_params = CertificateParams::new(vec!["client".to_string()]);
-    let client_cert = Certificate::from_params(client_params).unwrap();
+    fn random_serial() -> [u8; 16] {
+        let mut serial = [0u8; 16];
+        OsRng::default().fill_bytes(&mut serial);
+        serial[0] &= 0x7F;
+        serial
+    }
+
+    let mut rng = OsRng::default();
+    let ca_key = SigningKey::generate(&mut rng);
+    let ca_params = SelfSignedCertParams::builder()
+        .subject_cn("wallet-test-ca")
+        .validity(
+            UtcDateTime::now() - TimeDuration::hours(1),
+            UtcDateTime::now() + TimeDuration::days(7),
+        )
+        .serial(random_serial())
+        .ca(true)
+        .build()
+        .unwrap();
+    let ca_cert = sign_self_signed_ed25519(&ca_key, &ca_params).unwrap();
 
     let cert_file = sys::temp::NamedTempFile::new().unwrap();
     let key_file = sys::temp::NamedTempFile::new().unwrap();
     let ca_file = sys::temp::NamedTempFile::new().unwrap();
-    std::fs::write(
-        cert_file.path(),
-        client_cert.serialize_pem_with_signer(&ca).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(key_file.path(), client_cert.serialize_private_key_pem()).unwrap();
-    std::fs::write(ca_file.path(), ca.serialize_pem().unwrap()).unwrap();
+    let client_key = SigningKey::generate(&mut rng);
+    let client_params = SelfSignedCertParams::builder()
+        .subject_cn("client")
+        .validity(
+            UtcDateTime::now() - TimeDuration::hours(1),
+            UtcDateTime::now() + TimeDuration::days(7),
+        )
+        .serial(random_serial())
+        .build()
+        .unwrap();
+    let client_cert_der =
+        sign_with_ca_ed25519(&ca_key, ca_params.subject_cn(), &client_key, &client_params).unwrap();
+    let client_cert_pem = der_to_pem("CERTIFICATE", &client_cert_der);
+    let client_key_pem = der_to_pem(
+        "PRIVATE KEY",
+        client_key.to_pkcs8_der().expect("client pkcs8").as_bytes(),
+    );
+    std::fs::write(cert_file.path(), client_cert_pem).unwrap();
+    std::fs::write(key_file.path(), client_key_pem).unwrap();
+    std::fs::write(ca_file.path(), der_to_pem("CERTIFICATE", &ca_cert)).unwrap();
     std::env::set_var("REMOTE_SIGNER_TLS_CERT", cert_file.path());
     std::env::set_var("REMOTE_SIGNER_TLS_KEY", key_file.path());
     std::env::set_var("REMOTE_SIGNER_TLS_CA", ca_file.path());
 
-    let server_cert_pem = server_cert
-        .serialize_pem_with_signer(&ca)
-        .expect("server cert pem");
-    let server_key_pem = server_cert.serialize_private_key_pem();
+    let server_key = SigningKey::generate(&mut rng);
+    let server_params = SelfSignedCertParams::builder()
+        .subject_cn("127.0.0.1")
+        .add_dns_name("127.0.0.1")
+        .validity(
+            UtcDateTime::now() - TimeDuration::hours(1),
+            UtcDateTime::now() + TimeDuration::days(7),
+        )
+        .serial(random_serial())
+        .build()
+        .unwrap();
+    let server_cert_der =
+        sign_with_ca_ed25519(&ca_key, ca_params.subject_cn(), &server_key, &server_params).unwrap();
+    let server_cert_pem = der_to_pem("CERTIFICATE", &server_cert_der);
+    let server_key_pem = der_to_pem(
+        "PRIVATE KEY",
+        server_key.to_pkcs8_der().expect("server pkcs8").as_bytes(),
+    );
     let server_cert_file = sys::temp::NamedTempFile::new().unwrap();
     let server_key_file = sys::temp::NamedTempFile::new().unwrap();
     std::fs::write(server_cert_file.path(), server_cert_pem).unwrap();

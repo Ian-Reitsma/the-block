@@ -10,6 +10,7 @@ use crate::util::binary_codec;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
+use foundation_time::UtcDateTime;
 use std::collections::VecDeque;
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -17,8 +18,6 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
-use time::format_description::well_known::Iso8601;
-use time::OffsetDateTime;
 const MAX_CONCURRENT_REPAIRS: usize = 4;
 const MAX_LOG_FILES: usize = 14;
 const FAILURE_PREFIX: &str = "repair/failures/";
@@ -218,8 +217,8 @@ impl RepairLog {
     }
 
     fn current_file_path(&self) -> PathBuf {
-        let stamp = OffsetDateTime::now_utc()
-            .format(&Iso8601::DEFAULT)
+        let stamp = UtcDateTime::now()
+            .format_iso8601()
             .unwrap_or_else(|_| "unknown".into())
             .replace(':', "-");
         self.dir.join(format!("repair-{stamp}.jsonl"))
@@ -930,7 +929,7 @@ fn compute_shard_id(slot: usize, shard: &[u8]) -> [u8; 32] {
 }
 
 fn current_timestamp() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp()
+    UtcDateTime::now().unix_timestamp().unwrap_or(0)
 }
 
 /// Encodes `data` into fountain packets with the BLE-tuned parameters and decodes

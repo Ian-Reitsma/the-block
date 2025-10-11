@@ -2,7 +2,7 @@ use crate::{simple_db::names, util::binary_codec, SimpleDb};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
-use icu_normalizer::ComposingNormalizerBorrowed;
+use foundation_unicode::{NormalizationAccuracy, Normalizer};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -37,6 +37,27 @@ impl HandleError {
     }
 }
 
+struct NormalizedHandle {
+    value: String,
+    accuracy: NormalizationAccuracy,
+}
+
+impl NormalizedHandle {
+    fn value(&self) -> &str {
+        &self.value
+    }
+
+    fn accuracy(&self) -> NormalizationAccuracy {
+        self.accuracy
+    }
+}
+
+pub struct RegistrationOutcome {
+    pub address: String,
+    pub normalized_handle: String,
+    pub accuracy: NormalizationAccuracy,
+}
+
 pub struct HandleRegistry {
     db: SimpleDb,
 }
@@ -48,13 +69,23 @@ impl HandleRegistry {
         }
     }
 
-    fn normalize(handle: &str) -> Option<String> {
-        let normalized = ComposingNormalizerBorrowed::new_nfc().normalize(handle);
-        let trimmed = normalized.trim();
+    fn normalize(handle: &str) -> Option<NormalizedHandle> {
+        let normalized = Normalizer::default().nfkc(handle);
+        let trimmed = normalized.as_str().trim();
         if trimmed.is_empty() {
             return None;
         }
-        Some(trimmed.to_lowercase())
+        let value = trimmed.to_lowercase();
+        let accuracy = normalized.accuracy();
+        #[cfg(feature = "telemetry")]
+        {
+            let label = [accuracy.as_str()];
+            crate::telemetry::IDENTITY_HANDLE_NORMALIZATION_TOTAL
+                .ensure_handle_for_label_values(&label)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
+        }
+        Some(NormalizedHandle { value, accuracy })
     }
 
     fn reserved(handle: &str) -> bool {
@@ -78,11 +109,12 @@ impl HandleRegistry {
         #[cfg(feature = "pq-crypto")] pq_pubkey: Option<&[u8]>,
         sig: &[u8],
         nonce: u64,
-    ) -> Result<String, HandleError> {
-        let handle_norm = Self::normalize(handle).ok_or(HandleError::Reserved)?;
-        if Self::reserved(&handle_norm) {
+    ) -> Result<RegistrationOutcome, HandleError> {
+        let normalized = Self::normalize(handle).ok_or(HandleError::Reserved)?;
+        if Self::reserved(normalized.value()) {
             return Err(HandleError::Reserved);
         }
+        let handle_norm = normalized.value.clone();
         let address = crypto_suite::hex::encode(pubkey);
         // nonce check
         let nonce_key = Self::nonce_key(&address);
@@ -162,12 +194,16 @@ impl HandleRegistry {
             .ensure_handle_for_label_values(&["ok"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
-        Ok(address)
+        Ok(RegistrationOutcome {
+            address,
+            normalized_handle: handle_norm,
+            accuracy: normalized.accuracy(),
+        })
     }
 
     pub fn resolve_handle(&self, handle: &str) -> Option<String> {
-        let handle_norm = Self::normalize(handle)?;
-        let key = Self::handle_key(&handle_norm);
+        let normalized = Self::normalize(handle)?;
+        let key = Self::handle_key(normalized.value());
         self.db
             .get(&key)
             .and_then(|raw| binary_codec::deserialize::<HandleRecord>(&raw).ok())
@@ -183,8 +219,8 @@ impl HandleRegistry {
 
     #[cfg(feature = "pq-crypto")]
     pub fn pq_key_of(&self, handle: &str) -> Option<Vec<u8>> {
-        let handle_norm = Self::normalize(handle)?;
-        let key = Self::handle_key(&handle_norm);
+        let normalized = Self::normalize(handle)?;
+        let key = Self::handle_key(normalized.value());
         self.db
             .get(&key)
             .and_then(|raw| binary_codec::deserialize::<HandleRecord>(&raw).ok())

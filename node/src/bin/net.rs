@@ -1,7 +1,7 @@
-use colored::*;
 use crypto_suite::signatures::Signer;
 use foundation_regex::Regex;
 use foundation_serialization::json::{self, Value};
+use foundation_tui::color::Colorize;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
 use runtime::net::TcpStream;
 use runtime::{

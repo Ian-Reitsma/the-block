@@ -1301,10 +1301,27 @@ async fn async_main() -> std::process::ExitCode {
                         }
                     };
                     if regen {
-                        let cert = rcgen::generate_simple_self_signed(["the-block".to_string()])
-                            .expect("generate cert");
-                        let cert_der = cert.serialize_der().expect("cert der");
-                        let key_der = cert.serialize_private_key_der();
+                        use foundation_time::{Duration as TimeDuration, UtcDateTime};
+                        use foundation_tls::{generate_self_signed_ed25519, SelfSignedCertParams};
+                        use rand::rngs::OsRng;
+                        use rand::RngCore;
+
+                        let mut serial = [0u8; 16];
+                        OsRng::default().fill_bytes(&mut serial);
+                        serial[0] &= 0x7F;
+                        let now = UtcDateTime::now();
+                        let ttl_duration = TimeDuration::days(ttl_days as i64);
+                        let params = SelfSignedCertParams::builder()
+                            .subject_cn("the-block node quic")
+                            .add_dns_name("the-block")
+                            .validity(now - TimeDuration::hours(1), now + ttl_duration)
+                            .serial(serial)
+                            .build()
+                            .expect("quic certificate params");
+                        let generated =
+                            generate_self_signed_ed25519(&params).expect("generate quic cert");
+                        let cert_der = generated.certificate;
+                        let key_der = generated.private_key;
                         let _ = std::fs::create_dir_all(Path::new(&cert_path).parent().unwrap());
                         let mut cf = std::fs::OpenOptions::new()
                             .create(true)

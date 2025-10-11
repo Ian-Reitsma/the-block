@@ -7,7 +7,7 @@ use std::sync::Arc;
 use runtime::sync::oneshot;
 use sys::tempfile::{tempdir, TempDir};
 use the_block::net::transport_quic as s2n_transport;
-use transport::{Config as TransportConfig, ListenerHandle, ProviderKind};
+use transport::{Config as TransportConfig, ProviderKind};
 
 struct S2nTransportGuard {
     _dir: TempDir,
@@ -46,10 +46,7 @@ fn s2n_handshake_recovers_from_dropped_packets() {
         let listener = s2n_transport::start_server("127.0.0.1:0".parse().unwrap())
             .await
             .expect("start server");
-        let server = match listener {
-            ListenerHandle::S2n(server) => server,
-            _ => panic!("expected s2n listener"),
-        };
+        let server = listener.into_s2n().expect("s2n listener unavailable");
         let server_addr = server.local_addr().expect("server addr");
 
         let proxy_socket = runtime::net::UdpSocket::bind("127.0.0.1:0".parse().unwrap())
