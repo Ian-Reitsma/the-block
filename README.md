@@ -435,17 +435,25 @@ CI path-gates monitoring lint on `monitoring/**` changes.
 
 RPC tooling now relies on the workspace-owned [`httpd`](crates/httpd) crate
 instead of `reqwest`. The CLI and wallet call the synchronous
-`httpd::BlockingClient`, while daemon-side helpers reuse the async
-`httpd::HttpClient` in combination with the runtime handle. Both surfaces expose
+`http_env::blocking_client`, while daemon-side helpers reuse the async
+`http_env::http_client` wrappers on top of `httpd::HttpClient` so TLS
+configuration flows through a single environment gateway. Both surfaces expose
 identical request builders (`.header()`, `.json()`, `.timeout()`, `.send()`),
-so client code only needed the transport swap. Timeouts and retry strategy
-remain driven by the environment variables documented in
-[`docs/rpc.md`](docs/rpc.md). HTTPS endpoints continue to require a separate
-terminator until the in-house TLS hooks land; keep existing proxies in place if
-remote signers expect TLS. The node still serves JSON-RPC through its bespoke
-parser (`node/src/rpc/mod.rs`), and the metrics aggregator and gateway keep
-using `axum`/`hyper` for HTTP endpoints while the in-house server is developed
-(`metrics-aggregator/src/lib.rs`, `node/src/web/gateway.rs`).
+and emit scoped fallbacks when TLS configuration is missing so operators can
+spot plain-HTTP regressions. Timeouts and retry strategy remain driven by the
+environment variables documented in [`docs/rpc.md`](docs/rpc.md). HTTPS
+endpoints now rely on the in-house TLS connector; set `TB_RPC_TLS`,
+`TB_NODE_TLS`, `TB_AGGREGATOR_TLS`, `TB_PROBE_TLS`, or the global `TB_HTTP_TLS`
+prefix (with the usual `_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision
+identities and trust anchors. Remote signer clients honour
+`REMOTE_SIGNER_TLS_*` and fall back to the shared `TB_HTTP_TLS` prefix. Use the
+new `contract tls convert --cert server.pem --key server-key.pem --anchor
+cluster-ca.pem --out-dir tls --name node` helper to turn PEM material into the
+JSON identities and trust-anchor registries consumed by every prefix. The node
+still serves JSON-RPC through its bespoke parser (`node/src/rpc/mod.rs`), and
+the metrics aggregator and gateway keep using `axum`/`hyper` for HTTP endpoints
+while the in-house server is developed (`metrics-aggregator/src/lib.rs`,
+`node/src/web/gateway.rs`).
 
 Lane-tagged transaction via RPC:
 

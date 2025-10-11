@@ -8,6 +8,7 @@ use cli_core::{
 use foundation_serialization::json::{self, Value};
 use foundation_telemetry::TelemetrySummary;
 use httpd::{BlockingClient, Method};
+use node::http_client;
 use std::collections::VecDeque;
 
 mod cli_support;
@@ -62,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("pruned {total}");
         }
         Command::Telemetry { url } => {
-            let client = BlockingClient::default();
+            let client = http_client::blocking_client();
             let resp = client
                 .request(Method::Get, &format!("{}/telemetry", url))?
                 .send()?;

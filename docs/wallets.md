@@ -73,6 +73,31 @@ The wallet crate ships a reusable remote signer client in [`crates/wallet/src/re
 
 This keeps older nodes compatible (they continue to read `sig`) while giving upgraded deployments the data needed to enforce multisignature thresholds.
 
+### TLS configuration
+
+Remote signer and wallet HTTPS flows now consume the shared
+`http_env::{blocking_client,http_client}` wrappers layered on the
+`httpd::TlsConnector`. Configure trust material with the service-specific
+prefixes below; each prefix honours the common suffixes `<PREFIX>_CERT`,
+`<PREFIX>_KEY`, `<PREFIX>_CA`, and `<PREFIX>_INSECURE`:
+
+| Prefix | Applies to | Notes |
+| --- | --- | --- |
+| `REMOTE_SIGNER_TLS` | Wallet remote signer HTTP/WebSocket clients | Falls back to `TB_HTTP_TLS` when unset. Combine with `REMOTE_SIGNER_TLS_CERT`/`_KEY` for mTLS and `REMOTE_SIGNER_TLS_CA` for trust anchors. |
+| `TB_RPC_TLS` | CLI RPC helpers (`contract wallet`, `contract rpc`, logs/system tooling) | Uses `TB_HTTP_TLS` as a last resort so operators can maintain a single set of anchors. |
+| `TB_NODE_TLS` | Node-side HTTP clients (status fetchers, update checks, net diagnostics) | Mirrors the CLI behaviour and accepts the same suffixes. |
+| `TB_AGGREGATOR_TLS` | Metrics aggregator uploads and object-store pushes | Shared by async and blocking upload paths; defaults to `TB_HTTP_TLS`. |
+| `TB_PROBE_TLS` | Probe CLI HTTP calls | Enables trusted outbound HTTPS in probes without reconfiguring the CLI/tooling prefixes. |
+| `TB_MOBILE_TLS` | Mobile example push notifications (`examples/mobile`) | Demonstrates the same configuration pattern for SDK consumers. |
+
+Unset prefixes fall back to the default clients after `http_env` logs a
+component-tagged warning so local development continues to work against plain
+HTTP endpoints. Production deployments should provision explicit anchors and
+identities per prefix to avoid relying on the insecure fallback. The `contract
+tls convert --cert <pem> --key <pem> --anchor <pem> --out-dir tls --name
+wallet` helper writes JSON identities and trust-anchor registries matching what
+these prefixes expect.
+
 ## Ed25519 dependency alignment
 
 Both the wallet crate and the node CLI depend on the shared crypto suite’s

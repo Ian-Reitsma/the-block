@@ -11,6 +11,7 @@ serde = { version = "1", features=["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 the_block = { path = "../../node" }
 httpd = { path = "../../crates/httpd" }
+http_env = { path = "../../crates/http_env" }
 runtime = { path = "../../crates/runtime" }
 
 [[bin]]

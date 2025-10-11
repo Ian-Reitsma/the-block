@@ -20,12 +20,21 @@ pub mod filters;
 pub mod jsonrpc;
 pub mod metrics;
 mod tls;
+pub mod tls_client;
 use crate::tls::{AES_BLOCK, MAC_LEN};
 pub mod uri;
 pub use blocking::{BlockingClient, BlockingRequestBuilder};
 pub use client::{Client as HttpClient, ClientConfig, ClientError, ClientResponse};
 pub use jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcRouter};
+pub use tls_client::{
+    ClientTlsStream, TlsConnector, TlsConnectorBuilder, TlsConnectorError, tls_connector_from_env,
+    tls_connector_from_env_any,
+};
 pub use uri::{Uri, UriError, form_urlencoded, join_path};
+
+pub(crate) fn default_tls_connector() -> Option<TlsConnector> {
+    tls_connector_from_env("TB_HTTP_TLS").ok().flatten()
+}
 
 /// Asynchronous IO abstraction allowing the HTTP server to operate over raw
 /// TCP streams as well as TLS sessions that decrypt into an in-memory
@@ -671,11 +680,11 @@ impl UpgradeIo for TlsStream {
     type WebSocket = Self;
 
     fn supports_websocket(&self) -> bool {
-        false
+        true
     }
 
     fn into_websocket(self) -> Result<Self::WebSocket, HttpError> {
-        Err(HttpError::WebSocketTlsUnsupported)
+        Ok(self)
     }
 }
 

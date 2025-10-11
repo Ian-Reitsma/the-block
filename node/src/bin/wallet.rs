@@ -5,6 +5,7 @@ use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
 use foundation_serialization::json::{self, Value};
 use httpd::{BlockingClient, Method};
+use node::http_client;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -565,7 +566,7 @@ fn main() {
                     "threshold": threshold_value,
                 }
             });
-            let client = BlockingClient::default();
+            let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)
                 .and_then(|builder| builder.json(&body))
@@ -585,7 +586,7 @@ fn main() {
                 "method": "rent.escrow.balance",
                 "params": {"id": account},
             });
-            let client = BlockingClient::default();
+            let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)
                 .and_then(|builder| builder.json(&payload))
@@ -605,7 +606,7 @@ fn main() {
                 "method": "dex.escrow_release",
                 "params": {"id": id, "amount": amount},
             });
-            let client = BlockingClient::default();
+            let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)
                 .and_then(|builder| builder.json(&payload))

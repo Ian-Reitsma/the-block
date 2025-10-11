@@ -31,7 +31,8 @@ use sys::process;
 use foundation_serialization::Serialize;
 
 #[cfg(feature = "telemetry")]
-static GOV_WEBHOOK_CLIENT: Lazy<BlockingClient> = Lazy::new(BlockingClient::default);
+static GOV_WEBHOOK_CLIENT: Lazy<BlockingClient> =
+    Lazy::new(|| crate::http_client::blocking_client());
 
 pub mod summary;
 

@@ -343,6 +343,7 @@ fn emit_missing_sqlite_feature() {
 #[cfg(feature = "sqlite-storage")]
 mod sqlite {
     use super::{CorrelateMetricOptions, RotateKeyOptions, SearchOptions};
+    use crate::http_client;
     use anyhow::{anyhow, Result as AnyResult};
     use base64_fp::{decode_standard, encode_standard};
     use coding::Encryptor;
@@ -353,7 +354,7 @@ mod sqlite {
     use crypto_suite::hashing::blake3::derive_key;
     use foundation_serialization::Deserialize;
     use foundation_sqlite::{params, params_from_iter, Connection, Row, Value};
-    use httpd::{BlockingClient, Method};
+    use httpd::Method;
     use rpassword::prompt_password;
     use std::env;
 
@@ -436,7 +437,7 @@ mod sqlite {
             passphrase,
         } = options;
 
-        let client = BlockingClient::default();
+        let client = http_client::blocking_client();
         let url = format!(
             "{}/correlations/{}",
             aggregator.trim_end_matches('/'),

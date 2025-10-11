@@ -3,7 +3,7 @@ use governance::{
     RuntimeAdapter, Vote, VoteChoice, ACTIVATION_DELAY,
 };
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 struct ExampleRuntime {
     snapshot_secs: u64,

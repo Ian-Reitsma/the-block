@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-pprof = { version = "0.11", features = ["flamegraph"] }
+foundation_profiler = { path = "../../crates/foundation_profiler" }
 crypto_suite = { path = "../../crates/crypto_suite" }
 
 [build-dependencies]

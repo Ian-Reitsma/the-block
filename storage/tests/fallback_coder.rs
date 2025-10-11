@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use coding::{CompressionConfig, Config, ErasureConfig};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::simple_db::{names, SimpleDb};
 use the_block::storage::pipeline::{Provider, StoragePipeline};

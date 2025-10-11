@@ -4,6 +4,7 @@ use super::{
 use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
+use crate::http_client;
 use crate::net::message::{Message, Payload};
 use crate::net::Bytes;
 #[cfg(feature = "quic")]
@@ -2171,7 +2172,7 @@ impl AggregatorClient {
         Self {
             urls,
             token,
-            client: httpd::HttpClient::default(),
+            client: http_client::http_client(),
             idx: Arc::new(AtomicUsize::new(0)),
             handle: runtime::handle(),
         }

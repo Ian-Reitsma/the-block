@@ -18,7 +18,7 @@ GPU-backed hash workloads live under `node/src/compute_market/workloads/gpu.rs`.
 
 ## Recent Optimizations
 
-- `--profiling` flag enables `pprof` sampling and writes Chrome trace events to `trace.json` for deep analysis.
+- `--profiling` flag enables the first-party `foundation_profiler` sampling loop and writes Chrome trace events plus an SVG flamegraph to `trace.json`/`auto_profile.svg` for deep analysis.
 - LRU cache in `verify_signed_tx` avoids redundant Ed25519 checks, reusing thread-local buffers to reduce heap churn.
 - `BytesMut` serialization in `net/turbine.rs` eliminates temporary allocations when hashing broadcast messages.
 - PoW miner caches computed difficulty targets to skip per-iteration division.

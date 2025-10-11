@@ -37,7 +37,7 @@ struct ServerHelloFrame {
 }
 
 struct Identity {
-    tempdir: tempfile::TempDir,
+    tempdir: sys::tempfile::TempDir,
     cert_path: PathBuf,
     key_path: PathBuf,
     verifying: VerifyingKey,
@@ -45,7 +45,7 @@ struct Identity {
 
 impl Identity {
     fn new() -> Self {
-        let tempdir = tempfile::tempdir().expect("tempdir");
+        let tempdir = sys::tempfile::tempdir().expect("tempdir");
         let mut rng = OsRng::default();
         let signing = SigningKey::generate(&mut rng);
         let verifying = signing.verifying_key();

@@ -8,6 +8,7 @@ base64_fp = { path = "../base64_fp" }
 crypto_suite = { path = "../crypto_suite" }
 diagnostics = { path = "../diagnostics" }
 foundation_serialization = { path = "../foundation_serialization" }
+foundation_tls = { path = "../foundation_tls" }
 rand = { path = "../rand" }
 runtime = { path = "../runtime" }
 foundation_regex = { path = "../foundation_regex" }

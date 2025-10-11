@@ -7,17 +7,14 @@ use crypto_suite::{
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
-use httpd::{join_path, BlockingClient, Method, Uri};
+use httpd::{join_path, BlockingClient, ClientConfig, ClientTlsStream, Method, TlsConnector, Uri};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
-use native_tls::{Certificate as NativeCertificate, HandshakeError, Identity, TlsConnector};
 use rand::{Rng, RngCore};
 use std::collections::HashMap;
-use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
-use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -66,7 +63,7 @@ struct Frame {
 
 enum StreamKind {
     Plain(std::net::TcpStream),
-    Tls(native_tls::TlsStream<std::net::TcpStream>),
+    Tls(ClientTlsStream),
 }
 
 impl StreamKind {
@@ -103,7 +100,7 @@ impl BlockingWebSocket {
         }
     }
 
-    fn tls(stream: native_tls::TlsStream<std::net::TcpStream>) -> Self {
+    fn tls(stream: ClientTlsStream) -> Self {
         Self {
             stream: StreamKind::Tls(stream),
         }
@@ -372,32 +369,37 @@ impl RemoteSigner {
             .and_then(|v| v.parse().ok())
             .unwrap_or(5_000);
         let timeout = Duration::from_millis(timeout_ms);
-        let client = BlockingClient::default();
+        let mut client_config = ClientConfig::from_env(&["REMOTE_SIGNER_TLS", "TB_HTTP_TLS"])
+            .unwrap_or_else(|err| {
+                eprintln!(
+                "wallet remote signer: falling back to default HTTP client after TLS error: {err}"
+            );
+                ClientConfig::default()
+            });
         let mut tls = None;
         if let (Ok(cert_path), Ok(key_path)) = (
             std::env::var("REMOTE_SIGNER_TLS_CERT"),
             std::env::var("REMOTE_SIGNER_TLS_KEY"),
         ) {
-            let cert_bytes =
-                fs::read(cert_path).map_err(|e| WalletError::Failure(e.to_string()))?;
-            let key_bytes = fs::read(key_path).map_err(|e| WalletError::Failure(e.to_string()))?;
-            let identity = Identity::from_pkcs8(&cert_bytes, &key_bytes)
-                .map_err(|e| WalletError::Failure(e.to_string()))?;
             let mut tls_builder = TlsConnector::builder();
-            tls_builder.identity(identity.clone());
+            tls_builder
+                .identity_from_files(&cert_path, &key_path)
+                .map_err(|e| WalletError::Failure(e.to_string()))?;
+            let mut has_anchor = false;
             if let Ok(ca_path) = std::env::var("REMOTE_SIGNER_TLS_CA") {
-                let ca_bytes =
-                    fs::read(ca_path).map_err(|e| WalletError::Failure(e.to_string()))?;
-                let ca_cert = NativeCertificate::from_pem(&ca_bytes)
+                tls_builder
+                    .add_trust_anchor_from_file(&ca_path)
                     .map_err(|e| WalletError::Failure(e.to_string()))?;
-                tls_builder.add_root_certificate(ca_cert);
-                tls_builder.danger_accept_invalid_certs(true);
+                has_anchor = true;
             }
+            tls_builder.danger_accept_invalid_certs(!has_anchor);
             let connector = tls_builder
                 .build()
                 .map_err(|e| WalletError::Failure(e.to_string()))?;
+            client_config = client_config.with_tls_connector(connector.clone());
             tls = Some(connector);
         }
+        let client = BlockingClient::new(client_config);
         let mut pubkeys = Vec::new();
         for ep in endpoints {
             pubkeys.push(Self::fetch_pubkey(&client, ep, tls.as_ref())?);
@@ -545,29 +547,16 @@ fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyRes
     let connector = if let Some(conn) = tls {
         conn.clone()
     } else {
-        TlsConnector::builder()
+        let mut builder = TlsConnector::builder();
+        builder.danger_accept_invalid_certs(true);
+        builder
             .build()
             .map_err(|err| WalletError::Failure(err.to_string()))?
     };
 
-    let mut tls_stream = match connector.connect(host, stream) {
-        Ok(stream) => stream,
-        Err(HandshakeError::WouldBlock(mut mid)) => loop {
-            match mid.handshake() {
-                Ok(stream) => break stream,
-                Err(HandshakeError::WouldBlock(next)) => {
-                    mid = next;
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(HandshakeError::Failure(err)) => {
-                    return Err(WalletError::Failure(err.to_string()));
-                }
-            }
-        },
-        Err(HandshakeError::Failure(err)) => {
-            return Err(WalletError::Failure(err.to_string()));
-        }
-    };
+    let mut tls_stream = connector
+        .connect(host, stream)
+        .map_err(|err| WalletError::Failure(err.to_string()))?;
 
     let mut path = url.path().to_string();
     if path.is_empty() {

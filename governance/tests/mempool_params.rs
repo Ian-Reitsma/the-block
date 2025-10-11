@@ -6,7 +6,7 @@ use governance::{
     controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
     RuntimeAdapter, Vote, VoteChoice,
 };
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 #[derive(Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]

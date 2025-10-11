@@ -16,11 +16,11 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use runtime::net::TcpStream;
 
-const HANDSHAKE_MAGIC: &[u8; 4] = b"TBHS";
-const HANDSHAKE_VERSION: u8 = 1;
-const HANDSHAKE_MAX_LEN: usize = 8 * 1024;
+pub(crate) const HANDSHAKE_MAGIC: &[u8; 4] = b"TBHS";
+pub(crate) const HANDSHAKE_VERSION: u8 = 1;
+pub(crate) const HANDSHAKE_MAX_LEN: usize = 8 * 1024;
 const SESSION_INFO: &[u8] = b"tb-httpd-session-keys";
-const CLIENT_AUTH_INFO: &[u8] = b"tb-httpd-client-auth";
+pub(crate) const CLIENT_AUTH_INFO: &[u8] = b"tb-httpd-client-auth";
 pub(crate) const AES_BLOCK: usize = 16;
 pub(crate) const MAC_LEN: usize = 32;
 
@@ -176,7 +176,7 @@ impl ClientAuthPolicy {
 }
 
 impl SessionKeys {
-    fn derive(
+    pub(crate) fn derive(
         shared: &[u8; 32],
         client_nonce: &[u8; 32],
         server_nonce: &[u8; 32],
@@ -322,7 +322,7 @@ pub async fn perform_handshake(
     })
 }
 
-fn build_server_transcript(
+pub(crate) fn build_server_transcript(
     client_ephemeral: &[u8; 32],
     client_nonce: &[u8; 32],
     server_ephemeral: &[u8; 32],
@@ -337,7 +337,7 @@ fn build_server_transcript(
     transcript
 }
 
-pub fn encrypt_record(
+pub(crate) fn encrypt_record(
     key: &[u8; 32],
     mac_key: &[u8; 32],
     sequence: u64,
@@ -361,7 +361,7 @@ pub fn encrypt_record(
     Ok(out)
 }
 
-pub fn decrypt_record(
+pub(crate) fn decrypt_record(
     key: &[u8; 32],
     mac_key: &[u8; 32],
     expected_sequence: u64,
@@ -562,7 +562,7 @@ fn read_bytes(
     Ok(bytes)
 }
 
-fn parse_certificate(bytes: &[u8]) -> Result<VerifyingKey, Error> {
+pub(crate) fn parse_certificate(bytes: &[u8]) -> Result<VerifyingKey, Error> {
     let value: Value = json::from_slice(bytes).map_err(|err| Error::Encoding(err.to_string()))?;
     let map = match &value {
         Value::Object(map) => map,
@@ -582,7 +582,7 @@ fn parse_certificate(bytes: &[u8]) -> Result<VerifyingKey, Error> {
     decode_public_key(&public_key)
 }
 
-fn parse_signing_key(bytes: &[u8]) -> Result<SigningKey, Error> {
+pub(crate) fn parse_signing_key(bytes: &[u8]) -> Result<SigningKey, Error> {
     let value: Value = json::from_slice(bytes).map_err(|err| Error::Encoding(err.to_string()))?;
     let map = match &value {
         Value::Object(map) => map,

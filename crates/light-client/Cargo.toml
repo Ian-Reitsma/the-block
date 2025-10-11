@@ -24,7 +24,7 @@ coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }
 tracing = "0.1"
 state = { path = "../../state" }
-thiserror = "1"
+thiserror = { path = "../thiserror" }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"] }
 sys = { path = "../sys" }
 
@@ -58,4 +58,4 @@ optional = true
 
 [dev-dependencies]
 rand = { path = "../rand" }
-tempfile = "3"
+sys = { path = "../sys" }

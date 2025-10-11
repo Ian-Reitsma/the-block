@@ -44,8 +44,8 @@ p2p_overlay = { path = "../crates/p2p_overlay", optional = true }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 storage_engine = { path = "../crates/storage_engine", optional = true, default-features = false }
 transport = { path = "../crates/transport", optional = true }
-thiserror = "1"
-tempfile = "3"
+thiserror = { path = "../crates/thiserror" }
+sys = { path = "../crates/sys" }
 
 [dev-dependencies]
 serde_yaml = "0.9"

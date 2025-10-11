@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 #[test]
 fn detects_balance_change() {

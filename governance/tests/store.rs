@@ -5,7 +5,7 @@ use governance::{
     Runtime, RuntimeAdapter, Vote, VoteChoice, ACTIVATION_DELAY, RUNTIME_BACKEND_OPTIONS,
     STORAGE_ENGINE_OPTIONS, TRANSPORT_PROVIDER_OPTIONS,
 };
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 struct NoopAdapter;
 

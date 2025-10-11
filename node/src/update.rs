@@ -1,7 +1,8 @@
 use crate::governance::{self, ReleaseAttestation};
+use crate::http_client;
 use crate::provenance;
 use crypto_suite::hashing::blake3;
-use httpd::{BlockingClient, Method};
+use httpd::Method;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
@@ -89,7 +90,7 @@ pub fn fetch_release(
     }
     let base = std::env::var("TB_RELEASE_SOURCE_URL").map_err(|_| UpdateError::MissingSource)?;
     let url = format!("{}/{normalized}.bin", base.trim_end_matches('/'));
-    let response = BlockingClient::default()
+    let response = http_client::blocking_client()
         .request(Method::Get, &url)
         .map_err(|e| UpdateError::Network(e.to_string()))?
         .timeout(std::time::Duration::from_secs(30))

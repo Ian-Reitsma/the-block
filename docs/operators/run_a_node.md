@@ -81,6 +81,30 @@ tar -xzf node-<ver>-x86_64.tar.gz -C ~/.block
 ~/.block/node --datadir ~/.block/datadir --config ~/.block/config.toml
 ```
 
+## HTTPS client configuration
+
+Node tooling, the CLI, and the metrics aggregator now rely on the
+`http_env::{blocking_client,http_client}` helpers that wrap the shared
+`httpd::TlsConnector`. Populate the following prefixes with the usual `_CERT`,
+`_KEY`, `_CA`, and `_INSECURE` suffixes to provision client identities and trust
+anchors:
+
+| Prefix | Scope |
+| --- | --- |
+| `TB_HTTP_TLS` | Global fallback consulted by every helper when a service-specific prefix is missing. |
+| `TB_NODE_TLS` | Node-side HTTP clients (status page fetchers, update checks, peer diagnostics). |
+| `TB_RPC_TLS` | CLI RPC helpers and wallet subcommands. |
+| `TB_AGGREGATOR_TLS` | Metrics aggregator uploads and object store integrations. |
+| `TB_PROBE_TLS` | Probe CLI outbound HTTPS calls. |
+
+Unset prefixes fall back to plain HTTP after the helper logs a component-tagged
+warning so local development stays frictionless. Production deployments should
+set explicit anchors/identities per prefix to avoid relying on the insecure
+fallback. Use `contract tls convert --cert /path/to/server.pem --key
+/path/to/server-key.pem --anchor /path/to/cluster-ca.pem --out-dir tls --name
+node` to turn PEM material into the JSON identities and trust-anchor registries
+expected by these helpers.
+
 ### Feature-gated CLI flags
 
 The node binary now honours the workspace feature matrix so that light-weight

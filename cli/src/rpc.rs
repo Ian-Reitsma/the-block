@@ -8,6 +8,7 @@ use std::fmt;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use crate::http_client;
 use crate::tx::FeeLane;
 
 const MAX_BACKOFF_EXPONENT: u32 = 30;
@@ -35,7 +36,7 @@ impl RpcClient {
             .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.0);
         Self {
-            http: BlockingClient::default(),
+            http: http_client::blocking_client(),
             base_timeout: Duration::from_millis(base),
             jitter: Duration::from_millis(jitter),
             max_retries: retries,

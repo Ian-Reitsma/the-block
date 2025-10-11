@@ -1,6 +1,7 @@
 use anyhow::Context;
 use explorer::{router, Explorer, ExplorerHttpState};
-use httpd::{serve, serve_tls, ServerConfig, ServerTlsConfig};
+use http_env::server_tls_from_env;
+use httpd::{serve, serve_tls, ServerConfig};
 use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::Path, sync::Arc};
 
@@ -28,17 +29,16 @@ fn main() -> anyhow::Result<()> {
         let app = router(state);
         let config = ServerConfig::default();
 
-        if let (Ok(cert), Ok(key)) = (env::var("EXPLORER_CERT"), env::var("EXPLORER_KEY")) {
-            let tls = if let Ok(ca) = env::var("EXPLORER_CLIENT_CA") {
-                ServerTlsConfig::from_pem_files_with_client_auth(cert, key, ca)
-                    .context("explorer tls client auth config")?
-            } else if let Ok(ca) = env::var("EXPLORER_CLIENT_CA_OPTIONAL") {
-                ServerTlsConfig::from_pem_files_with_optional_client_auth(cert, key, ca)
-                    .context("explorer optional client auth config")?
-            } else {
-                ServerTlsConfig::from_pem_files(cert, key).context("explorer tls config")?
-            };
-            serve_tls(listener, app, config, tls)
+        let tls = server_tls_from_env("TB_EXPLORER_TLS", Some("EXPLORER"))
+            .map_err(|err| anyhow::Error::new(err))
+            .context("load explorer TLS configuration")?;
+        if let Some(result) = tls {
+            if result.legacy_env {
+                eprintln!(
+                    "explorer: using legacy EXPLORER_* TLS variables; migrate to TB_EXPLORER_TLS_*",
+                );
+            }
+            serve_tls(listener, app, config, result.config)
                 .await
                 .context("serve explorer tls")?;
         } else {

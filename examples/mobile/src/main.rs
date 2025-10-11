@@ -1,4 +1,7 @@
-use httpd::{BlockingClient, HttpError, Method, Response, Router, ServerConfig, StatusCode};
+use http_env::blocking_client as env_blocking_client;
+use httpd::{
+    BlockingClient, HttpError, Method, Response, Router, ServerConfig, StatusCode,
+};
 use light_client::{sync_background, upload_compressed_logs, Header, LightClient, SyncOptions};
 use runtime::net::TcpListener;
 use foundation_serialization::{Deserialize, Serialize};
@@ -119,8 +122,10 @@ fn main() {
     show_gov_votes();
 }
 
+const MOBILE_TLS_PREFIXES: &[&str] = &["TB_MOBILE_TLS", "TB_HTTP_TLS"];
+
 fn notify_tx(id: &str) {
-    let client = BlockingClient::default();
+    let client = env_blocking_client(MOBILE_TLS_PREFIXES, "examples::mobile");
     let _ = client
         .request(Method::Post, "http://localhost:8080/push")
         .and_then(|builder| builder.json(&foundation_serialization::json!({ "tx": id })))

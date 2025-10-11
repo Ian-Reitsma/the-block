@@ -1,5 +1,6 @@
 use concurrency::Lazy;
 use diagnostics::tracing::{info, warn};
+use http_env::http_client as env_http_client;
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
@@ -43,6 +44,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
+
+fn http_client() -> HttpClient {
+    env_http_client(&["TB_AGGREGATOR_TLS", "TB_HTTP_TLS"], "metrics-aggregator")
+}
 
 fn archive_metrics(blob: &str) {
     if let Ok(path) = std::env::var("TB_METRICS_ARCHIVE") {
@@ -549,7 +554,7 @@ async fn fetch_and_dump_logs(
     dump_dir: String,
     record: CorrelationRecord,
 ) -> Result<(), String> {
-    let client = HttpClient::default();
+    let client = http_client();
     let base = api.trim_end_matches('/');
     let mut serializer = form_urlencoded::Serializer::new(String::new());
     serializer.append_pair("db", &db);

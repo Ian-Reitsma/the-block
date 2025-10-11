@@ -22,6 +22,8 @@ use parse_utils::{
 };
 use system::SystemCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
+use tls::handle as handle_tls;
+use tls::TlsCmd;
 use version::VersionCmd;
 
 use crate::fee_estimator::RollingMedianEstimator;
@@ -39,6 +41,7 @@ mod fee_estimator;
 mod gateway;
 mod gov;
 mod htlc;
+mod http_client;
 mod identity;
 mod inhouse;
 mod light_client;
@@ -53,6 +56,7 @@ mod snark;
 mod storage;
 mod system;
 mod telemetry;
+mod tls;
 mod tx;
 mod version;
 #[cfg(feature = "quantum")]
@@ -244,6 +248,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_system(cmd);
             Ok(())
         }
+        "tls" => {
+            let cmd = TlsCmd::from_matches(sub_matches)?;
+            handle_tls(cmd)?;
+            Ok(())
+        }
         "bridge" => {
             let cmd = BridgeCmd::from_matches(sub_matches)?;
             handle_bridge(cmd);
@@ -335,6 +344,7 @@ fn build_root_command() -> Command {
         .subcommand(GatewayCmd::command())
         .subcommand(IdentityCmd::command())
         .subcommand(SystemCmd::command())
+        .subcommand(TlsCmd::command())
         .subcommand(BridgeCmd::command())
         .subcommand(GovCmd::command())
         .subcommand(HtlcCmd::command())

@@ -9,10 +9,10 @@ legacy-format = ["dep:sled-legacy"]
 
 [dependencies]
 storage_engine = { path = "../crates/storage_engine" }
-thiserror = "1"
-tempfile = "3"
+thiserror = { path = "../crates/thiserror" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
 crypto_suite = { path = "../crates/crypto_suite" }
+sys = { path = "../crates/sys" }
 
 [dependencies.sled-legacy]
 package = "sled"

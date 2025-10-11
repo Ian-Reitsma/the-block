@@ -1,6 +1,6 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;

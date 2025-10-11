@@ -5,9 +5,14 @@ use std::time::SystemTime;
 
 use crypto_suite::mac::{hmac_sha256, sha256_digest};
 use foundation_time::{FormatError as TimeFormatError, FormatKind, UtcDateTime};
+use http_env::http_client as env_http_client;
 use httpd::{ClientError, HttpClient, Method};
 
 const METRICS_OBJECT_KEY: &str = "metrics/latest.zip";
+
+fn http_client() -> HttpClient {
+    env_http_client(&["TB_AGGREGATOR_TLS", "TB_HTTP_TLS"], "metrics-aggregator")
+}
 
 pub fn upload_metrics_snapshot(bucket: &str, data: Vec<u8>) -> Result<(), UploadError> {
     let config = S3Config::from_env()?;
@@ -26,7 +31,7 @@ async fn put_object(
     now: UtcDateTime,
 ) -> Result<(), UploadError> {
     let artifacts = signing_artifacts(&config, &bucket, key, &body, now)?;
-    let client = HttpClient::default();
+    let client = http_client();
     let mut request = client
         .request(Method::Put, &artifacts.url)
         .map_err(UploadError::Client)?

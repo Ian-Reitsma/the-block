@@ -1,5 +1,17 @@
 # Node Dependency Tree
 
+> **2025-10-10 update:** The generated tree still lists `pprof`, `subtle`,
+> `tempfile`, `libc`, and `thiserror`/`thiserror-impl`. These have been replaced
+> by the in-house `foundation_profiler` crate, `crypto_suite::constant_time`
+> helpers, the `sys::tempfile` module, direct FFI inside `crates/sys`, and the
+> workspace `thiserror` derive crate; the diagram will refresh with the next
+> cargo tree export.
+>
+> **2025-10-11 update:** CLI and node binaries now import shared HTTP client
+> helpers that wrap `httpd::TlsConnector`, so the dependency tree will continue
+> to show `httpd` while HTTPS provisioning is handled entirely through the
+> first-party TLS facade with environment prefixes.
+
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
 ```
@@ -333,27 +345,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── httpd v0.1.0 (/workspace/the-block/crates/httpd) (*)
 │   ├── ledger v0.1.0 (/workspace/the-block/ledger) (*)
 │   ├── metrics v0.21.1 (*)
-│   ├── native-tls v0.2.14
-│   │   ├── log v0.4.28
-│   │   ├── openssl v0.10.73
-│   │   │   ├── bitflags v2.9.4
-│   │   │   ├── cfg-if v1.0.3
-│   │   │   ├── foreign-types v0.3.2
-│   │   │   │   └── foreign-types-shared v0.1.1
-│   │   │   ├── libc v0.2.176
-│   │   │   ├── once_cell v1.21.3
-│   │   │   ├── openssl-macros v0.1.1 (proc-macro)
-│   │   │   │   ├── proc-macro2 v1.0.101 (*)
-│   │   │   │   ├── quote v1.0.41 (*)
-│   │   │   │   └── syn v2.0.106 (*)
-│   │   │   └── openssl-sys v0.9.109
-│   │   │       └── libc v0.2.176
-│   │   │       [build-dependencies]
-│   │   │       ├── cc v1.2.40 (*)
-│   │   │       ├── pkg-config v0.3.32
-│   │   │       └── vcpkg v0.2.15
-│   │   ├── openssl-probe v0.1.6
-│   │   └── openssl-sys v0.9.109 (*)
+│   ├── foundation_tls v0.1.0 (/workspace/the-block/crates/foundation_tls)
+│   ├── foundation_time v0.1.0 (/workspace/the-block/crates/foundation_time)
 │   ├── rand v0.1.0 (/workspace/the-block/crates/rand) (*)
 │   ├── serde v1.0.228 (*)
 │   ├── subtle v2.6.1

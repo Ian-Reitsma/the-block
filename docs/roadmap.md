@@ -1,6 +1,6 @@
 # Status & Roadmap
-> **Review (2025-10-10):** Introduced the `foundation_sqlite` facade for explorer/CLI/log-indexer tooling, added the `foundation_time` crate so runtime/tooling timestamp paths move off the upstream `time` API, and replaced the legacy CLI colour stack with the first-party `foundation_tui` helpers while the binary codec consolidation continues across node, crypto suite, telemetry, and harness tooling.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and TUI facades are live with governance overrides enforced (2025-10-10).
+> **Review (2025-10-11):** Added the `http_env` helper crate so every CLI/node/aggregator/explorer binary shares one TLS loader with scoped fallbacks, shipped the `contract tls convert` command for PEM→JSON conversion, migrated the remaining HTTP clients onto the new helpers, and introduced integration tests that spin up the in-house HTTPS server to verify prefix selection and error reporting while binary codec consolidation continues across node, crypto suite, telemetry, and harness tooling.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
 The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, and the aggregator, gateway, explorer, and indexer surfaces all serve via the in-house `httpd` router. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
@@ -30,6 +30,11 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   builder. QUIC and s2n listeners now draw deterministic validity windows and
   serial numbers from `foundation_tls::RotationPolicy`, and the transport
   adapter can bind listeners with complete CA chains.
+- Wallet remote signer flows, the CLI RPC client, node HTTP helpers, and the
+  metrics aggregator now use the first-party `httpd::TlsConnector` with
+  environment-driven trust anchor/identity loading, eliminating the
+  `native-tls` shim and unblocking `FIRST_PARTY_ONLY=1` builds for HTTPS
+  consumers across tooling.
 - The network CLI now renders colours through the `foundation_tui` facade,
   dropping the third-party `colored` crate while keeping ANSI output gated on
   terminal detection and operator overrides.
@@ -43,6 +48,10 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
 - CLI, light-client, and transport path discovery flow through the new
   `sys::paths` adapters, removing the legacy `dirs` dependency and aligning
   migration scripts with the first-party OS abstraction.
+- `http_env` wraps both blocking and async HTTP clients in a shared environment
+  loader with component-tagged fallbacks, and the TLS env integration tests
+  exercise multi-prefix selection plus missing-identity error reporting,
+  ensuring the new helpers keep `FIRST_PARTY_ONLY=1` builds viable.
 Downstream tooling now targets the shared
 `governance` crate, compute settlement and the matcher enforce per-lane fairness
 with staged seeding, fairness deadlines, starvation warnings, and per-lane

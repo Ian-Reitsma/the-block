@@ -4,6 +4,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
 use foundation_serialization::Deserialize;
 use foundation_serialization::json;
@@ -14,6 +15,8 @@ struct Summary {
     receipts: u64,
     invalid: u64,
 }
+
+const TLS_PREFIXES: &[&str] = &["TB_RPC_TLS", "TB_HTTP_TLS"];
 
 fn main() {
     let mut argv = std::env::args();
@@ -44,7 +47,8 @@ fn main() {
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
     let body = foundation_serialization::json!({"method":"settlement.audit"});
-    let res: json::Value = BlockingClient::default()
+    let client = env_blocking_client(TLS_PREFIXES, "examples::audit");
+    let res: json::Value = client
         .request(Method::Post, &rpc)
         .and_then(|builder| builder.json(&body))
         .and_then(|builder| builder.send())

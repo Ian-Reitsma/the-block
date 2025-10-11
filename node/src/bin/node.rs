@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used)]
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
+use foundation_profiler::ProfilerGuard;
 use foundation_serialization::json::{self, Map as JsonMap};
 use runtime::sync::CancellationToken;
 use std::fs::{self, File};
@@ -353,7 +354,7 @@ fn init_logging(
     format: &str,
     specs: &[String],
     profiling: bool,
-) -> Result<(Option<pprof::ProfilerGuard>, Option<TraceGuard>), TbError> {
+) -> Result<(Option<ProfilerGuard>, Option<TraceGuard>), TbError> {
     let (default, directives) = parse_directives(specs);
     let log_format = if format.eq_ignore_ascii_case("json") {
         LogFormat::Json
@@ -374,8 +375,7 @@ fn init_logging(
         .map_err(|_| TbError::new("log sink already installed"))?;
 
     if profiling {
-        let guard =
-            pprof::ProfilerGuard::new(100).ok_or_else(|| TbError::new("profiler init failed"))?;
+        let guard = ProfilerGuard::new(100).ok_or_else(|| TbError::new("profiler init failed"))?;
         let trace_guard = trace.map(|writer| TraceGuard { writer });
         Ok((Some(guard), trace_guard))
     } else {

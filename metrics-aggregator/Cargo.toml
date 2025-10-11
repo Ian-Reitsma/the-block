@@ -8,6 +8,7 @@ build = "build.rs"
 concurrency = { path = "../crates/concurrency" }
 diagnostics = { path = "../crates/diagnostics" }
 httpd = { path = "../crates/httpd" }
+http_env = { path = "../crates/http_env" }
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_telemetry = { path = "../crates/foundation_telemetry" }

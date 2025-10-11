@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [dev-dependencies]
-tempfile = "3"
+sys = { path = "../../crates/sys" }
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

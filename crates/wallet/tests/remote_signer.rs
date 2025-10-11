@@ -4,6 +4,7 @@ use crypto_suite::signatures::ed25519::{Signature, SigningKey, SIGNATURE_LENGTH}
 use httpd::{ServerTlsConfig, StatusCode};
 use ledger::crypto::remote_tag;
 use std::time::Duration;
+use sys::tempfile::NamedTempFile;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 use support::{HttpSignerMock, TlsWebSocketSignerMock};
@@ -92,7 +93,7 @@ fn remote_signer_timeout() {
 fn remote_signer_mtls_ws() {
     use base64_fp::encode_standard;
     use foundation_time::{Duration as TimeDuration, UtcDateTime};
-    use foundation_tls::{sign_self_signed_ed25519, sign_with_ca_ed25519, SelfSignedCertParams};
+    use foundation_tls::{sign_with_ca_ed25519, SelfSignedCertParams};
     use rand::rngs::OsRng;
     use rand::RngCore;
 
@@ -127,11 +128,8 @@ fn remote_signer_mtls_ws() {
         .ca(true)
         .build()
         .unwrap();
-    let ca_cert = sign_self_signed_ed25519(&ca_key, &ca_params).unwrap();
-
-    let cert_file = sys::temp::NamedTempFile::new().unwrap();
-    let key_file = sys::temp::NamedTempFile::new().unwrap();
-    let ca_file = sys::temp::NamedTempFile::new().unwrap();
+    let cert_file = NamedTempFile::new().unwrap();
+    let key_file = NamedTempFile::new().unwrap();
     let client_key = SigningKey::generate(&mut rng);
     let client_params = SelfSignedCertParams::builder()
         .subject_cn("client")
@@ -151,37 +149,45 @@ fn remote_signer_mtls_ws() {
     );
     std::fs::write(cert_file.path(), client_cert_pem).unwrap();
     std::fs::write(key_file.path(), client_key_pem).unwrap();
-    std::fs::write(ca_file.path(), der_to_pem("CERTIFICATE", &ca_cert)).unwrap();
     std::env::set_var("REMOTE_SIGNER_TLS_CERT", cert_file.path());
     std::env::set_var("REMOTE_SIGNER_TLS_KEY", key_file.path());
-    std::env::set_var("REMOTE_SIGNER_TLS_CA", ca_file.path());
 
     let server_key = SigningKey::generate(&mut rng);
-    let server_params = SelfSignedCertParams::builder()
-        .subject_cn("127.0.0.1")
-        .add_dns_name("127.0.0.1")
-        .validity(
-            UtcDateTime::now() - TimeDuration::hours(1),
-            UtcDateTime::now() + TimeDuration::days(7),
-        )
-        .serial(random_serial())
-        .build()
-        .unwrap();
-    let server_cert_der =
-        sign_with_ca_ed25519(&ca_key, ca_params.subject_cn(), &server_key, &server_params).unwrap();
-    let server_cert_pem = der_to_pem("CERTIFICATE", &server_cert_der);
-    let server_key_pem = der_to_pem(
-        "PRIVATE KEY",
-        server_key.to_pkcs8_der().expect("server pkcs8").as_bytes(),
+    let server_cert_file = NamedTempFile::new().unwrap();
+    let server_key_file = NamedTempFile::new().unwrap();
+    let server_cert_json = format!(
+        "{{\"version\":1,\"algorithm\":\"ed25519\",\"public_key\":\"{}\"}}",
+        encode_standard(&server_key.verifying_key().to_bytes())
     );
-    let server_cert_file = sys::temp::NamedTempFile::new().unwrap();
-    let server_key_file = sys::temp::NamedTempFile::new().unwrap();
-    std::fs::write(server_cert_file.path(), server_cert_pem).unwrap();
-    std::fs::write(server_key_file.path(), server_key_pem).unwrap();
-    let tls = ServerTlsConfig::from_pem_files_with_client_auth(
+    let server_key_json = format!(
+        "{{\"version\":1,\"algorithm\":\"ed25519\",\"private_key\":\"{}\"}}",
+        encode_standard(&server_key.to_bytes())
+    );
+    std::fs::write(server_cert_file.path(), server_cert_json).unwrap();
+    std::fs::write(server_key_file.path(), server_key_json).unwrap();
+
+    let client_registry_file = NamedTempFile::new().unwrap();
+    let client_registry = format!(
+        "{{\"version\":1,\"allowed\":[{{\"algorithm\":\"ed25519\",\"public_key\":\"{}\"}}]}}",
+        encode_standard(&client_key.verifying_key().to_bytes())
+    );
+    std::fs::write(client_registry_file.path(), client_registry).unwrap();
+
+    let trust_anchor_file = NamedTempFile::new().unwrap();
+    std::fs::write(
+        trust_anchor_file.path(),
+        format!(
+            "{{\"version\":1,\"algorithm\":\"ed25519\",\"public_key\":\"{}\"}}",
+            encode_standard(&server_key.verifying_key().to_bytes())
+        ),
+    )
+    .unwrap();
+    std::env::set_var("REMOTE_SIGNER_TLS_CA", trust_anchor_file.path());
+
+    let tls = ServerTlsConfig::from_identity_files_with_client_auth(
         server_cert_file.path(),
         server_key_file.path(),
-        ca_file.path(),
+        client_registry_file.path(),
     )
     .unwrap();
 

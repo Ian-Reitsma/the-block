@@ -7,7 +7,6 @@ edition = "2021"
 serde = { version = "1.0", features = ["derive"] }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 crypto_suite = { path = "../crates/crypto_suite" }
-subtle = "2"
 
 [dev-dependencies]
 testkit = { path = "../crates/testkit" }

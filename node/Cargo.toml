@@ -13,7 +13,6 @@ inflation = { path = "../inflation" }
 rand = { path = "../crates/rand" }
 dkg = { path = "../dkg" }
 histogram_fp = { path = "../crates/histogram_fp" }
-subtle = "2"
 foundation_time = { path = "../crates/foundation_time" }
 diagnostics = { path = "../crates/diagnostics" }
 concurrency = { path = "../crates/concurrency", features = ["serde"] }
@@ -22,6 +21,7 @@ wallet = { path = "../crates/wallet" }
 # Async runtime facade
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 httpd = { path = "../crates/httpd" }
+http_env = { path = "../crates/http_env" }
 # Region policy packs
 jurisdiction = { path = "../crates/jurisdiction" }
 p2p_overlay = { path = "../crates/p2p_overlay" }
@@ -34,6 +34,7 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_regex = { path = "../crates/foundation_regex" }
 foundation_rpc = { path = "../crates/foundation_rpc" }
 foundation_telemetry = { path = "../crates/foundation_telemetry" }
+foundation_profiler = { path = "../crates/foundation_profiler" }
 foundation_archive = { path = "../crates/foundation_archive" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
 static_assertions = "1"
@@ -65,7 +66,6 @@ coding = { path = "../crates/coding" }
 # governance parameter helpers
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
-pprof = { version = "0.13", features = ["flamegraph"] }
 transport = { path = "../crates/transport", optional = true, default-features = false, features = ["inhouse", "quinn", "s2n-quic"] }
 sys = { path = "../crates/sys" }
 

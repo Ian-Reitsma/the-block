@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use storage_engine::inhouse_engine::InhouseEngine;
 use storage_engine::{KeyValue, KeyValueIterator, StorageError};
-use tempfile::TempDir;
+use sys::{error::SysError, tempfile::TempDir};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -38,6 +38,15 @@ impl From<StorageError> for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::Io(err.to_string())
+    }
+}
+
+impl From<SysError> for Error {
+    fn from(err: SysError) -> Self {
+        match err {
+            SysError::Io(io) => Error::Io(io.to_string()),
+            SysError::Unsupported(feature) => Error::Unsupported(feature.into()),
+        }
     }
 }
 
@@ -374,7 +383,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     fn open_persistent() -> (Db, PathBuf) {
         let dir = tempdir().unwrap();

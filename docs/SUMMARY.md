@@ -1,6 +1,6 @@
 # Summary
-> **Review (2025-09-25):** Synced Summary guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-11):** Captured the wallet TLS client migration, updated dependency guidance after retiring `native-tls`, and reaffirmed the dependency-sovereignty pivot checkpoints.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, and TLS facades are live with governance overrides enforced (2025-10-11).
 
 - [Progress Snapshot & Pillar Evidence](progress.md)
 - [Dependency Sovereignty Pivot Plan](pivot_dependency_strategy.md)

@@ -26,6 +26,7 @@ use cli_core::{
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
+use node::http_client;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -889,7 +890,7 @@ fn top_level_commands() -> Vec<&'static str> {
 }
 
 fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
-    BlockingClient::default()
+    http_client::blocking_client()
         .request(Method::Post, rpc)?
         .timeout(Duration::from_secs(5))
         .header("host", "localhost")
@@ -1349,7 +1350,7 @@ fn main() {
                     } else if let Some(pass) = password {
                         url.push_str(&format!("?password={pass}"));
                     }
-                    match BlockingClient::default().request(Method::Get, &url) {
+                    match http_client::blocking_client().request(Method::Get, &url) {
                         Ok(builder) => match builder.timeout(Duration::from_secs(30)).send() {
                             Ok(resp) => {
                                 if resp.status().is_success() {

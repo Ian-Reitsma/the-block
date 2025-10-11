@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
+use std::io::{Error as IoError, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
 use concurrency::Bytes;
@@ -49,7 +50,7 @@ pub struct Adapter {
 }
 
 struct AdapterInner {
-    endpoints: Mutex<HashMap<SocketAddr, Arc<EndpointInner>>>,
+    endpoints: Mutex<HashMap<SocketAddr, Weak<EndpointInner>>>,
     connections: Mutex<HashMap<SocketAddr, Arc<Connection>>>,
     callbacks: InhouseEventCallbacks,
     retry: RetryPolicy,
@@ -85,9 +86,14 @@ impl Adapter {
     }
 
     pub async fn listen(&self, addr: SocketAddr) -> DiagResult<(Endpoint, Certificate)> {
-        let mut endpoints = self.inner.endpoints.lock().unwrap();
-        if endpoints.contains_key(&addr) {
-            return Err(anyhow!("listener already active"));
+        {
+            let mut endpoints = self.inner.endpoints.lock().unwrap();
+            if let Some(existing) = endpoints.get(&addr) {
+                if existing.upgrade().is_some() {
+                    return Err(anyhow!("listener already active"));
+                }
+                endpoints.remove(&addr);
+            }
         }
 
         let certificate = Certificate::generate()?;
@@ -111,14 +117,20 @@ impl Adapter {
         // immediate connection attempts do not race the listener startup.
         runtime::yield_now().await;
 
+        let owner = Arc::downgrade(&self.inner);
         let endpoint = Arc::new(EndpointInner {
+            owner,
             addr: local_addr,
             certificate: certificate.clone(),
             shutdown,
             _worker: worker,
         });
 
-        endpoints.insert(local_addr, endpoint.clone());
+        self.inner
+            .endpoints
+            .lock()
+            .unwrap()
+            .insert(local_addr, Arc::downgrade(&endpoint));
         Ok((Endpoint { inner: endpoint }, certificate))
     }
 
@@ -163,6 +175,7 @@ impl Adapter {
             let endpoints = self.inner.endpoints.lock().unwrap();
             endpoints
                 .get(&addr)
+                .and_then(|endpoint| endpoint.upgrade())
                 .map(|endpoint| endpoint.certificate.clone())
                 .ok_or_else(|| anyhow!("no listener"))?
         };
@@ -212,6 +225,7 @@ pub struct Endpoint {
 }
 
 struct EndpointInner {
+    owner: Weak<AdapterInner>,
     addr: SocketAddr,
     certificate: Certificate,
     shutdown: CancellationToken,
@@ -227,6 +241,16 @@ impl Endpoint {
 impl Drop for EndpointInner {
     fn drop(&mut self) {
         self.shutdown.cancel();
+        if let Some(owner) = self.owner.upgrade() {
+            let mut endpoints = owner.endpoints.lock().unwrap();
+            let self_ptr = self as *const EndpointInner as *mut EndpointInner;
+            if let Some(entry) = endpoints.get(&self.addr) {
+                let entry_ptr = Weak::as_ptr(entry);
+                if entry_ptr == self_ptr || entry.upgrade().is_none() {
+                    endpoints.remove(&self.addr);
+                }
+            }
+        }
     }
 }
 
@@ -239,7 +263,7 @@ struct ConnectionInner {
     remote_addr: SocketAddr,
     handshake_id: [u8; 16],
     certificate: Certificate,
-    socket: Arc<AsyncMutex<UdpSocket>>,
+    socket: Arc<AsyncMutex<Option<UdpSocket>>>,
     incoming: AsyncMutex<UnboundedReceiver<Vec<u8>>>,
     shutdown: CancellationToken,
     deliveries: std::sync::atomic::AtomicU64,
@@ -248,7 +272,7 @@ struct ConnectionInner {
 
 impl Connection {
     fn from_handshake(handshake: ClientHandshake, certificate: Certificate) -> Arc<Self> {
-        let socket = Arc::new(AsyncMutex::new(handshake.socket));
+        let socket = Arc::new(AsyncMutex::new(Some(handshake.socket)));
         let (tx, rx) = mpsc::unbounded_channel();
         let shutdown = CancellationToken::new();
         let inner = Arc::new(ConnectionInner {
@@ -270,11 +294,16 @@ impl Connection {
 
     async fn send(&self, data: &[u8]) -> DiagResult<()> {
         let frame = encode_application_data(&self.inner.handshake_id, data);
+        let mut socket = {
+            let mut guard = self.inner.socket.lock().await;
+            guard
+                .take()
+                .ok_or_else(|| anyhow!("connection socket closed"))?
+        };
+        let result = socket.send_to(&frame, self.inner.remote_addr).await;
         let mut guard = self.inner.socket.lock().await;
-        guard
-            .send_to(&frame, self.inner.remote_addr)
-            .await
-            .map_err(|err| anyhow!("send datagram: {err}"))?;
+        *guard = Some(socket);
+        result.map_err(|err| anyhow!("send datagram: {err}"))?;
         Ok(())
     }
 
@@ -451,7 +480,7 @@ async fn receive_server_hello(
 
 async fn client_receiver_loop(
     connection: Arc<ConnectionInner>,
-    socket: Arc<AsyncMutex<UdpSocket>>,
+    socket: Arc<AsyncMutex<Option<UdpSocket>>>,
     tx: UnboundedSender<Vec<u8>>,
     shutdown: CancellationToken,
 ) {
@@ -484,11 +513,19 @@ async fn client_receiver_loop(
 }
 
 async fn recv_datagram(
-    socket: &Arc<AsyncMutex<UdpSocket>>,
+    socket: &Arc<AsyncMutex<Option<UdpSocket>>>,
 ) -> std::io::Result<(Vec<u8>, SocketAddr)> {
-    let mut guard = socket.lock().await;
+    let mut udp = {
+        let mut guard = socket.lock().await;
+        guard
+            .take()
+            .ok_or_else(|| IoError::new(ErrorKind::NotConnected, "connection socket closed"))?
+    };
     let mut buf = vec![0u8; MAX_DATAGRAM];
-    let (len, addr) = guard.recv_from(&mut buf).await?;
+    let result = udp.recv_from(&mut buf).await;
+    let mut guard = socket.lock().await;
+    *guard = Some(udp);
+    let (len, addr) = result?;
     buf.truncate(len);
     Ok((buf, addr))
 }
@@ -509,7 +546,7 @@ async fn server_loop(
                 let message = match decode_message(&buf[..len]) {
                     Ok(message) => message,
                     Err(MessageError::InvalidVersion(_)) | Err(MessageError::UnknownKind(_)) => {
-                        continue
+                        continue;
                     }
                     Err(_) => continue,
                 };

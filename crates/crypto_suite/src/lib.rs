@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod constant_time;
 pub mod encoding;
 pub mod encryption;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod zk;
 /// Semantic version of the crypto suite crate for telemetry labeling.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub use constant_time::{ConstantTimeEq, CtChoice};
 pub use encoding::hex;
 pub use error::{Error, ErrorKind, Result};
 

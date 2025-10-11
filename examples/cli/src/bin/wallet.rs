@@ -4,6 +4,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
 };
+use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
 use foundation_serialization::json;
 use wallet::{Wallet, WalletSigner};
@@ -14,6 +15,8 @@ enum Role {
     Storage,
     Exec,
 }
+
+const TLS_PREFIXES: &[&str] = &["TB_RPC_TLS", "TB_HTTP_TLS"];
 
 fn main() {
     if let Err(err) = run_cli() {
@@ -98,7 +101,7 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
             "threshold": 1,
         }
     });
-    let client = BlockingClient::default();
+    let client = env_blocking_client(TLS_PREFIXES, "examples::wallet");
     match client
         .request(Method::Post, &url)
         .and_then(|builder| builder.json(&body))
@@ -128,7 +131,7 @@ fn handle_escrow_balance(matches: &Matches) -> Result<(), String> {
         "method": "rent.escrow.balance",
         "params": {"id": account},
     });
-    let client = BlockingClient::default();
+    let client = env_blocking_client(TLS_PREFIXES, "examples::wallet");
     match client
         .request(Method::Post, &url)
         .and_then(|builder| builder.json(&payload))

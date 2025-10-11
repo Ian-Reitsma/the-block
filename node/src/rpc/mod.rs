@@ -17,6 +17,7 @@ use ::storage::{contract::StorageContract, offer::StorageOffer};
 use base64_fp::decode_standard;
 use concurrency::Lazy;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use crypto_suite::ConstantTimeEq;
 use foundation_rpc::{
     Params as RpcParams, Request as RpcRequest, Response as RpcResponse, RpcError,
 };
@@ -41,7 +42,6 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
-use subtle::ConstantTimeEq;
 
 pub mod ledger;
 pub mod limiter;

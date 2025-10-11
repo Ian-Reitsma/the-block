@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
-tempfile = "3"
+sys = { path = "../crates/sys" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 
 the_block = { path = "../node", features = ["fuzzy"] }

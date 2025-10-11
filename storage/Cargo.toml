@@ -9,10 +9,10 @@ telemetry = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+thiserror = { path = "../crates/thiserror" }
 crypto_suite = { path = "../crates/crypto_suite" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 
 [dev-dependencies]
-tempfile = "3"
+sys = { path = "../crates/sys" }
 the_block = { path = "../node", features = ["telemetry"] }
