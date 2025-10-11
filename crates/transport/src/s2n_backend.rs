@@ -16,7 +16,10 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::json::{self, Map, Value};
 use foundation_time::{Duration, UtcDateTime};
-use foundation_tls::{sign_self_signed_ed25519, RotationPolicy, SelfSignedCertParams};
+use foundation_tls::{
+    sign_self_signed_ed25519, OcspResponse, RotationPolicy, SelfSignedCertParams,
+    SessionResumeStore, TrustAnchorStore,
+};
 use rand::{OsRng, RngCore};
 use runtime::net::UdpSocket;
 use runtime::sync::Mutex as AsyncMutex;
@@ -50,6 +53,9 @@ pub enum S2nCallbackError {
 
 static CALLBACKS: OnceLock<RwLock<Arc<S2nEventCallbacks>>> = OnceLock::new();
 static HANDSHAKE_TIMEOUT: OnceLock<RwLock<StdDuration>> = OnceLock::new();
+static TRUST_ANCHORS: OnceLock<RwLock<Option<Arc<TrustAnchorStore>>>> = OnceLock::new();
+static SESSION_STORE: OnceLock<RwLock<Option<Arc<SessionResumeStore>>>> = OnceLock::new();
+static OCSP_STATE: OnceLock<RwLock<Option<OcspResponse>>> = OnceLock::new();
 
 fn with_callbacks<F>(f: F)
 where
@@ -81,6 +87,39 @@ fn handshake_timeout() -> StdDuration {
 pub fn set_handshake_timeout(timeout: StdDuration) {
     let lock = HANDSHAKE_TIMEOUT.get_or_init(|| RwLock::new(StdDuration::from_secs(5)));
     *lock.write().unwrap() = timeout;
+}
+
+pub fn install_trust_anchors(store: TrustAnchorStore) {
+    let lock = TRUST_ANCHORS.get_or_init(|| RwLock::new(None));
+    *lock.write().unwrap() = Some(Arc::new(store));
+}
+
+pub fn clear_trust_anchors() {
+    if let Some(lock) = TRUST_ANCHORS.get() {
+        *lock.write().unwrap() = None;
+    }
+}
+
+pub fn install_session_store(store: SessionResumeStore) {
+    let lock = SESSION_STORE.get_or_init(|| RwLock::new(None));
+    *lock.write().unwrap() = Some(Arc::new(store));
+}
+
+pub fn clear_session_store() {
+    if let Some(lock) = SESSION_STORE.get() {
+        *lock.write().unwrap() = None;
+    }
+}
+
+pub fn install_ocsp_response(response: OcspResponse) {
+    let lock = OCSP_STATE.get_or_init(|| RwLock::new(None));
+    *lock.write().unwrap() = Some(response);
+}
+
+pub fn clear_ocsp_response() {
+    if let Some(lock) = OCSP_STATE.get() {
+        *lock.write().unwrap() = None;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -262,7 +301,7 @@ fn parse_u64_field(value: Value, field: &str) -> Result<u64> {
 }
 
 #[cfg(test)]
-mod tests {
+mod storage_tests {
     use super::*;
 
     fn expect_string<'a>(value: &'a Value, field: &str) -> &'a str {
@@ -794,7 +833,7 @@ async fn wait_for_ack(
 }
 
 #[cfg(test)]
-mod tests {
+mod transport_tests {
     use super::*;
     use rand::OsRng;
     use std::sync::{

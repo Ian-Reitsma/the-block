@@ -8,8 +8,8 @@ use concurrency::Bytes;
 use sys::tempfile::tempdir;
 use transport::{
     available_providers, inhouse_certificate_store, CertificateHandle, CertificateStore, Config,
-    DefaultFactory, ListenerHandle, ProviderCapability, ProviderKind, RetryPolicy,
-    TransportCallbacks, TransportFactory,
+    DefaultFactory, ProviderCapability, ProviderKind, RetryPolicy, TransportCallbacks,
+    TransportFactory,
 };
 
 fn test_config() -> Config {
@@ -20,7 +20,8 @@ fn test_config() -> Config {
             attempts: 2,
             backoff: Duration::from_millis(1),
         },
-        handshake_timeout: Duration::from_millis(20),
+        handshake_timeout: Duration::from_millis(50),
+        tls: Default::default(),
     }
 }
 
@@ -34,16 +35,15 @@ fn handshake_success_roundtrip() {
             .expect("registry");
         let adapter = registry.inhouse().expect("inhouse adapter");
 
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let (listener, cert) = adapter.listen(addr).await.expect("listen");
-        match listener {
-            ListenerHandle::Inhouse(endpoint) => {
-                assert_eq!(endpoint.local_addr(), addr);
-            }
-        }
+        let listen_addr = listener
+            .as_inhouse()
+            .expect("inhouse listener")
+            .local_addr();
 
         let conn = adapter
-            .connect(addr, &cert)
+            .connect(listen_addr, &cert)
             .await
             .expect("handshake succeeds");
         adapter.send(&conn, b"hello inhouse").await.expect("send");
@@ -52,7 +52,7 @@ fn handshake_success_roundtrip() {
 
         let stats = adapter.connection_stats();
         assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].0, addr);
+        assert_eq!(stats[0].0, listen_addr);
         assert!(stats[0].1.deliveries >= 1);
     });
 }
@@ -67,20 +67,27 @@ fn handshake_rejects_mismatched_certificate() {
             .expect("registry");
         let adapter = registry.inhouse().expect("inhouse adapter");
 
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001);
-        let (_listener, cert) = adapter.listen(addr).await.expect("listen");
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let (listener, cert) = adapter.listen(addr).await.expect("listen");
+        let listen_addr = listener
+            .as_inhouse()
+            .expect("inhouse listener")
+            .local_addr();
 
         // Derive an unrelated certificate to trigger the mismatch path.
         let bogus = adapter.certificate_from_der(Bytes::from(vec![1, 2, 3, 4]));
         let err = adapter
-            .connect(addr, &bogus)
+            .connect(listen_addr, &bogus)
             .await
             .err()
             .expect("handshake fails");
         assert!(err.to_string().contains("handshake failed"));
 
         // Ensure the real certificate continues to succeed after the failure.
-        let conn = adapter.connect(addr, &cert).await.expect("retry succeeds");
+        let conn = adapter
+            .connect(listen_addr, &cert)
+            .await
+            .expect("retry succeeds");
         adapter
             .send(&conn, b"ok")
             .await
@@ -98,22 +105,24 @@ fn verify_remote_certificate_matches_generated_material() {
             .expect("registry");
         let adapter = registry.inhouse().expect("inhouse adapter");
 
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9010);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let (_listener, cert) = adapter.listen(addr).await.expect("listen");
 
-        let (fingerprint, der) = match cert {
-            CertificateHandle::Inhouse(cert) => (cert.fingerprint, cert.der.clone()),
+        let (fingerprint, verifying_key, der) = match cert {
+            CertificateHandle::Inhouse(cert) => {
+                (cert.fingerprint, cert.verifying_key, cert.der.clone())
+            }
             #[allow(unreachable_patterns)]
             _ => panic!("unexpected certificate handle"),
         };
 
         let verified = adapter
-            .verify_remote_certificate(&[3u8; 32], &der)
+            .verify_remote_certificate(&verifying_key, &der)
             .expect("verify succeeds");
         assert_eq!(verified, fingerprint);
 
         let err = adapter
-            .verify_remote_certificate(&[3u8; 32], &[])
+            .verify_remote_certificate(&[0u8; 32], &[])
             .expect_err("empty certificate rejected");
         assert!(err.to_string().contains("certificate"));
     });
@@ -129,8 +138,11 @@ fn certificate_store_rotation_persists() {
     assert!(path.exists());
     let advert2 = store.rotate().expect("rotate");
     assert_ne!(advert1.fingerprint, advert2.fingerprint);
+    assert_ne!(advert1.verifying_key, advert2.verifying_key);
+    assert_ne!(advert1.verifying_key, [0u8; 32]);
     let current = store.current().expect("current advert");
     assert_eq!(current.fingerprint, advert2.fingerprint);
+    assert_eq!(current.verifying_key, advert2.verifying_key);
 }
 
 #[test]

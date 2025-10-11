@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod store;
+
 use std::borrow::Cow;
 
 use crypto_suite::{
@@ -9,6 +11,10 @@ use crypto_suite::{
 use foundation_time::{Duration, UtcDateTime};
 use rand::rngs::OsRng;
 use thiserror::Error;
+
+pub use store::{
+    OcspError, OcspResponse, SessionResumeStore, TrustAnchor, TrustAnchorError, TrustAnchorStore,
+};
 
 #[derive(Debug, Error)]
 pub enum CertificateError {
@@ -30,6 +36,10 @@ pub enum CertificateError {
     TimestampEncoding,
     #[error("key encoding failed")]
     KeyEncoding,
+    #[error("certificate does not contain an Ed25519 subject public key")]
+    MissingPublicKey,
+    #[error("certificate subject public key is malformed")]
+    InvalidPublicKey,
 }
 
 #[derive(Clone, Debug)]
@@ -243,12 +253,9 @@ pub fn generate_self_signed_ed25519(
     let mut rng = OsRng::default();
     let signing_key = SigningKey::generate(&mut rng);
     let certificate = sign_self_signed_ed25519(&signing_key, params)?;
-    let private_key = signing_key
-        .to_pkcs8_der()
-        .map_err(|_| CertificateError::KeyEncoding)?
-        .as_bytes()
-        .to_vec();
+    let secret = signing_key.to_bytes();
     let public_key = signing_key.verifying_key().to_bytes();
+    let private_key = encode_pkcs8_ed25519(&secret, &public_key);
     Ok(GeneratedEd25519Cert {
         certificate,
         private_key,
@@ -310,6 +317,13 @@ fn assemble_certificate(tbs: Vec<u8>, signature: &[u8; 64]) -> Vec<u8> {
     sig_body.push(0u8);
     sig_body.extend_from_slice(signature);
     sequence(vec![tbs, algorithm, wrap(0x03, &sig_body)])
+}
+
+fn encode_pkcs8_ed25519(secret: &[u8; 32], _public: &[u8; 32]) -> Vec<u8> {
+    let version = encode_integer(&[0]);
+    let algorithm = sequence(vec![encode_oid(&[1, 3, 101, 112])]);
+    let private_key = wrap(0x04, &wrap(0x04, secret));
+    sequence(vec![version, algorithm, private_key])
 }
 
 fn encode_extensions(
@@ -511,6 +525,79 @@ fn encode_length(len: usize, out: &mut Vec<u8>) {
     let bytes = &buf[idx..];
     out.push(0x80 | bytes.len() as u8);
     out.extend_from_slice(bytes);
+}
+
+fn decode_length(input: &[u8]) -> Result<(usize, usize), CertificateError> {
+    if input.is_empty() {
+        return Err(CertificateError::InvalidPublicKey);
+    }
+    let first = input[0];
+    if first & 0x80 == 0 {
+        return Ok((first as usize, 1));
+    }
+    let count = (first & 0x7F) as usize;
+    if count == 0 || count > input.len() - 1 {
+        return Err(CertificateError::InvalidPublicKey);
+    }
+    let mut value = 0usize;
+    for &byte in &input[1..=count] {
+        value = value
+            .checked_mul(256)
+            .ok_or(CertificateError::InvalidPublicKey)?
+            + byte as usize;
+    }
+    Ok((value, 1 + count))
+}
+
+fn find_slice(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    let mut idx = start;
+    while idx + needle.len() <= haystack.len() {
+        if &haystack[idx..idx + needle.len()] == needle {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+    None
+}
+
+pub fn ed25519_public_key_from_der(der: &[u8]) -> Result<[u8; 32], CertificateError> {
+    const OID_ED25519: [u8; 5] = [0x06, 0x03, 0x2B, 0x65, 0x70];
+    let mut cursor = 0usize;
+    while let Some(pos) = find_slice(der, &OID_ED25519, cursor) {
+        let mut offset = pos + OID_ED25519.len();
+        if offset >= der.len() {
+            break;
+        }
+        let tag = der[offset];
+        offset += 1;
+        if tag != 0x03 {
+            cursor = offset;
+            continue;
+        }
+        let (len, consumed) = decode_length(&der[offset..])?;
+        offset += consumed;
+        if offset.checked_add(len).map_or(true, |end| end > der.len()) {
+            return Err(CertificateError::InvalidPublicKey);
+        }
+        let bit_string = &der[offset..offset + len];
+        if bit_string.is_empty() {
+            return Err(CertificateError::InvalidPublicKey);
+        }
+        if bit_string[0] != 0 {
+            return Err(CertificateError::InvalidPublicKey);
+        }
+        let key_bytes = &bit_string[1..];
+        if key_bytes.len() != 32 {
+            return Err(CertificateError::InvalidPublicKey);
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(key_bytes);
+        return Ok(out);
+    }
+    Err(CertificateError::MissingPublicKey)
 }
 
 fn timestamp_i128(time: UtcDateTime) -> Result<i128, CertificateError> {

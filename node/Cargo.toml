@@ -66,7 +66,7 @@ coding = { path = "../crates/coding" }
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
 pprof = { version = "0.13", features = ["flamegraph"] }
-transport = { path = "../crates/transport", optional = true, default-features = false, features = ["quinn", "s2n-quic"] }
+transport = { path = "../crates/transport", optional = true, default-features = false, features = ["inhouse", "quinn", "s2n-quic"] }
 sys = { path = "../crates/sys" }
 
 [features]

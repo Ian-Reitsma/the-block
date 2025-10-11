@@ -7,9 +7,10 @@ This document describes the QUIC handshake sequence, provider metadata, and fall
 ## Handshake flow
 
 1. Nodes advertise the `QuicTransport` feature bit, their QUIC socket address, certificate fingerprint, provider identifier, and capability bitmap in the `p2p::handshake::Hello` message.
-2. Peers dial the advertised QUIC endpoint through `transport::ProviderRegistry`, which instantiates the configured backend (Quinn by default, s2n-quic when enabled). The registry supplies a shared `transport::Config` derived from `config/quic.toml`, covering retry/backoff policy, handshake timeout, and certificate cache paths.
-3. The remote certificate is validated via the provider’s `CertificateStore`, which mirrors fingerprints from disk and enforces rotation history. Handshake latency, provider name, and failure reasons are emitted through the transport callbacks (`quic_conn_latency_seconds`, `quic_handshake_fail_total{peer,provider}`, `quic_provider_connect_total{provider}`).
-4. After the transport handshake completes, the standard P2P payload proceeds over the first uni-stream. The handshake layer persists the provider metadata so CLI and RPC surfaces can display which implementation each peer is using.
+2. Peers dial the advertised QUIC endpoint through `transport::ProviderRegistry`, which instantiates the configured backend (Quinn by default, s2n-quic when enabled, or the in-house UDP + TLS handshake implemented under `crates/transport/src/inhouse`). The registry supplies a shared `transport::Config` derived from `config/quic.toml`, covering retry/backoff policy, handshake timeout, and certificate cache paths.
+3. The remote certificate is validated via the provider’s `CertificateStore`, which mirrors fingerprints and the Ed25519 verifying key from disk while enforcing rotation history. Handshake latency, provider name, and failure reasons are emitted through the transport callbacks (`quic_conn_latency_seconds`, `quic_handshake_fail_total{peer,provider}`, `quic_provider_connect_total{provider}`).
+4. The in-house UDP + TLS backend retransmits client hellos with exponential backoff inside the configured handshake timeout, caches the latest `ServerHello` for duplicate packets, and prunes handshake table entries once their 30 s TTL expires so stale addresses cannot acknowledge application traffic.
+5. After the transport handshake completes, the standard P2P payload proceeds over the first uni-stream. The handshake layer persists the provider metadata so CLI and RPC surfaces can display which implementation each peer is using.
 
 ## Transport fallback
 
