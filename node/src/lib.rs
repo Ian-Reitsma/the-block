@@ -31,6 +31,7 @@ use diagnostics::tracing::info;
 use diagnostics::tracing::warn;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
+pub mod http_client;
 mod legacy_cbor;
 mod py;
 

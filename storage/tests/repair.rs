@@ -6,7 +6,7 @@ use the_block::storage::settings;
 use the_block::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy};
 use the_block::SimpleDb;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::storage::types::{CHACHA20_POLY1305_NONCE_LEN, CHACHA20_POLY1305_TAG_LEN};
 
 fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] {

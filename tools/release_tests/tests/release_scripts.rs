@@ -8,7 +8,7 @@ use std::{
     process::Command,
 };
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 fn repo_root() -> PathBuf {
     let output = Command::new("git")

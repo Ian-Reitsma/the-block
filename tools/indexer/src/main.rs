@@ -192,22 +192,17 @@ fn handle_matches(matches: Matches) -> Result<(), RunError> {
                     .map_err(|err| RunError::failure(format!("failed to bind {addr}: {err}")))?;
                 let config = ServerConfig::default();
                 let app = router(idx);
-                if let (Ok(cert), Ok(key)) = (env::var("INDEXER_CERT"), env::var("INDEXER_KEY")) {
-                    let tls = if let Ok(ca) = env::var("INDEXER_CLIENT_CA") {
-                        ServerTlsConfig::from_pem_files_with_client_auth(cert, key, ca).map_err(
-                            |err| RunError::failure(format!("invalid TLS configuration: {err}")),
-                        )?
-                    } else if let Ok(ca) = env::var("INDEXER_CLIENT_CA_OPTIONAL") {
-                        ServerTlsConfig::from_pem_files_with_optional_client_auth(cert, key, ca)
-                            .map_err(|err| {
-                                RunError::failure(format!("invalid TLS configuration: {err}"))
-                            })?
-                    } else {
-                        ServerTlsConfig::from_pem_files(cert, key).map_err(|err| {
-                            RunError::failure(format!("invalid TLS configuration: {err}"))
-                        })?
-                    };
-                    serve_tls(listener, app, config, tls)
+                let tls =
+                    server_tls_from_env("TB_INDEXER_TLS", Some("INDEXER")).map_err(|err| {
+                        RunError::failure(format!("invalid TLS configuration: {err}"))
+                    })?;
+                if let Some(result) = tls {
+                    if result.legacy_env {
+                        eprintln!(
+                            "indexer: using legacy INDEXER_* TLS variables; migrate to TB_INDEXER_TLS_*",
+                        );
+                    }
+                    serve_tls(listener, app, config, result.config)
                         .await
                         .map_err(|err| RunError::failure(format!("TLS server error: {err}")))?;
                 } else {

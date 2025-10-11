@@ -1,6 +1,6 @@
 # System-Wide Economic Changes
-> **Review (2025-10-10):** Added the `foundation_sqlite`, `foundation_time`, and `foundation_tui` entries, keeping the dependency-sovereignty log current while the codec/telemetry rewrites proceed.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and TUI facades are live with governance overrides enforced (2025-10-10).
+> **Review (2025-10-11):** Added the `http_env` TLS environment harness, logged the new HTTPS integration tests that validate prefix selection and error reporting against the in-house server, captured the `contract tls convert` helper that turns PEM material into the JSON identities consumed across the stack, and retained context on the prior `foundation_*` facade rollouts.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
 
@@ -81,6 +81,87 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - The lossy `certificate_from_der` helper still accepts legacy blobs, but any
   handshake using invalid DER will now fail during verification; update fixtures
   accordingly.
+
+## First-Party TLS Client Adoption (2025-10-11)
+
+### Rationale
+
+- **Eliminate remaining OpenSSL shims:** Wallet remote signer flows still
+  depended on `native-tls`, leaving `FIRST_PARTY_ONLY=1` builds blocked on
+  OpenSSL and schannel while the rest of the stack moved to first-party TLS.
+- **Align TLS provisioning across clients:** The HTTP client needed the same
+  certificate/identity format as the in-house transport so operators and tests
+  manage a single set of JSON trust anchors and identities.
+
+### Implementation Summary
+
+- Added `httpd::tls_client` with `TlsConnector`/`ClientTlsStream` that reuse the
+  in-house handshake, X25519 key exchange, and Ed25519 certificate validation
+  from `crates/httpd/src/tls.rs`.
+- Migrated the wallet remote signer to the new connector, supporting optional
+  client authentication, deterministic trust-anchor lookups, and in-process
+  WebSocket upgrades without leaking listeners (`crates/wallet/src/remote_signer.rs`).
+- Updated remote signer fixtures to JSON certificate/PKCS#8 assets and adjusted
+  tests to cover mutual TLS, trust anchor rejection, and signer rotation
+  (`crates/wallet/tests/remote_signer.rs`, `crates/httpd/src/tls_client.rs`).
+- Added reusable HTTP client helpers for the CLI, node binaries, and the
+  metrics aggregator so TLS identities and trust anchors are loaded from
+  environment prefixes instead of hard-coded manifests
+  (`cli/src/http_client.rs`, `node/src/http_client.rs`,
+  `metrics-aggregator/src/lib.rs`, `metrics-aggregator/src/object_store.rs`).
+- Refreshed the dependency snapshot and first-party audit to record the removal
+  of `native-tls` and OpenSSL transitively.
+
+### Operator & Developer Impact
+
+- Wallet binaries, CLI tooling, node helpers, and the metrics aggregator now
+  consume first-party TLS end-to-end with shared environment prefixes, enabling
+  `FIRST_PARTY_ONLY=1` builds for HTTPS consumers and eliminating OpenSSL from
+  remote signer deployments.
+
+## Shared TLS Environment Helpers & Converter (2025-10-11)
+
+### Rationale
+
+- **Unify environment handling:** CLI, node, and tooling binaries each carried
+  bespoke TLS loaders, leading to drift and inconsistent fallback behaviour.
+- **Accelerate PEM migrations:** Operators needed a supported path to convert
+  existing PEM material into the JSON identities consumed by the first-party
+  TLS stack.
+
+### Implementation Summary
+
+- Added the `http_env` crate exposing `blocking_client` and `http_client`
+  wrappers that delegate to `httpd` while emitting component-scoped fallbacks
+  when TLS configuration is incomplete.
+- Migrated CLI, node, metrics aggregator, explorer, probe, jurisdiction, and
+  example binaries to the new helpers, ensuring every HTTP consumer honours the
+  same prefix-ordering semantics and logging.
+- Introduced the `contract tls convert` CLI subcommand that decodes PEM or
+  existing JSON identities/trust anchors and writes the canonical JSON files
+  expected by the environment loaders.
+- Added `crates/httpd/tests/tls_env.rs`, an integration suite that spins up the
+  in-house HTTPS server and verifies prefix preference, fallback behaviour, and
+  error reporting for incomplete identities.
+
+### Operator & Developer Impact
+
+- Operators configure a single set of prefixes across binaries and receive
+  consistent warnings whenever clients fall back to plain HTTP.
+- PEM material can be converted into JSON identities and trust anchors without
+  hand editing, reducing onboarding friction.
+- Regression coverage catches prefix regressions and missing identity handling
+  before releases ship.
+
+### Migration Notes
+
+- Replace direct calls to `HttpClient::with_tls_from_env` or
+  `BlockingClient::with_tls_from_env` with the `http_env` helpers so future
+  logging/selection changes apply automatically.
+- Use `contract tls convert --cert <pem> --key <pem> [--anchor <pem>]` to stage
+  JSON identities; existing JSON files remain compatible with the new loader.
+- Tests and local tooling use the same JSON trust anchors as the transport
+  layer, reducing drift between QUIC and HTTPS provisioning.
 
 ## In-House QUIC Handshake Hardening (2025-10-10)
 

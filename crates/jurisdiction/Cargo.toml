@@ -11,6 +11,7 @@ base64_fp = { path = "../base64_fp" }
 crypto_suite = { path = "../crypto_suite" }
 foundation_lazy = { path = "../foundation_lazy" }
 httpd = { path = "../httpd" }
+http_env = { path = "../http_env" }
 
 # optional post-quantum encryption
 pqcrypto-kyber = { version = "0.8", optional = true }
@@ -20,4 +21,4 @@ default = []
 pq = ["pqcrypto-kyber"]
 
 [dev-dependencies]
-tempfile = "3"
+sys = { path = "../sys" }

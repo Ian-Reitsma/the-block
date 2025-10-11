@@ -6,7 +6,7 @@ use light_client::{
     StateStreamError,
 };
 use state::MerkleTrie;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]

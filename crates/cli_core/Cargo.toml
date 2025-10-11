@@ -10,7 +10,7 @@ name = "cli_core"
 path = "src/lib.rs"
 
 [dependencies]
-thiserror = "1"
+thiserror = { path = "../thiserror" }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [features]

@@ -3,6 +3,38 @@
     {
       "dependencies": [
         {
+          "name": "log",
+          "version": "0.4.28"
+        },
+        {
+          "name": "ring",
+          "version": "0.17.14"
+        },
+        {
+          "name": "rustls-webpki",
+          "version": "0.101.7"
+        },
+        {
+          "name": "sct",
+          "version": "0.7.1"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "foundation_tls",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 2,
+      "license": "Apache-2.0 OR ISC OR MIT",
+      "name": "rustls",
+      "origin": "crates.io",
+      "tier": "strategic",
+      "version": "0.21.12"
+    },
+    {
+      "dependencies": [
+        {
           "name": "serde_core",
           "version": "1.0.228"
         },
@@ -151,47 +183,8 @@
     {
       "dependencies": [
         {
-          "name": "gimli",
-          "version": "0.32.3"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 OR MIT",
-      "name": "addr2line",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.25.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "miniz_oxide",
-          "version": "0.8.9"
-        }
-      ],
-      "depth": 4,
-      "license": "0BSD OR MIT OR Apache-2.0",
-      "name": "adler2",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.1"
-    },
-    {
-      "dependencies": [
-        {
           "name": "cfg-if",
           "version": "1.0.3"
-        },
-        {
-          "name": "getrandom",
-          "version": "0.3.3"
         },
         {
           "name": "once_cell",
@@ -210,10 +203,6 @@
         {
           "name": "hashbrown",
           "version": "0.14.5"
-        },
-        {
-          "name": "inferno",
-          "version": "0.11.21"
         },
         {
           "name": "metrics",
@@ -347,21 +336,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.5.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "num-format",
-          "version": "0.4.4"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "arrayvec",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.7.6"
     },
     {
       "dependencies": [
@@ -551,54 +525,6 @@
       "version": "1.5.0"
     },
     {
-      "dependencies": [
-        {
-          "name": "addr2line",
-          "version": "0.25.1"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "miniz_oxide",
-          "version": "0.8.9"
-        },
-        {
-          "name": "object",
-          "version": "0.37.3"
-        },
-        {
-          "name": "rustc-demangle",
-          "version": "0.1.26"
-        },
-        {
-          "name": "windows-link",
-          "version": "0.2.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "backtrace",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.76"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -611,6 +537,10 @@
         },
         {
           "name": "crypto",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
           "version": "0.1.0"
         },
         {
@@ -653,43 +583,16 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "nix",
-          "version": "0.26.4"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "bitflags",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.3.2"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
+          "name": "io-uring",
+          "version": "0.7.10"
+        },
         {
           "name": "nix",
           "version": "0.27.1"
         },
         {
-          "name": "openssl",
-          "version": "0.10.73"
-        },
-        {
-          "name": "redox_syscall",
-          "version": "0.5.18"
-        },
-        {
           "name": "rusqlite",
           "version": "0.30.0"
-        },
-        {
-          "name": "rustix",
-          "version": "1.1.2"
-        },
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
         }
       ],
       "depth": 3,
@@ -795,25 +698,6 @@
       "version": "3.19.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "image",
-          "version": "0.23.14"
-        },
-        {
-          "name": "rgb",
-          "version": "0.8.52"
-        }
-      ],
-      "depth": 4,
-      "license": "Zlib OR Apache-2.0 OR MIT",
-      "name": "bytemuck",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.24.0"
-    },
-    {
       "dependencies": [
         {
           "name": "find-msvc-tools",
@@ -834,10 +718,6 @@
       ],
       "dependents": [
         {
-          "name": "findshlibs",
-          "version": "0.10.2"
-        },
-        {
           "name": "hidapi",
           "version": "2.6.3"
         },
@@ -854,16 +734,16 @@
           "version": "0.27.0"
         },
         {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
           "name": "pqcrypto-dilithium",
           "version": "0.5.0"
         },
         {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
+        },
+        {
+          "name": "ring",
+          "version": "0.17.14"
         }
       ],
       "depth": 3,
@@ -885,8 +765,8 @@
           "version": "0.3.76"
         },
         {
-          "name": "cpp_demangle",
-          "version": "0.4.5"
+          "name": "getrandom",
+          "version": "0.2.16"
         },
         {
           "name": "getrandom",
@@ -897,35 +777,23 @@
           "version": "2.6.3"
         },
         {
-          "name": "nix",
-          "version": "0.26.4"
+          "name": "io-uring",
+          "version": "0.7.10"
         },
         {
           "name": "nix",
           "version": "0.27.1"
         },
         {
-          "name": "openssl",
-          "version": "0.10.73"
-        },
-        {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
+          "name": "ring",
+          "version": "0.17.14"
         },
         {
           "name": "wasm-bindgen",
           "version": "0.2.104"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "cfg-if",
       "origin": "crates.io",
@@ -936,7 +804,7 @@
       "dependencies": [
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -1020,7 +888,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -1072,7 +940,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -1147,81 +1015,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "core-foundation-sys",
-          "version": "0.8.7"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "core-foundation",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.4"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "core-foundation",
-          "version": "0.9.4"
-        },
-        {
-          "name": "iana-time-zone",
-          "version": "0.1.64"
-        },
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
-        },
-        {
-          "name": "security-framework-sys",
-          "version": "2.15.0"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "core-foundation-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.7"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "symbolic-demangle",
-          "version": "10.2.1"
-        },
-        {
-          "name": "symbolic-demangle",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "cpp_demangle",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.5"
     },
     {
       "dependencies": [
@@ -1366,7 +1159,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -1566,30 +1359,6 @@
       "version": "2.9.0"
     },
     {
-      "dependencies": [
-        {
-          "name": "uuid",
-          "version": "1.18.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "symbolic-common",
-          "version": "10.2.1"
-        },
-        {
-          "name": "symbolic-common",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 4,
-      "license": "Apache-2.0",
-      "name": "debugid",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.0"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -1757,10 +1526,6 @@
         {
           "name": "serde",
           "version": "1.0.228"
-        },
-        {
-          "name": "subtle",
-          "version": "2.6.1"
         },
         {
           "name": "testkit",
@@ -1946,30 +1711,6 @@
     {
       "dependencies": [
         {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.61.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rustix",
-          "version": "1.1.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "errno",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.14"
-    },
-    {
-      "dependencies": [
-        {
           "name": "anyhow",
           "version": "1.0.100"
         },
@@ -1991,6 +1732,10 @@
         },
         {
           "name": "foundation_sqlite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -2073,21 +1818,6 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "tempfile",
-          "version": "3.23.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR MIT",
-      "name": "fastrand",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.3.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
           "name": "cc",
           "version": "1.2.41"
         }
@@ -2098,42 +1828,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.1.4"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.41"
-        },
-        {
-          "name": "lazy_static",
-          "version": "1.5.0"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "winapi",
-          "version": "0.3.9"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "findshlibs",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.10.2"
     },
     {
       "dependencies": [
@@ -2154,41 +1848,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.10.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "foreign-types-shared",
-          "version": "0.1.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT/Apache-2.0",
-      "name": "foreign-types",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.2"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "foreign-types",
-          "version": "0.3.2"
-        }
-      ],
-      "depth": 5,
-      "license": "MIT/Apache-2.0",
-      "name": "foreign-types-shared",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.1"
     },
     {
       "dependencies": [],
@@ -2284,6 +1943,25 @@
       "dependencies": [],
       "dependents": [
         {
+          "name": "auto-profile",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": null,
+      "name": "foundation_profiler",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
@@ -2315,7 +1993,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -2561,6 +2239,10 @@
     {
       "dependencies": [
         {
+          "name": "base64_fp",
+          "version": "0.1.0"
+        },
+        {
           "name": "crypto_suite",
           "version": "0.1.0"
         },
@@ -2573,17 +2255,33 @@
           "version": "0.1.0"
         },
         {
+          "name": "rustls",
+          "version": "0.21.12"
+        },
+        {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
+        {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
+        {
+          "name": "httpd",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        },
         {
           "name": "wallet",
           "version": "0.1.0"
         }
       ],
-      "depth": 2,
+      "depth": 1,
       "license": null,
       "name": "foundation_tls",
       "origin": "workspace",
@@ -2613,6 +2311,10 @@
     {
       "dependencies": [],
       "dependents": [
+        {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
         {
           "name": "the_block",
           "version": "0.1.0"
@@ -2928,6 +2630,34 @@
           "version": "0.2.177"
         },
         {
+          "name": "wasi",
+          "version": "0.11.1+wasi-snapshot-preview1"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "ring",
+          "version": "0.17.14"
+        }
+      ],
+      "depth": 4,
+      "license": "MIT OR Apache-2.0",
+      "name": "getrandom",
+      "origin": "crates.io",
+      "tier": "unclassified",
+      "version": "0.2.16"
+    },
+    {
+      "dependencies": [
+        {
+          "name": "cfg-if",
+          "version": "1.0.3"
+        },
+        {
+          "name": "libc",
+          "version": "0.2.177"
+        },
+        {
           "name": "r-efi",
           "version": "5.3.0"
         },
@@ -2938,10 +2668,6 @@
       ],
       "dependents": [
         {
-          "name": "ahash",
-          "version": "0.8.12"
-        },
-        {
           "name": "jobserver",
           "version": "0.1.34"
         },
@@ -2950,35 +2676,16 @@
           "version": "0.2.11"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
-        },
-        {
           "name": "uuid",
           "version": "1.18.1"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "getrandom",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.3.3"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "addr2line",
-          "version": "0.25.1"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "gimli",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.32.3"
     },
     {
       "dependencies": [],
@@ -3022,8 +2729,8 @@
           "version": "0.34.0"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         }
       ],
       "dependents": [
@@ -3103,21 +2810,6 @@
       "version": "0.8.4"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "is-terminal",
-          "version": "0.4.16"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "hermit-abi",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.2"
-    },
-    {
       "dependencies": [
         {
           "name": "cc",
@@ -3175,6 +2867,50 @@
     {
       "dependencies": [
         {
+          "name": "httpd",
+          "version": "0.1.0"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
+        {
+          "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "indexer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "jurisdiction",
+          "version": "0.1.0"
+        },
+        {
+          "name": "metrics-aggregator",
+          "version": "0.1.0"
+        },
+        {
+          "name": "probe",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": "Apache-2.0",
+      "name": "http_env",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        {
           "name": "base64_fp",
           "version": "0.1.0"
         },
@@ -3192,6 +2928,10 @@
         },
         {
           "name": "foundation_serialization",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
           "version": "0.1.0"
         },
         {
@@ -3218,6 +2958,10 @@
         },
         {
           "name": "foundation_rpc",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -3265,10 +3009,6 @@
       ],
       "dependents": [
         {
-          "name": "inferno",
-          "version": "0.11.21"
-        },
-        {
           "name": "serde_yaml",
           "version": "0.9.34+deprecated"
         }
@@ -3279,66 +3019,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "2.11.4"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "ahash",
-          "version": "0.8.12"
-        },
-        {
-          "name": "indexmap",
-          "version": "2.11.4"
-        },
-        {
-          "name": "is-terminal",
-          "version": "0.4.16"
-        },
-        {
-          "name": "itoa",
-          "version": "1.0.15"
-        },
-        {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "num-format",
-          "version": "0.4.4"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "quick-xml",
-          "version": "0.26.0"
-        },
-        {
-          "name": "rgb",
-          "version": "0.8.52"
-        },
-        {
-          "name": "str_stack",
-          "version": "0.1.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "CDDL-1.0",
-      "name": "inferno",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.21"
     },
     {
       "dependencies": [
@@ -3369,47 +3049,11 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [
-        {
-          "name": "hermit-abi",
-          "version": "0.5.2"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.59.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "is-terminal",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.16"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
           "name": "csv",
           "version": "1.3.1"
-        },
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        },
-        {
-          "name": "num-format",
-          "version": "0.4.4"
         },
         {
           "name": "serde_json",
@@ -3506,6 +3150,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "http_env",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
@@ -3518,8 +3166,8 @@
           "version": "1.0.228"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         }
       ],
       "dependents": [
@@ -3538,10 +3186,6 @@
     {
       "dependencies": [],
       "dependents": [
-        {
-          "name": "findshlibs",
-          "version": "0.10.2"
-        },
         {
           "name": "x509-parser",
           "version": "0.16.0"
@@ -3622,16 +3266,8 @@
           "version": "1.2.41"
         },
         {
-          "name": "core-foundation",
-          "version": "0.9.4"
-        },
-        {
-          "name": "errno",
-          "version": "0.3.14"
-        },
-        {
-          "name": "findshlibs",
-          "version": "0.10.2"
+          "name": "getrandom",
+          "version": "0.2.16"
         },
         {
           "name": "getrandom",
@@ -3642,56 +3278,24 @@
           "version": "2.6.3"
         },
         {
-          "name": "is-terminal",
-          "version": "0.4.16"
+          "name": "io-uring",
+          "version": "0.7.10"
         },
         {
           "name": "jobserver",
           "version": "0.1.34"
         },
         {
-          "name": "memmap2",
-          "version": "0.5.10"
-        },
-        {
-          "name": "memmap2",
-          "version": "0.9.8"
-        },
-        {
           "name": "mio",
           "version": "0.8.11"
         },
         {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
-          "name": "nix",
-          "version": "0.26.4"
+          "name": "mio",
+          "version": "1.0.4"
         },
         {
           "name": "nix",
           "version": "0.27.1"
-        },
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
         },
         {
           "name": "pqcrypto-dilithium",
@@ -3700,6 +3304,10 @@
         {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
+        },
+        {
+          "name": "ring",
+          "version": "0.17.14"
         },
         {
           "name": "rpassword",
@@ -3714,24 +3322,12 @@
           "version": "0.1.0"
         },
         {
-          "name": "rustix",
-          "version": "1.1.2"
-        },
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
-        },
-        {
-          "name": "security-framework-sys",
-          "version": "2.15.0"
-        },
-        {
           "name": "socket2",
           "version": "0.5.10"
         },
         {
-          "name": "sys",
-          "version": "0.1.0"
+          "name": "tokio",
+          "version": "1.47.1"
         },
         {
           "name": "wait-timeout",
@@ -3812,12 +3408,8 @@
           "version": "0.1.0"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
-        },
-        {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         },
         {
           "name": "tracing",
@@ -3849,47 +3441,8 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "rustix",
-          "version": "1.1.2"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "name": "linux-raw-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "scopeguard",
-          "version": "1.2.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "parking_lot",
-          "version": "0.12.5"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "lock_api",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.14"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
           "name": "iana-time-zone",
           "version": "0.1.64"
-        },
-        {
-          "name": "inferno",
-          "version": "0.11.21"
         },
         {
           "name": "jurisdiction",
@@ -3900,16 +3453,8 @@
           "version": "0.8.11"
         },
         {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
+          "name": "rustls",
+          "version": "0.21.12"
         },
         {
           "name": "wasm-bindgen-backend",
@@ -3951,10 +3496,6 @@
           "version": "0.37.3"
         },
         {
-          "name": "quick-xml",
-          "version": "0.26.0"
-        },
-        {
           "name": "regex",
           "version": "1.11.3"
         },
@@ -3973,26 +3514,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "2.7.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "symbolic-common",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "memmap2",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.8"
     },
     {
       "dependencies": [
@@ -4076,26 +3597,6 @@
     {
       "dependencies": [
         {
-          "name": "adler2",
-          "version": "2.0.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Zlib OR Apache-2.0",
-      "name": "miniz_oxide",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.9"
-    },
-    {
-      "dependencies": [
-        {
           "name": "libc",
           "version": "0.2.177"
         },
@@ -4124,90 +3625,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.8.11"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        },
-        {
-          "name": "openssl-probe",
-          "version": "0.1.6"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
-          "name": "schannel",
-          "version": "0.1.28"
-        },
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
-        },
-        {
-          "name": "security-framework-sys",
-          "version": "2.15.0"
-        },
-        {
-          "name": "tempfile",
-          "version": "3.23.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "native-tls",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.14"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "bitflags",
-          "version": "1.3.2"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "nix",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.26.4"
     },
     {
       "dependencies": [
@@ -4338,30 +3755,6 @@
     {
       "dependencies": [
         {
-          "name": "arrayvec",
-          "version": "0.7.6"
-        },
-        {
-          "name": "itoa",
-          "version": "1.0.15"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "num-format",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.4"
-    },
-    {
-      "dependencies": [
-        {
           "name": "num-traits",
           "version": "0.2.19"
         }
@@ -4450,26 +3843,6 @@
     {
       "dependencies": [
         {
-          "name": "memchr",
-          "version": "2.7.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 OR MIT",
-      "name": "object",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.37.3"
-    },
-    {
-      "dependencies": [
-        {
           "name": "asn1-rs",
           "version": "0.6.2"
         }
@@ -4495,28 +3868,8 @@
           "version": "0.8.12"
         },
         {
-          "name": "inferno",
-          "version": "0.11.21"
-        },
-        {
           "name": "js-sys",
           "version": "0.3.81"
-        },
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        },
-        {
-          "name": "tempfile",
-          "version": "3.23.0"
         },
         {
           "name": "tracing-core",
@@ -4527,135 +3880,12 @@
           "version": "0.2.104"
         }
       ],
-      "depth": 2,
+      "depth": 4,
       "license": "MIT OR Apache-2.0",
       "name": "once_cell",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "1.21.3"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "bitflags",
-          "version": "2.9.4"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "foreign-types",
-          "version": "0.3.2"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "openssl-macros",
-          "version": "0.1.1"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0",
-      "name": "openssl",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.10.73"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT/Apache-2.0",
-      "name": "openssl-macros",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "openssl-probe",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.41"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "pkg-config",
-          "version": "0.3.32"
-        },
-        {
-          "name": "vcpkg",
-          "version": "0.2.15"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
-          "name": "openssl",
-          "version": "0.10.73"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "openssl-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.109"
     },
     {
       "dependencies": [
@@ -4692,70 +3922,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "lock_api",
-          "version": "0.4.14"
-        },
-        {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "parking_lot",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.12.5"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "redox_syscall",
-          "version": "0.5.18"
-        },
-        {
-          "name": "smallvec",
-          "version": "1.15.1"
-        },
-        {
-          "name": "windows-link",
-          "version": "0.2.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "parking_lot",
-          "version": "0.12.5"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "parking_lot_core",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.12"
     },
     {
       "dependencies": [
@@ -4817,6 +3983,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "tokio",
+          "version": "1.47.1"
+        },
+        {
           "name": "tracing",
           "version": "0.1.41"
         }
@@ -4853,10 +4023,6 @@
         {
           "name": "libsqlite3-sys",
           "version": "0.27.0"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
         }
       ],
       "depth": 3,
@@ -4899,74 +4065,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.2.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "findshlibs",
-          "version": "0.10.2"
-        },
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "nix",
-          "version": "0.26.4"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "parking_lot",
-          "version": "0.12.5"
-        },
-        {
-          "name": "smallvec",
-          "version": "1.15.1"
-        },
-        {
-          "name": "symbolic-demangle",
-          "version": "12.16.3"
-        },
-        {
-          "name": "tempfile",
-          "version": "3.23.0"
-        },
-        {
-          "name": "thiserror",
-          "version": "1.0.69"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "Apache-2.0",
-      "name": "pprof",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.13.0"
     },
     {
       "dependencies": [
@@ -5157,12 +4255,16 @@
           "version": "0.1.0"
         },
         {
+          "name": "http_env",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [],
@@ -5204,10 +4306,6 @@
         {
           "name": "metrics-macros",
           "version": "0.7.1"
-        },
-        {
-          "name": "openssl-macros",
-          "version": "0.1.1"
         },
         {
           "name": "pin-project-internal",
@@ -5272,26 +4370,6 @@
     {
       "dependencies": [
         {
-          "name": "memchr",
-          "version": "2.7.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "quick-xml",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.26.0"
-    },
-    {
-      "dependencies": [
-        {
           "name": "proc-macro2",
           "version": "1.0.101"
         }
@@ -5320,10 +4398,6 @@
         {
           "name": "metrics-macros",
           "version": "0.7.1"
-        },
-        {
-          "name": "openssl-macros",
-          "version": "0.1.1"
         },
         {
           "name": "pin-project-internal",
@@ -5393,7 +4467,7 @@
           "version": "0.3.3"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "name": "r-efi",
       "origin": "crates.io",
@@ -5494,26 +4568,6 @@
     {
       "dependencies": [
         {
-          "name": "bitflags",
-          "version": "2.9.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT",
-      "name": "redox_syscall",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.18"
-    },
-    {
-      "dependencies": [
-        {
           "name": "aho-corasick",
           "version": "1.1.3"
         },
@@ -5597,22 +4651,50 @@
     {
       "dependencies": [
         {
-          "name": "bytemuck",
-          "version": "1.24.0"
+          "name": "cc",
+          "version": "1.2.41"
+        },
+        {
+          "name": "cfg-if",
+          "version": "1.0.3"
+        },
+        {
+          "name": "getrandom",
+          "version": "0.2.16"
+        },
+        {
+          "name": "libc",
+          "version": "0.2.177"
+        },
+        {
+          "name": "untrusted",
+          "version": "0.9.0"
+        },
+        {
+          "name": "windows-sys",
+          "version": "0.52.0"
         }
       ],
       "dependents": [
         {
-          "name": "inferno",
-          "version": "0.11.21"
+          "name": "rustls",
+          "version": "0.21.12"
+        },
+        {
+          "name": "rustls-webpki",
+          "version": "0.101.7"
+        },
+        {
+          "name": "sct",
+          "version": "0.7.1"
         }
       ],
       "depth": 3,
-      "license": "MIT",
-      "name": "rgb",
+      "license": "Apache-2.0 AND ISC",
+      "name": "ring",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "0.8.52"
+      "version": "0.17.14"
     },
     {
       "dependencies": [
@@ -5763,29 +4845,6 @@
       "version": "0.30.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        },
-        {
-          "name": "symbolic-demangle",
-          "version": "10.2.1"
-        },
-        {
-          "name": "symbolic-demangle",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "rustc-demangle",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.26"
-    },
-    {
       "dependencies": [
         {
           "name": "nom",
@@ -5816,38 +4875,26 @@
     {
       "dependencies": [
         {
-          "name": "bitflags",
-          "version": "2.9.4"
+          "name": "ring",
+          "version": "0.17.14"
         },
         {
-          "name": "errno",
-          "version": "0.3.14"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "linux-raw-sys",
-          "version": "0.11.0"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.61.2"
+          "name": "untrusted",
+          "version": "0.9.0"
         }
       ],
       "dependents": [
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "rustls",
+          "version": "0.21.12"
         }
       ],
-      "depth": 2,
-      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "name": "rustix",
+      "depth": 3,
+      "license": "ISC",
+      "name": "rustls-webpki",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "1.1.2"
+      "version": "0.101.7"
     },
     {
       "dependencies": [],
@@ -5890,101 +4937,26 @@
     {
       "dependencies": [
         {
-          "name": "windows-sys",
-          "version": "0.61.2"
+          "name": "ring",
+          "version": "0.17.14"
+        },
+        {
+          "name": "untrusted",
+          "version": "0.9.0"
         }
       ],
       "dependents": [
         {
-          "name": "native-tls",
-          "version": "0.2.14"
+          "name": "rustls",
+          "version": "0.21.12"
         }
       ],
       "depth": 3,
-      "license": "MIT",
-      "name": "schannel",
+      "license": "Apache-2.0 OR ISC OR MIT",
+      "name": "sct",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "0.1.28"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "lock_api",
-          "version": "0.4.14"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "scopeguard",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.2.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "bitflags",
-          "version": "2.9.4"
-        },
-        {
-          "name": "core-foundation",
-          "version": "0.9.4"
-        },
-        {
-          "name": "core-foundation-sys",
-          "version": "0.8.7"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "security-framework-sys",
-          "version": "2.15.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "security-framework",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.11.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "core-foundation-sys",
-          "version": "0.8.7"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
-          "name": "security-framework",
-          "version": "2.11.1"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "security-framework-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.15.0"
+      "version": "0.7.1"
     },
     {
       "dependencies": [
@@ -6139,6 +5111,10 @@
         {
           "name": "futures-util",
           "version": "0.3.31"
+        },
+        {
+          "name": "tokio",
+          "version": "1.47.1"
         }
       ],
       "depth": 3,
@@ -6163,12 +5139,12 @@
           "version": "0.1.0"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -6196,23 +5172,11 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        },
-        {
           "name": "rusqlite",
           "version": "0.30.0"
         }
       ],
-      "depth": 2,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "smallvec",
       "origin": "crates.io",
@@ -6244,25 +5208,6 @@
       "version": "0.5.10"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "symbolic-common",
-          "version": "10.2.1"
-        },
-        {
-          "name": "symbolic-common",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "stable_deref_trait",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.2.1"
-    },
-    {
       "dependencies": [
         {
           "name": "crypto_suite",
@@ -6282,7 +5227,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -6336,8 +5281,8 @@
           "version": "1.0.228"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         },
         {
           "name": "the_block",
@@ -6345,7 +5290,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -6426,104 +5371,6 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "inferno",
-          "version": "0.11.21"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "str_stack",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "dex",
-          "version": "0.1.0"
-        },
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        },
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "BSD-3-Clause",
-      "name": "subtle",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.6.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "debugid",
-          "version": "0.8.0"
-        },
-        {
-          "name": "memmap2",
-          "version": "0.9.8"
-        },
-        {
-          "name": "stable_deref_trait",
-          "version": "1.2.1"
-        },
-        {
-          "name": "uuid",
-          "version": "1.18.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "symbolic-demangle",
-          "version": "12.16.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "symbolic-common",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "12.16.3"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cpp_demangle",
-          "version": "0.4.5"
-        },
-        {
-          "name": "rustc-demangle",
-          "version": "0.1.26"
-        },
-        {
-          "name": "symbolic-common",
-          "version": "12.16.3"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "symbolic-demangle",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "12.16.3"
-    },
-    {
       "dependencies": [
         {
           "name": "proc-macro2",
@@ -6562,10 +5409,6 @@
         {
           "name": "metrics-macros",
           "version": "0.7.1"
-        },
-        {
-          "name": "openssl-macros",
-          "version": "0.1.1"
         },
         {
           "name": "pin-project-internal",
@@ -6652,10 +5495,6 @@
         {
           "name": "crypto_suite",
           "version": "0.1.0"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -6680,6 +5519,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "dependency_registry",
+          "version": "0.1.0"
+        },
+        {
           "name": "explorer",
           "version": "0.1.0"
         },
@@ -6688,11 +5531,19 @@
           "version": "0.1.0"
         },
         {
+          "name": "governance",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
         {
           "name": "indexer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "jurisdiction",
           "version": "0.1.0"
         },
         {
@@ -6708,7 +5559,19 @@
           "version": "0.1.0"
         },
         {
+          "name": "release_tests",
+          "version": "0.1.0"
+        },
+        {
+          "name": "sled",
+          "version": "0.34.0"
+        },
+        {
           "name": "state",
+          "version": "0.1.0"
+        },
+        {
+          "name": "storage",
           "version": "0.1.0"
         },
         {
@@ -6716,11 +5579,23 @@
           "version": "0.1.0"
         },
         {
+          "name": "tb-sim",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the-block-fuzz",
+          "version": "0.0.0"
+        },
+        {
           "name": "the_block",
           "version": "0.1.0"
         },
         {
           "name": "wallet",
+          "version": "0.1.0"
+        },
+        {
+          "name": "xtask",
           "version": "0.1.0"
         }
       ],
@@ -6790,8 +5665,8 @@
           "version": "0.9.34+deprecated"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         },
         {
           "name": "the_block",
@@ -6799,7 +5674,7 @@
         },
         {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         }
       ],
       "dependents": [
@@ -6814,90 +5689,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "fastrand",
-          "version": "2.3.0"
-        },
-        {
-          "name": "getrandom",
-          "version": "0.3.3"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "rustix",
-          "version": "1.1.2"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.61.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "dependency_registry",
-          "version": "0.1.0"
-        },
-        {
-          "name": "governance",
-          "version": "0.1.0"
-        },
-        {
-          "name": "jurisdiction",
-          "version": "0.1.0"
-        },
-        {
-          "name": "light-client",
-          "version": "0.1.0"
-        },
-        {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        },
-        {
-          "name": "release_tests",
-          "version": "0.1.0"
-        },
-        {
-          "name": "sled",
-          "version": "0.34.0"
-        },
-        {
-          "name": "storage",
-          "version": "0.1.0"
-        },
-        {
-          "name": "tb-sim",
-          "version": "0.1.0"
-        },
-        {
-          "name": "the-block-fuzz",
-          "version": "0.0.0"
-        },
-        {
-          "name": "xtask",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "tempfile",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "3.23.0"
     },
     {
       "dependencies": [],
@@ -6940,6 +5731,10 @@
         },
         {
           "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "wallet",
           "version": "0.1.0"
         }
       ],
@@ -7037,6 +5832,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_profiler",
+          "version": "0.1.0"
+        },
+        {
           "name": "foundation_regex",
           "version": "0.1.0"
         },
@@ -7057,6 +5856,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_tls",
+          "version": "0.1.0"
+        },
+        {
           "name": "foundation_tui",
           "version": "0.1.0"
         },
@@ -7074,6 +5877,10 @@
         },
         {
           "name": "histogram_fp",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -7099,10 +5906,6 @@
         {
           "name": "p2p_overlay",
           "version": "0.1.0"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
         },
         {
           "name": "rand",
@@ -7139,10 +5942,6 @@
         {
           "name": "storage_engine",
           "version": "0.1.0"
-        },
-        {
-          "name": "subtle",
-          "version": "2.6.1"
         },
         {
           "name": "sys",
@@ -7211,21 +6010,8 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [
-        {
-          "name": "thiserror-impl",
-          "version": "1.0.69"
-        }
-      ],
+      "dependencies": [],
       "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "cargo_metadata",
-          "version": "0.18.1"
-        },
         {
           "name": "cli_core",
           "version": "0.1.0"
@@ -7255,14 +6041,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "pprof",
-          "version": "0.11.1"
-        },
-        {
-          "name": "pprof",
-          "version": "0.13.0"
-        },
-        {
           "name": "probe",
           "version": "0.1.0"
         },
@@ -7285,13 +6063,37 @@
         {
           "name": "wallet",
           "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": "MIT",
+      "name": "thiserror",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.0.1"
+    },
+    {
+      "dependencies": [
+        {
+          "name": "thiserror-impl",
+          "version": "1.0.69"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "asn1-rs",
+          "version": "0.6.2"
+        },
+        {
+          "name": "cargo_metadata",
+          "version": "0.18.1"
         },
         {
           "name": "x509-parser",
           "version": "0.16.0"
         }
       ],
-      "depth": 1,
+      "depth": 2,
       "license": "MIT OR Apache-2.0",
       "name": "thiserror",
       "origin": "crates.io",
@@ -7319,7 +6121,7 @@
           "version": "1.0.69"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "thiserror-impl",
       "origin": "crates.io",
@@ -7536,6 +6338,29 @@
       "version": "0.2.11"
     },
     {
+      "dependencies": [],
+      "dependents": [
+        {
+          "name": "ring",
+          "version": "0.17.14"
+        },
+        {
+          "name": "rustls-webpki",
+          "version": "0.101.7"
+        },
+        {
+          "name": "sct",
+          "version": "0.7.1"
+        }
+      ],
+      "depth": 4,
+      "license": "ISC",
+      "name": "untrusted",
+      "origin": "crates.io",
+      "tier": "unclassified",
+      "version": "0.9.0"
+    },
+    {
       "dependencies": [
         {
           "name": "getrandom",
@@ -7551,18 +6376,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "debugid",
-          "version": "0.8.0"
-        },
-        {
-          "name": "symbolic-common",
-          "version": "10.2.1"
-        },
-        {
-          "name": "symbolic-common",
-          "version": "12.16.3"
-        },
         {
           "name": "wallet",
           "version": "0.1.0"
@@ -7581,13 +6394,9 @@
         {
           "name": "libsqlite3-sys",
           "version": "0.27.0"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
         }
       ],
-      "depth": 4,
+      "depth": 6,
       "license": "MIT/Apache-2.0",
       "name": "vcpkg",
       "origin": "crates.io",
@@ -7672,10 +6481,6 @@
           "version": "0.21.1"
         },
         {
-          "name": "native-tls",
-          "version": "0.2.14"
-        },
-        {
           "name": "rand",
           "version": "0.1.0"
         },
@@ -7688,16 +6493,16 @@
           "version": "1.0.228"
         },
         {
-          "name": "subtle",
-          "version": "2.6.1"
-        },
-        {
           "name": "sys",
           "version": "0.1.0"
         },
         {
+          "name": "testkit",
+          "version": "0.1.0"
+        },
+        {
           "name": "thiserror",
-          "version": "1.0.69"
+          "version": "0.0.1"
         },
         {
           "name": "tracing",
@@ -7729,8 +6534,16 @@
       "dependencies": [],
       "dependents": [
         {
+          "name": "getrandom",
+          "version": "0.2.16"
+        },
+        {
           "name": "mio",
           "version": "0.8.11"
+        },
+        {
+          "name": "mio",
+          "version": "1.0.4"
         }
       ],
       "depth": 3,
@@ -7753,7 +6566,7 @@
           "version": "0.3.3"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wasi",
       "origin": "crates.io",
@@ -7773,7 +6586,7 @@
           "version": "0.14.7+wasi-0.2.4"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wasip2",
       "origin": "crates.io",
@@ -7959,99 +6772,6 @@
     {
       "dependencies": [
         {
-          "name": "winapi-i686-pc-windows-gnu",
-          "version": "0.4.0"
-        },
-        {
-          "name": "winapi-x86_64-pc-windows-gnu",
-          "version": "0.4.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "findshlibs",
-          "version": "0.10.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "winapi",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.9"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "winapi",
-          "version": "0.3.9"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT/Apache-2.0",
-      "name": "winapi-i686-pc-windows-gnu",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "winapi",
-          "version": "0.3.9"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT/Apache-2.0",
-      "name": "winapi-x86_64-pc-windows-gnu",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "backtrace",
-          "version": "0.3.76"
-        },
-        {
-          "name": "chrono",
-          "version": "0.4.42"
-        },
-        {
-          "name": "parking_lot_core",
-          "version": "0.9.12"
-        },
-        {
-          "name": "windows-core",
-          "version": "0.62.2"
-        },
-        {
-          "name": "windows-result",
-          "version": "0.4.1"
-        },
-        {
-          "name": "windows-strings",
-          "version": "0.5.1"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.61.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "windows-link",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.1"
-    },
-    {
-      "dependencies": [
-        {
           "name": "windows-targets",
           "version": "0.48.5"
         }
@@ -8082,6 +6802,10 @@
       ],
       "dependents": [
         {
+          "name": "ring",
+          "version": "0.17.14"
+        },
+        {
           "name": "rtoolbox",
           "version": "0.0.3"
         },
@@ -8096,62 +6820,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.52.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "windows-targets",
-          "version": "0.52.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "is-terminal",
-          "version": "0.4.16"
-        },
-        {
-          "name": "rpassword",
-          "version": "7.4.0"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "windows-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.59.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "windows-link",
-          "version": "0.2.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "errno",
-          "version": "0.3.14"
-        },
-        {
-          "name": "rustix",
-          "version": "1.1.2"
-        },
-        {
-          "name": "schannel",
-          "version": "0.1.28"
-        },
-        {
-          "name": "tempfile",
-          "version": "3.23.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "windows-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.61.2"
     },
     {
       "dependencies": [
@@ -8482,7 +7150,7 @@
           "version": "1.0.1+wasi-0.2.4"
         }
       ],
-      "depth": 5,
+      "depth": 6,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wit-bindgen",
       "origin": "crates.io",
@@ -8568,8 +7236,8 @@
           "version": "3.1.3"
         },
         {
-          "name": "tempfile",
-          "version": "3.23.0"
+          "name": "sys",
+          "version": "0.1.0"
         }
       ],
       "dependents": [],
@@ -8629,7 +7297,7 @@
       "version": "0.8.27"
     }
   ],
-  "generated_at": "2025-10-10T15:45:18.864900106Z",
+  "generated_at": "2025-10-11T18:40:34.727914790Z",
   "policy": {
     "config_path": "config/dependency_policies.toml",
     "forbidden_licenses": [
@@ -8662,6 +7330,7 @@
     "foundation_archive",
     "foundation_lazy",
     "foundation_math",
+    "foundation_profiler",
     "foundation_regex",
     "foundation_rpc",
     "foundation_serialization",
@@ -8675,6 +7344,7 @@
     "gov-graph",
     "governance",
     "histogram_fp",
+    "http_env",
     "httpd",
     "indexer",
     "inflation",
@@ -8708,6 +7378,7 @@
     "testkit_macros",
     "the-block-fuzz",
     "the_block",
+    "thiserror",
     "transport",
     "wallet",
     "xtask"

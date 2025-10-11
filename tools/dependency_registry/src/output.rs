@@ -236,7 +236,7 @@ pub fn diff_registries(old_path: &Path, new_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::model::{ViolationEntry, ViolationKind};
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn telemetry_metrics_empty_report_emits_zero_total() {

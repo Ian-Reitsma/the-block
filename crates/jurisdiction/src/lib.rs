@@ -3,6 +3,7 @@ use base64_fp::encode_standard;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::{json, Deserialize, Serialize};
+use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -49,7 +50,8 @@ impl SignedPack {
 static CACHE: Lazy<std::sync::Mutex<HashMap<String, PolicyPack>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
-static HTTP_CLIENT: Lazy<BlockingClient> = Lazy::new(BlockingClient::default);
+static HTTP_CLIENT: Lazy<BlockingClient> =
+    Lazy::new(|| env_blocking_client(&["TB_JURISDICTION_TLS", "TB_HTTP_TLS"], "jurisdiction"));
 
 fn map_http_error(err: HttpClientError) -> io::Error {
     if err.is_timeout() {
@@ -184,7 +186,7 @@ pub fn log_law_enforcement_request(path: impl AsRef<Path>, metadata: &str) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn loads_pack() {

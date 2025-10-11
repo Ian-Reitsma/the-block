@@ -2,10 +2,11 @@
 #![cfg(feature = "gateway")]
 
 use httpd::{HttpClient, Method};
+use node::http_client;
 use runtime::net::TcpListener;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use tempfile;
+use sys::tempfile;
 use the_block::web::status;
 use the_block::Blockchain;
 
@@ -24,7 +25,7 @@ fn status_returns_height() {
             status::run(addr, bc).await.unwrap();
         });
         let url = format!("http://{}", addr);
-        let body = HttpClient::default()
+        let body = http_client::http_client()
             .request(Method::Get, &url)
             .unwrap()
             .send()

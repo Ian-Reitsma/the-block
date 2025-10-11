@@ -1,6 +1,17 @@
 # Project Progress Snapshot
-> **Review (2025-10-10):** Landed the `foundation_sqlite` facade for explorer/CLI/log-indexer tooling, introduced the `foundation_time` crate so runtime/tooling timestamp paths no longer import the upstream `time` API, replaced the CLI colour stack with the first-party `foundation_tui` helpers, delivered the `foundation_unicode` and `foundation_tls` facades so identity flows and QUIC rotation shed the last external normalization/certificate builders, and rewrote the `xtask` diff helper to drop `git2`/`url`/`idna` in favour of the git CLI.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and TUI facades are live with governance overrides enforced (2025-10-10); node, telemetry, and harness tooling now default to the first-party binary codec.
+> **Review (2025-10-11):** Introduced the `http_env` helper crate so every CLI,
+> node, aggregator, explorer, probe, and example binary shares a single TLS
+> loader with scoped fallback logging, added an integration suite that spins up
+> the in-house HTTPS server to verify prefix selection and error reporting,
+> shipped the `contract tls convert` command to translate PEM identities and
+> anchors into the JSON format consumed by the new loaders, refreshed the TLS
+> env plumbing across wallet remote signer flows, jurisdiction tooling, metrics
+> uploads, explorer/indexer helpers, and examples, and reran the dependency
+> snapshot to capture the new crate alongside the retired ad-hoc TLS wrappers.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
+> crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are
+> live with governance overrides enforced (2025-10-11); node, telemetry, and
+> harness tooling now default to the first-party binary codec.
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
@@ -23,10 +34,10 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-10-10T15:45:18.864900106Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. Governance/ledger/metrics-aggregator updates in October did not add third-party crates; the latest snapshot confirms the tooling cleanup that removed `git2`, `url`, and the ICU-backed `idna` stack.
+- **Current inventory** *(generated at `2025-10-11T18:41:19Z`)*: 0 strategic crates, 1 replaceable crate, and 254 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot records the new `http_env` crate while confirming that TLS migrations removed the last `native-tls` consumers.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
-- **Next refresh**: Run `./scripts/dependency_snapshot.sh` on **2025-10-12** once the remaining tooling migrations (monitoring dashboards, remote signer) land to capture the cleaned DAG and refresh these metrics.
-- **In-house scaffolding**: Bootstrapped the `diagnostics` error/logging facade and the `concurrency` primitive crate to replace third-party `anyhow`/`tracing`/`log`/`dashmap` usages; `dependency_registry` is now wired to the new stack while we phase in the remaining migrations. Added a workspace-local `rand` crate over the stubbed `rand_core` module so all binaries compile against first-party randomness helpers, routed CLI/light-client/transport home-directory lookups through the new `sys::paths` adapters to remove the `dirs` dependency, introduced the `foundation_sqlite` facade so optional SQLite tooling now compiles against first-party parameter/value handling before the native engine ships, landed `foundation_time` so S3 signing, storage repair logs, and QUIC certificate rotation rely on our in-house timestamp helpers, delivered `foundation_unicode` so identity tooling no longer depends on ICU, shipped `foundation_tls`/`foundation_tui` so QUIC certificates and CLI colour output are fully first party, and rewrote `tools/xtask` to call the git CLI directly so the `git2`/`url`/`idna` stack disappears from the workspace DAG.
+- **Next refresh**: Run `./scripts/dependency_snapshot.sh` on **2025-10-13** once the remaining tooling migrations (monitoring dashboards, remote signer) land to capture the cleaned DAG and refresh these metrics.
+- **In-house scaffolding**: Bootstrapped the `diagnostics` error/logging facade and the `concurrency` primitive crate to replace third-party `anyhow`/`tracing`/`log`/`dashmap` usages; `dependency_registry` is now wired to the new stack while we phase in the remaining migrations. Added a workspace-local `rand` crate over the stubbed `rand_core` module so all binaries compile against first-party randomness helpers, routed CLI/light-client/transport home-directory lookups through the new `sys::paths` adapters to remove the `dirs` dependency, introduced the `foundation_sqlite` facade so optional SQLite tooling now compiles against first-party parameter/value handling before the native engine ships, landed `foundation_time` so S3 signing, storage repair logs, and QUIC certificate rotation rely on our in-house timestamp helpers, delivered `foundation_unicode` so identity tooling no longer depends on ICU, shipped `foundation_tls`/`foundation_tui` so QUIC certificates and CLI colour output are fully first party, rewrote `tools/xtask` to call the git CLI directly so the `git2`/`url`/`idna` stack disappears from the workspace DAG, and added the `http_env` crate to centralise TLS environment parsing for clients while emitting component-scoped fallbacks.
 - **Dependency guard rollout**: Extracted the build-script enforcement logic into `crates/dependency_guard` and wired every crate that still pulls from crates.io or git sources through the shared helper. The guard now fires for `cargo check -p <crate>` across CLI, metrics, storage, state, and tooling crates, with `.cargo/config.toml` defaulting `FIRST_PARTY_ONLY=1` and documenting the explicit `FIRST_PARTY_ONLY=0` escape hatch for staged rewrites.
 - **State serialization rewrite**: Replaced the `state` crate’s reliance on `serde`, `serde_json`, and `bincode` with compact first-party encoders. Snapshots, contract stores, schema markers, and audit helpers now emit deterministic binary or JSON strings without touching third-party codecs, unblocking the dependency freeze for the state pipeline.
 - **Base64 replacement**: Introduced the `base64_fp` crate and switched CLI, node networking, storage snapshots, transport certificate persistence, wallet remote signer flows, and tooling over to the first-party encoder/decoder so no workspace crate pulls the crates.io `base64` API directly; remaining third-party usage now exists only transitively and is earmarked for upcoming vendor rewrites.
@@ -202,6 +213,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - CLI + hardware wallet support (`crates/wallet`).
 - Remote signer workflows (`crates/wallet/src/remote_signer.rs`, `docs/wallets.md`).
 - Remote signer HTTP calls now rely on the blocking wrapper in `crates/httpd`, eliminating external clients while keeping retry/backoff semantics intact (`crates/wallet/src/remote_signer.rs`, `crates/httpd/src/blocking.rs`).
+- Wallet remote signer TLS now uses the first-party `httpd::TlsConnector`, JSON trust anchors, and certificate tooling, removing the `native-tls` shim while preserving client auth coverage in `crates/wallet/tests/remote_signer.rs` and `crates/httpd/src/tls_client.rs`.
+- CLI RPC flows, node HTTP helpers, and the metrics aggregator now consume the
+  `httpd::TlsConnector` via shared helpers so trust anchors and client
+  identities come from environment prefixes (`cli/src/http_client.rs`,
+  `node/src/http_client.rs`, `metrics-aggregator/src/lib.rs`,
+  `metrics-aggregator/src/object_store.rs`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
 - Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`).
@@ -295,4 +312,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑29*
+*Last updated: 2025‑10‑10*

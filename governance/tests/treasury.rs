@@ -1,5 +1,5 @@
 use governance::{DisbursementStatus, GovStore};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 #[test]
 fn treasury_disbursements_roundtrip() {

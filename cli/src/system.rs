@@ -1,10 +1,11 @@
+use crate::http_client;
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
 use foundation_serialization::{Deserialize, Serialize};
-use httpd::{BlockingClient, Method};
+use httpd::Method;
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
@@ -74,7 +75,7 @@ pub fn handle(cmd: SystemCmd) {
 }
 
 fn fetch_dependencies(base: &str) -> anyhow::Result<String> {
-    let client = BlockingClient::default();
+    let client = http_client::blocking_client();
     let url = format!("{}/wrappers", base.trim_end_matches('/'));
     let response = client.request(Method::Get, &url)?.send()?;
     if !response.status().is_success() {

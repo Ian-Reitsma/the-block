@@ -36,6 +36,88 @@ pub mod error {
     pub type Result<T> = std::result::Result<T, SysError>;
 }
 
+#[cfg(unix)]
+mod unix_ffi {
+    use core::ffi::{c_int, c_uint, c_ulong, c_void};
+
+    pub const STDIN_FILENO: c_int = 0;
+    pub const STDOUT_FILENO: c_int = 1;
+    pub const TIOCGWINSZ: c_ulong = 0x5413;
+
+    pub const SIGHUP: c_int = 1;
+
+    pub const SA_SIGINFO: c_ulong = 0x0000_0004;
+    pub const SA_RESTART: c_ulong = 0x1000_0000;
+
+    pub const F_GETFL: c_int = 3;
+    pub const F_SETFL: c_int = 4;
+    pub const F_GETFD: c_int = 1;
+    pub const F_SETFD: c_int = 2;
+    pub const FD_CLOEXEC: c_int = 1;
+    pub const O_NONBLOCK: c_int = 0o0004_000;
+    pub const O_NOFOLLOW: c_int = 0o0040_0000;
+    pub const LOCK_EX: c_int = 2;
+
+    const SIGSET_WORDS: usize = 16;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct sigset_t {
+        bits: [u64; SIGSET_WORDS],
+    }
+
+    impl sigset_t {
+        pub fn empty() -> Self {
+            Self {
+                bits: [0; SIGSET_WORDS],
+            }
+        }
+    }
+
+    #[repr(C)]
+    pub union SigActionHandler {
+        pub handler: extern "C" fn(c_int),
+        pub sigaction: extern "C" fn(c_int, *mut siginfo_t, *mut c_void),
+    }
+
+    #[repr(C)]
+    pub struct sigaction {
+        pub sa_sigaction: SigActionHandler,
+        pub sa_mask: sigset_t,
+        pub sa_flags: c_ulong,
+        pub sa_restorer: Option<extern "C" fn()>,
+    }
+
+    #[repr(C)]
+    pub struct siginfo_t {
+        _private: [u8; 128],
+    }
+
+    #[repr(C)]
+    pub struct winsize {
+        pub ws_row: c_uint,
+        pub ws_col: c_uint,
+        pub ws_xpixel: c_uint,
+        pub ws_ypixel: c_uint,
+    }
+
+    extern "C" {
+        pub fn sigaction(signum: c_int, act: *const sigaction, oldact: *mut sigaction) -> c_int;
+        pub fn pipe(fds: *mut c_int) -> c_int;
+        pub fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
+        pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+        pub fn write(fd: c_int, buf: *const c_void, count: usize) -> isize;
+        pub fn flock(fd: c_int, operation: c_int) -> c_int;
+        #[cfg(test)]
+        pub fn raise(sig: c_int) -> c_int;
+    }
+
+    pub use self::sigaction as SigAction;
+    pub use self::siginfo_t as SigInfo;
+    pub use self::sigset_t as SigSet;
+    pub use self::winsize as WinSize;
+}
+
 pub mod paths {
     use std::env;
     use std::path::PathBuf;
@@ -68,16 +150,16 @@ pub mod cpu {
 }
 
 pub mod process {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     use crate::error::{Result, SysError};
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     use std::fs;
 
     /// Best-effort determination of the resident set size for the current process.
     pub fn resident_memory_bytes() -> Option<u64> {
         #[cfg(target_os = "linux")]
         {
-            read_statm().ok()
+            read_vmrss().ok()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -86,81 +168,93 @@ pub mod process {
     }
 
     #[cfg(target_os = "linux")]
-    fn read_statm() -> Result<u64> {
-        let data = fs::read_to_string("/proc/self/statm")?;
-        let mut fields = data.split_whitespace();
-        let _size = fields.next();
-        let resident = fields
-            .next()
-            .ok_or_else(|| SysError::unsupported("/proc/self/statm resident"))?;
-        let resident: u64 = resident
-            .parse()
-            .map_err(|_| SysError::unsupported("/proc/self/statm parse"))?;
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-        if page_size <= 0 {
-            return Err(SysError::unsupported("sysconf(_SC_PAGESIZE)"));
+    fn read_vmrss() -> Result<u64> {
+        let status = fs::read_to_string("/proc/self/status")?;
+        for line in status.lines() {
+            if let Some(value) = line.strip_prefix("VmRSS:") {
+                let mut parts = value.split_whitespace();
+                let amount = parts
+                    .next()
+                    .ok_or_else(|| SysError::unsupported("VmRSS amount"))?;
+                let unit = parts.next().unwrap_or("kB");
+                let quantity: u64 = amount
+                    .parse()
+                    .map_err(|_| SysError::unsupported("VmRSS parse"))?;
+                return match unit {
+                    "B" => Ok(quantity),
+                    "kB" => Ok(quantity.saturating_mul(1024)),
+                    "MB" | "mB" => Ok(quantity.saturating_mul(1024 * 1024)),
+                    "GB" | "gB" => Ok(quantity.saturating_mul(1024 * 1024 * 1024)),
+                    _ => Err(SysError::unsupported("VmRSS unit")),
+                };
+            }
         }
-        Ok(resident * page_size as u64)
+        Err(SysError::unsupported("VmRSS missing"))
     }
 
     /// Return the effective user ID when available.
     pub fn effective_uid() -> Option<u32> {
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
-            Some(unsafe { libc::geteuid() })
+            read_effective_uid().ok()
         }
-        #[cfg(not(unix))]
+        #[cfg(not(target_os = "linux"))]
         {
             None
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_effective_uid() -> Result<u32> {
+        let status = fs::read_to_string("/proc/self/status")?;
+        for line in status.lines() {
+            if let Some(value) = line.strip_prefix("Uid:") {
+                let mut parts = value.split_whitespace();
+                let _real = parts
+                    .next()
+                    .ok_or_else(|| SysError::unsupported("Uid real"))?;
+                let effective = parts
+                    .next()
+                    .ok_or_else(|| SysError::unsupported("Uid effective"))?;
+                let parsed: u32 = effective
+                    .parse()
+                    .map_err(|_| SysError::unsupported("Uid parse"))?;
+                return Ok(parsed);
+            }
+        }
+        Err(SysError::unsupported("Uid missing"))
     }
 }
 
 pub mod random {
     use crate::error::{Result, SysError};
-    use std::io;
-    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
     use std::io::Read;
+    #[cfg(unix)]
+    use std::sync::{Mutex, OnceLock};
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn fill_bytes(dest: &mut [u8]) -> Result<()> {
-        use libc::{c_void, getrandom};
-
-        let mut offset = 0;
-        while offset < dest.len() {
-            let remaining = dest.len() - offset;
-            let ptr = dest[offset..].as_mut_ptr() as *mut c_void;
-            let filled = unsafe { getrandom(ptr, remaining, 0) };
-            if filled < 0 {
-                let err = io::Error::last_os_error();
-                if err.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(SysError::from(err));
-            }
-            offset += filled as usize;
+    #[cfg(unix)]
+    fn urandom() -> Result<&'static Mutex<std::fs::File>> {
+        static URANDOM: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+        if let Some(reader) = URANDOM.get() {
+            return Ok(reader);
         }
-        Ok(())
+        let file = std::fs::File::open("/dev/urandom").map_err(SysError::from)?;
+        match URANDOM.set(Mutex::new(file)) {
+            Ok(()) => Ok(URANDOM.get().expect("urandom file initialized")),
+            Err(_) => Ok(URANDOM.get().expect("urandom file initialized")),
+        }
     }
 
-    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+    #[cfg(unix)]
     pub fn fill_bytes(dest: &mut [u8]) -> Result<()> {
-        use std::fs::File;
-        use std::sync::{Mutex, OnceLock};
-
-        static URANDOM: OnceLock<Mutex<File>> = OnceLock::new();
-
-        let reader = URANDOM.get_or_try_init(|| {
-            File::open("/dev/urandom")
-                .map(Mutex::new)
-                .map_err(SysError::from)
-        })?;
-
+        if dest.is_empty() {
+            return Ok(());
+        }
+        let reader = urandom()?;
         let mut guard = reader
             .lock()
             .map_err(|_| SysError::unsupported("/dev/urandom mutex poisoned"))?;
-        guard.read_exact(dest)?;
-        Ok(())
+        guard.read_exact(dest).map_err(SysError::from)
     }
 
     #[cfg(not(unix))]
@@ -183,24 +277,27 @@ pub mod tty {
 
     #[cfg(unix)]
     pub fn dimensions() -> Option<(u16, u16)> {
-        use libc::{ioctl, winsize, STDIN_FILENO, STDOUT_FILENO, TIOCGWINSZ};
+        use crate::unix_ffi::{self, WinSize};
+        use core::ffi::c_int;
 
-        unsafe fn query(fd: libc::c_int) -> Option<(u16, u16)> {
-            let mut ws = winsize {
+        unsafe fn query(fd: c_int) -> Option<(u16, u16)> {
+            let mut ws = WinSize {
                 ws_row: 0,
                 ws_col: 0,
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             };
-            if ioctl(fd, TIOCGWINSZ, &mut ws) == 0 {
-                if ws.ws_col > 0 && ws.ws_row > 0 {
-                    return Some((ws.ws_col as u16, ws.ws_row as u16));
+            if unix_ffi::ioctl(fd, unix_ffi::TIOCGWINSZ, &mut ws) == 0 {
+                let cols = ws.ws_col as u16;
+                let rows = ws.ws_row as u16;
+                if cols > 0 && rows > 0 {
+                    return Some((cols, rows));
                 }
             }
             None
         }
 
-        unsafe { query(STDOUT_FILENO).or_else(|| query(STDIN_FILENO)) }
+        unsafe { query(unix_ffi::STDOUT_FILENO).or_else(|| query(unix_ffi::STDIN_FILENO)) }
     }
 
     #[cfg(not(unix))]
@@ -231,7 +328,8 @@ pub mod signals {
     #[cfg(unix)]
     mod unix {
         use super::*;
-        use libc::{self, c_int};
+        use crate::unix_ffi;
+        use core::ffi::{c_int, c_void};
         use std::collections::{HashSet, VecDeque};
         use std::fs::File;
         use std::io::{self, Read};
@@ -241,7 +339,7 @@ pub mod signals {
         use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
         use std::thread;
 
-        pub const SIGHUP: i32 = libc::SIGHUP;
+        pub const SIGHUP: i32 = unix_ffi::SIGHUP;
 
         static WRITE_FD: AtomicI32 = AtomicI32::new(-1);
         static DISPATCHER: OnceLock<Dispatcher> = OnceLock::new();
@@ -396,14 +494,15 @@ pub mod signals {
                     return Ok(());
                 }
                 unsafe {
-                    let mut sa: libc::sigaction = mem::zeroed();
-                    sa.sa_sigaction = mem::transmute::<
-                        unsafe extern "C" fn(c_int, *mut libc::siginfo_t, *mut libc::c_void),
-                        usize,
-                    >(signal_handler);
-                    sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
-                    libc::sigemptyset(&mut sa.sa_mask);
-                    if libc::sigaction(signal as c_int, &sa, std::ptr::null_mut()) != 0 {
+                    let sa = unix_ffi::SigAction {
+                        sa_sigaction: unix_ffi::SigActionHandler {
+                            sigaction: signal_handler,
+                        },
+                        sa_mask: unix_ffi::SigSet::empty(),
+                        sa_flags: unix_ffi::SA_SIGINFO | unix_ffi::SA_RESTART,
+                        sa_restorer: None,
+                    };
+                    if unix_ffi::sigaction(signal as c_int, &sa, std::ptr::null_mut()) != 0 {
                         return Err(io::Error::last_os_error().into());
                     }
                 }
@@ -414,7 +513,7 @@ pub mod signals {
 
         fn create_pipe() -> Result<(RawFd, RawFd)> {
             let mut fds = [0; 2];
-            let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
+            let res = unsafe { unix_ffi::pipe(fds.as_mut_ptr()) };
             if res != 0 {
                 return Err(io::Error::last_os_error().into());
             }
@@ -427,11 +526,11 @@ pub mod signals {
 
         fn set_nonblocking(fd: RawFd) -> Result<()> {
             unsafe {
-                let flags = libc::fcntl(fd, libc::F_GETFL);
+                let flags = unix_ffi::fcntl(fd, unix_ffi::F_GETFL);
                 if flags == -1 {
                     return Err(io::Error::last_os_error().into());
                 }
-                if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
+                if unix_ffi::fcntl(fd, unix_ffi::F_SETFL, flags | unix_ffi::O_NONBLOCK) == -1 {
                     return Err(io::Error::last_os_error().into());
                 }
             }
@@ -440,28 +539,26 @@ pub mod signals {
 
         fn set_cloexec(fd: RawFd) -> Result<()> {
             unsafe {
-                let flags = libc::fcntl(fd, libc::F_GETFD);
+                let flags = unix_ffi::fcntl(fd, unix_ffi::F_GETFD);
                 if flags == -1 {
                     return Err(io::Error::last_os_error().into());
                 }
-                if libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
+                if unix_ffi::fcntl(fd, unix_ffi::F_SETFD, flags | unix_ffi::FD_CLOEXEC) == -1 {
                     return Err(io::Error::last_os_error().into());
                 }
             }
             Ok(())
         }
 
-        unsafe extern "C" fn signal_handler(
-            signal: c_int,
-            _: *mut libc::siginfo_t,
-            _: *mut libc::c_void,
-        ) {
+        extern "C" fn signal_handler(signal: c_int, _: *mut unix_ffi::SigInfo, _: *mut c_void) {
             let fd = WRITE_FD.load(Ordering::Relaxed);
             if fd < 0 {
                 return;
             }
             let bytes = signal.to_ne_bytes();
-            let _ = libc::write(fd, bytes.as_ptr() as *const libc::c_void, bytes.len());
+            unsafe {
+                let _ = unix_ffi::write(fd, bytes.as_ptr() as *const c_void, bytes.len());
+            }
         }
 
         pub struct Signals {
@@ -529,7 +626,7 @@ pub mod signals {
             fn pending_drains_signals() {
                 let mut signals = Signals::new([SIGHUP]).expect("signals");
                 unsafe {
-                    libc::raise(SIGHUP);
+                    unix_ffi::raise(SIGHUP);
                 }
                 thread::sleep(Duration::from_millis(25));
                 let mut drained = signals.pending();
@@ -542,7 +639,7 @@ pub mod signals {
                 thread::spawn(|| {
                     thread::sleep(Duration::from_millis(25));
                     unsafe {
-                        libc::raise(SIGHUP);
+                        unix_ffi::raise(SIGHUP);
                     }
                 });
                 assert_eq!(signals.wait(), Some(SIGHUP));
@@ -815,7 +912,7 @@ pub mod fs {
     use std::os::fd::AsRawFd;
 
     #[cfg(unix)]
-    pub const O_NOFOLLOW: i32 = libc::O_NOFOLLOW;
+    pub const O_NOFOLLOW: i32 = crate::unix_ffi::O_NOFOLLOW;
     #[cfg(not(unix))]
     pub const O_NOFOLLOW: i32 = 0;
 
@@ -828,7 +925,7 @@ pub mod fs {
             #[cfg(unix)]
             {
                 let fd = self.as_raw_fd();
-                let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
+                let result = unsafe { crate::unix_ffi::flock(fd, crate::unix_ffi::LOCK_EX) };
                 if result == 0 {
                     Ok(())
                 } else {

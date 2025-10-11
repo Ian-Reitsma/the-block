@@ -181,11 +181,7 @@ const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::Inhouse;
 #[cfg(all(not(feature = "inhouse"), feature = "quinn"))]
 const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::Quinn;
 
-#[cfg(all(
-    not(feature = "inhouse"),
-    not(feature = "quinn"),
-    feature = "s2n-quic"
-))]
+#[cfg(all(not(feature = "inhouse"), not(feature = "quinn"), feature = "s2n-quic"))]
 const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::S2nQuic;
 
 #[cfg(all(

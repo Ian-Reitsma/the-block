@@ -188,7 +188,7 @@ fn build_websocket_router(state: SignerState) -> Router<SignerState> {
                         Message::Binary(_) => {
                             return Err(HttpError::Handler(
                                 "binary websocket frames are not supported".into(),
-                            ))
+                            ));
                         }
                         Message::Ping(data) => {
                             stream

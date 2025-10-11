@@ -1,12 +1,14 @@
-use crate::{Method, StatusCode, Uri};
+use crate::{Method, StatusCode, TlsConnector, TlsConnectorError, Uri};
 use foundation_serialization::de::DeserializeOwned;
 use foundation_serialization::{Error as SerializationError, Serialize, json};
 use runtime::io::BufferedTcpStream;
 use runtime::net::TcpStream;
+use runtime::spawn_blocking;
 use runtime::timeout;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
 use std::time::Duration;
@@ -20,6 +22,8 @@ pub struct ClientConfig {
     pub request_timeout: Duration,
     /// Maximum number of response bytes buffered in memory.
     pub max_response_bytes: usize,
+    /// Optional TLS connector used for HTTPS requests.
+    pub tls: Option<TlsConnector>,
 }
 
 impl Default for ClientConfig {
@@ -28,7 +32,26 @@ impl Default for ClientConfig {
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(15),
             max_response_bytes: 16 * 1024 * 1024,
+            tls: super::default_tls_connector(),
         }
+    }
+}
+
+impl ClientConfig {
+    /// Attach a TLS connector to the configuration.
+    pub fn with_tls_connector(mut self, connector: TlsConnector) -> Self {
+        self.tls = Some(connector);
+        self
+    }
+
+    /// Construct a configuration that pulls TLS settings from the provided
+    /// environment variable prefixes.
+    pub fn from_env(prefixes: &[&str]) -> Result<Self, TlsConnectorError> {
+        let mut config = Self::default();
+        if let Some(connector) = super::tls_connector_from_env_any(prefixes)? {
+            config.tls = Some(connector);
+        }
+        Ok(config)
     }
 }
 
@@ -49,10 +72,16 @@ impl Client {
         Self::new(ClientConfig::default())
     }
 
+    /// Create a client using TLS settings sourced from the environment.
+    pub fn with_tls_from_env(prefixes: &[&str]) -> Result<Self, TlsConnectorError> {
+        let config = ClientConfig::from_env(prefixes)?;
+        Ok(Self::new(config))
+    }
+
     /// Prepare an outbound request to the provided URL.
     pub fn request(&self, method: Method, url: &str) -> Result<RequestBuilder<'_>, ClientError> {
         let parsed = Uri::parse(url).map_err(|err| ClientError::InvalidUrl(err.to_string()))?;
-        if parsed.scheme() != "http" {
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Err(ClientError::UnsupportedScheme(parsed.scheme().to_string()));
         }
         Ok(RequestBuilder {
@@ -133,6 +162,7 @@ pub enum ClientError {
     ResponseTooLarge,
     Serialization(SerializationError),
     Utf8(FromUtf8Error),
+    Tls(TlsConnectorError),
 }
 
 impl From<io::Error> for ClientError {
@@ -153,6 +183,12 @@ impl From<FromUtf8Error> for ClientError {
     }
 }
 
+impl From<TlsConnectorError> for ClientError {
+    fn from(value: TlsConnectorError) -> Self {
+        ClientError::Tls(value)
+    }
+}
+
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -168,6 +204,7 @@ impl fmt::Display for ClientError {
             ClientError::ResponseTooLarge => write!(f, "response exceeds configured limit"),
             ClientError::Serialization(err) => write!(f, "serialization error: {err}"),
             ClientError::Utf8(err) => write!(f, "utf-8 error: {err}"),
+            ClientError::Tls(err) => write!(f, "tls error: {err}"),
         }
     }
 }
@@ -178,6 +215,7 @@ impl std::error::Error for ClientError {
             ClientError::Io(err) => Some(err),
             ClientError::Serialization(err) => Some(err),
             ClientError::Utf8(err) => Some(err),
+            ClientError::Tls(err) => Some(err),
             _ => None,
         }
     }
@@ -236,68 +274,31 @@ async fn execute(
     client: &Client,
     method: Method,
     url: Uri,
-    mut headers: HashMap<String, String>,
+    headers: HashMap<String, String>,
     body: Vec<u8>,
     timeout_override: Option<Duration>,
 ) -> Result<ClientResponse, ClientError> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| ClientError::InvalidResponse("missing host"))?;
-    let socket = url
-        .socket_addr()
-        .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
-    let addr =
-        resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
-    let connect_timeout = client.config.connect_timeout;
-    let request_timeout = timeout_override.unwrap_or(client.config.request_timeout);
-    let stream = timeout(connect_timeout, TcpStream::connect(addr))
-        .await
-        .map_err(|_| ClientError::Timeout)??;
-    let mut buffered = BufferedTcpStream::new(stream);
-
-    let path = request_target(&url);
-    let mut request = format!("{} {} HTTP/1.1\r\n", method.as_str(), path);
-    let host_header = url.host_header().unwrap_or_else(|| host.to_string());
-    headers.insert("host".into(), host_header);
-    headers
-        .entry("connection".into())
-        .or_insert_with(|| "close".to_string());
-    if !body.is_empty() {
-        headers
-            .entry("content-length".into())
-            .or_insert_with(|| body.len().to_string());
-    } else {
-        headers
-            .entry("content-length".into())
-            .or_insert_with(|| "0".into());
-    }
-    for (name, value) in headers.iter() {
-        request.push_str(name);
-        request.push_str(": ");
-        request.push_str(value);
-        request.push_str("\r\n");
-    }
-    request.push_str("\r\n");
-
-    timeout(request_timeout, buffered.write_all(request.as_bytes()))
-        .await
-        .map_err(|_| ClientError::Timeout)??;
-    if !body.is_empty() {
-        timeout(request_timeout, buffered.write_all(&body))
+    match url.scheme() {
+        "http" => execute_http(client, method, url, headers, body, timeout_override).await,
+        "https" => {
+            let connector = client
+                .config
+                .tls
+                .clone()
+                .ok_or_else(|| ClientError::UnsupportedScheme("https".into()))?;
+            execute_https(
+                client,
+                method,
+                url,
+                headers,
+                body,
+                timeout_override,
+                connector,
+            )
             .await
-            .map_err(|_| ClientError::Timeout)??;
+        }
+        scheme => Err(ClientError::UnsupportedScheme(scheme.to_string())),
     }
-    timeout(request_timeout, buffered.get_mut().flush())
-        .await
-        .map_err(|_| ClientError::Timeout)??;
-
-    let response = timeout(
-        request_timeout,
-        read_response(&mut buffered, client.config.max_response_bytes),
-    )
-    .await
-    .map_err(|_| ClientError::Timeout)??;
-    Ok(response)
 }
 
 fn resolve_addr(target: &str) -> Option<std::net::SocketAddr> {
@@ -464,6 +465,279 @@ async fn read_chunked_body(
             .map_err(ClientError::from)?;
         if &crlf != b"\r\n" {
             return Err(ClientError::InvalidResponse("chunk missing terminator"));
+        }
+    }
+    Ok(body)
+}
+
+async fn execute_http(
+    client: &Client,
+    method: Method,
+    url: Uri,
+    mut headers: HashMap<String, String>,
+    body: Vec<u8>,
+    timeout_override: Option<Duration>,
+) -> Result<ClientResponse, ClientError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| ClientError::InvalidResponse("missing host"))?;
+    let socket = url
+        .socket_addr()
+        .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+    let addr =
+        resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+    let connect_timeout = client.config.connect_timeout;
+    let request_timeout = timeout_override.unwrap_or(client.config.request_timeout);
+    let stream = timeout(connect_timeout, TcpStream::connect(addr))
+        .await
+        .map_err(|_| ClientError::Timeout)??;
+    let mut buffered = BufferedTcpStream::new(stream);
+
+    let request = build_request(method, &url, &mut headers, &body, host)?;
+
+    timeout(request_timeout, buffered.write_all(request.as_bytes()))
+        .await
+        .map_err(|_| ClientError::Timeout)??;
+    if !body.is_empty() {
+        timeout(request_timeout, buffered.write_all(&body))
+            .await
+            .map_err(|_| ClientError::Timeout)??;
+    }
+    timeout(request_timeout, buffered.get_mut().flush())
+        .await
+        .map_err(|_| ClientError::Timeout)??;
+
+    let response = timeout(
+        request_timeout,
+        read_response(&mut buffered, client.config.max_response_bytes),
+    )
+    .await
+    .map_err(|_| ClientError::Timeout)??;
+    Ok(response)
+}
+
+async fn execute_https(
+    client: &Client,
+    method: Method,
+    url: Uri,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
+    timeout_override: Option<Duration>,
+    connector: TlsConnector,
+) -> Result<ClientResponse, ClientError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| ClientError::InvalidResponse("missing host"))?
+        .to_string();
+    let socket = url
+        .socket_addr()
+        .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+    let addr =
+        resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+    let connect_timeout = client.config.connect_timeout;
+    let request_timeout = timeout_override.unwrap_or(client.config.request_timeout);
+    let max_response_bytes = client.config.max_response_bytes;
+    let url_clone = url.clone();
+
+    let join = spawn_blocking(move || {
+        execute_https_blocking(
+            method,
+            url_clone,
+            headers,
+            body,
+            connector,
+            host,
+            addr,
+            connect_timeout,
+            request_timeout,
+            max_response_bytes,
+        )
+    })
+    .await
+    .map_err(|err| {
+        ClientError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("join blocking https task: {err}"),
+        ))
+    })?;
+
+    join
+}
+
+fn execute_https_blocking(
+    method: Method,
+    url: Uri,
+    mut headers: HashMap<String, String>,
+    body: Vec<u8>,
+    connector: TlsConnector,
+    host: String,
+    addr: std::net::SocketAddr,
+    connect_timeout: Duration,
+    request_timeout: Duration,
+    max_response_bytes: usize,
+) -> Result<ClientResponse, ClientError> {
+    use std::net::TcpStream as StdTcpStream;
+
+    let stream = StdTcpStream::connect_timeout(&addr, connect_timeout)?;
+    let _ = stream.set_nodelay(true);
+    let _ = stream.set_read_timeout(Some(request_timeout));
+    let _ = stream.set_write_timeout(Some(request_timeout));
+
+    let mut tls_stream = connector.connect(&host, stream)?;
+    let request = build_request(method, &url, &mut headers, &body, &host)?;
+    tls_stream.write_all(request.as_bytes())?;
+    if !body.is_empty() {
+        tls_stream.write_all(&body)?;
+    }
+    tls_stream.flush()?;
+
+    let mut reader = BufReader::new(tls_stream);
+    read_response_blocking(&mut reader, max_response_bytes)
+}
+
+fn build_request(
+    method: Method,
+    url: &Uri,
+    headers: &mut HashMap<String, String>,
+    body: &[u8],
+    host: impl AsRef<str>,
+) -> Result<String, ClientError> {
+    let path = request_target(url);
+    let mut request = format!("{} {} HTTP/1.1\r\n", method.as_str(), path);
+    let host_header = url
+        .host_header()
+        .unwrap_or_else(|| host.as_ref().to_string());
+    headers.insert("host".into(), host_header);
+    headers
+        .entry("connection".into())
+        .or_insert_with(|| "close".to_string());
+    if !body.is_empty() {
+        headers
+            .entry("content-length".into())
+            .or_insert_with(|| body.len().to_string());
+    } else {
+        headers
+            .entry("content-length".into())
+            .or_insert_with(|| "0".into());
+    }
+    for (name, value) in headers.iter() {
+        request.push_str(name);
+        request.push_str(": ");
+        request.push_str(value);
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    Ok(request)
+}
+
+fn read_response_blocking(
+    reader: &mut BufReader<crate::ClientTlsStream>,
+    max_body: usize,
+) -> Result<ClientResponse, ClientError> {
+    let mut status_line = String::new();
+    let read = reader.read_line(&mut status_line)?;
+    if read == 0 {
+        return Err(ClientError::InvalidResponse("empty response"));
+    }
+    let status = parse_status_line(&status_line)?;
+    let headers = read_headers_blocking(reader)?;
+    let body = read_body_blocking(reader, &headers, max_body)?;
+    Ok(ClientResponse {
+        status,
+        headers,
+        body,
+    })
+}
+
+fn read_headers_blocking(
+    reader: &mut BufReader<crate::ClientTlsStream>,
+) -> Result<HashMap<String, String>, ClientError> {
+    let mut headers = HashMap::new();
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line)?;
+        if read == 0 {
+            return Err(ClientError::InvalidResponse(
+                "unexpected eof reading headers",
+            ));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+        } else {
+            return Err(ClientError::InvalidResponse("malformed header"));
+        }
+    }
+    Ok(headers)
+}
+
+fn read_body_blocking(
+    reader: &mut BufReader<crate::ClientTlsStream>,
+    headers: &HashMap<String, String>,
+    max_body: usize,
+) -> Result<Vec<u8>, ClientError> {
+    if let Some(te) = headers.get("transfer-encoding") {
+        if te.eq_ignore_ascii_case("chunked") {
+            return read_chunked_body_blocking(reader, max_body);
+        }
+    }
+    let length = headers
+        .get("content-length")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    if length > max_body {
+        return Err(ClientError::ResponseTooLarge);
+    }
+    let mut body = vec![0u8; length];
+    if length > 0 {
+        reader.read_exact(&mut body)?;
+    }
+    Ok(body)
+}
+
+fn read_chunked_body_blocking(
+    reader: &mut BufReader<crate::ClientTlsStream>,
+    max_body: usize,
+) -> Result<Vec<u8>, ClientError> {
+    let mut body = Vec::new();
+    loop {
+        let mut size_line = String::new();
+        let read = reader.read_line(&mut size_line)?;
+        if read == 0 {
+            return Err(ClientError::InvalidResponse(
+                "unexpected eof reading chunk size",
+            ));
+        }
+        let size = size_line
+            .trim_end_matches(['\r', '\n'])
+            .split(';')
+            .next()
+            .ok_or(ClientError::InvalidResponse("missing chunk size"))?
+            .trim();
+        let chunk_size = usize::from_str_radix(size, 16)
+            .map_err(|_| ClientError::InvalidResponse("invalid chunk size"))?;
+        if chunk_size == 0 {
+            loop {
+                let mut line = String::new();
+                let read = reader.read_line(&mut line)?;
+                if read == 0 || line == "\r\n" || line == "\n" {
+                    break;
+                }
+            }
+            break;
+        }
+        if body.len() + chunk_size > max_body {
+            return Err(ClientError::ResponseTooLarge);
+        }
+        let mut chunk = vec![0u8; chunk_size];
+        reader.read_exact(&mut chunk)?;
+        body.extend_from_slice(&chunk);
+        let mut crlf = [0u8; 2];
+        reader.read_exact(&mut crlf)?;
+        if crlf != [b'\r', b'\n'] {
+            return Err(ClientError::InvalidResponse("missing chunk terminator"));
         }
     }
     Ok(body)

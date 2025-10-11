@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-10 22:45:00Z_
+_Last updated: 2025-10-11 18:41:19Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -72,7 +72,7 @@ third-party codecs:
   `crate::util::binary_codec`, keeping the shared helpers in one place and
   routing encode/decode operations through the facade-backed metrics hooks.
 
-### Tooling & Support Crate Migrations (2025-10-10)
+### Tooling & Support Crate Migrations (2025-10-11)
 
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
   `foundation_serialization::json` and the in-house HTTP client, eliminating the
@@ -117,6 +117,13 @@ third-party codecs:
 - ✅ `tools/gov_graph` now reads proposal DAG entries via
   `foundation_serialization::binary::decode`, removing the final `bincode`
   usage from the governance DOT export helper.
+- ✅ Added the `http_env` helper crate and migrated CLI, node, aggregator,
+  explorer, probe, jurisdiction, and example binaries to its shared TLS loader
+  so HTTPS clients honour consistent prefix ordering and fallback logging; the
+  new `contract tls convert` command converts PEM assets into the JSON
+  identities consumed by the loader, and `crates/httpd/tests/tls_env.rs` now
+  exercises prefix selection plus missing-identity failures against the
+  in-house server.
 - ✅ Peer metrics exports, support-bundle smoke tests, and light-client log
   uploads route through the new `foundation_archive::{tar, gzip}` helpers,
   which now expose streaming encode/decode paths so large bundles avoid
@@ -206,10 +213,8 @@ delivery windows unless otherwise specified.
 | --- | --- | --- | --- |
 | `serde` derives (`serde`, `serde_bytes`) | Residual derives across gateway/storage RPCs (`node/src/gateway/read_receipt.rs`, `node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
 | `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
-| `subtle 2` | Constant-time comparisons in the wallet/identity stacks | Inline constant-time primitives inside `crypto_suite` (`ct_equal`, `ct_assign`) and drop the dependency once verification coverage lands. | Crypto Suite — W43 |
 | `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
 | `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
-| `pprof 0.13` | Flamegraph dumps for profiling harnesses | Offer a `foundation_profiler` crate that emits the same file format using our sampling hooks; stub out the external crate when profiling is disabled. | Performance Guild — W46 |
 | `bytes 1` | Buffer utilities in networking/tests (`node/src/net/*`, benches) | `concurrency::bytes::{Bytes, BytesMut}` wrappers now back all gossip payloads and QUIC cert handling; remaining dependency is indirect via `combine` and will be stubbed next. | Networking — W44 |
 
 The dependency guard in `node/Cargo.toml` should be updated alongside each
@@ -234,6 +239,24 @@ Dependency Migration" milestone) to coordinate the rollout.
   metrics snapshots, and QUIC certificate rotation no longer depend on the
   third-party `time` API, and replaced the remaining rcgen bridge with the
   first-party `foundation_tls` certificate builder.
+- ✅ Landed the `foundation_profiler` crate, replacing the external `pprof`
+  dependency with a native sampling loop and SVG renderer for profiling builds.
+- ✅ Dropped the `subtle` crate by adding constant-time equality helpers to
+  `crypto_suite` and wiring wallet, consensus, RPC, and DEX modules to the new
+  primitives.
+- ✅ Routed all workspace consumers through `sys::tempfile`, removing the
+  third-party `tempfile` dependency from manifests while keeping the temporary
+  directory API stable for tests and tooling. Remote signer workflows, CLI/node
+  HTTP helpers, and the metrics aggregator now rely on the in-house TLS
+  connector with shared environment prefixes, eliminating the lingering
+  `native-tls` shim and bringing wallet and tooling HTTPS flows fully in-house.
+- ✅ Rebuilt `crates/sys` on direct FFI declarations and `/proc` parsing so the
+  workspace no longer depends on the upstream `libc` crate while preserving the
+  existing tempfile, signal, randomness, and tty helpers under the first-party
+  API surface.
+- ✅ Introduced the in-house `thiserror` derive crate, replaced every workspace
+  dependency on the upstream `thiserror`/`thiserror-impl` pair, and added
+  regression tests so error enums now rely exclusively on the first-party macro.
 - ✅ Introduced `foundation_unicode` so handle normalization and identity flows
   no longer rely on the ICU normalizer or its data tables; callers now share a
   first-party NFKC + ASCII fast-path implementation.

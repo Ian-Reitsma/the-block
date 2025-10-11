@@ -1,4 +1,5 @@
 use crate::Method;
+use crate::TlsConnectorError;
 use crate::client::{Client, ClientConfig, ClientError, ClientResponse, RequestBuilder};
 use foundation_serialization::Serialize;
 use runtime::RuntimeHandle;
@@ -23,6 +24,13 @@ impl BlockingClient {
     /// Construct a client with the default configuration.
     pub fn default() -> Self {
         Self::new(ClientConfig::default())
+    }
+
+    /// Construct a client using TLS configuration sourced from the provided
+    /// environment variable prefixes.
+    pub fn with_tls_from_env(prefixes: &[&str]) -> Result<Self, TlsConnectorError> {
+        let config = ClientConfig::from_env(prefixes)?;
+        Ok(Self::new(config))
     }
 
     /// Prepare a blocking request to the provided URL using the supplied method.

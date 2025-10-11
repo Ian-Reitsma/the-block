@@ -31,6 +31,8 @@ foundation_lazy = { path = "../crates/foundation_lazy" }
 state = { path = "../state" }
 httpd = { path = "../crates/httpd" }
 coding = { path = "../crates/coding" }
+http_env = { path = "../crates/http_env" }
+foundation_tls = { path = "../crates/foundation_tls" }
 
 [features]
 default = []

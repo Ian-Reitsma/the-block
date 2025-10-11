@@ -1,5 +1,5 @@
 use crypto_suite::hashing::blake3;
-use pprof::ProfilerGuard;
+use foundation_profiler::ProfilerGuard;
 use std::fs::File;
 use std::time::Instant;
 

@@ -1,10 +1,12 @@
 pub mod ai;
 pub mod codec_helpers;
 pub mod compute;
+pub mod http_client;
 pub mod identity;
 pub mod light_client;
 pub mod parse_utils;
 pub mod rpc;
+pub mod tls;
 pub mod tx;
 pub mod wallet;
 pub mod wasm;

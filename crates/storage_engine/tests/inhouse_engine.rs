@@ -26,7 +26,7 @@ fn cleanup(path: &Path) {
 
 #[test]
 fn loads_legacy_manifest_and_wal_fixture() {
-    let tempdir = tempfile::tempdir().expect("tempdir");
+    let tempdir = sys::tempfile::tempdir().expect("tempdir");
     let root = tempdir.path();
     let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_cf");
 

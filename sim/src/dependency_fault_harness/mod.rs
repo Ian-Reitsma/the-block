@@ -14,7 +14,7 @@ use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::Serialize;
 use runtime::sync::CancellationToken;
-use tempfile;
+use sys::tempfile;
 
 use codec::{self, Codec as CodecProfile};
 use coding::{Config as CodingConfig, RolloutConfig};

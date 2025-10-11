@@ -63,7 +63,7 @@ where
     F: FnMut(&str) -> E,
     E: KeyValue,
 {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = sys::tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("db");
     let db_path_str = db_path.to_string_lossy().into_owned();
     {
@@ -86,7 +86,7 @@ where
 
 #[test]
 fn memory_engine_behaviour() {
-    let dir = tempfile::tempdir().expect("memory tempdir");
+    let dir = sys::tempfile::tempdir().expect("memory tempdir");
     let path = dir.path().join("memory");
     let path_str = path.to_string_lossy().into_owned();
 
@@ -103,7 +103,7 @@ fn memory_engine_behaviour() {
 fn rocksdb_engine_behaviour() {
     use storage_engine::rocksdb_engine::RocksDbEngine;
 
-    let dir = tempfile::tempdir().expect("rocks tempdir");
+    let dir = sys::tempfile::tempdir().expect("rocks tempdir");
     let path = dir.path().join("rocks");
     let path_str = path.to_string_lossy().into_owned();
 

@@ -2,7 +2,7 @@
 use arbitrary::{Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
 use std::collections::HashMap;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::SimpleDb;
 
 const MAX_BYTES: usize = 1 << 20; // 1 MiB

@@ -7,6 +7,7 @@ use std::fmt;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use crate::http_client;
 use crate::transaction::FeeLane;
 
 const MAX_BACKOFF_EXPONENT: u32 = 30;
@@ -48,7 +49,7 @@ impl RpcClient {
             .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.0);
         Self {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(base),
             jitter: Duration::from_millis(jitter),
             max_retries: retries,
@@ -530,7 +531,7 @@ mod tests {
     #[test]
     fn backoff_with_jitter_matches_legacy_for_small_attempts() {
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(25),
             jitter: Duration::from_millis(0),
             max_retries: 3,
@@ -546,7 +547,7 @@ mod tests {
 
     fn assert_backoff_saturates_for_large_attempts() {
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(10),
             jitter: Duration::from_millis(0),
             max_retries: 100,
@@ -576,7 +577,7 @@ mod tests {
     #[test]
     fn backoff_with_jitter_is_monotonic() {
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(5),
             jitter: Duration::from_millis(0),
             max_retries: 100,
@@ -597,7 +598,7 @@ mod tests {
     #[test]
     fn timeout_jitter_within_bounds() {
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(100),
             jitter: Duration::from_millis(50),
             max_retries: 1,
@@ -631,7 +632,7 @@ mod tests {
         });
 
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(100),
             jitter: Duration::from_millis(0),
             max_retries: 0,
@@ -662,7 +663,7 @@ mod tests {
     #[test]
     fn call_returns_fault_injection_error() {
         let client = RpcClient {
-            http: HttpClient::default(),
+            http: http_client::http_client(),
             base_timeout: Duration::from_millis(10),
             jitter: Duration::from_millis(0),
             max_retries: 0,

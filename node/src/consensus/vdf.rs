@@ -1,6 +1,6 @@
 use crypto_suite::hashing::blake3::Hasher;
+use crypto_suite::ConstantTimeEq;
 use std::thread;
-use subtle::ConstantTimeEq;
 
 pub const MODULUS_BITS: usize = 512; // placeholder for Pietrzak modulus size
 

@@ -4,10 +4,15 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 use thiserror::Error;
+
+fn http_client() -> BlockingClient {
+    env_blocking_client(&["TB_PROBE_TLS", "TB_HTTP_TLS"], "probe")
+}
 
 #[derive(Error, Debug)]
 enum ProbeError {
@@ -262,7 +267,7 @@ fn find_command<'a>(root: &'a CliCommand, path: &[&str]) -> Option<&'a CliComman
 }
 
 fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, ProbeError> {
-    let client = BlockingClient::default();
+    let client = http_client();
     let start = Instant::now();
     let req = foundation_serialization::json!({
         "jsonrpc": "2.0",
@@ -313,7 +318,7 @@ fn mine_one(
     timeout: Duration,
     expect_delta: u64,
 ) -> Result<Duration, ProbeError> {
-    let client = BlockingClient::default();
+    let client = http_client();
     let start_height = fetch_height(url, &client, timeout)?;
     let req = foundation_serialization::json!({
         "jsonrpc": "2.0",
@@ -381,7 +386,7 @@ fn gossip_check(addr: &str, timeout: Duration) -> Result<Duration, ProbeError> {
 }
 
 fn tip(url: &str, expect: u64, timeout: Duration) -> Result<Duration, ProbeError> {
-    let client = BlockingClient::default();
+    let client = http_client();
     let h = fetch_height(url, &client, timeout)?;
     if expect > 0 && h < expect {
         return Err(ProbeError::Timeout);

@@ -9,6 +9,7 @@ serde = { version = "1.0", features = ["derive"] }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 codec = { path = "../crates/codec" }
 httpd = { path = "../crates/httpd" }
+http_env = { path = "../crates/http_env" }
 runtime = { path = "../crates/runtime" }
 anyhow = "1"
 the_block = { path = "../node" }

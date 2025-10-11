@@ -9,6 +9,7 @@ cli_core = { path = "../../crates/cli_core" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 foundation_sqlite = { path = "../../crates/foundation_sqlite" }
 httpd = { path = "../../crates/httpd" }
+http_env = { path = "../../crates/http_env" }
 runtime = { path = "../../crates/runtime" }
 the_block = { path = "../../node", default-features = false }
 

@@ -1,7 +1,7 @@
 use crypto_suite::key_derivation::inhouse as kdf_inhouse;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
+use crypto_suite::ConstantTimeEq;
 use rand::rngs::OsRng;
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 /// Common signer interface for software and hardware wallets.

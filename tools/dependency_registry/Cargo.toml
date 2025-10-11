@@ -16,7 +16,7 @@ foundation_serialization = { path = "../../crates/foundation_serialization" }
 runtime = { path = "../../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 
 [dev-dependencies]
-tempfile = "3"
+sys = { path = "../../crates/sys" }
 
 
 [build-dependencies]

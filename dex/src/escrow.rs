@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use crypto_suite::hashing::{blake3, sha3::Sha3_256};
+use crypto_suite::ConstantTimeEq;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use subtle::ConstantTimeEq;
 
 /// Unique identifier for an escrow entry.
 pub type EscrowId = u64;
