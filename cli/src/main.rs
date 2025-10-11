@@ -39,6 +39,7 @@ mod fee_estimator;
 mod gateway;
 mod gov;
 mod htlc;
+mod identity;
 mod inhouse;
 mod light_client;
 mod light_sync;
@@ -73,6 +74,8 @@ use gov::handle as handle_gov;
 use gov::GovCmd;
 use htlc::handle as handle_htlc;
 use htlc::HtlcCmd;
+use identity::handle as handle_identity;
+use identity::IdentityCmd;
 use light_client::handle as handle_light_client;
 use light_client::LightClientCmd;
 use light_sync::handle as handle_light_sync;
@@ -231,6 +234,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_gateway(cmd);
             Ok(())
         }
+        "identity" => {
+            let cmd = IdentityCmd::from_matches(sub_matches)?;
+            handle_identity(cmd);
+            Ok(())
+        }
         "system" => {
             let cmd = SystemCmd::from_matches(sub_matches)?;
             handle_system(cmd);
@@ -325,6 +333,7 @@ fn build_root_command() -> Command {
         .subcommand(DifficultyCmd::command())
         .subcommand(ExplorerCmd::command())
         .subcommand(GatewayCmd::command())
+        .subcommand(IdentityCmd::command())
         .subcommand(SystemCmd::command())
         .subcommand(BridgeCmd::command())
         .subcommand(GovCmd::command())

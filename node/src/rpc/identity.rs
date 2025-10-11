@@ -32,10 +32,14 @@ pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value
         .map(|s| crypto_suite::hex::decode(s).ok())
         .flatten();
     #[cfg(feature = "pq-crypto")]
-    let addr = reg.register_handle(handle, &pk_bytes, pq_bytes.as_deref(), &sig_bytes, nonce)?;
+    let outcome = reg.register_handle(handle, &pk_bytes, pq_bytes.as_deref(), &sig_bytes, nonce)?;
     #[cfg(not(feature = "pq-crypto"))]
-    let addr = reg.register_handle(handle, &pk_bytes, &sig_bytes, nonce)?;
-    Ok(foundation_serialization::json!({"address": addr}))
+    let outcome = reg.register_handle(handle, &pk_bytes, &sig_bytes, nonce)?;
+    Ok(foundation_serialization::json!({
+        "address": outcome.address,
+        "normalized_handle": outcome.normalized_handle,
+        "normalization_accuracy": outcome.accuracy.as_str(),
+    }))
 }
 
 pub fn resolve_handle(params: &Value, reg: &HandleRegistry) -> Value {

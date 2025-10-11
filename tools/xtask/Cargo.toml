@@ -6,7 +6,6 @@ build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
-git2 = "0.18"
 anyhow = "1"
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 

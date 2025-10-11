@@ -7,9 +7,10 @@ use concurrency::Bytes;
 use dashmap::DashMap;
 use diagnostics::{anyhow, Result, TbError};
 use foundation_lazy::sync::{Lazy, OnceCell};
+use foundation_time::{Duration as TimeDuration, UtcDateTime};
+use foundation_tls::{generate_self_signed_ed25519, RotationPolicy, SelfSignedCertParams};
 pub use quinn::{Connection, Endpoint};
 use rand::Rng;
-use rcgen::generate_simple_self_signed;
 use rustls::client::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier, WebPkiVerifier,
 };
@@ -195,11 +196,29 @@ impl AsRef<[u8]> for Certificate {
 }
 
 pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
-    let cert = generate_simple_self_signed(["the-block".to_string()]).map_err(|e| anyhow!(e))?;
-    let cert_der = Bytes::from(cert.serialize_der().map_err(|e| anyhow!(e))?);
-    let key_der = cert.serialize_private_key_der();
+    let now = UtcDateTime::now();
+    let anchor =
+        UtcDateTime::from_unix_timestamp(0).map_err(|_| anyhow!("unix epoch unavailable"))?;
+    let policy = RotationPolicy::new(anchor, TimeDuration::days(7), TimeDuration::hours(1))
+        .map_err(|err| anyhow!("invalid rotation policy: {err}"))?;
+    let slot = policy
+        .slot_at(now)
+        .map_err(|err| anyhow!("compute rotation slot failed: {err}"))?;
+    let context = format!("quinn:{addr}");
+    let plan = policy
+        .plan(slot, context.as_bytes())
+        .map_err(|err| anyhow!("plan rotation window failed: {err}"))?;
+    let params = SelfSignedCertParams::builder()
+        .subject_cn("the-block quinn listener")
+        .add_dns_name("the-block")
+        .apply_rotation_plan(&plan)
+        .build()
+        .map_err(|err| anyhow!("build certificate params failed: {err}"))?;
+    let generated = generate_self_signed_ed25519(&params)
+        .map_err(|err| anyhow!("generate certificate failed: {err}"))?;
+    let cert_der = Bytes::from(generated.certificate.clone());
     let certificate = Certificate::from_der(cert_der.clone());
-    let key = PrivateKey(key_der);
+    let key = PrivateKey(generated.private_key.clone());
     let server_config = quinn::ServerConfig::with_single_cert(vec![certificate.as_rustls()], key)
         .map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
@@ -222,12 +241,24 @@ pub async fn listen_with_cert(
     cert_der: &Bytes,
     key_der: &Bytes,
 ) -> Result<Endpoint> {
+    listen_with_chain(addr, std::slice::from_ref(cert_der), key_der).await
+}
+
+pub async fn listen_with_chain(
+    addr: SocketAddr,
+    chain: &[Bytes],
+    key_der: &Bytes,
+) -> Result<Endpoint> {
+    if chain.is_empty() {
+        return Err(anyhow!("certificate chain must not be empty"));
+    }
     let key = PrivateKey(key_der.clone().into_vec());
-    let server_config = quinn::ServerConfig::with_single_cert(
-        vec![RustlsCertificate(cert_der.clone().into_vec())],
-        key,
-    )
-    .map_err(|e| anyhow!(e))?;
+    let rustls_chain: Vec<RustlsCertificate> = chain
+        .iter()
+        .map(|cert| RustlsCertificate(cert.clone().into_vec()))
+        .collect();
+    let server_config =
+        quinn::ServerConfig::with_single_cert(rustls_chain, key).map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
     let mut attempts = 0usize;
     loop {

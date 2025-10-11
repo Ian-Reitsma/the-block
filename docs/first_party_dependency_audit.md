@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-10 18:30:00Z_
+_Last updated: 2025-10-10 22:45:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -88,6 +88,10 @@ third-party codecs:
 - ✅ `crates/probe` emits RPC payloads through the in-house `json!` macro, and
   `crates/wallet` (including the remote signer tests) round-trips signer
   messages with the same facade.
+- ✅ Introduced the `foundation_sqlite` facade so CLI, explorer, and log/indexer
+  tooling share first-party parameter/value handling. The facade defaults to the
+  `rusqlite` engine but exposes a stub backend for `FIRST_PARTY_ONLY` builds
+  while we bring up a native store.
 - ✅ `sim/` (core harness, dependency-fault metrics, chaos summaries, and DID
   generator) serializes exclusively with the facade, while globals continue to
   rely on `foundation_lazy` for deterministic initialization.
@@ -177,7 +181,7 @@ ancillary tooling, but several third-party crates still block
 
 | Crate | Primary Consumers | Notes |
 | --- | --- | --- |
-| `rusqlite` | `cli`, `explorer`, `tools/{indexer,log_indexer_cli}` | Required for optional SQLite ingestion paths and log backfills. Plan: introduce a `foundation_sqlite` facade with deterministic builds and migrate the CLI/explorer helpers before flipping the guard. |
+| `rusqlite` | `cli`, `explorer`, `tools/{indexer,log_indexer_cli}` | ✅ Direct call-sites now route through the new `foundation_sqlite` facade. The default `rusqlite-backend` feature supplies the engine for standard builds while `FIRST_PARTY_ONLY` compiles against the stub that returns backend-unavailable errors. Follow-up: replace the backend shim with an in-house engine. |
 | `sled` | `the_block::SimpleDb`, storage tests, log indexer | Runtime already wraps sled; deliver an in-house key-value engine stub (even if backed by sled) so `FIRST_PARTY_ONLY` can compile without linking the crate. |
 | `openssl`/`openssl-sys` | transitive via TLS tooling | QUIC/TLS stacks still pull these in when the bundled providers are enabled. Scope a lightweight first-party crypto shim (or the minimal FFI needed for mutual TLS) so the guard can be satisfied without OpenSSL. |
 
@@ -203,10 +207,7 @@ delivery windows unless otherwise specified.
 | `serde` derives (`serde`, `serde_bytes`) | Residual derives across gateway/storage RPCs (`node/src/gateway/read_receipt.rs`, `node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
 | `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
 | `subtle 2` | Constant-time comparisons in the wallet/identity stacks | Inline constant-time primitives inside `crypto_suite` (`ct_equal`, `ct_assign`) and drop the dependency once verification coverage lands. | Crypto Suite — W43 |
-| `time 0.3` | Timestamp formatting inside governance snapshots and CLI UX | Introduce `foundation_time` facade with RFC3339/chrono-format utilities backed by our POSIX shim; keep third-party crate gated until feature parity is reached. | Runtime Platform — W46 |
-| `icu_normalizer 2` | Unicode normalization for DID inputs and governance text | Prototype a cut-down `foundation_unicode` normalizer (NFKC + ASCII fast-path) and switch both node and CLI validation to it. | Governance UX — W47 |
 | `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
-| `colored 2` | CLI colour output for governance/net tools | Replace with a lightweight `foundation_tui::color` helper that wraps ANSI escapes with feature gating for TTY detection. | CLI Team — W43 |
 | `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
 | `pprof 0.13` | Flamegraph dumps for profiling harnesses | Offer a `foundation_profiler` crate that emits the same file format using our sampling hooks; stub out the external crate when profiling is disabled. | Performance Guild — W46 |
 | `bytes 1` | Buffer utilities in networking/tests (`node/src/net/*`, benches) | `concurrency::bytes::{Bytes, BytesMut}` wrappers now back all gossip payloads and QUIC cert handling; remaining dependency is indirect via `combine` and will be stubbed next. | Networking — W44 |
@@ -229,9 +230,22 @@ Dependency Migration" milestone) to coordinate the rollout.
   `regex`/`regex-automata`/`regex-syntax`.
 - ✅ Added `sys::tty::dimensions()` and switched CLI layout heuristics to the
   first-party helper so the `terminal_size` crate is no longer required.
+- ✅ Landed the `foundation_time` crate so runtime storage repair logs,
+  metrics snapshots, and QUIC certificate rotation no longer depend on the
+  third-party `time` API, and replaced the remaining rcgen bridge with the
+  first-party `foundation_tls` certificate builder.
+- ✅ Introduced `foundation_unicode` so handle normalization and identity flows
+  no longer rely on the ICU normalizer or its data tables; callers now share a
+  first-party NFKC + ASCII fast-path implementation.
 - ✅ Replaced the external `hex` crate with `crypto_suite::hex` helpers, updating
   CLI, node, explorer, wallet, and tooling call sites to the first-party
   encoder/decoder and removing the dependency from workspace manifests.
+- ✅ Introduced the `foundation_tui` crate so CLI tooling now uses the
+  in-house colour helpers, allowing us to drop the third-party `colored`
+  dependency from the node binary and the wider workspace manifests.
+- ✅ Rewrote the `tools/xtask` diff helper to shell out to git, letting us drop
+  the `git2` bindings and their `url`/`idna_adapter`/ICU stack from the
+  workspace manifests.
 - ✅ Migrated the gateway fuzz harness onto the first-party HTTP parser and
   dropped the `httparse` dependency from the workspace.
 - ✅ Implemented `concurrency::filters::xor8::Xor8`, rewired the rate-limit

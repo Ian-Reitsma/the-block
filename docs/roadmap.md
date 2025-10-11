@@ -1,6 +1,6 @@
 # Status & Roadmap
-> **Review (2025-10-10):** Documented the binary codec consolidation across node, crypto suite, telemetry, and harness tooling while flagging the remaining serde/bincode usage limited to ancillary tooling.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-10).
+> **Review (2025-10-10):** Introduced the `foundation_sqlite` facade for explorer/CLI/log-indexer tooling, added the `foundation_time` crate so runtime/tooling timestamp paths move off the upstream `time` API, and replaced the legacy CLI colour stack with the first-party `foundation_tui` helpers while the binary codec consolidation continues across node, crypto suite, telemetry, and harness tooling.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and TUI facades are live with governance overrides enforced (2025-10-10).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
 The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, and the aggregator, gateway, explorer, and indexer surfaces all serve via the in-house `httpd` router. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
@@ -21,6 +21,22 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   and crypto helpers now rely on the `foundation_serialization` facade
   (JSON/binary/base58); remaining serde_json/bincode usage is isolated to
   auxiliary tooling tracked in `docs/pivot_dependency_strategy.md`.
+- Explorer, CLI, and log/indexer tooling now route SQLite operations through
+  the `foundation_sqlite` facade, removing direct `rusqlite` usage while a
+  stub backend guards `FIRST_PARTY_ONLY` builds until the native engine lands.
+- Metrics aggregator timestamp signing, storage repair logging, and QUIC
+  certificate rotation now depend on the `foundation_time` facade, centralising
+  formatting and removing direct `time` imports ahead of the native certificate
+  builder. QUIC and s2n listeners now draw deterministic validity windows and
+  serial numbers from `foundation_tls::RotationPolicy`, and the transport
+  adapter can bind listeners with complete CA chains.
+- The network CLI now renders colours through the `foundation_tui` facade,
+  dropping the third-party `colored` crate while keeping ANSI output gated on
+  terminal detection and operator overrides.
+- The contract CLI gained identity subcommands that reuse the
+  `foundation_unicode` facade, display normalization accuracy, and warn when a
+  handle required transliteration so operators can intervene before
+  registration.
 - A workspace-local `rand` crate and stubbed `rand_core` now back all
   randomness helpers, allowing node/CLI/runtime components to compile without
   pulling external RNG stacks while the in-house engines are completed.

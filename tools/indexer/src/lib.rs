@@ -2,11 +2,13 @@ use foundation_serialization::{
     binary,
     json::{self, Map, Number, Value},
 };
+use foundation_sqlite::{params, Connection};
 use httpd::{HttpError, Request, Response, Router, StatusCode};
-use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 
 use the_block::compute_market::receipt::Receipt;
+
+type DbResult<T> = foundation_sqlite::Result<T>;
 
 #[derive(Debug, Clone)]
 pub struct BlockRecord {
@@ -79,46 +81,52 @@ pub struct Indexer {
 
 impl Indexer {
     /// Open or create an indexer at the given path.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> DbResult<Self> {
         let path_buf = path.as_ref().to_path_buf();
         let conn = Connection::open(&path_buf)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS blocks (hash TEXT PRIMARY KEY, height INTEGER, timestamp INTEGER)",
-            [],
+            params![],
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, epoch INTEGER, provider TEXT, buyer TEXT, amount INTEGER)",
-            [],
+            params![],
         )?;
         Ok(Self { path: path_buf })
     }
 
-    fn conn(&self) -> Result<Connection> {
+    fn conn(&self) -> DbResult<Connection> {
         Connection::open(&self.path)
     }
 
     /// Index a block record.
-    pub fn index_block(&self, record: &BlockRecord) -> Result<()> {
+    pub fn index_block(&self, record: &BlockRecord) -> DbResult<()> {
         let conn = self.conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO blocks (hash, height, timestamp) VALUES (?1, ?2, ?3)",
-            params![record.hash, record.height, record.timestamp],
+            params![&record.hash, record.height, record.timestamp],
         )?;
         Ok(())
     }
 
     /// Index a receipt record.
-    pub fn index_receipt(&self, record: &ReceiptRecord) -> Result<()> {
+    pub fn index_receipt(&self, record: &ReceiptRecord) -> DbResult<()> {
         let conn = self.conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO receipts (key, epoch, provider, buyer, amount) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![record.key, record.epoch, record.provider, record.buyer, record.amount],
+            params![
+                &record.key,
+                record.epoch,
+                &record.provider,
+                &record.buyer,
+                record.amount,
+            ],
         )?;
         Ok(())
     }
 
     /// Fetch a block by hash.
-    pub fn get_block(&self, hash: &str) -> Result<BlockRecord> {
+    pub fn get_block(&self, hash: &str) -> DbResult<BlockRecord> {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT hash, height, timestamp FROM blocks WHERE hash=?1",
@@ -134,11 +142,11 @@ impl Indexer {
     }
 
     /// Return all indexed blocks.
-    pub fn all_blocks(&self) -> Result<Vec<BlockRecord>> {
+    pub fn all_blocks(&self) -> DbResult<Vec<BlockRecord>> {
         let conn = self.conn()?;
         let mut stmt =
             conn.prepare("SELECT hash, height, timestamp FROM blocks ORDER BY height")?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![], |row| {
             Ok(BlockRecord {
                 hash: row.get(0)?,
                 height: row.get(1)?,
@@ -153,11 +161,11 @@ impl Indexer {
     }
 
     /// Return all indexed receipts.
-    pub fn all_receipts(&self) -> Result<Vec<ReceiptRecord>> {
+    pub fn all_receipts(&self) -> DbResult<Vec<ReceiptRecord>> {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT key, epoch, provider, buyer, amount FROM receipts ORDER BY epoch")?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![], |row| {
             Ok(ReceiptRecord {
                 key: row.get(0)?,
                 epoch: row.get(1)?,
@@ -174,7 +182,7 @@ impl Indexer {
     }
 
     /// Helper to index all receipts in a pending directory.
-    pub fn index_receipts_dir(&self, dir: &Path) -> Result<()> {
+    pub fn index_receipts_dir(&self, dir: &Path) -> DbResult<()> {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for ent in entries.flatten() {
                 if let Ok(epoch) = ent.file_name().to_string_lossy().parse::<u64>() {

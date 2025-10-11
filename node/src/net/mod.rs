@@ -351,6 +351,7 @@ fn build_transport_callbacks() -> TransportCallbacks {
     let mut callbacks = TransportCallbacks::default();
 
     #[cfg(feature = "quic")]
+    #[allow(unused_variables)]
     let provider_counter: Arc<dyn Fn(&'static str) + Send + Sync + 'static> = {
         let cb = Arc::new(|provider: &'static str| {
             #[cfg(feature = "telemetry")]

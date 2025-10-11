@@ -70,8 +70,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── serde v1.0.228 (*)
 │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)
 │   └── thiserror v1.0.69 (*)
-├── colored v2.2.0
-│   └── lazy_static v1.5.0
+├── foundation_tui v0.1.0 (/workspace/the-block/crates/foundation_tui)
+│   └── sys v0.1.0 (/workspace/the-block/crates/sys) (*)
 ├── concurrency v0.1.0 (/workspace/the-block/crates/concurrency)
 │   └── serde v1.0.228 (*)
 ├── crypto v0.1.0 (/workspace/the-block/crypto) (*)
@@ -188,56 +188,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       └── thiserror v1.0.69 (*)
 ├── histogram_fp v0.1.0 (/workspace/the-block/crates/histogram_fp)
 ├── httpd v0.1.0 (/workspace/the-block/crates/httpd) (*)
-├── icu_normalizer v2.0.0
-│   ├── displaydoc v0.2.5 (proc-macro)
-│   │   ├── proc-macro2 v1.0.101 (*)
-│   │   ├── quote v1.0.41 (*)
-│   │   └── syn v2.0.106 (*)
-│   ├── icu_collections v2.0.0
-│   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │   ├── potential_utf v0.1.3
-│   │   │   └── zerovec v0.11.4
-│   │   │       ├── yoke v0.8.0
-│   │   │       │   ├── stable_deref_trait v1.2.0
-│   │   │       │   ├── yoke-derive v0.8.0 (proc-macro)
-│   │   │       │   │   ├── proc-macro2 v1.0.101 (*)
-│   │   │       │   │   ├── quote v1.0.41 (*)
-│   │   │       │   │   ├── syn v2.0.106 (*)
-│   │   │       │   │   └── synstructure v0.13.2
-│   │   │       │   │       ├── proc-macro2 v1.0.101 (*)
-│   │   │       │   │       ├── quote v1.0.41 (*)
-│   │   │       │   │       └── syn v2.0.106 (*)
-│   │   │       │   └── zerofrom v0.1.6
-│   │   │       │       └── zerofrom-derive v0.1.6 (proc-macro)
-│   │   │       │           ├── proc-macro2 v1.0.101 (*)
-│   │   │       │           ├── quote v1.0.41 (*)
-│   │   │       │           ├── syn v2.0.106 (*)
-│   │   │       │           └── synstructure v0.13.2 (*)
-│   │   │       ├── zerofrom v0.1.6 (*)
-│   │   │       └── zerovec-derive v0.11.1 (proc-macro)
-│   │   │           ├── proc-macro2 v1.0.101 (*)
-│   │   │           ├── quote v1.0.41 (*)
-│   │   │           └── syn v2.0.106 (*)
-│   │   ├── yoke v0.8.0 (*)
-│   │   ├── zerofrom v0.1.6 (*)
-│   │   └── zerovec v0.11.4 (*)
-│   ├── icu_normalizer_data v2.0.0
-│   ├── icu_provider v2.0.0
-│   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │   ├── icu_locale_core v2.0.0
-│   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │   │   ├── litemap v0.8.0
-│   │   │   ├── tinystr v0.8.1
-│   │   │   │   └── displaydoc v0.2.5 (proc-macro) (*)
-│   │   │   └── writeable v0.6.1
-│   │   ├── stable_deref_trait v1.2.0
-│   │   ├── tinystr v0.8.1 (*)
-│   │   ├── writeable v0.6.1
-│   │   ├── yoke v0.8.0 (*)
-│   │   ├── zerofrom v0.1.6 (*)
-│   │   ├── zerotrie v0.2.2
-│   │   │   └── displaydoc v0.2.5 (proc-macro) (*)
-│   │   └── zerovec v0.11.4 (*)
+├── foundation_unicode v0.1.0 (/workspace/the-block/crates/foundation_unicode)
 │   ├── smallvec v1.15.1
 │   ├── utf16_iter v1.0.5
 │   ├── utf8_iter v1.0.4
@@ -469,20 +420,21 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
 │   │   ├── httpd v0.1.0 (/workspace/the-block/crates/httpd) (*)
 │   │   ├── runtime v0.1.0 (/workspace/the-block/crates/runtime) (*)
-│   │   ├── rusqlite v0.30.0
-│   │   │   ├── bitflags v2.9.4
-│   │   │   ├── fallible-iterator v0.3.0
-│   │   │   ├── fallible-streaming-iterator v0.1.9
-│   │   │   ├── hashlink v0.8.4
-│   │   │   │   └── hashbrown v0.14.5
-│   │   │   │       ├── ahash v0.8.12 (*)
-│   │   │   │       └── allocator-api2 v0.2.21
-│   │   │   ├── libsqlite3-sys v0.27.0
-│   │   │   │   [build-dependencies]
-│   │   │   │   ├── cc v1.2.40 (*)
-│   │   │   │   ├── pkg-config v0.3.32
-│   │   │   │   └── vcpkg v0.2.15
-│   │   │   └── smallvec v1.15.1
+│   │   ├── foundation_sqlite v0.1.0 (/workspace/the-block/crates/foundation_sqlite)
+│   │   │   └── rusqlite v0.30.0
+│   │   │       ├── bitflags v2.9.4
+│   │   │       ├── fallible-iterator v0.3.0
+│   │   │       ├── fallible-streaming-iterator v0.1.9
+│   │   │       ├── hashlink v0.8.4
+│   │   │       │   └── hashbrown v0.14.5
+│   │   │       │       ├── ahash v0.8.12 (*)
+│   │   │       │       └── allocator-api2 v0.2.21
+│   │   │       ├── libsqlite3-sys v0.27.0
+│   │   │       │   [build-dependencies]
+│   │   │       │   ├── cc v1.2.40 (*)
+│   │   │       │   ├── pkg-config v0.3.32
+│   │   │       │   └── vcpkg v0.2.15
+│   │   │       └── smallvec v1.15.1
 │   │   ├── serde v1.0.228 (*)
 │   │   ├── storage v0.1.0 (/workspace/the-block/storage) (*)
 │   │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)

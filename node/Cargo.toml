@@ -14,7 +14,7 @@ rand = { path = "../crates/rand" }
 dkg = { path = "../dkg" }
 histogram_fp = { path = "../crates/histogram_fp" }
 subtle = "2"
-time = "0.3"
+foundation_time = { path = "../crates/foundation_time" }
 diagnostics = { path = "../crates/diagnostics" }
 concurrency = { path = "../crates/concurrency", features = ["serde"] }
 # Wallet framework
@@ -35,12 +35,12 @@ foundation_regex = { path = "../crates/foundation_regex" }
 foundation_rpc = { path = "../crates/foundation_rpc" }
 foundation_telemetry = { path = "../crates/foundation_telemetry" }
 foundation_archive = { path = "../crates/foundation_archive" }
-icu_normalizer = "2"
+foundation_unicode = { path = "../crates/foundation_unicode" }
 static_assertions = "1"
-colored = "2"
+foundation_tui = { path = "../crates/foundation_tui" }
 base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }
-rusqlite = { version = "0.30", features = ["bundled"], optional = true }
+foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
 futures = "0.3"
 x509-parser = "0.16"
 state = { path = "../state" }
@@ -73,7 +73,7 @@ sys = { path = "../crates/sys" }
 default = ["inhouse-storage"]
 storage-rocksdb = []
 inhouse-storage = []
-sqlite-migration = ["dep:rusqlite"]
+sqlite-migration = ["dep:foundation_sqlite"]
 cli = []
 lightweight-integration = []
 integration-tests = []
@@ -100,6 +100,7 @@ python-bindings = ["dep:python_bridge"]
 jurisdiction = { path = "../crates/jurisdiction" }
 sim = { package = "tb-sim", path = "../sim" }
 testkit = { path = "../crates/testkit" }
+foundation_tls = { path = "../crates/foundation_tls" }
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

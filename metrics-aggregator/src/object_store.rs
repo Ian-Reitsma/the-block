@@ -4,20 +4,16 @@ use std::fmt;
 use std::time::SystemTime;
 
 use crypto_suite::mac::{hmac_sha256, sha256_digest};
+use foundation_time::{FormatError as TimeFormatError, FormatKind, UtcDateTime};
 use httpd::{ClientError, HttpClient, Method};
-use time::{format_description::FormatItem, macros::format_description, OffsetDateTime};
 
 const METRICS_OBJECT_KEY: &str = "metrics/latest.zip";
-
-static DATE_FORMAT: &[FormatItem<'_>] = format_description!("[year][month][day]");
-static AMZ_DATE_FORMAT: &[FormatItem<'_>] =
-    format_description!("[year][month][day]T[hour][minute][second]Z");
 
 pub fn upload_metrics_snapshot(bucket: &str, data: Vec<u8>) -> Result<(), UploadError> {
     let config = S3Config::from_env()?;
     let bucket = bucket.to_owned();
     runtime::handle().block_on(async move {
-        let now = OffsetDateTime::from(SystemTime::now());
+        let now = UtcDateTime::from(SystemTime::now());
         put_object(config, bucket, METRICS_OBJECT_KEY, data, now).await
     })
 }
@@ -27,7 +23,7 @@ async fn put_object(
     bucket: String,
     key: &str,
     body: Vec<u8>,
-    now: OffsetDateTime,
+    now: UtcDateTime,
 ) -> Result<(), UploadError> {
     let artifacts = signing_artifacts(&config, &bucket, key, &body, now)?;
     let client = HttpClient::default();
@@ -236,13 +232,13 @@ fn signing_artifacts(
     bucket: &str,
     key: &str,
     body: &[u8],
-    now: OffsetDateTime,
+    now: UtcDateTime,
 ) -> Result<SigningArtifacts, UploadError> {
     let canonical_uri = config.endpoint.canonical_uri(bucket, key);
     let url = config.endpoint.request_url(&canonical_uri);
     let payload_hash = hex(&sha256_digest(body));
-    let amz_date = now.format(AMZ_DATE_FORMAT)?;
-    let date_stamp = now.format(DATE_FORMAT)?;
+    let amz_date = now.format(FormatKind::CompactDateTime)?;
+    let date_stamp = now.format(FormatKind::CompactDate)?;
 
     let mut headers = vec![
         ("content-length".to_string(), body.len().to_string()),
@@ -348,7 +344,7 @@ pub enum UploadError {
     InvalidEndpoint(String),
     UnsupportedScheme(String),
     InvalidPort(String),
-    Time(time::error::Format),
+    Time(TimeFormatError),
     Client(ClientError),
     UnexpectedResponse { status: u16, body: String },
 }
@@ -387,8 +383,8 @@ impl StdError for UploadError {
     }
 }
 
-impl From<time::error::Format> for UploadError {
-    fn from(value: time::error::Format) -> Self {
+impl From<TimeFormatError> for UploadError {
+    fn from(value: TimeFormatError) -> Self {
         UploadError::Time(value)
     }
 }
@@ -413,7 +409,7 @@ mod tests {
             session_token: None,
         };
         let body = b"Welcome to Amazon S3.";
-        let now = OffsetDateTime::from_unix_timestamp(1369353600).unwrap();
+        let now = UtcDateTime::from_unix_timestamp(1_369_353_600).unwrap();
         let artifacts = signing_artifacts(&config, "examplebucket", "test.txt", body, now).unwrap();
         let expected_canonical = concat!(
             "PUT\n",

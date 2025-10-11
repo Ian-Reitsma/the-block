@@ -17,20 +17,20 @@ quinn = [
     "dep:dashmap",
     "dep:quinn",
     "dep:rand",
-    "dep:rcgen",
     "dep:runtime",
     "dep:rustls",
+    "dep:foundation_tls",
 ]
 "s2n-quic" = [
     "dep:base64_fp",
     "dep:crypto_suite",
     "dep:rand",
-    "dep:rcgen",
     "dep:runtime",
     "dep:sys",
-    "dep:time",
+    "dep:foundation_time",
     "dep:x509-parser",
     "dep:foundation_serialization",
+    "dep:foundation_tls",
 ]
 quic = ["quinn", "s2n-quic"]
 
@@ -42,12 +42,12 @@ sys = { path = "../sys", optional = true }
 crypto_suite = { path = "../crypto_suite", optional = true }
 foundation_lazy = { path = "../foundation_lazy" }
 rand = { path = "../rand", optional = true }
-rcgen = { version = "0.12", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
-time = { version = "0.3", optional = true }
+foundation_time = { path = "../foundation_time", optional = true }
 x509-parser = { version = "0.16", optional = true }
 foundation_serialization = { path = "../foundation_serialization", optional = true }
 concurrency = { path = "../concurrency", features = ["serde"] }
+foundation_tls = { path = "../foundation_tls", optional = true }
 

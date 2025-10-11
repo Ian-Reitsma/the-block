@@ -618,14 +618,21 @@ playbook, including onboarding checklists, operator runbooks, troubleshooting gu
 and diagrams showing wrapper control flow across runtime, transport, overlay, storage,
 coding, crypto, and codec crates.
 
-**2025-10-08 status.** Governance, ledger, and the metrics aggregator now encode
+**2025-10-10 status.** Governance, ledger, and the metrics aggregator now encode
 exclusively through the `foundation_serialization` facade—first-party JSON, binary,
 TOML, and base58 helpers replaced every remaining `serde_json`/`bincode` call in these
 production crates. The in-house base58 encoder also supplanted `bs58` across the
-workspace. Residual serde_json/bincode dependencies live in tooling (`tools/*`,
-`sim/`, `examples/`) and are tracked in `docs/pivot_dependency_strategy.md` with
-assigned owners; removing them is the next dependency-guard milestone before we can
-ban the crates globally.
+workspace. Explorer, CLI, and log/indexer SQLite flows now ride the new
+`foundation_sqlite` facade so optional tooling compiles behind a first-party API
+even as the native backend is staged, and runtime/tooling timestamp paths now depend
+on the `foundation_time` facade so S3 signing, storage repair logging, and QUIC
+certificate rotation avoid direct `time` usage. Terminal colour output for the
+network CLI now routes through the new `foundation_tui` crate so the workspace no
+longer links the third-party `colored` dependency. Residual serde_json/bincode
+dependencies live in tooling (`tools/*`, `sim/`, `examples/`) and are tracked in
+`docs/pivot_dependency_strategy.md` with assigned owners; removing them and delivering
+the in-house SQLite engine are the next dependency-guard milestones before we can ban
+the crates globally.
 
 ### Staged Rollout Plan (At a Glance)
 

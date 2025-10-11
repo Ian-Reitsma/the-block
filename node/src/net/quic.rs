@@ -31,6 +31,18 @@ pub async fn listen_with_cert(
         .map_err(Into::into)
 }
 
+pub async fn listen_with_chain(
+    addr: SocketAddr,
+    chain: &[concurrency::Bytes],
+    key_der: concurrency::Bytes,
+) -> Result<ListenerHandle> {
+    let adapter = quinn_adapter()?;
+    adapter
+        .listen_with_chain(addr, chain, key_der)
+        .await
+        .map_err(Into::into)
+}
+
 pub async fn connect(
     addr: SocketAddr,
     cert: &CertificateHandle,

@@ -11,15 +11,13 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
-use ::time::{Duration, OffsetDateTime};
 use base64_fp::{decode_standard, encode_standard};
-use crypto_suite::signatures::ed25519::{SigningKey, PUBLIC_KEY_LENGTH, SECRET_KEY_LENGTH};
+use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::json::{self, Map, Value};
+use foundation_time::{Duration, UtcDateTime};
+use foundation_tls::{sign_self_signed_ed25519, RotationPolicy, SelfSignedCertParams};
 use rand::{OsRng, RngCore};
-use rcgen::{
-    Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, RemoteKeyPair, SanType,
-};
 use runtime::net::UdpSocket;
 use runtime::sync::Mutex as AsyncMutex;
 use runtime::{sleep, timeout, TimeoutError};
@@ -91,36 +89,6 @@ pub struct LocalCert {
     pub key: Vec<u8>,
     pub fingerprint: [u8; 32],
     pub issued_at: u64,
-}
-
-struct SigningRemoteKey {
-    secret: [u8; SECRET_KEY_LENGTH],
-    public: [u8; PUBLIC_KEY_LENGTH],
-}
-
-impl SigningRemoteKey {
-    fn new(key: &SigningKey) -> Self {
-        Self {
-            secret: key.to_bytes(),
-            public: key.verifying_key().to_bytes(),
-        }
-    }
-}
-
-impl RemoteKeyPair for SigningRemoteKey {
-    fn public_key(&self) -> &[u8] {
-        &self.public
-    }
-
-    fn sign(&self, msg: &[u8]) -> std::result::Result<Vec<u8>, rcgen::Error> {
-        let signer = SigningKey::from_bytes(&self.secret);
-        let signature = signer.sign(msg);
-        Ok(signature.to_bytes().to_vec())
-    }
-
-    fn algorithm(&self) -> &'static rcgen::SignatureAlgorithm {
-        &rcgen::PKCS_ED25519
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -498,39 +466,35 @@ fn rotate_state(signing_key: &SigningKey, state: &mut CertState) -> Result<()> {
 
 fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
     let issued_at = now_secs();
-    let mut params = CertificateParams::default();
-    params.alg = &rcgen::PKCS_ED25519;
-    params.distinguished_name = {
-        let mut dn = DistinguishedName::new();
-        let hex_id = crypto_suite::hex::encode(signing_key.verifying_key().to_bytes());
-        dn.push(DnType::CommonName, format!("the-block node {hex_id}"));
-        dn
-    };
-    params.subject_alt_names = vec![SanType::DnsName("the-block.local".into())];
-    params.not_before = OffsetDateTime::now_utc() - Duration::hours(1);
-    params.not_after = OffsetDateTime::now_utc() + Duration::days(7);
-    params.serial_number = Some(random_serial());
-    let remote = SigningRemoteKey::new(signing_key);
-    let key_pair = KeyPair::from_remote(Box::new(remote)).map_err(|err| anyhow!(err))?;
-    params.key_pair = Some(key_pair);
-    let cert = Certificate::from_params(params).map_err(|err| anyhow!(err))?;
-    let cert_der = cert.serialize_der().map_err(|err| anyhow!(err))?;
+    let now = UtcDateTime::now();
+    let anchor =
+        UtcDateTime::from_unix_timestamp(0).map_err(|_| anyhow!("unix epoch unavailable"))?;
+    let policy = RotationPolicy::new(anchor, Duration::days(7), Duration::hours(1))
+        .map_err(|err| anyhow!("invalid rotation policy: {err}"))?;
+    let slot = policy
+        .slot_at(now)
+        .map_err(|err| anyhow!("compute rotation slot failed: {err}"))?;
+    let verifier_bytes = signing_key.verifying_key().to_bytes();
+    let plan = policy
+        .plan(slot, &verifier_bytes)
+        .map_err(|err| anyhow!("plan rotation window failed: {err}"))?;
+    let hex_id = crypto_suite::hex::encode(&verifier_bytes);
+    let params = SelfSignedCertParams::builder()
+        .subject_cn(format!("the-block node {hex_id}"))
+        .add_dns_name("the-block.local")
+        .apply_rotation_plan(&plan)
+        .build()
+        .map_err(|err| anyhow!("build certificate params failed: {err}"))?;
+    let cert_der = sign_self_signed_ed25519(signing_key, &params)
+        .map_err(|err| anyhow!("generate certificate failed: {err}"))?;
     let mut fp = [0u8; 32];
     fp.copy_from_slice(blake3::hash(&cert_der).as_bytes());
-    let cert_bytes = Bytes::from(cert_der);
     Ok(LocalCert {
-        cert: cert_bytes,
+        cert: Bytes::from(cert_der),
         key: signing_key.to_keypair_bytes().to_vec(),
         fingerprint: fp,
         issued_at,
     })
-}
-
-fn random_serial() -> rcgen::SerialNumber {
-    let mut buf = [0u8; 16];
-    OsRng::default().fill_bytes(&mut buf);
-    buf[0] &= 0x7F;
-    rcgen::SerialNumber::from_slice(&buf)
 }
 
 fn load_from_disk(state: &mut CertState) -> Result<()> {

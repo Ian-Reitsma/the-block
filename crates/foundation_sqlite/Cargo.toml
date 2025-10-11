@@ -1,0 +1,14 @@
+[package]
+name = "foundation_sqlite"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["rusqlite-backend"]
+rusqlite-backend = ["dep:rusqlite"]
+
+[dependencies]
+rusqlite = { version = "0.30", features = ["bundled"], optional = true }
+
+[dev-dependencies]
+# Ensure doctests can compile without the backend.

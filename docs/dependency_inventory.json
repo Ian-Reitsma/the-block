@@ -105,10 +105,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "pem",
-          "version": "3.0.5"
-        },
-        {
           "name": "semver",
           "version": "1.0.27"
         },
@@ -141,16 +137,8 @@
           "version": "0.3.44"
         },
         {
-          "name": "url",
-          "version": "2.5.7"
-        },
-        {
           "name": "wallet",
           "version": "0.1.0"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
         }
       ],
       "depth": 1,
@@ -271,7 +259,7 @@
           "version": "0.14.5"
         }
       ],
-      "depth": 6,
+      "depth": 7,
       "license": "MIT OR Apache-2.0",
       "name": "allocator-api2",
       "origin": "crates.io",
@@ -507,7 +495,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "predicates",
@@ -574,7 +562,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "miniz_oxide",
@@ -609,21 +597,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.3.76"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "pem",
-          "version": "3.0.5"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "base64",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.22.1"
     },
     {
       "dependencies": [],
@@ -695,10 +668,6 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "git2",
-          "version": "0.18.3"
-        },
-        {
           "name": "nix",
           "version": "0.27.1"
         },
@@ -723,7 +692,7 @@
           "version": "2.11.1"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "bitflags",
       "origin": "crates.io",
@@ -848,7 +817,7 @@
       "dependencies": [
         {
           "name": "find-msvc-tools",
-          "version": "0.1.3"
+          "version": "0.1.4"
         },
         {
           "name": "jobserver",
@@ -856,7 +825,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "shlex",
@@ -881,20 +850,8 @@
           "version": "0.4.10"
         },
         {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
           "name": "libsqlite3-sys",
           "version": "0.27.0"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
         },
         {
           "name": "openssl-sys",
@@ -907,10 +864,6 @@
         {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
-        },
-        {
-          "name": "ring",
-          "version": "0.16.20"
         }
       ],
       "depth": 3,
@@ -918,7 +871,7 @@
       "name": "cc",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "1.2.40"
+      "version": "1.2.41"
     },
     {
       "dependencies": [],
@@ -1154,30 +1107,6 @@
     {
       "dependencies": [
         {
-          "name": "lazy_static",
-          "version": "1.5.0"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.59.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MPL-2.0",
-      "name": "colored",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.2.0"
-    },
-    {
-      "dependencies": [
-        {
           "name": "serde",
           "version": "1.0.228"
         }
@@ -1227,7 +1156,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -1467,6 +1396,10 @@
         },
         {
           "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
           "version": "0.1.0"
         },
         {
@@ -1804,7 +1737,7 @@
           "version": "0.3.44"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "deranged",
       "origin": "crates.io",
@@ -1932,37 +1865,9 @@
         {
           "name": "der-parser",
           "version": "9.0.0"
-        },
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "tinystr",
-          "version": "0.8.1"
-        },
-        {
-          "name": "zerotrie",
-          "version": "0.2.2"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "displaydoc",
       "origin": "crates.io",
@@ -2042,7 +1947,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "windows-sys",
@@ -2085,6 +1990,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_sqlite",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
@@ -2095,10 +2004,6 @@
         {
           "name": "runtime",
           "version": "0.1.0"
-        },
-        {
-          "name": "rusqlite",
-          "version": "0.30.0"
         },
         {
           "name": "serde",
@@ -2142,7 +2047,7 @@
           "version": "0.30.0"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT/Apache-2.0",
       "name": "fallible-iterator",
       "origin": "crates.io",
@@ -2157,7 +2062,7 @@
           "version": "0.30.0"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT/Apache-2.0",
       "name": "fallible-streaming-iterator",
       "origin": "crates.io",
@@ -2184,7 +2089,7 @@
       "dependents": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         }
       ],
       "depth": 4,
@@ -2192,13 +2097,13 @@
       "name": "find-msvc-tools",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "0.1.3"
+      "version": "0.1.4"
     },
     {
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "lazy_static",
@@ -2206,7 +2111,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "winapi",
@@ -2284,26 +2189,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.1.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "percent-encoding",
-          "version": "2.3.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "url",
-          "version": "2.5.7"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "form_urlencoded",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.2.2"
     },
     {
       "dependencies": [],
@@ -2601,6 +2486,30 @@
     {
       "dependencies": [
         {
+          "name": "rusqlite",
+          "version": "0.30.0"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "indexer",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 3,
+      "license": null,
+      "name": "foundation_sqlite",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        {
           "name": "foundation_serialization",
           "version": "0.1.0"
         }
@@ -2618,6 +2527,100 @@
       "depth": 1,
       "license": "MIT",
       "name": "foundation_telemetry",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        {
+          "name": "foundation_tls",
+          "version": "0.1.0"
+        },
+        {
+          "name": "metrics-aggregator",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "wallet",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": null,
+      "name": "foundation_time",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        {
+          "name": "crypto_suite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_time",
+          "version": "0.1.0"
+        },
+        {
+          "name": "rand",
+          "version": "0.1.0"
+        },
+        {
+          "name": "thiserror",
+          "version": "1.0.69"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "wallet",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 2,
+      "license": null,
+      "name": "foundation_tls",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        {
+          "name": "sys",
+          "version": "0.1.0"
+        }
+      ],
+      "dependents": [
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": null,
+      "name": "foundation_tui",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": null,
+      "name": "foundation_unicode",
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
@@ -2922,7 +2925,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "r-efi",
@@ -2976,50 +2979,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.32.3"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "bitflags",
-          "version": "2.9.4"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.176"
-        },
-        {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "openssl-probe",
-          "version": "0.1.6"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
-          "name": "url",
-          "version": "2.5.7"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "xtask",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "git2",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.18.3"
     },
     {
       "dependencies": [],
@@ -3101,7 +3060,7 @@
           "version": "0.8.4"
         }
       ],
-      "depth": 5,
+      "depth": 6,
       "license": "MIT OR Apache-2.0",
       "name": "hashbrown",
       "origin": "crates.io",
@@ -3136,7 +3095,7 @@
           "version": "0.30.0"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "hashlink",
       "origin": "crates.io",
@@ -3162,7 +3121,7 @@
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "cfg-if",
@@ -3170,7 +3129,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "pkg-config",
@@ -3296,336 +3255,6 @@
     {
       "dependencies": [
         {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "potential_utf",
-          "version": "0.1.3"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        }
-      ],
-      "depth": 2,
-      "license": "Unicode-3.0",
-      "name": "icu_collections",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "litemap",
-          "version": "0.8.0"
-        },
-        {
-          "name": "tinystr",
-          "version": "0.8.1"
-        },
-        {
-          "name": "writeable",
-          "version": "0.6.1"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "icu_locale_core",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_normalizer_data",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "smallvec",
-          "version": "1.15.1"
-        },
-        {
-          "name": "utf16_iter",
-          "version": "1.0.5"
-        },
-        {
-          "name": "utf8_iter",
-          "version": "1.0.4"
-        },
-        {
-          "name": "write16",
-          "version": "1.0.0"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "idna_adapter",
-          "version": "1.2.1"
-        },
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "Unicode-3.0",
-      "name": "icu_normalizer",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Unicode-3.0",
-      "name": "icu_normalizer_data",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties_data",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "potential_utf",
-          "version": "0.1.3"
-        },
-        {
-          "name": "zerotrie",
-          "version": "0.2.2"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "idna_adapter",
-          "version": "1.2.1"
-        }
-      ],
-      "depth": 2,
-      "license": "Unicode-3.0",
-      "name": "icu_properties",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "icu_properties_data",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "stable_deref_trait",
-          "version": "1.2.0"
-        },
-        {
-          "name": "tinystr",
-          "version": "0.8.1"
-        },
-        {
-          "name": "writeable",
-          "version": "0.6.1"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerotrie",
-          "version": "0.2.2"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        }
-      ],
-      "depth": 2,
-      "license": "Unicode-3.0",
-      "name": "icu_provider",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "idna_adapter",
-          "version": "1.2.1"
-        },
-        {
-          "name": "smallvec",
-          "version": "1.15.1"
-        },
-        {
-          "name": "utf8_iter",
-          "version": "1.0.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "url",
-          "version": "2.5.7"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "idna",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "idna",
-          "version": "1.1.0"
-        }
-      ],
-      "depth": 4,
-      "license": "Apache-2.0 OR MIT",
-      "name": "idna_adapter",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.2.1"
-    },
-    {
-      "dependencies": [
-        {
           "name": "equivalent",
           "version": "1.0.2"
         },
@@ -3747,7 +3376,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "windows-sys",
@@ -3795,7 +3424,7 @@
           "version": "0.3.44"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "itoa",
       "origin": "crates.io",
@@ -3810,13 +3439,13 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         }
       ],
       "depth": 4,
@@ -3849,10 +3478,6 @@
         {
           "name": "uuid",
           "version": "1.18.1"
-        },
-        {
-          "name": "web-sys",
-          "version": "0.3.81"
         }
       ],
       "depth": 3,
@@ -3913,10 +3538,6 @@
     {
       "dependencies": [],
       "dependents": [
-        {
-          "name": "colored",
-          "version": "2.2.0"
-        },
         {
           "name": "findshlibs",
           "version": "0.10.2"
@@ -3998,7 +3619,7 @@
         },
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "core-foundation",
@@ -4017,10 +3638,6 @@
           "version": "0.3.3"
         },
         {
-          "name": "git2",
-          "version": "0.18.3"
-        },
-        {
           "name": "hidapi",
           "version": "2.6.3"
         },
@@ -4031,18 +3648,6 @@
         {
           "name": "jobserver",
           "version": "0.1.34"
-        },
-        {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
         },
         {
           "name": "memmap2",
@@ -4097,10 +3702,6 @@
           "version": "0.2.11"
         },
         {
-          "name": "ring",
-          "version": "0.16.20"
-        },
-        {
           "name": "rpassword",
           "version": "7.4.0"
         },
@@ -4142,53 +3743,13 @@
       "name": "libc",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "0.2.176"
+      "version": "0.2.177"
     },
     {
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.176"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
-          "name": "pkg-config",
-          "version": "0.3.32"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "git2",
-          "version": "0.18.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "libgit2-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.16.2+1.7.2"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "pkg-config",
@@ -4205,88 +3766,12 @@
           "version": "0.30.0"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT",
       "name": "libsqlite3-sys",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.27.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.40"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.176"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
-        },
-        {
-          "name": "openssl-sys",
-          "version": "0.9.109"
-        },
-        {
-          "name": "pkg-config",
-          "version": "0.3.32"
-        },
-        {
-          "name": "vcpkg",
-          "version": "0.2.15"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "libssh2-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.40"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.176"
-        },
-        {
-          "name": "pkg-config",
-          "version": "0.3.32"
-        },
-        {
-          "name": "vcpkg",
-          "version": "0.2.15"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "libz-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.1.22"
     },
     {
       "dependencies": [
@@ -4376,21 +3861,6 @@
       "version": "0.11.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 4,
-      "license": "Unicode-3.0",
-      "name": "litemap",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.0"
-    },
-    {
       "dependencies": [
         {
           "name": "scopeguard",
@@ -4413,10 +3883,6 @@
     {
       "dependencies": [],
       "dependents": [
-        {
-          "name": "git2",
-          "version": "0.18.3"
-        },
         {
           "name": "iana-time-zone",
           "version": "0.1.64"
@@ -4512,7 +3978,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -4631,7 +4097,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "log",
@@ -4663,7 +4129,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "log",
@@ -4723,7 +4189,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -4755,7 +4221,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -4862,7 +4328,7 @@
           "version": "0.2.24"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "num-conv",
       "origin": "crates.io",
@@ -5049,10 +4515,6 @@
           "version": "0.13.0"
         },
         {
-          "name": "ring",
-          "version": "0.16.20"
-        },
-        {
           "name": "tempfile",
           "version": "3.23.0"
         },
@@ -5088,7 +4550,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "once_cell",
@@ -5148,15 +4610,11 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "git2",
-          "version": "0.18.3"
-        },
-        {
           "name": "native-tls",
           "version": "0.2.14"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT/Apache-2.0",
       "name": "openssl-probe",
       "origin": "crates.io",
@@ -5167,11 +4625,11 @@
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "pkg-config",
@@ -5184,18 +4642,6 @@
       ],
       "dependents": [
         {
-          "name": "git2",
-          "version": "0.18.3"
-        },
-        {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
           "name": "native-tls",
           "version": "0.2.14"
         },
@@ -5204,7 +4650,7 @@
           "version": "0.10.73"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT",
       "name": "openssl-sys",
       "origin": "crates.io",
@@ -5283,7 +4729,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "redox_syscall",
@@ -5310,49 +4756,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.9.12"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "base64",
-          "version": "0.22.1"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rcgen",
-          "version": "0.11.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "pem",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "3.0.5"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "form_urlencoded",
-          "version": "1.2.2"
-        },
-        {
-          "name": "url",
-          "version": "2.5.7"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "percent-encoding",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.3.2"
     },
     {
       "dependencies": [
@@ -5448,20 +4851,8 @@
           "version": "2.6.3"
         },
         {
-          "name": "libgit2-sys",
-          "version": "0.16.2+1.7.2"
-        },
-        {
           "name": "libsqlite3-sys",
           "version": "0.27.0"
-        },
-        {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
         },
         {
           "name": "openssl-sys",
@@ -5491,30 +4882,6 @@
       "version": "1.11.1"
     },
     {
-      "dependencies": [
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "potential_utf",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.3"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -5526,7 +4893,7 @@
           "version": "0.3.44"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "powerfmt",
       "origin": "crates.io",
@@ -5553,7 +4920,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "log",
@@ -5605,7 +4972,7 @@
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "glob",
@@ -5613,7 +4980,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "pqcrypto-internals",
@@ -5641,7 +5008,7 @@
       "dependencies": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         },
         {
           "name": "dunce",
@@ -5653,7 +5020,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -5891,20 +5258,8 @@
           "version": "0.59.3"
         },
         {
-          "name": "yoke-derive",
-          "version": "0.8.0"
-        },
-        {
           "name": "zerocopy-derive",
           "version": "0.8.27"
-        },
-        {
-          "name": "zerofrom-derive",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerovec-derive",
-          "version": "0.11.1"
         }
       ],
       "depth": 3,
@@ -6019,20 +5374,8 @@
           "version": "0.59.3"
         },
         {
-          "name": "yoke-derive",
-          "version": "0.8.0"
-        },
-        {
           "name": "zerocopy-derive",
           "version": "0.8.27"
-        },
-        {
-          "name": "zerofrom-derive",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerovec-derive",
-          "version": "0.11.1"
         }
       ],
       "depth": 3,
@@ -6083,6 +5426,10 @@
         },
         {
           "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
           "version": "0.1.0"
         },
         {
@@ -6143,38 +5490,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "pem",
-          "version": "3.0.5"
-        },
-        {
-          "name": "ring",
-          "version": "0.16.20"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
-        },
-        {
-          "name": "yasna",
-          "version": "0.5.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "rcgen",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.3"
     },
     {
       "dependencies": [
@@ -6302,50 +5617,6 @@
     {
       "dependencies": [
         {
-          "name": "cc",
-          "version": "1.2.40"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.176"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "spin",
-          "version": "0.5.2"
-        },
-        {
-          "name": "untrusted",
-          "version": "0.7.1"
-        },
-        {
-          "name": "web-sys",
-          "version": "0.3.81"
-        },
-        {
-          "name": "winapi",
-          "version": "0.3.9"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rcgen",
-          "version": "0.11.3"
-        }
-      ],
-      "depth": 3,
-      "license": "file:LICENSE",
-      "name": "ring",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.16.20"
-    },
-    {
-      "dependencies": [
-        {
           "name": "base64_fp",
           "version": "0.1.0"
         },
@@ -6371,7 +5642,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "metrics",
@@ -6480,15 +5751,11 @@
       ],
       "dependents": [
         {
-          "name": "explorer",
-          "version": "0.1.0"
-        },
-        {
-          "name": "indexer",
+          "name": "foundation_sqlite",
           "version": "0.1.0"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "MIT",
       "name": "rusqlite",
       "origin": "crates.io",
@@ -6558,7 +5825,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "linux-raw-sys",
@@ -6671,7 +5938,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "security-framework-sys",
@@ -6699,7 +5966,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -6856,7 +6123,7 @@
       "dependents": [
         {
           "name": "cc",
-          "version": "1.2.40"
+          "version": "1.2.41"
         }
       ],
       "depth": 4,
@@ -6929,14 +6196,6 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "idna",
-          "version": "1.1.0"
-        },
-        {
           "name": "parking_lot_core",
           "version": "0.9.12"
         },
@@ -6964,7 +6223,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         },
         {
           "name": "windows-sys",
@@ -6988,43 +6247,20 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "ring",
-          "version": "0.16.20"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT",
-      "name": "spin",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.2"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
           "name": "symbolic-common",
           "version": "10.2.1"
         },
         {
           "name": "symbolic-common",
           "version": "12.16.3"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
         }
       ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
+      "depth": 4,
+      "license": "MIT OR Apache-2.0",
       "name": "stable_deref_trait",
       "origin": "crates.io",
       "tier": "unclassified",
-      "version": "1.2.0"
+      "version": "1.2.1"
     },
     {
       "dependencies": [
@@ -7239,7 +6475,7 @@
         },
         {
           "name": "stable_deref_trait",
-          "version": "1.2.0"
+          "version": "1.2.1"
         },
         {
           "name": "uuid",
@@ -7372,20 +6608,8 @@
           "version": "0.59.3"
         },
         {
-          "name": "yoke-derive",
-          "version": "0.8.0"
-        },
-        {
           "name": "zerocopy-derive",
           "version": "0.8.27"
-        },
-        {
-          "name": "zerofrom-derive",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerovec-derive",
-          "version": "0.11.1"
         }
       ],
       "depth": 3,
@@ -7414,14 +6638,6 @@
         {
           "name": "asn1-rs-derive",
           "version": "0.5.1"
-        },
-        {
-          "name": "yoke-derive",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom-derive",
-          "version": "0.1.6"
         }
       ],
       "depth": 4,
@@ -7439,7 +6655,7 @@
         },
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -7465,6 +6681,10 @@
         },
         {
           "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tui",
           "version": "0.1.0"
         },
         {
@@ -7781,10 +7001,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "colored",
-          "version": "2.2.0"
-        },
-        {
           "name": "concurrency",
           "version": "0.1.0"
         },
@@ -7837,6 +7053,18 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_time",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tui",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_unicode",
+          "version": "0.1.0"
+        },
+        {
           "name": "futures",
           "version": "0.3.31"
         },
@@ -7851,10 +7079,6 @@
         {
           "name": "httpd",
           "version": "0.1.0"
-        },
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
         },
         {
           "name": "inflation",
@@ -7931,10 +7155,6 @@
         {
           "name": "testkit",
           "version": "0.1.0"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
         },
         {
           "name": "wallet",
@@ -8024,6 +7244,10 @@
         },
         {
           "name": "foundation_rpc",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
           "version": "0.1.0"
         },
         {
@@ -8139,27 +7363,11 @@
           "version": "0.6.2"
         },
         {
-          "name": "metrics-aggregator",
-          "version": "0.1.0"
-        },
-        {
-          "name": "rcgen",
-          "version": "0.11.3"
-        },
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        },
-        {
           "name": "x509-parser",
           "version": "0.16.0"
-        },
-        {
-          "name": "yasna",
-          "version": "0.5.2"
         }
       ],
-      "depth": 1,
+      "depth": 2,
       "license": "MIT OR Apache-2.0",
       "name": "time",
       "origin": "crates.io",
@@ -8178,7 +7386,7 @@
           "version": "0.2.24"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "time-core",
       "origin": "crates.io",
@@ -8202,40 +7410,12 @@
           "version": "0.3.44"
         }
       ],
-      "depth": 2,
+      "depth": 3,
       "license": "MIT OR Apache-2.0",
       "name": "time-macros",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.2.24"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "tinystr",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.1"
     },
     {
       "dependencies": [
@@ -8356,87 +7536,6 @@
       "version": "0.2.11"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "ring",
-          "version": "0.16.20"
-        }
-      ],
-      "depth": 4,
-      "license": "ISC",
-      "name": "untrusted",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.7.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "form_urlencoded",
-          "version": "1.2.2"
-        },
-        {
-          "name": "idna",
-          "version": "1.1.0"
-        },
-        {
-          "name": "percent-encoding",
-          "version": "2.3.2"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "git2",
-          "version": "0.18.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "url",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.5.7"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR MIT",
-      "name": "utf16_iter",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.5"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "idna",
-          "version": "1.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR MIT",
-      "name": "utf8_iter",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.4"
-    },
-    {
       "dependencies": [
         {
           "name": "getrandom",
@@ -8484,19 +7583,11 @@
           "version": "0.27.0"
         },
         {
-          "name": "libssh2-sys",
-          "version": "0.3.1"
-        },
-        {
-          "name": "libz-sys",
-          "version": "1.1.22"
-        },
-        {
           "name": "openssl-sys",
           "version": "0.9.109"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "MIT/Apache-2.0",
       "name": "vcpkg",
       "origin": "crates.io",
@@ -8522,7 +7613,7 @@
       "dependencies": [
         {
           "name": "libc",
-          "version": "0.2.176"
+          "version": "0.2.177"
         }
       ],
       "dependents": [
@@ -8557,6 +7648,14 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_time",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_tls",
+          "version": "0.1.0"
+        },
+        {
           "name": "hidapi",
           "version": "2.6.3"
         },
@@ -8579,10 +7678,6 @@
         {
           "name": "rand",
           "version": "0.1.0"
-        },
-        {
-          "name": "rcgen",
-          "version": "0.11.3"
         },
         {
           "name": "runtime",
@@ -8724,10 +7819,6 @@
         {
           "name": "uuid",
           "version": "1.18.1"
-        },
-        {
-          "name": "web-sys",
-          "version": "0.3.81"
         }
       ],
       "depth": 3,
@@ -8868,30 +7959,6 @@
     {
       "dependencies": [
         {
-          "name": "js-sys",
-          "version": "0.3.81"
-        },
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "ring",
-          "version": "0.16.20"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "web-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.81"
-    },
-    {
-      "dependencies": [
-        {
           "name": "winapi-i686-pc-windows-gnu",
           "version": "0.4.0"
         },
@@ -8904,10 +7971,6 @@
         {
           "name": "findshlibs",
           "version": "0.10.2"
-        },
-        {
-          "name": "ring",
-          "version": "0.16.20"
         }
       ],
       "depth": 3,
@@ -9043,10 +8106,6 @@
       ],
       "dependents": [
         {
-          "name": "colored",
-          "version": "2.2.0"
-        },
-        {
           "name": "is-terminal",
           "version": "0.4.16"
         },
@@ -9055,7 +8114,7 @@
           "version": "7.4.0"
         }
       ],
-      "depth": 2,
+      "depth": 4,
       "license": "MIT OR Apache-2.0",
       "name": "windows-sys",
       "origin": "crates.io",
@@ -9183,7 +8242,7 @@
           "version": "0.59.0"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "MIT OR Apache-2.0",
       "name": "windows-targets",
       "origin": "crates.io",
@@ -9213,7 +8272,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_aarch64_gnullvm",
       "origin": "crates.io",
@@ -9243,7 +8302,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_aarch64_msvc",
       "origin": "crates.io",
@@ -9273,7 +8332,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_i686_gnu",
       "origin": "crates.io",
@@ -9288,7 +8347,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_i686_gnullvm",
       "origin": "crates.io",
@@ -9318,7 +8377,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_i686_msvc",
       "origin": "crates.io",
@@ -9348,7 +8407,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_x86_64_gnu",
       "origin": "crates.io",
@@ -9378,7 +8437,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_x86_64_gnullvm",
       "origin": "crates.io",
@@ -9408,7 +8467,7 @@
           "version": "0.52.6"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0",
       "name": "windows_x86_64_msvc",
       "origin": "crates.io",
@@ -9429,40 +8488,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.46.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR MIT",
-      "name": "write16",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "writeable",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.6.1"
     },
     {
       "dependencies": [
@@ -9539,10 +8564,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "git2",
-          "version": "0.18.3"
-        },
-        {
           "name": "predicates",
           "version": "3.1.3"
         },
@@ -9558,102 +8579,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rcgen",
-          "version": "0.11.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "yasna",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.2"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        },
-        {
-          "name": "stable_deref_trait",
-          "version": "1.2.0"
-        },
-        {
-          "name": "yoke-derive",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "zerotrie",
-          "version": "0.2.2"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "yoke",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        },
-        {
-          "name": "synstructure",
-          "version": "0.13.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        }
-      ],
-      "depth": 4,
-      "license": "Unicode-3.0",
-      "name": "yoke-derive",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.0"
     },
     {
       "dependencies": [
@@ -9702,189 +8627,9 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.8.27"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "zerofrom-derive",
-          "version": "0.1.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerotrie",
-          "version": "0.2.2"
-        },
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "zerofrom",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        },
-        {
-          "name": "synstructure",
-          "version": "0.13.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        }
-      ],
-      "depth": 4,
-      "license": "Unicode-3.0",
-      "name": "zerofrom-derive",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "zerotrie",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.2"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "yoke",
-          "version": "0.8.0"
-        },
-        {
-          "name": "zerofrom",
-          "version": "0.1.6"
-        },
-        {
-          "name": "zerovec-derive",
-          "version": "0.11.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "icu_collections",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_locale_core",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_normalizer",
-          "version": "2.0.0"
-        },
-        {
-          "name": "icu_properties",
-          "version": "2.0.1"
-        },
-        {
-          "name": "icu_provider",
-          "version": "2.0.0"
-        },
-        {
-          "name": "potential_utf",
-          "version": "0.1.3"
-        },
-        {
-          "name": "tinystr",
-          "version": "0.8.1"
-        }
-      ],
-      "depth": 2,
-      "license": "Unicode-3.0",
-      "name": "zerovec",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.4"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "zerovec",
-          "version": "0.11.4"
-        }
-      ],
-      "depth": 3,
-      "license": "Unicode-3.0",
-      "name": "zerovec-derive",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.1"
     }
   ],
-  "generated_at": "2025-10-10T11:47:21.097583490Z",
+  "generated_at": "2025-10-10T15:45:18.864900106Z",
   "policy": {
     "config_path": "config/dependency_policies.toml",
     "forbidden_licenses": [
@@ -9920,7 +8665,12 @@
     "foundation_regex",
     "foundation_rpc",
     "foundation_serialization",
+    "foundation_sqlite",
     "foundation_telemetry",
+    "foundation_time",
+    "foundation_tls",
+    "foundation_tui",
+    "foundation_unicode",
     "gateway-fuzz",
     "gov-graph",
     "governance",

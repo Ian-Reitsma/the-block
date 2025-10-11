@@ -14,7 +14,7 @@ foundation_telemetry = { path = "../crates/foundation_telemetry" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 crypto_suite = { path = "../crates/crypto_suite" }
 storage_engine = { path = "../crates/storage_engine" }
-time = { version = "0.3", default-features = false, features = ["formatting", "macros", "std"] }
+foundation_time = { path = "../crates/foundation_time" }
 sys = { path = "../crates/sys" }
 
 [dev-dependencies]

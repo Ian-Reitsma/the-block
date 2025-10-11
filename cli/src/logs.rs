@@ -342,18 +342,19 @@ fn emit_missing_sqlite_feature() {
 
 #[cfg(feature = "sqlite-storage")]
 mod sqlite {
-    use super::LogCmd;
+    use super::{CorrelateMetricOptions, RotateKeyOptions, SearchOptions};
     use anyhow::{anyhow, Result as AnyResult};
     use base64_fp::{decode_standard, encode_standard};
+    use coding::Encryptor;
     use coding::{
         decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
         CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
     };
     use crypto_suite::hashing::blake3::derive_key;
     use foundation_serialization::Deserialize;
+    use foundation_sqlite::{params, params_from_iter, Connection, Row, Value};
     use httpd::{BlockingClient, Method};
     use rpassword::prompt_password;
-    use rusqlite::{params, params_from_iter, Connection, Row};
     use std::env;
 
     #[derive(Debug, Deserialize)]
@@ -519,10 +520,10 @@ mod sqlite {
         after_id: Option<u64>,
         passphrase: Option<String>,
         limit: Option<usize>,
-    ) -> rusqlite::Result<()> {
+    ) -> foundation_sqlite::Result<()> {
         let conn = Connection::open(db)?;
         let mut clauses = Vec::new();
-        let mut params: Vec<rusqlite::types::Value> = Vec::new();
+        let mut params: Vec<Value> = Vec::new();
         if let Some(peer) = peer {
             clauses.push("peer = ?".to_string());
             params.push(peer.into());
@@ -570,9 +571,11 @@ mod sqlite {
         let mut stmt = conn.prepare(&sql)?;
         let key = passphrase.as_ref().map(|p| derive_key_bytes(p));
         let key_ref = key.as_ref();
-        let mut rows = stmt.query(params_from_iter(params.iter()))?;
-        while let Some(row) = rows.next()? {
-            let entry = decode_row(row, key_ref)?;
+        let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
+            decode_row(row, key_ref)
+        })?;
+        for row in rows {
+            let entry = row?;
             println!(
                 "#{} {} [{}] {} :: {}",
                 entry.id.unwrap_or(0),
@@ -596,7 +599,7 @@ mod sqlite {
     fn decode_row(
         row: &Row<'_>,
         key: Option<&[u8; CHACHA20_POLY1305_KEY_LEN]>,
-    ) -> rusqlite::Result<QueryRow> {
+    ) -> foundation_sqlite::Result<QueryRow> {
         let encrypted: i64 = row.get("encrypted")?;
         let stored_msg: String = row.get("message")?;
         let nonce: Option<Vec<u8>> = row.get("nonce")?;
@@ -624,14 +627,19 @@ mod sqlite {
         let old_key = current.as_deref().map(derive_key_bytes);
         let new_key = derive_key_bytes(&new_pass);
         let tx = conn.transaction()?;
-        let mut select_stmt = tx.prepare("SELECT id, message, nonce, encrypted FROM logs")?;
-        let mut rows = select_stmt.query([])?;
+        let select_rows = tx
+            .prepare("SELECT id, message, nonce, encrypted FROM logs")?
+            .query_map(params![], |row| {
+                Ok((
+                    row.get::<_, i64>("id")?,
+                    row.get::<_, Option<Vec<u8>>>("nonce")?,
+                    row.get::<_, String>("message")?,
+                    row.get::<_, i64>("encrypted")?,
+                ))
+            })?;
         let mut updates = Vec::new();
-        while let Some(row) = rows.next()? {
-            let id: i64 = row.get("id")?;
-            let nonce: Option<Vec<u8>> = row.get("nonce")?;
-            let message: String = row.get("message")?;
-            let encrypted_flag: i64 = row.get("encrypted")?;
+        for row in select_rows {
+            let (id, nonce, message, encrypted_flag) = row?;
             let plain = if encrypted_flag == 1 {
                 let key = old_key
                     .as_ref()
@@ -645,8 +653,6 @@ mod sqlite {
             let (cipher, nonce_bytes) = encrypt_message(&new_key, &plain)?;
             updates.push((id, cipher, nonce_bytes));
         }
-        drop(rows);
-        drop(select_stmt);
         {
             let mut update_stmt = tx
                 .prepare("UPDATE logs SET message = ?1, nonce = ?2, encrypted = 1 WHERE id = ?3")?;

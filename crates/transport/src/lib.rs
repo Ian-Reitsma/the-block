@@ -1,6 +1,5 @@
 #[cfg(any(feature = "inhouse", all(feature = "quinn", not(feature = "s2n-quic"))))]
 use crypto_suite::hashing::blake3;
-use diagnostics::{anyhow, Result as DiagResult};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -430,6 +429,16 @@ impl QuinnAdapter {
         Ok(ListenerHandle::Quinn(endpoint))
     }
 
+    pub async fn listen_with_chain(
+        &self,
+        addr: SocketAddr,
+        chain: &[Bytes],
+        key_der: Bytes,
+    ) -> DiagResult<ListenerHandle> {
+        let endpoint = quinn_impl::listen_with_chain(addr, chain, &key_der).await?;
+        Ok(ListenerHandle::Quinn(endpoint))
+    }
+
     pub async fn connect(
         &self,
         addr: SocketAddr,
@@ -712,6 +721,74 @@ pub enum ListenerHandle {
     S2n(Arc<s2n_impl::Server>),
     #[cfg(feature = "inhouse")]
     Inhouse(inhouse_impl::Endpoint),
+}
+
+impl ListenerHandle {
+    #[cfg(feature = "quinn")]
+    pub fn as_quinn(&self) -> Option<&quinn::Endpoint> {
+        match self {
+            ListenerHandle::Quinn(endpoint) => Some(endpoint),
+            #[cfg(feature = "s2n-quic")]
+            ListenerHandle::S2n(_) => None,
+            #[cfg(feature = "inhouse")]
+            ListenerHandle::Inhouse(_) => None,
+        }
+    }
+
+    #[cfg(feature = "quinn")]
+    pub fn into_quinn(self) -> Option<quinn::Endpoint> {
+        match self {
+            ListenerHandle::Quinn(endpoint) => Some(endpoint),
+            #[cfg(feature = "s2n-quic")]
+            ListenerHandle::S2n(_) => None,
+            #[cfg(feature = "inhouse")]
+            ListenerHandle::Inhouse(_) => None,
+        }
+    }
+
+    #[cfg(feature = "s2n-quic")]
+    pub fn as_s2n(&self) -> Option<&Arc<s2n_impl::Server>> {
+        match self {
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => None,
+            ListenerHandle::S2n(server) => Some(server),
+            #[cfg(feature = "inhouse")]
+            ListenerHandle::Inhouse(_) => None,
+        }
+    }
+
+    #[cfg(feature = "s2n-quic")]
+    pub fn into_s2n(self) -> Option<Arc<s2n_impl::Server>> {
+        match self {
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => None,
+            ListenerHandle::S2n(server) => Some(server),
+            #[cfg(feature = "inhouse")]
+            ListenerHandle::Inhouse(_) => None,
+        }
+    }
+
+    #[cfg(feature = "inhouse")]
+    pub fn as_inhouse(&self) -> Option<&inhouse_impl::Endpoint> {
+        match self {
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => None,
+            #[cfg(feature = "s2n-quic")]
+            ListenerHandle::S2n(_) => None,
+            ListenerHandle::Inhouse(endpoint) => Some(endpoint),
+        }
+    }
+
+    #[cfg(feature = "inhouse")]
+    pub fn into_inhouse(self) -> Option<inhouse_impl::Endpoint> {
+        match self {
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => None,
+            #[cfg(feature = "s2n-quic")]
+            ListenerHandle::S2n(_) => None,
+            ListenerHandle::Inhouse(endpoint) => Some(endpoint),
+        }
+    }
 }
 
 #[cfg(feature = "quinn")]

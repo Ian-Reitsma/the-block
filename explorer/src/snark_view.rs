@@ -3,6 +3,7 @@
 use crate::Explorer;
 use anyhow::Result;
 use foundation_serialization::Serialize;
+use foundation_sqlite::params;
 
 #[derive(Serialize)]
 pub struct SnarkProofRecord {
@@ -14,7 +15,7 @@ pub struct SnarkProofRecord {
 pub fn list_snark_proofs(exp: &Explorer) -> Result<Vec<SnarkProofRecord>> {
     let conn = exp.conn()?;
     let mut stmt = conn.prepare("SELECT job_id, verified FROM snark_proofs")?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(params![], |row| {
         Ok(SnarkProofRecord {
             job_id: row.get(0)?,
             verified: row.get::<_, i64>(1)? != 0,

@@ -2,6 +2,12 @@
 #![cfg(feature = "quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_serialization::binary;
+use foundation_time::{Duration as TimeDuration, UtcDateTime};
+use foundation_tls::{
+    generate_self_signed_ed25519, sign_self_signed_ed25519, sign_with_ca_ed25519, RotationPolicy,
+    SelfSignedCertParams,
+};
+use rand::rngs::OsRng;
 use std::io::Read;
 #[cfg(feature = "s2n-quic")]
 use sys::tempfile::tempdir;
@@ -14,7 +20,7 @@ use the_block::p2p::handshake::{Hello, Transport};
 use the_block::telemetry::{QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL};
 use the_block::Blockchain;
 #[cfg(feature = "s2n-quic")]
-use transport::{Config as TransportConfig, ListenerHandle, ProviderKind};
+use transport::{Config as TransportConfig, ProviderKind};
 
 #[cfg(feature = "telemetry")]
 fn reset_counters() {
@@ -24,6 +30,29 @@ fn reset_counters() {
 
 fn sample_sk() -> SigningKey {
     SigningKey::from_bytes(&[1u8; 32])
+}
+
+fn random_serial_bytes() -> [u8; 16] {
+    use rand::RngCore;
+
+    let mut serial = [0u8; 16];
+    OsRng::default().fill_bytes(&mut serial);
+    serial[0] &= 0x7F;
+    serial
+}
+
+fn generate_test_cert_der(name: &str) -> Vec<u8> {
+    let now = UtcDateTime::now();
+    let params = SelfSignedCertParams::builder()
+        .subject_cn(name.to_string())
+        .add_dns_name(name.to_string())
+        .validity(now - TimeDuration::hours(1), now + TimeDuration::days(7))
+        .serial(random_serial_bytes())
+        .build()
+        .expect("test cert params");
+    generate_self_signed_ed25519(&params)
+        .expect("test cert generation")
+        .certificate
 }
 
 #[cfg(feature = "s2n-quic")]
@@ -66,6 +95,7 @@ fn quic_handshake_roundtrip() {
         reset_counters();
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
         let (tx, rx) = runtime::sync::oneshot::channel();
         let ep = server_ep.clone();
@@ -83,7 +113,7 @@ fn quic_handshake_roundtrip() {
             .ensure_handle_for_label_values(&["unknown", "certificate"])
             .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
-        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let conn = quic::connect(listen_addr, &cert).await.unwrap();
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,
@@ -124,6 +154,7 @@ fn quic_gossip_roundtrip() {
         reset_counters();
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
         let (hs_tx, hs_rx) = runtime::sync::oneshot::channel();
         let (msg_tx, msg_rx) = runtime::sync::oneshot::channel();
@@ -145,7 +176,7 @@ fn quic_gossip_roundtrip() {
             .ensure_handle_for_label_values(&["unknown", "certificate"])
             .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
-        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let conn = quic::connect(listen_addr, &cert).await.unwrap();
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,
@@ -194,6 +225,7 @@ fn quic_disconnect() {
         reset_counters();
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
         let (close_tx, close_rx) = runtime::sync::oneshot::channel();
         let ep = server_ep.clone();
@@ -206,7 +238,7 @@ fn quic_disconnect() {
                 close_tx.send(()).unwrap();
             }
         });
-        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let conn = quic::connect(listen_addr, &cert).await.unwrap();
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,
@@ -239,11 +271,7 @@ fn quic_fallback_to_tcp() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
         reset_counters();
-        use rcgen::generate_simple_self_signed;
-        let cert = generate_simple_self_signed(["fallback".into()])
-            .unwrap()
-            .serialize_der()
-            .unwrap();
+        let cert = generate_test_cert_der("fallback");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = runtime::sync::oneshot::channel();
@@ -293,16 +321,12 @@ fn s2n_quic_connect_roundtrip() {
         let listener = transport_quic::start_server(addr)
             .await
             .expect("start s2n server");
-        let listen_addr = match &listener {
-            ListenerHandle::S2n(server) => server.local_addr().expect("local addr"),
-            #[cfg(feature = "quinn")]
-            ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
-        };
-        let server = match listener {
-            ListenerHandle::S2n(server) => server,
-            #[cfg(feature = "quinn")]
-            ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
-        };
+        let listen_addr = listener
+            .as_s2n()
+            .expect("s2n listener unavailable")
+            .local_addr()
+            .expect("local addr");
+        let server = listener.into_s2n().expect("s2n listener unavailable");
         let (done_tx, done_rx) = runtime::sync::oneshot::channel();
         let accept = server.clone();
         the_block::spawn(async move {
@@ -320,11 +344,45 @@ fn s2n_quic_connect_roundtrip() {
     });
 }
 
+#[cfg(feature = "s2n-quic")]
+#[testkit::tb_serial]
+fn s2n_ca_signed_certificate_verification() {
+    let anchor = UtcDateTime::from_unix_timestamp(0).unwrap();
+    let policy =
+        RotationPolicy::new(anchor, TimeDuration::days(7), TimeDuration::hours(1)).expect("policy");
+    let mut rng = OsRng::default();
+    let ca_plan = policy.plan(0, b"s2n-ca").expect("plan");
+    let ca_params = SelfSignedCertParams::builder()
+        .subject_cn("s2n-ca")
+        .ca(true)
+        .apply_rotation_plan(&ca_plan)
+        .build()
+        .expect("ca params");
+    let ca_key = SigningKey::generate(&mut rng);
+    let _ = sign_self_signed_ed25519(&ca_key, &ca_params).expect("ca cert");
+
+    let leaf_key = SigningKey::generate(&mut rng);
+    let leaf_ctx = leaf_key.verifying_key().to_bytes();
+    let leaf_plan = policy.plan(1, &leaf_ctx).expect("leaf plan");
+    let leaf_params = SelfSignedCertParams::builder()
+        .subject_cn("s2n-leaf")
+        .apply_rotation_plan(&leaf_plan)
+        .build()
+        .expect("leaf params");
+    let leaf_cert = sign_with_ca_ed25519(&ca_key, ca_params.subject_cn(), &leaf_key, &leaf_params)
+        .expect("leaf cert");
+    let pubkey = leaf_key.verifying_key().to_bytes();
+    let fingerprint =
+        transport::verify_remote_certificate(&pubkey, &leaf_cert).expect("verify certificate");
+    assert!(fingerprint.iter().any(|byte| *byte != 0));
+}
+
 #[testkit::tb_serial]
 fn quic_endpoint_reuse() {
     runtime::block_on(async {
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let ep = server_ep.clone();
         the_block::spawn(async move {
             while let Some(conn) = ep.accept().await {
@@ -333,9 +391,9 @@ fn quic_endpoint_reuse() {
             }
         });
         let listen_addr = server_ep.local_addr().unwrap();
-        let conn1 = quic::connect(listen_addr, cert.clone()).await.unwrap();
+        let conn1 = quic::connect(listen_addr, &cert).await.unwrap();
         conn1.close(0u32.into(), b"done");
-        let conn2 = quic::connect(listen_addr, cert).await.unwrap();
+        let conn2 = quic::connect(listen_addr, &cert).await.unwrap();
         conn2.close(0u32.into(), b"done");
         server_ep.wait_idle().await;
         #[cfg(feature = "telemetry")]
@@ -344,31 +402,103 @@ fn quic_endpoint_reuse() {
 }
 
 #[testkit::tb_serial]
+fn quic_ca_signed_chain() {
+    runtime::block_on(async {
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let anchor = UtcDateTime::from_unix_timestamp(0).unwrap();
+        let policy = RotationPolicy::new(anchor, TimeDuration::days(7), TimeDuration::hours(1))
+            .expect("policy");
+        let mut rng = rand::rngs::OsRng::default();
+        let ca_plan = policy.plan(0, b"quinn-ca").expect("plan");
+        let ca_params = SelfSignedCertParams::builder()
+            .subject_cn("quinn-ca")
+            .ca(true)
+            .apply_rotation_plan(&ca_plan)
+            .build()
+            .expect("build ca params");
+        let ca_key = SigningKey::generate(&mut rng);
+        let ca_cert = sign_self_signed_ed25519(&ca_key, &ca_params).expect("ca cert");
+
+        let leaf_key = SigningKey::generate(&mut rng);
+        let leaf_ctx = leaf_key.verifying_key().to_bytes();
+        let leaf_plan = policy.plan(1, &leaf_ctx).expect("leaf plan");
+        let leaf_params = SelfSignedCertParams::builder()
+            .subject_cn("quinn-leaf")
+            .add_dns_name("quinn.local")
+            .apply_rotation_plan(&leaf_plan)
+            .build()
+            .expect("leaf params");
+        let leaf_cert =
+            sign_with_ca_ed25519(&ca_key, ca_params.subject_cn(), &leaf_key, &leaf_params)
+                .expect("leaf cert");
+        let key_der = concurrency::Bytes::from(
+            leaf_key
+                .to_pkcs8_der()
+                .expect("leaf key pkcs8")
+                .as_bytes()
+                .to_vec(),
+        );
+        let chain = vec![
+            concurrency::Bytes::from(leaf_cert.clone()),
+            concurrency::Bytes::from(ca_cert.clone()),
+        ];
+        let listener = quic::listen_with_chain(addr, &chain, key_der)
+            .await
+            .unwrap();
+        let listen_addr = listener
+            .as_quinn()
+            .expect("quinn listener unavailable")
+            .local_addr()
+            .unwrap();
+        let server_ep = listener.into_quinn().expect("quinn listener unavailable");
+        let (done_tx, done_rx) = runtime::sync::oneshot::channel();
+        let accept_ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = accept_ep.accept().await {
+                let connection = conn.await.unwrap();
+                let _ = done_tx.send(());
+                connection.close(0u32.into(), b"done");
+            }
+        });
+        let ca_handle = quic::certificate_from_der(concurrency::Bytes::from(ca_cert)).unwrap();
+        let conn = quic::connect(listen_addr, &ca_handle).await.unwrap();
+        conn.close(0u32.into(), b"done");
+        done_rx.await.unwrap();
+        server_ep.wait_idle().await;
+    });
+}
+
+#[cfg(feature = "telemetry")]
+#[testkit::tb_serial]
 fn quic_handshake_failure_metric() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
         reset_counters();
-        use rcgen::generate_simple_self_signed;
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, _cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
-        let bad = generate_simple_self_signed(["bad".into()]).unwrap();
-        let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
+        #[cfg(feature = "telemetry")]
         let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
             .ensure_handle_for_label_values(&["unknown", "certificate"])
             .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
-        let res = quic::connect(listen_addr, bad_cert).await;
+        let bad_cert =
+            quic::certificate_from_der(concurrency::Bytes::from(generate_test_cert_der("bad")))
+                .unwrap();
+        let res = quic::connect(listen_addr, &bad_cert).await;
         assert!(res.is_err());
         server_ep.wait_idle().await;
         #[cfg(feature = "telemetry")]
-        assert!(
-            the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                .ensure_handle_for_label_values(&["unknown", "certificate"])
-                .expect(telemetry::LABEL_REGISTRATION_ERR)
-                .get()
-                >= before + 1
-        );
+        {
+            assert!(
+                the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                    .ensure_handle_for_label_values(&["unknown", "certificate"])
+                    .expect(telemetry::LABEL_REGISTRATION_ERR)
+                    .get()
+                    >= before + 1
+            );
+        }
     });
 }
 
@@ -377,28 +507,26 @@ fn quic_handshake_timeout() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
         reset_counters();
-        use rcgen::generate_simple_self_signed;
-        let cert = generate_simple_self_signed(["timeout".into()])
-            .unwrap()
-            .serialize_der()
-            .unwrap();
+        let cert = generate_test_cert_der("timeout");
         let addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
-        let cert = rustls::Certificate(cert);
+        let cert = quic::certificate_from_der(concurrency::Bytes::from(cert)).unwrap();
         #[cfg(feature = "telemetry")]
         let before = QUIC_HANDSHAKE_FAIL_TOTAL
             .ensure_handle_for_label_values(&["unknown", "timeout"])
             .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
-        let res = quic::connect(addr, cert).await;
+        let res = quic::connect(addr, &cert).await;
         assert!(res.is_err());
         #[cfg(feature = "telemetry")]
-        assert!(
-            QUIC_HANDSHAKE_FAIL_TOTAL
-                .ensure_handle_for_label_values(&["unknown", "timeout"])
-                .expect(telemetry::LABEL_REGISTRATION_ERR)
-                .get()
-                >= before + 1
-        );
+        {
+            assert!(
+                QUIC_HANDSHAKE_FAIL_TOTAL
+                    .ensure_handle_for_label_values(&["unknown", "timeout"])
+                    .expect(telemetry::LABEL_REGISTRATION_ERR)
+                    .get()
+                    >= before + 1
+            );
+        }
     });
 }
 
@@ -409,6 +537,7 @@ fn quic_version_mismatch() {
         reset_counters();
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
         let (tx, rx) = runtime::sync::oneshot::channel();
         let ep = server_ep.clone();
@@ -421,7 +550,7 @@ fn quic_version_mismatch() {
                 connection.close(0u32.into(), b"done");
             }
         });
-        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let conn = quic::connect(listen_addr, &cert).await.unwrap();
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION - 1,
@@ -468,6 +597,7 @@ fn quic_packet_loss_env() {
         std::env::set_var("TB_QUIC_PACKET_LOSS", "1.0");
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let server_ep = server_ep.into_quinn().expect("quinn listener unavailable");
         let listen_addr = server_ep.local_addr().unwrap();
         let (tx, rx) = runtime::sync::oneshot::channel();
         let ep = server_ep.clone();
@@ -483,7 +613,7 @@ fn quic_packet_loss_env() {
                 connection.close(0u32.into(), b"done");
             }
         });
-        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let conn = quic::connect(listen_addr, &cert).await.unwrap();
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,

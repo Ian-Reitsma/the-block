@@ -2,7 +2,26 @@
 > **Review (2025-09-25):** Synced Identity Registry guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
-Handles are normalized to lowercase NFC form and must not start with `sys/` or `admin/`.
+Handles are normalized with the in-house Unicode facade, which first attempts a
+canonical NFKC pass and then transliterates common Latin-1 and Greek accents
+into ASCII equivalents. The registry stores the lowercase representation and
+marks each submission as an *exact* or *approximate* normalization depending on
+whether transliteration was required. Reserved prefixes (`sys/`, `admin/`) are
+rejected prior to signature verification.
+
+The node exports `identity_handle_normalization_total{accuracy}` so operators
+can monitor the mix of exact versus approximate handles. Approximate handles are
+still accepted but should be surfaced to users so they can adjust before final
+registration.
+
+The CLI now exposes `contract identity register|resolve|normalize` helpers. The
+register command performs local normalization, calls the JSON-RPC endpoint, and
+prints both local and remote accuracy labels so operators can spot drift between
+their environment and the node. When built with the `pq-crypto`/`quantum`
+feature, `contract identity register` accepts an optional `--pq-pubkey <hex>`
+flag so Dilithium-enabled accounts can publish their post-quantum verifying key
+alongside the Ed25519 payload. The `normalize` subcommand is offline-only and
+mirrors the registry’s transliteration rules.
 
 ## Signed message
 

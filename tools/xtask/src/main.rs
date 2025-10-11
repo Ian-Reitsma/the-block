@@ -5,7 +5,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-use git2::{DiffFormat, Repository};
+use foundation_serialization::json;
 use std::io::{self, Write};
 use std::process::Command as StdCommand;
 
@@ -172,25 +172,19 @@ fn run_summary(matches: &cli_core::parse::Matches) -> Result<()> {
         .unwrap_or_else(|| "origin/main".to_string());
     let title = matches.get_string("title");
 
-    let repo = Repository::discover(".")?;
-    let base = repo.revparse_single(&base_ref)?.peel_to_commit()?;
-    let head = repo.head()?.peel_to_commit()?;
-    let base_tree = base.tree()?;
-    let head_tree = head.tree()?;
-    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
-
     let mut summary = Summary::default();
-    diff.print(DiffFormat::Patch, |_, _, line| {
-        if let Ok(content) = std::str::from_utf8(line.content()) {
-            if content.contains("balance") {
-                summary.balance_changed = true;
-            }
-            if content.contains("pending_") {
-                summary.pending_changed = true;
-            }
+    let diff_output = git_diff(&base_ref)?;
+    for line in diff_output.lines() {
+        if line.contains("balance") {
+            summary.balance_changed = true;
         }
-        true
-    })?;
+        if line.contains("pending_") {
+            summary.pending_changed = true;
+        }
+        if summary.balance_changed && summary.pending_changed {
+            break;
+        }
+    }
 
     if let Some(t) = title {
         if summary.balance_changed || summary.pending_changed {
@@ -205,6 +199,26 @@ fn run_summary(matches: &cli_core::parse::Matches) -> Result<()> {
         bail!("PR title does not match modified areas");
     }
     Ok(())
+}
+
+fn git_diff(base_ref: &str) -> Result<String> {
+    let status = StdCommand::new("git")
+        .args(["rev-parse", &format!("{base_ref}^{{commit}}")])
+        .status()
+        .context("failed to resolve base revision")?;
+    if !status.success() {
+        bail!("failed to resolve base revision: {base_ref}");
+    }
+
+    let diff_range = format!("{base_ref}..HEAD");
+    let output = StdCommand::new("git")
+        .args(["diff", "--patch", &diff_range])
+        .output()
+        .context("failed to execute git diff")?;
+    if !output.status.success() {
+        bail!("git diff exited with status {}", output.status);
+    }
+    String::from_utf8(output.stdout).context("git diff output was not valid UTF-8")
 }
 
 fn run_check_deps(matches: &cli_core::parse::Matches) -> Result<()> {

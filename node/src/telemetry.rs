@@ -3487,6 +3487,21 @@ pub static IDENTITY_REGISTRATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static IDENTITY_HANDLE_NORMALIZATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "identity_handle_normalization_total",
+            "Handle normalization outcomes grouped by accuracy",
+        ),
+        &["accuracy"],
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static IDENTITY_REPLAYS_BLOCKED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "identity_replays_blocked_total",

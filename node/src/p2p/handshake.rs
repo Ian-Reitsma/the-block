@@ -431,20 +431,33 @@ mod tests {
 
     #[cfg(feature = "quic")]
     fn sample_quic_certificate() -> ([u8; 32], Bytes, [u8; 32]) {
-        use rcgen::{Certificate, CertificateParams, KeyPair, PKCS_ED25519};
+        use foundation_time::{Duration as TimeDuration, UtcDateTime};
+        use foundation_tls::{generate_self_signed_ed25519, SelfSignedCertParams};
 
-        let key_pair = KeyPair::generate_for(&PKCS_ED25519).expect("ed25519 keypair");
-        let pk_raw = key_pair.public_key_raw();
+        let now = UtcDateTime::now();
+        let params = SelfSignedCertParams::builder()
+            .subject_cn("the-block.test")
+            .add_dns_name("the-block.test")
+            .validity(now - TimeDuration::hours(1), now + TimeDuration::days(7))
+            .serial(random_serial())
+            .build()
+            .expect("certificate params");
+        let generated = generate_self_signed_ed25519(&params).expect("certificate");
         let mut peer_key = [0u8; 32];
-        peer_key.copy_from_slice(&pk_raw);
-        let mut params =
-            CertificateParams::new(vec!["the-block.test".into()]).expect("certificate params");
-        params.alg = &PKCS_ED25519;
-        params.key_pair = Some(key_pair);
-        let cert = Certificate::from_params(params).expect("certificate");
-        let cert_der = cert.serialize_der().expect("serialize cert");
-        let fingerprint = transport_quic::fingerprint(&cert_der);
-        (peer_key, Bytes::from(cert_der), fingerprint)
+        peer_key.copy_from_slice(&generated.public_key);
+        let fingerprint = transport_quic::fingerprint(&generated.certificate);
+        (peer_key, Bytes::from(generated.certificate), fingerprint)
+    }
+
+    #[cfg(feature = "quic")]
+    fn random_serial() -> [u8; 16] {
+        use rand::rngs::OsRng;
+        use rand::RngCore;
+
+        let mut buf = [0u8; 16];
+        OsRng::default().fill_bytes(&mut buf);
+        buf[0] &= 0x7F;
+        buf
     }
 
     #[cfg(feature = "quic")]
