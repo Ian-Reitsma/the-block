@@ -848,9 +848,11 @@ version = "0.1.0"
 name = "foundation_tls"
 version = "0.1.0"
 dependencies = [
+ "base64_fp",
  "crypto_suite",
  "foundation_time",
  "rand 0.1.0",
+ "rustls",
  "thiserror",
 ]
 
@@ -3112,6 +3114,7 @@ dependencies = [
  "runtime",
  "rustls",
  "sys",
+ "tokio",
  "x509-parser",
 ]
 

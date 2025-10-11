@@ -1,31 +1,37 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::{ProviderCapability, RetryPolicy};
 use concurrency::Bytes;
 use dashmap::DashMap;
 use diagnostics::{anyhow, Result, TbError};
 use foundation_lazy::sync::{Lazy, OnceCell};
 use foundation_time::{Duration as TimeDuration, UtcDateTime};
-use foundation_tls::{generate_self_signed_ed25519, RotationPolicy, SelfSignedCertParams};
+use foundation_tls::{
+    generate_self_signed_ed25519, OcspResponse, RotationPolicy, SelfSignedCertParams,
+    SessionResumeStore, TrustAnchorStore,
+};
 pub use quinn::{Connection, Endpoint};
 use rand::Rng;
+use rustls::client::{ClientSessionStore, Resumption};
 use rustls::client::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier, WebPkiVerifier,
 };
 use rustls::Certificate as RustlsCertificate;
 use rustls::{ClientConfig, PrivateKey, RootCertStore};
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
-use std::sync::RwLock;
-
-use crate::{ProviderCapability, RetryPolicy};
 
 static CONNECTIONS: Lazy<DashMap<SocketAddr, Connection>> = Lazy::new(|| DashMap::new());
 static CALLBACKS: OnceCell<RwLock<Arc<QuinnEventCallbacks>>> = OnceCell::new();
 static RETRY_POLICY: Lazy<RwLock<RetryPolicy>> = Lazy::new(|| RwLock::new(RetryPolicy::default()));
 static HANDSHAKE_TIMEOUT: Lazy<RwLock<Duration>> =
     Lazy::new(|| RwLock::new(Duration::from_secs(5)));
+static TRUST_ANCHORS: Lazy<RwLock<Option<Arc<TrustAnchorStore>>>> = Lazy::new(|| RwLock::new(None));
+static SESSION_CACHE: Lazy<RwLock<Option<Arc<SessionResumeStore>>>> =
+    Lazy::new(|| RwLock::new(None));
+static OCSP_STAPLE: Lazy<RwLock<Option<OcspResponse>>> = Lazy::new(|| RwLock::new(None));
 
 pub fn set_retry_policy(policy: RetryPolicy) {
     *RETRY_POLICY.write().unwrap() = policy;
@@ -41,6 +47,51 @@ pub fn set_handshake_timeout(timeout: Duration) {
 
 fn handshake_timeout() -> Duration {
     *HANDSHAKE_TIMEOUT.read().unwrap()
+}
+
+pub fn install_trust_anchors(store: TrustAnchorStore) {
+    *TRUST_ANCHORS.write().unwrap() = Some(Arc::new(store));
+}
+
+pub fn clear_trust_anchors() {
+    *TRUST_ANCHORS.write().unwrap() = None;
+}
+
+pub fn trust_anchor_fingerprints() -> Vec<[u8; 32]> {
+    TRUST_ANCHORS
+        .read()
+        .unwrap()
+        .as_ref()
+        .map(|store| store.fingerprints())
+        .unwrap_or_default()
+}
+
+pub fn install_session_store(store: SessionResumeStore) {
+    *SESSION_CACHE.write().unwrap() = Some(Arc::new(store));
+}
+
+pub fn clear_session_store() {
+    *SESSION_CACHE.write().unwrap() = None;
+}
+
+pub fn install_ocsp_response(response: OcspResponse) {
+    *OCSP_STAPLE.write().unwrap() = Some(response);
+}
+
+pub fn clear_ocsp_response() {
+    *OCSP_STAPLE.write().unwrap() = None;
+}
+
+fn current_trust_store() -> Option<Arc<TrustAnchorStore>> {
+    TRUST_ANCHORS.read().unwrap().as_ref().cloned()
+}
+
+fn current_session_store() -> Option<Arc<SessionResumeStore>> {
+    SESSION_CACHE.read().unwrap().as_ref().cloned()
+}
+
+fn current_ocsp_response() -> Option<OcspResponse> {
+    OCSP_STAPLE.read().unwrap().clone()
 }
 
 #[derive(Clone, Default)]
@@ -257,6 +308,7 @@ pub async fn listen_with_chain(
         .iter()
         .map(|cert| RustlsCertificate(cert.clone().into_vec()))
         .collect();
+    let _ = current_ocsp_response();
     let server_config =
         quinn::ServerConfig::with_single_cert(rustls_chain, key).map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
@@ -279,14 +331,28 @@ pub async fn connect(
     cert: &Certificate,
 ) -> std::result::Result<Connection, ConnectError> {
     let mut roots = RootCertStore::empty();
-    let rustls_cert = cert.as_rustls();
-    roots
-        .add(&rustls_cert)
-        .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    let crypto = ClientConfig::builder()
+    let mut added_anchor = false;
+    if let Some(store) = current_trust_store() {
+        let der: Vec<_> = store.iter().map(|anchor| anchor.der().to_vec()).collect();
+        let (added, _skipped) = roots.add_parsable_certificates(&der);
+        if added > 0 {
+            added_anchor = true;
+        }
+    }
+    if !added_anchor {
+        let rustls_cert = cert.as_rustls();
+        roots
+            .add(&rustls_cert)
+            .map_err(|e| ConnectError::Other(anyhow!(e)))?;
+    }
+    let mut crypto = ClientConfig::builder()
         .with_safe_defaults()
         .with_root_certificates(roots)
         .with_no_client_auth();
+    if let Some(store) = current_session_store() {
+        let dyn_store: Arc<dyn ClientSessionStore> = store;
+        crypto.resumption = Resumption::store(dyn_store);
+    }
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
     let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
@@ -613,6 +679,8 @@ mod tests {
 
     #[test]
     fn listen_retries_until_port_is_available() {
+        let tokio_runtime = tokio::runtime::Runtime::new().expect("tokio runtime for quinn tests");
+        let _guard = tokio_runtime.enter();
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind retry guard");
         let addr = socket.local_addr().expect("socket addr");
         let join = std::thread::spawn(move || {

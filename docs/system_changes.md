@@ -4,6 +4,129 @@
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
 
+## Transport TLS Asset Wiring (2025-10-10)
+
+### Rationale
+
+- **Drop OpenSSL from QUIC providers:** Quinn and s2n backends relied on ad-hoc
+  global state to ingest trust anchors, OCSP staples, and session caches,
+  complicating the effort to ship an entirely first-party TLS stack.
+- **Consistent provisioning:** Runtime selectors, tests, and operators need a
+  single configuration surface to stage TLS material regardless of the active
+  QUIC provider.
+
+### Implementation Summary
+
+- Added `transport::TlsSettings` and surfaced it on `transport::Config` so
+  callers can provide optional trust anchors, OCSP staples, and TLS resumption
+  caches.
+- Taught the default transport factory to install (or clear) the configured
+  assets when spinning up Quinn or s2n providers, ensuring stale material is
+  removed when swapping providers.
+- Split `s2n_backend` tests into storage and transport modules to keep targeted
+  coverage without namespace collisions when building the crate in isolation.
+
+### Operator & Developer Impact
+
+- Nodes can stage first-party trust stores or OCSP staples without touching
+  provider internals, smoothing the migration away from OpenSSL-backed tooling.
+- Test harnesses can now exercise TLS asset rotation deterministically by
+  injecting ephemeral stores via the shared config structure.
+
+### Migration Notes
+
+- Update any custom transport configuration builders to populate
+  `transport::Config::tls` when providing trust anchors or resumption stores.
+- Reset helpers (`reset_quinn_tls` / `reset_s2n_tls`) clear global state when a
+  provider is not selected, so out-of-band installs should migrate to the shared
+  configuration surface.
+
+## In-House QUIC Certificates (2025-10-10)
+
+### Rationale
+
+- **First-party cert material:** The in-house provider previously emitted random
+  byte blobs as "certificates", preventing TLS verifiers from authenticating
+  peers or extracting public keys for handshake validation.
+- **Key continuity:** QUIC callers need deterministic fingerprints and
+  verifying keys to compare against advertised peer identities when rotating
+  away from Quinn/s2n.
+
+### Implementation Summary
+
+- Taught `foundation_tls` how to recover Ed25519 verifying keys from DER-encoded
+  certificates via `ed25519_public_key_from_der` with hardened length parsing.
+- Swapped the in-house provider to generate bona fide self-signed Ed25519
+  certificates using the shared rotation helpers from `foundation_tls` and
+  `foundation_time`, persisting the verifying key alongside the fingerprint.
+- Updated `verify_remote_certificate` to reject mismatched public keys rather
+  than only hashing the payload, and threaded verifying keys through certificate
+  handles so callers can enforce identity checks.
+- Adjusted the test harness to provision the new TLS settings and assert the
+  stricter verification path.
+
+### Operator & Developer Impact
+
+- QUIC integrations that opt into the in-house backend now surface real
+  certificate material, enabling peer identity validation and future TLS
+  handshakes without falling back to third-party providers.
+- Tests and tooling can trust fingerprint comparisons to reflect the actual
+  Ed25519 verifying key embedded in the certificate, closing the gap between
+  the in-house backend and production Quinn/s2n deployments.
+
+### Migration Notes
+
+- Existing consumers should cache or distribute the verifying key exposed by
+  `CertificateHandle::Inhouse` when comparing peer advertisements.
+- The lossy `certificate_from_der` helper still accepts legacy blobs, but any
+  handshake using invalid DER will now fail during verification; update fixtures
+  accordingly.
+
+## In-House QUIC Handshake Hardening (2025-10-10)
+
+### Rationale
+
+- **Reliability on first-party transport:** The initial UDP + TLS adapter sent
+  a single `ClientHello` and trusted best-effort delivery, making in-house QUIC
+  materially flakier than the Quinn and s2n providers it is intended to
+  replace.
+- **Peer identity continuity:** Certificate advertisements only persisted
+  fingerprints, forcing higher-level identity checks to guess at the verifying
+  key when rotating or auditing peer material.
+
+### Implementation Summary
+
+- Added an exponential retransmission schedule inside the client handshake so
+  `ClientHello` frames are resent within the configured timeout and verified by
+  an updated server loop that replays cached `ServerHello` payloads and rejects
+  stale entries after 30 s.
+- Extended the handshake table with explicit TTL tracking, duplicate handling,
+  and unit tests that cover cached replies, expiration, and retransmission
+  bounds.
+- Persisted the Ed25519 verifying key alongside the fingerprint in the JSON
+  advertisement store, regenerating cache entries that predate the new schema
+  so peers always publish verifiable material.
+- Tightened integration coverage to exercise the upgraded handshake path and
+  the richer advertisement metadata.
+
+### Operator & Developer Impact
+
+- In-house QUIC connections now enjoy the same retry guarantees as the
+  third-party backends, reducing the gap while FIRST_PARTY_ONLY builds phase in
+  the native transport.
+- Certificate rotation feeds both fingerprints and verifying keys through the
+  on-disk advertisement cache, simplifying peer validation across node, CLI,
+  and explorer surfaces.
+
+### Migration Notes
+
+- Older advertisement files lacking a verifying key are automatically
+  regenerated on load, but operators should verify that distribution pipelines
+  and dashboards consume the new field when auditing peer identity.
+- The new retransmission schedule honours the existing handshake timeout; tune
+  `handshake_timeout` in `config/quic.toml` if deployments relied on the
+  previous best-effort behaviour.
+
 ## First-Party SQLite Facade (2025-10-10)
 
 ### Rationale
@@ -446,3 +569,69 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 - **Deployments** issuing certificates from internal CAs can feed chain
   artifacts directly into the QUIC adapter without patching the transport
   crate.
+
+## In-house QUIC Handshake Skeleton (2025-10-10)
+
+### Rationale
+
+- **Dependency sovereignty:** Replaces the placeholder `inhouse_backend` with
+  a first-party UDP + TLS handshake so transport builds no longer rely on
+  Quinn/s2n just to smoke-test the in-house provider.
+- **Certificate fidelity:** Shares the `foundation_tls` certificate helpers so
+  the in-house backend generates/verifies the same Ed25519 material used by
+  external providers, keeping CLI/RPC validation paths consistent.
+- **Stateful advertising:** Persists listener advertisements and rotation data
+  through a dedicated certificate store, allowing nodes to reload fingerprints
+  without piping through third-party JSON codecs.
+
+### Implementation Summary
+
+- Introduced `crates/transport/src/inhouse/` with `adapter.rs`,
+  `messages.rs`, `certificate.rs`, and `store.rs` implementing the UDP
+  handshake, message encoding, certificate generation, and JSON-backed
+  advertisement persistence.
+- Updated the transport registry (`crates/transport/src/lib.rs`) to load the
+  new module, pass handshake timeouts through `Config`, and surface
+  provider-specific helpers via `ListenerHandle::as_inhouse`.
+- Replaced the legacy integration tests with
+  `crates/transport/tests/inhouse.rs`, covering successful round trips,
+  certificate mismatches, metadata introspection, and certificate-store
+  rotation.
+
+### Operational Impact
+
+- **Operators** can now exercise the in-house transport end-to-end without
+  enabling third-party QUIC crates, paving the way for
+  `FIRST_PARTY_ONLY=1` transport builds.
+- **Certificate tooling** can rely on the shared store to inspect fingerprints
+  and issued-at timestamps when debugging node rotations.
+- **Telemetry** continues to surface handshake success/failure via the
+  existing callbacks, ensuring dashboards reflect the in-house backend just
+  like Quinn and s2n.
+
+## Default Transport Provider Switch (2025-10-10)
+
+### Rationale
+
+- **First-party by default:** With the in-house UDP/TLS adapter now carrying
+  parity coverage, the transport configuration should prefer it automatically
+  so new nodes no longer reach for Quinn before custom code.
+- **Build readiness:** Bundling the `inhouse` feature into the node’s
+  transport dependency keeps the provider available in every QUIC-enabled
+  build while the third-party stacks remain compiled for comparison tests.
+
+### Implementation Summary
+
+- Updated `transport::Config::default` to resolve the preferred provider at
+  compile time, prioritising the in-house backend when it is enabled.
+- Enabled the `inhouse` feature on the node’s transport dependency so QUIC
+  builds ship the first-party implementation alongside legacy providers.
+
+### Operational Impact
+
+- **Node boot defaults** now point at the in-house provider whenever it is
+  compiled, reducing manual configuration for operators embracing
+  `FIRST_PARTY_ONLY` builds.
+- **CI configurations** maintain Quinn and s2n support for parity suites, but
+  the runtime registry starts with the custom adapter, accelerating
+  first-party rollout.

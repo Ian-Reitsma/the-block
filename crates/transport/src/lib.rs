@@ -1,5 +1,6 @@
-#[cfg(any(feature = "inhouse", all(feature = "quinn", not(feature = "s2n-quic"))))]
+#[cfg(all(feature = "quinn", not(feature = "s2n-quic")))]
 use crypto_suite::hashing::blake3;
+use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -10,11 +11,14 @@ use std::time::Duration;
 #[cfg(any(feature = "quinn", feature = "inhouse"))]
 use concurrency::Bytes;
 
+#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+use foundation_tls::{OcspResponse, SessionResumeStore, TrustAnchorStore};
+
 #[cfg(feature = "s2n-quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
 
 #[cfg(feature = "inhouse")]
-use crate::inhouse_backend as inhouse_impl;
+use crate::inhouse as inhouse_impl;
 
 /// Known transport provider implementations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,6 +123,36 @@ impl Default for RetryPolicy {
     }
 }
 
+/// TLS material that providers can install during initialization.
+#[derive(Clone, Default)]
+pub struct TlsSettings {
+    #[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+    pub trust_anchors: Option<TrustAnchorStore>,
+    #[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+    pub session_store: Option<SessionResumeStore>,
+    #[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+    pub ocsp: Option<OcspResponse>,
+}
+
+impl fmt::Debug for TlsSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("TlsSettings");
+        #[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+        {
+            debug.field(
+                "trust_anchors",
+                &self.trust_anchors.as_ref().map(|store| store.len()),
+            );
+            debug.field(
+                "session_store",
+                &self.session_store.as_ref().map(|_| "present"),
+            );
+            debug.field("ocsp", &self.ocsp.as_ref().map(|_| "present"));
+        }
+        debug.finish()
+    }
+}
+
 /// Common configuration for the transport abstraction.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -126,18 +160,40 @@ pub struct Config {
     pub certificate_cache: Option<PathBuf>,
     pub retry: RetryPolicy,
     pub handshake_timeout: Duration,
+    pub tls: TlsSettings,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            provider: ProviderKind::Quinn,
+            provider: DEFAULT_PROVIDER_KIND,
             certificate_cache: None,
             retry: RetryPolicy::default(),
             handshake_timeout: Duration::from_secs(5),
+            tls: TlsSettings::default(),
         }
     }
 }
+
+#[cfg(feature = "inhouse")]
+const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::Inhouse;
+
+#[cfg(all(not(feature = "inhouse"), feature = "quinn"))]
+const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::Quinn;
+
+#[cfg(all(
+    not(feature = "inhouse"),
+    not(feature = "quinn"),
+    feature = "s2n-quic"
+))]
+const DEFAULT_PROVIDER_KIND: ProviderKind = ProviderKind::S2nQuic;
+
+#[cfg(all(
+    not(feature = "inhouse"),
+    not(feature = "quinn"),
+    not(feature = "s2n-quic")
+))]
+compile_error!("transport crate compiled without any QUIC providers");
 
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 use diagnostics::{anyhow, Result as DiagResult};
@@ -214,6 +270,9 @@ impl TransportFactory for DefaultFactory {
             ProviderKind::Quinn => {
                 #[cfg(feature = "quinn")]
                 {
+                    apply_quinn_tls(&cfg.tls);
+                    #[cfg(feature = "s2n-quic")]
+                    reset_s2n_tls();
                     ProviderInstance::new_quinn(cfg, &callbacks.quinn)?
                 }
                 #[cfg(not(feature = "quinn"))]
@@ -224,6 +283,9 @@ impl TransportFactory for DefaultFactory {
             ProviderKind::S2nQuic => {
                 #[cfg(feature = "s2n-quic")]
                 {
+                    #[cfg(feature = "quinn")]
+                    reset_quinn_tls();
+                    apply_s2n_tls(&cfg.tls);
                     ProviderInstance::new_s2n(cfg, &callbacks.s2n)?
                 }
                 #[cfg(not(feature = "s2n-quic"))]
@@ -232,12 +294,64 @@ impl TransportFactory for DefaultFactory {
                 }
             }
             #[cfg(feature = "inhouse")]
-            ProviderKind::Inhouse => ProviderInstance::new_inhouse(cfg, &callbacks.inhouse)?,
+            ProviderKind::Inhouse => {
+                #[cfg(feature = "quinn")]
+                reset_quinn_tls();
+                #[cfg(feature = "s2n-quic")]
+                reset_s2n_tls();
+                ProviderInstance::new_inhouse(cfg, &callbacks.inhouse)?
+            }
         };
         Ok(ProviderRegistry {
             inner: Arc::new(instance),
         })
     }
+}
+
+#[cfg(feature = "quinn")]
+fn apply_quinn_tls(settings: &TlsSettings) {
+    match settings.trust_anchors.clone() {
+        Some(store) => quinn_impl::install_trust_anchors(store),
+        None => quinn_impl::clear_trust_anchors(),
+    }
+    match settings.session_store.clone() {
+        Some(cache) => quinn_impl::install_session_store(cache),
+        None => quinn_impl::clear_session_store(),
+    }
+    match settings.ocsp.clone() {
+        Some(response) => quinn_impl::install_ocsp_response(response),
+        None => quinn_impl::clear_ocsp_response(),
+    }
+}
+
+#[cfg(all(feature = "quinn", any(feature = "s2n-quic", feature = "inhouse")))]
+fn reset_quinn_tls() {
+    quinn_impl::clear_trust_anchors();
+    quinn_impl::clear_session_store();
+    quinn_impl::clear_ocsp_response();
+}
+
+#[cfg(feature = "s2n-quic")]
+fn apply_s2n_tls(settings: &TlsSettings) {
+    match settings.trust_anchors.clone() {
+        Some(store) => s2n_impl::install_trust_anchors(store),
+        None => s2n_impl::clear_trust_anchors(),
+    }
+    match settings.session_store.clone() {
+        Some(cache) => s2n_impl::install_session_store(cache),
+        None => s2n_impl::clear_session_store(),
+    }
+    match settings.ocsp.clone() {
+        Some(response) => s2n_impl::install_ocsp_response(response),
+        None => s2n_impl::clear_ocsp_response(),
+    }
+}
+
+#[cfg(all(feature = "s2n-quic", any(feature = "quinn", feature = "inhouse")))]
+fn reset_s2n_tls() {
+    s2n_impl::clear_trust_anchors();
+    s2n_impl::clear_session_store();
+    s2n_impl::clear_ocsp_response();
 }
 
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
@@ -514,7 +628,11 @@ impl InhouseAdapter {
         backend_callbacks.handshake_success = callbacks.handshake_success.clone();
         backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
         backend_callbacks.provider_connect = callbacks.provider_connect.clone();
-        let adapter = inhouse_impl::Adapter::new(cfg.retry.clone(), &backend_callbacks)?;
+        let adapter = inhouse_impl::Adapter::new(
+            cfg.retry.clone(),
+            cfg.handshake_timeout,
+            &backend_callbacks,
+        )?;
         Ok(Self(Arc::new(InhouseAdapterInner {
             backend: adapter,
             retry: cfg.retry.clone(),
@@ -599,14 +717,8 @@ impl InhouseAdapter {
     }
 
     pub fn certificate_from_der(&self, cert: Bytes) -> CertificateHandle {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(cert.as_ref());
-        let mut fingerprint = [0u8; 32];
-        fingerprint.copy_from_slice(hasher.finalize().as_bytes());
-        CertificateHandle::Inhouse(inhouse_impl::Certificate {
-            fingerprint,
-            der: cert,
-        })
+        let certificate = inhouse_impl::Certificate::from_der_lossy(cert);
+        CertificateHandle::Inhouse(certificate)
     }
 }
 
@@ -908,4 +1020,4 @@ pub mod quinn_backend;
 pub mod s2n_backend;
 
 #[cfg(feature = "inhouse")]
-pub mod inhouse_backend;
+pub mod inhouse;
