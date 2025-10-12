@@ -154,6 +154,12 @@ fingerprint gauges/counters (`tls_env_warning_detail_fingerprint{prefix,code}`,
 `tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`) so
 diagnostics fan-out and peer ingests keep dashboards up to date while restarts
 rehydrate warning freshness and hashed payload counts from node-exported
+gauges. Those fingerprint gauges are emitted as integer samples, preserving the
+full 64-bit digest instead of rounding through IEEE754 conversions. The
+`tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}`,
+`tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`) so
+diagnostics fan-out and peer ingests keep dashboards up to date while restarts
+rehydrate warning freshness and hashed payload counts from node-exported
 gauges. The `tls_env_warning_detail_unique_fingerprints{prefix,code}` and
 `tls_env_warning_variables_unique_fingerprints{prefix,code}` gauges expose how
 many distinct hashes have been seen per label set, and the aggregator emits an
@@ -205,7 +211,10 @@ remediation steps alongside the raw status payload.
 For on-host validation, `contract telemetry tls-warnings` mirrors the same
 data, exposes per-fingerprint counts, and now accepts `--probe-detail` /
 `--probe-variables` flags to compute expected hashes locally before comparing
-them with Prometheus output. The `monitoring compare-tls-warnings` binary wraps
+them with Prometheus output. The text view now includes an `ORIGIN` column that
+matches the Prometheus `tls_env_warning_events_total{prefix,code,origin}`
+label, making it trivial to line up local snapshots with dashboard filters. The
+`monitoring compare-tls-warnings` binary wraps
 this workflow by reading `contract telemetry tls-warnings --json`, fetching
 `/tls/warnings/latest`, and verifying the Prometheus
 `tls_env_warning_*` counters/gauges; any drift prints a labeled mismatch and sets

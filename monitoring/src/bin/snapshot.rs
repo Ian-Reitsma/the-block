@@ -2,8 +2,8 @@ use http_env::blocking_client;
 use httpd::{client::ClientError, Method, StatusCode};
 use monitoring_build::{
     load_metrics_spec, parse_prometheus_snapshot, render_html_snapshot, DashboardError,
+    MetricSnapshot,
 };
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,7 +109,7 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn fetch_snapshot(endpoint: &str) -> Result<HashMap<String, f64>> {
+fn fetch_snapshot(endpoint: &str) -> Result<MetricSnapshot> {
     let client = blocking_client(DEFAULT_PREFIXES, COMPONENT);
     let response = client
         .request(Method::Get, endpoint)?

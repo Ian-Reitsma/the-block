@@ -484,7 +484,11 @@ variants without free-form detail strings, while
 distinct hashes have been observed per prefix/code. The aggregator logs a
 structured `observed new tls env warning ... fingerprint` info event whenever a
 non-`none` fingerprint first appears so runbooks can highlight previously unseen
-payloads.
+payloads. The aggregator also emits
+`tls_env_warning_events_total{prefix,code,origin}` so dashboards can separate
+diagnostics-driven warnings from peer-ingested deltas, and the shared
+`crates/tls_warning` module centralises the BLAKE3 helpers so the node,
+aggregator, CLI, and monitoring pipelines all compute identical fingerprints.
 The Grafana TLS row now charts the hashed fingerprints alongside the
 per-fingerprint deltas: `TLS env warnings (detail fingerprint hash)` and
 `TLS env warnings (variables fingerprint hash)` show the latest BLAKE3 values per

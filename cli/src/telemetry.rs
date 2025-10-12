@@ -314,8 +314,8 @@ pub fn handle(cmd: TelemetryCmd) {
                     println!("no TLS environment warnings recorded");
                 } else {
                     println!(
-                        "{:<32} {:<32} {:>8} {:>8} {:<}",
-                        "PREFIX", "CODE", "TOTAL", "AGE_S", "DETAIL"
+                        "{:<32} {:<32} {:<12} {:>8} {:>8} {:<}",
+                        "PREFIX", "CODE", "ORIGIN", "TOTAL", "AGE_S", "DETAIL"
                     );
                     for snapshot in snapshots {
                         let age = now.saturating_sub(snapshot.last_seen);
@@ -325,11 +325,16 @@ pub fn handle(cmd: TelemetryCmd) {
                             .map(|detail| detail.to_string())
                             .unwrap_or_else(|| "-".to_string());
                         println!(
-                            "{:<32} {:<32} {:>8} {:>8} {}",
-                            snapshot.prefix, snapshot.code, snapshot.total, age, detail
+                            "{:<32} {:<32} {:<12} {:>8} {:>8} {}",
+                            snapshot.prefix,
+                            snapshot.code,
+                            snapshot.origin.as_str(),
+                            snapshot.total,
+                            age,
+                            detail
                         );
                         if !snapshot.variables.is_empty() {
-                            println!("{:>65} vars: {}", "", snapshot.variables.join(","));
+                            println!("{:>77} vars: {}", "", snapshot.variables.join(","));
                         }
                         if snapshot.detail_fingerprint.is_some()
                             || snapshot.variables_fingerprint.is_some()
@@ -343,7 +348,7 @@ pub fn handle(cmd: TelemetryCmd) {
                                 .map(format_tls_warning_fingerprint)
                                 .unwrap_or_else(|| "-".to_string());
                             println!(
-                                "{:>65} fingerprints: detail={} vars={}",
+                                "{:>77} fingerprints: detail={} vars={}",
                                 "", detail_hex, vars_hex
                             );
                         }
@@ -355,7 +360,7 @@ pub fn handle(cmd: TelemetryCmd) {
                         );
                         if detail_counts != "-" || vars_counts != "-" {
                             println!(
-                                "{:>65} fingerprint_counts: detail={} vars={}",
+                                "{:>77} fingerprint_counts: detail={} vars={}",
                                 "", detail_counts, vars_counts
                             );
                         }

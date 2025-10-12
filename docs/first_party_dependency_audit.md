@@ -158,6 +158,11 @@ third-party codecs:
   `monitoring compare-tls-warnings` helper cross-checks
   `contract telemetry tls-warnings --json` against `/tls/warnings/latest` plus
   the Prometheus series so automation can flag drift automatically.
+  The shared `crates/tls_warning` module now canonicalises TLS warning
+  fingerprints for every consumer (node, aggregator, CLI, monitoring) and the
+  aggregator exports `tls_env_warning_events_total{prefix,code,origin}` so
+  dashboards can distinguish diagnostics-driven warnings from peer-ingested
+  deltas without duplicating hashing logic or emitting raw payloads.
   Grafana auto-templates continue to plot "TLS env warnings (age seconds)" via
   `clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`
   to make stale prefixes obvious, and `tls-manifest-guard` now tolerates quoted

@@ -1,0 +1,8 @@
+[package]
+name = "tls_warning"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crypto_suite = { path = "../crypto_suite" }
+foundation_serialization = { path = "../foundation_serialization" }
