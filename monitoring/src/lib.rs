@@ -70,6 +70,26 @@ const TLS_STALE_PANEL_TITLE: &str = "TLS env warnings (stale snapshots)";
 const TLS_STALE_EXPR: &str = "tls_env_warning_stale_snapshots";
 const TLS_RETENTION_PANEL_TITLE: &str = "TLS env warnings (retention seconds)";
 const TLS_RETENTION_EXPR: &str = "tls_env_warning_retention_seconds";
+const TLS_DETAIL_FINGERPRINT_PANEL_TITLE: &str = "TLS env warnings (detail fingerprint hash)";
+const TLS_DETAIL_FINGERPRINT_EXPR: &str =
+    "max by (prefix, code)(tls_env_warning_detail_fingerprint)";
+const TLS_VARIABLES_FINGERPRINT_PANEL_TITLE: &str = "TLS env warnings (variables fingerprint hash)";
+const TLS_VARIABLES_FINGERPRINT_EXPR: &str =
+    "max by (prefix, code)(tls_env_warning_variables_fingerprint)";
+const TLS_DETAIL_UNIQUE_PANEL_TITLE: &str = "TLS env warnings (unique detail fingerprints)";
+const TLS_DETAIL_UNIQUE_EXPR: &str =
+    "max by (prefix, code)(tls_env_warning_detail_unique_fingerprints)";
+const TLS_VARIABLES_UNIQUE_PANEL_TITLE: &str = "TLS env warnings (unique variables fingerprints)";
+const TLS_VARIABLES_UNIQUE_EXPR: &str =
+    "max by (prefix, code)(tls_env_warning_variables_unique_fingerprints)";
+const TLS_DETAIL_FINGERPRINT_DELTA_PANEL_TITLE: &str =
+    "TLS env warnings (detail fingerprint 5m delta)";
+const TLS_DETAIL_FINGERPRINT_DELTA_EXPR: &str =
+    "sum by (prefix, code, fingerprint)(increase(tls_env_warning_detail_fingerprint_total[5m]))";
+const TLS_VARIABLES_FINGERPRINT_DELTA_PANEL_TITLE: &str =
+    "TLS env warnings (variables fingerprint 5m delta)";
+const TLS_VARIABLES_FINGERPRINT_DELTA_EXPR: &str =
+    "sum by (prefix, code, fingerprint)(increase(tls_env_warning_variables_fingerprint_total[5m]))";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -173,6 +193,54 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         if metric.name == "tls_env_warning_last_seen_seconds" {
             tls.push(build_tls_last_seen_panel(metric));
             tls.push(build_tls_freshness_panel(metric));
+            continue;
+        }
+        if metric.name == "tls_env_warning_detail_fingerprint" {
+            tls.push(build_tls_hash_panel(
+                TLS_DETAIL_FINGERPRINT_PANEL_TITLE,
+                TLS_DETAIL_FINGERPRINT_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "tls_env_warning_variables_fingerprint" {
+            tls.push(build_tls_hash_panel(
+                TLS_VARIABLES_FINGERPRINT_PANEL_TITLE,
+                TLS_VARIABLES_FINGERPRINT_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "tls_env_warning_detail_unique_fingerprints" {
+            tls.push(build_tls_unique_panel(
+                TLS_DETAIL_UNIQUE_PANEL_TITLE,
+                TLS_DETAIL_UNIQUE_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "tls_env_warning_variables_unique_fingerprints" {
+            tls.push(build_tls_unique_panel(
+                TLS_VARIABLES_UNIQUE_PANEL_TITLE,
+                TLS_VARIABLES_UNIQUE_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "tls_env_warning_detail_fingerprint_total" {
+            tls.push(build_tls_fingerprint_delta_panel(
+                TLS_DETAIL_FINGERPRINT_DELTA_PANEL_TITLE,
+                TLS_DETAIL_FINGERPRINT_DELTA_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "tls_env_warning_variables_fingerprint_total" {
+            tls.push(build_tls_fingerprint_delta_panel(
+                TLS_VARIABLES_FINGERPRINT_DELTA_PANEL_TITLE,
+                TLS_VARIABLES_FINGERPRINT_DELTA_EXPR,
+                metric,
+            ));
             continue;
         }
         if metric.name == "tls_env_warning_active_snapshots" {
@@ -353,6 +421,67 @@ fn build_tls_stale_panel(metric: &Metric) -> Value {
 
 fn build_tls_retention_panel(metric: &Metric) -> Value {
     build_tls_scalar_panel(TLS_RETENTION_PANEL_TITLE, TLS_RETENTION_EXPR, metric)
+}
+
+fn build_tls_hash_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from("{{prefix}} · {{code}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_tls_unique_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    build_tls_hash_panel(title, expr, metric)
+}
+
+fn build_tls_fingerprint_delta_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert(
+        "legendFormat".into(),
+        Value::from("{{prefix}} · {{code}} · {{fingerprint}}"),
+    );
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
 }
 
 fn build_tls_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {

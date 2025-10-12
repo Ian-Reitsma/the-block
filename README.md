@@ -471,6 +471,42 @@ configuration warning in the `TLS_ENV_WARNING_TOTAL{prefix,code}` counter and
 stamps `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` with the most recent
 UNIX timestamp so dashboards and alerts can reason about both warning volume and
 freshness even after aggregator restarts.
+`tls_env_warning_detail_fingerprint{prefix,code}` and
+`tls_env_warning_variables_fingerprint{prefix,code}` expose BLAKE3 fingerprints
+of the latest warning detail string and variable list so dashboards and alerts
+can detect drift without parsing free-form payloads. Companion counters
+`tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}` and
+`tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}` tally how
+often each hashed payload appeared so Prometheus can graph the mix of warning
+variants without free-form detail strings, while
+`tls_env_warning_detail_unique_fingerprints{prefix,code}` and
+`tls_env_warning_variables_unique_fingerprints{prefix,code}` report how many
+distinct hashes have been observed per prefix/code. The aggregator logs a
+structured `observed new tls env warning ... fingerprint` info event whenever a
+non-`none` fingerprint first appears so runbooks can highlight previously unseen
+payloads.
+The Grafana TLS row now charts the hashed fingerprints alongside the
+per-fingerprint deltas: `TLS env warnings (detail fingerprint hash)` and
+`TLS env warnings (variables fingerprint hash)` show the latest BLAKE3 values per
+prefix/code, `TLS env warnings (unique detail fingerprints)` /
+`TLS env warnings (unique variables fingerprints)` track how many distinct hashes
+have appeared, and the new `TLS env warnings (detail fingerprint 5m delta)` /
+`TLS env warnings (variables fingerprint 5m delta)` panels aggregate
+`increase(tls_env_warning_*_fingerprint_total[5m])` so on-call engineers can spot
+surges from the dashboard without digging through raw counters.
+`contract telemetry tls-warnings`
+renders those fingerprints as 16-character hex strings alongside the captured
+variables for on-host triage, emits per-fingerprint counts (e.g.
+`fingerprint_counts: detail=f00d=3 vars=beef=1`) to mirror the Prometheus
+totals, and accepts `--probe-detail <text>` /
+`--probe-variables <a,b,c>` to compute the expected fingerprints for arbitrary
+payloads before comparing them with dashboard output.
+`monitoring compare-tls-warnings` cross-checks the JSON emitted by
+`contract telemetry tls-warnings --json` against both
+`/tls/warnings/latest` and the Prometheus `tls_env_warning_*` series so runbooks
+can fail fast when the aggregator diverges from local state; the tool exits with
+non-zero status and surfaces the mismatched fingerprint or counter labels when
+cluster totals fall behind local counts.
 `GET /tls/warnings/status` now surfaces a structured summary (retention window,
 active snapshot count, oldest/newest timestamps, and stale entries) so
 operators can audit cluster health without scraping `/metrics`. Use
@@ -488,7 +524,16 @@ human-readable report (or `--json` for automation) that merges the status
 payload with the most recent `/tls/warnings/latest` snapshots and suggests
 remediation steps when entries go stale or no warnings have arrived during the
 retention window. Monitoring ships a matching `TlsEnvWarningSnapshotsStale`
-alert to page when the stale gauge is non-zero for 15 minutes.
+alert to page when the stale gauge is non-zero for 15 minutes. Operators can
+also inspect local node state without hitting the aggregator via
+`contract telemetry tls-warnings` (`--json` emits structured output while
+`--prefix`/`--code` filter by label). The CLI surfaces the same counters,
+age calculation, and captured `variables` list that back the dashboards so
+incident responders can diff local and aggregated views before filing tickets.
+Aggregator support bundles (`/export/all`, optionally encrypted) now include
+`tls_warnings/latest.json` and `tls_warnings/status.json` entries so offline
+investigations retain hashed detail/variable payloads, fingerprint tallies, and
+retention metadata alongside the per-peer metrics snapshots.
 The node still serves JSON-RPC through its bespoke parser
 (`node/src/rpc/mod.rs`), and the metrics aggregator and gateway keep using
 `axum`/`hyper` for HTTP endpoints while the in-house server is developed

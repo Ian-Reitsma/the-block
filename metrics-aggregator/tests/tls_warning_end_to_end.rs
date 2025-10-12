@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use foundation_serialization::json::Value;
 use http_env::server_tls_from_env;
 use httpd::{HttpClient, Method, ServerConfig};
@@ -6,11 +7,35 @@ use runtime::net::TcpListener;
 use runtime::{sleep, spawn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+const TLS_WARNING_FINGERPRINT_DELIM: u8 = 0x1f;
+
 fn unique_suffix() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock should be monotonic")
         .as_nanos()
+}
+
+fn fingerprint(bytes: &[u8]) -> i64 {
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&blake3::hash(bytes).as_bytes()[..8]);
+    i64::from_le_bytes(buf)
+}
+
+fn fingerprint_hex(value: i64) -> String {
+    let unsigned = u64::from_le_bytes(value.to_le_bytes());
+    format!("{unsigned:016x}")
+}
+
+fn variables_fingerprint(variables: &[String]) -> i64 {
+    let mut bytes = Vec::new();
+    for (idx, value) in variables.iter().enumerate() {
+        if idx > 0 {
+            bytes.push(TLS_WARNING_FINGERPRINT_DELIM);
+        }
+        bytes.extend_from_slice(value.as_bytes());
+    }
+    fingerprint(&bytes)
 }
 
 #[test]
@@ -48,6 +73,12 @@ fn diagnostics_warnings_surface_over_http() {
 
         let ingest_prefix = format!("TB_NODE_TLS_{}", unique_suffix());
         let ingest_code = format!("missing_anchor_{}", unique_suffix());
+        let ingest_detail_hint = format!("{}:{}", ingest_prefix, ingest_code);
+        let ingest_detail_fp = fingerprint(ingest_detail_hint.as_bytes());
+        let ingest_variables = vec!["missing_anchor".to_string()];
+        let ingest_variables_fp = variables_fingerprint(&ingest_variables);
+        let ingest_detail_fp_metric = (ingest_detail_fp as f64).round() as i64;
+        let ingest_variables_fp_metric = (ingest_variables_fp as f64).round() as i64;
         let client = HttpClient::default();
         let ingest_url = format!("http://{addr}/ingest");
 
@@ -57,6 +88,12 @@ fn diagnostics_warnings_surface_over_http() {
                 "metrics": {
                     "tls_env_warning_total": [
                         {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 1.0}
+                    ],
+                    "tls_env_warning_detail_fingerprint": [
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp as f64}
+                    ],
+                    "tls_env_warning_variables_fingerprint": [
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp as f64}
                     ]
                 }
             }
@@ -78,6 +115,12 @@ fn diagnostics_warnings_surface_over_http() {
                 "metrics": {
                     "tls_env_warning_total": [
                         {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 4.0}
+                    ],
+                    "tls_env_warning_detail_fingerprint": [
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp as f64}
+                    ],
+                    "tls_env_warning_variables_fingerprint": [
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp as f64}
                     ]
                 }
             }
@@ -121,9 +164,44 @@ fn diagnostics_warnings_surface_over_http() {
         );
         let detail = diagnostics_entry["detail"].as_str().expect("detail string");
         assert!(detail.contains(&diag_key));
+        let detail_fingerprint = diagnostics_entry["detail_fingerprint"]
+            .as_i64()
+            .expect("detail fingerprint");
+        assert_eq!(detail_fingerprint, fingerprint(detail.as_bytes()));
         assert_eq!(
             diagnostics_entry["variables"],
             foundation_serialization::json!([diag_key.as_str()])
+        );
+        let diag_variables: Vec<String> = diagnostics_entry["variables"]
+            .as_array()
+            .expect("variables array")
+            .iter()
+            .filter_map(|value| value.as_str().map(|s| s.to_string()))
+            .collect();
+        let variables_fingerprint_value = diagnostics_entry["variables_fingerprint"]
+            .as_i64()
+            .expect("variables fingerprint");
+        assert_eq!(
+            variables_fingerprint_value,
+            variables_fingerprint(&diag_variables)
+        );
+        let detail_counts = diagnostics_entry["detail_fingerprint_counts"]
+            .as_object()
+            .expect("detail fingerprint counts object");
+        assert_eq!(
+            detail_counts
+                .get(&fingerprint_hex(detail_fingerprint))
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        let variables_counts = diagnostics_entry["variables_fingerprint_counts"]
+            .as_object()
+            .expect("variables fingerprint counts object");
+        assert_eq!(
+            variables_counts
+                .get(&fingerprint_hex(variables_fingerprint_value))
+                .and_then(|value| value.as_u64()),
+            Some(1)
         );
 
         let ingest_entry = snapshots
@@ -148,6 +226,34 @@ fn diagnostics_warnings_surface_over_http() {
         assert_eq!(
             ingest_entry["peer_id"],
             foundation_serialization::json!("node-a")
+        );
+        assert_eq!(
+            ingest_entry["detail_fingerprint"],
+            foundation_serialization::json!(ingest_detail_fp_metric)
+        );
+        assert_eq!(
+            ingest_entry["variables_fingerprint"],
+            foundation_serialization::json!(ingest_variables_fp_metric)
+        );
+        let ingest_detail_hex = fingerprint_hex(ingest_detail_fp_metric);
+        let ingest_variables_hex = fingerprint_hex(ingest_variables_fp_metric);
+        let ingest_detail_counts = ingest_entry["detail_fingerprint_counts"]
+            .as_object()
+            .expect("ingest detail fingerprint counts");
+        assert_eq!(
+            ingest_detail_counts
+                .get(&ingest_detail_hex)
+                .and_then(|value| value.as_u64()),
+            Some(4)
+        );
+        let ingest_variables_counts = ingest_entry["variables_fingerprint_counts"]
+            .as_object()
+            .expect("ingest variables fingerprint counts");
+        assert_eq!(
+            ingest_variables_counts
+                .get(&ingest_variables_hex)
+                .and_then(|value| value.as_u64()),
+            Some(4)
         );
 
         let metrics_url = format!("http://{addr}/metrics");
@@ -174,6 +280,66 @@ fn diagnostics_warnings_surface_over_http() {
         assert!(body.contains(&format!(
             "tls_env_warning_last_seen_seconds{{prefix=\"{}\",code=\"{}\"}}",
             ingest_prefix, ingest_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
+            diag_prefix,
+            diag_code,
+            fingerprint(detail.as_bytes()) as f64
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
+            ingest_prefix, ingest_code, ingest_detail_fp_metric as f64
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
+            diag_prefix,
+            diag_code,
+            variables_fingerprint(&diag_variables) as f64
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
+            ingest_prefix, ingest_code, ingest_variables_fp_metric as f64
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_unique_fingerprints{{prefix=\"{}\",code=\"{}\"}} 1",
+            diag_prefix, diag_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_unique_fingerprints{{prefix=\"{}\",code=\"{}\"}} 1",
+            ingest_prefix, ingest_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_unique_fingerprints{{prefix=\"{}\",code=\"{}\"}} 1",
+            diag_prefix, diag_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_unique_fingerprints{{prefix=\"{}\",code=\"{}\"}} 1",
+            ingest_prefix, ingest_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_fingerprint_total{{prefix=\"{}\",code=\"{}\",fingerprint=\"{}\"}} 1",
+            diag_prefix,
+            diag_code,
+            fingerprint_hex(detail_fingerprint)
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_detail_fingerprint_total{{prefix=\"{}\",code=\"{}\",fingerprint=\"{}\"}} 4",
+            ingest_prefix,
+            ingest_code,
+            ingest_detail_hex
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_fingerprint_total{{prefix=\"{}\",code=\"{}\",fingerprint=\"{}\"}} 1",
+            diag_prefix,
+            diag_code,
+            fingerprint_hex(variables_fingerprint_value)
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_variables_fingerprint_total{{prefix=\"{}\",code=\"{}\",fingerprint=\"{}\"}} 4",
+            ingest_prefix,
+            ingest_code,
+            ingest_variables_hex
         )));
 
         let status_url = format!("http://{addr}/tls/warnings/status");

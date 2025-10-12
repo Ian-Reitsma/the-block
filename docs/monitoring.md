@@ -147,17 +147,27 @@ counters like `aggregator_ingest_total`, `aggregator_retention_pruned_total`,
 and `bulk_export_total` are registered inside the in-house registry and served
 at `/metrics`. The shared `http_env` sink feeds both the
 `tls_env_warning_total{prefix,code}` counter and the
-`tls_env_warning_last_seen_seconds{prefix,code}` gauge, so diagnostics fan-out
-and peer ingests keep dashboards up to date while restarts rehydrate warning
-freshness from node-exported gauges. Operators can also query
+`tls_env_warning_last_seen_seconds{prefix,code}` gauge, and now publishes BLAKE3
+fingerprint gauges/counters (`tls_env_warning_detail_fingerprint{prefix,code}`,
+`tls_env_warning_variables_fingerprint{prefix,code}`,
+`tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}`,
+`tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`) so
+diagnostics fan-out and peer ingests keep dashboards up to date while restarts
+rehydrate warning freshness and hashed payload counts from node-exported
+gauges. The `tls_env_warning_detail_unique_fingerprints{prefix,code}` and
+`tls_env_warning_variables_unique_fingerprints{prefix,code}` gauges expose how
+many distinct hashes have been seen per label set, and the aggregator emits an
+`observed new tls env warning … fingerprint` info log the first time a
+non-`none` fingerprint arrives so operators can flag previously unseen payloads
+in incident timelines. Operators can also query
 `GET /tls/warnings/latest` for a JSON document summarising the latest warning
 per `{prefix,code}` pair, including the accumulated total, the most recent
 delta, the originating peer (when the increment arrived via ingestion), any
-structured diagnostics detail, the last-seen timestamp, and captured variables.
-Warning snapshots default to a seven-day retention window (overridable via
-`AGGREGATOR_TLS_WARNING_RETENTION_SECS`); older entries are pruned automatically
-so `/tls/warnings/latest` mirrors the current operational state instead of
-accumulating historical noise. Recommended scrape targets remain both the
+structured diagnostics detail, the last-seen timestamp, captured variables, and
+per-fingerprint counts. Warning snapshots default to a seven-day retention
+window (overridable via `AGGREGATOR_TLS_WARNING_RETENTION_SECS`); older entries
+are pruned automatically so `/tls/warnings/latest` mirrors the current
+operational state instead of accumulating historical noise. Recommended scrape targets remain both the
 aggregator and the node exporters. Alert when `cluster_peer_active_total` drops
 unexpectedly, when ingestion/export counters stop increasing, or when the
 `TlsEnvWarningBurst` alert fires for any service prefix. The end-to-end
@@ -178,11 +188,31 @@ extra templating. Grafana dashboards now include a "TLS env warnings (age
 seconds)" panel sourced from
 `clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`
 to visualise how long each warning has been quiet and to back alerts that guard
-against forgotten TLS overrides. The new `TlsEnvWarningSnapshotsStale` alert
-triggers when the stale gauge stays above zero for 15 minutes, and operators can
-double-check the report with `contract tls status --aggregator
+against forgotten TLS overrides. The TLS row also charts the hashed detail and
+variables fingerprints (`tls_env_warning_*_fingerprint`), the unique hash counts
+(`tls_env_warning_*_unique_fingerprints`), and per-fingerprint 5-minute deltas
+derived from `increase(tls_env_warning_*_fingerprint_total[5m])` so engineers can
+spot new hashes or sustained bursts at a glance. The new
+`TlsEnvWarningNewDetailFingerprint`/`TlsEnvWarningNewVariablesFingerprint`
+alerts fire when the unique gauges climb, while the
+`TlsEnvWarningDetailFingerprintFlood` and
+`TlsEnvWarningVariablesFingerprintFlood` alerts promote prolonged non-`none`
+fingerprint surges to a paging signal. The `TlsEnvWarningSnapshotsStale` alert
+continues to trigger when the stale gauge stays above zero for 15 minutes, and
+operators can double-check the report with `contract tls status --aggregator
 http://localhost:9000 --latest` (or `--json` for automation) to print suggested
 remediation steps alongside the raw status payload.
+For on-host validation, `contract telemetry tls-warnings` mirrors the same
+data, exposes per-fingerprint counts, and now accepts `--probe-detail` /
+`--probe-variables` flags to compute expected hashes locally before comparing
+them with Prometheus output. The `monitoring compare-tls-warnings` binary wraps
+this workflow by reading `contract telemetry tls-warnings --json`, fetching
+`/tls/warnings/latest`, and verifying the Prometheus
+`tls_env_warning_*` counters/gauges; any drift prints a labeled mismatch and sets
+the exit code for automation. `/export/all` support bundles now bundle
+`tls_warnings/latest.json` and `tls_warnings/status.json` so offline incidents
+retain hashed payloads, fingerprint tallies, and retention metadata alongside
+peer metrics.
 
 ### Metrics-to-logs correlation
 

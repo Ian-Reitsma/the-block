@@ -147,9 +147,16 @@ the JSON identities and trust-anchor registries expected by these helpers.
    `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` whenever a configuration
    problem is detected (rehydrating from node gauges after restarts), the
    aggregator exposes the latest structured metadata at `/tls/warnings/latest`,
-   and the fleet dashboards now surface dedicated panels (including "TLS env
-   warnings (age seconds)") plus the `TlsEnvWarningBurst` and
-   `TlsEnvWarningSnapshotsStale` alerts. Any remaining warnings indicate
+   increments the unique-fingerprint gauges
+   (`tls_env_warning_detail_unique_fingerprints{prefix,code}` /
+   `tls_env_warning_variables_unique_fingerprints{prefix,code}`), and emits an
+   info log the first time a non-`none` fingerprint shows up so rotation runbooks
+  can flag novel payloads. The fleet dashboards now surface dedicated panels
+  (including "TLS env warnings (age seconds)" plus hashed fingerprint,
+  unique-fingerprint, and five-minute delta charts) alongside the
+  `TlsEnvWarningBurst`, `TlsEnvWarningNewDetailFingerprint`,
+  `TlsEnvWarningNewVariablesFingerprint`, `TlsEnvWarningDetailFingerprintFlood`,
+  and `TlsEnvWarningVariablesFingerprintFlood` alerts. Any remaining warnings indicate
    misnamed files or conflicting client-auth variables that must be resolved
    before tearing down the previous identity. Use `/tls/warnings/status` to
    verify the retention window, spot stale snapshots, and confirm that any
@@ -157,7 +164,18 @@ the JSON identities and trust-anchor registries expected by these helpers.
    marking the rotation complete. The `contract tls status --aggregator
    http://localhost:9000 --latest` helper prints the same status payload along
    with the freshest snapshots, last-seen bounds, and suggested remediation
-   steps (use `--json` when feeding the report into automation).
+   steps (use `--json` when feeding the report into automation). For local
+  inspection without hitting the aggregator, run `contract telemetry
+  tls-warnings` (`--json` for machine output, `--prefix`/`--code` to filter)
+  to dump the node’s cached warning totals, last-seen timestamps, detail
+  strings, captured environment variables, and per-fingerprint counts. Pair this
+  with `monitoring compare-tls-warnings http://localhost:9000 tls-warnings.json`
+  (capture `contract telemetry tls-warnings --json > tls-warnings.json` first) to
+  cross-check the Prometheus series and `/tls/warnings/latest`; the tool exits
+  non-zero and prints mismatched fingerprints when the cluster lags the local
+  snapshot. Support bundles fetched via `/export/all` include `tls_warnings/latest.json` and
+  `tls_warnings/status.json` so offline reviews keep hashed payloads and
+  retention metadata alongside per-peer metrics.
 
 ### Feature-gated CLI flags
 
