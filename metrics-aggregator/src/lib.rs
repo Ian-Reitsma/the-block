@@ -1,11 +1,15 @@
 use concurrency::Lazy;
-use diagnostics::tracing::{info, warn};
+use diagnostics::{
+    internal::{install_tls_env_warning_subscriber, SubscriberGuard as LoggingSubscriberGuard},
+    tracing::{info, warn},
+};
 use http_env::{http_client as env_http_client, register_tls_warning_sink, TlsEnvWarningSinkGuard};
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
-use runtime::telemetry::{Counter, CounterVec, Gauge, GaugeVec, Opts, Registry};
+use runtime::telemetry::{Counter, CounterVec, Gauge, GaugeVec, IntGaugeVec, Opts, Registry};
 use runtime::{spawn, spawn_blocking};
+use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::fmt;
 use std::str::FromStr;
@@ -16,7 +20,6 @@ use crypto_suite::encryption::{
     envelope::{self, EnvelopeError, PASSWORD_CONTENT_TYPE, RECIPIENT_CONTENT_TYPE},
     x25519,
 };
-use crypto_suite::hashing::blake3;
 
 #[cfg(feature = "s3")]
 mod object_store;
@@ -46,6 +49,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
+use tls_warning::{
+    detail_fingerprint as tls_detail_fingerprint, fingerprint_label,
+    variables_fingerprint as tls_variables_fingerprint, WarningOrigin,
+};
 
 fn http_client() -> HttpClient {
     env_http_client(&["TB_AGGREGATOR_TLS", "TB_HTTP_TLS"], "metrics-aggregator")
@@ -69,7 +76,6 @@ const METRICS_CF: &str = "peer_metrics";
 const COUNTER_EPSILON: f64 = 1e-6;
 const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
-const TLS_WARNING_FINGERPRINT_DELIM: u8 = 0x1f;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -318,47 +324,43 @@ impl AppState {
         }
 
         let mut metadata_map: HashMap<(String, String), TlsWarningMetadata> = HashMap::new();
-        for (prefix, code, value) in detail_fingerprints {
-            match quantize_fingerprint(value) {
-                Some(fingerprint) => {
+        for sample in detail_fingerprints {
+            let prefix = sample.prefix;
+            let code = sample.code;
+            match sample.value {
+                TlsFingerprintValue::Parsed(fingerprint) => {
                     let entry = metadata_map
                         .entry((prefix.clone(), code.clone()))
                         .or_insert_with(|| TlsWarningMetadata::peer(peer_id));
-                    entry.detail_fingerprint = if fingerprint == 0 {
-                        Some(0)
-                    } else {
-                        Some(fingerprint)
-                    };
+                    entry.detail_fingerprint = Some(fingerprint);
                 }
-                None => warn!(
+                TlsFingerprintValue::Invalid(raw) => warn!(
                     target: "aggregator",
                     %peer_id,
                     %prefix,
                     %code,
-                    value,
+                    value = %raw,
                     "ignored invalid tls warning detail fingerprint sample",
                 ),
             }
         }
 
-        for (prefix, code, value) in variables_fingerprints {
-            match quantize_fingerprint(value) {
-                Some(fingerprint) => {
+        for sample in variables_fingerprints {
+            let prefix = sample.prefix;
+            let code = sample.code;
+            match sample.value {
+                TlsFingerprintValue::Parsed(fingerprint) => {
                     let entry = metadata_map
                         .entry((prefix.clone(), code.clone()))
                         .or_insert_with(|| TlsWarningMetadata::peer(peer_id));
-                    entry.variables_fingerprint = if fingerprint == 0 {
-                        Some(0)
-                    } else {
-                        Some(fingerprint)
-                    };
+                    entry.variables_fingerprint = Some(fingerprint);
                 }
-                None => warn!(
+                TlsFingerprintValue::Invalid(raw) => warn!(
                     target: "aggregator",
                     %peer_id,
                     %prefix,
                     %code,
-                    value,
+                    value = %raw,
                     "ignored invalid tls warning variables fingerprint sample",
                 ),
             }
@@ -535,25 +537,19 @@ struct AggregatorMetrics {
     telemetry_ingest_total: Counter,
     telemetry_schema_error_total: Counter,
     tls_env_warning_total: CounterVec,
+    tls_env_warning_events_total: CounterVec,
     tls_env_warning_last_seen: GaugeVec,
     tls_env_warning_retention_seconds: Gauge,
     tls_env_warning_active_snapshots: Gauge,
     tls_env_warning_stale_snapshots: Gauge,
     tls_env_warning_most_recent_last_seen: Gauge,
     tls_env_warning_least_recent_last_seen: Gauge,
-    tls_env_warning_detail_fingerprint: GaugeVec,
-    tls_env_warning_variables_fingerprint: GaugeVec,
+    tls_env_warning_detail_fingerprint: IntGaugeVec,
+    tls_env_warning_variables_fingerprint: IntGaugeVec,
     tls_env_warning_detail_fingerprint_total: CounterVec,
     tls_env_warning_variables_fingerprint_total: CounterVec,
-    tls_env_warning_detail_unique_fingerprints: GaugeVec,
-    tls_env_warning_variables_unique_fingerprints: GaugeVec,
-}
-
-#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
-#[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
-enum TlsWarningOrigin {
-    Diagnostics,
-    PeerIngest,
+    tls_env_warning_detail_unique_fingerprints: IntGaugeVec,
+    tls_env_warning_variables_unique_fingerprints: IntGaugeVec,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
@@ -564,7 +560,7 @@ struct TlsWarningSnapshot {
     total: u64,
     last_delta: u64,
     last_seen: u64,
-    origin: TlsWarningOrigin,
+    origin: WarningOrigin,
     peer_id: Option<String>,
     detail: Option<String>,
     variables: Vec<String>,
@@ -595,7 +591,7 @@ impl TlsWarningSnapshot {
             total: 0,
             last_delta: 0,
             last_seen: 0,
-            origin: TlsWarningOrigin::PeerIngest,
+            origin: WarningOrigin::PeerIngest,
             peer_id: None,
             detail: None,
             variables: Vec::new(),
@@ -611,10 +607,23 @@ impl TlsWarningSnapshot {
 struct TlsWarningMetadata {
     detail: Option<String>,
     variables: Vec<String>,
-    origin: TlsWarningOrigin,
+    origin: WarningOrigin,
     peer_id: Option<String>,
     detail_fingerprint: Option<i64>,
     variables_fingerprint: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+struct TlsFingerprintSample {
+    prefix: String,
+    code: String,
+    value: TlsFingerprintValue,
+}
+
+#[derive(Clone, Debug)]
+enum TlsFingerprintValue {
+    Parsed(i64),
+    Invalid(String),
 }
 
 impl TlsWarningMetadata {
@@ -626,12 +635,13 @@ impl TlsWarningMetadata {
         };
         let detail_fingerprint = detail
             .as_ref()
-            .map(|value| tls_warning_fingerprint(value.as_bytes()));
-        let variables_fingerprint = tls_warning_variables_fingerprint(&variables);
+            .map(|value| tls_detail_fingerprint(value.as_str()));
+        let variables_fingerprint =
+            tls_variables_fingerprint(variables.iter().map(|value| value.as_str()));
         Self {
             detail,
             variables,
-            origin: TlsWarningOrigin::Diagnostics,
+            origin: WarningOrigin::Diagnostics,
             peer_id: None,
             detail_fingerprint,
             variables_fingerprint,
@@ -642,7 +652,7 @@ impl TlsWarningMetadata {
         Self {
             detail: None,
             variables: Vec::new(),
-            origin: TlsWarningOrigin::PeerIngest,
+            origin: WarningOrigin::PeerIngest,
             peer_id: Some(peer_id.to_string()),
             detail_fingerprint: None,
             variables_fingerprint: None,
@@ -656,7 +666,7 @@ impl TlsWarningMetadata {
             None => self
                 .detail
                 .as_ref()
-                .map(|value| tls_warning_fingerprint(value.as_bytes())),
+                .map(|value| tls_detail_fingerprint(value.as_str())),
         }
     }
 
@@ -664,45 +674,8 @@ impl TlsWarningMetadata {
         match self.variables_fingerprint {
             Some(0) => None,
             Some(value) => Some(value),
-            None => {
-                if self.variables.is_empty() {
-                    None
-                } else {
-                    tls_warning_variables_fingerprint(&self.variables)
-                }
-            }
+            None => tls_variables_fingerprint(self.variables.iter().map(|value| value.as_str())),
         }
-    }
-}
-
-fn tls_warning_fingerprint(bytes: &[u8]) -> i64 {
-    let digest = blake3::hash(bytes);
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&digest.as_bytes()[..8]);
-    i64::from_le_bytes(buf)
-}
-
-fn tls_warning_variables_fingerprint(variables: &[String]) -> Option<i64> {
-    if variables.is_empty() {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    for (idx, value) in variables.iter().enumerate() {
-        if idx > 0 {
-            bytes.push(TLS_WARNING_FINGERPRINT_DELIM);
-        }
-        bytes.extend_from_slice(value.as_bytes());
-    }
-    Some(tls_warning_fingerprint(&bytes))
-}
-
-fn fingerprint_label(fingerprint: Option<i64>) -> String {
-    match fingerprint {
-        Some(value) => {
-            let unsigned = u64::from_le_bytes(value.to_le_bytes());
-            format!("{unsigned:016x}")
-        }
-        None => "none".to_string(),
     }
 }
 
@@ -711,7 +684,7 @@ impl Default for TlsWarningMetadata {
         Self {
             detail: None,
             variables: Vec::new(),
-            origin: TlsWarningOrigin::PeerIngest,
+            origin: WarningOrigin::PeerIngest,
             peer_id: None,
             detail_fingerprint: None,
             variables_fingerprint: None,
@@ -774,6 +747,17 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(tls_env_warning_total.clone()))
         .expect("register tls_env_warning_total");
+    let tls_env_warning_events_total = CounterVec::new(
+        Opts::new(
+            "tls_env_warning_events_total",
+            "TLS warning events grouped by prefix, code, and origin",
+        ),
+        &["prefix", "code", "origin"],
+    )
+    .expect("build tls_env_warning_events_total counter vec");
+    registry
+        .register(Box::new(tls_env_warning_events_total.clone()))
+        .expect("register tls_env_warning_events_total");
     let tls_env_warning_last_seen = GaugeVec::new(
         Opts::new(
             "tls_env_warning_last_seen_seconds",
@@ -814,43 +798,47 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             "Last-seen timestamp of the stalest TLS warning snapshot",
         )
         .expect("register tls_env_warning_least_recent_last_seen_seconds");
-    let tls_env_warning_detail_fingerprint = GaugeVec::new(
+    let tls_env_warning_detail_fingerprint = IntGaugeVec::new(
         Opts::new(
             "tls_env_warning_detail_fingerprint",
             "Fingerprint of the most recent TLS warning detail payload",
         ),
         &["prefix", "code"],
-    );
+    )
+    .expect("build tls_env_warning_detail_fingerprint gauge vec");
     registry
         .register(Box::new(tls_env_warning_detail_fingerprint.clone()))
         .expect("register tls_env_warning_detail_fingerprint");
-    let tls_env_warning_variables_fingerprint = GaugeVec::new(
+    let tls_env_warning_variables_fingerprint = IntGaugeVec::new(
         Opts::new(
             "tls_env_warning_variables_fingerprint",
             "Fingerprint of the most recent TLS warning variable payload",
         ),
         &["prefix", "code"],
-    );
+    )
+    .expect("build tls_env_warning_variables_fingerprint gauge vec");
     registry
         .register(Box::new(tls_env_warning_variables_fingerprint.clone()))
         .expect("register tls_env_warning_variables_fingerprint");
-    let tls_env_warning_detail_unique_fingerprints = GaugeVec::new(
+    let tls_env_warning_detail_unique_fingerprints = IntGaugeVec::new(
         Opts::new(
             "tls_env_warning_detail_unique_fingerprints",
             "Unique TLS warning detail fingerprints observed",
         ),
         &["prefix", "code"],
-    );
+    )
+    .expect("build tls_env_warning_detail_unique_fingerprints gauge vec");
     registry
         .register(Box::new(tls_env_warning_detail_unique_fingerprints.clone()))
         .expect("register tls_env_warning_detail_unique_fingerprints");
-    let tls_env_warning_variables_unique_fingerprints = GaugeVec::new(
+    let tls_env_warning_variables_unique_fingerprints = IntGaugeVec::new(
         Opts::new(
             "tls_env_warning_variables_unique_fingerprints",
             "Unique TLS warning variables fingerprints observed",
         ),
         &["prefix", "code"],
-    );
+    )
+    .expect("build tls_env_warning_variables_unique_fingerprints gauge vec");
     registry
         .register(Box::new(
             tls_env_warning_variables_unique_fingerprints.clone(),
@@ -890,6 +878,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         telemetry_ingest_total,
         telemetry_schema_error_total,
         tls_env_warning_total,
+        tls_env_warning_events_total,
         tls_env_warning_last_seen,
         tls_env_warning_retention_seconds,
         tls_env_warning_active_snapshots,
@@ -999,10 +988,10 @@ fn update_tls_warning_snapshot(
             }
             None => {}
         }
-        if metadata.origin == TlsWarningOrigin::Diagnostics
-            || entry.origin != TlsWarningOrigin::Diagnostics
+        if metadata.origin == WarningOrigin::Diagnostics
+            || entry.origin != WarningOrigin::Diagnostics
         {
-            entry.origin = metadata.origin.clone();
+            entry.origin = metadata.origin;
         }
         if let Some(peer) = metadata.peer_id.as_ref() {
             entry.peer_id = Some(peer.clone());
@@ -1159,6 +1148,8 @@ fn prune_tls_warning_snapshots_for_test(now_secs: u64) {
 #[cfg(test)]
 fn reset_tls_warning_status_metrics() {
     let metrics = aggregator_metrics();
+    metrics.tls_env_warning_total.reset();
+    metrics.tls_env_warning_events_total.reset();
     metrics.tls_env_warning_retention_seconds.reset();
     metrics.tls_env_warning_active_snapshots.reset();
     metrics.tls_env_warning_stale_snapshots.reset();
@@ -1175,6 +1166,7 @@ fn reset_tls_warning_status_metrics() {
 }
 
 static TLS_WARNING_SINK: OnceLock<TlsEnvWarningSinkGuard> = OnceLock::new();
+static TLS_WARNING_SUBSCRIBER: OnceLock<LoggingSubscriberGuard> = OnceLock::new();
 
 fn record_tls_env_warning_event(
     prefix: &str,
@@ -1185,7 +1177,8 @@ fn record_tls_env_warning_event(
     if delta == 0 {
         return;
     }
-    match aggregator_metrics()
+    let metrics = aggregator_metrics();
+    match metrics
         .tls_env_warning_total
         .ensure_handle_for_label_values(&[prefix, code])
     {
@@ -1198,9 +1191,23 @@ fn record_tls_env_warning_event(
             "failed to record tls env warning metric"
         ),
     }
+    if let Err(err) = metrics
+        .tls_env_warning_events_total
+        .ensure_handle_for_label_values(&[prefix, code, metadata.origin.as_str()])
+        .map(|handle| handle.inc_by(delta))
+    {
+        warn!(
+            target: "aggregator",
+            %prefix,
+            %code,
+            origin = metadata.origin.as_str(),
+            error = %err,
+            "failed to record tls env warning origin metric",
+        );
+    }
     let last_seen = update_tls_warning_snapshot(prefix, code, delta, &metadata, None);
     if let Some(update) = last_seen {
-        match aggregator_metrics()
+        match metrics
             .tls_env_warning_last_seen
             .ensure_handle_for_label_values(&[prefix, code])
         {
@@ -1251,7 +1258,7 @@ fn record_tls_warning_fingerprint_metrics(prefix: &str, code: &str, update: &Tls
     if let Err(err) = metrics
         .tls_env_warning_detail_fingerprint
         .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.detail_fingerprint.unwrap_or(0) as f64))
+        .map(|handle| handle.set(update.detail_fingerprint.unwrap_or(0)))
     {
         warn!(
             target: "aggregator",
@@ -1264,7 +1271,7 @@ fn record_tls_warning_fingerprint_metrics(prefix: &str, code: &str, update: &Tls
     if let Err(err) = metrics
         .tls_env_warning_variables_fingerprint
         .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.variables_fingerprint.unwrap_or(0) as f64))
+        .map(|handle| handle.set(update.variables_fingerprint.unwrap_or(0)))
     {
         warn!(
             target: "aggregator",
@@ -1277,7 +1284,7 @@ fn record_tls_warning_fingerprint_metrics(prefix: &str, code: &str, update: &Tls
     if let Err(err) = metrics
         .tls_env_warning_detail_unique_fingerprints
         .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.detail_unique as f64))
+        .map(|handle| handle.set(update.detail_unique as i64))
     {
         warn!(
             target: "aggregator",
@@ -1290,7 +1297,7 @@ fn record_tls_warning_fingerprint_metrics(prefix: &str, code: &str, update: &Tls
     if let Err(err) = metrics
         .tls_env_warning_variables_unique_fingerprints
         .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.variables_unique as f64))
+        .map(|handle| handle.set(update.variables_unique as i64))
     {
         warn!(
             target: "aggregator",
@@ -1369,6 +1376,21 @@ fn ensure_tls_warning_forwarder() {
                 1,
                 TlsWarningMetadata::diagnostics(warning.detail.clone(), warning.variables.clone()),
             );
+        })
+    });
+    TLS_WARNING_SUBSCRIBER.get_or_init(|| {
+        install_tls_env_warning_subscriber(|warning| {
+            if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                record_tls_env_warning_last_seen(
+                    &warning.prefix,
+                    &warning.code,
+                    now.as_secs(),
+                    TlsWarningMetadata::diagnostics(
+                        warning.detail.clone(),
+                        warning.variables.clone(),
+                    ),
+                );
+            }
         })
     });
 }
@@ -1473,28 +1495,16 @@ fn quantize_counter(value: f64) -> Option<u64> {
     }
 }
 
-fn quantize_fingerprint(value: f64) -> Option<i64> {
-    if !value.is_finite() {
-        return None;
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > COUNTER_EPSILON {
-        None
-    } else {
-        Some(rounded as i64)
-    }
-}
-
 fn extract_tls_warning_counters(metrics: &Value) -> Vec<(String, String, f64)> {
     extract_tls_warning_metric(metrics, "tls_env_warning_total")
 }
 
-fn extract_tls_warning_detail_fingerprints(metrics: &Value) -> Vec<(String, String, f64)> {
-    extract_tls_warning_metric(metrics, "tls_env_warning_detail_fingerprint")
+fn extract_tls_warning_detail_fingerprints(metrics: &Value) -> Vec<TlsFingerprintSample> {
+    extract_tls_warning_fingerprint_metric(metrics, "tls_env_warning_detail_fingerprint")
 }
 
-fn extract_tls_warning_variables_fingerprints(metrics: &Value) -> Vec<(String, String, f64)> {
-    extract_tls_warning_metric(metrics, "tls_env_warning_variables_fingerprint")
+fn extract_tls_warning_variables_fingerprints(metrics: &Value) -> Vec<TlsFingerprintSample> {
+    extract_tls_warning_fingerprint_metric(metrics, "tls_env_warning_variables_fingerprint")
 }
 
 fn extract_tls_warning_metric(metrics: &Value, key: &str) -> Vec<(String, String, f64)> {
@@ -1515,6 +1525,39 @@ fn extract_tls_warning_metric(metrics: &Value, key: &str) -> Vec<(String, String
         .into_iter()
         .map(|((prefix, code), value)| (prefix, code, value))
         .collect()
+}
+
+fn extract_tls_warning_fingerprint_metric(metrics: &Value, key: &str) -> Vec<TlsFingerprintSample> {
+    let mut samples = Vec::new();
+    let root = match metrics {
+        Value::Object(map) => map.get(key),
+        _ => None,
+    };
+    if let Some(value) = root {
+        collect_tls_warning_fingerprint_samples(value, &mut samples);
+    }
+
+    let mut dedup: HashMap<(String, String), TlsFingerprintSample> = HashMap::new();
+    for sample in samples {
+        let key = (sample.prefix.clone(), sample.code.clone());
+        dedup
+            .entry(key)
+            .and_modify(|existing| match (&existing.value, &sample.value) {
+                (TlsFingerprintValue::Parsed(_), TlsFingerprintValue::Parsed(_)) => {
+                    *existing = sample.clone();
+                }
+                (TlsFingerprintValue::Parsed(_), TlsFingerprintValue::Invalid(_)) => {}
+                (TlsFingerprintValue::Invalid(_), TlsFingerprintValue::Parsed(_)) => {
+                    *existing = sample.clone();
+                }
+                (TlsFingerprintValue::Invalid(_), TlsFingerprintValue::Invalid(_)) => {
+                    *existing = sample.clone();
+                }
+            })
+            .or_insert(sample);
+    }
+
+    dedup.into_values().collect()
 }
 
 fn collect_tls_warning_samples(value: &Value, out: &mut Vec<(String, String, f64)>) {
@@ -1554,6 +1597,131 @@ fn collect_tls_warning_samples(value: &Value, out: &mut Vec<(String, String, f64
         }
         _ => {}
     }
+}
+
+fn collect_tls_warning_fingerprint_samples(value: &Value, out: &mut Vec<TlsFingerprintSample>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_tls_warning_fingerprint_samples(item, out);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(samples) = map.get("samples") {
+                collect_tls_warning_fingerprint_samples(samples, out);
+            }
+
+            let labels = map.get("labels").and_then(|labels| labels.as_object());
+            let prefix = labels
+                .and_then(|obj| obj.get("prefix"))
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("prefix").and_then(|v| v.as_str()));
+            let code = labels
+                .and_then(|obj| obj.get("code"))
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("code").and_then(|v| v.as_str()));
+
+            if let (Some(prefix), Some(code)) = (prefix, code) {
+                if let Some(value) = fingerprint_value_from_map(map) {
+                    out.push(TlsFingerprintSample {
+                        prefix: prefix.to_string(),
+                        code: code.to_string(),
+                        value,
+                    });
+                }
+            }
+
+            for (key, child) in map {
+                if key == "labels" || key == "samples" {
+                    continue;
+                }
+                if matches!(child, Value::Array(_) | Value::Object(_)) {
+                    collect_tls_warning_fingerprint_samples(child, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn fingerprint_value_from_map(map: &Map) -> Option<TlsFingerprintValue> {
+    let raw = map.get("value").or_else(|| map.get("counter"))?;
+    match parse_fingerprint_number(raw) {
+        Ok(parsed) => Some(TlsFingerprintValue::Parsed(parsed)),
+        Err(raw) => Some(TlsFingerprintValue::Invalid(raw)),
+    }
+}
+
+fn parse_fingerprint_number(value: &Value) -> Result<i64, String> {
+    match value {
+        Value::Number(number) => {
+            if let Some(int) = number.as_i64() {
+                return Ok(int);
+            }
+            if let Some(uint) = number.as_u64() {
+                if let Ok(int) = i64::try_from(uint) {
+                    return Ok(int);
+                }
+            }
+            let float = number.as_f64();
+            if !float.is_finite() {
+                return Err(number_to_display(number));
+            }
+            let rounded = float.round();
+            if (rounded - float).abs() > COUNTER_EPSILON {
+                return Err(number_to_display(number));
+            }
+            if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+                return Err(number_to_display(number));
+            }
+            Ok(rounded as i64)
+        }
+        Value::String(text) => parse_string_fingerprint(text).ok_or_else(|| text.clone()),
+        other => Err(other.to_string()),
+    }
+}
+
+fn parse_string_fingerprint(value: &str) -> Option<i64> {
+    if let Ok(parsed) = value.parse::<i64>() {
+        return Some(parsed);
+    }
+    let stripped = value.strip_prefix("0x").unwrap_or(value);
+    if stripped.len() != 16 {
+        return None;
+    }
+    let mut acc = 0u64;
+    for ch in stripped.chars() {
+        let digit = ch.to_digit(16)? as u64;
+        acc = (acc << 4) | digit;
+    }
+    Some(i64::from_le_bytes(acc.to_le_bytes()))
+}
+
+fn number_to_display(number: &Number) -> String {
+    if let Some(value) = number.as_i64() {
+        value.to_string()
+    } else if let Some(value) = number.as_u64() {
+        value.to_string()
+    } else {
+        format_float_for_logging(number.as_f64())
+    }
+}
+
+fn format_float_for_logging(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let mut formatted = format!("{value:.6}");
+    while formatted.contains('.') && formatted.ends_with('0') {
+        formatted.pop();
+    }
+    if formatted.ends_with('.') {
+        formatted.pop();
+    }
+    if formatted.is_empty() {
+        formatted.push('0');
+    }
+    formatted
 }
 
 fn extract_tls_warning_last_seen(metrics: &Value) -> Vec<(String, String, f64)> {
@@ -2204,6 +2372,11 @@ mod tests {
         metrics
             .tls_env_warning_total
             .remove_label_values(&[prefix.as_str(), "missing_identity_component"]);
+        metrics.tls_env_warning_events_total.remove_label_values(&[
+            prefix.as_str(),
+            "missing_identity_component",
+            "diagnostics",
+        ]);
         let _ = metrics
             .tls_env_warning_last_seen
             .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
@@ -2226,6 +2399,15 @@ mod tests {
             .get_metric_with_label_values(&[prefix.as_str(), "missing_identity_component"])
             .expect("registered label set");
         assert_eq!(counter.get(), 1);
+        let events = metrics
+            .tls_env_warning_events_total
+            .get_metric_with_label_values(&[
+                prefix.as_str(),
+                "missing_identity_component",
+                "diagnostics",
+            ])
+            .expect("registered origin label set");
+        assert_eq!(events.get(), 1);
         let gauge = metrics
             .tls_env_warning_last_seen
             .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
@@ -2236,7 +2418,7 @@ mod tests {
             .expect("snapshot recorded for missing_key");
         assert_eq!(snapshot.total, 1);
         assert_eq!(snapshot.last_delta, 1);
-        assert_eq!(snapshot.origin, TlsWarningOrigin::Diagnostics);
+        assert_eq!(snapshot.origin, WarningOrigin::Diagnostics);
         assert_eq!(snapshot.peer_id, None);
         let expected_detail = format!(
             "identity requires both {cert} and {key}; missing {key}",
@@ -2261,6 +2443,11 @@ mod tests {
         metrics
             .tls_env_warning_total
             .remove_label_values(&["TB_NODE_TLS", "missing_anchor"]);
+        metrics.tls_env_warning_events_total.remove_label_values(&[
+            "TB_NODE_TLS",
+            "missing_anchor",
+            "peer_ingest",
+        ]);
 
         run_async(async {
             let dir = tempfile::tempdir().unwrap();
@@ -2317,6 +2504,11 @@ mod tests {
             .get_metric_with_label_values(&["TB_NODE_TLS", "missing_anchor"])
             .expect("registered label set");
         assert_eq!(counter.get(), 3);
+        let events = metrics
+            .tls_env_warning_events_total
+            .get_metric_with_label_values(&["TB_NODE_TLS", "missing_anchor", "peer_ingest"])
+            .expect("registered origin label set");
+        assert_eq!(events.get(), 3);
         let gauge = metrics
             .tls_env_warning_last_seen
             .ensure_handle_for_label_values(&["TB_NODE_TLS", "missing_anchor"])
@@ -2326,7 +2518,7 @@ mod tests {
             .expect("snapshot recorded for missing_anchor");
         assert_eq!(snapshot.total, 3);
         assert_eq!(snapshot.last_delta, 1);
-        assert_eq!(snapshot.origin, TlsWarningOrigin::PeerIngest);
+        assert_eq!(snapshot.origin, WarningOrigin::PeerIngest);
         assert_eq!(snapshot.peer_id.as_deref(), Some("node-a"));
         assert!(snapshot.detail.is_none());
         assert!(snapshot.variables.is_empty());
@@ -2383,7 +2575,7 @@ mod tests {
             .expect("snapshot recorded for gauge");
         assert_eq!(snapshot.total, 0);
         assert_eq!(snapshot.last_delta, 0);
-        assert_eq!(snapshot.origin, TlsWarningOrigin::PeerIngest);
+        assert_eq!(snapshot.origin, WarningOrigin::PeerIngest);
         assert_eq!(snapshot.peer_id.as_deref(), Some("node-b"));
         assert!(snapshot.detail.is_none());
         assert!(snapshot.variables.is_empty());

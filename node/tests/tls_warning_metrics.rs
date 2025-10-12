@@ -3,6 +3,7 @@
 use crypto_suite::hashing::blake3;
 use http_env::server_tls_from_env;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tls_warning::WarningOrigin;
 
 fn unique_suffix() -> u128 {
     SystemTime::now()
@@ -21,6 +22,14 @@ fn tls_env_warning_metrics_increment_on_log() {
         .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
         .expect(the_block::telemetry::LABEL_REGISTRATION_ERR);
     counter.reset();
+    let events_counter = the_block::telemetry::TLS_ENV_WARNING_EVENTS_TOTAL
+        .ensure_handle_for_label_values(&[
+            prefix.as_str(),
+            "missing_identity_component",
+            WarningOrigin::Diagnostics.as_str(),
+        ])
+        .expect(the_block::telemetry::LABEL_REGISTRATION_ERR);
+    events_counter.reset();
     let gauge = the_block::telemetry::TLS_ENV_WARNING_LAST_SEEN_SECONDS
         .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
         .expect(the_block::telemetry::LABEL_REGISTRATION_ERR);
@@ -49,6 +58,7 @@ fn tls_env_warning_metrics_increment_on_log() {
 
     assert_eq!(counter.value(), 1);
     assert!(gauge.get() > 0);
+    assert_eq!(events_counter.value(), 1);
     let expected_detail =
         format!("identity requires both {cert_var} and {key_var}; missing {key_var}");
     let mut detail_bytes = [0u8; 8];
@@ -76,6 +86,7 @@ fn tls_env_warning_metrics_increment_on_log() {
     assert_eq!(snapshot.total, 1);
     assert_eq!(snapshot.last_delta, 1);
     assert!(snapshot.last_seen > 0);
+    assert_eq!(snapshot.origin, WarningOrigin::Diagnostics);
     assert!(snapshot
         .detail
         .as_ref()

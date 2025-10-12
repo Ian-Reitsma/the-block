@@ -31,7 +31,10 @@
 > per-fingerprint totals), `/export/all` support bundles (which now include
 > `tls_warnings/latest.json` plus `tls_warnings/status.json`), and the
 > `TlsEnvWarningSnapshotsStale` alert for missing identities or conflicting
-> client-auth variables. The TLS Grafana row now renders hashed fingerprint,
+> client-auth variables. Fingerprint gauges now publish integer samples so the
+> 64-bit digests remain exact across Prometheus scrapes, and the CLI table adds an
+> `ORIGIN` column aligned with `tls_env_warning_events_total{prefix,code,origin}`
+> to keep on-host audits synchronized with dashboards. The TLS Grafana row now renders hashed fingerprint,
 > unique-fingerprint, and five-minute delta panels, Prometheus adds
 > `TlsEnvWarningNewDetailFingerprint`, `TlsEnvWarningNewVariablesFingerprint`,
 > `TlsEnvWarningDetailFingerprintFlood`, and
@@ -40,6 +43,18 @@
 > `contract telemetry tls-warnings --json` against `/tls/warnings/latest` plus the
 > Prometheus series so incident automation can fail fast when cluster counts drift
 > from on-host snapshots.
+> The shared `crates/tls_warning` module now centralises BLAKE3 hashing helpers
+> for every consumer, and the aggregator exports
+> `tls_env_warning_events_total{prefix,code,origin}` alongside the per-code
+> totals so dashboards can distinguish diagnostics observers from peer-ingest
+> deltas without reimplementing hashing or exposing raw payloads.
+> Subsequent telemetry refresh keeps the sink-driven gauges current even when only
+> diagnostics observers fire, decodes JSON numbers/hex labels into exact 64-bit
+> fingerprints so CLI hashes match Prometheus output without f64 rounding, and moves
+> the monitoring snapshot/compare helpers onto typed
+> `MetricValue::{Float,Integer,Unsigned}` snapshots so automation no longer
+> round-trips through lossy floats when validating totals and per-fingerprint
+> counters.
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |

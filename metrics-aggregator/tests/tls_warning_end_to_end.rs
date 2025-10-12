@@ -77,8 +77,8 @@ fn diagnostics_warnings_surface_over_http() {
         let ingest_detail_fp = fingerprint(ingest_detail_hint.as_bytes());
         let ingest_variables = vec!["missing_anchor".to_string()];
         let ingest_variables_fp = variables_fingerprint(&ingest_variables);
-        let ingest_detail_fp_metric = (ingest_detail_fp as f64).round() as i64;
-        let ingest_variables_fp_metric = (ingest_variables_fp as f64).round() as i64;
+        let ingest_detail_fp_metric = ingest_detail_fp;
+        let ingest_variables_fp_metric = ingest_variables_fp;
         let client = HttpClient::default();
         let ingest_url = format!("http://{addr}/ingest");
 
@@ -90,10 +90,10 @@ fn diagnostics_warnings_surface_over_http() {
                         {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 1.0}
                     ],
                     "tls_env_warning_detail_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp as f64}
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp}
                     ],
                     "tls_env_warning_variables_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp as f64}
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp}
                     ]
                 }
             }
@@ -117,10 +117,10 @@ fn diagnostics_warnings_surface_over_http() {
                         {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 4.0}
                     ],
                     "tls_env_warning_detail_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp as f64}
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp}
                     ],
                     "tls_env_warning_variables_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp as f64}
+                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp}
                     ]
                 }
             }
@@ -285,21 +285,21 @@ fn diagnostics_warnings_surface_over_http() {
             "tls_env_warning_detail_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
             diag_prefix,
             diag_code,
-            fingerprint(detail.as_bytes()) as f64
+            fingerprint(detail.as_bytes())
         )));
         assert!(body.contains(&format!(
             "tls_env_warning_detail_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
-            ingest_prefix, ingest_code, ingest_detail_fp_metric as f64
+            ingest_prefix, ingest_code, ingest_detail_fp_metric
         )));
         assert!(body.contains(&format!(
             "tls_env_warning_variables_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
             diag_prefix,
             diag_code,
-            variables_fingerprint(&diag_variables) as f64
+            variables_fingerprint(&diag_variables)
         )));
         assert!(body.contains(&format!(
             "tls_env_warning_variables_fingerprint{{prefix=\"{}\",code=\"{}\"}} {}",
-            ingest_prefix, ingest_code, ingest_variables_fp_metric as f64
+            ingest_prefix, ingest_code, ingest_variables_fp_metric
         )));
         assert!(body.contains(&format!(
             "tls_env_warning_detail_unique_fingerprints{{prefix=\"{}\",code=\"{}\"}} 1",

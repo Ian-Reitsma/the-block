@@ -4,7 +4,7 @@ use foundation_serialization::{
 };
 use http_env::blocking_client;
 use httpd::{client::ClientError, Method, StatusCode};
-use monitoring_build::parse_prometheus_snapshot;
+use monitoring_build::{parse_prometheus_snapshot, MetricSnapshot, MetricValue};
 use std::{
     collections::{BTreeMap, HashMap},
     env,
@@ -169,7 +169,7 @@ fn fetch_aggregator_snapshots(base: &str) -> Result<Vec<Snapshot>, CompareError>
     Ok(snapshots)
 }
 
-fn fetch_metrics(base: &str) -> Result<HashMap<String, f64>, CompareError> {
+fn fetch_metrics(base: &str) -> Result<MetricSnapshot, CompareError> {
     let client = blocking_client(TLS_PREFIXES, COMPONENT);
     let url = format!("{}/metrics", base);
     let response = client
@@ -188,7 +188,7 @@ fn fetch_metrics(base: &str) -> Result<HashMap<String, f64>, CompareError> {
 fn compare_snapshots(
     cli: &[Snapshot],
     aggregator: &[Snapshot],
-    metrics: &HashMap<String, f64>,
+    metrics: &MetricSnapshot,
 ) -> Vec<String> {
     let aggregator_index: HashMap<(&str, &str), &Snapshot> = aggregator
         .iter()
@@ -212,10 +212,10 @@ fn compare_snapshots(
             cli_snapshot.prefix, cli_snapshot.code
         );
         if let Some(value) = metrics.get(&total_metric) {
-            if value + EPSILON < cli_snapshot.total as f64 {
+            if !metric_ge_u64(value, cli_snapshot.total) {
                 mismatches.push(format!(
                     "cluster total {} below CLI total {} for {}:{}",
-                    value,
+                    describe_metric(value),
                     cli_snapshot.total,
                     cli_snapshot.prefix,
                     cli_snapshot.code
@@ -308,7 +308,7 @@ fn check_unique_counts(
     code: &str,
     cli_unique: usize,
     metric: &str,
-    metrics: &HashMap<String, f64>,
+    metrics: &MetricSnapshot,
     mismatches: &mut Vec<String>,
 ) {
     if cli_unique == 0 {
@@ -316,10 +316,14 @@ fn check_unique_counts(
     }
     let key = format!("{}{{prefix=\"{}\",code=\"{}\"}}", metric, prefix, code);
     match metrics.get(&key) {
-        Some(value) if value + EPSILON >= cli_unique as f64 => {}
+        Some(value) if metric_ge_usize(value, cli_unique) => {}
         Some(value) => mismatches.push(format!(
             "{} below CLI unique count {} for {}:{} (value={})",
-            metric, cli_unique, prefix, code, value
+            metric,
+            cli_unique,
+            prefix,
+            code,
+            describe_metric(value)
         )),
         None => mismatches.push(format!("missing metric {}", key)),
     }
@@ -331,7 +335,7 @@ fn check_counter(
     fingerprint: &str,
     cli_count: u64,
     metric: &str,
-    metrics: &HashMap<String, f64>,
+    metrics: &MetricSnapshot,
     mismatches: &mut Vec<String>,
 ) {
     let key = format!(
@@ -339,11 +343,57 @@ fn check_counter(
         metric, prefix, code, fingerprint
     );
     match metrics.get(&key) {
-        Some(value) if value + EPSILON >= cli_count as f64 => {}
+        Some(value) if metric_ge_u64(value, cli_count) => {}
         Some(value) => mismatches.push(format!(
             "{} below CLI count {} for {}:{} fingerprint {} (value={})",
-            metric, cli_count, prefix, code, fingerprint, value
+            metric,
+            cli_count,
+            prefix,
+            code,
+            fingerprint,
+            describe_metric(value)
         )),
         None => mismatches.push(format!("missing metric {}", key)),
     }
+}
+
+fn describe_metric(value: &MetricValue) -> String {
+    match value {
+        MetricValue::Float(v) => format_float_for_display(*v),
+        MetricValue::Integer(v) => v.to_string(),
+        MetricValue::Unsigned(v) => v.to_string(),
+    }
+}
+
+fn metric_ge_u64(value: &MetricValue, target: u64) -> bool {
+    match value {
+        MetricValue::Float(v) => v.is_finite() && *v + EPSILON >= target as f64,
+        MetricValue::Integer(v) => *v >= 0 && (*v as u64) >= target,
+        MetricValue::Unsigned(v) => *v >= target,
+    }
+}
+
+fn metric_ge_usize(value: &MetricValue, target: usize) -> bool {
+    match value {
+        MetricValue::Float(v) => v.is_finite() && *v + EPSILON >= target as f64,
+        MetricValue::Integer(v) => *v >= 0 && (*v as usize) >= target,
+        MetricValue::Unsigned(v) => (*v as usize) >= target,
+    }
+}
+
+fn format_float_for_display(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let mut formatted = format!("{value:.6}");
+    while formatted.contains('.') && formatted.ends_with('0') {
+        formatted.pop();
+    }
+    if formatted.ends_with('.') {
+        formatted.pop();
+    }
+    if formatted.is_empty() {
+        formatted.push('0');
+    }
+    formatted
 }

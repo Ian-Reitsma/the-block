@@ -1307,6 +1307,7 @@ dependencies = [
  "runtime",
  "storage_engine",
  "sys",
+ "tls_warning",
 ]
 
 [[package]]
@@ -2541,6 +2542,7 @@ dependencies = [
  "sys",
  "tb-sim",
  "testkit",
+ "tls_warning",
  "transport",
  "wallet",
  "x509-parser",
@@ -2622,6 +2624,14 @@ version = "0.1.0"
 dependencies = [
  "foundation_serialization",
  "foundation_time",
+]
+
+[[package]]
+name = "tls_warning"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_serialization",
 ]
 
 [[package]]

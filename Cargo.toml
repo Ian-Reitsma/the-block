@@ -74,6 +74,7 @@ members = [
   "crates/python_bridge",
   "crates/sys",
   "crates/http_env",
+  "crates/tls_warning",
 ]
 default-members = [
   "node",

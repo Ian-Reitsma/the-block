@@ -57,6 +57,17 @@ impl std::error::Error for DashboardError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MetricValue {
+    Float(f64),
+    Integer(i64),
+    Unsigned(u64),
+}
+
+impl MetricValue {}
+
+pub type MetricSnapshot = HashMap<String, MetricValue>;
+
 const TLS_PANEL_TITLE: &str = "TLS env warnings (5m delta)";
 const TLS_PANEL_EXPR: &str = "sum by (prefix, code)(increase(tls_env_warning_total[5m]))";
 const TLS_LAST_SEEN_PANEL_TITLE: &str = "TLS env warnings (last seen)";
@@ -512,8 +523,8 @@ fn build_tls_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {
 
 /// Parse a Prometheus text-format payload into a metric/value map.
 #[cfg_attr(not(test), allow(dead_code))]
-pub fn parse_prometheus_snapshot(payload: &str) -> HashMap<String, f64> {
-    let mut values = HashMap::new();
+pub fn parse_prometheus_snapshot(payload: &str) -> MetricSnapshot {
+    let mut values = MetricSnapshot::new();
     for line in payload.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -525,7 +536,7 @@ pub fn parse_prometheus_snapshot(payload: &str) -> HashMap<String, f64> {
                 continue;
             }
             if let Some(value_str) = parts.last() {
-                if let Ok(value) = value_str.parse::<f64>() {
+                if let Some(value) = parse_metric_value(value_str) {
                     values.insert(name.to_string(), value);
                 }
             }
@@ -534,12 +545,25 @@ pub fn parse_prometheus_snapshot(payload: &str) -> HashMap<String, f64> {
     values
 }
 
+fn parse_metric_value(value: &str) -> Option<MetricValue> {
+    if let Ok(int) = value.parse::<i64>() {
+        return Some(MetricValue::Integer(int));
+    }
+    if let Ok(uint) = value.parse::<u64>() {
+        return Some(MetricValue::Unsigned(uint));
+    }
+    value
+        .parse::<f64>()
+        .ok()
+        .map(MetricValue::Float)
+}
+
 /// Render the in-house HTML snapshot used by the telemetry dashboard helpers.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn render_html_snapshot(
     endpoint: &str,
     metrics: &[Metric],
-    snapshot: &HashMap<String, f64>,
+    snapshot: &MetricSnapshot,
 ) -> String {
     let mut sections = [
         ("DEX", Vec::new()),
@@ -580,7 +604,7 @@ pub fn render_html_snapshot(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn render_section(title: &str, metrics: &[&Metric], snapshot: &HashMap<String, f64>) -> String {
+fn render_section(title: &str, metrics: &[&Metric], snapshot: &MetricSnapshot) -> String {
     if metrics.is_empty() {
         return String::new();
     }
@@ -593,7 +617,7 @@ fn render_section(title: &str, metrics: &[&Metric], snapshot: &HashMap<String, f
             html_escape(&metric.description)
         };
         let value_display = match snapshot.get(&metric.name) {
-            Some(value) => format_metric_value(*value),
+            Some(value) => format_metric_value(value),
             None => "<span class=\"error\">missing</span>".to_string(),
         };
         rows.push_str(&format!(
@@ -626,7 +650,15 @@ fn html_escape(input: &str) -> String {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn format_metric_value(value: f64) -> String {
+fn format_metric_value(value: &MetricValue) -> String {
+    match value {
+        MetricValue::Float(v) => format_float(*v),
+        MetricValue::Integer(v) => v.to_string(),
+        MetricValue::Unsigned(v) => v.to_string(),
+    }
+}
+
+fn format_float(value: f64) -> String {
     if !value.is_finite() {
         return value.to_string();
     }
@@ -696,8 +728,6 @@ pub fn render_pretty(dashboard: &Value) -> Result<String, foundation_serializati
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
     #[test]
     fn groups_metrics_by_prefix() {
         let metrics = vec![
@@ -1014,7 +1044,7 @@ scheduler_match_total_bucket{result="ok",le="0.5"} 1
 scheduler_match_total_sum 10
 "#;
         let parsed = parse_prometheus_snapshot(payload);
-        assert_eq!(parsed.get("dex_trades_total"), Some(&42.0));
+        assert_eq!(parsed.get("dex_trades_total"), Some(&MetricValue::Integer(42)));
         assert!(!parsed.contains_key("scheduler_match_total_bucket"));
         assert!(!parsed.contains_key("scheduler_match_total_sum"));
     }
@@ -1035,8 +1065,8 @@ scheduler_match_total_sum 10
                 deprecated: false,
             },
         ];
-        let mut snapshot = HashMap::new();
-        snapshot.insert("dex_trades_total".to_string(), 42.0);
+        let mut snapshot = MetricSnapshot::new();
+        snapshot.insert("dex_trades_total".to_string(), MetricValue::Integer(42));
         let html = render_html_snapshot("http://localhost:9090/metrics", &metrics, &snapshot);
         assert!(html.contains("The-Block Telemetry Snapshot"));
         assert!(html.contains("<h2>DEX</h2>"));
@@ -1048,9 +1078,21 @@ scheduler_match_total_sum 10
 
     #[test]
     fn format_metric_value_trims_trailing_zeroes() {
-        assert_eq!(format_metric_value(42.0), "42");
-        assert_eq!(format_metric_value(3.140000), "3.14");
-        assert_eq!(format_metric_value(0.0), "0");
-        assert_eq!(format_metric_value(f64::INFINITY), "inf");
+        assert_eq!(
+            format_metric_value(&MetricValue::Float(42.0)),
+            "42"
+        );
+        assert_eq!(
+            format_metric_value(&MetricValue::Float(3.140000)),
+            "3.14"
+        );
+        assert_eq!(
+            format_metric_value(&MetricValue::Float(0.0)),
+            "0"
+        );
+        assert_eq!(
+            format_metric_value(&MetricValue::Float(f64::INFINITY)),
+            "inf"
+        );
     }
 }

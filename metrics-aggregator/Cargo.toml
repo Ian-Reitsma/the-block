@@ -16,6 +16,7 @@ crypto_suite = { path = "../crates/crypto_suite" }
 storage_engine = { path = "../crates/storage_engine" }
 foundation_time = { path = "../crates/foundation_time" }
 sys = { path = "../crates/sys" }
+tls_warning = { path = "../crates/tls_warning" }
 
 [dev-dependencies]
 rand = { path = "../crates/rand" }
