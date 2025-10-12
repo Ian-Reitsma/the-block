@@ -120,14 +120,28 @@ third-party codecs:
   usage from the governance DOT export helper.
 - ✅ Added the `http_env` helper crate and migrated CLI, node, aggregator,
   explorer, probe, jurisdiction, and example binaries to its shared TLS loader
-  so HTTPS clients honour consistent prefix ordering and diagnostics-backed
+  so HTTPS clients honour consistent prefix ordering and sink-backed
   `TLS_ENV_WARNING` events (plus observer hooks). The new `contract tls convert`
   and enhanced `contract tls stage` commands convert PEM assets into the JSON
   identities consumed by the loader, fan them out to per-service directories,
-  emit canonical `--env-file` exports, and allow service-specific environment
-  prefix overrides; the HTTP/CLI test suites now exercise prefix selection,
-  legacy fallbacks, canonical exports, and converter round-trips against the
-  in-house server.
+  emit canonical `--env-file` exports, allow service-specific environment
+  prefix overrides, and feed both the
+  `TLS_ENV_WARNING_TOTAL{prefix,code}` counter and
+  `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` gauge (with aggregator
+  rehydration and retention overrides). `/tls/warnings/status` now summarizes
+  retention health, the aggregator exports
+  `tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`,
+  `tls_env_warning_stale_snapshots`,
+  `tls_env_warning_most_recent_last_seen_seconds`, and
+  `tls_env_warning_least_recent_last_seen_seconds`, monitoring ships the
+  `TlsEnvWarningSnapshotsStale` alert, and `contract tls status --latest`
+  renders human-readable or `--json` automation reports with remediation hints.
+  Grafana auto-templates continue to plot "TLS env warnings (age seconds)" via
+  `clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`
+  to make stale prefixes obvious, and `tls-manifest-guard` now tolerates quoted
+  env-file values. The HTTP/CLI test suites exercise prefix selection, legacy
+  fallbacks, canonical exports, converter round-trips, and the status workflow
+  against the in-house server.
 - ✅ Peer metrics exports, support-bundle smoke tests, and light-client log
   uploads route through the new `foundation_archive::{tar, gzip}` helpers,
   which now expose streaming encode/decode paths so large bundles avoid

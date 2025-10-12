@@ -112,6 +112,7 @@ impl Clone for WarningHandler {
 
 struct WarningCell {
     handler: Mutex<WarningHandler>,
+    sinks: Mutex<Vec<Arc<dyn Fn(&TlsEnvWarning) + Send + Sync + 'static>>>,
 }
 
 static WARNING_CELL: OnceLock<WarningCell> = OnceLock::new();
@@ -119,11 +120,25 @@ static WARNING_CELL: OnceLock<WarningCell> = OnceLock::new();
 fn warning_cell() -> &'static WarningCell {
     WARNING_CELL.get_or_init(|| WarningCell {
         handler: Mutex::new(WarningHandler::Diagnostics),
+        sinks: Mutex::new(Vec::new()),
     })
 }
 
 pub struct TlsEnvWarningGuard {
     previous: WarningHandler,
+}
+
+pub struct TlsEnvWarningSinkGuard {
+    sink: Arc<dyn Fn(&TlsEnvWarning) + Send + Sync + 'static>,
+    cell: &'static WarningCell,
+}
+
+impl Drop for TlsEnvWarningSinkGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.cell.sinks.lock() {
+            guard.retain(|existing| !Arc::ptr_eq(existing, &self.sink));
+        }
+    }
 }
 
 impl Drop for TlsEnvWarningGuard {
@@ -140,6 +155,19 @@ fn set_warning_handler(handler: WarningHandler) -> TlsEnvWarningGuard {
     let previous = lock.clone();
     *lock = handler;
     TlsEnvWarningGuard { previous }
+}
+
+pub fn register_tls_warning_sink<F>(sink: F) -> TlsEnvWarningSinkGuard
+where
+    F: Fn(&TlsEnvWarning) + Send + Sync + 'static,
+{
+    let cell = warning_cell();
+    let sink: Arc<dyn Fn(&TlsEnvWarning) + Send + Sync + 'static> = Arc::new(sink);
+    {
+        let mut guard = cell.sinks.lock().expect("tls warning sinks");
+        guard.push(Arc::clone(&sink));
+    }
+    TlsEnvWarningSinkGuard { sink, cell }
 }
 
 pub fn install_tls_warning_handler<F>(handler: F) -> TlsEnvWarningGuard
@@ -186,6 +214,16 @@ fn emit_tls_warning(
     };
 
     handler.call(&warning);
+
+    let sinks = warning_cell()
+        .sinks
+        .lock()
+        .map(|guard| guard.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    for sink in sinks {
+        sink(&warning);
+    }
 }
 
 fn log_warning(warning: &TlsEnvWarning) {

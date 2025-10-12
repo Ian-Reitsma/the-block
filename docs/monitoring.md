@@ -145,23 +145,44 @@ registry, rendering a Prometheus-compatible text payload without linking the
 third-party `prometheus` crate. Gauges such as `cluster_peer_active_total` and
 counters like `aggregator_ingest_total`, `aggregator_retention_pruned_total`,
 and `bulk_export_total` are registered inside the in-house registry and served
-at `/metrics`. The `tls_env_warning_total{prefix,code}` counter is sourced from
-diagnostics as well as node ingests, so fleet dashboards reflect local warnings
-and cluster-wide deltas as soon as they are reported. Operators can also query
+at `/metrics`. The shared `http_env` sink feeds both the
+`tls_env_warning_total{prefix,code}` counter and the
+`tls_env_warning_last_seen_seconds{prefix,code}` gauge, so diagnostics fan-out
+and peer ingests keep dashboards up to date while restarts rehydrate warning
+freshness from node-exported gauges. Operators can also query
 `GET /tls/warnings/latest` for a JSON document summarising the latest warning
 per `{prefix,code}` pair, including the accumulated total, the most recent
-delta, the originating peer (when the increment arrived via ingestion), and any
-structured diagnostics detail and variables captured from `TLS_ENV_WARNING`
-events. Warning snapshots are retained for seven days; older entries are
-pruned automatically so `/tls/warnings/latest` mirrors the current operational
-state instead of accumulating historical noise. Recommended scrape targets
-remain both the aggregator and the node exporters. Alert when
-`cluster_peer_active_total` drops unexpectedly, when ingestion/export counters
-stop increasing, or when the `TlsEnvWarningBurst` alert fires for any service
-prefix. The end-to-end telemetry tests spin up a real aggregator instance,
-emit diagnostics warnings, post peer ingests, and assert that `/metrics` and
-`/tls/warnings/latest` reflect both sources, preventing regressions across the
-diagnostics subscriber and HTTP ingestion paths.
+delta, the originating peer (when the increment arrived via ingestion), any
+structured diagnostics detail, the last-seen timestamp, and captured variables.
+Warning snapshots default to a seven-day retention window (overridable via
+`AGGREGATOR_TLS_WARNING_RETENTION_SECS`); older entries are pruned automatically
+so `/tls/warnings/latest` mirrors the current operational state instead of
+accumulating historical noise. Recommended scrape targets remain both the
+aggregator and the node exporters. Alert when `cluster_peer_active_total` drops
+unexpectedly, when ingestion/export counters stop increasing, or when the
+`TlsEnvWarningBurst` alert fires for any service prefix. The end-to-end
+telemetry tests spin up a real aggregator instance, emit diagnostics warnings,
+post peer ingests, and assert that `/metrics` and `/tls/warnings/latest`
+reflect both sources, preventing regressions across the sink fan-out and HTTP
+ingestion paths.
+`GET /tls/warnings/status` complements the latest snapshot endpoint by
+returning a retention summary (`retention_seconds`, `active_snapshots`,
+`stale_snapshots`, and the newest/oldest timestamps). Operators should wire this
+into runbooks so widening the retention window or clearing obsolete prefixes can
+be verified without scraping metrics. The same data lands in Prometheus as
+`tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`,
+`tls_env_warning_stale_snapshots`,
+`tls_env_warning_most_recent_last_seen_seconds`, and
+`tls_env_warning_least_recent_last_seen_seconds`, enabling alert rules without
+extra templating. Grafana dashboards now include a "TLS env warnings (age
+seconds)" panel sourced from
+`clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`
+to visualise how long each warning has been quiet and to back alerts that guard
+against forgotten TLS overrides. The new `TlsEnvWarningSnapshotsStale` alert
+triggers when the stale gauge stays above zero for 15 minutes, and operators can
+double-check the report with `contract tls status --aggregator
+http://localhost:9000 --latest` (or `--json` for automation) to print suggested
+remediation steps alongside the raw status payload.
 
 ### Metrics-to-logs correlation
 

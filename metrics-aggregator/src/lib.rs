@@ -1,10 +1,10 @@
 use concurrency::Lazy;
 use diagnostics::tracing::{info, warn};
-use http_env::http_client as env_http_client;
+use http_env::{http_client as env_http_client, register_tls_warning_sink, TlsEnvWarningSinkGuard};
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
-use runtime::telemetry::{Counter, CounterVec, Gauge, Opts, Registry};
+use runtime::telemetry::{Counter, CounterVec, Gauge, GaugeVec, Opts, Registry};
 use runtime::{spawn, spawn_blocking};
 use std::error::Error as StdError;
 use std::fmt;
@@ -67,6 +67,7 @@ const TELEMETRY_WINDOW: usize = 120;
 const METRICS_CF: &str = "peer_metrics";
 const COUNTER_EPSILON: f64 = 1e-6;
 const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
+static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -127,7 +128,7 @@ pub struct LeaderSnapshot {
 
 impl AppState {
     pub fn new(token: String, path: impl AsRef<Path>, retention_secs: u64) -> Self {
-        Self::new_with_opts(token, None, path, retention_secs, None)
+        Self::new_with_opts(token, None, path, retention_secs, None, None)
     }
 
     pub fn new_with_opts(
@@ -136,6 +137,7 @@ impl AppState {
         path: impl AsRef<Path>,
         retention_secs: u64,
         wal: Option<PathBuf>,
+        tls_warning_retention_secs: Option<u64>,
     ) -> Self {
         let db_path = path.as_ref().to_path_buf();
         let store = Arc::new(
@@ -154,6 +156,11 @@ impl AppState {
             }
         }
         let wal = wal.and_then(|p| Wal::open(p).ok()).map(Arc::new);
+        let retention = tls_warning_retention_secs.unwrap_or(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
+        TLS_WARNING_RETENTION_SECS.store(retention, Ordering::Relaxed);
+        aggregator_metrics()
+            .tls_env_warning_retention_seconds
+            .set(retention as f64);
         let state = Self {
             data: Arc::new(Mutex::new(data)),
             token: Arc::new(RwLock::new(token)),
@@ -296,13 +303,14 @@ impl AppState {
     }
 
     fn record_tls_warning_samples(&self, peer_id: &str, metrics: &Value) {
-        let samples = extract_tls_warning_samples(metrics);
-        if samples.is_empty() {
+        let counter_samples = extract_tls_warning_counters(metrics);
+        let gauge_samples = extract_tls_warning_last_seen(metrics);
+        if counter_samples.is_empty() && gauge_samples.is_empty() {
             return;
         }
 
         let mut cache = self.tls_warning_counters.lock().unwrap();
-        for (prefix, code, value) in samples {
+        for (prefix, code, value) in counter_samples {
             if !value.is_finite() || value < 0.0 {
                 warn!(
                     target: "aggregator",
@@ -340,6 +348,32 @@ impl AppState {
                     "unable to quantize tls warning delta",
                 );
             }
+        }
+
+        drop(cache);
+
+        for (prefix, code, value) in gauge_samples {
+            if !value.is_finite() || value < 0.0 {
+                warn!(
+                    target: "aggregator",
+                    %peer_id,
+                    %prefix,
+                    %code,
+                    value,
+                    "ignored invalid tls warning last seen sample",
+                );
+                continue;
+            }
+            if value == 0.0 {
+                continue;
+            }
+
+            let timestamp = value.round();
+            if timestamp.is_nan() || timestamp.is_infinite() || timestamp < 0.0 {
+                continue;
+            }
+            let metadata = TlsWarningMetadata::peer(peer_id);
+            record_tls_env_warning_last_seen(&prefix, &code, timestamp as u64, metadata);
         }
     }
     fn record_telemetry(&self, entry: TelemetrySummary) {
@@ -440,6 +474,12 @@ struct AggregatorMetrics {
     telemetry_ingest_total: Counter,
     telemetry_schema_error_total: Counter,
     tls_env_warning_total: CounterVec,
+    tls_env_warning_last_seen: GaugeVec,
+    tls_env_warning_retention_seconds: Gauge,
+    tls_env_warning_active_snapshots: Gauge,
+    tls_env_warning_stale_snapshots: Gauge,
+    tls_env_warning_most_recent_last_seen: Gauge,
+    tls_env_warning_least_recent_last_seen: Gauge,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
@@ -479,6 +519,7 @@ impl TlsWarningSnapshot {
     }
 }
 
+#[derive(Clone)]
 struct TlsWarningMetadata {
     detail: Option<String>,
     variables: Vec<String>,
@@ -576,6 +617,46 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(tls_env_warning_total.clone()))
         .expect("register tls_env_warning_total");
+    let tls_env_warning_last_seen = GaugeVec::new(
+        Opts::new(
+            "tls_env_warning_last_seen_seconds",
+            "Unix timestamp of the most recent TLS environment warning",
+        ),
+        &["prefix", "code"],
+    );
+    registry
+        .register(Box::new(tls_env_warning_last_seen.clone()))
+        .expect("register tls_env_warning_last_seen");
+    let tls_env_warning_retention_seconds = registry
+        .register_gauge(
+            "tls_env_warning_retention_seconds",
+            "Retention window for TLS warning snapshots in seconds",
+        )
+        .expect("register tls_env_warning_retention_seconds");
+    let tls_env_warning_active_snapshots = registry
+        .register_gauge(
+            "tls_env_warning_active_snapshots",
+            "Number of active TLS warning snapshots tracked by the aggregator",
+        )
+        .expect("register tls_env_warning_active_snapshots");
+    let tls_env_warning_stale_snapshots = registry
+        .register_gauge(
+            "tls_env_warning_stale_snapshots",
+            "TLS warning snapshots older than the configured retention window",
+        )
+        .expect("register tls_env_warning_stale_snapshots");
+    let tls_env_warning_most_recent_last_seen = registry
+        .register_gauge(
+            "tls_env_warning_most_recent_last_seen_seconds",
+            "Last-seen timestamp of the most recent TLS warning snapshot",
+        )
+        .expect("register tls_env_warning_most_recent_last_seen_seconds");
+    let tls_env_warning_least_recent_last_seen = registry
+        .register_gauge(
+            "tls_env_warning_least_recent_last_seen_seconds",
+            "Last-seen timestamp of the stalest TLS warning snapshot",
+        )
+        .expect("register tls_env_warning_least_recent_last_seen_seconds");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -586,6 +667,12 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         telemetry_ingest_total,
         telemetry_schema_error_total,
         tls_env_warning_total,
+        tls_env_warning_last_seen,
+        tls_env_warning_retention_seconds,
+        tls_env_warning_active_snapshots,
+        tls_env_warning_stale_snapshots,
+        tls_env_warning_most_recent_last_seen,
+        tls_env_warning_least_recent_last_seen,
     }
 });
 
@@ -601,32 +688,54 @@ fn update_tls_warning_snapshot(
     code: &str,
     delta: u64,
     metadata: &TlsWarningMetadata,
-) {
+    last_seen_override: Option<u64>,
+) -> Option<u64> {
     let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
-        return;
+        return None;
     };
     let now_secs = now.as_secs();
+    let last_seen_hint = last_seen_override.unwrap_or(now_secs);
+    let retention = TLS_WARNING_RETENTION_SECS.load(Ordering::Relaxed);
+    let payload;
     let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
-    let entry = guard
-        .entry((prefix.to_string(), code.to_string()))
-        .or_insert_with(|| TlsWarningSnapshot::new(prefix, code));
-    entry.total = entry.total.saturating_add(delta);
-    entry.last_delta = delta;
-    entry.last_seen = now_secs;
-    if let Some(detail) = metadata.detail.clone() {
-        if detail.is_empty() {
-            entry.detail = None;
-        } else {
-            entry.detail = Some(detail);
+    let last_seen;
+    {
+        let entry = guard
+            .entry((prefix.to_string(), code.to_string()))
+            .or_insert_with(|| TlsWarningSnapshot::new(prefix, code));
+        if delta > 0 {
+            entry.total = entry.total.saturating_add(delta);
+            entry.last_delta = delta;
         }
+        if entry.last_seen < last_seen_hint {
+            entry.last_seen = last_seen_hint;
+        }
+        if let Some(detail) = metadata.detail.as_ref() {
+            if detail.is_empty() {
+                entry.detail = None;
+            } else {
+                entry.detail = Some(detail.clone());
+            }
+        }
+        if !metadata.variables.is_empty() {
+            entry.variables = metadata.variables.clone();
+        }
+        if metadata.origin == TlsWarningOrigin::Diagnostics
+            || entry.origin != TlsWarningOrigin::Diagnostics
+        {
+            entry.origin = metadata.origin.clone();
+        }
+        if let Some(peer) = metadata.peer_id.as_ref() {
+            entry.peer_id = Some(peer.clone());
+        }
+        last_seen = entry.last_seen;
     }
-    if !metadata.variables.is_empty() {
-        entry.variables = metadata.variables.clone();
-    }
-    entry.origin = metadata.origin.clone();
-    entry.peer_id = metadata.peer_id.clone();
 
     prune_tls_warning_snapshots_locked(&mut guard, now_secs);
+    payload = tls_warning_status_from_guard(&guard, now_secs, retention);
+    drop(guard);
+    record_tls_warning_status_metrics(&payload);
+    Some(last_seen)
 }
 
 fn tls_warning_snapshots() -> Vec<TlsWarningSnapshot> {
@@ -638,20 +747,100 @@ fn tls_warning_snapshots() -> Vec<TlsWarningSnapshot> {
         .collect()
 }
 
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TlsWarningStatusPayload {
+    retention_seconds: u64,
+    active_snapshots: usize,
+    stale_snapshots: usize,
+    most_recent_last_seen: Option<u64>,
+    least_recent_last_seen: Option<u64>,
+}
+
+fn tls_warning_status_snapshot() -> TlsWarningStatusPayload {
+    let retention = TLS_WARNING_RETENTION_SECS.load(Ordering::Relaxed);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+    let payload = tls_warning_status_from_guard(&guard, now_secs, retention);
+    drop(guard);
+    record_tls_warning_status_metrics(&payload);
+    payload
+}
+
+fn tls_warning_status_from_guard(
+    guard: &HashMap<(String, String), TlsWarningSnapshot>,
+    now_secs: u64,
+    retention: u64,
+) -> TlsWarningStatusPayload {
+    let mut most_recent: Option<u64> = None;
+    let mut least_recent: Option<u64> = None;
+    let mut stale = 0usize;
+    for snapshot in guard.values() {
+        let last_seen = snapshot.last_seen;
+        most_recent = Some(match most_recent {
+            Some(value) => value.max(last_seen),
+            None => last_seen,
+        });
+        least_recent = Some(match least_recent {
+            Some(value) => value.min(last_seen),
+            None => last_seen,
+        });
+        if retention > 0 {
+            let age = now_secs.saturating_sub(last_seen);
+            if age > retention {
+                stale += 1;
+            }
+        }
+    }
+
+    TlsWarningStatusPayload {
+        retention_seconds: retention,
+        active_snapshots: guard.len(),
+        stale_snapshots: stale,
+        most_recent_last_seen: most_recent,
+        least_recent_last_seen: least_recent,
+    }
+}
+
+fn record_tls_warning_status_metrics(payload: &TlsWarningStatusPayload) {
+    let metrics = aggregator_metrics();
+    metrics
+        .tls_env_warning_retention_seconds
+        .set(payload.retention_seconds as f64);
+    metrics
+        .tls_env_warning_active_snapshots
+        .set(payload.active_snapshots as f64);
+    metrics
+        .tls_env_warning_stale_snapshots
+        .set(payload.stale_snapshots as f64);
+    metrics
+        .tls_env_warning_most_recent_last_seen
+        .set(payload.most_recent_last_seen.unwrap_or(0) as f64);
+    metrics
+        .tls_env_warning_least_recent_last_seen
+        .set(payload.least_recent_last_seen.unwrap_or(0) as f64);
+}
+
 fn prune_tls_warning_snapshots_locked(
     snapshots: &mut HashMap<(String, String), TlsWarningSnapshot>,
     now_secs: u64,
 ) {
-    if TLS_WARNING_SNAPSHOT_RETENTION_SECS == 0 {
+    let retention = TLS_WARNING_RETENTION_SECS.load(Ordering::Relaxed);
+    if retention == 0 {
         return;
     }
-    let cutoff = now_secs.saturating_sub(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
+    let cutoff = now_secs.saturating_sub(retention);
     snapshots.retain(|_, snapshot| snapshot.last_seen >= cutoff);
 }
 
 #[cfg(test)]
 fn reset_tls_warning_snapshots() {
     TLS_WARNING_SNAPSHOTS.lock().unwrap().clear();
+    TLS_WARNING_RETENTION_SECS.store(TLS_WARNING_SNAPSHOT_RETENTION_SECS, Ordering::Relaxed);
+    reset_tls_warning_status_metrics();
 }
 
 #[cfg(test)]
@@ -665,9 +854,26 @@ fn tls_warning_snapshot(prefix: &str, code: &str) -> Option<TlsWarningSnapshot> 
 fn prune_tls_warning_snapshots_for_test(now_secs: u64) {
     let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
     prune_tls_warning_snapshots_locked(&mut guard, now_secs);
+    let payload = tls_warning_status_from_guard(
+        &guard,
+        now_secs,
+        TLS_WARNING_RETENTION_SECS.load(Ordering::Relaxed),
+    );
+    drop(guard);
+    record_tls_warning_status_metrics(&payload);
 }
 
-static TLS_WARNING_SUBSCRIBER: OnceLock<diagnostics::internal::SubscriberGuard> = OnceLock::new();
+#[cfg(test)]
+fn reset_tls_warning_status_metrics() {
+    let metrics = aggregator_metrics();
+    metrics.tls_env_warning_retention_seconds.reset();
+    metrics.tls_env_warning_active_snapshots.reset();
+    metrics.tls_env_warning_stale_snapshots.reset();
+    metrics.tls_env_warning_most_recent_last_seen.reset();
+    metrics.tls_env_warning_least_recent_last_seen.reset();
+}
+
+static TLS_WARNING_SINK: OnceLock<TlsEnvWarningSinkGuard> = OnceLock::new();
 
 fn record_tls_env_warning_event(
     prefix: &str,
@@ -691,17 +897,59 @@ fn record_tls_env_warning_event(
             "failed to record tls env warning metric"
         ),
     }
-    update_tls_warning_snapshot(prefix, code, delta, &metadata);
+    let last_seen = update_tls_warning_snapshot(prefix, code, delta, &metadata, None);
+    if let Some(now_secs) = last_seen {
+        match aggregator_metrics()
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&[prefix, code])
+        {
+            Ok(handle) => handle.set(now_secs as f64),
+            Err(err) => warn!(
+                target: "aggregator",
+                %prefix,
+                %code,
+                error = %err,
+                "failed to record tls env warning last seen gauge",
+            ),
+        }
+    }
+}
+
+fn record_tls_env_warning_last_seen(
+    prefix: &str,
+    code: &str,
+    last_seen_secs: u64,
+    metadata: TlsWarningMetadata,
+) {
+    if last_seen_secs == 0 {
+        return;
+    }
+    let last_seen = update_tls_warning_snapshot(prefix, code, 0, &metadata, Some(last_seen_secs));
+    if let Some(ts) = last_seen {
+        match aggregator_metrics()
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&[prefix, code])
+        {
+            Ok(handle) => handle.set(ts as f64),
+            Err(err) => warn!(
+                target: "aggregator",
+                %prefix,
+                %code,
+                error = %err,
+                "failed to record tls env warning last seen gauge",
+            ),
+        }
+    }
 }
 
 fn ensure_tls_warning_forwarder() {
-    TLS_WARNING_SUBSCRIBER.get_or_init(|| {
-        diagnostics::internal::install_tls_env_warning_subscriber(|event| {
+    TLS_WARNING_SINK.get_or_init(|| {
+        register_tls_warning_sink(|warning| {
             record_tls_env_warning_event(
-                &event.prefix,
-                &event.code,
+                &warning.prefix,
+                warning.code,
                 1,
-                TlsWarningMetadata::diagnostics(event.detail.clone(), event.variables.clone()),
+                TlsWarningMetadata::diagnostics(warning.detail.clone(), warning.variables.clone()),
             );
         })
     });
@@ -807,7 +1055,7 @@ fn quantize_counter(value: f64) -> Option<u64> {
     }
 }
 
-fn extract_tls_warning_samples(metrics: &Value) -> Vec<(String, String, f64)> {
+fn extract_tls_warning_counters(metrics: &Value) -> Vec<(String, String, f64)> {
     let mut samples = Vec::new();
     let root = match metrics {
         Value::Object(map) => map.get("tls_env_warning_total"),
@@ -864,6 +1112,33 @@ fn collect_tls_warning_samples(value: &Value, out: &mut Vec<(String, String, f64
         }
         _ => {}
     }
+}
+
+fn extract_tls_warning_last_seen(metrics: &Value) -> Vec<(String, String, f64)> {
+    let mut samples = Vec::new();
+    let root = match metrics {
+        Value::Object(map) => map.get("tls_env_warning_last_seen_seconds"),
+        _ => None,
+    };
+    if let Some(value) = root {
+        collect_tls_warning_samples(value, &mut samples);
+    }
+
+    let mut dedup = HashMap::new();
+    for (prefix, code, value) in samples {
+        dedup
+            .entry((prefix.clone(), code.clone()))
+            .and_modify(|existing| {
+                if value > *existing {
+                    *existing = value;
+                }
+            })
+            .or_insert(value);
+    }
+    dedup
+        .into_iter()
+        .map(|((prefix, code), value)| (prefix, code, value))
+        .collect()
 }
 
 fn spawn_log_dump(record: CorrelationRecord) {
@@ -1295,6 +1570,11 @@ async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
     ))
 }
 
+async fn tls_warning_status(_request: Request<AppState>) -> Result<Response, HttpError> {
+    let payload = tls_warning_status_snapshot();
+    Response::new(StatusCode::OK).json(&payload)
+}
+
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new(state)
         .post("/ingest", ingest)
@@ -1302,6 +1582,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/correlations/:metric", correlations)
         .get("/cluster", cluster)
         .get("/tls/warnings/latest", tls_warning_latest)
+        .get("/tls/warnings/status", tls_warning_status)
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)
@@ -1355,10 +1636,12 @@ mod tests {
     };
     use crypto_suite::hashing::blake3;
     use foundation_telemetry::WrapperMetricEntry;
+    use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
     use rand::rngs::OsRng;
     use std::collections::HashMap;
     use std::future::Future;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use sys::archive::zip::ZipReader;
     use sys::tempfile;
 
@@ -1368,6 +1651,13 @@ mod tests {
 
     fn parse_json(input: &str) -> Value {
         json::value_from_str(input).expect("valid test json")
+    }
+
+    fn unique_suffix() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("monotonic clock")
+            .as_nanos()
     }
 
     #[test]
@@ -1454,36 +1744,57 @@ mod tests {
         install_tls_env_warning_forwarder();
         reset_tls_warning_snapshots();
         let metrics = aggregator_metrics();
+        let prefix = format!("TB_TEST_TLS_{}", unique_suffix());
         metrics
             .tls_env_warning_total
-            .remove_label_values(&["TB_TEST_TLS", "missing_key"]);
+            .remove_label_values(&[prefix.as_str(), "missing_identity_component"]);
+        let _ = metrics
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
+            .map(|handle| handle.set(0.0));
 
-        warn!(
-            target: "http_env.tls_env",
-            prefix = %"TB_TEST_TLS",
-            code = "missing_key",
-            detail = %"test missing key",
-            variables = ?vec!["missing.pem", "fallback"],
-            "tls_env_warning"
-        );
+        let cert_var = format!("{prefix}_CERT");
+        let key_var = format!("{prefix}_KEY");
+        let client_ca_var = format!("{prefix}_CLIENT_CA");
+        let client_ca_optional_var = format!("{prefix}_CLIENT_CA_OPTIONAL");
+
+        std::env::set_var(&cert_var, "/tmp/test-aggregator-cert.pem");
+        std::env::remove_var(&key_var);
+        std::env::remove_var(&client_ca_var);
+        std::env::remove_var(&client_ca_optional_var);
+
+        let _ = server_tls_from_env(&prefix, None);
 
         let counter = metrics
             .tls_env_warning_total
-            .get_metric_with_label_values(&["TB_TEST_TLS", "missing_key"])
+            .get_metric_with_label_values(&[prefix.as_str(), "missing_identity_component"])
             .expect("registered label set");
         assert_eq!(counter.get(), 1);
-        let snapshot = tls_warning_snapshot("TB_TEST_TLS", "missing_key")
+        let gauge = metrics
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&[prefix.as_str(), "missing_identity_component"])
+            .expect("gauge handle");
+        assert!(gauge.get() > 0.0);
+
+        let snapshot = tls_warning_snapshot(&prefix, "missing_identity_component")
             .expect("snapshot recorded for missing_key");
         assert_eq!(snapshot.total, 1);
         assert_eq!(snapshot.last_delta, 1);
         assert_eq!(snapshot.origin, TlsWarningOrigin::Diagnostics);
         assert_eq!(snapshot.peer_id, None);
-        assert_eq!(snapshot.detail.as_deref(), Some("test missing key"));
-        assert_eq!(
-            snapshot.variables,
-            vec!["missing.pem".to_string(), "fallback".to_string()]
+        let expected_detail = format!(
+            "identity requires both {cert} and {key}; missing {key}",
+            cert = cert_var,
+            key = key_var
         );
+        assert_eq!(snapshot.detail.as_deref(), Some(expected_detail.as_str()));
+        assert_eq!(snapshot.variables, vec![key_var.clone()]);
         assert!(snapshot.last_seen > 0);
+
+        std::env::remove_var(cert_var);
+        std::env::remove_var(key_var);
+        std::env::remove_var(client_ca_var);
+        std::env::remove_var(client_ca_optional_var);
     }
 
     #[test]
@@ -1550,6 +1861,11 @@ mod tests {
             .get_metric_with_label_values(&["TB_NODE_TLS", "missing_anchor"])
             .expect("registered label set");
         assert_eq!(counter.get(), 3);
+        let gauge = metrics
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&["TB_NODE_TLS", "missing_anchor"])
+            .expect("gauge handle");
+        assert!(gauge.get() > 0.0);
         let snapshot = tls_warning_snapshot("TB_NODE_TLS", "missing_anchor")
             .expect("snapshot recorded for missing_anchor");
         assert_eq!(snapshot.total, 3);
@@ -1562,22 +1878,87 @@ mod tests {
     }
 
     #[test]
+    fn tls_env_warning_gauge_rehydrates_last_seen() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        let metrics = aggregator_metrics();
+        metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_NODE_TLS", "missing_anchor"]);
+        metrics
+            .tls_env_warning_last_seen
+            .remove_label_values(&["TB_NODE_TLS", "missing_anchor"]);
+
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("t".into(), dir.path().join("rehydrate.json"), 60);
+            let app = router(state.clone());
+
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("monotonic clock")
+                .as_secs();
+            let payload = parse_json(&format!(
+                r#"[
+                    {{
+                        "peer_id": "node-b",
+                        "metrics": {{
+                            "tls_env_warning_last_seen_seconds": [
+                                {{"labels": {{"prefix": "TB_NODE_TLS", "code": "missing_anchor"}}, "value": {}}}
+                            ]
+                        }}
+                    }}
+                ]"#,
+                now_secs
+            ));
+
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "t")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(req).await.unwrap();
+        });
+
+        let snapshot = tls_warning_snapshot("TB_NODE_TLS", "missing_anchor")
+            .expect("snapshot recorded for gauge");
+        assert_eq!(snapshot.total, 0);
+        assert_eq!(snapshot.last_delta, 0);
+        assert_eq!(snapshot.origin, TlsWarningOrigin::PeerIngest);
+        assert_eq!(snapshot.peer_id.as_deref(), Some("node-b"));
+        assert!(snapshot.detail.is_none());
+        assert!(snapshot.variables.is_empty());
+        assert!(snapshot.last_seen > 0);
+
+        let gauge = metrics
+            .tls_env_warning_last_seen
+            .ensure_handle_for_label_values(&["TB_NODE_TLS", "missing_anchor"])
+            .expect("gauge handle");
+        assert_eq!(gauge.get().round() as u64, snapshot.last_seen);
+    }
+
+    #[test]
     fn tls_warning_latest_endpoint_exposes_snapshots() {
         install_tls_env_warning_forwarder();
         reset_tls_warning_snapshots();
         let metrics = aggregator_metrics();
+        let prefix = format!("TB_FLEET_TLS_{}", unique_suffix());
+        let code = "missing_identity_component";
         let _ = metrics
             .tls_env_warning_total
-            .remove_label_values(&["TB_FLEET_TLS", "stale_bundle"]);
+            .remove_label_values(&[prefix.as_str(), code]);
 
-        warn!(
-            target: "http_env.tls_env",
-            prefix = %"TB_FLEET_TLS",
-            code = "stale_bundle",
-            detail = %"fleet stale bundle",
-            variables = ?vec!["fleet", "bundle"],
-            "tls_env_warning"
-        );
+        let cert_var = format!("{prefix}_CERT");
+        let key_var = format!("{prefix}_KEY");
+        std::env::set_var(&cert_var, "/tmp/test-fleet-cert.pem");
+        std::env::remove_var(&key_var);
+        std::env::remove_var(format!("{prefix}_CLIENT_CA"));
+        std::env::remove_var(format!("{prefix}_CLIENT_CA_OPTIONAL"));
+
+        let _ = server_tls_from_env(&prefix, None);
 
         run_async(async {
             let dir = tempfile::tempdir().unwrap();
@@ -1593,30 +1974,37 @@ mod tests {
             assert!(!array.is_empty());
             let entry = array
                 .iter()
-                .find(|item| item.get("code").and_then(Value::as_str) == Some("stale_bundle"))
-                .expect("stale bundle snapshot");
+                .find(|item| {
+                    item.get("prefix").and_then(Value::as_str) == Some(prefix.as_str())
+                        && item.get("code").and_then(Value::as_str) == Some(code)
+                })
+                .expect("fleet tls snapshot");
             assert_eq!(
                 entry.get("prefix").and_then(Value::as_str),
-                Some("TB_FLEET_TLS")
+                Some(prefix.as_str())
             );
             assert_eq!(
                 entry.get("origin").and_then(Value::as_str),
                 Some("diagnostics")
             );
-            assert_eq!(
-                entry.get("detail").and_then(Value::as_str),
-                Some("fleet stale bundle")
-            );
+            let detail = entry
+                .get("detail")
+                .and_then(Value::as_str)
+                .expect("detail string");
+            assert!(detail.contains(&key_var));
             let vars = entry
                 .get("variables")
                 .and_then(Value::as_array)
                 .expect("variables array");
-            assert_eq!(vars.len(), 2);
+            assert_eq!(vars.len(), 1);
+            assert_eq!(vars[0], foundation_serialization::json!(key_var.as_str()));
         });
 
         let _ = metrics
             .tls_env_warning_total
-            .remove_label_values(&["TB_FLEET_TLS", "stale_bundle"]);
+            .remove_label_values(&[prefix.as_str(), code]);
+        std::env::remove_var(cert_var);
+        std::env::remove_var(key_var);
     }
 
     #[test]
@@ -1638,6 +2026,140 @@ mod tests {
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].prefix, "TB_FRESH");
         assert_eq!(snapshots[0].code, "active");
+    }
+
+    #[test]
+    fn tls_warning_retention_override_applies() {
+        reset_tls_warning_snapshots();
+        let dir = tempfile::tempdir().unwrap();
+        let _state = AppState::new_with_opts(
+            "token".into(),
+            None,
+            dir.path().join("override.db"),
+            60,
+            None,
+            Some(10),
+        );
+
+        {
+            let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+            let mut stale = TlsWarningSnapshot::new("TB_OVERRIDE", "stale");
+            stale.last_seen = 1;
+            guard.insert(("TB_OVERRIDE".into(), "stale".into()), stale);
+
+            let mut fresh = TlsWarningSnapshot::new("TB_OVERRIDE", "fresh");
+            fresh.last_seen = 15;
+            guard.insert(("TB_OVERRIDE".into(), "fresh".into()), fresh);
+        }
+
+        prune_tls_warning_snapshots_for_test(20);
+        let snapshots = tls_warning_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].prefix, "TB_OVERRIDE");
+        assert_eq!(snapshots[0].code, "fresh");
+    }
+
+    #[test]
+    fn tls_warning_status_reports_counts_and_retention() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        let metrics = aggregator_metrics();
+        let _ = metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_STATUS_TLS", "missing_anchor"]);
+        let dir = tempfile::tempdir().unwrap();
+        let _state = AppState::new_with_opts(
+            "token".into(),
+            None,
+            dir.path().join("status.db"),
+            60,
+            None,
+            Some(15),
+        );
+
+        record_tls_env_warning_event(
+            "TB_STATUS_TLS",
+            "missing_anchor",
+            2,
+            TlsWarningMetadata::peer("node-a"),
+        );
+        {
+            let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+            if let Some(entry) = guard.get_mut(&("TB_STATUS_TLS".into(), "missing_anchor".into())) {
+                entry.last_seen = 1;
+            }
+        }
+
+        let payload = tls_warning_status_snapshot();
+        assert_eq!(payload.retention_seconds, 15);
+        assert_eq!(payload.active_snapshots, 1);
+        assert_eq!(payload.stale_snapshots, 1);
+        assert_eq!(payload.least_recent_last_seen, Some(1));
+        assert_eq!(payload.most_recent_last_seen, Some(1));
+        assert_eq!(metrics.tls_env_warning_retention_seconds.get(), 15.0);
+        assert_eq!(metrics.tls_env_warning_active_snapshots.get(), 1.0);
+        assert_eq!(metrics.tls_env_warning_stale_snapshots.get(), 1.0);
+        assert_eq!(
+            metrics.tls_env_warning_most_recent_last_seen.get().round() as u64,
+            1
+        );
+        assert_eq!(
+            metrics.tls_env_warning_least_recent_last_seen.get().round() as u64,
+            1
+        );
+    }
+
+    #[test]
+    fn tls_warning_status_endpoint_exposes_payload() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new_with_opts(
+                "token".into(),
+                None,
+                dir.path().join("status_endpoint.db"),
+                60,
+                None,
+                Some(42),
+            );
+            let app = router(state.clone());
+
+            record_tls_env_warning_event(
+                "TB_STATUS_TLS",
+                "missing_anchor",
+                1,
+                TlsWarningMetadata::peer("node-a"),
+            );
+
+            let resp = app
+                .handle(app.request_builder().path("/tls/warnings/status").build())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let value: Value = json::from_slice(resp.body()).unwrap();
+            assert_eq!(
+                value
+                    .get("retention_seconds")
+                    .and_then(Value::as_u64)
+                    .expect("retention seconds"),
+                42
+            );
+            assert_eq!(
+                value
+                    .get("active_snapshots")
+                    .and_then(Value::as_u64)
+                    .expect("active snapshots"),
+                1
+            );
+            assert_eq!(
+                value
+                    .get("stale_snapshots")
+                    .and_then(Value::as_u64)
+                    .expect("stale snapshots"),
+                0
+            );
+        });
     }
 
     #[test]

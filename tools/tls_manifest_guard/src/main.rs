@@ -538,9 +538,22 @@ fn load_env_file(path: &Path) -> Result<HashMap<String, String>, String> {
                 index + 1
             ));
         };
-        map.insert(key.trim().to_string(), value.trim().to_string());
+        let cleaned = strip_optional_quotes(value.trim());
+        map.insert(key.trim().to_string(), cleaned);
     }
     Ok(map)
+}
+
+fn strip_optional_quotes(value: &str) -> String {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let last = value.len() - 1;
+        if (bytes[0] == b'"' && bytes[last] == b'"') || (bytes[0] == b'\'' && bytes[last] == b'\'')
+        {
+            return value[1..last].to_string();
+        }
+    }
+    value.to_string()
 }
 
 fn parse_timestamp(input: &str) -> Result<UtcDateTime, String> {
@@ -693,6 +706,26 @@ mod tests {
     }
 
     #[test]
+    fn load_env_file_strips_wrapping_quotes() {
+        let path = unique_path("env_quotes");
+        fs::write(
+            &path,
+            "TB_NODE_CERT=\"/etc/node/cert.pem\"\nTB_NODE_KEY='/etc/node/key.pem'\n",
+        )
+        .unwrap();
+        let map = load_env_file(&path).expect("quoted env parsed");
+        assert_eq!(
+            map.get("TB_NODE_CERT").map(String::as_str),
+            Some("/etc/node/cert.pem")
+        );
+        assert_eq!(
+            map.get("TB_NODE_KEY").map(String::as_str),
+            Some("/etc/node/key.pem")
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
     fn validate_manifest_respects_allow_stale_reminder_flag() {
         let base_dir = unique_path("manifest");
         fs::create_dir_all(&base_dir).unwrap();
@@ -775,6 +808,18 @@ mod tests {
         let _ = fs::remove_file(&manifest_path);
         let _ = fs::remove_file(&staged_file);
         let _ = fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn strip_optional_quotes_preserves_unbalanced_inputs() {
+        assert_eq!(
+            strip_optional_quotes("\"/etc/node/cert.pem"),
+            "\"/etc/node/cert.pem"
+        );
+        assert_eq!(
+            strip_optional_quotes("/etc/node/key.pem'"),
+            "/etc/node/key.pem'"
+        );
     }
 
     #[test]

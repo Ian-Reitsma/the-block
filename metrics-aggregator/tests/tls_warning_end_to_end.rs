@@ -1,4 +1,5 @@
 use foundation_serialization::json::Value;
+use http_env::server_tls_from_env;
 use httpd::{HttpClient, Method, ServerConfig};
 use metrics_aggregator::{install_tls_env_warning_forwarder, router, AppState};
 use runtime::net::TcpListener;
@@ -36,15 +37,14 @@ fn diagnostics_warnings_surface_over_http() {
         sleep(Duration::from_millis(50)).await;
 
         let diag_prefix = format!("TB_TEST_TLS_{}", unique_suffix());
-        let diag_code = format!("missing_key_{}", unique_suffix());
-        diagnostics::warn!(
-            target: "http_env.tls_env",
-            prefix = %diag_prefix,
-            code = diag_code.as_str(),
-            detail = %"test diagnostics path",
-            variables = ?vec!["a.pem", "b.pem"],
-            "tls_env_warning"
-        );
+        let diag_code = "missing_identity_component";
+        let diag_cert = format!("{diag_prefix}_CERT");
+        let diag_key = format!("{diag_prefix}_KEY");
+        std::env::set_var(&diag_cert, "/tmp/test-diag-cert.pem");
+        std::env::remove_var(&diag_key);
+        std::env::remove_var(format!("{diag_prefix}_CLIENT_CA"));
+        std::env::remove_var(format!("{diag_prefix}_CLIENT_CA_OPTIONAL"));
+        let _ = server_tls_from_env(&diag_prefix, None);
 
         let ingest_prefix = format!("TB_NODE_TLS_{}", unique_suffix());
         let ingest_code = format!("missing_anchor_{}", unique_suffix());
@@ -109,7 +109,7 @@ fn diagnostics_warnings_surface_over_http() {
             .expect("diagnostics warning present");
         assert_eq!(
             diagnostics_entry["code"],
-            foundation_serialization::json!(diag_code.as_str())
+            foundation_serialization::json!(diag_code)
         );
         assert_eq!(
             diagnostics_entry["total"],
@@ -119,13 +119,11 @@ fn diagnostics_warnings_surface_over_http() {
             diagnostics_entry["origin"],
             foundation_serialization::json!("diagnostics")
         );
-        assert_eq!(
-            diagnostics_entry["detail"],
-            foundation_serialization::json!("test diagnostics path")
-        );
+        let detail = diagnostics_entry["detail"].as_str().expect("detail string");
+        assert!(detail.contains(&diag_key));
         assert_eq!(
             diagnostics_entry["variables"],
-            foundation_serialization::json!(["a.pem", "b.pem"])
+            foundation_serialization::json!([diag_key.as_str()])
         );
 
         let ingest_entry = snapshots
@@ -169,7 +167,35 @@ fn diagnostics_warnings_surface_over_http() {
             "tls_env_warning_total{{prefix=\"{}\",code=\"{}\"}} 4",
             ingest_prefix, ingest_code
         )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_last_seen_seconds{{prefix=\"{}\",code=\"{}\"}}",
+            diag_prefix, diag_code
+        )));
+        assert!(body.contains(&format!(
+            "tls_env_warning_last_seen_seconds{{prefix=\"{}\",code=\"{}\"}}",
+            ingest_prefix, ingest_code
+        )));
+
+        let status_url = format!("http://{addr}/tls/warnings/status");
+        let response = client
+            .request(Method::Get, &status_url)
+            .expect("build status request")
+            .send()
+            .await
+            .expect("fetch status snapshot");
+        assert_eq!(response.status(), httpd::StatusCode::OK);
+        let status: Value = response.json().expect("parse status payload");
+        let retention = status["retention_seconds"]
+            .as_u64()
+            .expect("retention seconds");
+        assert!(retention >= 7 * 24 * 60 * 60);
+        assert_eq!(status["active_snapshots"].as_u64(), Some(2));
+        assert_eq!(status["stale_snapshots"].as_u64(), Some(0));
+        assert!(status["most_recent_last_seen"].as_u64().is_some());
+        assert!(status["least_recent_last_seen"].as_u64().is_some());
 
         server.abort();
+        std::env::remove_var(diag_cert);
+        std::env::remove_var(diag_key);
     });
 }

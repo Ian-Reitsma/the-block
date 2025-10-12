@@ -1,5 +1,6 @@
 # System-Wide Economic Changes
-> **Review (2025-10-11):** Hardened the `http_env` TLS environment harness with diagnostics-backed `TLS_ENV_WARNING` emissions, observer hooks, and regression coverage for legacy prefix fallbacks, expanded the HTTPS integration suite to round-trip CLI-converted identities, extended the TLS tooling surface with `contract tls stage` (`--env-file`, environment-prefix overrides, canonical export paths) so operators can fan identities out to per-service directories without bespoke scripting while retaining the prior `foundation_*` facade rollouts, shipped the `tls-manifest-guard` validator for manifest-driven reloads, and wired the metrics aggregator to surface `tls_env_warning_total{prefix,code}` from diagnostics and node ingests so dashboards and alerts react immediately to configuration regressions. The aggregator now persists the most recent warning metadata per `{prefix,code}` and exposes it at `/tls/warnings/latest`, while `tls-manifest-guard` grows a `--report <path>` option that emits a machine-readable JSON summary of errors and warnings for automation hooks. Follow-up work adds seven-day snapshot pruning plus a diagnostics-to-HTTP integration test, and tightens `tls-manifest-guard` with directory confinement, prefix enforcement, duplicate detection, and env-file drift warnings.
+> **Review (2025-10-11):** Hardened the `http_env` TLS environment harness with a multi-sink `TLS_ENV_WARNING` registry so diagnostics, telemetry, tests, and services can all observe structured events without bespoke subscribers, expanded the HTTPS integration suite to round-trip CLI-converted identities, extended the TLS tooling surface with `contract tls stage` (`--env-file`, environment-prefix overrides, canonical export paths) so operators can fan identities out to per-service directories without bespoke scripting while retaining the prior `foundation_*` facade rollouts, shipped the `tls-manifest-guard` validator for manifest-driven reloads (now stripping optional quotes from env-file values before comparison), and wired the metrics aggregator to surface both `tls_env_warning_total{prefix,code}` and `tls_env_warning_last_seen_seconds{prefix,code}` via the shared sink. Warning snapshots now retain structured detail, rehydrate from node-exported gauges after restarts, respect the configurable `AGGREGATOR_TLS_WARNING_RETENTION_SECS` window, and remain available at `/tls/warnings/latest`, while `tls-manifest-guard` grows a `--report <path>` option that emits a machine-readable JSON summary of errors and warnings for automation hooks. Follow-up work adds seven-day snapshot pruning plus a diagnostics-to-HTTP integration test, and tightens `tls-manifest-guard` with directory confinement, prefix enforcement, duplicate detection, and env-file drift warnings.
+> `/tls/warnings/status` augments the latest snapshot endpoint with retention metadata (`retention_seconds`, `active_snapshots`, `stale_snapshots`, newest/oldest timestamps), the aggregator exports matching gauges (`tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`, `tls_env_warning_stale_snapshots`, `tls_env_warning_most_recent_last_seen_seconds`, `tls_env_warning_least_recent_last_seen_seconds`), monitoring templates render a "TLS env warnings (age seconds)" panel that graphs `clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`, and the CLI adds `contract tls status` to print the combined status/snapshot payload while dashboards page on the new `TlsEnvWarningSnapshotsStale` alert when stale entries linger.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
@@ -134,10 +135,11 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - Added the `http_env` crate exposing `blocking_client` and `http_client`
   wrappers that delegate to `httpd` while emitting component-scoped fallbacks
   when TLS configuration is incomplete.
-- Promoted diagnostics-backed `TLS_ENV_WARNING` logging (with
-  `install_tls_warning_observer` and `redirect_tls_warnings_to_stderr` helpers)
-  so structured warnings surface both via stderr and the global diagnostics
-  sink without bespoke glue in consumers.
+- Promoted sink-backed `TLS_ENV_WARNING` logging (with
+  `register_tls_warning_sink`, `install_tls_warning_observer`, and
+  `redirect_tls_warnings_to_stderr` helpers) so structured warnings surface via
+  diagnostics, telemetry, and bespoke observers without bespoke glue in
+  consumers.
 - Migrated CLI, node, metrics aggregator, explorer, probe, jurisdiction, and
   example binaries to the new helpers, ensuring every HTTP consumer honours the
   same prefix-ordering semantics and logging.
@@ -152,10 +154,19 @@ This living document chronicles every deliberate shift in The‑Block's protocol
   renewal windows, and certificate `not_after` timestamps so orchestrators can
   audit assets before reloads; YAML output mirrors the JSON manifest for humans
   and plays nicely with config management systems.
-- Added a diagnostics subscriber that forwards `TLS_ENV_WARNING` events into a
-  new `TLS_ENV_WARNING_TOTAL{prefix,code}` counter, plus node-level helpers
-  (`install_tls_env_warning_forwarder`, `record_tls_env_warning`) to hook the
-  telemetry registry.
+- Installed sink-driven forwarders that increment
+  `TLS_ENV_WARNING_TOTAL{prefix,code}`, stamp
+  `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}`, and rehydrate warning
+  snapshots from node-exported gauges after restarts via
+  `install_tls_env_warning_forwarder`.
+- Extended the status pipeline so the aggregator emits
+  `tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`,
+  `tls_env_warning_stale_snapshots`,
+  `tls_env_warning_most_recent_last_seen_seconds`, and
+  `tls_env_warning_least_recent_last_seen_seconds`, ships the
+  `TlsEnvWarningSnapshotsStale` alert, and exposes `contract tls status`
+  (`--latest`/`--json`) so operators can fetch combined status and snapshot
+  reports with remediation suggestions.
 - Added integration coverage that spins up the in-house HTTPS server, verifies
   prefix preference, covers legacy fallbacks, ensures canonical environment
   exports are generated, round-trips converter output through the runtime
@@ -165,10 +176,12 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 ### Operator & Developer Impact
 
 - Operators configure a single set of prefixes across binaries and now receive
-  machine-parseable `TLS_ENV_WARNING` lines via the diagnostics sink (and
-  optional observers) whenever identities are missing or conflicting
-  client-auth variables are present. Dashboards can alert on
-  `TLS_ENV_WARNING_TOTAL{prefix,code}` spikes to spot miswired prefixes.
+  machine-parseable `TLS_ENV_WARNING` lines via diagnostics plus the shared
+  sink whenever identities are missing or conflicting client-auth variables are
+  present. Dashboards can alert on
+  `TLS_ENV_WARNING_TOTAL{prefix,code}` spikes and track
+  `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` freshness (rehydrated from
+  node gauges after restarts) to spot miswired prefixes.
 - PEM material can be converted into JSON identities and trust anchors without
   hand editing, then staged into service-specific directories with a single
   CLI command that also writes canonical `export FOO=` environment files and
@@ -188,6 +201,10 @@ This living document chronicles every deliberate shift in The‑Block's protocol
   those assets out into service directories (with optional
   `label[:mode]@ENV_PREFIX` overrides); existing JSON files remain compatible
   with the new loader.
+- `tls-manifest-guard` trims optional single or double quotes around env-file
+  values before comparing against the manifest export, so shell-style quoting
+  (`export TB_NODE_TLS_CERT="/etc/cert.pem"`) no longer causes false
+  mismatches.
 - Tests and local tooling use the same JSON trust anchors as the transport
   layer, reducing drift between QUIC and HTTPS provisioning.
 

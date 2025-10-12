@@ -6,11 +6,18 @@
 > traffic flows through `foundation_tls` and the vendored `rustls` stack
 > recorded below. Use the shared environment prefixes (`TB_*_TLS` or
 > service-specific overrides) together with `<PREFIX>_CERT`, `<PREFIX>_KEY`,
-> `<PREFIX>_CA`, and `<PREFIX>_INSECURE` plus the `contract tls convert` and
-> enhanced `contract tls stage` subcommands (`--env-file`, prefix overrides)
-> to populate trust material in the new client wrappers while the loader emits
-> diagnostics-backed `TLS_ENV_WARNING` events for missing identities or
-> conflicting client-auth variables.
+> `<PREFIX>_CA`, and `<PREFIX>_INSECURE` plus the `contract tls convert`,
+> enhanced `contract tls stage`, and new `contract tls status` subcommands
+> (status emits human/JSON summaries, remediation hints, and gauges sourced
+> from `tls_env_warning_retention_seconds`,
+> `tls_env_warning_active_snapshots`,
+> `tls_env_warning_stale_snapshots`,
+> `tls_env_warning_most_recent_last_seen_seconds`, and
+> `tls_env_warning_least_recent_last_seen_seconds`) to populate and audit trust
+> material while the loader emits sink-backed `TLS_ENV_WARNING` events feeding
+> the telemetry counter, last-seen gauges, and the
+> `TlsEnvWarningSnapshotsStale` alert for missing identities or conflicting
+> client-auth variables.
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |

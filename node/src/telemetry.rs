@@ -11,7 +11,6 @@ use crypto_suite::{self, signatures::ed25519};
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
 use httpd::{BlockingClient, Method};
-#[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
     self, Encoder, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec, IntCounter,
@@ -4788,7 +4787,7 @@ pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
-static TLS_WARNING_SUBSCRIBER: OnceLock<diagnostics::internal::SubscriberGuard> = OnceLock::new();
+static TLS_WARNING_SINK: OnceLock<http_env::TlsEnvWarningSinkGuard> = OnceLock::new();
 
 pub static TLS_ENV_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
@@ -4806,11 +4805,39 @@ pub static TLS_ENV_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
+pub static TLS_ENV_WARNING_LAST_SEEN_SECONDS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "tls_env_warning_last_seen_seconds",
+            "Unix timestamp of the most recent TLS environment warning",
+        ),
+        &["prefix", "code"],
+    )
+    .unwrap_or_else(|e| panic!("gauge tls env warning last seen: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry tls env warning last seen: {e}"));
+    g
+});
+
+#[cfg(not(feature = "telemetry"))]
+pub static TLS_ENV_WARNING_LAST_SEEN_SECONDS: () = ();
+
+#[cfg(feature = "telemetry")]
 pub fn record_tls_env_warning(prefix: &str, code: &str) {
     TLS_ENV_WARNING_TOTAL
         .ensure_handle_for_label_values(&[prefix, code])
         .expect(LABEL_REGISTRATION_ERR)
         .inc();
+    if let Ok(handle) =
+        TLS_ENV_WARNING_LAST_SEEN_SECONDS.ensure_handle_for_label_values(&[prefix, code])
+    {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        handle.set(now as i64);
+    }
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -4818,9 +4845,9 @@ pub fn record_tls_env_warning(_prefix: &str, _code: &str) {}
 
 #[cfg(feature = "telemetry")]
 pub fn install_tls_env_warning_forwarder() {
-    TLS_WARNING_SUBSCRIBER.get_or_init(|| {
-        diagnostics::internal::install_tls_env_warning_subscriber(|event| {
-            record_tls_env_warning(&event.prefix, &event.code);
+    TLS_WARNING_SINK.get_or_init(|| {
+        http_env::register_tls_warning_sink(|warning| {
+            record_tls_env_warning(&warning.prefix, warning.code);
         })
     });
 }

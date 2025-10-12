@@ -43,3 +43,10 @@ groups:
           severity: warn
         annotations:
           summary: "TLS environment warning detected for {{ $labels.prefix }} ({{ $labels.code }})"
+      - alert: TlsEnvWarningSnapshotsStale
+        expr: tls_env_warning_stale_snapshots > 0
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "TLS warning snapshots stale beyond retention ({{ printf \"%.0f\" $value }} affected)"
