@@ -54,6 +54,62 @@
     },
     {
       "deprecated": false,
+      "description": "Fingerprint of the most recent TLS warning detail payload",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_detail_fingerprint"
+    },
+    {
+      "deprecated": false,
+      "description": "Fingerprint of the most recent TLS warning variables payload",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_variables_fingerprint"
+    },
+    {
+      "deprecated": false,
+      "description": "Unique TLS warning detail fingerprints observed",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_detail_unique_fingerprints"
+    },
+    {
+      "deprecated": false,
+      "description": "Unique TLS warning variables fingerprints observed",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_variables_unique_fingerprints"
+    },
+    {
+      "deprecated": false,
+      "description": "Cumulative TLS warning events grouped by detail fingerprint",
+      "labels": [
+        "prefix",
+        "code",
+        "fingerprint"
+      ],
+      "name": "tls_env_warning_detail_fingerprint_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Cumulative TLS warning events grouped by variables fingerprint",
+      "labels": [
+        "prefix",
+        "code",
+        "fingerprint"
+      ],
+      "name": "tls_env_warning_variables_fingerprint_total"
+    },
+    {
+      "deprecated": false,
       "description": "Number of active TLS warning snapshots after retention pruning",
       "labels": [],
       "name": "tls_env_warning_active_snapshots"

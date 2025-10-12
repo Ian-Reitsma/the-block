@@ -133,9 +133,31 @@ third-party codecs:
   `tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`,
   `tls_env_warning_stale_snapshots`,
   `tls_env_warning_most_recent_last_seen_seconds`, and
-  `tls_env_warning_least_recent_last_seen_seconds`, monitoring ships the
-  `TlsEnvWarningSnapshotsStale` alert, and `contract tls status --latest`
-  renders human-readable or `--json` automation reports with remediation hints.
+  `tls_env_warning_least_recent_last_seen_seconds`, plus BLAKE3 fingerprint
+  gauges/counters (`tls_env_warning_detail_fingerprint{prefix,code}`,
+  `tls_env_warning_variables_fingerprint{prefix,code}`,
+  `tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}`,
+  `tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`) and the
+  unique fingerprint gauges (`tls_env_warning_detail_unique_fingerprints{prefix,code}` /
+  `tls_env_warning_variables_unique_fingerprints{prefix,code}`) so dashboards
+  correlate hashed warning variants and detect novel hashes without free-form
+  payloads. Monitoring ships the `TlsEnvWarningSnapshotsStale` alert, the node
+  maintains a local snapshot map (`telemetry::tls_env_warning_snapshots()`) with
+  per-fingerprint counts and unique tallies for on-host inspection,
+  `contract telemetry tls-warnings` mirrors that data with optional JSON/label
+  filters, per-fingerprint totals, and `--probe-detail`/`--probe-variables`
+  calculators, `contract tls status --latest` renders human-readable or `--json`
+  automation reports with remediation hints, the aggregator logs
+  `observed new tls env warning … fingerprint` on first-seen hashes, and
+  `/export/all` bundles `tls_warnings/latest.json` plus
+  `tls_warnings/status.json` for offline review. Grafana templates now render
+  hashed fingerprint, unique-fingerprint, and five-minute delta panels, the
+  Prometheus rule set adds `TlsEnvWarningNewDetailFingerprint`,
+  `TlsEnvWarningNewVariablesFingerprint`, `TlsEnvWarningDetailFingerprintFlood`,
+  and `TlsEnvWarningVariablesFingerprintFlood`, and the new
+  `monitoring compare-tls-warnings` helper cross-checks
+  `contract telemetry tls-warnings --json` against `/tls/warnings/latest` plus
+  the Prometheus series so automation can flag drift automatically.
   Grafana auto-templates continue to plot "TLS env warnings (age seconds)" via
   `clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)`
   to make stale prefixes obvious, and `tls-manifest-guard` now tolerates quoted

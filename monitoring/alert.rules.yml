@@ -43,6 +43,34 @@ groups:
           severity: warn
         annotations:
           summary: "TLS environment warning detected for {{ $labels.prefix }} ({{ $labels.code }})"
+      - alert: TlsEnvWarningNewDetailFingerprint
+        expr: increase(max by (prefix, code)(tls_env_warning_detail_unique_fingerprints)[10m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "New TLS detail fingerprint observed for {{ $labels.prefix }} ({{ $labels.code }})"
+      - alert: TlsEnvWarningNewVariablesFingerprint
+        expr: increase(max by (prefix, code)(tls_env_warning_variables_unique_fingerprints)[10m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "New TLS variables fingerprint observed for {{ $labels.prefix }} ({{ $labels.code }})"
+      - alert: TlsEnvWarningDetailFingerprintFlood
+        expr: sum by (prefix, code, fingerprint)(increase(tls_env_warning_detail_fingerprint_total{fingerprint!="none"}[5m])) > 10
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "TLS detail fingerprint {{ $labels.fingerprint }} surging for {{ $labels.prefix }} ({{ $labels.code }})"
+      - alert: TlsEnvWarningVariablesFingerprintFlood
+        expr: sum by (prefix, code, fingerprint)(increase(tls_env_warning_variables_fingerprint_total{fingerprint!="none"}[5m])) > 10
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "TLS variables fingerprint {{ $labels.fingerprint }} surging for {{ $labels.prefix }} ({{ $labels.code }})"
       - alert: TlsEnvWarningSnapshotsStale
         expr: tls_env_warning_stale_snapshots > 0
         for: 15m

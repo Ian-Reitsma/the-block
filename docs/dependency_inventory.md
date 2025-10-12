@@ -7,17 +7,39 @@
 > recorded below. Use the shared environment prefixes (`TB_*_TLS` or
 > service-specific overrides) together with `<PREFIX>_CERT`, `<PREFIX>_KEY`,
 > `<PREFIX>_CA`, and `<PREFIX>_INSECURE` plus the `contract tls convert`,
-> enhanced `contract tls stage`, and new `contract tls status` subcommands
-> (status emits human/JSON summaries, remediation hints, and gauges sourced
+> enhanced `contract tls stage`, and new `contract tls status` plus
+> `contract telemetry tls-warnings` subcommands (status emits human/JSON
+> summaries, remediation hints, and gauges sourced
 > from `tls_env_warning_retention_seconds`,
 > `tls_env_warning_active_snapshots`,
 > `tls_env_warning_stale_snapshots`,
 > `tls_env_warning_most_recent_last_seen_seconds`, and
-> `tls_env_warning_least_recent_last_seen_seconds`) to populate and audit trust
-> material while the loader emits sink-backed `TLS_ENV_WARNING` events feeding
-> the telemetry counter, last-seen gauges, and the
+> `tls_env_warning_least_recent_last_seen_seconds`, while telemetry exposes
+> fingerprint gauges/counters
+> `tls_env_warning_detail_fingerprint{prefix,code}`,
+> `tls_env_warning_variables_fingerprint{prefix,code}`,
+> `tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}`, and
+> `tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`),
+> plus the new `tls_env_warning_detail_unique_fingerprints{prefix,code}` /
+> `tls_env_warning_variables_unique_fingerprints{prefix,code}` gauges and
+> `observed new tls env warning … fingerprint` info logs, to populate and audit
+> trust material while the loader emits sink-backed `TLS_ENV_WARNING` events
+> feeding the telemetry counter, last-seen gauges, local snapshot cache (with
+> per-fingerprint counts and unique hash tallies)
+> (`telemetry::tls_env_warning_snapshots()`), the CLI inspection path (now with
+> `--probe-detail`/`--probe-variables` fingerprint calculators and printed
+> per-fingerprint totals), `/export/all` support bundles (which now include
+> `tls_warnings/latest.json` plus `tls_warnings/status.json`), and the
 > `TlsEnvWarningSnapshotsStale` alert for missing identities or conflicting
-> client-auth variables.
+> client-auth variables. The TLS Grafana row now renders hashed fingerprint,
+> unique-fingerprint, and five-minute delta panels, Prometheus adds
+> `TlsEnvWarningNewDetailFingerprint`, `TlsEnvWarningNewVariablesFingerprint`,
+> `TlsEnvWarningDetailFingerprintFlood`, and
+> `TlsEnvWarningVariablesFingerprintFlood` alerts, and the
+> `monitoring compare-tls-warnings` helper cross-checks
+> `contract telemetry tls-warnings --json` against `/tls/warnings/latest` plus the
+> Prometheus series so incident automation can fail fast when cluster counts drift
+> from on-host snapshots.
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
