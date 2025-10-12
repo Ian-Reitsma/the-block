@@ -439,34 +439,56 @@ instead of `reqwest`. The CLI and wallet call the synchronous
 `http_env::http_client` wrappers on top of `httpd::HttpClient` so TLS
 configuration flows through a single environment gateway. Both surfaces expose
 identical request builders (`.header()`, `.json()`, `.timeout()`, `.send()`),
-and emit structured `TLS_ENV_WARNING` events through the diagnostics facade
+and fan out structured `TLS_ENV_WARNING` events through the sink registry
 whenever the environment misses a key, certificate, or mis-wires client-auth
-variables so operators can spot plain-HTTP regressions before boot (tests can
-hook `http_env::install_tls_warning_observer` to collect the warnings without
-disabling diagnostics). Timeouts and retry strategy remain driven by the
-environment variables documented in [`docs/rpc.md`](docs/rpc.md). HTTPS
-endpoints now rely on the in-house TLS connector; set `TB_RPC_TLS`,
-`TB_NODE_TLS`, `TB_AGGREGATOR_TLS`, `TB_PROBE_TLS`, or the global `TB_HTTP_TLS`
-prefix (with the usual `_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision
-identities and trust anchors. Remote signer clients honour
-`REMOTE_SIGNER_TLS_*` and fall back to the shared `TB_HTTP_TLS` prefix. Use the
-new TLS tooling to bootstrap deployments: `contract tls convert --cert
-server.pem --key server-key.pem --anchor cluster-ca.pem --out-dir tls --name
-node` turns PEM material into the JSON identities and trust-anchor registries
-consumed by every prefix, while `contract tls stage --input tls --service
+variables so operators can spot plain-HTTP regressions before boot. Additional
+consumers can be registered with `http_env::register_tls_warning_sink` or the
+scoped `install_tls_warning_observer` helper—each sink receives the prefix,
+warning code, detail string, and captured variables without having to attach to
+diagnostics. Timeouts and retry strategy remain driven by the environment
+variables documented in [`docs/rpc.md`](docs/rpc.md). HTTPS endpoints now rely
+on the in-house TLS connector; set `TB_RPC_TLS`, `TB_NODE_TLS`,
+`TB_AGGREGATOR_TLS`, `TB_PROBE_TLS`, or the global `TB_HTTP_TLS` prefix (with
+the usual `_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision identities and
+trust anchors. Remote signer clients honour `REMOTE_SIGNER_TLS_*` and fall back
+to the shared `TB_HTTP_TLS` prefix. Use the new TLS tooling to bootstrap
+deployments: `contract tls convert --cert server.pem --key server-key.pem
+--anchor cluster-ca.pem --out-dir tls --name node` turns PEM material into the
+JSON identities and trust-anchor registries consumed by every prefix, while
+`contract tls stage --input tls --service
 aggregator:required=/etc/the-block/aggregator --service
 explorer=/etc/the-block/explorer --env-file tls.env` fans those assets out into
-per-binary directories, writes canonical `export TB_AGGREGATOR_TLS_*=` lines
-for operators to source, and lets each service override its environment prefix
+per-binary directories, writes canonical `export TB_AGGREGATOR_TLS_*=` lines for
+operators to source, and lets each service override its environment prefix
 (`gateway:optional@TB_GATEWAY_TLS=/etc/the-block/gateway`) so systemd units can
 mount read-only secrets without bespoke glue. Each staged directory now gains a
 `tls-manifest.json` and `tls-manifest.yaml` companion describing the generated
 paths, exported variables, and renewal window; the JSON payload includes the
 certificate `not_after` timestamp and a `renewal_reminder` set two weeks prior.
 Systemd units reference the manifest via `TLS_MANIFEST_PATH` so `ExecReload`
-hooks can verify staged files before reloading services, and telemetry records
-every configuration warning in the `TLS_ENV_WARNING_TOTAL{prefix,code}` counter
-to surface miswired prefixes on dashboards.
+hooks can verify staged files before reloading services. Telemetry records every
+configuration warning in the `TLS_ENV_WARNING_TOTAL{prefix,code}` counter and
+stamps `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` with the most recent
+UNIX timestamp so dashboards and alerts can reason about both warning volume and
+freshness even after aggregator restarts.
+`GET /tls/warnings/status` now surfaces a structured summary (retention window,
+active snapshot count, oldest/newest timestamps, and stale entries) so
+operators can audit cluster health without scraping `/metrics`. Use
+`AGGREGATOR_TLS_WARNING_RETENTION_SECS=<seconds>` to widen or shrink the
+snapshot window, then `curl http://$AGGREGATOR_ADDR/tls/warnings/status` to
+confirm the override before updating dashboard alert thresholds. The
+aggregator publishes the same data points as gauges on
+`tls_env_warning_retention_seconds`, `tls_env_warning_active_snapshots`,
+`tls_env_warning_stale_snapshots`,
+`tls_env_warning_most_recent_last_seen_seconds`, and
+`tls_env_warning_least_recent_last_seen_seconds`, keeping dashboards and alert
+rules aligned with the status endpoint. Operators can now run
+`contract tls status --aggregator http://localhost:9000 --latest` for a
+human-readable report (or `--json` for automation) that merges the status
+payload with the most recent `/tls/warnings/latest` snapshots and suggests
+remediation steps when entries go stale or no warnings have arrived during the
+retention window. Monitoring ships a matching `TlsEnvWarningSnapshotsStale`
+alert to page when the stale gauge is non-zero for 15 minutes.
 The node still serves JSON-RPC through its bespoke parser
 (`node/src/rpc/mod.rs`), and the metrics aggregator and gateway keep using
 `axum`/`hyper` for HTTP endpoints while the in-house server is developed

@@ -98,9 +98,10 @@ anchors:
 | `TB_PROBE_TLS` | Probe CLI outbound HTTPS calls. |
 
 Unset prefixes fall back to plain HTTP after the helper logs a
-component-tagged `TLS_ENV_WARNING` (emitted through the diagnostics sink and
-available to observers via `http_env::install_tls_warning_observer`) so local
-development stays frictionless.
+component-tagged `TLS_ENV_WARNING` (fanned out through the shared sink and
+available to observers via `http_env::register_tls_warning_sink` or
+`http_env::install_tls_warning_observer`) so local development stays
+frictionless.
 Production deployments should set explicit anchors/identities per prefix to
 avoid relying on the insecure fallback. Use `contract tls convert --cert
 /path/to/server.pem --key /path/to/server-key.pem --anchor
@@ -142,12 +143,21 @@ the JSON identities and trust-anchor registries expected by these helpers.
    elapsed.
 5. Confirm the logs and dashboards are free of `TLS_ENV_WARNING` entries after
    restart. The node and metrics aggregator both increment
-   `TLS_ENV_WARNING_TOTAL{prefix,code}` whenever a configuration problem is
-   detected, the aggregator exposes the latest structured metadata at
-   `/tls/warnings/latest`, and the fleet dashboards now surface a dedicated
-   panel plus the `TlsEnvWarningBurst` alert. Any remaining warnings indicate
+   `TLS_ENV_WARNING_TOTAL{prefix,code}` and update
+   `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` whenever a configuration
+   problem is detected (rehydrating from node gauges after restarts), the
+   aggregator exposes the latest structured metadata at `/tls/warnings/latest`,
+   and the fleet dashboards now surface dedicated panels (including "TLS env
+   warnings (age seconds)") plus the `TlsEnvWarningBurst` and
+   `TlsEnvWarningSnapshotsStale` alerts. Any remaining warnings indicate
    misnamed files or conflicting client-auth variables that must be resolved
-   before tearing down the previous identity.
+   before tearing down the previous identity. Use `/tls/warnings/status` to
+   verify the retention window, spot stale snapshots, and confirm that any
+   `AGGREGATOR_TLS_WARNING_RETENTION_SECS` overrides have taken effect before
+   marking the rotation complete. The `contract tls status --aggregator
+   http://localhost:9000 --latest` helper prints the same status payload along
+   with the freshest snapshots, last-seen bounds, and suggested remediation
+   steps (use `--json` when feeding the report into automation).
 
 ### Feature-gated CLI flags
 

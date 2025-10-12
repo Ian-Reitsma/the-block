@@ -19,7 +19,11 @@ fn main() {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(24 * 60 * 60);
-        let state = AppState::new(token, db, retention);
+        let tls_warning_retention = env::var("AGGREGATOR_TLS_WARNING_RETENTION_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok());
+        let state =
+            AppState::new_with_opts(token, None, &db, retention, None, tls_warning_retention);
         state.spawn_cleanup();
         let app = router(state);
         let listener = TcpListener::bind(addr).await.expect("bind listener");

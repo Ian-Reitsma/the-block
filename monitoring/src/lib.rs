@@ -59,6 +59,17 @@ impl std::error::Error for DashboardError {
 
 const TLS_PANEL_TITLE: &str = "TLS env warnings (5m delta)";
 const TLS_PANEL_EXPR: &str = "sum by (prefix, code)(increase(tls_env_warning_total[5m]))";
+const TLS_LAST_SEEN_PANEL_TITLE: &str = "TLS env warnings (last seen)";
+const TLS_LAST_SEEN_EXPR: &str = "max by (prefix, code)(tls_env_warning_last_seen_seconds)";
+const TLS_FRESHNESS_PANEL_TITLE: &str = "TLS env warnings (age seconds)";
+const TLS_FRESHNESS_EXPR: &str =
+    "clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)";
+const TLS_ACTIVE_PANEL_TITLE: &str = "TLS env warnings (active snapshots)";
+const TLS_ACTIVE_EXPR: &str = "tls_env_warning_active_snapshots";
+const TLS_STALE_PANEL_TITLE: &str = "TLS env warnings (stale snapshots)";
+const TLS_STALE_EXPR: &str = "tls_env_warning_stale_snapshots";
+const TLS_RETENTION_PANEL_TITLE: &str = "TLS env warnings (retention seconds)";
+const TLS_RETENTION_EXPR: &str = "tls_env_warning_retention_seconds";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -159,6 +170,23 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             tls.push(build_tls_panel(metric));
             continue;
         }
+        if metric.name == "tls_env_warning_last_seen_seconds" {
+            tls.push(build_tls_last_seen_panel(metric));
+            tls.push(build_tls_freshness_panel(metric));
+            continue;
+        }
+        if metric.name == "tls_env_warning_active_snapshots" {
+            tls.push(build_tls_active_panel(metric));
+            continue;
+        }
+        if metric.name == "tls_env_warning_stale_snapshots" {
+            tls.push(build_tls_stale_panel(metric));
+            continue;
+        }
+        if metric.name == "tls_env_warning_retention_seconds" {
+            tls.push(build_tls_retention_panel(metric));
+            continue;
+        }
 
         let mut panel = Map::new();
         panel.insert("type".into(), Value::from("timeseries"));
@@ -249,6 +277,98 @@ fn build_tls_panel(metric: &Metric) -> Value {
 
     let mut legend = Map::new();
     legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_tls_last_seen_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(TLS_LAST_SEEN_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(TLS_LAST_SEEN_EXPR));
+    target.insert("legendFormat".into(), Value::from("{{prefix}} · {{code}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_tls_freshness_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(TLS_FRESHNESS_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(TLS_FRESHNESS_EXPR));
+    target.insert("legendFormat".into(), Value::from("{{prefix}} · {{code}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_tls_active_panel(metric: &Metric) -> Value {
+    build_tls_scalar_panel(TLS_ACTIVE_PANEL_TITLE, TLS_ACTIVE_EXPR, metric)
+}
+
+fn build_tls_stale_panel(metric: &Metric) -> Value {
+    build_tls_scalar_panel(TLS_STALE_PANEL_TITLE, TLS_STALE_EXPR, metric)
+}
+
+fn build_tls_retention_panel(metric: &Metric) -> Value {
+    build_tls_scalar_panel(TLS_RETENTION_PANEL_TITLE, TLS_RETENTION_EXPR, metric)
+}
+
+fn build_tls_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(false));
     let mut options = Map::new();
     options.insert("legend".into(), Value::Object(legend));
     panel.insert("options".into(), Value::Object(options));
@@ -597,6 +717,131 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or_default();
         assert_eq!(legend_format, "{{prefix}} · {{code}}");
+    }
+
+    #[test]
+    fn tls_last_seen_and_freshness_panels_are_included() {
+        let metrics = vec![Metric {
+            name: "tls_env_warning_last_seen_seconds".into(),
+            description: String::from("TLS warning freshness"),
+            unit: String::new(),
+            deprecated: false,
+        }];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 3);
+
+        let last_seen_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == super::TLS_LAST_SEEN_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("last seen panel present");
+        let last_seen_expr = last_seen_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("last seen expr");
+        assert_eq!(last_seen_expr, super::TLS_LAST_SEEN_EXPR);
+
+        let freshness_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == super::TLS_FRESHNESS_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("freshness panel present");
+        let freshness_expr = freshness_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("freshness expr");
+        assert_eq!(freshness_expr, super::TLS_FRESHNESS_EXPR);
+    }
+
+    #[test]
+    fn tls_status_scalar_panels_are_included() {
+        let metrics = vec![
+            Metric {
+                name: "tls_env_warning_active_snapshots".into(),
+                description: String::from("Active TLS warning snapshots"),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "tls_env_warning_stale_snapshots".into(),
+                description: String::from("Stale TLS warning snapshots"),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "tls_env_warning_retention_seconds".into(),
+                description: String::from("Configured retention window"),
+                unit: String::new(),
+                deprecated: false,
+            },
+        ];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 4);
+
+        let titles: Vec<&str> = panels
+            .iter()
+            .filter_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    None
+                }
+                Value::Object(map) => map.get("title").and_then(Value::as_str),
+                _ => None,
+            })
+            .collect();
+
+        assert!(titles.contains(&super::TLS_ACTIVE_PANEL_TITLE));
+        assert!(titles.contains(&super::TLS_STALE_PANEL_TITLE));
+        assert!(titles.contains(&super::TLS_RETENTION_PANEL_TITLE));
     }
 
     #[test]

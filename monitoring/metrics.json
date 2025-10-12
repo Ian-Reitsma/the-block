@@ -45,6 +45,45 @@
     },
     {
       "deprecated": false,
+      "description": "Unix timestamp of the most recent TLS environment warning",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_last_seen_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of active TLS warning snapshots after retention pruning",
+      "labels": [],
+      "name": "tls_env_warning_active_snapshots"
+    },
+    {
+      "deprecated": false,
+      "description": "TLS warning snapshots exceeding the retention window",
+      "labels": [],
+      "name": "tls_env_warning_stale_snapshots"
+    },
+    {
+      "deprecated": false,
+      "description": "Configured TLS warning retention window in seconds",
+      "labels": [],
+      "name": "tls_env_warning_retention_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Last-seen timestamp of the newest TLS warning snapshot",
+      "labels": [],
+      "name": "tls_env_warning_most_recent_last_seen_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Last-seen timestamp of the stalest TLS warning snapshot",
+      "labels": [],
+      "name": "tls_env_warning_least_recent_last_seen_seconds"
+    },
+    {
+      "deprecated": false,
       "description": "Whether a service badge is active (1/0)",
       "labels": [],
       "name": "badge_active"

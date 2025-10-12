@@ -1,3 +1,4 @@
+use crate::http_client;
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
@@ -5,10 +6,12 @@ use cli_core::{
 };
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_serialization::json::{self, Value};
-use foundation_serialization::Serialize;
+use foundation_serialization::{Deserialize, Serialize};
 use foundation_time::{Duration, UtcDateTime};
 use foundation_tls::ed25519_public_key_from_der;
+use httpd::Method;
 use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -30,6 +33,17 @@ pub enum TlsCmd {
         force: bool,
         env_file: Option<PathBuf>,
     },
+    Status {
+        aggregator: String,
+        include_latest: bool,
+        output: StatusOutput,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusOutput {
+    Text,
+    Json,
 }
 
 impl TlsCmd {
@@ -107,6 +121,32 @@ impl TlsCmd {
                 )))
                 .build(),
             )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("tls.status"),
+                    "status",
+                    "Summarize TLS warning retention health",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "aggregator",
+                        "aggregator",
+                        "Metrics aggregator base URL",
+                    )
+                    .default("http://localhost:9000"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "latest",
+                    "latest",
+                    "Include the latest TLS warning snapshots",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Render the status payload as JSON",
+                )))
+                .build(),
+            )
             .build()
     }
 
@@ -159,6 +199,23 @@ impl TlsCmd {
                     env_file: env_file.map(PathBuf::from),
                 })
             }
+            "status" => {
+                let aggregator = sub_matches
+                    .get_string("aggregator")
+                    .unwrap_or_else(|| "http://localhost:9000".to_string());
+                let include_latest = sub_matches.get_flag("latest");
+                let json = sub_matches.get_flag("json");
+                let output = if json {
+                    StatusOutput::Json
+                } else {
+                    StatusOutput::Text
+                };
+                Ok(TlsCmd::Status {
+                    aggregator,
+                    include_latest,
+                    output,
+                })
+            }
             other => Err(format!("unknown tls command '{other}'")),
         }
     }
@@ -189,6 +246,11 @@ pub fn handle(cmd: TlsCmd) -> Result<(), String> {
                 println!("staged {}", path.display());
             }
         }),
+        TlsCmd::Status {
+            aggregator,
+            include_latest,
+            output,
+        } => status_tls(aggregator, include_latest, output),
     }
 }
 
@@ -1234,6 +1296,372 @@ fn required_option(matches: &Matches, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing required option '--{name}'"))
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct CliTlsWarningStatus {
+    retention_seconds: u64,
+    active_snapshots: usize,
+    stale_snapshots: usize,
+    most_recent_last_seen: Option<u64>,
+    least_recent_last_seen: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct CliTlsWarningSnapshot {
+    prefix: String,
+    code: String,
+    total: u64,
+    last_delta: u64,
+    last_seen: u64,
+    origin: CliTlsWarningOrigin,
+    peer_id: Option<String>,
+    detail: Option<String>,
+    variables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CliTlsWarningOrigin {
+    Diagnostics,
+    PeerIngest,
+}
+
+#[derive(Debug, Serialize)]
+struct CliTlsStatusReport {
+    aggregator: String,
+    status: CliTlsWarningStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshots: Option<Vec<CliTlsWarningSnapshot>>,
+    suggestions: Vec<String>,
+    generated_at: u64,
+}
+
+fn status_tls(
+    aggregator: String,
+    include_latest: bool,
+    output: StatusOutput,
+) -> Result<(), String> {
+    let base = aggregator.trim_end_matches('/').to_string();
+    let status = fetch_tls_status(&base)?;
+    let snapshots = if include_latest {
+        Some(fetch_tls_latest(&base)?)
+    } else {
+        None
+    };
+    let now = current_unix_timestamp();
+    let suggestions =
+        generate_status_suggestions(&status, snapshots.as_deref(), now, include_latest);
+
+    if matches!(output, StatusOutput::Json) {
+        let report = CliTlsStatusReport {
+            aggregator: base.clone(),
+            status,
+            snapshots,
+            suggestions,
+            generated_at: now,
+        };
+        let json = json::to_vec_pretty(&report)
+            .map_err(|err| format!("failed to encode status report: {err}"))?;
+        println!("{}", String::from_utf8_lossy(&json));
+        return Ok(());
+    }
+
+    let rendered = render_status_report(&base, &status, snapshots.as_deref(), now, &suggestions)?;
+    print!("{}", rendered);
+    Ok(())
+}
+
+fn fetch_tls_status(base: &str) -> Result<CliTlsWarningStatus, String> {
+    let client = http_client::blocking_client();
+    let url = format!("{}/tls/warnings/status", base);
+    let response = client
+        .request(Method::Get, &url)
+        .map_err(|err| format!("failed to construct status request: {err}"))?
+        .send()
+        .map_err(|err| format!("failed to query {url}: {err}"))?;
+    let status_code = response.status();
+    if !status_code.is_success() {
+        return Err(format!(
+            "aggregator responded with status {} for {}",
+            status_code.as_u16(),
+            url
+        ));
+    }
+    response
+        .json::<CliTlsWarningStatus>()
+        .map_err(|err| format!("failed to decode status payload: {err}"))
+}
+
+fn fetch_tls_latest(base: &str) -> Result<Vec<CliTlsWarningSnapshot>, String> {
+    let client = http_client::blocking_client();
+    let url = format!("{}/tls/warnings/latest", base);
+    let response = client
+        .request(Method::Get, &url)
+        .map_err(|err| format!("failed to construct latest request: {err}"))?
+        .send()
+        .map_err(|err| format!("failed to query {url}: {err}"))?;
+    let status_code = response.status();
+    if !status_code.is_success() {
+        return Err(format!(
+            "aggregator responded with status {} for {}",
+            status_code.as_u16(),
+            url
+        ));
+    }
+    response
+        .json::<Vec<CliTlsWarningSnapshot>>()
+        .map_err(|err| format!("failed to decode snapshot payload: {err}"))
+}
+
+fn render_status_report(
+    aggregator: &str,
+    status: &CliTlsWarningStatus,
+    snapshots: Option<&[CliTlsWarningSnapshot]>,
+    now: u64,
+    suggestions: &[String],
+) -> Result<String, String> {
+    let mut out = String::new();
+    writeln!(out, "TLS warning status for {}", aggregator).map_err(stringify_fmt_error)?;
+    let retention_label = if status.retention_seconds == 0 {
+        "disabled".to_string()
+    } else {
+        format_duration(status.retention_seconds)
+    };
+    writeln!(
+        out,
+        "Retention window: {} ({})",
+        status.retention_seconds, retention_label
+    )
+    .map_err(stringify_fmt_error)?;
+    writeln!(out, "Active snapshots: {}", status.active_snapshots).map_err(stringify_fmt_error)?;
+    writeln!(out, "Stale snapshots: {}", status.stale_snapshots).map_err(stringify_fmt_error)?;
+
+    if let Some(ts) = status.most_recent_last_seen {
+        let age = now.saturating_sub(ts);
+        let stamp = format_unix_timestamp(ts);
+        writeln!(
+            out,
+            "Most recent last_seen: {} (age {})",
+            stamp,
+            format_duration(age)
+        )
+        .map_err(stringify_fmt_error)?;
+    } else {
+        writeln!(out, "Most recent last_seen: n/a").map_err(stringify_fmt_error)?;
+    }
+
+    if let Some(ts) = status.least_recent_last_seen {
+        let age = now.saturating_sub(ts);
+        let stamp = format_unix_timestamp(ts);
+        writeln!(
+            out,
+            "Oldest last_seen: {} (age {})",
+            stamp,
+            format_duration(age)
+        )
+        .map_err(stringify_fmt_error)?;
+    } else {
+        writeln!(out, "Oldest last_seen: n/a").map_err(stringify_fmt_error)?;
+    }
+
+    match snapshots {
+        Some(entries) if entries.is_empty() => {
+            writeln!(out, "\nSnapshots: none reported").map_err(stringify_fmt_error)?;
+        }
+        Some(entries) => {
+            writeln!(out, "\nSnapshots:").map_err(stringify_fmt_error)?;
+            for entry in entries {
+                writeln!(
+                    out,
+                    "- {} · {} (origin: {}, total: {}, last_delta: {}, peer: {})",
+                    entry.prefix,
+                    entry.code,
+                    origin_label(&entry.origin),
+                    entry.total,
+                    entry.last_delta,
+                    entry.peer_id.as_deref().unwrap_or("n/a")
+                )
+                .map_err(stringify_fmt_error)?;
+                let stamp = format_unix_timestamp(entry.last_seen);
+                let age = now.saturating_sub(entry.last_seen);
+                let stale_note = match stale_over(entry, status, now) {
+                    Some(over) => format!(" [STALE +{}]", format_duration(over)),
+                    None => String::new(),
+                };
+                writeln!(
+                    out,
+                    "  last_seen: {} (age {}{})",
+                    stamp,
+                    format_duration(age),
+                    stale_note
+                )
+                .map_err(stringify_fmt_error)?;
+                if let Some(detail) = entry.detail.as_ref().filter(|d| !d.is_empty()) {
+                    writeln!(out, "  detail: {}", detail).map_err(stringify_fmt_error)?;
+                }
+                if !entry.variables.is_empty() {
+                    writeln!(out, "  variables: {}", entry.variables.join(", "))
+                        .map_err(stringify_fmt_error)?;
+                }
+            }
+        }
+        None if status.active_snapshots > 0 => {
+            writeln!(
+                out,
+                "\nSnapshots: run 'contract tls status --latest' to list {} tracked entries",
+                status.active_snapshots
+            )
+            .map_err(stringify_fmt_error)?;
+        }
+        _ => {}
+    }
+
+    if !suggestions.is_empty() {
+        writeln!(out, "\nSuggested actions:").map_err(stringify_fmt_error)?;
+        for suggestion in suggestions {
+            writeln!(out, "  - {}", suggestion).map_err(stringify_fmt_error)?;
+        }
+    }
+
+    Ok(out)
+}
+
+fn stringify_fmt_error(err: std::fmt::Error) -> String {
+    err.to_string()
+}
+
+fn generate_status_suggestions(
+    status: &CliTlsWarningStatus,
+    snapshots: Option<&[CliTlsWarningSnapshot]>,
+    now: u64,
+    include_latest: bool,
+) -> Vec<String> {
+    let mut suggestions = Vec::new();
+    if status.retention_seconds == 0 {
+        suggestions.push(
+            "Retention is disabled; set AGGREGATOR_TLS_WARNING_RETENTION_SECS to retain history."
+                .into(),
+        );
+    }
+    if status.stale_snapshots > 0 {
+        if let Some(entries) = snapshots {
+            let offenders: Vec<String> = entries
+                .iter()
+                .filter(|entry| stale_over(entry, status, now).is_some())
+                .map(|entry| format!("{}·{}", entry.prefix, entry.code))
+                .take(5)
+                .collect();
+            if !offenders.is_empty() {
+                suggestions.push(format!(
+                    "Rotate TLS materials or prune manifests for stale snapshots: {}.",
+                    offenders.join(", ")
+                ));
+            } else {
+                suggestions.push(
+                    "Stale snapshots detected; inspect manifests and rotation pipelines for drift."
+                        .into(),
+                );
+            }
+        } else {
+            suggestions.push(format!(
+                "{} snapshot(s) exceed the retention window; rerun with '--latest' to identify prefixes.",
+                status.stale_snapshots
+            ));
+        }
+    }
+    if status.active_snapshots == 0 {
+        suggestions.push(
+            "No TLS warnings are currently tracked; verify recent rotations completed cleanly."
+                .into(),
+        );
+    } else if status.stale_snapshots == 0 {
+        suggestions.push("All tracked warnings are within the retention window; continue monitoring dashboards for new events.".into());
+    }
+    if include_latest {
+        if let Some(entries) = snapshots {
+            if entries.is_empty() {
+                suggestions.push(
+                    "Latest snapshot list is empty; confirm the aggregator is exporting TLS gauges.".into(),
+                );
+            }
+        }
+    } else if status.active_snapshots > 0 {
+        suggestions
+            .push("Use '--latest' to inspect per-prefix details when triaging warnings.".into());
+    }
+    if status.retention_seconds > 0 && status.retention_seconds < 86_400 {
+        suggestions.push("Consider widening AGGREGATOR_TLS_WARNING_RETENTION_SECS if rotations span more than a day.".into());
+    }
+    suggestions
+}
+
+fn stale_over(
+    snapshot: &CliTlsWarningSnapshot,
+    status: &CliTlsWarningStatus,
+    now: u64,
+) -> Option<u64> {
+    if status.retention_seconds == 0 {
+        return None;
+    }
+    let age = now.saturating_sub(snapshot.last_seen);
+    if age > status.retention_seconds {
+        Some(age - status.retention_seconds)
+    } else {
+        None
+    }
+}
+
+fn origin_label(origin: &CliTlsWarningOrigin) -> &'static str {
+    match origin {
+        CliTlsWarningOrigin::Diagnostics => "diagnostics",
+        CliTlsWarningOrigin::PeerIngest => "peer_ingest",
+    }
+}
+
+fn format_unix_timestamp(ts: u64) -> String {
+    if let Ok(dt) = UtcDateTime::from_unix_timestamp(ts as i64) {
+        if let Ok(text) = dt.format_iso8601() {
+            return text;
+        }
+    }
+    ts.to_string()
+}
+
+fn format_duration(seconds: u64) -> String {
+    if seconds == 0 {
+        return "0s".to_string();
+    }
+    let mut remaining = seconds;
+    let mut parts = Vec::new();
+    let days = remaining / 86_400;
+    if days > 0 {
+        parts.push(format!("{}d", days));
+        remaining %= 86_400;
+    }
+    let hours = remaining / 3_600;
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+        remaining %= 3_600;
+    }
+    let minutes = remaining / 60;
+    if minutes > 0 {
+        parts.push(format!("{}m", minutes));
+        remaining %= 60;
+    }
+    if remaining > 0 {
+        parts.push(format!("{}s", remaining));
+    }
+    parts.join(" ")
+}
+
+fn current_unix_timestamp() -> u64 {
+    let secs = UtcDateTime::now().unix_timestamp().unwrap_or(0);
+    if secs < 0 {
+        0
+    } else {
+        secs as u64
+    }
+}
+
 #[derive(Serialize)]
 struct AnchorEntry<'a> {
     version: u8,
@@ -1297,6 +1725,62 @@ mod tests {
         let json = render_certificate_json(&verifying.to_bytes(), None).expect("render cert");
         let parsed = parse_certificate(&json).expect("parse certificate");
         assert_eq!(parsed, verifying.to_bytes());
+    }
+
+    #[test]
+    fn format_duration_compacts_units() {
+        assert_eq!(format_duration(0), "0s");
+        assert_eq!(format_duration(59), "59s");
+        assert_eq!(format_duration(61), "1m 1s");
+        assert_eq!(format_duration(3_661), "1h 1m 1s");
+        assert_eq!(format_duration(90_061), "1d 1h 1m 1s");
+    }
+
+    #[test]
+    fn render_status_report_marks_stale_entries() {
+        let now = 200;
+        let status = CliTlsWarningStatus {
+            retention_seconds: 60,
+            active_snapshots: 1,
+            stale_snapshots: 1,
+            most_recent_last_seen: Some(now - 10),
+            least_recent_last_seen: Some(now - 120),
+        };
+        let snapshot = CliTlsWarningSnapshot {
+            prefix: "TB_NODE_TLS".into(),
+            code: "missing_anchor".into(),
+            total: 2,
+            last_delta: 1,
+            last_seen: now - 120,
+            origin: CliTlsWarningOrigin::Diagnostics,
+            peer_id: Some("node-a".into()),
+            detail: Some("anchors missing".into()),
+            variables: vec!["TB_NODE_CERT".into()],
+        };
+        let report = render_status_report(
+            "http://localhost:9000",
+            &status,
+            Some(&[snapshot]),
+            now,
+            &["rotate TLS materials".into()],
+        )
+        .expect("report renders");
+        assert!(report.contains("TB_NODE_TLS · missing_anchor"));
+        assert!(report.contains("[STALE +1m"));
+        assert!(report.contains("rotate TLS materials"));
+    }
+
+    #[test]
+    fn generate_status_suggestions_prompts_for_latest_when_missing() {
+        let status = CliTlsWarningStatus {
+            retention_seconds: 120,
+            active_snapshots: 3,
+            stale_snapshots: 2,
+            most_recent_last_seen: Some(1_000),
+            least_recent_last_seen: Some(800),
+        };
+        let suggestions = generate_status_suggestions(&status, None, 1_200, false);
+        assert!(suggestions.iter().any(|entry| entry.contains("'--latest'")));
     }
 
     #[test]

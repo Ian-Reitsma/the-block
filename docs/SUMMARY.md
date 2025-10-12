@@ -1,5 +1,5 @@
 # Summary
-> **Review (2025-10-11):** Captured the wallet TLS client migration, updated dependency guidance after retiring `native-tls`, and reaffirmed the dependency-sovereignty pivot checkpoints.
+> **Review (2025-10-11):** Captured the wallet TLS client migration, updated dependency guidance after retiring `native-tls`, and reaffirmed the dependency-sovereignty pivot checkpoints. `contract tls status` now renders human-readable or JSON retention reports (fed by the new `tls_env_warning_*` gauges and backed by the `TlsEnvWarningSnapshotsStale` alert) so operators and automation surface stale prefixes without bespoke glue, while `tls-manifest-guard` accepts quoted env exports after the latest hardening.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, and TLS facades are live with governance overrides enforced (2025-10-11).
 
 - [Progress Snapshot & Pillar Evidence](progress.md)
