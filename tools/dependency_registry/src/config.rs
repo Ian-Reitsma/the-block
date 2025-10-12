@@ -7,6 +7,7 @@ use foundation_serialization::Deserialize;
 use crate::model::RiskTier;
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PolicyConfig {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub tiers: TierConfig,
@@ -68,6 +69,7 @@ impl PolicyConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SettingsConfig {
     #[serde(default = "SettingsConfig::default_max_depth")]
     pub max_depth: usize,
@@ -88,6 +90,7 @@ impl SettingsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct TierConfig {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub strategic: Vec<String>,
@@ -106,6 +109,7 @@ impl TierConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct LicenseConfig {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub forbidden: Vec<String>,

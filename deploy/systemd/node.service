@@ -6,8 +6,8 @@ After=network.target
 User=block
 EnvironmentFile=/etc/the-block/tls/node.env
 Environment=TLS_MANIFEST_PATH=/etc/the-block/tls/node/tls-manifest.json
-ExecStartPre=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name node --service node:required=/etc/the-block/tls/node --env-file /etc/the-block/tls/node.env --force'
-ExecReload=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name node --service node:required=/etc/the-block/tls/node --env-file /etc/the-block/tls/node.env --force && systemctl kill -s HUP %n'
+ExecStartPre=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name node --service node:required=/etc/the-block/tls/node --env-file /etc/the-block/tls/node.env --force && /usr/local/bin/tls-manifest-guard --manifest "${TLS_MANIFEST_PATH}" --env-file /etc/the-block/tls/node.env'
+ExecReload=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name node --service node:required=/etc/the-block/tls/node --env-file /etc/the-block/tls/node.env --force && /usr/local/bin/tls-manifest-guard --manifest "${TLS_MANIFEST_PATH}" --env-file /etc/the-block/tls/node.env && systemctl kill -s HUP %n'
 ExecStart=/usr/local/bin/node --rpc 0.0.0.0:8545 --p2p 0.0.0.0:8001
 Restart=on-failure
 LimitNOFILE=65536

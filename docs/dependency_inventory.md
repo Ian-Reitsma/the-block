@@ -155,7 +155,6 @@
 | unclassified | `serde_bytes` | 0.11.19 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `serde_core` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `serde_derive` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `serde_yaml` | 0.9.34+deprecated | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `shlex` | 1.3.0 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `slab` | 0.4.11 | crates.io | MIT | 3 |
 | unclassified | `sled` | 0.34.0 | workspace | — | 1 |

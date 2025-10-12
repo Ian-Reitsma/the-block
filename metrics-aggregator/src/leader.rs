@@ -217,6 +217,7 @@ impl From<std::time::SystemTimeError> for LeaderElectionError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct LeaderRecord {
     holder: String,
     expires_at_ms: u64,

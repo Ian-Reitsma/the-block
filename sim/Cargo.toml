@@ -48,7 +48,6 @@ thiserror = { path = "../crates/thiserror" }
 sys = { path = "../crates/sys" }
 
 [dev-dependencies]
-serde_yaml = "0.9"
 
 [[bin]]
 name = "htlc_scenarios"

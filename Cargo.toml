@@ -35,6 +35,7 @@ members = [
   "tools/ai_diag",
   "tools/log_indexer_cli",
   "tools/storage_migrate",
+  "tools/tls_manifest_guard",
   "tools/release_tests",
   "explorer",
   "bridges",

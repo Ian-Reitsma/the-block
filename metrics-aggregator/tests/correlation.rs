@@ -5,6 +5,7 @@ use std::future::Future;
 use sys::tempfile;
 
 #[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct ApiCorrelation {
     correlation_id: String,
     peer_id: String,

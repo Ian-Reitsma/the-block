@@ -1,10 +1,11 @@
 use http_env::server_tls_from_env;
 use httpd::{serve, serve_tls, ServerConfig};
-use metrics_aggregator::{router, AppState};
+use metrics_aggregator::{install_tls_env_warning_forwarder, router, AppState};
 use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::PathBuf};
 
 fn main() {
+    install_tls_env_warning_forwarder();
     runtime::block_on(async {
         let addr: SocketAddr = env::var("AGGREGATOR_ADDR")
             .unwrap_or_else(|_| "0.0.0.0:9000".into())

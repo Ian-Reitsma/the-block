@@ -137,7 +137,6 @@ serde
 serde_bytes
 serde_core
 serde_derive
-serde_yaml
 shlex
 slab
 sled
