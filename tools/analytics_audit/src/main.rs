@@ -7,6 +7,7 @@ use std::{
 };
 
 #[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct ReadAck {
     manifest: [u8; 32],
     path_hash: [u8; 32],

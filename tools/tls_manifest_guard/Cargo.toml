@@ -1,0 +1,8 @@
+[package]
+name = "tls_manifest_guard"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+foundation_serialization = { path = "../../crates/foundation_serialization" }
+foundation_time = { path = "../../crates/foundation_time" }

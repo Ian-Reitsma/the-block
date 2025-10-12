@@ -4,11 +4,12 @@ use http_env::http_client as env_http_client;
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
-use runtime::telemetry::{Counter, Gauge, Registry};
+use runtime::telemetry::{Counter, CounterVec, Gauge, Opts, Registry};
 use runtime::{spawn, spawn_blocking};
 use std::error::Error as StdError;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use sys::archive::zip::ZipBuilder;
 
 use crypto_suite::encryption::{
@@ -64,20 +65,25 @@ fn archive_metrics(blob: &str) {
 const MAX_CORRELATIONS_PER_METRIC: usize = 64;
 const TELEMETRY_WINDOW: usize = 120;
 const METRICS_CF: &str = "peer_metrics";
+const COUNTER_EPSILON: f64 = 1e-6;
+const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PeerStat {
     pub peer_id: String,
     pub metrics: Value,
 }
 
 #[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct TelemetryErrorResponse {
     error: String,
     path: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct CorrelationRecord {
     pub metric: String,
     pub correlation_id: String,
@@ -106,6 +112,7 @@ pub struct AppState {
     correlations: Arc<Mutex<HashMap<String, VecDeque<CorrelationRecord>>>>,
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
     telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummary>>>>,
+    tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -159,6 +166,7 @@ impl AppState {
             correlations: Arc::new(Mutex::new(HashMap::new())),
             last_metric_values: Arc::new(Mutex::new(HashMap::new())),
             telemetry: Arc::new(Mutex::new(HashMap::new())),
+            tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
@@ -286,6 +294,54 @@ impl AppState {
         );
         spawn_log_dump(record.clone());
     }
+
+    fn record_tls_warning_samples(&self, peer_id: &str, metrics: &Value) {
+        let samples = extract_tls_warning_samples(metrics);
+        if samples.is_empty() {
+            return;
+        }
+
+        let mut cache = self.tls_warning_counters.lock().unwrap();
+        for (prefix, code, value) in samples {
+            if !value.is_finite() || value < 0.0 {
+                warn!(
+                    target: "aggregator",
+                    %peer_id,
+                    %prefix,
+                    %code,
+                    value,
+                    "ignored non-finite tls warning counter sample",
+                );
+                continue;
+            }
+
+            let key = (peer_id.to_string(), prefix.clone(), code.clone());
+            let previous = cache.get(&key).copied();
+            let delta_value = match previous {
+                Some(prev) if value > prev + COUNTER_EPSILON => value - prev,
+                Some(_) => {
+                    cache.insert(key, value);
+                    continue;
+                }
+                None => value,
+            };
+            cache.insert(key, value);
+
+            if let Some(delta) = quantize_counter(delta_value) {
+                let metadata = TlsWarningMetadata::peer(peer_id);
+                record_tls_env_warning_event(&prefix, &code, delta, metadata);
+            } else {
+                warn!(
+                    target: "aggregator",
+                    %peer_id,
+                    %prefix,
+                    %code,
+                    delta_value,
+                    "unable to quantize tls warning delta",
+                );
+            }
+        }
+    }
     fn record_telemetry(&self, entry: TelemetrySummary) {
         if let Ok(mut map) = self.telemetry.lock() {
             let deque = map
@@ -383,6 +439,86 @@ struct AggregatorMetrics {
     retention_pruned_total: Counter,
     telemetry_ingest_total: Counter,
     telemetry_schema_error_total: Counter,
+    tls_env_warning_total: CounterVec,
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+#[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
+enum TlsWarningOrigin {
+    Diagnostics,
+    PeerIngest,
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TlsWarningSnapshot {
+    prefix: String,
+    code: String,
+    total: u64,
+    last_delta: u64,
+    last_seen: u64,
+    origin: TlsWarningOrigin,
+    peer_id: Option<String>,
+    detail: Option<String>,
+    variables: Vec<String>,
+}
+
+impl TlsWarningSnapshot {
+    fn new(prefix: &str, code: &str) -> Self {
+        Self {
+            prefix: prefix.to_string(),
+            code: code.to_string(),
+            total: 0,
+            last_delta: 0,
+            last_seen: 0,
+            origin: TlsWarningOrigin::PeerIngest,
+            peer_id: None,
+            detail: None,
+            variables: Vec::new(),
+        }
+    }
+}
+
+struct TlsWarningMetadata {
+    detail: Option<String>,
+    variables: Vec<String>,
+    origin: TlsWarningOrigin,
+    peer_id: Option<String>,
+}
+
+impl TlsWarningMetadata {
+    fn diagnostics(detail: String, variables: Vec<String>) -> Self {
+        Self {
+            detail: if detail.is_empty() {
+                None
+            } else {
+                Some(detail)
+            },
+            variables,
+            origin: TlsWarningOrigin::Diagnostics,
+            peer_id: None,
+        }
+    }
+
+    fn peer(peer_id: &str) -> Self {
+        Self {
+            detail: None,
+            variables: Vec::new(),
+            origin: TlsWarningOrigin::PeerIngest,
+            peer_id: Some(peer_id.to_string()),
+        }
+    }
+}
+
+impl Default for TlsWarningMetadata {
+    fn default() -> Self {
+        Self {
+            detail: None,
+            variables: Vec::new(),
+            origin: TlsWarningOrigin::PeerIngest,
+            peer_id: None,
+        }
+    }
 }
 
 impl AggregatorMetrics {
@@ -429,6 +565,17 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             "Telemetry payloads rejected due to schema drift",
         )
         .expect("register aggregator_telemetry_schema_error_total");
+    let tls_env_warning_total = CounterVec::new(
+        Opts::new(
+            "tls_env_warning_total",
+            "TLS environment configuration warnings grouped by prefix and code",
+        ),
+        &["prefix", "code"],
+    )
+    .expect("build tls_env_warning_total counter vec");
+    registry
+        .register(Box::new(tls_env_warning_total.clone()))
+        .expect("register tls_env_warning_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -438,11 +585,130 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         retention_pruned_total,
         telemetry_ingest_total,
         telemetry_schema_error_total,
+        tls_env_warning_total,
     }
 });
 
 fn aggregator_metrics() -> &'static AggregatorMetrics {
     Lazy::force(&METRICS)
+}
+
+static TLS_WARNING_SNAPSHOTS: Lazy<Mutex<HashMap<(String, String), TlsWarningSnapshot>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn update_tls_warning_snapshot(
+    prefix: &str,
+    code: &str,
+    delta: u64,
+    metadata: &TlsWarningMetadata,
+) {
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return;
+    };
+    let now_secs = now.as_secs();
+    let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+    let entry = guard
+        .entry((prefix.to_string(), code.to_string()))
+        .or_insert_with(|| TlsWarningSnapshot::new(prefix, code));
+    entry.total = entry.total.saturating_add(delta);
+    entry.last_delta = delta;
+    entry.last_seen = now_secs;
+    if let Some(detail) = metadata.detail.clone() {
+        if detail.is_empty() {
+            entry.detail = None;
+        } else {
+            entry.detail = Some(detail);
+        }
+    }
+    if !metadata.variables.is_empty() {
+        entry.variables = metadata.variables.clone();
+    }
+    entry.origin = metadata.origin.clone();
+    entry.peer_id = metadata.peer_id.clone();
+
+    prune_tls_warning_snapshots_locked(&mut guard, now_secs);
+}
+
+fn tls_warning_snapshots() -> Vec<TlsWarningSnapshot> {
+    TLS_WARNING_SNAPSHOTS
+        .lock()
+        .unwrap()
+        .values()
+        .cloned()
+        .collect()
+}
+
+fn prune_tls_warning_snapshots_locked(
+    snapshots: &mut HashMap<(String, String), TlsWarningSnapshot>,
+    now_secs: u64,
+) {
+    if TLS_WARNING_SNAPSHOT_RETENTION_SECS == 0 {
+        return;
+    }
+    let cutoff = now_secs.saturating_sub(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
+    snapshots.retain(|_, snapshot| snapshot.last_seen >= cutoff);
+}
+
+#[cfg(test)]
+fn reset_tls_warning_snapshots() {
+    TLS_WARNING_SNAPSHOTS.lock().unwrap().clear();
+}
+
+#[cfg(test)]
+fn tls_warning_snapshot(prefix: &str, code: &str) -> Option<TlsWarningSnapshot> {
+    tls_warning_snapshots()
+        .into_iter()
+        .find(|entry| entry.prefix == prefix && entry.code == code)
+}
+
+#[cfg(test)]
+fn prune_tls_warning_snapshots_for_test(now_secs: u64) {
+    let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+    prune_tls_warning_snapshots_locked(&mut guard, now_secs);
+}
+
+static TLS_WARNING_SUBSCRIBER: OnceLock<diagnostics::internal::SubscriberGuard> = OnceLock::new();
+
+fn record_tls_env_warning_event(
+    prefix: &str,
+    code: &str,
+    delta: u64,
+    metadata: TlsWarningMetadata,
+) {
+    if delta == 0 {
+        return;
+    }
+    match aggregator_metrics()
+        .tls_env_warning_total
+        .ensure_handle_for_label_values(&[prefix, code])
+    {
+        Ok(handle) => handle.inc_by(delta),
+        Err(err) => warn!(
+            target: "aggregator",
+            %prefix,
+            %code,
+            error = %err,
+            "failed to record tls env warning metric"
+        ),
+    }
+    update_tls_warning_snapshot(prefix, code, delta, &metadata);
+}
+
+fn ensure_tls_warning_forwarder() {
+    TLS_WARNING_SUBSCRIBER.get_or_init(|| {
+        diagnostics::internal::install_tls_env_warning_subscriber(|event| {
+            record_tls_env_warning_event(
+                &event.prefix,
+                &event.code,
+                1,
+                TlsWarningMetadata::diagnostics(event.detail.clone(), event.variables.clone()),
+            );
+        })
+    });
+}
+
+pub fn install_tls_env_warning_forwarder() {
+    ensure_tls_warning_forwarder();
 }
 
 #[cfg(feature = "s3")]
@@ -522,6 +788,82 @@ fn collect_correlations(value: &Value) -> Vec<RawCorrelation> {
     out.into_iter()
         .filter(|entry| seen.insert((entry.metric.clone(), entry.correlation_id.clone())))
         .collect()
+}
+
+fn quantize_counter(value: f64) -> Option<u64> {
+    if !value.is_finite() {
+        return None;
+    }
+    if value < COUNTER_EPSILON {
+        return Some(0);
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > COUNTER_EPSILON {
+        None
+    } else if rounded < 0.0 {
+        None
+    } else {
+        Some(rounded as u64)
+    }
+}
+
+fn extract_tls_warning_samples(metrics: &Value) -> Vec<(String, String, f64)> {
+    let mut samples = Vec::new();
+    let root = match metrics {
+        Value::Object(map) => map.get("tls_env_warning_total"),
+        _ => None,
+    };
+    if let Some(value) = root {
+        collect_tls_warning_samples(value, &mut samples);
+    }
+
+    let mut dedup = HashMap::new();
+    for (prefix, code, value) in samples {
+        dedup.insert((prefix, code), value);
+    }
+    dedup
+        .into_iter()
+        .map(|((prefix, code), value)| (prefix, code, value))
+        .collect()
+}
+
+fn collect_tls_warning_samples(value: &Value, out: &mut Vec<(String, String, f64)>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_tls_warning_samples(item, out);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(samples) = map.get("samples") {
+                collect_tls_warning_samples(samples, out);
+            }
+
+            let labels = map.get("labels").and_then(|labels| labels.as_object());
+            let prefix = labels
+                .and_then(|obj| obj.get("prefix"))
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("prefix").and_then(|v| v.as_str()));
+            let code = labels
+                .and_then(|obj| obj.get("code"))
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("code").and_then(|v| v.as_str()));
+            let value_field = map
+                .get("value")
+                .and_then(|v| v.as_f64())
+                .or_else(|| map.get("counter").and_then(|v| v.as_f64()));
+            if let (Some(prefix), Some(code), Some(counter)) = (prefix, code, value_field) {
+                out.push((prefix.to_string(), code.to_string(), counter));
+            }
+
+            for child in map.values() {
+                if matches!(child, Value::Array(_) | Value::Object(_)) {
+                    collect_tls_warning_samples(child, out);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn spawn_log_dump(record: CorrelationRecord) {
@@ -663,6 +1005,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                             state.handle_quic_failure(&record);
                         }
                     }
+                    state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
                     continue;
                 }
             }
@@ -689,6 +1032,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                     }
                 }
             }
+            state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
         }
         aggregator_metrics().active_peers.set(map.len() as f64);
     }
@@ -747,6 +1091,12 @@ async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
     let state = Arc::clone(request.state());
     let count = state.data.lock().unwrap().len();
     Response::new(StatusCode::OK).json(&count)
+}
+
+async fn tls_warning_latest(_request: Request<AppState>) -> Result<Response, HttpError> {
+    let mut snapshots = tls_warning_snapshots();
+    snapshots.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    Response::new(StatusCode::OK).json(&snapshots)
 }
 
 #[derive(Debug)]
@@ -951,6 +1301,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/peer/:id", peer)
         .get("/correlations/:metric", correlations)
         .get("/cluster", cluster)
+        .get("/tls/warnings/latest", tls_warning_latest)
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)
@@ -1096,6 +1447,329 @@ mod tests {
             let map = state.data.lock().unwrap();
             assert!(map.get("p").map(|d| d.is_empty()).unwrap_or(true));
         });
+    }
+
+    #[test]
+    fn tls_env_warnings_increment_metric() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        let metrics = aggregator_metrics();
+        metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_TEST_TLS", "missing_key"]);
+
+        warn!(
+            target: "http_env.tls_env",
+            prefix = %"TB_TEST_TLS",
+            code = "missing_key",
+            detail = %"test missing key",
+            variables = ?vec!["missing.pem", "fallback"],
+            "tls_env_warning"
+        );
+
+        let counter = metrics
+            .tls_env_warning_total
+            .get_metric_with_label_values(&["TB_TEST_TLS", "missing_key"])
+            .expect("registered label set");
+        assert_eq!(counter.get(), 1);
+        let snapshot = tls_warning_snapshot("TB_TEST_TLS", "missing_key")
+            .expect("snapshot recorded for missing_key");
+        assert_eq!(snapshot.total, 1);
+        assert_eq!(snapshot.last_delta, 1);
+        assert_eq!(snapshot.origin, TlsWarningOrigin::Diagnostics);
+        assert_eq!(snapshot.peer_id, None);
+        assert_eq!(snapshot.detail.as_deref(), Some("test missing key"));
+        assert_eq!(
+            snapshot.variables,
+            vec!["missing.pem".to_string(), "fallback".to_string()]
+        );
+        assert!(snapshot.last_seen > 0);
+    }
+
+    #[test]
+    fn tls_env_warning_ingest_updates_counter() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        let metrics = aggregator_metrics();
+        metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_NODE_TLS", "missing_anchor"]);
+
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("t".into(), dir.path().join("ingest.json"), 60);
+            let app = router(state.clone());
+
+            let payload = parse_json(
+                r#"[
+                    {
+                        "peer_id": "node-a",
+                        "metrics": {
+                            "tls_env_warning_total": [
+                                {"labels": {"prefix": "TB_NODE_TLS", "code": "missing_anchor"}, "value": 2.0}
+                            ]
+                        }
+                    }
+                ]"#,
+            );
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "t")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(req).await.unwrap();
+
+            let payload = parse_json(
+                r#"[
+                    {
+                        "peer_id": "node-a",
+                        "metrics": {
+                            "tls_env_warning_total": [
+                                {"labels": {"prefix": "TB_NODE_TLS", "code": "missing_anchor"}, "value": 3.0}
+                            ]
+                        }
+                    }
+                ]"#,
+            );
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "t")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(req).await.unwrap();
+        });
+
+        let counter = metrics
+            .tls_env_warning_total
+            .get_metric_with_label_values(&["TB_NODE_TLS", "missing_anchor"])
+            .expect("registered label set");
+        assert_eq!(counter.get(), 3);
+        let snapshot = tls_warning_snapshot("TB_NODE_TLS", "missing_anchor")
+            .expect("snapshot recorded for missing_anchor");
+        assert_eq!(snapshot.total, 3);
+        assert_eq!(snapshot.last_delta, 1);
+        assert_eq!(snapshot.origin, TlsWarningOrigin::PeerIngest);
+        assert_eq!(snapshot.peer_id.as_deref(), Some("node-a"));
+        assert!(snapshot.detail.is_none());
+        assert!(snapshot.variables.is_empty());
+        assert!(snapshot.last_seen > 0);
+    }
+
+    #[test]
+    fn tls_warning_latest_endpoint_exposes_snapshots() {
+        install_tls_env_warning_forwarder();
+        reset_tls_warning_snapshots();
+        let metrics = aggregator_metrics();
+        let _ = metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_FLEET_TLS", "stale_bundle"]);
+
+        warn!(
+            target: "http_env.tls_env",
+            prefix = %"TB_FLEET_TLS",
+            code = "stale_bundle",
+            detail = %"fleet stale bundle",
+            variables = ?vec!["fleet", "bundle"],
+            "tls_env_warning"
+        );
+
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("state.db"), 60);
+            let app = router(state);
+            let resp = app
+                .handle(app.request_builder().path("/tls/warnings/latest").build())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let value: Value = json::from_slice(resp.body()).unwrap();
+            let array = value.as_array().expect("array payload");
+            assert!(!array.is_empty());
+            let entry = array
+                .iter()
+                .find(|item| item.get("code").and_then(Value::as_str) == Some("stale_bundle"))
+                .expect("stale bundle snapshot");
+            assert_eq!(
+                entry.get("prefix").and_then(Value::as_str),
+                Some("TB_FLEET_TLS")
+            );
+            assert_eq!(
+                entry.get("origin").and_then(Value::as_str),
+                Some("diagnostics")
+            );
+            assert_eq!(
+                entry.get("detail").and_then(Value::as_str),
+                Some("fleet stale bundle")
+            );
+            let vars = entry
+                .get("variables")
+                .and_then(Value::as_array)
+                .expect("variables array");
+            assert_eq!(vars.len(), 2);
+        });
+
+        let _ = metrics
+            .tls_env_warning_total
+            .remove_label_values(&["TB_FLEET_TLS", "stale_bundle"]);
+    }
+
+    #[test]
+    fn tls_warning_snapshots_prune_stale_entries() {
+        reset_tls_warning_snapshots();
+        {
+            let mut guard = TLS_WARNING_SNAPSHOTS.lock().unwrap();
+            let mut old = TlsWarningSnapshot::new("TB_OLD", "expired");
+            old.last_seen = 1;
+            guard.insert(("TB_OLD".into(), "expired".into()), old);
+
+            let mut fresh = TlsWarningSnapshot::new("TB_FRESH", "active");
+            fresh.last_seen = TLS_WARNING_SNAPSHOT_RETENTION_SECS + 100;
+            guard.insert(("TB_FRESH".into(), "active".into()), fresh);
+        }
+
+        prune_tls_warning_snapshots_for_test(TLS_WARNING_SNAPSHOT_RETENTION_SECS + 200);
+        let snapshots = tls_warning_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].prefix, "TB_FRESH");
+        assert_eq!(snapshots[0].code, "active");
+    }
+
+    #[test]
+    fn tls_env_warning_ingest_handles_nested_samples() {
+        install_tls_env_warning_forwarder();
+        let metrics = aggregator_metrics();
+        for labels in [
+            ["TB_NODE_TLS", "missing_anchor"],
+            ["TB_NODE_TLS", "mismatched_chain"],
+            ["TB_GATEWAY_TLS", "expired_certificate"],
+        ] {
+            let _ = metrics.tls_env_warning_total.remove_label_values(&labels);
+        }
+
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("t".into(), dir.path().join("nested.json"), 60);
+            let app = router(state.clone());
+
+            let payload = parse_json(
+                r#"
+                [
+                    {
+                        "peer_id": "node-a",
+                        "metrics": {
+                            "tls_env_warning_total": [
+                                {
+                                    "labels": {"prefix": "TB_NODE_TLS", "code": "missing_anchor"},
+                                    "value": 2.0,
+                                    "samples": [
+                                        {"prefix": "TB_NODE_TLS", "code": "missing_anchor", "counter": 2.0},
+                                        {"labels": {"prefix": "TB_NODE_TLS", "code": "mismatched_chain"}, "value": 1.0}
+                                    ],
+                                    "children": [
+                                        {"labels": {"prefix": "TB_NODE_TLS", "code": "missing_anchor"}, "value": 2.0}
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "peer_id": "node-b",
+                        "metrics": {
+                            "tls_env_warning_total": {
+                                "samples": [
+                                    {"labels": {"prefix": "TB_GATEWAY_TLS", "code": "expired_certificate"}, "value": 4.0}
+                                ]
+                            }
+                        }
+                    }
+                ]
+                "#,
+            );
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "t")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(req).await.unwrap();
+
+            let payload = parse_json(
+                r#"
+                [
+                    {
+                        "peer_id": "node-a",
+                        "metrics": {
+                            "tls_env_warning_total": [
+                                {
+                                    "prefix": "TB_NODE_TLS",
+                                    "code": "missing_anchor",
+                                    "value": 5.0,
+                                    "samples": [
+                                        {"labels": {"prefix": "TB_NODE_TLS", "code": "missing_anchor"}, "counter": 5.0},
+                                        {"labels": {"prefix": "TB_NODE_TLS", "code": "mismatched_chain"}, "counter": 2.0}
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "peer_id": "node-b",
+                        "metrics": {
+                            "tls_env_warning_total": [
+                                {
+                                    "labels": {"prefix": "TB_GATEWAY_TLS", "code": "expired_certificate"},
+                                    "counter": 7.0
+                                }
+                            ]
+                        }
+                    }
+                ]
+                "#,
+            );
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "t")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(req).await.unwrap();
+        });
+
+        let missing_anchor = metrics
+            .tls_env_warning_total
+            .get_metric_with_label_values(&["TB_NODE_TLS", "missing_anchor"])
+            .expect("missing_anchor label set");
+        assert_eq!(missing_anchor.get(), 5);
+
+        let mismatched_chain = metrics
+            .tls_env_warning_total
+            .get_metric_with_label_values(&["TB_NODE_TLS", "mismatched_chain"])
+            .expect("mismatched_chain label set");
+        assert_eq!(mismatched_chain.get(), 2);
+
+        let expired_certificate = metrics
+            .tls_env_warning_total
+            .get_metric_with_label_values(&["TB_GATEWAY_TLS", "expired_certificate"])
+            .expect("expired_certificate label set");
+        assert_eq!(expired_certificate.get(), 7);
+
+        for labels in [
+            ["TB_NODE_TLS", "missing_anchor"],
+            ["TB_NODE_TLS", "mismatched_chain"],
+            ["TB_GATEWAY_TLS", "expired_certificate"],
+        ] {
+            let _ = metrics.tls_env_warning_total.remove_label_values(&labels);
+        }
     }
 
     #[test]

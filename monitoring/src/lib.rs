@@ -57,6 +57,9 @@ impl std::error::Error for DashboardError {
     }
 }
 
+const TLS_PANEL_TITLE: &str = "TLS env warnings (5m delta)";
+const TLS_PANEL_EXPR: &str = "sum by (prefix, code)(increase(tls_env_warning_total[5m]))";
+
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
         let map = match value {
@@ -148,9 +151,15 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut dex = Vec::new();
     let mut compute = Vec::new();
     let mut gossip = Vec::new();
+    let mut tls = Vec::new();
     let mut other = Vec::new();
 
     for metric in metrics.iter().filter(|m| !m.deprecated) {
+        if metric.name == "tls_env_warning_total" {
+            tls.push(build_tls_panel(metric));
+            continue;
+        }
+
         let mut panel = Map::new();
         panel.insert("type".into(), Value::from("timeseries"));
         panel.insert("title".into(), Value::from(metric.name.clone()));
@@ -189,6 +198,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("DEX", dex),
         ("Compute", compute),
         ("Gossip", gossip),
+        ("TLS", tls),
         ("Other", other),
     ] {
         if entries.is_empty() {
@@ -222,6 +232,33 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     }
 
     Ok(dashboard)
+}
+
+fn build_tls_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(TLS_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(TLS_PANEL_EXPR));
+    target.insert("legendFormat".into(), Value::from("{{prefix}} · {{code}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
 }
 
 /// Parse a Prometheus text-format payload into a metric/value map.
@@ -471,6 +508,95 @@ mod tests {
             .collect();
 
         assert_eq!(titles, vec!["DEX", "Compute", "Gossip", "Other"]);
+    }
+
+    #[test]
+    fn tls_panel_is_included_with_custom_query() {
+        let metrics = vec![Metric {
+            name: "tls_env_warning_total".into(),
+            description: "TLS warnings grouped by prefix/code".into(),
+            unit: String::new(),
+            deprecated: false,
+        }];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 2);
+
+        let rows: Vec<&str> = panels
+            .iter()
+            .filter_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    map.get("title").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows, vec!["TLS"]);
+
+        let tls_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == super::TLS_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("tls panel present");
+
+        let expr = tls_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("tls panel expression");
+        assert_eq!(expr, super::TLS_PANEL_EXPR);
+
+        let legend_enabled = tls_panel
+            .get("options")
+            .and_then(|options| match options {
+                Value::Object(map) => map.get("legend"),
+                _ => None,
+            })
+            .and_then(|legend| match legend {
+                Value::Object(map) => map.get("showLegend"),
+                _ => None,
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        assert!(legend_enabled, "TLS panel legend should be enabled");
+
+        let legend_format = tls_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("legendFormat"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(legend_format, "{{prefix}} · {{code}}");
     }
 
     #[test]

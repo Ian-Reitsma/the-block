@@ -5,8 +5,8 @@ use std::{
 
 use camino::Utf8Path;
 use cargo_metadata::{Metadata, MetadataCommand, Node, Package, PackageId};
-use chrono::Utc;
 use diagnostics::anyhow::{Context, Result};
+use foundation_time::UtcDateTime;
 
 use crate::{
     config::PolicyConfig,
@@ -133,8 +133,11 @@ pub fn build_registry(options: BuildOptions<'_>) -> Result<BuildOutput> {
         .collect::<Vec<_>>();
     root_packages.sort();
 
+    let generated_at = UtcDateTime::now()
+        .format_iso8601()
+        .context("format generated_at timestamp")?;
     let registry = DependencyRegistry {
-        generated_at: Utc::now(),
+        generated_at,
         workspace_root: metadata.workspace_root.to_string(),
         root_packages,
         policy: PolicySummary {

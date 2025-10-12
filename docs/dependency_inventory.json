@@ -149,10 +149,6 @@
           "version": "1.0.145"
         },
         {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
-        },
-        {
           "name": "storage",
           "version": "0.1.0"
         },
@@ -3007,12 +3003,7 @@
           "version": "0.16.0"
         }
       ],
-      "dependents": [
-        {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
-        }
-      ],
+      "dependents": [],
       "depth": 3,
       "license": "Apache-2.0 OR MIT",
       "name": "indexmap",
@@ -3058,10 +3049,6 @@
         {
           "name": "serde_json",
           "version": "1.0.145"
-        },
-        {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
         },
         {
           "name": "time",
@@ -4921,10 +4908,6 @@
         {
           "name": "serde_json",
           "version": "1.0.145"
-        },
-        {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
         }
       ],
       "depth": 3,
@@ -5053,42 +5036,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "1.0.228"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "indexmap",
-          "version": "2.11.4"
-        },
-        {
-          "name": "itoa",
-          "version": "1.0.15"
-        },
-        {
-          "name": "ryu",
-          "version": "1.0.20"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        },
-        {
-          "name": "unsafe-libyaml",
-          "version": "0.2.11"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "tb-sim",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "serde_yaml",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.34+deprecated"
     },
     {
       "dependencies": [],
@@ -5659,10 +5606,6 @@
         {
           "name": "serde",
           "version": "1.0.228"
-        },
-        {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
         },
         {
           "name": "sys",
@@ -6324,12 +6267,7 @@
     },
     {
       "dependencies": [],
-      "dependents": [
-        {
-          "name": "serde_yaml",
-          "version": "0.9.34+deprecated"
-        }
-      ],
+      "dependents": [],
       "depth": 3,
       "license": "MIT",
       "name": "unsafe-libyaml",

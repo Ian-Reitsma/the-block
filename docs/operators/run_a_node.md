@@ -128,15 +128,26 @@ the JSON identities and trust-anchor registries expected by these helpers.
 4. Source (or copy) the generated environment exports, point each unit at the
    manifest via `TLS_MANIFEST_PATH=/etc/the-block/<service>/tls-manifest.json`,
    and reload the relevant units. QUIC rotation continues to use the same JSON
-   files so no separate provisioning step is required. The manifest gives
-   `ExecReload` hooks enough context to sanity-check staged assets before the
-   process restarts.
+   files so no separate provisioning step is required. Each systemd unit now
+   invokes `tls-manifest-guard --manifest "$TLS_MANIFEST_PATH" --env-file`
+   before it restarts; you can run the helper manually if you are performing a
+   dry run or orchestrating reloads outside of systemd. Pass
+   `--report /var/lib/the-block/<service>-tls-report.json` when you want a
+   machine-readable summary of validation errors and warnings for CI pipelines
+   or config management tooling. The guard validates the staged files, ensures
+   every path lives under the declared service directory, enforces that
+   environment exports use the manifest’s prefix, checks the exports match the
+   manifest (and surfaces warnings when the env file contains extra exports for
+   that prefix), and blocks restarts when the renewal reminder window has
+   elapsed.
 5. Confirm the logs and dashboards are free of `TLS_ENV_WARNING` entries after
-   restart. The node increments
+   restart. The node and metrics aggregator both increment
    `TLS_ENV_WARNING_TOTAL{prefix,code}` whenever a configuration problem is
-   detected; any remaining warnings indicate misnamed files or conflicting
-   client-auth variables that must be resolved before tearing down the previous
-   identity.
+   detected, the aggregator exposes the latest structured metadata at
+   `/tls/warnings/latest`, and the fleet dashboards now surface a dedicated
+   panel plus the `TlsEnvWarningBurst` alert. Any remaining warnings indicate
+   misnamed files or conflicting client-auth variables that must be resolved
+   before tearing down the previous identity.
 
 ### Feature-gated CLI flags
 

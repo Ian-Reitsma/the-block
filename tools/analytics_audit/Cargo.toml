@@ -6,7 +6,6 @@ build = "build.rs"
 
 [dependencies]
 crypto_suite = { path = "../../crates/crypto_suite" }
-serde = { version = "1.0", features = ["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 
 [build-dependencies]

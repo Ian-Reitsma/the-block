@@ -145,9 +145,23 @@ registry, rendering a Prometheus-compatible text payload without linking the
 third-party `prometheus` crate. Gauges such as `cluster_peer_active_total` and
 counters like `aggregator_ingest_total`, `aggregator_retention_pruned_total`,
 and `bulk_export_total` are registered inside the in-house registry and served
-at `/metrics`. Recommended scrape targets remain both the aggregator and the
-node exporters. Alert when `cluster_peer_active_total` drops unexpectedly or
-when ingestion/export counters stop increasing.
+at `/metrics`. The `tls_env_warning_total{prefix,code}` counter is sourced from
+diagnostics as well as node ingests, so fleet dashboards reflect local warnings
+and cluster-wide deltas as soon as they are reported. Operators can also query
+`GET /tls/warnings/latest` for a JSON document summarising the latest warning
+per `{prefix,code}` pair, including the accumulated total, the most recent
+delta, the originating peer (when the increment arrived via ingestion), and any
+structured diagnostics detail and variables captured from `TLS_ENV_WARNING`
+events. Warning snapshots are retained for seven days; older entries are
+pruned automatically so `/tls/warnings/latest` mirrors the current operational
+state instead of accumulating historical noise. Recommended scrape targets
+remain both the aggregator and the node exporters. Alert when
+`cluster_peer_active_total` drops unexpectedly, when ingestion/export counters
+stop increasing, or when the `TlsEnvWarningBurst` alert fires for any service
+prefix. The end-to-end telemetry tests spin up a real aggregator instance,
+emit diagnostics warnings, post peer ingests, and assert that `/metrics` and
+`/tls/warnings/latest` reflect both sources, preventing regressions across the
+diagnostics subscriber and HTTP ingestion paths.
 
 ### Metrics-to-logs correlation
 

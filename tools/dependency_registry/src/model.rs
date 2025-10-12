@@ -1,10 +1,10 @@
 use std::{cmp::Ordering, fmt};
 
-use chrono::{DateTime, Utc};
 use concurrency::OrderedMap;
 use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct CrateRef {
     pub name: String,
     pub version: String,
@@ -17,6 +17,7 @@ impl CrateRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DependencyEntry {
     pub name: String,
     pub version: String,
@@ -29,6 +30,7 @@ pub struct DependencyEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PolicySummary {
     pub config_path: String,
     pub max_depth: usize,
@@ -36,8 +38,9 @@ pub struct PolicySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DependencyRegistry {
-    pub generated_at: DateTime<Utc>,
+    pub generated_at: String,
     pub workspace_root: String,
     pub root_packages: Vec<String>,
     pub policy: PolicySummary,
@@ -55,6 +58,7 @@ impl DependencyRegistry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ComparisonRegistry {
     pub root_packages: Vec<String>,
     pub policy: PolicySummary,
@@ -62,6 +66,7 @@ pub struct ComparisonRegistry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ViolationEntry {
     pub name: String,
     pub version: String,
@@ -71,6 +76,7 @@ pub struct ViolationEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum ViolationKind {
     Depth,
     License,
@@ -91,6 +97,7 @@ impl fmt::Display for ViolationKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ViolationReport {
     pub entries: Vec<ViolationEntry>,
 }
@@ -106,7 +113,7 @@ impl ViolationReport {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
+#[serde(crate = "foundation_serialization::serde", rename_all = "lowercase")]
 pub enum RiskTier {
     Strategic,
     Replaceable,

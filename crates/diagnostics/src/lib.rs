@@ -439,6 +439,87 @@ pub mod internal {
         super::active_sink().log(&record);
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TlsEnvWarningEvent {
+        pub prefix: String,
+        pub code: String,
+        pub detail: String,
+        pub variables: Vec<String>,
+    }
+
+    fn parse_variable_list(raw: &str) -> Vec<String> {
+        let trimmed = raw.trim();
+        if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+            return if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            };
+        }
+
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if inner.trim().is_empty() {
+            return Vec::new();
+        }
+
+        inner
+            .split(',')
+            .filter_map(|segment| {
+                let value = segment.trim().trim_matches('"');
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            })
+            .collect()
+    }
+
+    pub fn install_tls_env_warning_subscriber<F>(callback: F) -> SubscriberGuard
+    where
+        F: Fn(&TlsEnvWarningEvent) + Send + Sync + 'static,
+    {
+        install_subscriber(move |record| {
+            if record.target.as_ref() != "http_env.tls_env" {
+                return;
+            }
+            if record.level.as_str() != Level::WARN.as_str() {
+                return;
+            }
+            if record.message.as_ref() != "tls_env_warning" {
+                return;
+            }
+
+            let mut prefix = None;
+            let mut code = None;
+            let mut detail = None;
+            let mut variables: Vec<String> = Vec::new();
+
+            for field in &record.fields {
+                match field.key.as_ref() {
+                    "prefix" => prefix = Some(field.value.clone()),
+                    "code" => code = Some(field.value.clone()),
+                    "detail" => detail = Some(field.value.clone()),
+                    "variables" => variables = parse_variable_list(&field.value),
+                    _ => {}
+                }
+            }
+
+            let (Some(prefix), Some(code)) = (prefix, code) else {
+                return;
+            };
+
+            let event = TlsEnvWarningEvent {
+                prefix,
+                code,
+                detail: detail.unwrap_or_default(),
+                variables,
+            };
+
+            callback(&event);
+        })
+    }
+
     #[derive(Debug)]
     pub struct SpanBuilder {
         name: Cow<'static, str>,
@@ -486,6 +567,21 @@ pub mod internal {
     {
         let id = super::subscriber_registry().register(callback);
         SubscriberGuard { id }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parses_variable_lists() {
+            assert!(parse_variable_list("[]").is_empty());
+            assert_eq!(
+                parse_variable_list("[\"A\", \"B\"]"),
+                vec!["A".to_string(), "B".to_string()]
+            );
+            assert_eq!(parse_variable_list("single"), vec!["single".to_string()]);
+        }
     }
 }
 

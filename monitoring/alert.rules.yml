@@ -36,3 +36,10 @@ groups:
           severity: warn
         annotations:
           summary: "Rent escrow locked CT spiking"
+      - alert: TlsEnvWarningBurst
+        expr: sum by (prefix, code)(increase(tls_env_warning_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "TLS environment warning detected for {{ $labels.prefix }} ({{ $labels.code }})"

@@ -1,3 +1,4 @@
+use foundation_serialization::json;
 use foundation_serialization::Deserialize;
 #[derive(Default)]
 struct TreasuryState {
@@ -26,8 +27,8 @@ struct Proposal {
 
 #[test]
 fn treasury_inflows_scenario_models_outcomes() {
-    let text = std::fs::read_to_string("governance/treasury_inflows.yaml").unwrap();
-    let s: Scenario = serde_yaml::from_str(&text).unwrap();
+    let text = std::fs::read_to_string("governance/treasury_inflows.json").unwrap();
+    let s: Scenario = json::from_str(&text).unwrap();
     let mut activated = std::collections::HashSet::new();
     let mut treasury = TreasuryState::default();
     for p in &s.proposals {

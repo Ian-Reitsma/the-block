@@ -8,11 +8,10 @@ build = "build.rs"
 diagnostics = { path = "../../crates/diagnostics" }
 cargo_metadata = "0.18"
 cli_core = { path = "../../crates/cli_core" }
-chrono = { version = "0.4", features = ["serde"] }
 camino = "1.1"
 concurrency = { path = "../../crates/concurrency" }
-serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
+foundation_time = { path = "../../crates/foundation_time" }
 runtime = { path = "../../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 
 [dev-dependencies]

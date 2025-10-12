@@ -36,6 +36,15 @@
     },
     {
       "deprecated": false,
+      "description": "TLS environment configuration warnings grouped by prefix and code",
+      "labels": [
+        "prefix",
+        "code"
+      ],
+      "name": "tls_env_warning_total"
+    },
+    {
+      "deprecated": false,
       "description": "Whether a service badge is active (1/0)",
       "labels": [],
       "name": "badge_active"

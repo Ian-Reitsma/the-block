@@ -4819,30 +4819,8 @@ pub fn record_tls_env_warning(_prefix: &str, _code: &str) {}
 #[cfg(feature = "telemetry")]
 pub fn install_tls_env_warning_forwarder() {
     TLS_WARNING_SUBSCRIBER.get_or_init(|| {
-        diagnostics::internal::install_subscriber(|record| {
-            if record.target.as_ref() != "http_env.tls_env" {
-                return;
-            }
-            if record.level.as_str() != diagnostics::Level::WARN.as_str() {
-                return;
-            }
-            if record.message.as_ref() != "tls_env_warning" {
-                return;
-            }
-
-            let mut prefix = None;
-            let mut code = None;
-            for field in &record.fields {
-                match field.key.as_ref() {
-                    "prefix" => prefix = Some(field.value.clone()),
-                    "code" => code = Some(field.value.clone()),
-                    _ => {}
-                }
-            }
-
-            if let (Some(prefix), Some(code)) = (prefix, code) {
-                record_tls_env_warning(&prefix, &code);
-            }
+        diagnostics::internal::install_tls_env_warning_subscriber(|event| {
+            record_tls_env_warning(&event.prefix, &event.code);
         })
     });
 }
