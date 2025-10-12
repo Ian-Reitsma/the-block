@@ -35,11 +35,14 @@ scripts/monitor_native.sh
 same script. When Docker isn't installed or the daemon is stopped, these
 commands automatically fall back to the native binaries.
 
-The native script streams the node’s `/metrics` endpoint, regenerates
-`monitoring/output/index.html` every few seconds, and serves it on
-<http://127.0.0.1:8088>. Set `TELEMETRY_ENDPOINT` to track a remote node or
-adjust `REFRESH_INTERVAL`/`FOUNDATION_DASHBOARD_PORT` to suit local
-requirements. `monitoring/prometheus.yml` now documents canonical telemetry
+The native script wraps the new `cargo run --bin snapshot` utility, streaming
+the node’s `/metrics` endpoint, regenerating `monitoring/output/index.html`
+every few seconds, and serving it on <http://127.0.0.1:8088>. Set
+`TB_MONITORING_ENDPOINT` to track a remote node or adjust
+`TB_MONITORING_OUTPUT`/`FOUNDATION_DASHBOARD_PORT` to suit local requirements.
+When TLS staging manifests are available, the script also respects
+`TB_MONITORING_TLS_*` prefixes so operators can reuse the same certificates the
+node consumes. `monitoring/prometheus.yml` now documents canonical telemetry
 targets for clusters and the Docker compose recipe consumes it as a bind mount.
 
 The rendered dashboard mirrors the previous Grafana panels: per-lane mempool
@@ -55,6 +58,19 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 `subsidy_auto_reduced_total` and `kill_switch_trigger_total` so operators can
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
+
+### Snapshot CLI
+
+Operators that prefer to run the snapshotter manually can invoke it directly:
+
+```bash
+(cd monitoring && cargo run --bin snapshot -- $TB_MONITORING_ENDPOINT)
+```
+
+The binary parses the same `TB_MONITORING_*` environment variables as the
+native script, emitting `monitoring/output/index.html` alongside the metrics
+specification. Exit codes reflect network status so automation can alert when a
+fetch fails or the endpoint returns a non-success HTTP status.
 
 Remote signer integrations emit `remote_signer_request_total`,
 `remote_signer_success_total`, and `remote_signer_error_total{reason}` under the

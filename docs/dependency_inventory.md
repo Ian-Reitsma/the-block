@@ -6,8 +6,11 @@
 > traffic flows through `foundation_tls` and the vendored `rustls` stack
 > recorded below. Use the shared environment prefixes (`TB_*_TLS` or
 > service-specific overrides) together with `<PREFIX>_CERT`, `<PREFIX>_KEY`,
-> `<PREFIX>_CA`, and `<PREFIX>_INSECURE` plus the `contract tls convert`
-> subcommand to populate trust material in the new client wrappers.
+> `<PREFIX>_CA`, and `<PREFIX>_INSECURE` plus the `contract tls convert` and
+> enhanced `contract tls stage` subcommands (`--env-file`, prefix overrides)
+> to populate trust material in the new client wrappers while the loader emits
+> diagnostics-backed `TLS_ENV_WARNING` events for missing identities or
+> conflicting client-auth variables.
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |

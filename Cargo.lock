@@ -422,6 +422,7 @@ dependencies = [
  "foundation_lazy",
  "foundation_serialization",
  "foundation_sqlite",
+ "foundation_time",
  "foundation_tls",
  "foundation_unicode",
  "governance",
@@ -1025,7 +1026,11 @@ version = "0.1.0"
 name = "http_env"
 version = "0.1.0"
 dependencies = [
+ "base64_fp",
+ "crypto_suite",
+ "diagnostics",
  "httpd",
+ "rand 0.1.0",
 ]
 
 [[package]]

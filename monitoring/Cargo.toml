@@ -6,6 +6,8 @@ build = "build.rs"
 
 [dependencies]
 foundation_serialization = { path = "../crates/foundation_serialization" }
+http_env = { path = "../crates/http_env" }
+httpd = { path = "../crates/httpd" }
 
 [workspace]
 

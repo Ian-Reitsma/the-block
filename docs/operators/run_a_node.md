@@ -97,13 +97,46 @@ anchors:
 | `TB_AGGREGATOR_TLS` | Metrics aggregator uploads and object store integrations. |
 | `TB_PROBE_TLS` | Probe CLI outbound HTTPS calls. |
 
-Unset prefixes fall back to plain HTTP after the helper logs a component-tagged
-warning so local development stays frictionless. Production deployments should
-set explicit anchors/identities per prefix to avoid relying on the insecure
-fallback. Use `contract tls convert --cert /path/to/server.pem --key
-/path/to/server-key.pem --anchor /path/to/cluster-ca.pem --out-dir tls --name
-node` to turn PEM material into the JSON identities and trust-anchor registries
-expected by these helpers.
+Unset prefixes fall back to plain HTTP after the helper logs a
+component-tagged `TLS_ENV_WARNING` (emitted through the diagnostics sink and
+available to observers via `http_env::install_tls_warning_observer`) so local
+development stays frictionless.
+Production deployments should set explicit anchors/identities per prefix to
+avoid relying on the insecure fallback. Use `contract tls convert --cert
+/path/to/server.pem --key /path/to/server-key.pem --anchor
+/path/to/cluster-ca.pem --out-dir tls --name node` to turn PEM material into
+the JSON identities and trust-anchor registries expected by these helpers.
+
+### TLS rotation playbook
+
+1. Generate fresh PEM material for the QUIC and HTTPS surfaces (leaf
+   certificate, private key, and optional client registry anchor).
+2. Run `contract tls convert --cert leaf.pem --key leaf.key --anchor
+   registry.pem --out-dir tls --name cluster` to produce the JSON artifacts
+   consumed by `http_env` and the QUIC backends.
+3. Stage the converted identities into per-binary directories with `contract
+   tls stage --input tls --service node:required=/etc/the-block/node --service
+   aggregator:required=/etc/the-block/aggregator --service
+   gateway:optional@TB_GATEWAY_TLS=/etc/the-block/gateway --service
+   explorer=/etc/the-block/explorer --env-file tls.env`. The helper writes
+   `cert.json`, `key.json`, the appropriate client-auth registry file for each
+   service, emits canonical `export TB_*_TLS_*=` assignments so systemd units
+   can source a single file instead of managing paths manually, and generates
+   `tls-manifest.json`/`tls-manifest.yaml` companions describing the staged
+   files, exported variables, renewal window, and the certificate’s
+   `not_after` timestamp.
+4. Source (or copy) the generated environment exports, point each unit at the
+   manifest via `TLS_MANIFEST_PATH=/etc/the-block/<service>/tls-manifest.json`,
+   and reload the relevant units. QUIC rotation continues to use the same JSON
+   files so no separate provisioning step is required. The manifest gives
+   `ExecReload` hooks enough context to sanity-check staged assets before the
+   process restarts.
+5. Confirm the logs and dashboards are free of `TLS_ENV_WARNING` entries after
+   restart. The node increments
+   `TLS_ENV_WARNING_TOTAL{prefix,code}` whenever a configuration problem is
+   detected; any remaining warnings indicate misnamed files or conflicting
+   client-auth variables that must be resolved before tearing down the previous
+   identity.
 
 ### Feature-gated CLI flags
 

@@ -326,10 +326,9 @@ impl SettlementState {
                     reason: reason.to_string(),
                 }
             }
-            SlaOutcome::Violated {
-                reason,
-                automated: _,
-            } => {
+            SlaOutcome::Violated { reason, automated } => {
+                #[cfg(not(feature = "telemetry"))]
+                let _ = automated;
                 let memo = format!("sla_violation_{reason}");
                 match self.ct.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {

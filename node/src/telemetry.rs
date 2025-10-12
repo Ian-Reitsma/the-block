@@ -20,6 +20,8 @@ use runtime::telemetry::{
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "telemetry")]
+use std::sync::OnceLock;
 use std::sync::RwLock;
 #[cfg(feature = "telemetry")]
 use std::sync::{Mutex, Once};
@@ -4784,6 +4786,69 @@ pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
 });
+
+#[cfg(feature = "telemetry")]
+static TLS_WARNING_SUBSCRIBER: OnceLock<diagnostics::internal::SubscriberGuard> = OnceLock::new();
+
+pub static TLS_ENV_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "tls_env_warning_total",
+            "TLS environment configuration warnings grouped by prefix and code",
+        ),
+        &["prefix", "code"],
+    )
+    .unwrap_or_else(|e| panic!("counter tls env warning: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry tls env warning: {e}"));
+    c
+});
+
+#[cfg(feature = "telemetry")]
+pub fn record_tls_env_warning(prefix: &str, code: &str) {
+    TLS_ENV_WARNING_TOTAL
+        .ensure_handle_for_label_values(&[prefix, code])
+        .expect(LABEL_REGISTRATION_ERR)
+        .inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_tls_env_warning(_prefix: &str, _code: &str) {}
+
+#[cfg(feature = "telemetry")]
+pub fn install_tls_env_warning_forwarder() {
+    TLS_WARNING_SUBSCRIBER.get_or_init(|| {
+        diagnostics::internal::install_subscriber(|record| {
+            if record.target.as_ref() != "http_env.tls_env" {
+                return;
+            }
+            if record.level.as_str() != diagnostics::Level::WARN.as_str() {
+                return;
+            }
+            if record.message.as_ref() != "tls_env_warning" {
+                return;
+            }
+
+            let mut prefix = None;
+            let mut code = None;
+            for field in &record.fields {
+                match field.key.as_ref() {
+                    "prefix" => prefix = Some(field.value.clone()),
+                    "code" => code = Some(field.value.clone()),
+                    _ => {}
+                }
+            }
+
+            if let (Some(prefix), Some(code)) = (prefix, code) {
+                record_tls_env_warning(&prefix, &code);
+            }
+        })
+    });
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn install_tls_env_warning_forwarder() {}
 
 pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(

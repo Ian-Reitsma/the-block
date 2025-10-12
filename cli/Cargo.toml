@@ -33,6 +33,7 @@ httpd = { path = "../crates/httpd" }
 coding = { path = "../crates/coding" }
 http_env = { path = "../crates/http_env" }
 foundation_tls = { path = "../crates/foundation_tls" }
+foundation_time = { path = "../crates/foundation_time" }
 
 [features]
 default = []

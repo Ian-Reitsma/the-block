@@ -1,5 +1,5 @@
 # Status & Roadmap
-> **Review (2025-10-11):** Added the `http_env` helper crate so every CLI/node/aggregator/explorer binary shares one TLS loader with scoped fallbacks, shipped the `contract tls convert` command for PEM→JSON conversion, migrated the remaining HTTP clients onto the new helpers, and introduced integration tests that spin up the in-house HTTPS server to verify prefix selection and error reporting while binary codec consolidation continues across node, crypto suite, telemetry, and harness tooling.
+> **Review (2025-10-11):** Hardened the `http_env` helper crate so every CLI/node/aggregator/explorer binary shares one TLS loader with diagnostics-backed warnings and observer hooks, shipped the `contract tls convert` and enhanced `contract tls stage` commands (canonical `--env-file` exports, service prefix overrides, PEM chain resilience, manifest generation with renewal reminders) for PEM→JSON conversion and asset fan-out, migrated the remaining HTTP clients onto the new helpers, introduced integration tests that spin up the in-house HTTPS server to verify prefix selection, legacy fallbacks, converter round-trips, and the new `TLS_ENV_WARNING_TOTAL{prefix,code}` telemetry counter, and replaced the Python dashboard helper with the first-party monitoring snapshot binary while binary codec consolidation continues across node, crypto suite, telemetry, and harness tooling.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
@@ -49,9 +49,11 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   `sys::paths` adapters, removing the legacy `dirs` dependency and aligning
   migration scripts with the first-party OS abstraction.
 - `http_env` wraps both blocking and async HTTP clients in a shared environment
-  loader with component-tagged fallbacks, and the TLS env integration tests
-  exercise multi-prefix selection plus missing-identity error reporting,
-  ensuring the new helpers keep `FIRST_PARTY_ONLY=1` builds viable.
+  loader with component-tagged fallbacks, diagnostics-backed warnings, and
+  observer hooks; the TLS env integration tests exercise multi-prefix
+  selection, missing-identity error reporting, canonical `--env-file` exports,
+  and service-prefix overrides, keeping the new helpers `FIRST_PARTY_ONLY`
+  friendly.
 Downstream tooling now targets the shared
 `governance` crate, compute settlement and the matcher enforce per-lane fairness
 with staged seeding, fairness deadlines, starvation warnings, and per-lane
