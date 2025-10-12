@@ -374,6 +374,9 @@ fn init_logging(
     diagnostics::install_log_sink(Box::new(sink))
         .map_err(|_| TbError::new("log sink already installed"))?;
 
+    #[cfg(feature = "telemetry")]
+    the_block::telemetry::install_tls_env_warning_forwarder();
+
     if profiling {
         let guard = ProfilerGuard::new(100).ok_or_else(|| TbError::new("profiler init failed"))?;
         let trace_guard = trace.map(|writer| TraceGuard { writer });

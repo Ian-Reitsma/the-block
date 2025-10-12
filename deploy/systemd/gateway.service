@@ -4,6 +4,10 @@ After=network.target
 
 [Service]
 User=block
+EnvironmentFile=/etc/the-block/tls/gateway.env
+Environment=TLS_MANIFEST_PATH=/etc/the-block/tls/gateway/tls-manifest.json
+ExecStartPre=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name gateway --service gateway:optional=/etc/the-block/tls/gateway --env-file /etc/the-block/tls/gateway.env --force'
+ExecReload=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name gateway --service gateway:optional=/etc/the-block/tls/gateway --env-file /etc/the-block/tls/gateway.env --force && systemctl kill -s HUP %n'
 ExecStart=/usr/local/bin/gateway --listen 0.0.0.0:9000
 Restart=on-failure
 LimitNOFILE=65536

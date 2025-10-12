@@ -106,7 +106,8 @@ third-party codecs:
   `prometheus` dependency and updating regression tests to assert against the
   first-party collector snapshots.
 - ✅ Monitoring scripts, docker-compose assets, and the metrics aggregator all
-  emit dashboards via `monitoring/tools/render_foundation_dashboard.py` and
+  emit dashboards via the in-house snapshot binary
+  (`monitoring/src/bin/snapshot.rs`) and
   `httpd::metrics::telemetry_snapshot`, removing Prometheus from the
   observability toolchain. Wrapper summaries inside the aggregator now rely on
   `foundation_serialization::defaults::default` so telemetry exports stay on
@@ -119,10 +120,13 @@ third-party codecs:
   usage from the governance DOT export helper.
 - ✅ Added the `http_env` helper crate and migrated CLI, node, aggregator,
   explorer, probe, jurisdiction, and example binaries to its shared TLS loader
-  so HTTPS clients honour consistent prefix ordering and fallback logging; the
-  new `contract tls convert` command converts PEM assets into the JSON
-  identities consumed by the loader, and `crates/httpd/tests/tls_env.rs` now
-  exercises prefix selection plus missing-identity failures against the
+  so HTTPS clients honour consistent prefix ordering and diagnostics-backed
+  `TLS_ENV_WARNING` events (plus observer hooks). The new `contract tls convert`
+  and enhanced `contract tls stage` commands convert PEM assets into the JSON
+  identities consumed by the loader, fan them out to per-service directories,
+  emit canonical `--env-file` exports, and allow service-specific environment
+  prefix overrides; the HTTP/CLI test suites now exercise prefix selection,
+  legacy fallbacks, canonical exports, and converter round-trips against the
   in-house server.
 - ✅ Peer metrics exports, support-bundle smoke tests, and light-client log
   uploads route through the new `foundation_archive::{tar, gzip}` helpers,

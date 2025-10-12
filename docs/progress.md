@@ -1,13 +1,20 @@
 # Project Progress Snapshot
-> **Review (2025-10-11):** Introduced the `http_env` helper crate so every CLI,
+> **Review (2025-10-11):** Hardened the `http_env` helper crate so every CLI,
 > node, aggregator, explorer, probe, and example binary shares a single TLS
-> loader with scoped fallback logging, added an integration suite that spins up
-> the in-house HTTPS server to verify prefix selection and error reporting,
-> shipped the `contract tls convert` command to translate PEM identities and
-> anchors into the JSON format consumed by the new loaders, refreshed the TLS
-> env plumbing across wallet remote signer flows, jurisdiction tooling, metrics
-> uploads, explorer/indexer helpers, and examples, and reran the dependency
-> snapshot to capture the new crate alongside the retired ad-hoc TLS wrappers.
+> loader with diagnostics-backed `TLS_ENV_WARNING` events (plus
+> `install_tls_warning_observer` hooks), added integration coverage that spins
+> up the in-house HTTPS server to verify legacy prefix fallbacks and round-trip
+> CLI-converted identities, shipped the `contract tls convert` and enhanced
+> `contract tls stage` commands (canonical `--env-file` exports, service-specific
+> environment-prefix overrides, PEM chain resilience, manifest generation with
+> renewal reminders) to translate PEM identities into JSON and fan them out to
+> per-service directories, refreshed the TLS env plumbing across wallet remote
+> signer flows, jurisdiction tooling, metrics uploads, explorer/indexer helpers,
+> and examples, reran the dependency snapshot to capture the new crate alongside
+> the retired ad-hoc TLS wrappers, wired `TLS_ENV_WARNING` diagnostics into the
+> telemetry registry via `TLS_ENV_WARNING_TOTAL{prefix,code}`, and replaced the
+> Python dashboard helper with the in-house `monitoring` snapshot binary so
+> observability stays entirely first party.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
 > crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are
 > live with governance overrides enforced (2025-10-11); node, telemetry, and

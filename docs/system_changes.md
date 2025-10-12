@@ -1,5 +1,5 @@
 # System-Wide Economic Changes
-> **Review (2025-10-11):** Added the `http_env` TLS environment harness, logged the new HTTPS integration tests that validate prefix selection and error reporting against the in-house server, captured the `contract tls convert` helper that turns PEM material into the JSON identities consumed across the stack, and retained context on the prior `foundation_*` facade rollouts.
+> **Review (2025-10-11):** Hardened the `http_env` TLS environment harness with diagnostics-backed `TLS_ENV_WARNING` emissions, observer hooks, and regression coverage for legacy prefix fallbacks, expanded the HTTPS integration suite to round-trip CLI-converted identities, and extended the TLS tooling surface with `contract tls stage` (`--env-file`, environment-prefix overrides, canonical export paths) so operators can fan identities out to per-service directories without bespoke scripting while retaining the prior `foundation_*` facade rollouts.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
@@ -134,32 +134,60 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - Added the `http_env` crate exposing `blocking_client` and `http_client`
   wrappers that delegate to `httpd` while emitting component-scoped fallbacks
   when TLS configuration is incomplete.
+- Promoted diagnostics-backed `TLS_ENV_WARNING` logging (with
+  `install_tls_warning_observer` and `redirect_tls_warnings_to_stderr` helpers)
+  so structured warnings surface both via stderr and the global diagnostics
+  sink without bespoke glue in consumers.
 - Migrated CLI, node, metrics aggregator, explorer, probe, jurisdiction, and
   example binaries to the new helpers, ensuring every HTTP consumer honours the
   same prefix-ordering semantics and logging.
 - Introduced the `contract tls convert` CLI subcommand that decodes PEM or
   existing JSON identities/trust anchors and writes the canonical JSON files
-  expected by the environment loaders.
-- Added `crates/httpd/tests/tls_env.rs`, an integration suite that spins up the
-  in-house HTTPS server and verifies prefix preference, fallback behaviour, and
-  error reporting for incomplete identities.
+  expected by the environment loaders, plus the companion `contract tls stage`
+  helper that copies converted assets into per-service directories with the
+  correct filename conventions, optional client-auth assets, `--env-file`
+  exports, and service-specific environment-prefix overrides.
+- Extended `contract tls stage` to emit per-service `tls-manifest.json` and
+  `tls-manifest.yaml` files capturing staged paths, environment exports,
+  renewal windows, and certificate `not_after` timestamps so orchestrators can
+  audit assets before reloads; YAML output mirrors the JSON manifest for humans
+  and plays nicely with config management systems.
+- Added a diagnostics subscriber that forwards `TLS_ENV_WARNING` events into a
+  new `TLS_ENV_WARNING_TOTAL{prefix,code}` counter, plus node-level helpers
+  (`install_tls_env_warning_forwarder`, `record_tls_env_warning`) to hook the
+  telemetry registry.
+- Added integration coverage that spins up the in-house HTTPS server, verifies
+  prefix preference, covers legacy fallbacks, ensures canonical environment
+  exports are generated, round-trips converter output through the runtime
+  loaders while emitting structured warnings for miswired variables, and now
+  asserts that TLS warning logs increment the metrics counter.
 
 ### Operator & Developer Impact
 
-- Operators configure a single set of prefixes across binaries and receive
-  consistent warnings whenever clients fall back to plain HTTP.
+- Operators configure a single set of prefixes across binaries and now receive
+  machine-parseable `TLS_ENV_WARNING` lines via the diagnostics sink (and
+  optional observers) whenever identities are missing or conflicting
+  client-auth variables are present. Dashboards can alert on
+  `TLS_ENV_WARNING_TOTAL{prefix,code}` spikes to spot miswired prefixes.
 - PEM material can be converted into JSON identities and trust anchors without
-  hand editing, reducing onboarding friction.
-- Regression coverage catches prefix regressions and missing identity handling
-  before releases ship.
+  hand editing, then staged into service-specific directories with a single
+  CLI command that also writes canonical `export FOO=` environment files and
+  manifest files that systemd units consume via `TLS_MANIFEST_PATH`, reducing
+  onboarding friction and reload risk.
+- Regression coverage catches prefix regressions, missing identity handling,
+  and converter incompatibilities before releases ship.
 
 ### Migration Notes
 
 - Replace direct calls to `HttpClient::with_tls_from_env` or
   `BlockingClient::with_tls_from_env` with the `http_env` helpers so future
   logging/selection changes apply automatically.
-- Use `contract tls convert --cert <pem> --key <pem> [--anchor <pem>]` to stage
-  JSON identities; existing JSON files remain compatible with the new loader.
+- Use `contract tls convert --cert <pem> --key <pem> [--anchor <pem>]` to
+  generate JSON identities and `contract tls stage --input <dir> --service
+  aggregator:required=/path --service explorer=/path --env-file tls.env` to fan
+  those assets out into service directories (with optional
+  `label[:mode]@ENV_PREFIX` overrides); existing JSON files remain compatible
+  with the new loader.
 - Tests and local tooling use the same JSON trust anchors as the transport
   layer, reducing drift between QUIC and HTTPS provisioning.
 

@@ -1,7 +1,11 @@
 #![forbid(unsafe_code)]
 
 use core::fmt;
-use std::{borrow::Cow, error::Error as StdError, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    error::Error as StdError,
+    sync::{atomic::AtomicUsize, atomic::Ordering, Arc, Mutex, OnceLock},
+};
 
 /// Canonical error type used across the workspace while the detailed
 /// diagnostics stack is rebuilt in-house.
@@ -235,6 +239,79 @@ fn active_sink() -> &'static dyn LogSink {
         .unwrap_or(&DEFAULT_STDERR)
 }
 
+type SubscriberFn = dyn Fn(&LogRecord) + Send + Sync + 'static;
+
+struct SubscriberEntry {
+    id: usize,
+    callback: Arc<SubscriberFn>,
+}
+
+struct SubscriberRegistry {
+    callbacks: Mutex<Vec<SubscriberEntry>>,
+    next_id: AtomicUsize,
+}
+
+impl SubscriberRegistry {
+    fn new() -> Self {
+        SubscriberRegistry {
+            callbacks: Mutex::new(Vec::new()),
+            next_id: AtomicUsize::new(1),
+        }
+    }
+
+    fn register<F>(&self, callback: F) -> usize
+    where
+        F: Fn(&LogRecord) + Send + Sync + 'static,
+    {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut guard) = self.callbacks.lock() {
+            guard.push(SubscriberEntry {
+                id,
+                callback: Arc::new(callback),
+            });
+        }
+        id
+    }
+
+    fn unregister(&self, id: usize) {
+        if let Ok(mut guard) = self.callbacks.lock() {
+            guard.retain(|entry| entry.id != id);
+        }
+    }
+
+    fn notify(&self, record: &LogRecord) {
+        let callbacks = match self.callbacks.lock() {
+            Ok(guard) => guard
+                .iter()
+                .map(|entry| entry.callback.clone())
+                .collect::<Vec<_>>(),
+            Err(_) => return,
+        };
+
+        for callback in callbacks {
+            callback(record);
+        }
+    }
+}
+
+static SUBSCRIBERS: OnceLock<SubscriberRegistry> = OnceLock::new();
+
+fn subscriber_registry() -> &'static SubscriberRegistry {
+    SUBSCRIBERS.get_or_init(SubscriberRegistry::new)
+}
+
+fn notify_subscribers(record: &LogRecord) {
+    if let Some(registry) = SUBSCRIBERS.get() {
+        registry.notify(record);
+    }
+}
+
+fn remove_subscriber(id: usize) {
+    if let Some(registry) = SUBSCRIBERS.get() {
+        registry.unregister(id);
+    }
+}
+
 pub fn flush_logs() {
     active_sink().flush();
 }
@@ -357,7 +434,9 @@ pub mod internal {
     }
 
     pub fn emit(builder: LogEventBuilder) {
-        super::active_sink().log(&builder.finalize());
+        let record = builder.finalize();
+        super::notify_subscribers(&record);
+        super::active_sink().log(&record);
     }
 
     #[derive(Debug)]
@@ -389,6 +468,25 @@ pub mod internal {
     }
 
     pub use LogEventBuilder as LogBuilder;
+
+    #[derive(Debug)]
+    pub struct SubscriberGuard {
+        id: usize,
+    }
+
+    impl Drop for SubscriberGuard {
+        fn drop(&mut self) {
+            super::remove_subscriber(self.id);
+        }
+    }
+
+    pub fn install_subscriber<F>(callback: F) -> SubscriberGuard
+    where
+        F: Fn(&LogRecord) + Send + Sync + 'static,
+    {
+        let id = super::subscriber_registry().register(callback);
+        SubscriberGuard { id }
+    }
 }
 
 #[macro_export]
@@ -611,5 +709,35 @@ pub mod log {
         pub fn flush(&self) {
             crate::flush_logs();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn subscribers_receive_emitted_records() {
+        let received: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured = received.clone();
+        let guard = internal::install_subscriber(move |record| {
+            if record.target.as_ref() == "diagnostics.test" {
+                if let Ok(mut sink) = captured.lock() {
+                    sink.push(record.message.to_string());
+                }
+            }
+        });
+
+        warn!(target: "diagnostics.test", "first");
+        warn!(target: "diagnostics.other", "ignored");
+
+        drop(guard);
+
+        warn!(target: "diagnostics.test", "second");
+
+        let messages = received.lock().unwrap().clone();
+        assert_eq!(messages, vec![String::from("first")]);
     }
 }

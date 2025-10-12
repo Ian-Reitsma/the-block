@@ -439,21 +439,38 @@ instead of `reqwest`. The CLI and wallet call the synchronous
 `http_env::http_client` wrappers on top of `httpd::HttpClient` so TLS
 configuration flows through a single environment gateway. Both surfaces expose
 identical request builders (`.header()`, `.json()`, `.timeout()`, `.send()`),
-and emit scoped fallbacks when TLS configuration is missing so operators can
-spot plain-HTTP regressions. Timeouts and retry strategy remain driven by the
+and emit structured `TLS_ENV_WARNING` events through the diagnostics facade
+whenever the environment misses a key, certificate, or mis-wires client-auth
+variables so operators can spot plain-HTTP regressions before boot (tests can
+hook `http_env::install_tls_warning_observer` to collect the warnings without
+disabling diagnostics). Timeouts and retry strategy remain driven by the
 environment variables documented in [`docs/rpc.md`](docs/rpc.md). HTTPS
 endpoints now rely on the in-house TLS connector; set `TB_RPC_TLS`,
 `TB_NODE_TLS`, `TB_AGGREGATOR_TLS`, `TB_PROBE_TLS`, or the global `TB_HTTP_TLS`
 prefix (with the usual `_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision
 identities and trust anchors. Remote signer clients honour
 `REMOTE_SIGNER_TLS_*` and fall back to the shared `TB_HTTP_TLS` prefix. Use the
-new `contract tls convert --cert server.pem --key server-key.pem --anchor
-cluster-ca.pem --out-dir tls --name node` helper to turn PEM material into the
-JSON identities and trust-anchor registries consumed by every prefix. The node
-still serves JSON-RPC through its bespoke parser (`node/src/rpc/mod.rs`), and
-the metrics aggregator and gateway keep using `axum`/`hyper` for HTTP endpoints
-while the in-house server is developed (`metrics-aggregator/src/lib.rs`,
-`node/src/web/gateway.rs`).
+new TLS tooling to bootstrap deployments: `contract tls convert --cert
+server.pem --key server-key.pem --anchor cluster-ca.pem --out-dir tls --name
+node` turns PEM material into the JSON identities and trust-anchor registries
+consumed by every prefix, while `contract tls stage --input tls --service
+aggregator:required=/etc/the-block/aggregator --service
+explorer=/etc/the-block/explorer --env-file tls.env` fans those assets out into
+per-binary directories, writes canonical `export TB_AGGREGATOR_TLS_*=` lines
+for operators to source, and lets each service override its environment prefix
+(`gateway:optional@TB_GATEWAY_TLS=/etc/the-block/gateway`) so systemd units can
+mount read-only secrets without bespoke glue. Each staged directory now gains a
+`tls-manifest.json` and `tls-manifest.yaml` companion describing the generated
+paths, exported variables, and renewal window; the JSON payload includes the
+certificate `not_after` timestamp and a `renewal_reminder` set two weeks prior.
+Systemd units reference the manifest via `TLS_MANIFEST_PATH` so `ExecReload`
+hooks can verify staged files before reloading services, and telemetry records
+every configuration warning in the `TLS_ENV_WARNING_TOTAL{prefix,code}` counter
+to surface miswired prefixes on dashboards.
+The node still serves JSON-RPC through its bespoke parser
+(`node/src/rpc/mod.rs`), and the metrics aggregator and gateway keep using
+`axum`/`hyper` for HTTP endpoints while the in-house server is developed
+(`metrics-aggregator/src/lib.rs`, `node/src/web/gateway.rs`).
 
 Lane-tagged transaction via RPC:
 
@@ -616,6 +633,17 @@ blockctl node --config ~/.block/config.toml \
 The compute marketplace's cancellation API integrates with telemetry: calling
 `compute.job_cancel` or `blockctl compute cancel` increments
 `scheduler_cancel_total{reason}` and the node refunds any locked bonds.
+
+For lightweight HTML dashboards without Prometheus, the `monitoring` crate now
+ships a first-party snapshot utility. Run
+```
+(cd monitoring && cargo run --bin snapshot -- http://127.0.0.1:3030/metrics)
+```
+to poll a node's exporter, group metrics by subsystem, and regenerate
+`monitoring/output/index.html` every five seconds. The tool honours
+`TB_MONITORING_ENDPOINT`, `TB_MONITORING_OUTPUT`, and `TB_MONITORING_TLS_*`
+prefixes via `http_env`, so production deployments can point it at remote
+nodes or reuse staged TLS identities without bespoke scripts.
 
 ## Supply-Chain & Dependency Independence
 

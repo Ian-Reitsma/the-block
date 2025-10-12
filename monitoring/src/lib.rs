@@ -1,5 +1,5 @@
 use foundation_serialization::json::{self, Map, Value};
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -95,13 +95,17 @@ impl Metric {
 }
 
 pub fn generate_dashboard(metrics_path: &str, overrides_path: Option<&str>) -> Result<Value, DashboardError> {
-    let metrics_value = read_json(metrics_path)?;
-    let metrics = extract_metrics(&metrics_value)?;
+    let metrics = load_metrics_spec(metrics_path)?;
     let overrides = match overrides_path {
         Some(path) => Some(read_json(path)?),
         None => None,
     };
     generate(&metrics, overrides)
+}
+
+pub fn load_metrics_spec(path: &str) -> Result<Vec<Metric>, DashboardError> {
+    let value = read_json(path)?;
+    extract_metrics(&value)
 }
 
 fn read_json(path: &str) -> Result<Value, DashboardError> {
@@ -220,6 +224,162 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     Ok(dashboard)
 }
 
+/// Parse a Prometheus text-format payload into a metric/value map.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn parse_prometheus_snapshot(payload: &str) -> HashMap<String, f64> {
+    let mut values = HashMap::new();
+    for line in payload.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        if let Some(name) = parts.next() {
+            if name.ends_with("_bucket") || name.ends_with("_count") || name.ends_with("_sum") {
+                continue;
+            }
+            if let Some(value_str) = parts.last() {
+                if let Ok(value) = value_str.parse::<f64>() {
+                    values.insert(name.to_string(), value);
+                }
+            }
+        }
+    }
+    values
+}
+
+/// Render the in-house HTML snapshot used by the telemetry dashboard helpers.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn render_html_snapshot(
+    endpoint: &str,
+    metrics: &[Metric],
+    snapshot: &HashMap<String, f64>,
+) -> String {
+    let mut sections = [
+        ("DEX", Vec::new()),
+        ("Compute", Vec::new()),
+        ("Gossip", Vec::new()),
+        ("Other", Vec::new()),
+    ];
+
+    for metric in metrics.iter().filter(|metric| !metric.deprecated) {
+        let bucket = match categorize_metric(metric) {
+            MetricCategory::Dex => 0,
+            MetricCategory::Compute => 1,
+            MetricCategory::Gossip => 2,
+            MetricCategory::Other => 3,
+        };
+        sections[bucket].1.push(metric);
+    }
+
+    let mut rendered_sections = Vec::new();
+    for (title, metrics) in sections.into_iter() {
+        let section = render_section(title, &metrics, snapshot);
+        if !section.is_empty() {
+            rendered_sections.push(section);
+        }
+    }
+
+    let body = if rendered_sections.is_empty() {
+        "<p>No metrics available.</p>".to_string()
+    } else {
+        rendered_sections.join("\n")
+    };
+
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta http-equiv=\"refresh\" content=\"5\">\n    <title>The-Block Telemetry Snapshot</title>\n    <style>\n      body {{ font-family: system-ui, sans-serif; margin: 2rem; background: #0f1115; color: #f8fafc; }}\n      h1 {{ margin-bottom: 1rem; }}\n      table {{ width: 100%; border-collapse: collapse; margin-bottom: 2rem; }}\n      th, td {{ border-bottom: 1px solid #1f2937; padding: 0.5rem 0.75rem; text-align: left; }}\n      th {{ text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.08em; color: #94a3b8; }}\n      tr.metric-row:hover {{ background: rgba(148, 163, 184, 0.08); }}\n      .status {{ font-weight: 600; }}\n      .error {{ color: #fca5a5; }}\n    </style>\n  </head>\n  <body>\n    <h1>The-Block Telemetry Snapshot</h1>\n    <p class=\"status\">Source: {}</p>\n    {}\n  </body>\n</html>\n",
+        html_escape(endpoint),
+        body
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn render_section(title: &str, metrics: &[&Metric], snapshot: &HashMap<String, f64>) -> String {
+    if metrics.is_empty() {
+        return String::new();
+    }
+    let mut rows = String::new();
+    for metric in metrics {
+        let name = html_escape(&metric.name);
+        let description = if metric.description.is_empty() {
+            "&mdash;".to_string()
+        } else {
+            html_escape(&metric.description)
+        };
+        let value_display = match snapshot.get(&metric.name) {
+            Some(value) => format_metric_value(*value),
+            None => "<span class=\"error\">missing</span>".to_string(),
+        };
+        rows.push_str(&format!(
+            "      <tr class=\"metric-row\"><td><code>{name}</code></td><td>{description}</td><td>{}</td></tr>\n",
+            value_display
+        ));
+    }
+
+    format!(
+        "<h2>{}</h2>\n<table>\n  <thead>\n    <tr><th>Metric</th><th>Description</th><th>Value</th></tr>\n  </thead>\n  <tbody>\n{}  </tbody>\n</table>",
+        html_escape(title),
+        rows
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn html_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn format_metric_value(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let mut formatted = format!("{value:.6}");
+    while formatted.contains('.') && formatted.ends_with('0') {
+        formatted.pop();
+    }
+    if formatted.ends_with('.') {
+        formatted.pop();
+    }
+    if formatted.is_empty() {
+        formatted.push('0');
+    }
+    formatted
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy)]
+enum MetricCategory {
+    Dex,
+    Compute,
+    Gossip,
+    Other,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn categorize_metric(metric: &Metric) -> MetricCategory {
+    let name = metric.name.as_str();
+    if name.starts_with("dex_") {
+        MetricCategory::Dex
+    } else if name.starts_with("compute_") || name.starts_with("scheduler_") {
+        MetricCategory::Compute
+    } else if name.starts_with("gossip_") {
+        MetricCategory::Gossip
+    } else {
+        MetricCategory::Other
+    }
+}
+
 pub(crate) fn apply_overrides(base: &mut Value, overrides: Value) -> Result<(), DashboardError> {
     let Value::Object(ref mut base_map) = base else {
         return Err(DashboardError::InvalidStructure(
@@ -250,6 +410,7 @@ pub fn render_pretty(dashboard: &Value) -> Result<String, foundation_serializati
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn groups_metrics_by_prefix() {
@@ -341,5 +502,55 @@ mod tests {
             DashboardError::InvalidMetric { field, .. } => assert_eq!(field, "name"),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_prometheus_snapshot_skips_histograms() {
+        let payload = r#"
+# HELP dex_trades_total Total trades
+# TYPE dex_trades_total counter
+dex_trades_total 42
+scheduler_match_total_bucket{result="ok",le="0.5"} 1
+scheduler_match_total_sum 10
+"#;
+        let parsed = parse_prometheus_snapshot(payload);
+        assert_eq!(parsed.get("dex_trades_total"), Some(&42.0));
+        assert!(!parsed.contains_key("scheduler_match_total_bucket"));
+        assert!(!parsed.contains_key("scheduler_match_total_sum"));
+    }
+
+    #[test]
+    fn render_html_snapshot_renders_sections() {
+        let metrics = vec![
+            Metric {
+                name: "dex_trades_total".into(),
+                description: "Total DEX trades".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "compute_jobs_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+        ];
+        let mut snapshot = HashMap::new();
+        snapshot.insert("dex_trades_total".to_string(), 42.0);
+        let html = render_html_snapshot("http://localhost:9090/metrics", &metrics, &snapshot);
+        assert!(html.contains("The-Block Telemetry Snapshot"));
+        assert!(html.contains("<h2>DEX</h2>"));
+        assert!(html.contains("<h2>Compute</h2>"));
+        assert!(html.contains("dex_trades_total"));
+        assert!(html.contains("42"));
+        assert!(html.contains("missing"));
+    }
+
+    #[test]
+    fn format_metric_value_trims_trailing_zeroes() {
+        assert_eq!(format_metric_value(42.0), "42");
+        assert_eq!(format_metric_value(3.140000), "3.14");
+        assert_eq!(format_metric_value(0.0), "0");
+        assert_eq!(format_metric_value(f64::INFINITY), "inf");
     }
 }

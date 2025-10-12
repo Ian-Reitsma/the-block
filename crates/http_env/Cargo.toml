@@ -5,4 +5,10 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
+diagnostics = { path = "../diagnostics" }
 httpd = { path = "../httpd" }
+
+[dev-dependencies]
+base64_fp = { path = "../base64_fp" }
+crypto_suite = { path = "../crypto_suite" }
+rand = { path = "../rand" }
