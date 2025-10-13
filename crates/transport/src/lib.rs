@@ -12,7 +12,16 @@ use std::time::Duration;
 use concurrency::Bytes;
 
 #[cfg(any(feature = "quinn", feature = "s2n-quic"))]
-use foundation_tls::{OcspResponse, SessionResumeStore, TrustAnchorStore};
+mod session;
+
+#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+pub use session::SessionResumeStore;
+
+#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+use foundation_tls::{OcspResponse, TrustAnchorStore};
+
+#[cfg(feature = "s2n-quic")]
+mod cert_parser;
 
 #[cfg(feature = "s2n-quic")]
 use crypto_suite::signatures::ed25519::SigningKey;

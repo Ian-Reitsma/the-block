@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod json;
+pub mod tempfile;
 pub use error::{StorageError, StorageResult};
 
 pub mod inhouse_engine;

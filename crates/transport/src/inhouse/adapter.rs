@@ -86,6 +86,15 @@ impl Adapter {
     }
 
     pub async fn listen(&self, addr: SocketAddr) -> DiagResult<(Endpoint, Certificate)> {
+        let certificate = Certificate::generate()?;
+        self.listen_with_certificate(addr, certificate).await
+    }
+
+    pub async fn listen_with_certificate(
+        &self,
+        addr: SocketAddr,
+        certificate: Certificate,
+    ) -> DiagResult<(Endpoint, Certificate)> {
         {
             let mut endpoints = self.inner.endpoints.lock().unwrap();
             if let Some(existing) = endpoints.get(&addr) {
@@ -96,7 +105,6 @@ impl Adapter {
             }
         }
 
-        let certificate = Certificate::generate()?;
         let socket = UdpSocket::bind(addr)
             .await
             .map_err(|err| anyhow!("bind udp socket: {err}"))?;

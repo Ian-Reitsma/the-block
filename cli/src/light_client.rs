@@ -9,13 +9,13 @@ use crate::parse_utils::{
 };
 use crate::rpc::RpcClient;
 use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
-use anyhow::{anyhow, Context, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
 use crypto_suite::signatures::ed25519::SigningKey;
+use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::json::Value;
 use foundation_serialization::{Deserialize, Serialize};
 use light_client::{self, SyncOptions};

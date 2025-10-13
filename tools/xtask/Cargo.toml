@@ -6,7 +6,7 @@ build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
-anyhow = "1"
+diagnostics = { path = "../../crates/diagnostics" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 
 [[bin]]
@@ -15,8 +15,6 @@ path = "../refcheck.rs"
 
 [dev-dependencies]
 sys = { path = "../../crates/sys" }
-assert_cmd = "2"
-predicates = "3"
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

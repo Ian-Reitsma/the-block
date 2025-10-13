@@ -7,6 +7,5 @@ edition = "2021"
 base64_fp = { path = "../base64_fp" }
 crypto_suite = { path = "../crypto_suite" }
 foundation_time = { path = "../foundation_time" }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
 thiserror = { path = "../thiserror" }
 rand = { path = "../rand" }

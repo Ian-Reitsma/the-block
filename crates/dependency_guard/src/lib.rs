@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::env;
 use std::path::Path;
 use std::process::Command;
+
+mod json;
 
 /// Error returned when the dependency guard fails.
 #[derive(Debug)]
@@ -120,6 +122,114 @@ fn run_cargo_metadata(manifest_path: &Path) -> Result<String, GuardError> {
 }
 
 fn detect_third_party(metadata: &str) -> BTreeSet<String> {
+    detect_third_party_precise(metadata).unwrap_or_else(|| detect_third_party_naive(metadata))
+}
+
+fn detect_third_party_precise(metadata: &str) -> Option<BTreeSet<String>> {
+    use json::Value;
+
+    let root_value = json::value_from_slice(metadata.as_bytes()).ok()?;
+    let mut root_map = match root_value {
+        Value::Object(map) => map,
+        _ => return None,
+    };
+
+    let packages_value = root_map.remove("packages")?;
+    let resolve_value = root_map.remove("resolve")?;
+
+    let packages = match packages_value {
+        Value::Array(items) => items,
+        _ => return None,
+    };
+
+    let mut package_sources: HashMap<String, (String, Option<String>)> = HashMap::new();
+    for pkg in packages {
+        let mut pkg_map = match pkg {
+            Value::Object(map) => map,
+            _ => continue,
+        };
+        let id = match pkg_map.remove("id") {
+            Some(Value::String(id)) => id,
+            _ => continue,
+        };
+        let name = match pkg_map.remove("name") {
+            Some(Value::String(name)) => name,
+            _ => continue,
+        };
+        let source = match pkg_map.remove("source") {
+            Some(Value::String(src)) => Some(src),
+            _ => None,
+        };
+        package_sources.insert(id, (name, source));
+    }
+
+    let mut resolve_map = match resolve_value {
+        Value::Object(map) => map,
+        _ => return None,
+    };
+    let root_id = match resolve_map.remove("root") {
+        Some(Value::String(root)) => root,
+        _ => return None,
+    };
+    let nodes = match resolve_map.remove("nodes") {
+        Some(Value::Array(nodes)) => nodes,
+        _ => return None,
+    };
+
+    let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+    for node in nodes {
+        let mut node_map = match node {
+            Value::Object(map) => map,
+            _ => continue,
+        };
+        let id = match node_map.remove("id") {
+            Some(Value::String(id)) => id,
+            _ => continue,
+        };
+        let deps_value = node_map.remove("dependencies");
+        let deps_iter = match deps_value {
+            Some(Value::Array(values)) => values.into_iter(),
+            _ => Vec::new().into_iter(),
+        };
+        let mut deps = Vec::new();
+        for dep in deps_iter {
+            if let Value::String(dep_id) = dep {
+                deps.push(dep_id);
+            }
+        }
+        adjacency.insert(id, deps);
+    }
+
+    let mut reachable = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back(root_id.clone());
+    while let Some(pkg) = queue.pop_front() {
+        if !reachable.insert(pkg.clone()) {
+            continue;
+        }
+        if let Some(deps) = adjacency.get(&pkg) {
+            for dep in deps {
+                queue.push_back(dep.clone());
+            }
+        }
+    }
+
+    let mut offenders = BTreeSet::new();
+    for pkg_id in reachable {
+        if pkg_id == root_id {
+            continue;
+        }
+        if let Some((name, Some(source))) = package_sources.get(&pkg_id) {
+            if source.starts_with("registry+") || source.starts_with("git+") {
+                offenders.insert(name.clone());
+            }
+        }
+    }
+
+    Some(offenders)
+}
+
+fn detect_third_party_naive(metadata: &str) -> BTreeSet<String> {
     let mut offenders = BTreeSet::new();
     let mut search_start = 0usize;
     const SOURCE_MARKER: &str = "\"source\":";

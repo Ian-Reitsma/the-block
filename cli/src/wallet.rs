@@ -4,13 +4,13 @@ use crate::codec_helpers::{json_to_string, json_to_string_pretty};
 use crate::parse_utils::{parse_required, parse_u64_required, require_string, take_string};
 use crate::rpc::{RpcClient, WalletQosError, WalletQosEvent};
 use crate::tx::{generate_keypair, sign_tx, FeeLane, RawTxPayload};
-use anyhow::{anyhow, Context, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
 use crypto::session::SessionKey;
+use diagnostics::{anyhow, Context, Result};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::{binary, Serialize};
 use std::collections::HashMap;

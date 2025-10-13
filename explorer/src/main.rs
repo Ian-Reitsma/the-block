@@ -1,11 +1,14 @@
-use anyhow::Context;
+use diagnostics::{
+    anyhow::{self, Result},
+    Context,
+};
 use explorer::{router, Explorer, ExplorerHttpState};
 use http_env::server_tls_from_env;
 use httpd::{serve, serve_tls, ServerConfig};
 use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::Path, sync::Arc};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     runtime::block_on(async {
         let args: Vec<String> = env::args().collect();
         let db_path = args.get(1).cloned().unwrap_or_else(|| "explorer.db".into());
@@ -30,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         let config = ServerConfig::default();
 
         let tls = server_tls_from_env("TB_EXPLORER_TLS", Some("EXPLORER"))
-            .map_err(|err| anyhow::Error::new(err))
+            .map_err(anyhow::Error::from_error)
             .context("load explorer TLS configuration")?;
         if let Some(result) = tls {
             if result.legacy_env {

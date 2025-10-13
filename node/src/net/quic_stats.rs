@@ -1,3 +1,5 @@
+#![cfg(feature = "quinn")]
+
 use concurrency::Lazy;
 use std::collections::HashMap;
 use std::net::SocketAddr;

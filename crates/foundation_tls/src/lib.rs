@@ -12,9 +12,7 @@ use foundation_time::{Duration, UtcDateTime};
 use rand::rngs::OsRng;
 use thiserror::Error;
 
-pub use store::{
-    OcspError, OcspResponse, SessionResumeStore, TrustAnchor, TrustAnchorError, TrustAnchorStore,
-};
+pub use store::{OcspError, OcspResponse, TrustAnchor, TrustAnchorError, TrustAnchorStore};
 
 #[derive(Debug, Error)]
 pub enum CertificateError {

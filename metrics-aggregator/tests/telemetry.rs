@@ -136,3 +136,30 @@ fn telemetry_rejects_schema_drift() {
         );
     });
 }
+
+#[test]
+fn runtime_bridge_updates_foundation_metrics() {
+    run_async(async {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        foundation_metrics::histogram!("runtime_spawn_latency_seconds", 0.05);
+        foundation_metrics::gauge!("runtime_pending_tasks", 4.0);
+
+        let resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = String::from_utf8(resp.body().to_vec()).unwrap();
+        assert!(
+            body.contains("runtime_spawn_latency_seconds_bucket"),
+            "metrics payload missing runtime spawn histogram: {body}"
+        );
+        assert!(
+            body.contains("runtime_pending_tasks 4"),
+            "metrics payload missing runtime pending gauge: {body}"
+        );
+    });
+}

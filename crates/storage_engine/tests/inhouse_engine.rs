@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use storage_engine::tempfile;
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
-use sys::tempfile;
 
 fn temp_dir(name: &str) -> PathBuf {
     let mut base = std::env::temp_dir();
@@ -26,7 +26,7 @@ fn cleanup(path: &Path) {
 
 #[test]
 fn loads_legacy_manifest_and_wal_fixture() {
-    let tempdir = sys::tempfile::tempdir().expect("tempdir");
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let root = tempdir.path();
     let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_cf");
 

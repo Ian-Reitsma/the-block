@@ -1,10 +1,10 @@
-use anyhow::{anyhow, bail, Context, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use diagnostics::{anyhow, bail, Context, Result, TbError};
 use foundation_serialization::json;
 use std::io::{self, Write};
 use std::process::Command as StdCommand;
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
             print_help_for_path(&command, &path);
             return Ok(());
         }
-        Err(err) => return Err(err.into()),
+        Err(err) => return Err(TbError::from_error(err)),
     };
 
     match matches.subcommand() {

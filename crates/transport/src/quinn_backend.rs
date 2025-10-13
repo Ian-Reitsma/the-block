@@ -3,15 +3,14 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use crate::{ProviderCapability, RetryPolicy};
-use concurrency::Bytes;
-use dashmap::DashMap;
+use crate::{ProviderCapability, RetryPolicy, SessionResumeStore};
+use concurrency::{Bytes, DashMap};
 use diagnostics::{anyhow, Result, TbError};
 use foundation_lazy::sync::{Lazy, OnceCell};
 use foundation_time::{Duration as TimeDuration, UtcDateTime};
 use foundation_tls::{
     generate_self_signed_ed25519, OcspResponse, RotationPolicy, SelfSignedCertParams,
-    SessionResumeStore, TrustAnchorStore,
+    TrustAnchorStore,
 };
 pub use quinn::{Connection, Endpoint};
 use rand::Rng;

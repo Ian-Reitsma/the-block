@@ -7,9 +7,6 @@ use std::string::FromUtf8Error;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-#[cfg(feature = "telemetry")]
-use metrics::{histogram, increment_counter};
-
 pub mod inhouse;
 pub mod macros;
 pub mod profiles;
@@ -392,7 +389,7 @@ fn record_success(codec: Codec, direction: Direction, size: usize) {
     let codec_label = codec.codec_label();
     let direction_label = direction.as_str();
     if let Some(profile) = codec.profile_label() {
-        histogram!(
+        foundation_metrics::histogram!(
             "codec_payload_bytes",
             size as f64,
             "codec" => codec_label,
@@ -400,7 +397,7 @@ fn record_success(codec: Codec, direction: Direction, size: usize) {
             "profile" => profile,
         );
     } else {
-        histogram!(
+        foundation_metrics::histogram!(
             "codec_payload_bytes",
             size as f64,
             "codec" => codec_label,
@@ -414,14 +411,14 @@ fn record_failure(codec: Codec, direction: Direction) {
     let codec_label = codec.codec_label();
     let direction_label = direction.as_str();
     if let Some(profile) = codec.profile_label() {
-        increment_counter!(
+        foundation_metrics::increment_counter!(
             "codec_operation_fail_total",
             "codec" => codec_label,
             "direction" => direction_label,
             "profile" => profile,
         );
     } else {
-        increment_counter!(
+        foundation_metrics::increment_counter!(
             "codec_operation_fail_total",
             "codec" => codec_label,
             "direction" => direction_label,

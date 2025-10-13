@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use diagnostics::{Context, Result};
 use foundation_serialization::Serialize;
 use std::path::Path;
 use the_block::light_client::proof_tracker::{ProofTracker, ReceiptPage};

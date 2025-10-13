@@ -473,6 +473,9 @@ impl CounterVec {
                 self.try_with_label_values(values)?;
                 self.handle_for_label_values(values)
             }
+            Err(err @ MetricError::InconsistentCardinality { .. }) => {
+                Ok(IntCounterHandle::new(Err(err)))
+            }
             Err(err) => Err(err),
         }
     }
@@ -832,6 +835,9 @@ impl IntGaugeVec {
                 self.try_with_label_values(values)?;
                 self.handle_for_label_values(values)
             }
+            Err(err @ MetricError::InconsistentCardinality { .. }) => {
+                Ok(IntGaugeHandle::new(Err(err)))
+            }
             Err(err) => Err(err),
         }
     }
@@ -983,6 +989,9 @@ impl GaugeVec {
             Err(MetricError::MissingLabelSet) => {
                 self.try_with_label_values(values)?;
                 self.handle_for_label_values(values)
+            }
+            Err(err @ MetricError::InconsistentCardinality { .. }) => {
+                Ok(GaugeHandle::new(Err(err)))
             }
             Err(err) => Err(err),
         }
@@ -1301,6 +1310,9 @@ impl HistogramVec {
             Err(MetricError::MissingLabelSet) => {
                 self.try_with_label_values(values)?;
                 self.handle_for_label_values(values)
+            }
+            Err(err @ MetricError::InconsistentCardinality { .. }) => {
+                Ok(HistogramHandle::new(Err(err)))
             }
             Err(err) => Err(err),
         }

@@ -6,6 +6,7 @@ build = "build.rs"
 
 [dependencies]
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_metrics = { path = "../crates/foundation_metrics" }
 http_env = { path = "../crates/http_env" }
 httpd = { path = "../crates/httpd" }
 

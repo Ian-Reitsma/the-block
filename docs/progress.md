@@ -1,25 +1,10 @@
 # Project Progress Snapshot
-> **Review (2025-10-11):** Hardened the `http_env` helper crate so every CLI,
-> node, aggregator, explorer, probe, and example binary shares a single TLS
-> loader with sink-backed `TLS_ENV_WARNING` events (plus
-> `register_tls_warning_sink`/`install_tls_warning_observer` hooks), added integration coverage that spins
-> up the in-house HTTPS server to verify legacy prefix fallbacks and round-trip
-> CLI-converted identities, shipped the `contract tls convert` and enhanced
-> `contract tls stage` commands (canonical `--env-file` exports, service-specific
-> environment-prefix overrides, PEM chain resilience, manifest generation with
-> renewal reminders) to translate PEM identities into JSON and fan them out to
-> per-service directories, refreshed the TLS env plumbing across wallet remote
-> signer flows, jurisdiction tooling, metrics uploads, explorer/indexer helpers,
-> and examples, reran the dependency snapshot to capture the new crate alongside
-> the retired ad-hoc TLS wrappers, wired the shared sink into the telemetry
-> registry via `TLS_ENV_WARNING_TOTAL{prefix,code}` and
-> `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` (with aggregator rehydration
-> from node gauges and the `AGGREGATOR_TLS_WARNING_RETENTION_SECS` override), and replaced the
-> Python dashboard helper with the in-house `monitoring` snapshot binary so
-> observability stays entirely first party.
+> **Review (2025-10-13):** Metrics aggregation now installs a first-party `AggregatorRecorder` so every `foundation_metrics` macro emitted by runtime backends, TLS sinks, and CLI tools flows back into the Prometheus handles without reintroducing third-party crates. Monitoring utilities gained a lightweight `MonitoringRecorder` that keeps snapshot success/error counters inside the facade, letting the `snapshot` CLI report health without depending on the retired `metrics` stack.
+> **Review (2025-10-12):** Storage engine manifests and WAL snapshots now round-trip through the new in-house JSON codec and temp-file harness, eliminating the crate’s `foundation_serialization`/`serde`/`sys::tempfile` dependencies and adding regression tests for malformed input, unicode escapes, byte-array coercions, and persist failures. The diagnostics crate no longer links the SQLite facade, `dependency_guard` scopes `cargo metadata` to the requesting crate before enforcing policy, and the dependency inventory snapshots were regenerated to reflect the leaner workspace DAG. Node telemetry now rides on the first-party `foundation_metrics` recorder, bridging runtime spawn-latency histograms, pending-task gauges, and wallet/CLI counters into the existing telemetry surfaces without touching the retired `metrics` crate.
+> **Prior update (2025-10-11):** FIRST_PARTY_ONLY transport builds drop the s2n feature, the in-house QUIC certificate store persists DER material with corruption pruning and relocation-friendly overrides, and `transport_quic` routes provider selection through the first-party adapter while surfacing provider identifiers to gossip handshakes. CLI, explorer, wallet, and support tooling now emit `diagnostics::TbError` instead of `anyhow`, the simulation harness writes dashboards via a first-party CSV emitter, and the remote signer trace IDs derive from an in-house generator so the workspace drops the `uuid` crate entirely. Follow-up work removes the `assert_cmd` / `predicates` dev stack from the `xtask` lint harness in favour of standard library process helpers, adds regression coverage that locks the new trace ID format, and refreshes `docs/dependency_inventory.{md,json}` plus the violations snapshot to excise `anyhow`, `csv`, `uuid`, `assert_cmd`, and `predicates` from the manifest.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
-> crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are
-> live with governance overrides enforced (2025-10-11); node, telemetry, and
+> crypto_suite, codec, serialization, SQLite, diagnostics, TUI, TLS, and HTTP env facades are
+> live with governance overrides enforced (2025-10-12); node, telemetry, and
 > harness tooling now default to the first-party binary codec.
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
@@ -43,8 +28,42 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-10-11T18:41:19Z`)*: 0 strategic crates, 1 replaceable crate, and 254 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot records the new `http_env` crate while confirming that TLS migrations removed the last `native-tls` consumers.
+- **Current inventory** *(generated at `2025-10-12T16:05:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers and the diagnostics crate’s SQLite-free manifest.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Latest migrations (2025-10-13)**: The storage engine now serializes
+  manifests/WALs via `crates/storage_engine::json` and isolates temp-dir usage
+  behind `crates/storage_engine::tempfile`, removing `foundation_serialization`,
+  `serde`, and `sys::tempfile` from the crate and adding regression coverage for
+  malformed values and persist failures. The diagnostics crate dropped its
+  `foundation_sqlite` dependency, `dependency_guard` scopes `cargo metadata` to
+  the requesting crate before enforcing policy, and QUIC transport caches now
+  ride on the first-party `concurrency::DashMap`, removing the external
+  `dashmap` crate. `foundation_tls` builds without `rustls` (session caching
+  lives beside the providers in `crates/transport`), and the s2n backend
+  verifies certificates through the new in-house DER parser
+  (`crates/transport/src/cert_parser.rs`), replacing `x509-parser` entirely.
+- ✅ `metrics-aggregator` now installs the in-house `AggregatorRecorder` so
+  `foundation_metrics` macros emitted across runtime, TLS, and tooling sinks
+  flow back into the Prometheus registry without regressing integer TLS
+  fingerprints or spawn-latency histograms.
+- ✅ The monitoring snapshot tooling installs a lightweight `MonitoringRecorder`
+  that tracks success/error totals through the same facade, allowing the
+  `snapshot` CLI to report health without the retired third-party `metrics`
+  crate.
+- ✅ Error handling across CLI, explorer, wallet, and tooling now routes through
+  `diagnostics`, removing the third-party `anyhow` facade while keeping context
+  helpers intact.
+- ✅ `tb-sim` exports CSV dashboards via a small in-house writer, removing the
+  external `csv` crate without changing downstream automation inputs.
+- ✅ Wallet remote signer trace identifiers now come from a first-party
+  generator so the workspace no longer links the crates.io `uuid` crate.
+- FIRST_PARTY_ONLY transport builds now exclude the s2n feature; the in-house
+  certificate store persists DER blobs and `node::net::transport_quic` selects
+  providers dynamically, keeping QUIC handshakes on first-party code paths even
+  when Quinn/s2n are unavailable.
+- Target-specific dependency gating now disables the Quinn feature whenever
+  `FIRST_PARTY_ONLY` is set, letting the transport crate compile with only the
+  in-house and s2n adapters while keeping standard builds on Quinn+s2n.
 - **Next refresh**: Run `./scripts/dependency_snapshot.sh` on **2025-10-13** once the remaining tooling migrations (monitoring dashboards, remote signer) land to capture the cleaned DAG and refresh these metrics.
 - **In-house scaffolding**: Bootstrapped the `diagnostics` error/logging facade and the `concurrency` primitive crate to replace third-party `anyhow`/`tracing`/`log`/`dashmap` usages; `dependency_registry` is now wired to the new stack while we phase in the remaining migrations. Added a workspace-local `rand` crate over the stubbed `rand_core` module so all binaries compile against first-party randomness helpers, routed CLI/light-client/transport home-directory lookups through the new `sys::paths` adapters to remove the `dirs` dependency, introduced the `foundation_sqlite` facade so optional SQLite tooling now compiles against first-party parameter/value handling before the native engine ships, landed `foundation_time` so S3 signing, storage repair logs, and QUIC certificate rotation rely on our in-house timestamp helpers, delivered `foundation_unicode` so identity tooling no longer depends on ICU, shipped `foundation_tls`/`foundation_tui` so QUIC certificates and CLI colour output are fully first party, rewrote `tools/xtask` to call the git CLI directly so the `git2`/`url`/`idna` stack disappears from the workspace DAG, and added the `http_env` crate to centralise TLS environment parsing for clients while emitting component-scoped fallbacks.
 - **TLS automation**: Added the `tls-manifest-guard` helper and wired it into the systemd units so manifests, environment exports, and renewal windows are validated before reloads. Metrics ingestion now forwards `tls_env_warning_total{prefix,code}` deltas from nodes into the aggregator, stamps `tls_env_warning_last_seen_seconds{prefix,code}` from the shared sink, rehydrates warning freshness from node-exported gauges after restarts, and respects the configurable `AGGREGATOR_TLS_WARNING_RETENTION_SECS` window. Nested telemetry encodings are covered by integration tests, and fleet dashboards (including the auto-generated templates) ship panels plus a `TlsEnvWarningBurst` alert sourcing the same counter/gauge pair. The guard now carries fixture-driven tests for stale reminders and env exports to block regressions in CI, emits machine-readable summaries with `--report <path>`, enforces that staged files live under the declared directory and that env exports use the manifest prefix, and warns when the env file carries extra prefix-matching exports. The aggregator exposes `/tls/warnings/latest` so operators can pull structured `{prefix,code}` diagnostics without scraping logs and ships an end-to-end test that spins up the HTTP service to prove sink fan-out and peer ingests both update `/metrics` and `/tls/warnings/latest`. Fingerprint gauges (`tls_env_warning_detail_fingerprint{prefix,code}`, `tls_env_warning_variables_fingerprint{prefix,code}`) and counters (`tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}`, `tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}`) now hash warning payloads so dashboards correlate variants without free-form detail strings, aggregator snapshots track per-fingerprint counts, `tls_env_warning_events_total{prefix,code,origin}` exposes diagnostics-versus-peer deltas, the shared `crates/tls_warning` module unifies BLAKE3 hashing for every consumer, and `contract telemetry tls-warnings` adds `--probe-detail` / `--probe-variables` helpers for local fingerprint calculations.
@@ -95,6 +114,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Runtime-owned TCP/UDP reactor now backs the node RPC client/server plumbing (`crates/runtime/src/net.rs`, `node/src/rpc/client.rs`) and the gateway/status HTTP services. Buffered IO helpers live in `crates/runtime/src/io.rs` with integration coverage in `crates/runtime/tests/net.rs`.
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, provider introspection, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `crates/transport/src/lib.rs`, `crates/transport/src/quinn_backend.rs`, `crates/transport/src/s2n_backend.rs`, and `docs/quic.md`, with telemetry via `quic_cert_rotation_total`, `quic_provider_connect_total{provider}`, and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
+- In-house transport cache honours `TransportConfig.certificate_cache` overrides,
+  prunes corrupt DER blobs, and ships a guard in `node/tests/net_quic.rs` that
+  asserts handshake payload echoing and DER persistence across restarts.
 - First-party UDP + TLS handshake for the in-house provider lives under `crates/transport/src/inhouse/` with message encoding, certificate generation, retransmission/backoff scheduling, TTL-governed handshake tables, and JSON-backed advertisement storage that now persists Ed25519 verifying keys; end-to-end tests in `crates/transport/tests/inhouse.rs` exercise handshake success, certificate mismatches, rotation persistence, and the retry flow without Quinn/s2n dependencies.
 - Default transport configuration now promotes the in-house provider whenever it is compiled (`crates/transport/src/lib.rs`, `node/Cargo.toml`), ensuring new nodes boot on the first-party adapter while keeping Quinn/s2n available for parity comparisons.
 - Overlay abstraction via `crates/p2p_overlay` with in-house and stub backends, configuration toggles, CLI overrides, JSON-backed persistence, integration tests exercising the in-house backend, telemetry gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts) exposed through `node/src/telemetry.rs`, `cli/src/net.rs`, and `node/src/rpc/peer.rs`, and base58-check peer IDs wired through CLI/RPC/gateway diagnostics, including the latest fanout set surfaced in `net gossip_status`.

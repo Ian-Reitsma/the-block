@@ -4,8 +4,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::tempfile::{self, NamedTempFile, TempDir};
 use base64_fp::{decode_url_no_pad, encode_url_no_pad};
-use sys::tempfile::{NamedTempFile, TempDir};
 
 use crate::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,
@@ -341,7 +341,7 @@ impl KeyValueBatch for MemoryBatch {
 
 impl Default for MemoryEngine {
     fn default() -> Self {
-        let dir = sys::tempfile::tempdir().expect("tmpdb");
+        let dir = tempfile::tempdir().expect("tmpdb");
         Self::open_from_tempdir(dir).expect("open temp memory engine")
     }
 }
@@ -495,8 +495,8 @@ impl<'a> MapDecoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tempfile::tempdir;
     use crate::KeyValue;
-    use sys::tempfile::tempdir;
 
     #[test]
     fn persists_across_reopen() {

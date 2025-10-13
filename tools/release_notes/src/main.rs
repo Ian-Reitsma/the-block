@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
 };
+use diagnostics::anyhow::{anyhow, Result};
 
 use release_notes::{
     format_allowed, format_change_summary, kind_label, load_history, summarise, summary_to_value,

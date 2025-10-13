@@ -13,6 +13,8 @@ use diagnostics::internal::{
     install_tls_env_warning_subscriber, SubscriberGuard as DiagnosticsSubscriberGuard,
 };
 #[cfg(feature = "telemetry")]
+use foundation_metrics::{self, Recorder};
+#[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
 use httpd::{BlockingClient, Method};
@@ -505,8 +507,157 @@ fn push_metric(
 }
 
 #[cfg(feature = "telemetry")]
+fn install_foundation_metrics_recorder() {
+    static RECORDER_INSTALL: Once = Once::new();
+    RECORDER_INSTALL.call_once(|| {
+        if let Err(err) = foundation_metrics::install_recorder(NodeMetricsRecorder) {
+            diagnostics::tracing::warn!(
+                reason = %err,
+                "foundation_metrics_recorder_install_failed"
+            );
+        }
+    });
+}
+
+#[cfg(feature = "telemetry")]
+fn label_value<'a>(labels: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    labels
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+#[cfg(feature = "telemetry")]
+fn counter_delta(value: f64) -> u64 {
+    if !value.is_finite() {
+        0
+    } else if value <= 0.0 {
+        0
+    } else {
+        value.round() as u64
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn gauge_value(value: f64) -> i64 {
+    if !value.is_finite() {
+        0
+    } else {
+        value.round() as i64
+    }
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Debug)]
+struct NodeMetricsRecorder;
+
+#[cfg(feature = "telemetry")]
+impl Recorder for NodeMetricsRecorder {
+    fn increment_counter(&self, name: &str, value: f64, labels: &[(String, String)]) {
+        match name {
+            "codec_operation_fail_total" => {
+                let Some(codec) = label_value(labels, "codec") else {
+                    return;
+                };
+                let Some(direction) = label_value(labels, "direction") else {
+                    return;
+                };
+                let profile = label_value(labels, "profile").unwrap_or(CODEC_NONE_PROFILE);
+                let delta = counter_delta(value);
+                if delta == 0 {
+                    return;
+                }
+                let version = codec::VERSION;
+                match direction {
+                    "serialize" => {
+                        if let Ok(counter) = CODEC_SERIALIZE_FAIL_TOTAL
+                            .ensure_handle_for_label_values(&[codec, profile, version])
+                        {
+                            counter.inc_by(delta);
+                        }
+                    }
+                    "deserialize" => {
+                        if let Ok(counter) = CODEC_DESERIALIZE_FAIL_TOTAL
+                            .ensure_handle_for_label_values(&[codec, profile, version])
+                        {
+                            counter.inc_by(delta);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "remote_signer_request_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    REMOTE_SIGNER_REQUEST_TOTAL.inc_by(delta);
+                }
+            }
+            "remote_signer_success_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    REMOTE_SIGNER_SUCCESS_TOTAL.inc_by(delta);
+                }
+            }
+            "remote_signer_key_rotation_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    REMOTE_SIGNER_KEY_ROTATION_TOTAL.inc_by(delta);
+                }
+            }
+            "snapshot_restore_fail_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    SNAPSHOT_RESTORE_FAIL_TOTAL.inc_by(delta);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_histogram(&self, name: &str, value: f64, labels: &[(String, String)]) {
+        if !value.is_finite() || value < 0.0 {
+            return;
+        }
+        match name {
+            "codec_payload_bytes" => {
+                let Some(codec) = label_value(labels, "codec") else {
+                    return;
+                };
+                let Some(direction) = label_value(labels, "direction") else {
+                    return;
+                };
+                let profile = label_value(labels, "profile").unwrap_or(CODEC_NONE_PROFILE);
+                let version = codec::VERSION;
+                if let Ok(hist) = CODEC_PAYLOAD_BYTES
+                    .ensure_handle_for_label_values(&[codec, direction, profile, version])
+                {
+                    hist.observe(value);
+                }
+            }
+            "remote_signer_latency_seconds" => {
+                REMOTE_SIGNER_LATENCY_SECONDS.observe(value);
+            }
+            "runtime_spawn_latency_seconds" => {
+                RUNTIME_SPAWN_LATENCY_SECONDS.observe(value);
+            }
+            _ => {}
+        }
+    }
+
+    fn record_gauge(&self, name: &str, value: f64, _labels: &[(String, String)]) {
+        match name {
+            "runtime_pending_tasks" => {
+                RUNTIME_PENDING_TASKS.set(gauge_value(value));
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(feature = "telemetry")]
 pub fn init_wrapper_metrics() {
     WRAPPER_INIT.call_once(|| {
+        install_foundation_metrics_recorder();
         if let Err(err) = codec::install_metrics_hook(codec_metrics_hook) {
             diagnostics::tracing::warn!(reason = %err, "codec_metrics_hook_install_failed");
         }
@@ -4522,6 +4673,32 @@ pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static RUNTIME_SPAWN_LATENCY_SECONDS: Lazy<HistogramHandle> = Lazy::new(|| {
+    let buckets = telemetry::exponential_buckets(0.0005, 2.0, 18);
+    let opts = HistogramOpts::new(
+        "runtime_spawn_latency_seconds",
+        "Latency observed when spawning tasks on the runtime",
+    )
+    .buckets(buckets);
+    let hist = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(hist.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    hist.handle()
+});
+
+pub static RUNTIME_PENDING_TASKS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let gauge = IntGauge::new(
+        "runtime_pending_tasks",
+        "Pending async tasks managed by the runtime",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    gauge.handle()
 });
 
 pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {

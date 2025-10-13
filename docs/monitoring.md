@@ -72,6 +72,12 @@ native script, emitting `monitoring/output/index.html` alongside the metrics
 specification. Exit codes reflect network status so automation can alert when a
 fetch fails or the endpoint returns a non-success HTTP status.
 
+The CLI installs a first-party `MonitoringRecorder` before scraping telemetry.
+It increments `monitoring_snapshot_success_total` on clean runs and
+`monitoring_snapshot_error_total` when a fetch fails, exposing structured
+counters through the `foundation_metrics` facade so automation can poll recorder
+state instead of parsing stderr.
+
 Remote signer integrations emit `remote_signer_request_total`,
 `remote_signer_success_total`, and `remote_signer_error_total{reason}` under the
 telemetry feature flag, allowing dashboards to correlate multisig activity with
@@ -145,7 +151,11 @@ registry, rendering a Prometheus-compatible text payload without linking the
 third-party `prometheus` crate. Gauges such as `cluster_peer_active_total` and
 counters like `aggregator_ingest_total`, `aggregator_retention_pruned_total`,
 and `bulk_export_total` are registered inside the in-house registry and served
-at `/metrics`. The shared `http_env` sink feeds both the
+at `/metrics`. The service installs the shared
+`AggregatorRecorder` during startup so every `foundation_metrics` macro emitted
+by runtime backends, TLS sinks, or tooling bridges back into those Prometheus
+handles while preserving integer TLS fingerprint gauges and the runtime
+spawn-latency histogram/pending-task gauge. The shared `http_env` sink feeds both the
 `tls_env_warning_total{prefix,code}` counter and the
 `tls_env_warning_last_seen_seconds{prefix,code}` gauge, and now publishes BLAKE3
 fingerprint gauges/counters (`tls_env_warning_detail_fingerprint{prefix,code}`,

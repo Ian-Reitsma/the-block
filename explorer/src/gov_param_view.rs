@@ -1,5 +1,5 @@
 use crate::decode_json;
-use anyhow::{Context, Result};
+use diagnostics::{Context, Result};
 use foundation_serialization::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ pub fn fee_floor_policy_history(path: impl AsRef<Path>) -> Result<Vec<FeeFloorPo
     let bytes =
         std::fs::read(&history_file).with_context(|| format!("read {}", history_file.display()))?;
     let mut records: Vec<FeeFloorPolicyRecord> =
-        decode_json(&bytes).with_context(|| "decode fee floor policy history")?;
+        decode_json(&bytes).with_context(|| "decode fee floor policy history".to_string())?;
     records.sort_by_key(|rec| rec.epoch);
     Ok(records)
 }
@@ -52,7 +52,7 @@ pub fn dependency_policy_history(path: impl AsRef<Path>) -> Result<Vec<Dependenc
     let bytes =
         std::fs::read(&history_file).with_context(|| format!("read {}", history_file.display()))?;
     let mut records: Vec<DependencyPolicyRecord> =
-        decode_json(&bytes).with_context(|| "decode dependency policy history")?;
+        decode_json(&bytes).with_context(|| "decode dependency policy history".to_string())?;
     records.sort_by_key(|rec| rec.epoch);
     Ok(records)
 }

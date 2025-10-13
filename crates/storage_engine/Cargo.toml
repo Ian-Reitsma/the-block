@@ -9,9 +9,6 @@ default = []
 
 [dependencies]
 base64_fp = { path = "../base64_fp" }
-diagnostics = { path = "../diagnostics" }
-foundation_serialization = { path = "../foundation_serialization" }
-sys = { path = "../sys" }
 
 [build-dependencies]
 dependency_guard = { path = "../dependency_guard" }

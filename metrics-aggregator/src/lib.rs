@@ -3,11 +3,14 @@ use diagnostics::{
     internal::{install_tls_env_warning_subscriber, SubscriberGuard as LoggingSubscriberGuard},
     tracing::{info, warn},
 };
+use foundation_metrics::{gauge, increment_counter, Recorder, RecorderInstallError};
 use http_env::{http_client as env_http_client, register_tls_warning_sink, TlsEnvWarningSinkGuard};
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
-use runtime::telemetry::{Counter, CounterVec, Gauge, GaugeVec, IntGaugeVec, Opts, Registry};
+use runtime::telemetry::{
+    Counter, CounterVec, Gauge, GaugeVec, Histogram, HistogramOpts, IntGaugeVec, Opts, Registry,
+};
 use runtime::{spawn, spawn_blocking};
 use std::convert::TryFrom;
 use std::error::Error as StdError;
@@ -76,6 +79,40 @@ const METRICS_CF: &str = "peer_metrics";
 const COUNTER_EPSILON: f64 = 1e-6;
 const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
+
+const METRIC_AGGREGATOR_INGEST_TOTAL: &str = "aggregator_ingest_total";
+const METRIC_BULK_EXPORT_TOTAL: &str = "bulk_export_total";
+const METRIC_CLUSTER_PEER_ACTIVE_TOTAL: &str = "cluster_peer_active_total";
+const METRIC_AGGREGATOR_REPLICATION_LAG: &str = "aggregator_replication_lag_seconds";
+const METRIC_AGGREGATOR_RETENTION_PRUNED_TOTAL: &str = "aggregator_retention_pruned_total";
+const METRIC_TELEMETRY_INGEST_TOTAL: &str = "aggregator_telemetry_ingest_total";
+const METRIC_TELEMETRY_SCHEMA_ERROR_TOTAL: &str = "aggregator_telemetry_schema_error_total";
+const METRIC_TLS_ENV_WARNING_TOTAL: &str = "tls_env_warning_total";
+const METRIC_TLS_ENV_WARNING_EVENTS_TOTAL: &str = "tls_env_warning_events_total";
+const METRIC_TLS_ENV_WARNING_LAST_SEEN: &str = "tls_env_warning_last_seen_seconds";
+const METRIC_TLS_ENV_WARNING_RETENTION_SECONDS: &str = "tls_env_warning_retention_seconds";
+const METRIC_TLS_ENV_WARNING_ACTIVE_SNAPSHOTS: &str = "tls_env_warning_active_snapshots";
+const METRIC_TLS_ENV_WARNING_STALE_SNAPSHOTS: &str = "tls_env_warning_stale_snapshots";
+const METRIC_TLS_ENV_WARNING_MOST_RECENT_LAST_SEEN: &str =
+    "tls_env_warning_most_recent_last_seen_seconds";
+const METRIC_TLS_ENV_WARNING_LEAST_RECENT_LAST_SEEN: &str =
+    "tls_env_warning_least_recent_last_seen_seconds";
+const METRIC_TLS_ENV_WARNING_DETAIL_FINGERPRINT: &str = "tls_env_warning_detail_fingerprint";
+const METRIC_TLS_ENV_WARNING_VARIABLES_FINGERPRINT: &str = "tls_env_warning_variables_fingerprint";
+const METRIC_TLS_ENV_WARNING_DETAIL_FINGERPRINT_TOTAL: &str =
+    "tls_env_warning_detail_fingerprint_total";
+const METRIC_TLS_ENV_WARNING_VARIABLES_FINGERPRINT_TOTAL: &str =
+    "tls_env_warning_variables_fingerprint_total";
+const METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS: &str =
+    "tls_env_warning_detail_unique_fingerprints";
+const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
+    "tls_env_warning_variables_unique_fingerprints";
+const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
+const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
+
+const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
+const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
+const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -147,6 +184,7 @@ impl AppState {
         wal: Option<PathBuf>,
         tls_warning_retention_secs: Option<u64>,
     ) -> Self {
+        ensure_foundation_metrics_recorder();
         let db_path = path.as_ref().to_path_buf();
         let store = Arc::new(
             InhouseEngine::open(&db_path.to_string_lossy()).expect("open inhouse metrics store"),
@@ -166,9 +204,7 @@ impl AppState {
         let wal = wal.and_then(|p| Wal::open(p).ok()).map(Arc::new);
         let retention = tls_warning_retention_secs.unwrap_or(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
         TLS_WARNING_RETENTION_SECS.store(retention, Ordering::Relaxed);
-        aggregator_metrics()
-            .tls_env_warning_retention_seconds
-            .set(retention as f64);
+        gauge!(METRIC_TLS_ENV_WARNING_RETENTION_SECONDS, retention as f64);
         let state = Self {
             data: Arc::new(Mutex::new(data)),
             token: Arc::new(RwLock::new(token)),
@@ -218,7 +254,7 @@ impl AppState {
             });
         }
         if removed > 0 {
-            aggregator_metrics().retention_pruned_total.inc_by(removed);
+            increment_counter!(METRIC_AGGREGATOR_RETENTION_PRUNED_TOTAL, removed);
             let _ = self.store.flush();
         }
         removed
@@ -533,6 +569,8 @@ struct AggregatorMetrics {
     bulk_export_total: Counter,
     active_peers: Gauge,
     replication_lag: Gauge,
+    runtime_spawn_latency: Histogram,
+    runtime_pending_tasks: Gauge,
     retention_pruned_total: Counter,
     telemetry_ingest_total: Counter,
     telemetry_schema_error_total: Counter,
@@ -698,6 +736,374 @@ impl AggregatorMetrics {
     }
 }
 
+#[derive(Clone)]
+struct AggregatorRecorder {
+    metrics: &'static AggregatorMetrics,
+}
+
+impl AggregatorRecorder {
+    fn new() -> Self {
+        Self {
+            metrics: aggregator_metrics(),
+        }
+    }
+
+    fn u64_delta(metric: &str, value: f64) -> Option<u64> {
+        if !value.is_finite() {
+            warn!(target: "aggregator", metric, %value, "discarding non-finite counter delta");
+            return None;
+        }
+        if value < 0.0 {
+            warn!(
+                target: "aggregator",
+                metric,
+                %value,
+                "discarding negative counter delta"
+            );
+            return None;
+        }
+        Some(value.round() as u64)
+    }
+
+    fn i64_value(metric: &str, value: f64) -> Option<i64> {
+        if !value.is_finite() {
+            warn!(target: "aggregator", metric, %value, "discarding non-finite gauge value");
+            return None;
+        }
+        Some(value.round() as i64)
+    }
+
+    fn f64_value(metric: &str, value: f64) -> Option<f64> {
+        if !value.is_finite() {
+            warn!(target: "aggregator", metric, %value, "discarding non-finite gauge value");
+            return None;
+        }
+        Some(value)
+    }
+
+    fn label_values<'a>(
+        metric: &str,
+        labels: &'a [(String, String)],
+        expected: &[&str],
+    ) -> Option<Vec<&'a str>> {
+        if labels.len() != expected.len() {
+            warn!(
+                target: "aggregator",
+                metric,
+                expected = %expected.join(","),
+                actual = labels.len(),
+                "unexpected label cardinality"
+            );
+            return None;
+        }
+        let mut values = Vec::with_capacity(expected.len());
+        for ((key, value), expected_key) in labels.iter().zip(expected.iter()) {
+            if key != expected_key {
+                warn!(
+                    target: "aggregator",
+                    metric,
+                    expected = *expected_key,
+                    actual = key.as_str(),
+                    "unexpected label key"
+                );
+                return None;
+            }
+            values.push(value.as_str());
+        }
+        Some(values)
+    }
+}
+
+impl Default for AggregatorRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Recorder for AggregatorRecorder {
+    fn increment_counter(&self, name: &str, value: f64, labels: &[(String, String)]) {
+        let metrics = self.metrics;
+        match name {
+            METRIC_AGGREGATOR_INGEST_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.ingest_total.inc_by(delta);
+                }
+            }
+            METRIC_BULK_EXPORT_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.bulk_export_total.inc_by(delta);
+                }
+            }
+            METRIC_AGGREGATOR_RETENTION_PRUNED_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.retention_pruned_total.inc_by(delta);
+                }
+            }
+            METRIC_TELEMETRY_INGEST_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.telemetry_ingest_total.inc_by(delta);
+                }
+            }
+            METRIC_TELEMETRY_SCHEMA_ERROR_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.telemetry_schema_error_total.inc_by(delta);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_total
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.inc_by(delta),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_total"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_EVENTS_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    if let Some(values) =
+                        Self::label_values(name, labels, &LABEL_PREFIX_CODE_ORIGIN)
+                    {
+                        match metrics
+                            .tls_env_warning_events_total
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.inc_by(delta),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_events_total"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_DETAIL_FINGERPRINT_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    if let Some(values) =
+                        Self::label_values(name, labels, &LABEL_PREFIX_CODE_FINGERPRINT)
+                    {
+                        match metrics
+                            .tls_env_warning_detail_fingerprint_total
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.inc_by(delta),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_detail_fingerprint_total"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_VARIABLES_FINGERPRINT_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    if let Some(values) =
+                        Self::label_values(name, labels, &LABEL_PREFIX_CODE_FINGERPRINT)
+                    {
+                        match metrics
+                            .tls_env_warning_variables_fingerprint_total
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.inc_by(delta),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_variables_fingerprint_total"
+                            ),
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_histogram(&self, name: &str, value: f64, labels: &[(String, String)]) {
+        if !labels.is_empty() {
+            warn!(
+                target: "aggregator",
+                metric = name,
+                label_count = labels.len(),
+                "histogram metrics do not accept labels"
+            );
+            return;
+        }
+        if name == METRIC_RUNTIME_SPAWN_LATENCY {
+            if let Some(sample) = Self::f64_value(name, value) {
+                self.metrics.runtime_spawn_latency.observe(sample);
+            }
+        }
+    }
+
+    fn record_gauge(&self, name: &str, value: f64, labels: &[(String, String)]) {
+        let metrics = self.metrics;
+        match name {
+            METRIC_CLUSTER_PEER_ACTIVE_TOTAL => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.active_peers.set(sample);
+                }
+            }
+            METRIC_AGGREGATOR_REPLICATION_LAG => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.replication_lag.set(sample);
+                }
+            }
+            METRIC_RUNTIME_PENDING_TASKS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.runtime_pending_tasks.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_RETENTION_SECONDS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.tls_env_warning_retention_seconds.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_ACTIVE_SNAPSHOTS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.tls_env_warning_active_snapshots.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_STALE_SNAPSHOTS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.tls_env_warning_stale_snapshots.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_MOST_RECENT_LAST_SEEN => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.tls_env_warning_most_recent_last_seen.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_LEAST_RECENT_LAST_SEEN => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    metrics.tls_env_warning_least_recent_last_seen.set(sample);
+                }
+            }
+            METRIC_TLS_ENV_WARNING_LAST_SEEN => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_last_seen
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_last_seen_seconds"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_DETAIL_FINGERPRINT => {
+                if let Some(sample) = Self::i64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_detail_fingerprint
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_detail_fingerprint"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_VARIABLES_FINGERPRINT => {
+                if let Some(sample) = Self::i64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_variables_fingerprint
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_variables_fingerprint"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS => {
+                if let Some(sample) = Self::i64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_detail_unique_fingerprints
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_detail_unique_fingerprints"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS => {
+                if let Some(sample) = Self::i64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_PREFIX_CODE) {
+                        match metrics
+                            .tls_env_warning_variables_unique_fingerprints
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update tls_env_warning_variables_unique_fingerprints"
+                            ),
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+static FOUNDATION_METRICS_RECORDER_GUARD: OnceLock<()> = OnceLock::new();
+
+pub fn install_foundation_metrics_recorder() -> Result<(), RecorderInstallError> {
+    foundation_metrics::install_recorder(AggregatorRecorder::new())
+}
+
+pub fn ensure_foundation_metrics_recorder() {
+    FOUNDATION_METRICS_RECORDER_GUARD.get_or_init(|| {
+        if let Err(err) = install_foundation_metrics_recorder() {
+            warn!(
+                target: "aggregator",
+                error = %err,
+                "failed to install foundation metrics recorder"
+            );
+        }
+    });
+}
+
 static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let registry = Registry::new();
     let ingest_total = registry
@@ -718,6 +1124,20 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             "Seconds since last WAL entry applied",
         )
         .expect("register aggregator_replication_lag_seconds");
+    let runtime_spawn_latency = Histogram::with_opts(HistogramOpts::new(
+        METRIC_RUNTIME_SPAWN_LATENCY,
+        "Runtime task spawn latency observed inside metrics-aggregator",
+    ))
+    .expect("build runtime_spawn_latency histogram");
+    registry
+        .register(Box::new(runtime_spawn_latency.clone()))
+        .expect("register runtime_spawn_latency_seconds");
+    let runtime_pending_tasks = registry
+        .register_gauge(
+            METRIC_RUNTIME_PENDING_TASKS,
+            "Runtime pending-task gauge for metrics-aggregator",
+        )
+        .expect("register runtime_pending_tasks");
     let retention_pruned_total = registry
         .register_counter(
             "aggregator_retention_pruned_total",
@@ -874,6 +1294,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bulk_export_total,
         active_peers,
         replication_lag,
+        runtime_spawn_latency,
+        runtime_pending_tasks,
         retention_pruned_total,
         telemetry_ingest_total,
         telemetry_schema_error_total,
@@ -1088,22 +1510,26 @@ fn tls_warning_status_from_guard(
 }
 
 fn record_tls_warning_status_metrics(payload: &TlsWarningStatusPayload) {
-    let metrics = aggregator_metrics();
-    metrics
-        .tls_env_warning_retention_seconds
-        .set(payload.retention_seconds as f64);
-    metrics
-        .tls_env_warning_active_snapshots
-        .set(payload.active_snapshots as f64);
-    metrics
-        .tls_env_warning_stale_snapshots
-        .set(payload.stale_snapshots as f64);
-    metrics
-        .tls_env_warning_most_recent_last_seen
-        .set(payload.most_recent_last_seen.unwrap_or(0) as f64);
-    metrics
-        .tls_env_warning_least_recent_last_seen
-        .set(payload.least_recent_last_seen.unwrap_or(0) as f64);
+    gauge!(
+        METRIC_TLS_ENV_WARNING_RETENTION_SECONDS,
+        payload.retention_seconds as f64
+    );
+    gauge!(
+        METRIC_TLS_ENV_WARNING_ACTIVE_SNAPSHOTS,
+        payload.active_snapshots as f64
+    );
+    gauge!(
+        METRIC_TLS_ENV_WARNING_STALE_SNAPSHOTS,
+        payload.stale_snapshots as f64
+    );
+    gauge!(
+        METRIC_TLS_ENV_WARNING_MOST_RECENT_LAST_SEEN,
+        payload.most_recent_last_seen.unwrap_or(0) as f64
+    );
+    gauge!(
+        METRIC_TLS_ENV_WARNING_LEAST_RECENT_LAST_SEEN,
+        payload.least_recent_last_seen.unwrap_or(0) as f64
+    );
 }
 
 fn prune_tls_warning_snapshots_locked(
@@ -1177,49 +1603,27 @@ fn record_tls_env_warning_event(
     if delta == 0 {
         return;
     }
-    let metrics = aggregator_metrics();
-    match metrics
-        .tls_env_warning_total
-        .ensure_handle_for_label_values(&[prefix, code])
-    {
-        Ok(handle) => handle.inc_by(delta),
-        Err(err) => warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            error = %err,
-            "failed to record tls env warning metric"
-        ),
-    }
-    if let Err(err) = metrics
-        .tls_env_warning_events_total
-        .ensure_handle_for_label_values(&[prefix, code, metadata.origin.as_str()])
-        .map(|handle| handle.inc_by(delta))
-    {
-        warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            origin = metadata.origin.as_str(),
-            error = %err,
-            "failed to record tls env warning origin metric",
-        );
-    }
+    increment_counter!(
+        METRIC_TLS_ENV_WARNING_TOTAL,
+        delta,
+        "prefix" => prefix,
+        "code" => code
+    );
+    increment_counter!(
+        METRIC_TLS_ENV_WARNING_EVENTS_TOTAL,
+        delta,
+        "prefix" => prefix,
+        "code" => code,
+        "origin" => metadata.origin.as_str()
+    );
     let last_seen = update_tls_warning_snapshot(prefix, code, delta, &metadata, None);
     if let Some(update) = last_seen {
-        match metrics
-            .tls_env_warning_last_seen
-            .ensure_handle_for_label_values(&[prefix, code])
-        {
-            Ok(handle) => handle.set(update.last_seen as f64),
-            Err(err) => warn!(
-                target: "aggregator",
-                %prefix,
-                %code,
-                error = %err,
-                "failed to record tls env warning last seen gauge",
-            ),
-        }
+        gauge!(
+            METRIC_TLS_ENV_WARNING_LAST_SEEN,
+            update.last_seen as f64,
+            "prefix" => prefix,
+            "code" => code
+        );
         record_tls_warning_fingerprint_metrics(prefix, code, &update);
         record_tls_warning_fingerprint_counters(prefix, code, delta, &update);
     }
@@ -1236,19 +1640,12 @@ fn record_tls_env_warning_last_seen(
     }
     let last_seen = update_tls_warning_snapshot(prefix, code, 0, &metadata, Some(last_seen_secs));
     if let Some(update) = last_seen {
-        match aggregator_metrics()
-            .tls_env_warning_last_seen
-            .ensure_handle_for_label_values(&[prefix, code])
-        {
-            Ok(handle) => handle.set(update.last_seen as f64),
-            Err(err) => warn!(
-                target: "aggregator",
-                %prefix,
-                %code,
-                error = %err,
-                "failed to record tls env warning last seen gauge",
-            ),
-        }
+        gauge!(
+            METRIC_TLS_ENV_WARNING_LAST_SEEN,
+            update.last_seen as f64,
+            "prefix" => prefix,
+            "code" => code
+        );
         record_tls_warning_fingerprint_metrics(prefix, code, &update);
     }
 }
@@ -1281,32 +1678,18 @@ fn record_tls_warning_fingerprint_metrics(prefix: &str, code: &str, update: &Tls
             "failed to record tls env warning variables fingerprint",
         );
     }
-    if let Err(err) = metrics
-        .tls_env_warning_detail_unique_fingerprints
-        .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.detail_unique as i64))
-    {
-        warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            error = %err,
-            "failed to record tls env warning detail unique fingerprint count",
-        );
-    }
-    if let Err(err) = metrics
-        .tls_env_warning_variables_unique_fingerprints
-        .ensure_handle_for_label_values(&[prefix, code])
-        .map(|handle| handle.set(update.variables_unique as i64))
-    {
-        warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            error = %err,
-            "failed to record tls env warning variables unique fingerprint count",
-        );
-    }
+    gauge!(
+        METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS,
+        update.detail_unique as f64,
+        "prefix" => prefix,
+        "code" => code
+    );
+    gauge!(
+        METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS,
+        update.variables_unique as f64,
+        "prefix" => prefix,
+        "code" => code
+    );
 }
 
 fn record_tls_warning_fingerprint_counters(
@@ -1318,21 +1701,13 @@ fn record_tls_warning_fingerprint_counters(
     if delta == 0 {
         return;
     }
-    let metrics = aggregator_metrics();
-    if let Err(err) = metrics
-        .tls_env_warning_detail_fingerprint_total
-        .ensure_handle_for_label_values(&[prefix, code, &update.detail_bucket])
-        .map(|handle| handle.inc_by(delta))
-    {
-        warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            fingerprint = %update.detail_bucket,
-            error = %err,
-            "failed to increment tls env warning detail fingerprint counter",
-        );
-    }
+    increment_counter!(
+        METRIC_TLS_ENV_WARNING_DETAIL_FINGERPRINT_TOTAL,
+        delta,
+        "prefix" => prefix,
+        "code" => code,
+        "fingerprint" => update.detail_bucket.as_str()
+    );
     if delta > 0 && update.detail_new && update.detail_bucket != "none" {
         info!(
             target: "aggregator",
@@ -1342,20 +1717,13 @@ fn record_tls_warning_fingerprint_counters(
             "observed new tls env warning detail fingerprint",
         );
     }
-    if let Err(err) = metrics
-        .tls_env_warning_variables_fingerprint_total
-        .ensure_handle_for_label_values(&[prefix, code, &update.variables_bucket])
-        .map(|handle| handle.inc_by(delta))
-    {
-        warn!(
-            target: "aggregator",
-            %prefix,
-            %code,
-            fingerprint = %update.variables_bucket,
-            error = %err,
-            "failed to increment tls env warning variables fingerprint counter",
-        );
-    }
+    increment_counter!(
+        METRIC_TLS_ENV_WARNING_VARIABLES_FINGERPRINT_TOTAL,
+        delta,
+        "prefix" => prefix,
+        "code" => code,
+        "fingerprint" => update.variables_bucket.as_str()
+    );
     if delta > 0 && update.variables_new && update.variables_bucket != "none" {
         info!(
             target: "aggregator",
@@ -1368,6 +1736,7 @@ fn record_tls_warning_fingerprint_counters(
 }
 
 fn ensure_tls_warning_forwarder() {
+    ensure_foundation_metrics_recorder();
     TLS_WARNING_SINK.get_or_init(|| {
         register_tls_warning_sink(|warning| {
             record_tls_env_warning_event(
@@ -1919,15 +2288,15 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
             }
             state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
         }
-        aggregator_metrics().active_peers.set(map.len() as f64);
+        gauge!(METRIC_CLUSTER_PEER_ACTIVE_TOTAL, map.len() as f64);
     }
 
-    aggregator_metrics().ingest_total.inc();
+    increment_counter!(METRIC_AGGREGATOR_INGEST_TOTAL);
     state.prune();
     state.persist();
     if let Some(wal) = &state.wal {
         match wal.append(&payload) {
-            Ok(_) => aggregator_metrics().replication_lag.set(0.0),
+            Ok(_) => gauge!(METRIC_AGGREGATOR_REPLICATION_LAG, 0.0),
             Err(err) => warn!(target: "aggregator", error = %err, "failed to append to wal"),
         }
     }
@@ -2108,7 +2477,7 @@ async fn export_all(request: Request<AppState>) -> Result<Response, HttpError> {
     let tls_snapshots = tls_warning_snapshots();
     let tls_status = tls_warning_status_snapshot();
 
-    aggregator_metrics().bulk_export_total.inc();
+    increment_counter!(METRIC_BULK_EXPORT_TOTAL);
 
     #[cfg(feature = "s3")]
     let bucket = S3_BUCKET.as_ref().cloned();
@@ -2143,12 +2512,12 @@ async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpErro
     let payload: Value = request.json()?;
     match TelemetrySummary::from_value(payload) {
         Ok(entry) => {
-            aggregator_metrics().telemetry_ingest_total.inc();
+            increment_counter!(METRIC_TELEMETRY_INGEST_TOTAL);
             state.record_telemetry(entry);
             Ok(Response::new(StatusCode::ACCEPTED))
         }
         Err(err) => {
-            aggregator_metrics().telemetry_schema_error_total.inc();
+            increment_counter!(METRIC_TELEMETRY_SCHEMA_ERROR_TOTAL);
             let path = err.path().to_string();
             let message = err.message().to_string();
             warn!(

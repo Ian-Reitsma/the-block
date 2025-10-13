@@ -7,3 +7,4 @@ authors = ["The Block Developers"]
 description = "First-party diagnostics facade (errors, logging, spans)"
 
 [dependencies]
+codec = { path = "../codec" }

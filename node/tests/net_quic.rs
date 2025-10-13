@@ -9,23 +9,94 @@ use foundation_tls::{
 };
 use rand::rngs::OsRng;
 use std::io::Read;
-#[cfg(feature = "s2n-quic")]
+#[cfg(any(feature = "s2n-quic", feature = "inhouse"))]
 use sys::tempfile::tempdir;
 use the_block::gossip::relay::Relay;
-#[cfg(feature = "s2n-quic")]
+#[cfg(any(feature = "s2n-quic", feature = "inhouse"))]
 use the_block::net::transport_quic;
 use the_block::net::{self, quic, Message, Payload, PeerSet, PROTOCOL_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL};
 use the_block::Blockchain;
-#[cfg(feature = "s2n-quic")]
+#[cfg(any(feature = "s2n-quic", feature = "inhouse"))]
 use transport::{Config as TransportConfig, ProviderKind};
 
 #[cfg(feature = "telemetry")]
 fn reset_counters() {
     QUIC_ENDPOINT_REUSE_TOTAL.reset();
     QUIC_HANDSHAKE_FAIL_TOTAL.reset();
+}
+
+#[cfg(all(feature = "quic", feature = "inhouse"))]
+struct InhouseTransportGuard {
+    _dir: sys::tempfile::TempDir,
+    override_store: std::path::PathBuf,
+    env_store: std::path::PathBuf,
+    prev_net_key: Option<String>,
+    prev_peer_store: Option<String>,
+    prev_env_store: Option<String>,
+}
+
+#[cfg(all(feature = "quic", feature = "inhouse"))]
+impl InhouseTransportGuard {
+    fn install() -> Self {
+        let dir = tempdir().expect("tempdir");
+        let override_store = dir.path().join("override_store.json");
+        let env_store = dir.path().join("legacy_store.json");
+        let net_key = dir.path().join("net_key");
+        let peer_store = dir.path().join("peer_store.json");
+        let prev_net_key = std::env::var("TB_NET_KEY_PATH").ok();
+        std::env::set_var("TB_NET_KEY_PATH", &net_key);
+        let prev_peer_store = std::env::var("TB_PEER_CERT_CACHE_PATH").ok();
+        std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+        let prev_env_store = std::env::var("TB_NET_CERT_STORE_PATH").ok();
+        std::env::set_var("TB_NET_CERT_STORE_PATH", &env_store);
+
+        let mut cfg = TransportConfig::default();
+        cfg.provider = ProviderKind::Inhouse;
+        cfg.certificate_cache = Some(override_store.clone());
+        the_block::net::configure_transport(&cfg).expect("configure inhouse transport");
+
+        Self {
+            _dir: dir,
+            override_store,
+            env_store,
+            prev_net_key,
+            prev_peer_store,
+            prev_env_store,
+        }
+    }
+
+    fn legacy_store_path(&self) -> std::path::PathBuf {
+        self.env_store.clone()
+    }
+
+    fn der_path(&self) -> std::path::PathBuf {
+        self.override_store.with_extension("der")
+    }
+}
+
+#[cfg(all(feature = "quic", feature = "inhouse"))]
+impl Drop for InhouseTransportGuard {
+    fn drop(&mut self) {
+        if let Some(value) = &self.prev_net_key {
+            std::env::set_var("TB_NET_KEY_PATH", value);
+        } else {
+            std::env::remove_var("TB_NET_KEY_PATH");
+        }
+        if let Some(value) = &self.prev_peer_store {
+            std::env::set_var("TB_PEER_CERT_CACHE_PATH", value);
+        } else {
+            std::env::remove_var("TB_PEER_CERT_CACHE_PATH");
+        }
+        if let Some(value) = &self.prev_env_store {
+            std::env::set_var("TB_NET_CERT_STORE_PATH", value);
+        } else {
+            std::env::remove_var("TB_NET_CERT_STORE_PATH");
+        }
+        let _ = the_block::net::configure_transport(&TransportConfig::default());
+    }
 }
 
 fn sample_sk() -> SigningKey {
@@ -399,6 +470,64 @@ fn quic_endpoint_reuse() {
         #[cfg(feature = "telemetry")]
         assert_eq!(QUIC_ENDPOINT_REUSE_TOTAL.get(), 0);
     });
+}
+
+#[cfg(all(feature = "quic", feature = "inhouse"))]
+#[testkit::tb_serial]
+fn inhouse_quic_roundtrip_and_persistence() {
+    let guard = InhouseTransportGuard::install();
+    runtime::block_on(async {
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = transport_quic::start_server(addr)
+            .await
+            .expect("start inhouse server");
+        let endpoint = listener.as_inhouse().expect("inhouse listener unavailable");
+        let listen_addr = endpoint.local_addr();
+        let registry = the_block::net::transport_registry().expect("transport registry");
+        let adapter = registry.inhouse().expect("inhouse adapter");
+        let advert =
+            the_block::net::transport_quic::current_advertisement().expect("inhouse advertisement");
+        assert_eq!(
+            the_block::net::transport_quic::provider_id(),
+            Some(transport::INHOUSE_PROVIDER_ID)
+        );
+
+        let certificate = adapter.certificate_from_der(advert.cert.clone());
+        let connection = adapter
+            .connect(listen_addr, &certificate)
+            .await
+            .expect("connect inhouse");
+        let payload = b"first-party-quic".to_vec();
+        adapter
+            .send(&connection, &payload)
+            .await
+            .expect("send payload");
+        let ack = adapter.recv(&connection).await.expect("receive ack");
+        assert_eq!(ack, payload);
+
+        drop(connection);
+        drop(listener);
+
+        let restart = transport_quic::start_server("127.0.0.1:0".parse().unwrap())
+            .await
+            .expect("restart inhouse server");
+        let reused = the_block::net::transport_quic::current_advertisement()
+            .expect("advertisement after restart");
+        assert_eq!(reused.fingerprint, advert.fingerprint);
+        drop(restart);
+    });
+
+    let der_path = guard.der_path();
+    assert!(der_path.exists(), "persisted der missing");
+    let legacy_der = guard.legacy_store_path().with_extension("der");
+    assert!(
+        !legacy_der.exists(),
+        "legacy env-based path should remain unused"
+    );
+    let stored = std::fs::read(&der_path).expect("read persisted certificate");
+    let snapshot =
+        the_block::net::transport_quic::current_advertisement().expect("snapshot advertisement");
+    assert_eq!(stored, snapshot.cert.as_ref());
 }
 
 #[testkit::tb_serial]

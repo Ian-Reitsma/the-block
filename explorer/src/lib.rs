@@ -1,7 +1,7 @@
-use anyhow::Result as AnyhowResult;
 use concurrency::cache::LruCache;
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex::encode as hex_encode;
+use diagnostics::anyhow::{self, Result as AnyhowResult};
 use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
 use foundation_sqlite::{params, Connection, OptionalExtension};
 use httpd::{HttpError, Request, Response, Router, StatusCode};

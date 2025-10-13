@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use storage_engine::memory_engine::MemoryEngine;
+use storage_engine::tempfile;
 use storage_engine::{KeyValue, KeyValueIterator};
-use sys::tempfile;
 
 fn concurrency_test<E>(engine: E)
 where
@@ -63,7 +63,7 @@ where
     F: FnMut(&str) -> E,
     E: KeyValue,
 {
-    let dir = sys::tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("db");
     let db_path_str = db_path.to_string_lossy().into_owned();
     {
@@ -86,7 +86,7 @@ where
 
 #[test]
 fn memory_engine_behaviour() {
-    let dir = sys::tempfile::tempdir().expect("memory tempdir");
+    let dir = tempfile::tempdir().expect("memory tempdir");
     let path = dir.path().join("memory");
     let path_str = path.to_string_lossy().into_owned();
 
@@ -103,7 +103,7 @@ fn memory_engine_behaviour() {
 fn rocksdb_engine_behaviour() {
     use storage_engine::rocksdb_engine::RocksDbEngine;
 
-    let dir = sys::tempfile::tempdir().expect("rocks tempdir");
+    let dir = tempfile::tempdir().expect("rocks tempdir");
     let path = dir.path().join("rocks");
     let path_str = path.to_string_lossy().into_owned();
 

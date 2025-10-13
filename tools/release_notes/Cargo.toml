@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-anyhow = "1.0"
+diagnostics = { path = "../../crates/diagnostics" }
 cli_core = { path = "../../crates/cli_core" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 

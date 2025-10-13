@@ -14,7 +14,7 @@ foundation_unicode = { path = "../crates/foundation_unicode" }
 foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
 serde = { version = "1", features = ["derive"] }
 dkg = { path = "../dkg", optional = true }
-anyhow = "1"
+diagnostics = { path = "../crates/diagnostics" }
 dex = { path = "../dex" }
 storage = { path = "../storage" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
