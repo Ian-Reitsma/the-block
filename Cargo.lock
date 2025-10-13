@@ -2631,6 +2631,7 @@ name = "tls_warning"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_lazy",
  "foundation_serialization",
 ]
 

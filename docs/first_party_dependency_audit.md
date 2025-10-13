@@ -144,6 +144,10 @@ third-party codecs:
   payloads. Monitoring ships the `TlsEnvWarningSnapshotsStale` alert, the node
   maintains a local snapshot map (`telemetry::tls_env_warning_snapshots()`) with
   per-fingerprint counts and unique tallies for on-host inspection,
+  `ensure_tls_env_warning_diagnostics_bridge()` mirrors diagnostics-only log
+  streams into the telemetry registry when no sinks are configured, and
+  `reset_tls_env_warning_forwarder_for_testing()` keeps integration harnesses
+  hermetic,
   `contract telemetry tls-warnings` mirrors that data with optional JSON/label
   filters, per-fingerprint totals, and `--probe-detail`/`--probe-variables`
   calculators, `contract tls status --latest` renders human-readable or `--json`

@@ -171,8 +171,23 @@ cluster-wide gauges when compiled with `--features telemetry`:
   deltas (`origin="peer_ingest"`) without losing any fingerprint context.
   The shared `telemetry::install_tls_env_warning_forwarder()` helper wires the
   sink into the logging pipeline at startup so diagnostics-only warnings still
-  advance the counters/gauges, and the `tls_warning::WarningOrigin` enum keeps
-  the label set consistent across node, aggregator, CLI, and monitoring tools.
+  advance the counters/gauges, while
+  `telemetry::ensure_tls_env_warning_diagnostics_bridge()` mirrors warning log
+  lines into telemetry whenever no sinks are active (offline tooling, focused
+  integration tests). `telemetry::reset_tls_env_warning_forwarder_for_testing()`
+  drops the cached sink/subscriber guards so suites can exercise both modes, and
+  the `tls_warning::WarningOrigin` enum keeps the label set consistent across
+  node, aggregator, CLI, and monitoring tools.
+  `tls_warning::register_tls_env_warning_telemetry_sink()` (re-exported via
+  `the_block::telemetry::register_tls_env_warning_telemetry_sink()`) surfaces the same
+  structured payloads to Rust consumers: callbacks receive a
+  `TlsEnvWarningTelemetryEvent` with the prefix, code, origin, total count,
+  `last_seen`, hashed detail/variable fingerprints, bucket labels, and
+  `detail_changed` / `variables_changed` flags. The returned guard unregisters
+  the callback on drop so tests, CLIs, and long-lived services can rotate sinks
+  without leaking global state. Test harnesses can reset the shared registry via
+  `tls_warning::reset_tls_env_warning_telemetry_sinks_for_test()` before installing
+  new callbacks.
   Nodes
   maintain an in-process cache (`telemetry::tls_env_warning_snapshots()`) that
   now includes the hashed fingerprints alongside total/delta/detail/variables

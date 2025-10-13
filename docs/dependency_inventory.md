@@ -54,7 +54,10 @@
 > the monitoring snapshot/compare helpers onto typed
 > `MetricValue::{Float,Integer,Unsigned}` snapshots so automation no longer
 > round-trips through lossy floats when validating totals and per-fingerprint
-> counters.
+> counters. The latest bridge mirrors diagnostics-only warning streams into the
+> node’s telemetry registry when no sinks are active
+> (`ensure_tls_env_warning_diagnostics_bridge`) and exposes a reset hook for
+> hermetic tests, ensuring TLS dashboards stay populated during offline staging.
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |

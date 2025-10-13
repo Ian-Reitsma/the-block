@@ -9,6 +9,10 @@ use crypto_suite::hashing::blake3;
 #[cfg(feature = "telemetry")]
 use crypto_suite::{self, signatures::ed25519};
 #[cfg(feature = "telemetry")]
+use diagnostics::internal::{
+    install_tls_env_warning_subscriber, SubscriberGuard as DiagnosticsSubscriberGuard,
+};
+#[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
 use httpd::{BlockingClient, Method};
@@ -20,8 +24,9 @@ use runtime::telemetry::{
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(feature = "telemetry"))]
+use std::sync::Once;
 #[cfg(feature = "telemetry")]
-use std::sync::OnceLock;
 use std::sync::RwLock;
 #[cfg(feature = "telemetry")]
 use std::sync::{Mutex, Once};
@@ -34,9 +39,35 @@ use foundation_serialization::Serialize;
 use tls_warning::WarningOrigin;
 #[cfg(feature = "telemetry")]
 use tls_warning::{
+    detail_fingerprint as tls_detail_fingerprint, dispatch_tls_env_warning_event,
+    fingerprint_label, reset_tls_env_warning_telemetry_sinks_for_test,
+    variables_fingerprint as tls_variables_fingerprint,
+};
+#[cfg(not(feature = "telemetry"))]
+use tls_warning::{
     detail_fingerprint as tls_detail_fingerprint, fingerprint_label,
     variables_fingerprint as tls_variables_fingerprint,
 };
+#[cfg(feature = "telemetry")]
+pub use tls_warning::{
+    register_tls_env_warning_telemetry_sink, TlsEnvWarningTelemetryEvent,
+    TlsEnvWarningTelemetrySinkGuard,
+};
+
+#[cfg(not(feature = "telemetry"))]
+#[derive(Clone, Debug)]
+pub struct TlsEnvWarningTelemetryEvent;
+
+#[cfg(not(feature = "telemetry"))]
+pub struct TlsEnvWarningTelemetrySinkGuard;
+
+#[cfg(not(feature = "telemetry"))]
+pub fn register_tls_env_warning_telemetry_sink<F>(_sink: F) -> TlsEnvWarningTelemetrySinkGuard
+where
+    F: Fn(&TlsEnvWarningTelemetryEvent) + Send + Sync + 'static,
+{
+    TlsEnvWarningTelemetrySinkGuard
+}
 
 #[cfg(feature = "telemetry")]
 #[derive(Clone, Debug, Serialize)]
@@ -4833,7 +4864,11 @@ pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
-static TLS_WARNING_SINK: OnceLock<http_env::TlsEnvWarningSinkGuard> = OnceLock::new();
+static TLS_WARNING_SINK: Lazy<Mutex<Option<http_env::TlsEnvWarningSinkGuard>>> =
+    Lazy::new(|| Mutex::new(None));
+#[cfg(feature = "telemetry")]
+static TLS_WARNING_SUBSCRIBER: Lazy<Mutex<Option<DiagnosticsSubscriberGuard>>> =
+    Lazy::new(|| Mutex::new(None));
 
 pub static TLS_ENV_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
@@ -4980,42 +5015,75 @@ pub fn record_tls_env_warning(
         let detail_bucket = fingerprint_label(new_detail_fingerprint);
         let variables_bucket = fingerprint_label(new_variables_fingerprint);
 
-        let mut entry = TLS_ENV_WARNINGS
-            .entry((prefix.to_string(), code.to_string()))
-            .or_insert_with(LocalTlsWarning::default);
-        entry.total = entry.total.saturating_add(1);
-        entry.last_delta = 1;
-        entry.last_seen = now;
-        entry.origin = origin;
-        if let Some(detail_value) = detail_string {
-            entry.detail = Some(detail_value);
-            entry.detail_fingerprint = new_detail_fingerprint;
-        }
-        if !variables_vec.is_empty() {
-            entry.variables = variables_vec;
-            entry.variables_fingerprint = new_variables_fingerprint;
-        }
+        let event = {
+            let mut entry = TLS_ENV_WARNINGS
+                .entry((prefix.to_string(), code.to_string()))
+                .or_insert_with(LocalTlsWarning::default);
 
-        *entry
-            .detail_fingerprint_counts
-            .entry(detail_bucket)
-            .or_insert(0) += 1;
-        *entry
-            .variables_fingerprint_counts
-            .entry(variables_bucket)
-            .or_insert(0) += 1;
+            entry.total = entry.total.saturating_add(1);
+            entry.last_delta = 1;
+            entry.last_seen = now;
+            entry.origin = origin;
+
+            let detail_changed = match detail_string {
+                Some(detail_value) => {
+                    let changed = entry.detail_fingerprint != new_detail_fingerprint;
+                    entry.detail = Some(detail_value);
+                    entry.detail_fingerprint = new_detail_fingerprint;
+                    changed
+                }
+                None => false,
+            };
+
+            let variables_changed = if !variables_vec.is_empty() {
+                let changed = entry.variables_fingerprint != new_variables_fingerprint;
+                entry.variables = variables_vec.clone();
+                entry.variables_fingerprint = new_variables_fingerprint;
+                changed
+            } else {
+                false
+            };
+
+            *entry
+                .detail_fingerprint_counts
+                .entry(detail_bucket.clone())
+                .or_insert(0) += 1;
+            *entry
+                .variables_fingerprint_counts
+                .entry(variables_bucket.clone())
+                .or_insert(0) += 1;
+
+            TlsEnvWarningTelemetryEvent {
+                prefix: prefix.to_string(),
+                code: code.to_string(),
+                origin,
+                total: entry.total,
+                last_delta: entry.last_delta,
+                last_seen: entry.last_seen,
+                detail: entry.detail.clone(),
+                detail_fingerprint: entry.detail_fingerprint,
+                detail_bucket: detail_bucket.clone(),
+                detail_changed,
+                variables: entry.variables.clone(),
+                variables_fingerprint: entry.variables_fingerprint,
+                variables_bucket: variables_bucket.clone(),
+                variables_changed,
+            }
+        };
 
         if let Ok(handle) =
             TLS_ENV_WARNING_DETAIL_FINGERPRINT.ensure_handle_for_label_values(&[prefix, code])
         {
-            handle.set(entry.detail_fingerprint.unwrap_or(0));
+            handle.set(event.detail_fingerprint.unwrap_or(0));
         }
 
         if let Ok(handle) =
             TLS_ENV_WARNING_VARIABLES_FINGERPRINT.ensure_handle_for_label_values(&[prefix, code])
         {
-            handle.set(entry.variables_fingerprint.unwrap_or(0));
+            handle.set(event.variables_fingerprint.unwrap_or(0));
         }
+
+        dispatch_tls_env_warning_event(&event);
     }
 }
 
@@ -5030,9 +5098,32 @@ pub fn record_tls_env_warning(
 }
 
 #[cfg(feature = "telemetry")]
+pub fn ensure_tls_env_warning_diagnostics_bridge() {
+    let mut guard = TLS_WARNING_SUBSCRIBER
+        .lock()
+        .expect("tls warning subscriber");
+    if guard.is_none() {
+        *guard = Some(install_tls_env_warning_subscriber(|warning| {
+            if http_env::has_tls_warning_sinks() {
+                return;
+            }
+            record_tls_env_warning(
+                &warning.prefix,
+                &warning.code,
+                WarningOrigin::Diagnostics,
+                Some(&warning.detail),
+                &warning.variables,
+            );
+        }));
+    }
+}
+
+#[cfg(feature = "telemetry")]
 pub fn install_tls_env_warning_forwarder() {
-    TLS_WARNING_SINK.get_or_init(|| {
-        http_env::register_tls_warning_sink(|warning| {
+    ensure_tls_env_warning_diagnostics_bridge();
+    let mut guard = TLS_WARNING_SINK.lock().expect("tls warning sink");
+    if guard.is_none() {
+        *guard = Some(http_env::register_tls_warning_sink(|warning| {
             record_tls_env_warning(
                 &warning.prefix,
                 warning.code,
@@ -5040,8 +5131,19 @@ pub fn install_tls_env_warning_forwarder() {
                 Some(&warning.detail),
                 &warning.variables,
             );
-        })
-    });
+        }));
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn reset_tls_env_warning_forwarder_for_testing() {
+    if let Ok(mut sink) = TLS_WARNING_SINK.lock() {
+        *sink = None;
+    }
+    if let Ok(mut subscriber) = TLS_WARNING_SUBSCRIBER.lock() {
+        *subscriber = None;
+    }
+    reset_tls_env_warning_telemetry_sinks_for_test();
 }
 
 #[cfg(feature = "telemetry")]
@@ -5068,6 +5170,12 @@ pub fn tls_env_warning_snapshots() -> Vec<TlsEnvWarningSnapshot> {
 
 #[cfg(not(feature = "telemetry"))]
 pub fn install_tls_env_warning_forwarder() {}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn ensure_tls_env_warning_diagnostics_bridge() {}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn reset_tls_env_warning_forwarder_for_testing() {}
 
 #[cfg(not(feature = "telemetry"))]
 pub fn tls_env_warning_snapshots() -> Vec<TlsEnvWarningSnapshot> {
