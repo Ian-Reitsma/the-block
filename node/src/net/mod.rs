@@ -4,14 +4,14 @@ pub mod discovery;
 mod message;
 pub mod peer;
 pub mod peer_metrics_store;
-#[cfg(feature = "quic")]
+#[cfg(all(feature = "quic", feature = "quinn"))]
 pub mod quic;
-#[cfg(feature = "quic")]
+#[cfg(all(feature = "quic", feature = "quinn"))]
 pub mod quic_stats;
 #[cfg(feature = "quic")]
 pub mod transport_quic;
 pub mod uptime;
-#[cfg(not(feature = "quic"))]
+#[cfg(any(not(feature = "quic"), not(feature = "quinn")))]
 pub mod quic {
     use super::peer::HandshakeError;
     use diagnostics::anyhow::Error;
@@ -20,6 +20,32 @@ pub mod quic {
     pub enum ConnectError {
         Handshake(HandshakeError),
         Other(Error),
+    }
+}
+#[cfg(all(feature = "quic", not(feature = "quinn")))]
+pub mod quic_stats {
+    pub(super) fn snapshot() -> Vec<super::QuicStatsEntry> {
+        Vec::new()
+    }
+
+    pub(super) fn record_latency(_peer: &[u8; 32], _ms: u64) {}
+
+    pub(super) fn record_handshake_failure(_peer: &[u8; 32]) {}
+
+    pub(super) fn record_endpoint_reuse(_peer: &[u8; 32]) {}
+
+    pub(super) fn record_address(_peer: &[u8; 32], _addr: std::net::SocketAddr) {}
+
+    pub(super) fn record_retransmit(_count: u64) {}
+
+    #[cfg(feature = "telemetry")]
+    pub(super) fn peer_label(_peer: Option<[u8; 32]>) -> String {
+        "unknown".to_string()
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    pub(super) fn peer_label(_peer: Option<[u8; 32]>) -> String {
+        String::new()
     }
 }
 pub mod partition_watch;
@@ -70,10 +96,12 @@ use crate::telemetry::{
 };
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{OVERLAY_BACKEND_ACTIVE, OVERLAY_PEER_PERSISTED_TOTAL, OVERLAY_PEER_TOTAL};
+#[cfg(feature = "quinn")]
+use transport::QuinnDisconnect;
 #[cfg(feature = "quic")]
 use transport::{
-    self, Config as TransportConfig, DefaultFactory as TransportDefaultFactory,
-    ProviderRegistry as TransportProviderRegistry, QuinnDisconnect, TransportCallbacks,
+    self, Config as TransportConfig, DefaultFactory as TransportDefaultFactory, ProviderKind,
+    ProviderRegistry as TransportProviderRegistry, TransportCallbacks,
 };
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
@@ -295,12 +323,12 @@ pub fn overlay_peer_to_base58(peer: &OverlayPeerId) -> String {
     peer.to_base58()
 }
 
-#[cfg(feature = "quic")]
+#[cfg(all(feature = "quic", feature = "quinn"))]
 pub fn quic_stats() -> Vec<QuicStatsEntry> {
     quic_stats::snapshot()
 }
 
-#[cfg(not(feature = "quic"))]
+#[cfg(any(not(feature = "quic"), not(feature = "quinn")))]
 pub fn quic_stats() -> Vec<QuicStatsEntry> {
     Vec::new()
 }
@@ -322,6 +350,15 @@ pub fn install_transport_factory(factory: Arc<dyn transport::TransportFactory>) 
 pub fn configure_transport(cfg: &TransportConfig) -> diagnostics::anyhow::Result<()> {
     let callbacks = build_transport_callbacks();
     let factory = TRANSPORT_FACTORY.read().unwrap().clone();
+    #[cfg(all(feature = "quic", feature = "inhouse"))]
+    {
+        let override_path = if cfg.provider == ProviderKind::Inhouse {
+            cfg.certificate_cache.clone()
+        } else {
+            None
+        };
+        transport_quic::set_inhouse_cert_store_override(override_path);
+    }
     let registry = factory.create(cfg, &callbacks)?;
     *TRANSPORT_REGISTRY.write().unwrap() = Some(registry);
     #[cfg(feature = "telemetry")]
@@ -371,12 +408,10 @@ fn build_transport_callbacks() -> TransportCallbacks {
         cb
     };
 
+    #[cfg(feature = "quinn")]
     {
         let quinn = &mut callbacks.quinn;
-        #[cfg(feature = "quinn")]
-        {
-            quinn.provider_connect = Some(provider_counter.clone());
-        }
+        quinn.provider_connect = Some(provider_counter.clone());
         quinn.handshake_latency = Some(Arc::new(|addr: SocketAddr, elapsed: Duration| {
             #[cfg(feature = "telemetry")]
             sampled_observe(&QUIC_CONN_LATENCY_SECONDS, elapsed.as_secs_f64());
@@ -1348,6 +1383,8 @@ impl Node {
                         cert: cert.clone(),
                         fingerprint,
                         previous: Vec::new(),
+                        verifying_key: None,
+                        issued_at: None,
                     }),
                 )
             }
@@ -1462,7 +1499,10 @@ impl Node {
         #[cfg(feature = "quic")]
         let (quic_provider, quic_capabilities) = {
             let meta = transport_registry().map(|registry| registry.metadata());
-            let provider = meta.as_ref().map(|m| m.id.to_string());
+            let provider = meta
+                .as_ref()
+                .map(|m| m.id.to_string())
+                .or_else(|| crate::net::transport_quic::provider_id().map(str::to_string));
             let caps = meta
                 .map(|m| {
                     m.capabilities

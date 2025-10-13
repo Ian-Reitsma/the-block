@@ -5,10 +5,10 @@ edition = "2021"
 
 [features]
 default = []
-telemetry = ["dep:metrics"]
+telemetry = ["dep:foundation_metrics"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../foundation_serialization" }
 thiserror = { path = "../thiserror" }
-metrics = { version = "0.21", optional = true }
+foundation_metrics = { path = "../foundation_metrics", optional = true }

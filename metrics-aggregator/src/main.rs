@@ -5,6 +5,7 @@ use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::PathBuf};
 
 fn main() {
+    metrics_aggregator::ensure_foundation_metrics_recorder();
     install_tls_env_warning_forwarder();
     runtime::block_on(async {
         let addr: SocketAddr = env::var("AGGREGATOR_ADDR")

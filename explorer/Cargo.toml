@@ -11,7 +11,7 @@ codec = { path = "../crates/codec" }
 httpd = { path = "../crates/httpd" }
 http_env = { path = "../crates/http_env" }
 runtime = { path = "../crates/runtime" }
-anyhow = "1"
+diagnostics = { path = "../crates/diagnostics" }
 the_block = { path = "../node" }
 crypto_suite = { path = "../crates/crypto_suite" }
 storage = { path = "../storage" }

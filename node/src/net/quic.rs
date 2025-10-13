@@ -1,3 +1,5 @@
+#![cfg(feature = "quinn")]
+
 use diagnostics::anyhow::{anyhow, Result};
 use std::net::SocketAddr;
 

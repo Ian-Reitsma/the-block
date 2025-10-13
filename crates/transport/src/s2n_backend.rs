@@ -11,23 +11,19 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
+use crate::{cert_parser::parse_certificate_metadata, ProviderCapability, SessionResumeStore};
 use base64_fp::{decode_standard, encode_standard};
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::json::{self, Map, Value};
 use foundation_time::{Duration, UtcDateTime};
 use foundation_tls::{
-    sign_self_signed_ed25519, OcspResponse, RotationPolicy, SelfSignedCertParams,
-    SessionResumeStore, TrustAnchorStore,
+    sign_self_signed_ed25519, OcspResponse, RotationPolicy, SelfSignedCertParams, TrustAnchorStore,
 };
 use rand::{OsRng, RngCore};
 use runtime::net::UdpSocket;
 use runtime::sync::Mutex as AsyncMutex;
 use runtime::{sleep, timeout, TimeoutError};
-use x509_parser::prelude::*;
-use x509_parser::time::ASN1Time;
-
-use crate::ProviderCapability;
 
 const MAX_PREVIOUS_CERTS: usize = 4;
 const CERT_STORE_FILE: &str = "quic_certs.json";
@@ -458,17 +454,16 @@ pub fn fingerprint(cert: &[u8]) -> [u8; 32] {
 }
 
 pub fn verify_remote_certificate(peer_key: &[u8; 32], cert_der: &[u8]) -> Result<[u8; 32]> {
-    let (_, parsed) =
-        X509Certificate::from_der(cert_der).map_err(|_| anyhow!("invalid x509 certificate"))?;
-    if parsed.subject_pki.algorithm.algorithm.to_id_string() != ED25519_OID {
+    let metadata = parse_certificate_metadata(cert_der)
+        .map_err(|err| anyhow!("invalid x509 certificate: {err}"))?;
+    if metadata.algorithm_oid != ED25519_OID {
         return Err(anyhow!("unexpected certificate algorithm"));
     }
-    let pk_bytes = parsed.subject_pki.subject_public_key.data.as_ref();
-    if pk_bytes != peer_key {
+    if metadata.public_key != peer_key {
         return Err(anyhow!("certificate public key mismatch"));
     }
-    let now = ASN1Time::now();
-    if parsed.validity().not_before > now || parsed.validity().not_after < now {
+    let now = UtcDateTime::now();
+    if metadata.not_before > now || metadata.not_after < now {
         return Err(anyhow!("certificate expired"));
     }
     Ok(fingerprint(cert_der))

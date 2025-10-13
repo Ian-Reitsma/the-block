@@ -344,7 +344,6 @@ fn emit_missing_sqlite_feature() {
 mod sqlite {
     use super::{CorrelateMetricOptions, RotateKeyOptions, SearchOptions};
     use crate::http_client;
-    use anyhow::{anyhow, Result as AnyResult};
     use base64_fp::{decode_standard, encode_standard};
     use coding::Encryptor;
     use coding::{
@@ -352,6 +351,7 @@ mod sqlite {
         CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
     };
     use crypto_suite::hashing::blake3::derive_key;
+    use diagnostics::anyhow::{anyhow, Result as AnyResult};
     use foundation_serialization::Deserialize;
     use foundation_sqlite::{params, params_from_iter, Connection, Row, Value};
     use httpd::Method;

@@ -6,7 +6,7 @@ authors = ["The Block"]
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1"
+diagnostics = { path = "../../crates/diagnostics" }
 
 [dev-dependencies]
-anyhow = "1"
+diagnostics = { path = "../../crates/diagnostics" }

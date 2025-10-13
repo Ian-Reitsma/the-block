@@ -4,6 +4,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use diagnostics::anyhow::{self, Result as AnyhowResult};
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::Method;
 use std::collections::BTreeMap;
@@ -74,17 +75,22 @@ pub fn handle(cmd: SystemCmd) {
     }
 }
 
-fn fetch_dependencies(base: &str) -> anyhow::Result<String> {
+fn fetch_dependencies(base: &str) -> AnyhowResult<String> {
     let client = http_client::blocking_client();
     let url = format!("{}/wrappers", base.trim_end_matches('/'));
-    let response = client.request(Method::Get, &url)?.send()?;
+    let response = client
+        .request(Method::Get, &url)
+        .map_err(anyhow::Error::from_error)?
+        .send()
+        .map_err(anyhow::Error::from_error)?;
     if !response.status().is_success() {
         anyhow::bail!(
             "aggregator responded with status {}",
             response.status().as_u16()
         );
     }
-    let summaries: BTreeMap<String, WrapperSummary> = response.json()?;
+    let summaries: BTreeMap<String, WrapperSummary> =
+        response.json().map_err(anyhow::Error::from_error)?;
     Ok(render_dependencies(summaries))
 }
 

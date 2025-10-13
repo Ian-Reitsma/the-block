@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
-use foundation_serialization::json::{self, Map, Number, Value};
+use crate::json::{self, Map, Number, Value};
 
 use crate::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,

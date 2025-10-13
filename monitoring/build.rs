@@ -1,7 +1,7 @@
 use foundation_serialization::json::{self, Value};
 use std::fs;
 mod gen {
-    include!("src/lib.rs");
+    include!("src/dashboard.rs");
 }
 
 fn main() {

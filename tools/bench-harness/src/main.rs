@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use anyhow::Context;
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
@@ -8,6 +7,8 @@ use cli_core::{
     parse::{Matches, ParseError, Parser},
 };
 use coding::{compressor_for, erasure_coder_for};
+use diagnostics::anyhow::{self, Result as AnyhowResult};
+use diagnostics::Context;
 use foundation_serialization::json::{self, Number, Value};
 use rand::{rngs::StdRng, RngCore};
 use std::fs;
@@ -17,7 +18,7 @@ use std::time::{Duration, Instant};
 
 enum RunError {
     Usage(String),
-    Failure(anyhow::Error),
+    Failure(diagnostics::anyhow::Error),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,8 +28,8 @@ struct Metrics {
 }
 
 impl Metrics {
-    fn to_value(self) -> anyhow::Result<Value> {
-        fn encode(label: &str, value: f64) -> anyhow::Result<Value> {
+    fn to_value(self) -> AnyhowResult<Value> {
+        fn encode(label: &str, value: f64) -> AnyhowResult<Value> {
             Number::from_f64(value)
                 .map(Value::Number)
                 .ok_or_else(|| anyhow::anyhow!("metrics.{label} must be finite"))
@@ -43,7 +44,7 @@ impl Metrics {
         Ok(Value::Object(map))
     }
 
-    fn from_value(value: Value) -> anyhow::Result<Self> {
+    fn from_value(value: Value) -> AnyhowResult<Self> {
         match value {
             Value::Object(map) => {
                 let latency = require_number(&map, "latency_ms")?;
@@ -61,7 +62,7 @@ impl Metrics {
     }
 }
 
-fn require_number(map: &json::Map, key: &str) -> anyhow::Result<f64> {
+fn require_number(map: &json::Map, key: &str) -> AnyhowResult<f64> {
     let value = map
         .get(key)
         .ok_or_else(|| anyhow::anyhow!("metrics.{key} missing"))?;
@@ -268,7 +269,7 @@ fn run_workload_mode(
     workload: Option<PathBuf>,
     report: PathBuf,
     baseline: Option<PathBuf>,
-) -> anyhow::Result<()> {
+) -> AnyhowResult<()> {
     deploy_nodes(nodes)?;
     let metrics = run_workload(workload)?;
     if let Some(base) = &baseline {
@@ -277,13 +278,13 @@ fn run_workload_mode(
     let payload = metrics.to_value()?;
     let mut file = fs::File::create(&report)?;
     json::to_writer_pretty(&mut file, &payload)
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from_error)
         .with_context(|| format!("failed to write benchmark report to {}", report.display()))?;
     writeln!(file)?;
     Ok(())
 }
 
-fn deploy_nodes(nodes: u32) -> anyhow::Result<()> {
+fn deploy_nodes(nodes: u32) -> AnyhowResult<()> {
     for n in 0..nodes {
         println!("starting node {n}");
         // Placeholder: spawn containers or remote nodes.
@@ -291,9 +292,9 @@ fn deploy_nodes(nodes: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_workload(workload: Option<PathBuf>) -> anyhow::Result<Metrics> {
+fn run_workload(workload: Option<PathBuf>) -> AnyhowResult<Metrics> {
     if let Some(path) = workload {
-        json::value_from_str(&fs::read_to_string(path)?).map_err(anyhow::Error::from)?;
+        json::value_from_str(&fs::read_to_string(path)?).map_err(anyhow::Error::from_error)?;
     }
     // In lieu of real metrics, return deterministic placeholder values.
     Ok(Metrics {
@@ -302,10 +303,10 @@ fn run_workload(workload: Option<PathBuf>) -> anyhow::Result<Metrics> {
     })
 }
 
-fn regression_check(metrics: &Metrics, baseline_path: &PathBuf) -> anyhow::Result<()> {
+fn regression_check(metrics: &Metrics, baseline_path: &PathBuf) -> AnyhowResult<()> {
     let data = fs::read(baseline_path)?;
     let baseline_value = json::value_from_slice(&data)
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from_error)
         .with_context(|| {
             format!(
                 "failed to decode baseline report {}",
@@ -322,7 +323,7 @@ fn regression_check(metrics: &Metrics, baseline_path: &PathBuf) -> anyhow::Resul
     Ok(())
 }
 
-fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> anyhow::Result<()> {
+fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> AnyhowResult<()> {
     if data == 0 {
         anyhow::bail!("data shards must be greater than zero");
     }

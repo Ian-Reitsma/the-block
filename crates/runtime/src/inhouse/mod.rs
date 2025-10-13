@@ -14,7 +14,6 @@ use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use futures::channel::oneshot;
 use futures::task::{waker_ref, ArcWake};
 use futures::FutureExt;
-use metrics::{gauge, histogram};
 use mio::{event::Source, Events, Interest, Poll as MioPoll, Token, Waker as MioWaker};
 use pin_project_lite::pin_project;
 use std::io;
@@ -60,7 +59,7 @@ impl InHouseRuntime {
         let cancel_for_task = Arc::clone(&cancel_flag);
         let sender_for_task = Arc::clone(&sender_slot);
         let instrumented = async move {
-            histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
+            foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
             let _guard = tracker;
             let cancelable = CancelableFuture::new(future, Arc::clone(&cancel_for_task));
             let outcome = AssertUnwindSafe(cancelable).catch_unwind().await;
@@ -114,7 +113,7 @@ impl InHouseRuntime {
         let sender_for_job = Arc::clone(&sender_slot);
 
         self.inner.blocking.spawn(BlockingJob::new(move || {
-            histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
+            foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
             let _guard = tracker;
             if cancel_for_job.load(AtomicOrdering::SeqCst) {
                 if let Some(sender) = sender_for_job
@@ -183,7 +182,7 @@ struct PendingTracker {
 impl PendingTracker {
     fn new(counter: PendingCounter) -> Self {
         let current = counter.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-        gauge!(PENDING_TASKS_METRIC, current as f64);
+        foundation_metrics::gauge!(PENDING_TASKS_METRIC, current as f64);
         Self { pending: counter }
     }
 }
@@ -191,7 +190,7 @@ impl PendingTracker {
 impl Drop for PendingTracker {
     fn drop(&mut self) {
         let remaining = self.pending.fetch_sub(1, AtomicOrdering::SeqCst) - 1;
-        gauge!(PENDING_TASKS_METRIC, remaining as f64);
+        foundation_metrics::gauge!(PENDING_TASKS_METRIC, remaining as f64);
     }
 }
 

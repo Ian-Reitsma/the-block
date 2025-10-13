@@ -5,6 +5,8 @@ use foundation_serialization::binary;
 use foundation_serialization::json;
 use foundation_serialization::Serialize;
 use rand::{rngs::StdRng, Rng};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 
 pub mod bridging;
 pub mod dashboard;
@@ -95,13 +97,15 @@ impl Simulation {
     }
 
     /// Run the simulation for the given number of steps and write a CSV dashboard.
-    pub fn run(&mut self, steps: u64, out: &str) -> csv::Result<()> {
-        let mut wtr = csv::Writer::from_path(out)?;
+    pub fn run(&mut self, steps: u64, out: &str) -> io::Result<()> {
+        let file = File::create(out)?;
+        let mut writer = BufWriter::new(file);
+        write_dashboard_header(&mut writer)?;
         for step in 0..steps {
             let snap = self.step(step);
-            wtr.serialize(&snap)?;
+            write_dashboard_row(&mut writer, &snap)?;
         }
-        wtr.flush().map_err(csv::Error::from)
+        writer.flush()
     }
 
     /// Export aggregated state to a governance decision template (JSON).
@@ -195,6 +199,33 @@ impl Simulation {
         }
         snap
     }
+}
+
+fn write_dashboard_header<W: Write>(writer: &mut W) -> io::Result<()> {
+    writer.write_all(b"step,subsidy,supply,liquidity,bridged,consumer_demand,industrial_demand,backlog,inflation_rate,sell_coverage,readiness,partition_active,reconciliation_latency,active_sessions,expired_sessions,wasm_exec\n")
+}
+
+fn write_dashboard_row<W: Write>(writer: &mut W, snap: &Snapshot) -> io::Result<()> {
+    writeln!(
+        writer,
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        snap.step,
+        snap.subsidy,
+        snap.supply,
+        snap.liquidity,
+        snap.bridged,
+        snap.consumer_demand,
+        snap.industrial_demand,
+        snap.backlog,
+        snap.inflation_rate,
+        snap.sell_coverage,
+        snap.readiness,
+        snap.partition_active,
+        snap.reconciliation_latency,
+        snap.active_sessions,
+        snap.expired_sessions,
+        snap.wasm_exec
+    )
 }
 
 #[cfg(test)]

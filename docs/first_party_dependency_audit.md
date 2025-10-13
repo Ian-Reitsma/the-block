@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-11 18:41:19Z_
+_Last updated: 2025-10-12 16:05:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -72,7 +72,7 @@ third-party codecs:
   `crate::util::binary_codec`, keeping the shared helpers in one place and
   routing encode/decode operations through the facade-backed metrics hooks.
 
-### Tooling & Support Crate Migrations (2025-10-11)
+### Tooling & Support Crate Migrations (2025-10-12)
 
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
   `foundation_serialization::json` and the in-house HTTP client, eliminating the
@@ -91,7 +91,21 @@ third-party codecs:
 - ✅ Introduced the `foundation_sqlite` facade so CLI, explorer, and log/indexer
   tooling share first-party parameter/value handling. The facade defaults to the
   `rusqlite` engine but exposes a stub backend for `FIRST_PARTY_ONLY` builds
-  while we bring up a native store.
+  while we bring up a native store. The diagnostics crate no longer depends on
+  the facade (or `foundation_sqlite`) after moving its storage emitters to pure
+  in-house telemetry, so FIRST_PARTY_ONLY builds now link the diagnostics
+  helpers without any SQLite shims.
+- ✅ `crates/storage_engine` now ships an in-house JSON codec and temp-file
+  harness (`json.rs`, `tempfile.rs`) that replace the old
+  `foundation_serialization`/`serde` parsing layers and the `sys::tempfile`
+  adapter. RocksDB, sled, and in-memory backends—plus the WAL/manifest tests—
+  consume the new helpers, so FIRST_PARTY_ONLY builds no longer link external
+  serialization crates when staging manifests or WAL entries.
+- ✅ `crates/dependency_guard` scopes `cargo metadata` resolution to the
+  requesting crate before evaluating policy violations. Guard failures now cite
+  only the offending crate’s dependency graph instead of the entire workspace,
+  keeping FIRST_PARTY_ONLY enforcement actionable while we migrate the
+  remaining tooling crates.
 - ✅ `sim/` (core harness, dependency-fault metrics, chaos summaries, and DID
   generator) serializes exclusively with the facade, while globals continue to
   rely on `foundation_lazy` for deterministic initialization.
@@ -180,6 +194,30 @@ third-party codecs:
 - ✅ Release installers emit `.tar.gz` bundles using the same
   `foundation_archive` builders, removing the legacy `zip` dependency from the
   packaging pipeline and keeping signatures deterministic.
+- ✅ CLI, explorer, wallet, and support tooling now route error handling through
+  the first-party `diagnostics` crate, eliminating the workspace-wide `anyhow`
+  dependency while keeping existing context and bail ergonomics intact.
+- ✅ `tb-sim` exports CSV dashboards via an in-house writer, dropping the
+  external `csv` crate without changing the snapshot format consumed by
+  automation.
+- ✅ Remote signer trace identifiers derive from a new first-party generator, so
+  the wallet crate no longer links the external `uuid` implementation. A unit
+  test now exercises the UUID layout and collision guarantees so log
+  subscribers can rely on the string form without pulling in helper crates.
+- ✅ The `xtask` lint harness switched to in-house process management, removing
+  `assert_cmd`/`predicates` from dev-dependencies while still diffing git state
+  and asserting JSON output through standard library helpers.
+- ✅ Introduced the `foundation_metrics` facade and recorder so runtime, wallet,
+  and tooling metrics no longer depend on the external `metrics`/
+  `metrics-macros` crates. FIRST_PARTY_ONLY builds now route counter/histogram
+  events through no-op stubs while the node installs a recorder that bridges
+  those events into the existing telemetry handles.
+- ✅ `metrics-aggregator` now installs the shared `AggregatorRecorder` so every
+  `foundation_metrics` macro emitted across runtime backends, TLS sinks, and
+  tooling surfaces flows into the Prometheus handles without reintroducing
+  third-party telemetry crates. Monitoring’s snapshot CLI installs a
+  lightweight `MonitoringRecorder` to expose success/error counters through the
+  same facade.
 - ✅ CLI binaries, explorer tooling, log indexer utilities, and runtime RPC
   clients now source `#[serde(default)]`/`skip_serializing_if` behaviour from
   `foundation_serialization::{defaults, skip}`. This keeps workspace derives on
@@ -187,8 +225,8 @@ third-party codecs:
 
 Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
 residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`) and
-landing the last telemetry histogram adapters in `runtime::telemetry` so
-tooling can model quantiles without local patches.
+wiring the remaining CLI/tooling surfaces to the `foundation_metrics`
+recorder so every consumer emits first-party telemetry without bespoke shims.
 
 ## 2. Third-Party Math, FFT, and Parallelism Inventory
 
@@ -273,6 +311,35 @@ Dependency Migration" milestone) to coordinate the rollout.
 
 ### Recent Completions
 
+- ✅ Expanded the storage engine test suite to cover malformed JSON, unicode
+  escapes, leading-zero rejection, and temp-file persist failures so the new
+  first-party codec/harness can detect regressions without third-party
+  fixtures.
+- ✅ The QUIC transport now uses `concurrency::DashMap` for connection caches
+  and session reuse, letting us drop the external `dashmap` crate entirely.
+  Session caching moved out of `foundation_tls` into the transport layer so
+  the certificate helper crate no longer links `rustls`, keeping the provider
+  bridge optional while `FIRST_PARTY_ONLY` builds stay clean.
+- ✅ `FIRST_PARTY_ONLY` builds of the transport crate now compile with only the
+  in-house and s2n adapters. Target-specific dependency gating in
+  `node/Cargo.toml` drops the Quinn feature whenever the guard is enabled, and
+  the session cache exposes a first-party stub when Quinn is absent so the
+  resumption store no longer pulls `rustls` into first-party builds.
+- ✅ FIRST_PARTY_ONLY node builds now omit the s2n transport feature entirely;
+  the in-house certificate store persists DER alongside fingerprints so
+  listeners can reuse certificates on restart, and `node::net::transport_quic`
+  routes provider selection through the first-party adapter so handshake code
+  compiles without third-party backends.
+- ✅ The in-house transport cache now honours the config-driven
+  `certificate_cache` path, deletes corrupt `.der` blobs instead of returning
+  zeroed verifying keys, and ships integration coverage that exercises the
+  override plus persistence. FIRST_PARTY_ONLY suites can isolate certificate
+  artefacts without shelling environment variables, closing the remaining gap
+  between test harnesses and production deployments.
+- ✅ Replaced the `x509-parser` dependency with the in-house
+  `transport::cert_parser` module, which performs DER parsing for Ed25519
+  certificates used by the s2n backend. Certificate verification is now fully
+  first party across every transport provider.
 - ✅ Replaced the third-party `lru` crate with `concurrency::cache::LruCache`
   and rewired the node/explorer caches to the in-house implementation, removing
   another blocker for `FIRST_PARTY_ONLY=1` builds.

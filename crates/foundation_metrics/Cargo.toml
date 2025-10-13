@@ -1,0 +1,9 @@
+[package]
+name = "foundation_metrics"
+version = "0.1.0"
+edition = "2021"
+description = "First-party metrics facade for The Block"
+authors = ["The Block Dev Team"]
+license = "MIT"
+
+[dependencies]

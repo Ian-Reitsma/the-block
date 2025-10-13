@@ -1,10 +1,10 @@
 use crate::{codec_helpers::json_from_str, parse_utils::take_string};
-use anyhow::Result;
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use diagnostics::anyhow::Result;
 use foundation_serialization::Deserialize;
 
 /// Minimal snapshot of metrics for diagnostics.

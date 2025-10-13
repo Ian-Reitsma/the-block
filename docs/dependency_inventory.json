@@ -3,38 +3,6 @@
     {
       "dependencies": [
         {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
-          "name": "rustls-webpki",
-          "version": "0.101.7"
-        },
-        {
-          "name": "sct",
-          "version": "0.7.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "foundation_tls",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR ISC OR MIT",
-      "name": "rustls",
-      "origin": "crates.io",
-      "tier": "strategic",
-      "version": "0.21.12"
-    },
-    {
-      "dependencies": [
-        {
           "name": "serde_core",
           "version": "1.0.228"
         },
@@ -45,16 +13,8 @@
       ],
       "dependents": [
         {
-          "name": "analytics_audit",
-          "version": "0.1.0"
-        },
-        {
           "name": "bridges",
           "version": "0.1.0"
-        },
-        {
-          "name": "bstr",
-          "version": "1.12.0"
         },
         {
           "name": "cargo-platform",
@@ -63,10 +23,6 @@
         {
           "name": "cargo_metadata",
           "version": "0.18.1"
-        },
-        {
-          "name": "chrono",
-          "version": "0.4.42"
         },
         {
           "name": "codec",
@@ -86,14 +42,6 @@
         },
         {
           "name": "crypto_suite",
-          "version": "0.1.0"
-        },
-        {
-          "name": "csv",
-          "version": "1.3.1"
-        },
-        {
-          "name": "dependency_registry",
           "version": "0.1.0"
         },
         {
@@ -129,10 +77,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "metrics-aggregator",
-          "version": "0.1.0"
-        },
-        {
           "name": "p2p_overlay",
           "version": "0.1.0"
         },
@@ -159,10 +103,6 @@
         {
           "name": "the_block",
           "version": "0.1.0"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
         },
         {
           "name": "wallet",
@@ -199,42 +139,14 @@
         {
           "name": "hashbrown",
           "version": "0.14.5"
-        },
-        {
-          "name": "metrics",
-          "version": "0.21.1"
         }
       ],
-      "depth": 3,
+      "depth": 7,
       "license": "MIT OR Apache-2.0",
       "name": "ahash",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.8.12"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "memchr",
-          "version": "2.7.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "regex",
-          "version": "1.11.3"
-        },
-        {
-          "name": "regex-automata",
-          "version": "0.4.11"
-        }
-      ],
-      "depth": 3,
-      "license": "Unlicense OR MIT",
-      "name": "aho-corasick",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.1.3"
     },
     {
       "dependencies": [],
@@ -250,68 +162,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.2.21"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        },
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "anstyle",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.13"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "ai_diag",
-          "version": "0.1.0"
-        },
-        {
-          "name": "bench-harness",
-          "version": "0.1.0"
-        },
-        {
-          "name": "contract-cli",
-          "version": "0.1.0"
-        },
-        {
-          "name": "explorer",
-          "version": "0.1.0"
-        },
-        {
-          "name": "installer",
-          "version": "0.1.0"
-        },
-        {
-          "name": "release_notes",
-          "version": "0.1.0"
-        },
-        {
-          "name": "tb-sim",
-          "version": "0.1.0"
-        },
-        {
-          "name": "xtask",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "anyhow",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.100"
     },
     {
       "dependencies": [
@@ -332,170 +182,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.5.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "asn1-rs-derive",
-          "version": "0.5.1"
-        },
-        {
-          "name": "asn1-rs-impl",
-          "version": "0.2.0"
-        },
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "nom",
-          "version": "7.1.3"
-        },
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        },
-        {
-          "name": "rusticata-macros",
-          "version": "4.1.0"
-        },
-        {
-          "name": "thiserror",
-          "version": "1.0.69"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        },
-        {
-          "name": "oid-registry",
-          "version": "0.7.1"
-        },
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "asn1-rs",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.6.2"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        },
-        {
-          "name": "synstructure",
-          "version": "0.13.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "asn1-rs-derive",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "asn1-rs-impl",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "anstyle",
-          "version": "1.0.13"
-        },
-        {
-          "name": "bstr",
-          "version": "1.12.0"
-        },
-        {
-          "name": "doc-comment",
-          "version": "0.3.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        },
-        {
-          "name": "predicates-core",
-          "version": "1.0.9"
-        },
-        {
-          "name": "predicates-tree",
-          "version": "1.0.12"
-        },
-        {
-          "name": "wait-timeout",
-          "version": "0.2.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "xtask",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "assert_cmd",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.0.17"
     },
     {
       "dependencies": [],
@@ -537,6 +223,10 @@
         },
         {
           "name": "foundation_tls",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -653,49 +343,6 @@
     {
       "dependencies": [
         {
-          "name": "memchr",
-          "version": "2.7.6"
-        },
-        {
-          "name": "regex-automata",
-          "version": "0.4.11"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "bstr",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.12.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 7,
-      "license": "MIT OR Apache-2.0",
-      "name": "bumpalo",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "3.19.0"
-    },
-    {
-      "dependencies": [
-        {
           "name": "find-msvc-tools",
           "version": "0.1.4"
         },
@@ -718,10 +365,6 @@
           "version": "2.6.3"
         },
         {
-          "name": "iana-time-zone-haiku",
-          "version": "0.1.2"
-        },
-        {
           "name": "libfuzzer-sys",
           "version": "0.4.10"
         },
@@ -736,10 +379,6 @@
         {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
-        },
-        {
-          "name": "ring",
-          "version": "0.17.14"
         }
       ],
       "depth": 3,
@@ -762,10 +401,6 @@
         },
         {
           "name": "getrandom",
-          "version": "0.2.16"
-        },
-        {
-          "name": "getrandom",
           "version": "0.3.3"
         },
         {
@@ -779,14 +414,6 @@
         {
           "name": "nix",
           "version": "0.27.1"
-        },
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
         }
       ],
       "depth": 3,
@@ -871,12 +498,12 @@
     {
       "dependencies": [
         {
-          "name": "foundation_serialization",
+          "name": "foundation_metrics",
           "version": "0.1.0"
         },
         {
-          "name": "metrics",
-          "version": "0.21.1"
+          "name": "foundation_serialization",
+          "version": "0.1.0"
         },
         {
           "name": "serde",
@@ -894,6 +521,10 @@
         },
         {
           "name": "crypto_suite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "diagnostics",
           "version": "0.1.0"
         },
         {
@@ -1192,6 +823,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "http_env",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
           "version": "0.1.0"
         },
@@ -1276,6 +911,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "tls_warning",
+          "version": "0.1.0"
+        },
+        {
           "name": "wallet",
           "version": "0.1.0"
         }
@@ -1286,73 +925,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "csv-core",
-          "version": "0.1.12"
-        },
-        {
-          "name": "itoa",
-          "version": "1.0.15"
-        },
-        {
-          "name": "ryu",
-          "version": "1.0.20"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "tb-sim",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Unlicense/MIT",
-      "name": "csv",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.3.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "memchr",
-          "version": "2.7.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "csv",
-          "version": "1.3.1"
-        }
-      ],
-      "depth": 3,
-      "license": "Unlicense/MIT",
-      "name": "csv-core",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.12"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "data-encoding",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.9.0"
     },
     {
       "dependencies": [],
@@ -1452,66 +1024,6 @@
     {
       "dependencies": [
         {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
-          "name": "nom",
-          "version": "7.1.3"
-        },
-        {
-          "name": "num-bigint",
-          "version": "0.4.6"
-        },
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        },
-        {
-          "name": "rusticata-macros",
-          "version": "4.1.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT/Apache-2.0",
-      "name": "der-parser",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "9.0.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "powerfmt",
-          "version": "0.2.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "deranged",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.4"
-    },
-    {
-      "dependencies": [
-        {
           "name": "crypto_suite",
           "version": "0.1.0"
         },
@@ -1554,10 +1066,35 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "codec",
+          "version": "0.1.0"
+        }
+      ],
       "dependents": [
         {
+          "name": "ai_diag",
+          "version": "0.1.0"
+        },
+        {
+          "name": "bench-harness",
+          "version": "0.1.0"
+        },
+        {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
+        {
           "name": "dependency_registry",
+          "version": "0.1.0"
+        },
+        {
+          "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -1565,11 +1102,19 @@
           "version": "0.1.0"
         },
         {
+          "name": "installer",
+          "version": "0.1.0"
+        },
+        {
           "name": "metrics-aggregator",
           "version": "0.1.0"
         },
         {
-          "name": "storage_engine",
+          "name": "release_notes",
+          "version": "0.1.0"
+        },
+        {
+          "name": "tb-sim",
           "version": "0.1.0"
         },
         {
@@ -1579,6 +1124,10 @@
         {
           "name": "transport",
           "version": "0.1.0"
+        },
+        {
+          "name": "xtask",
+          "version": "0.1.0"
         }
       ],
       "depth": 1,
@@ -1587,53 +1136,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "difflib",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "displaydoc",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.5"
     },
     {
       "dependencies": [
@@ -1663,21 +1165,6 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "doc-comment",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.3"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
         }
@@ -1690,26 +1177,7 @@
       "version": "1.0.5"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "indexmap",
-          "version": "2.11.4"
-        }
-      ],
-      "depth": 4,
-      "license": "Apache-2.0 OR MIT",
-      "name": "equivalent",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.2"
-    },
-    {
       "dependencies": [
-        {
-          "name": "anyhow",
-          "version": "1.0.100"
-        },
         {
           "name": "codec",
           "version": "0.1.0"
@@ -1720,6 +1188,10 @@
         },
         {
           "name": "crypto_suite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "diagnostics",
           "version": "0.1.0"
         },
         {
@@ -1826,26 +1298,6 @@
       "version": "0.1.4"
     },
     {
-      "dependencies": [
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "float-cmp",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.10.0"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -1896,6 +1348,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "tls_warning",
+          "version": "0.1.0"
+        },
+        {
           "name": "transport",
           "version": "0.1.0"
         },
@@ -1931,6 +1387,33 @@
       "depth": 1,
       "license": "MIT OR Apache-2.0",
       "name": "foundation_math",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        {
+          "name": "codec",
+          "version": "0.1.0"
+        },
+        {
+          "name": "runtime",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "wallet",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": "MIT",
+      "name": "foundation_metrics",
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
@@ -2126,10 +1609,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "storage_engine",
-          "version": "0.1.0"
-        },
-        {
           "name": "tb-sim",
           "version": "0.1.0"
         },
@@ -2139,6 +1618,14 @@
         },
         {
           "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "tls_manifest_guard",
+          "version": "0.1.0"
+        },
+        {
+          "name": "tls_warning",
           "version": "0.1.0"
         },
         {
@@ -2209,6 +1696,14 @@
       "dependencies": [],
       "dependents": [
         {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
+        {
+          "name": "dependency_registry",
+          "version": "0.1.0"
+        },
+        {
           "name": "foundation_tls",
           "version": "0.1.0"
         },
@@ -2218,6 +1713,10 @@
         },
         {
           "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "tls_manifest_guard",
           "version": "0.1.0"
         },
         {
@@ -2249,10 +1748,6 @@
         {
           "name": "rand",
           "version": "0.1.0"
-        },
-        {
-          "name": "rustls",
-          "version": "0.21.12"
         },
         {
           "name": "thiserror",
@@ -2626,34 +2121,6 @@
           "version": "0.2.177"
         },
         {
-          "name": "wasi",
-          "version": "0.11.1+wasi-snapshot-preview1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "getrandom",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.16"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
           "name": "r-efi",
           "version": "5.3.0"
         },
@@ -2670,13 +2137,9 @@
         {
           "name": "pqcrypto-internals",
           "version": "0.2.11"
-        },
-        {
-          "name": "uuid",
-          "version": "1.18.1"
         }
       ],
-      "depth": 3,
+      "depth": 4,
       "license": "MIT OR Apache-2.0",
       "name": "getrandom",
       "origin": "crates.io",
@@ -2771,21 +2234,6 @@
       "version": "0.14.5"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "indexmap",
-          "version": "2.11.4"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "hashbrown",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.16.0"
-    },
-    {
       "dependencies": [
         {
           "name": "hashbrown",
@@ -2863,7 +2311,23 @@
     {
       "dependencies": [
         {
+          "name": "base64_fp",
+          "version": "0.1.0"
+        },
+        {
+          "name": "crypto_suite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "diagnostics",
+          "version": "0.1.0"
+        },
+        {
           "name": "httpd",
+          "version": "0.1.0"
+        },
+        {
+          "name": "rand",
           "version": "0.1.0"
         }
       ],
@@ -2995,25 +2459,6 @@
     {
       "dependencies": [
         {
-          "name": "equivalent",
-          "version": "1.0.2"
-        },
-        {
-          "name": "hashbrown",
-          "version": "0.16.0"
-        }
-      ],
-      "dependents": [],
-      "depth": 3,
-      "license": "Apache-2.0 OR MIT",
-      "name": "indexmap",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.11.4"
-    },
-    {
-      "dependencies": [
-        {
           "name": "crypto_suite",
           "version": "0.1.0"
         },
@@ -3040,29 +2485,6 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "csv",
-          "version": "1.3.1"
-        },
-        {
-          "name": "serde_json",
-          "version": "1.0.145"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "itoa",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.15"
-    },
-    {
       "dependencies": [
         {
           "name": "getrandom",
@@ -3085,38 +2507,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.1.34"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "chrono",
-          "version": "0.4.42"
-        },
-        {
-          "name": "iana-time-zone",
-          "version": "0.1.64"
-        },
-        {
-          "name": "uuid",
-          "version": "1.18.1"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "js-sys",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.81"
     },
     {
       "dependencies": [
@@ -3171,21 +2561,6 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "lazy_static",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.5.0"
-    },
-    {
       "dependencies": [
         {
           "name": "cli_core",
@@ -3237,24 +2612,12 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "android_system_properties",
-          "version": "0.1.5"
-        },
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        },
-        {
           "name": "backtrace",
           "version": "0.3.76"
         },
         {
           "name": "cc",
           "version": "1.2.41"
-        },
-        {
-          "name": "getrandom",
-          "version": "0.2.16"
         },
         {
           "name": "getrandom",
@@ -3293,10 +2656,6 @@
           "version": "0.2.11"
         },
         {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
           "name": "rpassword",
           "version": "7.4.0"
         },
@@ -3315,10 +2674,6 @@
         {
           "name": "tokio",
           "version": "1.47.1"
-        },
-        {
-          "name": "wait-timeout",
-          "version": "0.2.1"
         }
       ],
       "depth": 2,
@@ -3428,24 +2783,12 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "iana-time-zone",
-          "version": "0.1.64"
-        },
-        {
           "name": "jurisdiction",
           "version": "0.1.0"
         },
         {
           "name": "mio",
           "version": "0.8.11"
-        },
-        {
-          "name": "rustls",
-          "version": "0.21.12"
-        },
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
         }
       ],
       "depth": 2,
@@ -3459,36 +2802,12 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "aho-corasick",
-          "version": "1.1.3"
-        },
-        {
-          "name": "bstr",
-          "version": "1.12.0"
-        },
-        {
-          "name": "csv-core",
-          "version": "0.1.12"
-        },
-        {
           "name": "futures-util",
           "version": "0.3.31"
         },
         {
-          "name": "nom",
-          "version": "7.1.3"
-        },
-        {
           "name": "object",
           "version": "0.37.3"
-        },
-        {
-          "name": "regex",
-          "version": "1.11.3"
-        },
-        {
-          "name": "regex-automata",
-          "version": "0.4.11"
         },
         {
           "name": "serde_json",
@@ -3501,85 +2820,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "2.7.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "ahash",
-          "version": "0.8.12"
-        },
-        {
-          "name": "metrics-macros",
-          "version": "0.7.1"
-        },
-        {
-          "name": "portable-atomic",
-          "version": "1.11.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "codec",
-          "version": "0.1.0"
-        },
-        {
-          "name": "runtime",
-          "version": "0.1.0"
-        },
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "metrics",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.21.1"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "metrics",
-          "version": "0.21.1"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "metrics-macros",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.7.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "nom",
-          "version": "7.1.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT/Apache-2.0",
-      "name": "minimal-lexical",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.1"
     },
     {
       "dependencies": [
@@ -3644,57 +2884,6 @@
     {
       "dependencies": [
         {
-          "name": "memchr",
-          "version": "2.7.6"
-        },
-        {
-          "name": "minimal-lexical",
-          "version": "0.2.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        },
-        {
-          "name": "rusticata-macros",
-          "version": "4.1.0"
-        },
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "nom",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "7.1.3"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0",
-      "name": "normalize-line-endings",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.0"
-    },
-    {
-      "dependencies": [
-        {
           "name": "num-integer",
           "version": "0.1.46"
         },
@@ -3707,10 +2896,6 @@
         {
           "name": "crypto_suite",
           "version": "0.1.0"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
         }
       ],
       "depth": 2,
@@ -3719,25 +2904,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.4.6"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "time",
-          "version": "0.3.44"
-        },
-        {
-          "name": "time-macros",
-          "version": "0.2.24"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "num-conv",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.0"
     },
     {
       "dependencies": [
@@ -3780,24 +2946,8 @@
           "version": "0.5.1"
         },
         {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "chrono",
-          "version": "0.4.42"
-        },
-        {
           "name": "crypto_suite",
           "version": "0.1.0"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        },
-        {
-          "name": "float-cmp",
-          "version": "0.10.0"
         },
         {
           "name": "image",
@@ -3828,26 +2978,6 @@
       "version": "0.2.19"
     },
     {
-      "dependencies": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "oid-registry",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.7.1"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -3855,16 +2985,8 @@
           "version": "0.8.12"
         },
         {
-          "name": "js-sys",
-          "version": "0.3.81"
-        },
-        {
           "name": "tracing-core",
           "version": "0.1.34"
-        },
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
         }
       ],
       "depth": 4,
@@ -4020,40 +3142,6 @@
       "version": "0.3.32"
     },
     {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "metrics",
-          "version": "0.21.1"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 OR MIT",
-      "name": "portable-atomic",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.11.1"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "deranged",
-          "version": "0.5.4"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "powerfmt",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.0"
-    },
-    {
       "dependencies": [
         {
           "name": "cc",
@@ -4143,97 +3231,6 @@
     {
       "dependencies": [
         {
-          "name": "anstyle",
-          "version": "1.0.13"
-        },
-        {
-          "name": "difflib",
-          "version": "0.4.0"
-        },
-        {
-          "name": "float-cmp",
-          "version": "0.10.0"
-        },
-        {
-          "name": "normalize-line-endings",
-          "version": "0.3.0"
-        },
-        {
-          "name": "predicates-core",
-          "version": "1.0.9"
-        },
-        {
-          "name": "regex",
-          "version": "1.11.3"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        },
-        {
-          "name": "xtask",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "predicates",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "3.1.3"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        },
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        },
-        {
-          "name": "predicates-tree",
-          "version": "1.0.12"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "predicates-core",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.9"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "predicates-core",
-          "version": "1.0.9"
-        },
-        {
-          "name": "termtree",
-          "version": "0.5.1"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "predicates-tree",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.12"
-    },
-    {
-      "dependencies": [
-        {
           "name": "cli_core",
           "version": "0.1.0"
         },
@@ -4271,28 +3268,12 @@
       ],
       "dependents": [
         {
-          "name": "asn1-rs-derive",
-          "version": "0.5.1"
-        },
-        {
-          "name": "asn1-rs-impl",
-          "version": "0.2.0"
-        },
-        {
           "name": "derive_arbitrary",
           "version": "1.4.2"
         },
         {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
           "name": "futures-macro",
           "version": "0.3.31"
-        },
-        {
-          "name": "metrics-macros",
-          "version": "0.7.1"
         },
         {
           "name": "pin-project-internal",
@@ -4311,10 +3292,6 @@
           "version": "2.0.106"
         },
         {
-          "name": "synstructure",
-          "version": "0.13.2"
-        },
-        {
           "name": "testkit_macros",
           "version": "0.1.0"
         },
@@ -4325,22 +3302,6 @@
         {
           "name": "tracing-attributes",
           "version": "0.1.30"
-        },
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        },
-        {
-          "name": "windows-implement",
-          "version": "0.60.2"
-        },
-        {
-          "name": "windows-interface",
-          "version": "0.59.3"
         },
         {
           "name": "zerocopy-derive",
@@ -4363,28 +3324,12 @@
       ],
       "dependents": [
         {
-          "name": "asn1-rs-derive",
-          "version": "0.5.1"
-        },
-        {
-          "name": "asn1-rs-impl",
-          "version": "0.2.0"
-        },
-        {
           "name": "derive_arbitrary",
           "version": "1.4.2"
         },
         {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
           "name": "futures-macro",
           "version": "0.3.31"
-        },
-        {
-          "name": "metrics-macros",
-          "version": "0.7.1"
         },
         {
           "name": "pin-project-internal",
@@ -4399,10 +3344,6 @@
           "version": "2.0.106"
         },
         {
-          "name": "synstructure",
-          "version": "0.13.2"
-        },
-        {
           "name": "testkit_macros",
           "version": "0.1.0"
         },
@@ -4413,26 +3354,6 @@
         {
           "name": "tracing-attributes",
           "version": "0.1.30"
-        },
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-macro",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        },
-        {
-          "name": "windows-implement",
-          "version": "0.60.2"
-        },
-        {
-          "name": "windows-interface",
-          "version": "0.59.3"
         },
         {
           "name": "zerocopy-derive",
@@ -4454,7 +3375,7 @@
           "version": "0.3.3"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "name": "r-efi",
       "origin": "crates.io",
@@ -4495,6 +3416,10 @@
         },
         {
           "name": "governance",
+          "version": "0.1.0"
+        },
+        {
+          "name": "http_env",
           "version": "0.1.0"
         },
         {
@@ -4555,137 +3480,6 @@
     {
       "dependencies": [
         {
-          "name": "aho-corasick",
-          "version": "1.1.3"
-        },
-        {
-          "name": "memchr",
-          "version": "2.7.6"
-        },
-        {
-          "name": "regex-automata",
-          "version": "0.4.11"
-        },
-        {
-          "name": "regex-syntax",
-          "version": "0.8.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "predicates",
-          "version": "3.1.3"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "regex",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.11.3"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "aho-corasick",
-          "version": "1.1.3"
-        },
-        {
-          "name": "memchr",
-          "version": "2.7.6"
-        },
-        {
-          "name": "regex-syntax",
-          "version": "0.8.6"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "bstr",
-          "version": "1.12.0"
-        },
-        {
-          "name": "regex",
-          "version": "1.11.3"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "regex-automata",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.11"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "regex",
-          "version": "1.11.3"
-        },
-        {
-          "name": "regex-automata",
-          "version": "0.4.11"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "regex-syntax",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.8.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.41"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "getrandom",
-          "version": "0.2.16"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "untrusted",
-          "version": "0.9.0"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.52.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rustls",
-          "version": "0.21.12"
-        },
-        {
-          "name": "rustls-webpki",
-          "version": "0.101.7"
-        },
-        {
-          "name": "sct",
-          "version": "0.7.1"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 AND ISC",
-      "name": "ring",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.17.14"
-    },
-    {
-      "dependencies": [
-        {
           "name": "base64_fp",
           "version": "0.1.0"
         },
@@ -4702,6 +3496,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_metrics",
+          "version": "0.1.0"
+        },
+        {
           "name": "futures",
           "version": "0.3.31"
         },
@@ -4712,10 +3510,6 @@
         {
           "name": "libc",
           "version": "0.2.177"
-        },
-        {
-          "name": "metrics",
-          "version": "0.21.1"
         },
         {
           "name": "mio",
@@ -4830,116 +3624,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.30.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "nom",
-          "version": "7.1.3"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        },
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT/Apache-2.0",
-      "name": "rusticata-macros",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "4.1.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
-          "name": "untrusted",
-          "version": "0.9.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rustls",
-          "version": "0.21.12"
-        }
-      ],
-      "depth": 3,
-      "license": "ISC",
-      "name": "rustls-webpki",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.101.7"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "rustversion",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.22"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "csv",
-          "version": "1.3.1"
-        },
-        {
-          "name": "serde_json",
-          "version": "1.0.145"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 OR BSL-1.0",
-      "name": "ryu",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.20"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
-          "name": "untrusted",
-          "version": "0.9.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "rustls",
-          "version": "0.21.12"
-        }
-      ],
-      "depth": 3,
-      "license": "Apache-2.0 OR ISC OR MIT",
-      "name": "sct",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.7.1"
     },
     {
       "dependencies": [
@@ -5270,18 +3954,6 @@
         {
           "name": "dependency_guard",
           "version": "0.1.0"
-        },
-        {
-          "name": "diagnostics",
-          "version": "0.1.0"
-        },
-        {
-          "name": "foundation_serialization",
-          "version": "0.1.0"
-        },
-        {
-          "name": "sys",
-          "version": "0.1.0"
         }
       ],
       "dependents": [
@@ -5334,28 +4006,12 @@
       ],
       "dependents": [
         {
-          "name": "asn1-rs-derive",
-          "version": "0.5.1"
-        },
-        {
-          "name": "asn1-rs-impl",
-          "version": "0.2.0"
-        },
-        {
           "name": "derive_arbitrary",
           "version": "1.4.2"
         },
         {
-          "name": "displaydoc",
-          "version": "0.2.5"
-        },
-        {
           "name": "futures-macro",
           "version": "0.3.31"
-        },
-        {
-          "name": "metrics-macros",
-          "version": "0.7.1"
         },
         {
           "name": "pin-project-internal",
@@ -5364,10 +4020,6 @@
         {
           "name": "serde_derive",
           "version": "1.0.228"
-        },
-        {
-          "name": "synstructure",
-          "version": "0.13.2"
         },
         {
           "name": "testkit_macros",
@@ -5382,22 +4034,6 @@
           "version": "0.1.30"
         },
         {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        },
-        {
-          "name": "windows-implement",
-          "version": "0.60.2"
-        },
-        {
-          "name": "windows-interface",
-          "version": "0.59.3"
-        },
-        {
           "name": "zerocopy-derive",
           "version": "0.8.27"
         }
@@ -5408,34 +4044,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "2.0.106"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs-derive",
-          "version": "0.5.1"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT",
-      "name": "synstructure",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.13.2"
     },
     {
       "dependencies": [
@@ -5522,10 +4130,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "storage_engine",
-          "version": "0.1.0"
-        },
-        {
           "name": "tb-sim",
           "version": "0.1.0"
         },
@@ -5556,10 +4160,6 @@
     {
       "dependencies": [
         {
-          "name": "anyhow",
-          "version": "1.0.100"
-        },
-        {
           "name": "cli_core",
           "version": "0.1.0"
         },
@@ -5568,11 +4168,11 @@
           "version": "0.1.0"
         },
         {
-          "name": "csv",
-          "version": "1.3.1"
+          "name": "dex",
+          "version": "0.1.0"
         },
         {
-          "name": "dex",
+          "name": "diagnostics",
           "version": "0.1.0"
         },
         {
@@ -5632,21 +4232,6 @@
       "origin": "workspace",
       "tier": "unclassified",
       "version": "0.1.0"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "predicates-tree",
-          "version": "1.0.12"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT",
-      "name": "termtree",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.1"
     },
     {
       "dependencies": [
@@ -5775,6 +4360,10 @@
           "version": "0.1.0"
         },
         {
+          "name": "foundation_metrics",
+          "version": "0.1.0"
+        },
+        {
           "name": "foundation_profiler",
           "version": "0.1.0"
         },
@@ -5899,12 +4488,12 @@
           "version": "0.1.0"
         },
         {
-          "name": "wallet",
+          "name": "tls_warning",
           "version": "0.1.0"
         },
         {
-          "name": "x509-parser",
-          "version": "0.16.0"
+          "name": "wallet",
+          "version": "0.1.0"
         }
       ],
       "dependents": [
@@ -6018,149 +4607,34 @@
     {
       "dependencies": [
         {
-          "name": "thiserror-impl",
-          "version": "1.0.69"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "cargo_metadata",
-          "version": "0.18.1"
-        },
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "thiserror",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.69"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "thiserror",
-          "version": "1.0.69"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "thiserror-impl",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.0.69"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "deranged",
-          "version": "0.5.4"
-        },
-        {
-          "name": "itoa",
-          "version": "1.0.15"
-        },
-        {
-          "name": "num-conv",
+          "name": "crypto_suite",
           "version": "0.1.0"
         },
         {
-          "name": "powerfmt",
-          "version": "0.2.0"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.228"
-        },
-        {
-          "name": "time-core",
-          "version": "0.1.6"
-        },
-        {
-          "name": "time-macros",
-          "version": "0.2.24"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "x509-parser",
-          "version": "0.16.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "time",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.3.44"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "time",
-          "version": "0.3.44"
-        },
-        {
-          "name": "time-macros",
-          "version": "0.2.24"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "time-core",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.1.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "num-conv",
+          "name": "foundation_lazy",
           "version": "0.1.0"
         },
         {
-          "name": "time-core",
-          "version": "0.1.6"
+          "name": "foundation_serialization",
+          "version": "0.1.0"
         }
       ],
       "dependents": [
         {
-          "name": "time",
-          "version": "0.3.44"
+          "name": "metrics-aggregator",
+          "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
         }
       ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "time-macros",
-      "origin": "crates.io",
+      "depth": 1,
+      "license": null,
+      "name": "tls_warning",
+      "origin": "workspace",
       "tier": "unclassified",
-      "version": "0.2.24"
+      "version": "0.1.0"
     },
     {
       "dependencies": [
@@ -6252,10 +4726,6 @@
         {
           "name": "syn",
           "version": "2.0.106"
-        },
-        {
-          "name": "wasm-bindgen-shared",
-          "version": "0.2.104"
         }
       ],
       "depth": 4,
@@ -6264,67 +4734,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "1.0.19"
-    },
-    {
-      "dependencies": [],
-      "dependents": [],
-      "depth": 3,
-      "license": "MIT",
-      "name": "unsafe-libyaml",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.11"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
-        {
-          "name": "rustls-webpki",
-          "version": "0.101.7"
-        },
-        {
-          "name": "sct",
-          "version": "0.7.1"
-        }
-      ],
-      "depth": 4,
-      "license": "ISC",
-      "name": "untrusted",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.9.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "getrandom",
-          "version": "0.3.3"
-        },
-        {
-          "name": "js-sys",
-          "version": "0.3.81"
-        },
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0 OR MIT",
-      "name": "uuid",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "1.18.1"
     },
     {
       "dependencies": [],
@@ -6349,32 +4758,12 @@
           "version": "0.8.12"
         }
       ],
-      "depth": 4,
+      "depth": 8,
       "license": "MIT/Apache-2.0",
       "name": "version_check",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.9.5"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT/Apache-2.0",
-      "name": "wait-timeout",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.1"
     },
     {
       "dependencies": [
@@ -6388,6 +4777,10 @@
         },
         {
           "name": "foundation_lazy",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_metrics",
           "version": "0.1.0"
         },
         {
@@ -6413,10 +4806,6 @@
         {
           "name": "ledger",
           "version": "0.1.0"
-        },
-        {
-          "name": "metrics",
-          "version": "0.21.1"
         },
         {
           "name": "rand",
@@ -6445,10 +4834,6 @@
         {
           "name": "tracing",
           "version": "0.1.41"
-        },
-        {
-          "name": "uuid",
-          "version": "1.18.1"
         }
       ],
       "dependents": [
@@ -6471,10 +4856,6 @@
     {
       "dependencies": [],
       "dependents": [
-        {
-          "name": "getrandom",
-          "version": "0.2.16"
-        },
         {
           "name": "mio",
           "version": "0.8.11"
@@ -6504,7 +4885,7 @@
           "version": "0.3.3"
         }
       ],
-      "depth": 4,
+      "depth": 5,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wasi",
       "origin": "crates.io",
@@ -6524,188 +4905,12 @@
           "version": "0.14.7+wasi-0.2.4"
         }
       ],
-      "depth": 5,
+      "depth": 6,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wasip2",
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "1.0.1+wasi-0.2.4"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "once_cell",
-          "version": "1.21.3"
-        },
-        {
-          "name": "rustversion",
-          "version": "1.0.22"
-        },
-        {
-          "name": "wasm-bindgen-macro",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-shared",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "chrono",
-          "version": "0.4.42"
-        },
-        {
-          "name": "iana-time-zone",
-          "version": "0.1.64"
-        },
-        {
-          "name": "js-sys",
-          "version": "0.3.81"
-        },
-        {
-          "name": "uuid",
-          "version": "1.18.1"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "wasm-bindgen",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.104"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "bumpalo",
-          "version": "3.19.0"
-        },
-        {
-          "name": "log",
-          "version": "0.4.28"
-        },
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        },
-        {
-          "name": "wasm-bindgen-shared",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 6,
-      "license": "MIT OR Apache-2.0",
-      "name": "wasm-bindgen-backend",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.104"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "wasm-bindgen-macro",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.104"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "proc-macro2",
-          "version": "1.0.101"
-        },
-        {
-          "name": "quote",
-          "version": "1.0.41"
-        },
-        {
-          "name": "syn",
-          "version": "2.0.106"
-        },
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-shared",
-          "version": "0.2.104"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wasm-bindgen-macro",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 5,
-      "license": "MIT OR Apache-2.0",
-      "name": "wasm-bindgen-macro-support",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.104"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "unicode-ident",
-          "version": "1.0.19"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "wasm-bindgen",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-backend",
-          "version": "0.2.104"
-        },
-        {
-          "name": "wasm-bindgen-macro-support",
-          "version": "0.2.104"
-        }
-      ],
-      "depth": 4,
-      "license": "MIT OR Apache-2.0",
-      "name": "wasm-bindgen-shared",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.104"
     },
     {
       "dependencies": [
@@ -6739,10 +4944,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "ring",
-          "version": "0.17.14"
-        },
         {
           "name": "rtoolbox",
           "version": "0.0.3"
@@ -7088,7 +5289,7 @@
           "version": "1.0.1+wasi-0.2.4"
         }
       ],
-      "depth": 6,
+      "depth": 7,
       "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "name": "wit-bindgen",
       "origin": "crates.io",
@@ -7098,66 +5299,6 @@
     {
       "dependencies": [
         {
-          "name": "asn1-rs",
-          "version": "0.6.2"
-        },
-        {
-          "name": "data-encoding",
-          "version": "2.9.0"
-        },
-        {
-          "name": "der-parser",
-          "version": "9.0.0"
-        },
-        {
-          "name": "lazy_static",
-          "version": "1.5.0"
-        },
-        {
-          "name": "nom",
-          "version": "7.1.3"
-        },
-        {
-          "name": "oid-registry",
-          "version": "0.7.1"
-        },
-        {
-          "name": "rusticata-macros",
-          "version": "4.1.0"
-        },
-        {
-          "name": "thiserror",
-          "version": "1.0.69"
-        },
-        {
-          "name": "time",
-          "version": "0.3.44"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "x509-parser",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.16.0"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "anyhow",
-          "version": "1.0.100"
-        },
-        {
-          "name": "assert_cmd",
-          "version": "2.0.17"
-        },
-        {
           "name": "cli_core",
           "version": "0.1.0"
         },
@@ -7166,12 +5307,12 @@
           "version": "0.1.0"
         },
         {
-          "name": "foundation_serialization",
+          "name": "diagnostics",
           "version": "0.1.0"
         },
         {
-          "name": "predicates",
-          "version": "3.1.3"
+          "name": "foundation_serialization",
+          "version": "0.1.0"
         },
         {
           "name": "sys",
@@ -7199,7 +5340,7 @@
           "version": "0.8.12"
         }
       ],
-      "depth": 4,
+      "depth": 8,
       "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
       "name": "zerocopy",
       "origin": "crates.io",
@@ -7227,7 +5368,7 @@
           "version": "0.8.27"
         }
       ],
-      "depth": 5,
+      "depth": 9,
       "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
       "name": "zerocopy-derive",
       "origin": "crates.io",
@@ -7235,7 +5376,6 @@
       "version": "0.8.27"
     }
   ],
-  "generated_at": "2025-10-11T18:40:34.727914790Z",
   "policy": {
     "config_path": "config/dependency_policies.toml",
     "forbidden_licenses": [
@@ -7268,6 +5408,7 @@
     "foundation_archive",
     "foundation_lazy",
     "foundation_math",
+    "foundation_metrics",
     "foundation_profiler",
     "foundation_regex",
     "foundation_rpc",
@@ -7317,9 +5458,10 @@
     "the-block-fuzz",
     "the_block",
     "thiserror",
+    "tls_manifest_guard",
+    "tls_warning",
     "transport",
     "wallet",
     "xtask"
-  ],
-  "workspace_root": "/workspace/the-block"
+  ]
 }

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 enum RunError {
     Usage(String),
-    Failure(anyhow::Error),
+    Failure(diagnostics::anyhow::Error),
 }
 
 fn package(os: String, out: PathBuf) -> std::io::Result<()> {
@@ -32,8 +32,8 @@ fn package(os: String, out: PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
-fn update() -> anyhow::Result<()> {
-    anyhow::bail!(
+fn update() -> diagnostics::anyhow::Result<()> {
+    diagnostics::anyhow::bail!(
         "first-party self-update tooling is not yet available; download releases manually"
     )
 }

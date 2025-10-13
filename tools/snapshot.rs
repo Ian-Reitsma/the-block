@@ -43,7 +43,7 @@ fn main() {
             }
             CliError::Failure(err) => {
                 #[cfg(feature = "telemetry")]
-                metrics::increment_counter!("snapshot_restore_fail_total");
+                foundation_metrics::increment_counter!("snapshot_restore_fail_total");
                 eprintln!("{err}");
                 std::process::exit(1);
             }

@@ -1,12 +1,12 @@
 use crate::parse_utils::{optional_path, take_string};
 use crate::rpc::RpcClient;
-use anyhow::{anyhow, Context, Result};
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
     ConfigReader,
 };
+use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::Serialize;
 use std::{path::PathBuf, process};
 

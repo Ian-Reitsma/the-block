@@ -7,6 +7,7 @@ build = "build.rs"
 [dependencies]
 concurrency = { path = "../crates/concurrency" }
 diagnostics = { path = "../crates/diagnostics" }
+foundation_metrics = { path = "../crates/foundation_metrics" }
 httpd = { path = "../crates/httpd" }
 http_env = { path = "../crates/http_env" }
 foundation_serialization = { path = "../crates/foundation_serialization" }

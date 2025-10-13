@@ -1,4 +1,4 @@
-use anyhow::Result;
+use diagnostics::anyhow::{self, Result};
 use foundation_serialization::Serialize;
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -78,10 +78,12 @@ fn to_entry(
 fn load_entries(path: &Path) -> Result<Vec<ReleaseHistoryEntry>> {
     let store = GovStore::open(path);
     let mut install_map: HashMap<String, Vec<u64>> =
-        governance::controller::release_installations(&store)?
+        governance::controller::release_installations(&store)
+            .map_err(anyhow::Error::from_error)?
             .into_iter()
             .collect();
-    let mut entries: Vec<ReleaseHistoryEntry> = governance::controller::approved_releases(&store)?
+    let mut entries: Vec<ReleaseHistoryEntry> = governance::controller::approved_releases(&store)
+        .map_err(anyhow::Error::from_error)?
         .into_iter()
         .map(|record| to_entry(record, &mut install_map))
         .collect();

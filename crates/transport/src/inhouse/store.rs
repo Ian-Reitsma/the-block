@@ -5,6 +5,8 @@ use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64_fp::{decode_standard, encode_standard};
+use concurrency::Bytes;
 use diagnostics::{anyhow, Result as DiagResult, TbError};
 use foundation_serialization::json::{self, Map, Value};
 
@@ -14,6 +16,7 @@ use super::certificate::Certificate;
 pub struct Advertisement {
     pub fingerprint: [u8; 32],
     pub verifying_key: [u8; 32],
+    pub certificate: Bytes,
     pub issued_at: SystemTime,
 }
 
@@ -33,6 +36,10 @@ impl Advertisement {
                     .map(Value::from)
                     .collect(),
             ),
+        );
+        map.insert(
+            "certificate".to_string(),
+            Value::String(encode_standard(self.certificate.as_ref())),
         );
         map.insert(
             "issued_at".to_string(),
@@ -55,6 +62,9 @@ impl Advertisement {
             .remove("fingerprint")
             .ok_or_else(|| anyhow!("advertisement missing fingerprint"))?;
         let verifying_key_value = object.remove("verifying_key");
+        let certificate_value = object
+            .remove("certificate")
+            .ok_or_else(|| anyhow!("advertisement missing certificate"))?;
         let issued_at_value = object
             .remove("issued_at")
             .ok_or_else(|| anyhow!("advertisement missing issued_at"))?;
@@ -64,8 +74,20 @@ impl Advertisement {
                 Some(value) => parse_byte_array(value, "verifying_key")?,
                 None => [0u8; 32],
             },
+            certificate: Bytes::from(parse_certificate(certificate_value)?),
             issued_at: parse_system_time(issued_at_value)?,
         })
+    }
+}
+
+impl From<&Certificate> for Advertisement {
+    fn from(cert: &Certificate) -> Self {
+        Self {
+            fingerprint: cert.fingerprint,
+            verifying_key: cert.verifying_key,
+            certificate: cert.der.clone(),
+            issued_at: SystemTime::now(),
+        }
     }
 }
 
@@ -126,6 +148,25 @@ fn parse_byte(value: Value, field: &str) -> DiagResult<u8> {
         .as_u64()
         .ok_or_else(|| anyhow!("{} entries must be unsigned integers", field))?;
     byte_from_u64(value, field)
+}
+
+fn parse_certificate(value: Value) -> DiagResult<Vec<u8>> {
+    match value {
+        Value::String(encoded) => {
+            decode_standard(&encoded).map_err(|err| anyhow!("invalid certificate payload: {err}"))
+        }
+        Value::Array(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for entry in values {
+                out.push(parse_byte(entry, "certificate")?);
+            }
+            Ok(out)
+        }
+        other => Err(anyhow!(
+            "certificate must be encoded as a base64 string or byte array, found {}",
+            describe_json(&other)
+        )),
+    }
 }
 
 fn byte_from_u64(value: u64, field: &str) -> DiagResult<u8> {
@@ -240,18 +281,16 @@ impl InhouseCertificateStore {
         Ok(Some(advert))
     }
 
-    fn generate(&self) -> DiagResult<Advertisement> {
+    fn generate(&self) -> DiagResult<(Certificate, Advertisement)> {
         let certificate = Certificate::generate()?;
-        Ok(Advertisement {
-            fingerprint: certificate.fingerprint,
-            verifying_key: certificate.verifying_key,
-            issued_at: SystemTime::now(),
-        })
+        let advert = Advertisement::from(&certificate);
+        Ok((certificate, advert))
     }
 
     fn regenerate(&self) -> Option<Advertisement> {
-        match self.generate().and_then(|advert| {
+        match self.generate().and_then(|(certificate, advert)| {
             self.persist(&advert)?;
+            self.write_der(&certificate)?;
             Ok(advert)
         }) {
             Ok(advert) => {
@@ -261,6 +300,43 @@ impl InhouseCertificateStore {
             Err(_) => None,
         }
     }
+
+    fn write_der(&self, certificate: &Certificate) -> DiagResult<()> {
+        let path = self.path.with_extension("der");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|err| anyhow!("create cert dir: {err}"))?;
+        }
+        let mut file = File::create(&path).map_err(|err| anyhow!("create cert der: {err}"))?;
+        file.write_all(certificate.der.as_ref())
+            .map_err(|err| anyhow!("write cert der: {err}"))?;
+        file.sync_all()
+            .map_err(|err| anyhow!("sync cert der: {err}"))?;
+        Ok(())
+    }
+
+    pub fn install_certificate(&self, certificate: &Certificate) -> DiagResult<Advertisement> {
+        let advert = Advertisement::from(certificate);
+        self.persist(&advert)?;
+        self.write_der(certificate)?;
+        *self.current.lock().unwrap() = Some(advert.clone());
+        Ok(advert)
+    }
+
+    pub fn load_certificate(&self) -> Option<Certificate> {
+        let path = self.path.with_extension("der");
+        let mut buf = Vec::new();
+        let mut file = File::open(&path).ok()?;
+        match file.read_to_end(&mut buf) {
+            Ok(0) | Err(_) => return None,
+            Ok(_) => {}
+        }
+        let certificate = Certificate::from_der_lossy(Bytes::from(buf));
+        if certificate.verifying_key == [0u8; 32] {
+            let _ = fs::remove_file(path);
+            return None;
+        }
+        Some(certificate)
+    }
 }
 
 impl crate::CertificateStore for InhouseCertificateStore {
@@ -268,15 +344,17 @@ impl crate::CertificateStore for InhouseCertificateStore {
     type Error = TbError;
 
     fn initialize(&self) -> StdResult<Self::Advertisement, Self::Error> {
-        let advert = self.generate()?;
+        let (certificate, advert) = self.generate()?;
         self.persist(&advert)?;
+        self.write_der(&certificate)?;
         *self.current.lock().unwrap() = Some(advert.clone());
         Ok(advert)
     }
 
     fn rotate(&self) -> StdResult<Self::Advertisement, Self::Error> {
-        let advert = self.generate()?;
+        let (certificate, advert) = self.generate()?;
         self.persist(&advert)?;
+        self.write_der(&certificate)?;
         *self.current.lock().unwrap() = Some(advert.clone());
         Ok(advert)
     }
@@ -287,7 +365,7 @@ impl crate::CertificateStore for InhouseCertificateStore {
         }
         match self.load() {
             Ok(Some(advert)) => {
-                if advert.verifying_key == [0u8; 32] {
+                if advert.verifying_key == [0u8; 32] || advert.certificate.is_empty() {
                     if let Some(fresh) = self.regenerate() {
                         return Some(fresh);
                     }
@@ -310,12 +388,14 @@ mod tests {
         let advert = Advertisement {
             fingerprint: [7u8; 32],
             verifying_key: [8u8; 32],
+            certificate: Bytes::from_static(b"cert-bytes"),
             issued_at: UNIX_EPOCH + std::time::Duration::new(5, 9),
         };
         let value = advert.to_value().expect("serialize");
         let restored = Advertisement::from_value(value).expect("deserialize");
         assert_eq!(restored.fingerprint, [7u8; 32]);
         assert_eq!(restored.verifying_key, [8u8; 32]);
+        assert_eq!(restored.certificate.as_ref(), b"cert-bytes");
         assert_eq!(restored.issued_at, advert.issued_at);
     }
 
@@ -324,6 +404,7 @@ mod tests {
         let advert = Advertisement {
             fingerprint: [0u8; 32],
             verifying_key: [1u8; 32],
+            certificate: Bytes::from_static(b"certificate"),
             issued_at: UNIX_EPOCH + std::time::Duration::new(5, 9),
         };
         let value = advert.to_value().expect("serialize");
@@ -355,5 +436,46 @@ mod tests {
             issued_map.get("nanos_since_epoch"),
             Some(&Value::from(9u32))
         );
+        let cert_value = map.get("certificate").expect("certificate");
+        match cert_value {
+            Value::String(encoded) => {
+                let decoded = decode_standard(encoded).expect("decode certificate");
+                assert_eq!(decoded, b"certificate");
+            }
+            other => panic!("certificate not encoded as string: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_certificate_persists_der() {
+        let temp = sys::tempfile::TempDir::new().expect("temp dir");
+        let store_path = temp.path().join("cert.json");
+        let store = InhouseCertificateStore::new(store_path.clone());
+        let certificate = Certificate::generate().expect("generate cert");
+        let advert = store
+            .install_certificate(&certificate)
+            .expect("install certificate");
+        assert_eq!(advert.fingerprint, certificate.fingerprint);
+
+        let loaded = store.load_certificate().expect("load certificate");
+        assert_eq!(loaded.fingerprint, certificate.fingerprint);
+
+        let fresh_store = InhouseCertificateStore::new(store_path);
+        let recovered = fresh_store.load_certificate().expect("recover certificate");
+        assert_eq!(recovered.fingerprint, certificate.fingerprint);
+    }
+
+    #[test]
+    fn load_certificate_rejects_corrupt_der() {
+        let temp = sys::tempfile::TempDir::new().expect("temp dir");
+        let store_path = temp.path().join("cert.json");
+        let store = InhouseCertificateStore::new(store_path.clone());
+        let der_path = store_path.with_extension("der");
+        if let Some(parent) = der_path.parent() {
+            fs::create_dir_all(parent).expect("create dir");
+        }
+        fs::write(&der_path, b"invalid-der").expect("write corrupt der");
+        assert!(store.load_certificate().is_none());
+        assert!(!der_path.exists());
     }
 }

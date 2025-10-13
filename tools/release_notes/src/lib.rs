@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, fs, path::Path};
 
-use anyhow::{anyhow, Context, Result};
+use diagnostics::anyhow::{anyhow, Context, Result};
 use foundation_serialization::json::{self, Map, Number, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,7 +9,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context, Result};
+use diagnostics::{anyhow, Context, Result};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::Serialize;

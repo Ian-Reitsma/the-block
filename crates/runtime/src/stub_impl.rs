@@ -8,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use futures::executor;
-use metrics::{gauge, histogram};
 use pin_project_lite::pin_project;
 
 type PendingCounter = Arc<AtomicI64>;
@@ -42,7 +41,7 @@ impl StubRuntime {
         let tracker = PendingTracker::new(Arc::clone(&self.pending));
         let start = Instant::now();
         let instrumented = async move {
-            histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
+            foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
             let _guard = tracker;
             future.await
         };
@@ -57,7 +56,7 @@ impl StubRuntime {
         let tracker = PendingTracker::new(Arc::clone(&self.pending));
         let start = Instant::now();
         let output = func();
-        histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
+        foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
         drop(tracker);
         StubJoinHandle::completed(output)
     }
@@ -89,7 +88,7 @@ struct PendingTracker {
 impl PendingTracker {
     fn new(counter: PendingCounter) -> Self {
         let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
-        gauge!(PENDING_TASKS_METRIC, current as f64);
+        foundation_metrics::gauge!(PENDING_TASKS_METRIC, current as f64);
         Self { pending: counter }
     }
 }
@@ -97,7 +96,7 @@ impl PendingTracker {
 impl Drop for PendingTracker {
     fn drop(&mut self) {
         let remaining = self.pending.fetch_sub(1, Ordering::SeqCst) - 1;
-        gauge!(PENDING_TASKS_METRIC, remaining as f64);
+        foundation_metrics::gauge!(PENDING_TASKS_METRIC, remaining as f64);
     }
 }
 

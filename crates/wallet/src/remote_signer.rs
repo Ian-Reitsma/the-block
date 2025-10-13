@@ -9,7 +9,6 @@ use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{join_path, BlockingClient, ClientConfig, ClientTlsStream, Method, TlsConnector, Uri};
 use ledger::crypto::remote_tag;
-use metrics::{histogram, increment_counter};
 use rand::{Rng, RngCore};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind, Read, Write};
@@ -17,7 +16,6 @@ use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
-use uuid::Uuid;
 
 /// Cache of signer public keys with an expiry.
 static PUBKEY_CACHE: Lazy<Mutex<HashMap<String, (VerifyingKey, Instant)>>> =
@@ -61,9 +59,66 @@ struct Frame {
     payload: Vec<u8>,
 }
 
+fn generate_trace_id() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0F) | 0x40;
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
 enum StreamKind {
     Plain(std::net::TcpStream),
     Tls(ClientTlsStream),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_trace_id;
+    use std::collections::HashSet;
+
+    #[test]
+    fn trace_ids_follow_uuid_layout_and_remain_unique() {
+        const SAMPLES: usize = 1024;
+        let mut seen = HashSet::with_capacity(SAMPLES);
+
+        for _ in 0..SAMPLES {
+            let trace_id = generate_trace_id();
+            assert_eq!(trace_id.len(), 36, "unexpected trace id length: {trace_id}");
+            let mut chars = trace_id.chars();
+
+            // Validate hyphen placement (8-4-4-4-12) and hexadecimal segments.
+            for (idx, expected_len) in [8usize, 4, 4, 4, 12].into_iter().enumerate() {
+                if idx > 0 {
+                    assert_eq!(chars.next(), Some('-'));
+                }
+                for _ in 0..expected_len {
+                    let ch = chars
+                        .next()
+                        .expect("trace id ended prematurely while validating segment");
+                    let is_hex_digit = ch.is_ascii_digit() || matches!(ch, 'a'..='f');
+                    assert!(
+                        is_hex_digit,
+                        "trace id segment must be lowercase hex, found '{ch}' in {trace_id}"
+                    );
+                }
+            }
+            assert!(chars.next().is_none(), "extra characters found in trace id");
+
+            // Version nibble should encode UUID version 4 and variant bits should match RFC4122.
+            assert_eq!(trace_id.chars().nth(14), Some('4'));
+            assert!(matches!(
+                trace_id.chars().nth(19),
+                Some('8' | '9' | 'a' | 'b')
+            ));
+
+            assert!(seen.insert(trace_id), "duplicate trace id generated");
+        }
+    }
 }
 
 impl StreamKind {
@@ -355,7 +410,7 @@ impl RemoteSigner {
             .lock()
             .unwrap()
             .insert(endpoint.to_string(), (pubkey.clone(), Instant::now()));
-        increment_counter!("remote_signer_key_rotation_total");
+        foundation_metrics::increment_counter!("remote_signer_key_rotation_total");
         Ok(pubkey)
     }
 
@@ -657,13 +712,13 @@ impl WalletSigner for RemoteSigner {
     }
 
     fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<(VerifyingKey, Signature)>, WalletError> {
-        increment_counter!("remote_signer_request_total");
+        foundation_metrics::increment_counter!("remote_signer_request_total");
         let start = Instant::now();
         let tagged = remote_tag(msg);
         let msg_hex = crypto_suite::hex::encode(&tagged);
-        let trace_id = Uuid::new_v4();
+        let trace_id = generate_trace_id();
         let payload = SignReq {
-            trace: &trace_id.to_string(),
+            trace: &trace_id,
             msg: msg_hex,
         };
         let mut approvals: Vec<(VerifyingKey, Signature)> = Vec::new();
@@ -702,8 +757,8 @@ impl WalletSigner for RemoteSigner {
             let mut rng = rand::thread_rng();
             lat += rng.gen_range(-0.5..0.5);
         }
-        histogram!("remote_signer_latency_seconds", lat);
-        increment_counter!("remote_signer_success_total");
+        foundation_metrics::histogram!("remote_signer_latency_seconds", lat);
+        foundation_metrics::increment_counter!("remote_signer_success_total");
         Ok(approvals)
     }
 }

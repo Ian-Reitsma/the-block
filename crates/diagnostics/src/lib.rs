@@ -73,7 +73,19 @@ impl TbError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, TbError>;
+impl From<std::io::Error> for TbError {
+    fn from(value: std::io::Error) -> Self {
+        TbError::from_error(value)
+    }
+}
+
+impl From<codec::Error> for TbError {
+    fn from(value: codec::Error) -> Self {
+        TbError::from_error(value)
+    }
+}
+
+pub type Result<T, E = TbError> = std::result::Result<T, E>;
 
 /// Lightweight substitute for the `anyhow::Context` trait.
 pub trait Context<T> {

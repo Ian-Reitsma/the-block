@@ -13,10 +13,10 @@ inhouse = [
     "dep:foundation_serialization",
     "dep:foundation_tls",
     "dep:foundation_time",
+    "dep:base64_fp",
 ]
 quinn = [
     "dep:crypto_suite",
-    "dep:dashmap",
     "dep:quinn",
     "dep:rand",
     "dep:runtime",
@@ -31,7 +31,6 @@ quinn = [
     "dep:runtime",
     "dep:sys",
     "dep:foundation_time",
-    "dep:x509-parser",
     "dep:foundation_serialization",
     "dep:foundation_tls",
 ]
@@ -40,7 +39,6 @@ quic = ["quinn", "s2n-quic"]
 [dependencies]
 diagnostics = { path = "../diagnostics" }
 base64_fp = { path = "../base64_fp", optional = true }
-dashmap = { version = "5", optional = true }
 sys = { path = "../sys", optional = true }
 crypto_suite = { path = "../crypto_suite", optional = true }
 foundation_lazy = { path = "../foundation_lazy" }
@@ -49,7 +47,6 @@ runtime = { path = "../runtime", default-features = false, features = ["inhouse-
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
 foundation_time = { path = "../foundation_time", optional = true }
-x509-parser = { version = "0.16", optional = true }
 foundation_serialization = { path = "../foundation_serialization", optional = true }
 concurrency = { path = "../concurrency", features = ["serde"] }
 foundation_tls = { path = "../foundation_tls", optional = true }

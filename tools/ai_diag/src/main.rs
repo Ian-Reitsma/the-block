@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use diagnostics::anyhow::{anyhow, Result};
 use std::env;
 
 #[derive(Debug)]

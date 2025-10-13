@@ -10,12 +10,11 @@ thiserror = { path = "../thiserror" }
 httpd = { path = "../httpd" }
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../foundation_serialization" }
-uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 ledger = { path = "../../ledger" }
 foundation_lazy = { path = "../foundation_lazy" }
 base64_fp = { path = "../base64_fp" }
-metrics = "0.21"
+foundation_metrics = { path = "../foundation_metrics" }
 
 # optional PQ signatures
 pqcrypto-dilithium = { version = "0.5", optional = true }

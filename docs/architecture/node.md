@@ -353,7 +353,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── thiserror v1.0.69 (*)
 │   ├── tracing v0.1.41 (*)
 │   └── uuid v1.18.1 (*)
-└── x509-parser v0.16.0
     ├── asn1-rs v0.6.2
     │   ├── asn1-rs-derive v0.5.1 (proc-macro)
     │   │   ├── proc-macro2 v1.0.101 (*)

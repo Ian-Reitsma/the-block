@@ -1,8 +1,9 @@
 use http_env::blocking_client;
 use httpd::{client::ClientError, Method, StatusCode};
 use monitoring_build::{
-    load_metrics_spec, parse_prometheus_snapshot, render_html_snapshot, DashboardError,
-    MetricSnapshot,
+    ensure_monitoring_recorder, install_monitoring_recorder, load_metrics_spec,
+    monitoring_metrics, parse_prometheus_snapshot, record_snapshot_error, record_snapshot_success,
+    render_html_snapshot, DashboardError, MetricSnapshot,
 };
 use std::env;
 use std::fs;
@@ -14,9 +15,24 @@ const COMPONENT: &str = "monitoring.snapshot";
 const DEFAULT_REFRESH_SECONDS: u64 = 5;
 
 fn main() {
-    if let Err(err) = run() {
-        eprintln!("{COMPONENT}: {err}");
-        std::process::exit(1);
+    if install_monitoring_recorder().is_err() {
+        ensure_monitoring_recorder();
+    }
+    match run() {
+        Ok(()) => {
+            record_snapshot_success();
+        }
+        Err(err) => {
+            record_snapshot_error();
+            eprintln!("{COMPONENT}: {err}");
+            if let Some(metrics) = monitoring_metrics() {
+                eprintln!(
+                    "{COMPONENT}: success_total={} error_total={}",
+                    metrics.success_total, metrics.error_total
+                );
+            }
+            std::process::exit(1);
+        }
     }
 }
 

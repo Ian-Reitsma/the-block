@@ -8,7 +8,10 @@ fn main() {
 }
 
 #[cfg(feature = "dependency-fault")]
-fn main() -> anyhow::Result<()> {
+use diagnostics::anyhow::{self, Result};
+
+#[cfg(feature = "dependency-fault")]
+fn main() -> Result<()> {
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -39,6 +42,11 @@ fn main() -> anyhow::Result<()> {
     let matches = match parser.parse(&args) {
         Ok(matches) => matches,
         Err(ParseError::HelpRequested(_)) => {
+            print_root_help(&command, &bin);
+            return Ok(());
+        }
+        Err(ParseError::UnknownFlag(flag)) => {
+            println!("unknown flag '{flag}'\n");
             print_root_help(&command, &bin);
             return Ok(());
         }
@@ -195,7 +203,7 @@ fn build_command() -> Command {
 }
 
 #[cfg(feature = "dependency-fault")]
-fn parse_choice<T>(matches: &Matches, key: &str, default: T) -> anyhow::Result<T>
+fn parse_choice<T>(matches: &Matches, key: &str, default: T) -> Result<T>
 where
     T: Copy + std::str::FromStr<Err = String>,
 {
