@@ -445,11 +445,17 @@ variables so operators can spot plain-HTTP regressions before boot. Additional
 consumers can be registered with `http_env::register_tls_warning_sink` or the
 scoped `install_tls_warning_observer` helper—each sink receives the prefix,
 warning code, detail string, and captured variables without having to attach to
-diagnostics. Timeouts and retry strategy remain driven by the environment
-variables documented in [`docs/rpc.md`](docs/rpc.md). HTTPS endpoints now rely
-on the in-house TLS connector; set `TB_RPC_TLS`, `TB_NODE_TLS`,
-`TB_AGGREGATOR_TLS`, `TB_PROBE_TLS`, or the global `TB_HTTP_TLS` prefix (with
-the usual `_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision identities and
+diagnostics. The node now exposes
+`the_block::telemetry::ensure_tls_env_warning_diagnostics_bridge()` so
+diagnostics-only surfaces (integration harnesses, offline tooling) still land in
+`TLS_ENV_WARNING_*` metrics even when no sinks are active, while
+`reset_tls_env_warning_forwarder_for_testing()` lets tests toggle the bridge or
+swap sinks without leaking global state. Timeouts and retry strategy remain
+driven by the environment variables documented in
+[`docs/rpc.md`](docs/rpc.md). HTTPS endpoints now rely on the in-house TLS
+connector; set `TB_RPC_TLS`, `TB_NODE_TLS`, `TB_AGGREGATOR_TLS`,
+`TB_PROBE_TLS`, or the global `TB_HTTP_TLS` prefix (with the usual
+`_CERT`/`_KEY`/`_CA`/`_INSECURE` suffixes) to provision identities and
 trust anchors. Remote signer clients honour `REMOTE_SIGNER_TLS_*` and fall back
 to the shared `TB_HTTP_TLS` prefix. Use the new TLS tooling to bootstrap
 deployments: `contract tls convert --cert server.pem --key server-key.pem
@@ -471,6 +477,15 @@ configuration warning in the `TLS_ENV_WARNING_TOTAL{prefix,code}` counter and
 stamps `TLS_ENV_WARNING_LAST_SEEN_SECONDS{prefix,code}` with the most recent
 UNIX timestamp so dashboards and alerts can reason about both warning volume and
 freshness even after aggregator restarts.
+`tls_warning::register_tls_env_warning_telemetry_sink()` (also re-exported as
+`the_block::telemetry::register_tls_env_warning_telemetry_sink()`) exposes the
+same warning stream directly to Rust consumers: callbacks receive a
+`TlsEnvWarningTelemetryEvent` containing the prefix, code, origin, running
+totals, last-seen timestamp, hashed detail/variable buckets, and boolean
+`detail_changed` / `variables_changed` toggles so downstream dashboards can
+highlight new fingerprints immediately. The returned guard unregisters the sink
+on drop, making it safe for tests and long-lived services to rotate handlers
+without restarting processes.
 `tls_env_warning_detail_fingerprint{prefix,code}` and
 `tls_env_warning_variables_fingerprint{prefix,code}` expose BLAKE3 fingerprints
 of the latest warning detail string and variable list so dashboards and alerts

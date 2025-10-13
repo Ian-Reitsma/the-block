@@ -170,6 +170,15 @@ where
     TlsEnvWarningSinkGuard { sink, cell }
 }
 
+/// Returns true when at least one TLS warning sink is registered.
+pub fn has_tls_warning_sinks() -> bool {
+    warning_cell()
+        .sinks
+        .lock()
+        .map(|guard| !guard.is_empty())
+        .unwrap_or(false)
+}
+
 pub fn install_tls_warning_handler<F>(handler: F) -> TlsEnvWarningGuard
 where
     F: Fn(&TlsEnvWarning) + Send + Sync + 'static,
