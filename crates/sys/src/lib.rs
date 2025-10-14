@@ -149,6 +149,370 @@ pub mod cpu {
     }
 }
 
+pub mod net;
+
+pub mod reactor;
+
+#[cfg(target_os = "linux")]
+pub mod inotify {
+    use std::ffi::{CString, OsString};
+    use std::io::{self, ErrorKind};
+    use std::mem::size_of;
+    use std::os::fd::{AsRawFd, RawFd};
+    use std::os::raw::{c_char, c_int, c_void};
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use std::path::Path;
+
+    const IN_NONBLOCK: c_int = 0o0004_000;
+    const IN_CLOEXEC: c_int = 0o2000_000;
+
+    #[repr(C)]
+    struct RawInotifyEvent {
+        wd: c_int,
+        mask: u32,
+        cookie: u32,
+        len: u32,
+        name: [c_char; 0],
+    }
+
+    extern "C" {
+        fn inotify_init1(flags: c_int) -> c_int;
+        fn inotify_add_watch(fd: c_int, name: *const c_char, mask: u32) -> c_int;
+        fn read(fd: c_int, buf: *mut c_void, count: usize) -> isize;
+        fn close(fd: c_int) -> c_int;
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Event {
+        pub watch_descriptor: i32,
+        pub mask: u32,
+        pub name: Option<OsString>,
+    }
+
+    #[derive(Debug)]
+    pub struct Inotify {
+        fd: RawFd,
+        buffer: Vec<u8>,
+    }
+
+    impl Inotify {
+        pub fn new() -> io::Result<Self> {
+            // SAFETY: `inotify_init1` has no additional safety requirements.
+            let fd = unsafe { inotify_init1(IN_NONBLOCK | IN_CLOEXEC) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self {
+                fd,
+                buffer: vec![0u8; 64 * 1024],
+            })
+        }
+
+        pub fn add_watch(&self, path: &Path, mask: u32) -> io::Result<i32> {
+            let bytes = path.as_os_str().as_bytes();
+            let c_path = CString::new(bytes)
+                .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "path contains null byte"))?;
+            // SAFETY: `inotify_add_watch` reads the provided C string.
+            let wd = unsafe { inotify_add_watch(self.fd, c_path.as_ptr(), mask as u32) };
+            if wd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(wd)
+        }
+
+        pub fn read_events(&mut self) -> io::Result<Vec<Event>> {
+            let mut events = Vec::new();
+            loop {
+                // SAFETY: buffer is valid for writes.
+                let read = unsafe {
+                    read(
+                        self.fd,
+                        self.buffer.as_mut_ptr() as *mut c_void,
+                        self.buffer.len(),
+                    )
+                };
+                if read < 0 {
+                    let err = io::Error::last_os_error();
+                    if err.kind() == ErrorKind::WouldBlock {
+                        break;
+                    } else if err.kind() == ErrorKind::Interrupted {
+                        continue;
+                    } else {
+                        return Err(err);
+                    }
+                }
+                if read == 0 {
+                    break;
+                }
+
+                let mut offset = 0usize;
+                while offset < read as usize {
+                    // SAFETY: offset is within buffer bounds thanks to length checks.
+                    let header =
+                        unsafe { &*(self.buffer.as_ptr().add(offset) as *const RawInotifyEvent) };
+                    let name_offset = offset + size_of::<RawInotifyEvent>();
+                    let name = if header.len > 0 {
+                        let name_len = (header.len.saturating_sub(1)) as usize;
+                        let slice = &self.buffer[name_offset..name_offset + name_len];
+                        Some(OsString::from_vec(slice.to_vec()))
+                    } else {
+                        None
+                    };
+                    events.push(Event {
+                        watch_descriptor: header.wd,
+                        mask: header.mask,
+                        name,
+                    });
+                    offset += size_of::<RawInotifyEvent>() + header.len as usize;
+                }
+            }
+
+            Ok(events)
+        }
+    }
+
+    impl Drop for Inotify {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = close(self.fd);
+            }
+        }
+    }
+
+    impl AsRawFd for Inotify {
+        fn as_raw_fd(&self) -> RawFd {
+            self.fd
+        }
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+pub mod kqueue {
+    use std::io::{self, ErrorKind};
+    use std::os::fd::{AsRawFd, RawFd};
+
+    #[derive(Debug, Clone)]
+    pub struct Event {
+        pub fd: RawFd,
+        pub flags: u32,
+    }
+
+    #[derive(Debug)]
+    pub struct Kqueue {
+        fd: RawFd,
+    }
+
+    impl Kqueue {
+        pub fn new() -> io::Result<Self> {
+            let fd = unsafe { ffi::kqueue() };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { fd })
+        }
+
+        pub fn register(&self, ident: RawFd, flags: u32) -> io::Result<()> {
+            let mut change = RawKevent::zeroed();
+            change.ident = ident as usize;
+            change.filter = EVFILT_VNODE;
+            change.flags = (EV_ADD | EV_ENABLE | EV_CLEAR) as u16;
+            change.fflags = flags;
+            change.data = 0;
+            change.set_udata_null();
+
+            let res = unsafe {
+                ffi::kevent(
+                    self.fd,
+                    &change as *const RawKevent,
+                    1,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null(),
+                )
+            };
+            if res < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        fn poll_raw(&self, buffer: &mut [RawKevent]) -> io::Result<usize> {
+            let timeout = Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            loop {
+                let res = unsafe {
+                    ffi::kevent(
+                        self.fd,
+                        std::ptr::null(),
+                        0,
+                        buffer.as_mut_ptr(),
+                        buffer.len() as i32,
+                        &timeout as *const Timespec,
+                    )
+                };
+                if res < 0 {
+                    let err = io::Error::last_os_error();
+                    if err.kind() == ErrorKind::Interrupted {
+                        continue;
+                    }
+                    return Err(err);
+                }
+                return Ok(res as usize);
+            }
+        }
+
+        pub fn poll_events(&self, capacity: usize) -> io::Result<Vec<Event>> {
+            let mut buffer = Vec::with_capacity(capacity.max(1));
+            buffer.resize_with(capacity.max(1), RawKevent::zeroed);
+            let count = self.poll_raw(&mut buffer)?;
+            Ok(super::kqueue::interpret_events(&buffer[..count]))
+        }
+    }
+
+    impl Drop for Kqueue {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = ffi::close(self.fd);
+            }
+        }
+    }
+
+    impl AsRawFd for Kqueue {
+        fn as_raw_fd(&self) -> RawFd {
+            self.fd
+        }
+    }
+
+    pub fn interpret_events(raw: &[RawKevent]) -> Vec<Event> {
+        raw.iter()
+            .map(|event| Event {
+                fd: event.ident as RawFd,
+                flags: event.fflags,
+            })
+            .collect()
+    }
+
+    pub const NOTE_DELETE: u32 = 0x0000_0001;
+    pub const NOTE_WRITE: u32 = 0x0000_0002;
+    pub const NOTE_EXTEND: u32 = 0x0000_0004;
+    pub const NOTE_ATTRIB: u32 = 0x0000_0008;
+    pub const NOTE_LINK: u32 = 0x0000_0010;
+    pub const NOTE_RENAME: u32 = 0x0000_0020;
+    pub const NOTE_REVOKE: u32 = 0x0000_0040;
+
+    const EVFILT_VNODE: i16 = -4;
+    const EV_ADD: u16 = 0x0001;
+    const EV_ENABLE: u16 = 0x0004;
+    const EV_CLEAR: u16 = 0x0020;
+
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i64,
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[repr(C)]
+    struct RawKevent {
+        ident: usize,
+        filter: i16,
+        flags: u16,
+        fflags: u32,
+        data: isize,
+        udata: *mut std::ffi::c_void,
+        ext: [u64; 4],
+    }
+
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    #[repr(C)]
+    struct RawKevent {
+        ident: usize,
+        filter: i16,
+        flags: u16,
+        fflags: u32,
+        data: isize,
+        udata: isize,
+    }
+
+    impl RawKevent {
+        fn zeroed() -> Self {
+            Self {
+                ident: 0,
+                filter: 0,
+                flags: 0,
+                fflags: 0,
+                data: 0,
+                udata: Self::udata_zero(),
+                #[cfg(any(target_os = "macos", target_os = "ios"))]
+                ext: [0; 4],
+            }
+        }
+
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        fn udata_zero() -> *mut std::ffi::c_void {
+            std::ptr::null_mut()
+        }
+
+        #[cfg(any(
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        fn udata_zero() -> isize {
+            0
+        }
+
+        fn set_udata_null(&mut self) {
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                self.udata = std::ptr::null_mut();
+            }
+
+            #[cfg(any(
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "dragonfly"
+            ))]
+            {
+                self.udata = 0;
+            }
+        }
+    }
+
+    mod ffi {
+        use super::{RawKevent, Timespec};
+
+        extern "C" {
+            pub fn kqueue() -> i32;
+            pub fn kevent(
+                kq: i32,
+                changelist: *const RawKevent,
+                nchanges: i32,
+                eventlist: *mut RawKevent,
+                nevents: i32,
+                timeout: *const Timespec,
+            ) -> i32;
+            pub fn close(fd: i32) -> i32;
+        }
+    }
+}
+
 pub mod process {
     #[cfg(target_os = "linux")]
     use crate::error::{Result, SysError};
@@ -227,7 +591,8 @@ pub mod process {
 }
 
 pub mod random {
-    use crate::error::{Result, SysError};
+    use crate::error::Result;
+    #[cfg(unix)]
     use std::io::Read;
     #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
@@ -238,7 +603,7 @@ pub mod random {
         if let Some(reader) = URANDOM.get() {
             return Ok(reader);
         }
-        let file = std::fs::File::open("/dev/urandom").map_err(SysError::from)?;
+        let file = std::fs::File::open("/dev/urandom").map_err(crate::error::SysError::from)?;
         match URANDOM.set(Mutex::new(file)) {
             Ok(()) => Ok(URANDOM.get().expect("urandom file initialized")),
             Err(_) => Ok(URANDOM.get().expect("urandom file initialized")),
@@ -253,8 +618,8 @@ pub mod random {
         let reader = urandom()?;
         let mut guard = reader
             .lock()
-            .map_err(|_| SysError::unsupported("/dev/urandom mutex poisoned"))?;
-        guard.read_exact(dest).map_err(SysError::from)
+            .map_err(|_| crate::error::SysError::unsupported("/dev/urandom mutex poisoned"))?;
+        guard.read_exact(dest).map_err(crate::error::SysError::from)
     }
 
     #[cfg(not(unix))]
@@ -262,7 +627,7 @@ pub mod random {
         if dest.is_empty() {
             return Ok(());
         }
-        Err(SysError::unsupported("os randomness"))
+        Err(crate::error::SysError::unsupported("os randomness"))
     }
 
     pub fn fill_u64() -> Result<u64> {
@@ -322,7 +687,9 @@ pub mod tty {
 }
 
 pub mod signals {
-    use crate::error::{Result, SysError};
+    use crate::error::Result;
+    #[cfg(unix)]
+    use crate::error::SysError;
     use std::vec::IntoIter;
 
     #[cfg(unix)]
@@ -909,7 +1276,11 @@ pub mod tempfile {
 pub mod fs {
     use crate::error::{Result, SysError};
     use std::fs::File;
+    #[cfg(unix)]
     use std::os::fd::AsRawFd;
+
+    #[cfg(target_os = "windows")]
+    pub mod windows;
 
     #[cfg(unix)]
     pub const O_NOFOLLOW: i32 = crate::unix_ffi::O_NOFOLLOW;

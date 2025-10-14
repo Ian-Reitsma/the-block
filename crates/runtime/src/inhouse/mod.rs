@@ -13,8 +13,16 @@ use std::time::{Duration, Instant};
 
 use crate::sync::oneshot;
 use foundation_async::block_on;
-use mio::{event::Source, Events, Interest, Poll as MioPoll, Token, Waker as MioWaker};
 use std::io;
+use sys::reactor::{
+    Event as ReactorEvent, Events as ReactorEvents, Interest as ReactorInterest,
+    Poll as ReactorPoll, Token, Waker as ReactorWaker,
+};
+
+#[cfg(unix)]
+pub(crate) type ReactorRaw = std::os::fd::RawFd;
+#[cfg(target_os = "windows")]
+pub(crate) type ReactorRaw = std::os::windows::io::RawSocket;
 
 pub(crate) mod net;
 
@@ -502,8 +510,8 @@ impl TimerRegistration {
 }
 
 pub(crate) struct ReactorInner {
-    poll: Mutex<MioPoll>,
-    waker: MioWaker,
+    poll: ReactorPoll,
+    waker: ReactorWaker,
     timers: Mutex<TimerState>,
     io: Mutex<IoState>,
     next_token: AtomicU64,
@@ -513,11 +521,12 @@ pub(crate) struct ReactorInner {
 
 impl ReactorInner {
     fn new() -> Arc<Self> {
-        let poll = MioPoll::new().expect("failed to create reactor poller");
-        let waker = MioWaker::new(poll.registry(), REACTOR_WAKER_TOKEN)
+        let poll = ReactorPoll::new().expect("failed to create reactor poller");
+        let waker = poll
+            .create_waker(REACTOR_WAKER_TOKEN)
             .expect("failed to create reactor waker");
         let inner = Arc::new(Self {
-            poll: Mutex::new(poll),
+            poll,
             waker,
             timers: Mutex::new(TimerState::new()),
             io: Mutex::new(IoState::new()),
@@ -535,13 +544,10 @@ impl ReactorInner {
     }
 
     fn run(self: Arc<Self>) {
-        let mut events = Events::with_capacity(128);
+        let mut events = ReactorEvents::with_capacity(128);
         while !self.shutdown.load(AtomicOrdering::SeqCst) {
             let timeout = self.compute_timeout();
-            {
-                let mut poll = self.poll.lock().expect("reactor poll mutex poisoned");
-                let _ = poll.poll(&mut events, timeout);
-            }
+            let _ = self.poll.poll(&mut events, timeout);
             for event in events.iter() {
                 if event.token() == REACTOR_WAKER_TOKEN {
                     // drain wake-up notification
@@ -574,7 +580,7 @@ impl ReactorInner {
         }
     }
 
-    fn dispatch_io_event(&self, event: &mio::event::Event) {
+    fn dispatch_io_event(&self, event: &ReactorEvent) {
         let token_index = event.token().0;
         let mut wake_read = None;
         let mut wake_write = None;
@@ -609,35 +615,21 @@ impl ReactorInner {
         }
     }
 
-    fn register_source(&self, source: &mut impl Source, interest: Interest) -> io::Result<Token> {
+    fn register_fd(&self, fd: ReactorRaw, interest: ReactorInterest) -> io::Result<Token> {
         let token_value = self.next_token.fetch_add(1, AtomicOrdering::SeqCst) as usize;
         let token = Token(token_value);
         let _ = self.waker.wake();
-        let poll = loop {
-            if let Ok(poll) = self.poll.try_lock() {
-                break poll;
-            }
-            let _ = self.waker.wake();
-            thread::yield_now();
-        };
-        poll.registry().register(source, token, interest)?;
+        self.poll.register(fd, token, interest)?;
         {
             let mut state = self.io.lock().expect("reactor io mutex poisoned");
-            state.insert(token);
+            state.insert(token, fd);
         }
         Ok(token)
     }
 
-    fn deregister_source(&self, source: &mut impl Source, token: Token) -> io::Result<()> {
+    fn deregister_fd(&self, fd: ReactorRaw, token: Token) -> io::Result<()> {
         let _ = self.waker.wake();
-        let poll = loop {
-            if let Ok(poll) = self.poll.try_lock() {
-                break poll;
-            }
-            let _ = self.waker.wake();
-            thread::yield_now();
-        };
-        poll.registry().deregister(source)?;
+        self.poll.deregister(fd, token)?;
         let mut state = self.io.lock().expect("reactor io mutex poisoned");
         state.remove(token);
         Ok(())
@@ -750,7 +742,7 @@ impl IoState {
         }
     }
 
-    fn insert(&mut self, token: Token) {
+    fn insert(&mut self, token: Token, _fd: ReactorRaw) {
         self.entries.insert(token.0, IoEntry::new());
     }
 
@@ -786,16 +778,17 @@ enum IoDirection {
 pub(crate) struct IoRegistration {
     reactor: Arc<ReactorInner>,
     token: Token,
+    fd: ReactorRaw,
 }
 
 impl IoRegistration {
     pub(crate) fn new(
         reactor: Arc<ReactorInner>,
-        source: &mut impl Source,
-        interest: Interest,
+        fd: ReactorRaw,
+        interest: ReactorInterest,
     ) -> io::Result<Self> {
-        let token = reactor.register_source(source, interest)?;
-        Ok(Self { reactor, token })
+        let token = reactor.register_fd(fd, interest)?;
+        Ok(Self { reactor, token, fd })
     }
 
     pub(crate) fn poll_read_ready(&self, cx: &Context<'_>) -> Poll<io::Result<()>> {
@@ -806,8 +799,8 @@ impl IoRegistration {
         self.reactor.poll_write_ready(self.token, cx)
     }
 
-    pub(crate) fn deregister(&self, source: &mut impl Source) -> io::Result<()> {
-        self.reactor.deregister_source(source, self.token)
+    pub(crate) fn deregister(&self) -> io::Result<()> {
+        self.reactor.deregister_fd(self.fd, self.token)
     }
 }
 

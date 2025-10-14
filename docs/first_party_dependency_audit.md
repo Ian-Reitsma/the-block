@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-12 00:00:00Z_
+_Last updated: 2025-10-14 06:00:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -94,6 +94,39 @@ path, removing the `binary_codec` shim while regression fixtures lock order
 books, escrow tables, AMM pools, and trade logs against the legacy bytes. The
 residual `crate::util::binary_codec` usage survives only inside compatibility
 tests while the module is phased out.
+
+### Tooling & Support Crate Migrations (2025-10-14 update)
+
+- ✅ `crates/sys` now ships first-party FFI shims for Linux inotify and the
+  BSD/macOS kqueue family, exposes a matching epoll-backed `reactor`
+  (`Poll`, `Events`, `Waker`), and adds a `sys::net` module that constructs
+  non-blocking TCP/UDP sockets without touching crates.io shims. The latest
+  refresh completes the Windows leg of that work: `crates/sys/src/reactor/platform_windows.rs`
+  now drives an IOCP-backed backend that associates sockets with a completion
+  port, fans out WSA waiters that post completions back into the queue, and
+  routes runtime wakers through `PostQueuedCompletionStatus`, eliminating the
+  prior 64-handle ceiling. `crates/sys/src/net/windows.rs` mirrors the Unix
+  helpers via `WSASocketW`, implements `AsRawSocket`, and keeps FIRST_PARTY_ONLY
+  builds free of `socket2`/`mio` even on Windows. Runtime’s watcher and
+  networking stack consume these modules directly—descriptors register through
+  the first-party reactor, connection handshakes ride the new socket wrappers,
+  and the `runtime` crate drops `mio`, `socket2`, and `nix` entirely. FIRST_PARTY_ONLY
+  builds now link watcher and networking plumbing exclusively through in-house
+  code, the Linux integration suite (`crates/sys/tests/inotify_linux.rs`)
+  exercises creation/deletion/directory events, the BSD harness
+  (`crates/sys/tests/reactor_kqueue.rs`) validates EV_SET/EVFILT_USER wakeups,
+  a new Windows scaling test (`crates/sys/tests/reactor_windows_scaling.rs`)
+  guards IOCP registration growth, and the socket regression suite adds a UDP
+  stress harness (`crates/sys/tests/net_udp_stress.rs`) alongside the 32-iteration
+  TCP loop to keep send/recv ordering intact while the EINPROGRESS-safe
+  handshake in `sys::net::TcpStream::connect` remains covered. Runtime watchers
+  now consume these surfaces directly: Linux/BSD modules reuse the
+  first-party inotify/kqueue shims and Windows binds to the IOCP-backed
+  `DirectoryChangeDriver` with explicit `Send` guarantees plus the
+  `windows-sys` feature set declared in `crates/sys/Cargo.toml`, allowing
+  `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` to pass for
+  both `sys` and `runtime`. Remaining `mio` references live only behind legacy
+  tokio consumers slated for follow-up migration.
 
 ### Tooling & Support Crate Migrations (2025-10-12)
 
@@ -401,6 +434,11 @@ Dependency Migration" milestone) to coordinate the rollout.
   `transport::cert_parser` module, which performs DER parsing for Ed25519
   certificates used by the s2n backend. Certificate verification is now fully
   first party across every transport provider.
+- ✅ Added first-party regression tests that assert the Quinn adapter rejects
+  in-house certificates/connections and that the in-house transport records
+  handshake latency, reuse, and failure metadata without external shims
+  (`crates/transport/tests/provider_mismatch.rs`,
+  `crates/transport/tests/inhouse.rs`).
 - ✅ Replaced the third-party `lru` crate with `concurrency::cache::LruCache`
   and rewired the node/explorer caches to the in-house implementation, removing
   another blocker for `FIRST_PARTY_ONLY=1` builds.

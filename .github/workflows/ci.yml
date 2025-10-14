@@ -102,6 +102,12 @@ jobs:
         run: make doc-ci
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: install windows cross-target
+        run: rustup target add x86_64-pc-windows-gnu
+      - name: windows target check (sys/runtime)
+        run: |
+          cargo check --target x86_64-pc-windows-gnu -p sys
+          cargo check --target x86_64-pc-windows-gnu -p runtime
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked

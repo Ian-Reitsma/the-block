@@ -1,35 +1,43 @@
 use std::future::Future;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "windows")]
+use std::os::windows::io::AsRawSocket;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use mio::net::{
-    TcpListener as MioTcpListener, TcpStream as MioTcpStream, UdpSocket as MioUdpSocket,
-};
-use mio::Interest;
-use socket2::{Domain, Protocol, Socket, Type};
-
 use super::{InHouseRuntime, IoRegistration, ReactorInner};
+use sys::net::{
+    self, TcpListener as SysTcpListener, TcpStream as SysTcpStream, UdpSocket as SysUdpSocket,
+};
+use sys::reactor::Interest as ReactorInterest;
+
+#[cfg(unix)]
+fn reactor_raw_of<T: AsRawFd>(value: &T) -> super::ReactorRaw {
+    value.as_raw_fd()
+}
+
+#[cfg(target_os = "windows")]
+fn reactor_raw_of<T: AsRawSocket>(value: &T) -> super::ReactorRaw {
+    value.as_raw_socket()
+}
 
 pub(crate) struct TcpListener {
     reactor: Arc<ReactorInner>,
-    inner: Mutex<MioTcpListener>,
+    inner: Mutex<SysTcpListener>,
     registration: IoRegistration,
 }
 
 impl TcpListener {
     pub(crate) fn bind(runtime: &InHouseRuntime, addr: SocketAddr) -> io::Result<Self> {
         let reactor = runtime.reactor();
-        let socket = create_tcp_socket(addr)?;
-        socket.bind(&addr.into())?;
-        socket.listen(1024)?;
-        socket.set_nonblocking(true)?;
-        let std_listener: std::net::TcpListener = socket.into();
-        let mut listener = MioTcpListener::from_std(std_listener);
+        let listener = net::bind_tcp_listener(addr)?;
+        let fd = reactor_raw_of(&listener);
         let registration =
-            IoRegistration::new(Arc::clone(&reactor), &mut listener, Interest::READABLE)?;
+            IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
         Ok(Self {
             reactor,
             inner: Mutex::new(listener),
@@ -52,23 +60,23 @@ impl TcpListener {
 
 impl Drop for TcpListener {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            let _ = self.registration.deregister(&mut *inner);
-        }
+        drop(self.inner.lock());
+        let _ = self.registration.deregister();
     }
 }
 
 pub(crate) struct TcpStream {
-    inner: MioTcpStream,
+    inner: SysTcpStream,
     registration: IoRegistration,
 }
 
 impl TcpStream {
-    fn new(reactor: Arc<ReactorInner>, mut stream: MioTcpStream) -> io::Result<Self> {
+    fn new(reactor: Arc<ReactorInner>, stream: SysTcpStream) -> io::Result<Self> {
+        let fd = reactor_raw_of(&stream);
         let registration = IoRegistration::new(
             reactor,
-            &mut stream,
-            Interest::READABLE | Interest::WRITABLE,
+            fd,
+            ReactorInterest::READABLE | ReactorInterest::WRITABLE,
         )?;
         Ok(Self {
             inner: stream,
@@ -78,32 +86,17 @@ impl TcpStream {
 
     pub(crate) fn connect(runtime: &InHouseRuntime, addr: SocketAddr) -> io::Result<ConnectFuture> {
         let reactor = runtime.reactor();
-        let socket = create_tcp_socket(addr)?;
-        socket.set_nonblocking(true)?;
-        let addr_any = &addr.into();
-        let pending = match socket.connect(addr_any) {
-            Ok(()) => false,
-            Err(err) => {
-                let in_progress = err.raw_os_error() == Some(libc::EINPROGRESS);
-                if err.kind() == ErrorKind::WouldBlock || in_progress {
-                    true
-                } else {
-                    return Err(err);
-                }
-            }
-        };
-        let std_stream: std::net::TcpStream = socket.into();
-        std_stream.set_nonblocking(true)?;
-        let mut stream = MioTcpStream::from_std(std_stream);
+        let (stream, ready) = net::connect(addr)?;
+        let fd = reactor_raw_of(&stream);
         let registration = IoRegistration::new(
             Arc::clone(&reactor),
-            &mut stream,
-            Interest::READABLE | Interest::WRITABLE,
+            fd,
+            ReactorInterest::READABLE | ReactorInterest::WRITABLE,
         )?;
         Ok(ConnectFuture {
             stream: Some(stream),
             registration: Some(registration),
-            ready: !pending,
+            ready,
         })
     }
 
@@ -138,29 +131,24 @@ impl TcpStream {
 
 impl Drop for TcpStream {
     fn drop(&mut self) {
-        let registration = &self.registration;
-        let inner = &mut self.inner;
-        let _ = registration.deregister(inner);
+        let _ = self.registration.deregister();
     }
 }
 
 pub(crate) struct UdpSocket {
-    inner: MioUdpSocket,
+    inner: SysUdpSocket,
     registration: IoRegistration,
 }
 
 impl UdpSocket {
     pub(crate) fn bind(runtime: &InHouseRuntime, addr: SocketAddr) -> io::Result<Self> {
         let reactor = runtime.reactor();
-        let socket = create_udp_socket(addr)?;
-        socket.bind(&addr.into())?;
-        socket.set_nonblocking(true)?;
-        let std_socket: std::net::UdpSocket = socket.into();
-        let mut udp = MioUdpSocket::from_std(std_socket);
+        let udp = net::bind_udp_socket(addr)?;
+        let fd = reactor_raw_of(&udp);
         let registration = IoRegistration::new(
             Arc::clone(&reactor),
-            &mut udp,
-            Interest::READABLE | Interest::WRITABLE,
+            fd,
+            ReactorInterest::READABLE | ReactorInterest::WRITABLE,
         )?;
         Ok(Self {
             inner: udp,
@@ -187,9 +175,7 @@ impl UdpSocket {
 
 impl Drop for UdpSocket {
     fn drop(&mut self) {
-        let registration = &self.registration;
-        let inner = &mut self.inner;
-        let _ = registration.deregister(inner);
+        let _ = self.registration.deregister();
     }
 }
 
@@ -231,7 +217,7 @@ impl<'a> Future for AcceptFuture<'a> {
 }
 
 pub(crate) struct ConnectFuture {
-    stream: Option<MioTcpStream>,
+    stream: Option<SysTcpStream>,
     registration: Option<IoRegistration>,
     ready: bool,
 }
@@ -246,8 +232,7 @@ impl Future for ConnectFuture {
                 let stream = this.stream.as_mut().expect("connect future missing stream");
                 match stream.take_error()? {
                     Some(err) => {
-                        let in_progress = err.raw_os_error() == Some(libc::EINPROGRESS);
-                        if err.kind() == ErrorKind::WouldBlock || in_progress {
+                        if err.kind() == ErrorKind::WouldBlock || is_connect_in_progress(&err) {
                             this.ready = false;
                             continue;
                         }
@@ -279,6 +264,27 @@ impl Future for ConnectFuture {
             }
         }
     }
+}
+
+fn is_connect_in_progress(err: &io::Error) -> bool {
+    err.raw_os_error()
+        .map(is_connect_in_progress_code)
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn is_connect_in_progress_code(code: i32) -> bool {
+    matches!(code, 115 | 114 | 36 | 37)
+}
+
+#[cfg(windows)]
+fn is_connect_in_progress_code(code: i32) -> bool {
+    matches!(code, 10035 | 10036 | 10037)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn is_connect_in_progress_code(_code: i32) -> bool {
+    false
 }
 
 pub(crate) struct TcpReadFuture<'a> {
@@ -384,20 +390,4 @@ impl<'a> Future for UdpSendFuture<'a> {
             }
         }
     }
-}
-
-fn create_tcp_socket(addr: SocketAddr) -> io::Result<Socket> {
-    let domain = match addr {
-        SocketAddr::V4(_) => Domain::IPV4,
-        SocketAddr::V6(_) => Domain::IPV6,
-    };
-    Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
-}
-
-fn create_udp_socket(addr: SocketAddr) -> io::Result<Socket> {
-    let domain = match addr {
-        SocketAddr::V4(_) => Domain::IPV4,
-        SocketAddr::V6(_) => Domain::IPV6,
-    };
-    Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
 }

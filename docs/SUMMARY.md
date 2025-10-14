@@ -1,4 +1,10 @@
 # Summary
+> **Review (2025-10-14):** `crates/sys` inlines the Linux inotify and BSD/macOS
+> kqueue ABIs, removing the crate’s `libc` dependency while runtime’s
+> `fs::watch` backend drops the `nix` bridge and reuses Mio registration for all
+> platforms. Network sockets now rely solely on Mio helpers, finishing the
+> `socket2` removal. Dependency inventories were refreshed to reflect the new
+> first-party coverage.
 > **Review (2025-10-12):** Runtime replaced the `crossbeam-deque` scheduler
 > with a first-party `WorkQueue` that drives both async tasks and the blocking
 > pool while preserving spawn-latency/pending-task telemetry. Added
