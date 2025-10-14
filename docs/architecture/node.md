@@ -18,6 +18,11 @@
 > `sync::oneshot` module has been retired. The next `cargo tree` export will drop
 > the legacy `futures`/`pin-project` nodes once downstream crates finish
 > rebuilding their lockfiles.
+>
+> **2025-10-12 update:** Workspace manifests now alias `serde` to the
+> `foundation_serde` facade and route big integer arithmetic through the new
+> `foundation_bigint` crate. The generated tree will continue to show `serde`
+> nodes while the external backend remains the default feature.
 
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
@@ -47,13 +52,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │           ├── quote v1.0.41 (*)
 │   │   │           └── syn v2.0.106 (*)
 │   │   ├── foundation_lazy v0.1.0 (/workspace/the-block/crates/foundation_lazy)
-│   │   ├── num-bigint v0.4.6
-│   │   │   ├── num-integer v0.1.46
-│   │   │   │   └── num-traits v0.2.19
-│   │   │   │       [build-dependencies]
-│   │   │   │       └── autocfg v1.5.0
-│   │   │   └── num-traits v0.2.19 (*)
-│   │   ├── num-traits v0.2.19 (*)
+│   │   ├── foundation_bigint v0.1.0 (/workspace/the-block/crates/foundation_bigint)
 │   │   ├── rand v0.1.0 (/workspace/the-block/crates/rand)
 │   │   │   └── rand_core v0.1.0 (/workspace/the-block/crates/rand_core)
 │   │   ├── serde v1.0.228 (*)
@@ -117,10 +116,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   └── runtime v0.1.0 (/workspace/the-block/crates/runtime)
 │   │       ├── base64_fp v0.1.0 (/workspace/the-block/crates/base64_fp)
 │   │       ├── concurrency v0.1.0 (/workspace/the-block/crates/concurrency) (*)
-│   │       ├── crossbeam-deque v0.8.6
-│   │       │   ├── crossbeam-epoch v0.9.18
-│   │       │   │   └── crossbeam-utils v0.8.21
-│   │       │   └── crossbeam-utils v0.8.21
 │   │       ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
 │   │       ├── futures v0.3.31
 │   │       │   ├── futures-channel v0.3.31
@@ -382,7 +377,6 @@ the_block v0.1.0 (/workspace/the-block/node)
     │   ├── asn1-rs v0.6.2 (*)
     │   ├── displaydoc v0.2.5 (proc-macro) (*)
     │   ├── nom v7.1.3 (*)
-    │   ├── num-bigint v0.4.6 (*)
     │   ├── num-traits v0.2.19 (*)
     │   └── rusticata-macros v4.1.0 (*)
     ├── lazy_static v1.5.0

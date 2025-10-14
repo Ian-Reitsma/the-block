@@ -617,14 +617,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "num-bigint",
-          "version": "0.4.6"
-        },
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        },
-        {
           "name": "rand",
           "version": "0.1.0"
         },
@@ -2683,39 +2675,11 @@
     {
       "dependencies": [
         {
-          "name": "num-integer",
-          "version": "0.1.46"
-        },
-        {
           "name": "num-traits",
           "version": "0.2.19"
         }
       ],
       "dependents": [
-        {
-          "name": "crypto_suite",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "num-bigint",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.4.6"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "num-bigint",
-          "version": "0.4.6"
-        },
         {
           "name": "num-iter",
           "version": "0.1.45"
@@ -2741,16 +2705,8 @@
       ],
       "dependents": [
         {
-          "name": "crypto_suite",
-          "version": "0.1.0"
-        },
-        {
           "name": "image",
           "version": "0.23.14"
-        },
-        {
-          "name": "num-bigint",
-          "version": "0.4.6"
         },
         {
           "name": "num-integer",

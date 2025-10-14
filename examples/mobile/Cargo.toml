@@ -7,7 +7,7 @@ edition = "2021"
 light-client = { path = "../../crates/light-client" }
 wallet = { path = "../../crates/wallet" }
 crypto_suite = { path = "../../crates/crypto_suite" }
-serde = { version = "1", features=["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 the_block = { path = "../../node" }
 httpd = { path = "../../crates/httpd" }

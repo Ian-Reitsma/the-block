@@ -8,7 +8,7 @@ default = []
 telemetry = []
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 thiserror = { path = "../crates/thiserror" }
 crypto_suite = { path = "../crates/crypto_suite" }
 foundation_serialization = { path = "../crates/foundation_serialization" }

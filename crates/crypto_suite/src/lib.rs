@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[allow(unused_extern_crates)]
+extern crate foundation_serialization as serde;
+
 pub mod constant_time;
 pub mod encoding;
 pub mod encryption;

@@ -13,9 +13,9 @@ telemetry = []
 [dependencies]
 rand = { path = "../rand" }
 thiserror = { path = "../thiserror" }
-serde = { version = "1", features = ["derive"] }
-num-bigint = { version = "0.4", features = ["std"] }
-num-traits = "0.2"
+foundation_serialization = { path = "../foundation_serialization" }
+foundation_bigint = { path = "../foundation_bigint" }
+serde = { package = "foundation_serde", path = "../foundation_serde", default-features = false }
 codec = { path = "../codec" }
 foundation_lazy = { path = "../foundation_lazy" }
 

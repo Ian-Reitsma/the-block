@@ -6,5 +6,10 @@ description = "First-party serialization scaffolding for The Block"
 authors = ["The Block Dev Team"]
 license = "MIT"
 
+[features]
+default = ["serde-stub"]
+serde-external = ["serde/external-backend"]
+serde-stub = ["serde/stub-backend"]
+
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { package = "foundation_serde", path = "../foundation_serde", default-features = false }

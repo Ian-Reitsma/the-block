@@ -7,7 +7,7 @@ edition = "2021"
 cli_core = { path = "../../crates/cli_core" }
 httpd = { path = "../../crates/httpd" }
 http_env = { path = "../../crates/http_env" }
-serde = { version = "1", features=["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 wallet = { path = "../../crates/wallet" }
 crypto_suite = { path = "../../crates/crypto_suite" }

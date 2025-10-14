@@ -1,0 +1,12 @@
+[package]
+name = "foundation_serde_derive"
+version = "0.1.0"
+edition = "2021"
+authors = ["The Block Developers"]
+license = "MIT OR Apache-2.0"
+description = "Derive macros for the foundation_serde stub backend"
+
+[lib]
+proc-macro = true
+
+[dependencies]

@@ -3,9 +3,8 @@
 use core::fmt;
 use std::ops::{Add, AddAssign, Mul, Sub};
 
+use foundation_bigint::BigUint;
 use foundation_lazy::sync::Lazy;
-use num_bigint::BigUint;
-use num_traits::{One, Zero};
 use thiserror::Error;
 
 const MODULUS_DEC: &str =

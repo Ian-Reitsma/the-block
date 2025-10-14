@@ -138,10 +138,10 @@ dependencies = [
  "concurrency",
  "crypto_suite",
  "dex",
+ "foundation_serde",
  "foundation_serialization",
  "ledger",
  "runtime",
- "serde",
  "sys",
 ]
 
@@ -235,7 +235,7 @@ checksum = "17cc5e6b5ab06331c33589842070416baa137e8b0eb912b008cfd4a78ada7919"
 name = "cli_core"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "foundation_serde",
  "thiserror 0.0.1",
 ]
 
@@ -244,8 +244,8 @@ name = "codec"
 version = "0.1.0"
 dependencies = [
  "foundation_metrics",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "thiserror 0.0.1",
 ]
 
@@ -255,8 +255,8 @@ version = "0.1.0"
 dependencies = [
  "base64_fp",
  "crypto",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "sys",
  "thiserror 0.0.1",
 ]
@@ -281,7 +281,7 @@ dependencies = [
 name = "concurrency"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "foundation_serde",
 ]
 
 [[package]]
@@ -300,6 +300,7 @@ dependencies = [
  "diagnostics",
  "dkg",
  "foundation_lazy",
+ "foundation_serde",
  "foundation_serialization",
  "foundation_sqlite",
  "foundation_time",
@@ -312,7 +313,6 @@ dependencies = [
  "rand 0.1.0",
  "rpassword",
  "runtime",
- "serde",
  "state",
  "storage",
  "sys",
@@ -347,16 +347,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-deque"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -386,11 +376,11 @@ name = "crypto_suite"
 version = "0.1.0"
 dependencies = [
  "codec",
+ "foundation_bigint",
  "foundation_lazy",
- "num-bigint",
- "num-traits",
+ "foundation_serde",
+ "foundation_serialization",
  "rand 0.1.0",
- "serde",
  "testkit",
  "thiserror 0.0.1",
 ]
@@ -431,8 +421,8 @@ name = "dex"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "testkit",
 ]
 
@@ -473,13 +463,13 @@ dependencies = [
  "concurrency",
  "crypto_suite",
  "diagnostics",
+ "foundation_serde",
  "foundation_serialization",
  "foundation_sqlite",
  "http_env",
  "httpd",
  "rand 0.1.0",
  "runtime",
- "serde",
  "storage",
  "sys",
  "testkit",
@@ -513,6 +503,10 @@ name = "foundation_async"
 version = "0.1.0"
 
 [[package]]
+name = "foundation_bigint"
+version = "0.1.0"
+
+[[package]]
 name = "foundation_lazy"
 version = "0.1.0"
 
@@ -536,17 +530,29 @@ version = "0.1.0"
 name = "foundation_rpc"
 version = "0.1.0"
 dependencies = [
+ "foundation_serde",
  "foundation_serialization",
  "httpd",
- "serde",
  "thiserror 0.0.1",
 ]
+
+[[package]]
+name = "foundation_serde"
+version = "0.1.0"
+dependencies = [
+ "foundation_serde_derive",
+ "serde",
+]
+
+[[package]]
+name = "foundation_serde_derive"
+version = "0.1.0"
 
 [[package]]
 name = "foundation_serialization"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "foundation_serde",
 ]
 
 [[package]]
@@ -560,6 +566,7 @@ dependencies = [
 name = "foundation_telemetry"
 version = "0.1.0"
 dependencies = [
+ "foundation_serde",
  "foundation_serialization",
 ]
 
@@ -650,8 +657,8 @@ name = "gov-graph"
 version = "0.1.0"
 dependencies = [
  "dependency_guard",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "the_block",
 ]
 
@@ -661,9 +668,9 @@ version = "0.1.0"
 dependencies = [
  "foundation_lazy",
  "foundation_math",
+ "foundation_serde",
  "foundation_serialization",
  "rand 0.1.0",
- "serde",
  "sled 0.34.0",
  "sys",
 ]
@@ -767,6 +774,7 @@ name = "inflation"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_serde",
  "foundation_serialization",
  "rand 0.1.0",
 ]
@@ -857,12 +865,12 @@ dependencies = [
  "base64_fp",
  "crypto_suite",
  "foundation_lazy",
+ "foundation_serde",
  "foundation_serialization",
  "http_env",
  "httpd",
  "log",
  "pqcrypto-kyber",
- "serde",
  "sys",
 ]
 
@@ -872,8 +880,8 @@ version = "0.1.0"
 dependencies = [
  "cli_core",
  "crypto_suite",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "storage_engine",
 ]
 
@@ -913,6 +921,7 @@ dependencies = [
  "crypto_suite",
  "foundation_archive",
  "foundation_lazy",
+ "foundation_serde",
  "foundation_serialization",
  "jni",
  "ndk",
@@ -1075,16 +1084,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-bigint"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
-dependencies = [
- "num-integer",
- "num-traits",
-]
-
-[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1201,8 +1200,8 @@ name = "p2p_overlay"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "sys",
 ]
 
@@ -1532,7 +1531,6 @@ version = "0.1.0"
 dependencies = [
  "base64_fp",
  "concurrency",
- "crossbeam-deque",
  "crypto_suite",
  "foundation_async",
  "foundation_metrics",
@@ -1828,8 +1826,8 @@ name = "storage"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_serde",
  "foundation_serialization",
- "serde",
  "sys",
  "the_block",
  "thiserror 0.0.1",
@@ -1893,13 +1891,13 @@ dependencies = [
  "dkg",
  "explorer",
  "foundation_lazy",
+ "foundation_serde",
  "foundation_serialization",
  "ledger",
  "light-client",
  "p2p_overlay",
  "rand 0.1.0",
  "runtime",
- "serde",
  "storage_engine",
  "sys",
  "the_block",
@@ -1952,6 +1950,7 @@ dependencies = [
  "foundation_profiler",
  "foundation_regex",
  "foundation_rpc",
+ "foundation_serde",
  "foundation_serialization",
  "foundation_sqlite",
  "foundation_telemetry",
@@ -1973,7 +1972,6 @@ dependencies = [
  "python_bridge",
  "rand 0.1.0",
  "runtime",
- "serde",
  "sled 0.34.0",
  "state",
  "static_assertions",
@@ -2040,6 +2038,7 @@ version = "0.1.0"
 dependencies = [
  "crypto_suite",
  "foundation_lazy",
+ "foundation_serde",
  "foundation_serialization",
 ]
 
@@ -2189,6 +2188,7 @@ dependencies = [
  "crypto_suite",
  "foundation_lazy",
  "foundation_metrics",
+ "foundation_serde",
  "foundation_serialization",
  "foundation_time",
  "foundation_tls",
@@ -2197,7 +2197,6 @@ dependencies = [
  "pqcrypto-dilithium",
  "rand 0.1.0",
  "runtime",
- "serde",
  "sys",
  "testkit",
  "thiserror 0.0.1",

@@ -5,13 +5,12 @@ edition = "2021"
 
 [features]
 default = ["inhouse-backend"]
-inhouse-backend = ["dep:foundation_metrics", "dep:crossbeam-deque", "dep:mio", "dep:socket2", "dep:libc", "dep:nix"]
+inhouse-backend = ["dep:foundation_metrics", "dep:mio", "dep:socket2", "dep:libc", "dep:nix"]
 stub-backend = ["dep:foundation_metrics"]
 
 [dependencies]
 concurrency = { path = "../concurrency" }
 foundation_async = { path = "../foundation_async" }
-crossbeam-deque = { version = "0.8", optional = true }
 mio = { version = "0.8", features = ["os-poll", "os-ext", "net"], optional = true }
 foundation_metrics = { path = "../foundation_metrics", optional = true }
 socket2 = { version = "0.5", optional = true }

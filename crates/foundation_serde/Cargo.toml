@@ -1,0 +1,16 @@
+[package]
+name = "foundation_serde"
+version = "0.1.0"
+edition = "2021"
+authors = ["The Block Developers"]
+license = "MIT OR Apache-2.0"
+description = "First-party serde compatibility facade with stubbed FIRST_PARTY_ONLY backend"
+
+[features]
+default = ["stub-backend"]
+external-backend = ["dep:serde"]
+stub-backend = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+foundation_serde_derive = { path = "../foundation_serde_derive" }

@@ -71,9 +71,6 @@
 | unclassified | `memchr` | 2.7.6 | crates.io | Unlicense OR MIT | 3 |
 | unclassified | `mio` | 0.8.11 | crates.io | MIT | 2 |
 | unclassified | `nix` | 0.27.1 | crates.io | MIT | 2 |
-| unclassified | `num-bigint` | 0.4.6 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `num-integer` | 0.1.46 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `num-traits` | 0.2.19 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `once_cell` | 1.21.3 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `p2p_overlay` | 0.1.0 | workspace | — | 1 |
 | unclassified | `pin-project` | 1.1.10 | crates.io | Apache-2.0 OR MIT | 2 |
@@ -143,3 +140,11 @@
 | unclassified | `xtask` | 0.1.0 | workspace | — | 0 |
 | unclassified | `zerocopy` | 0.8.27 | crates.io | BSD-2-Clause OR Apache-2.0 OR MIT | 8 |
 | unclassified | `zerocopy-derive` | 0.8.27 | crates.io | BSD-2-Clause OR Apache-2.0 OR MIT | 9 |
+
+> Note: the workspace no longer lists `num-bigint`; `foundation_bigint` now ships
+> the production big-integer implementation so crypto_suite runs on first-party
+> math under both guard settings while `image`/`num-*` tooling continues to pull
+> `num-traits`.
+> Note: `crossbeam-deque`/`crossbeam-epoch` remain in the inventory because the
+> vendored `sled` crate still depends on them; the runtime backend now schedules
+> through a first-party `WorkQueue` and no longer links crossbeam.

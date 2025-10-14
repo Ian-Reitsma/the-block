@@ -1,4 +1,23 @@
 # System-Wide Economic Changes
+> **Review (2025-10-12):** Replaced the runtime scheduler’s
+> `crossbeam-deque`/`crossbeam-epoch` work queues with a first-party
+> `WorkQueue` that backs both async tasks and the blocking pool while keeping
+> spawn latency/pending task telemetry intact. Added regression coverage for
+> the `foundation_bigint` engine so arithmetic, parsing, shifting, and modular
+> exponentiation now lock the in-house implementation against deterministic
+> vectors.
+> **Review (2025-10-12):** Introduced the `foundation_serde` facade and stub
+> backend so FIRST_PARTY_ONLY builds no longer depend on upstream `serde`.
+> Workspace manifests now alias `serde` to the facade, and `foundation_bigint`
+> replaces the `num-bigint` stack inside `crypto_suite` so the guard compiles
+> without crates.io big-integer code while residual `num-traits` stays in image/num-* tooling. `foundation_serialization`
+> continues to expose mutually
+> exclusive `serde-external`/`serde-stub` feature gates, the stub backend mirrors
+> serde’s `ser`/`de` traits, visitor hierarchy, value helpers, primitive
+> Serialize/Deserialize implementations, and `IntoDeserializer` adapters, and
+> `cargo check -p foundation_serialization --no-default-features --features
+> serde-stub` succeeds. The guard-validated inventory reflects the new crate
+> boundaries.
 > **Review (2025-10-12):** Testkit serial wrappers now expand without `syn`/`quote` by consuming raw token streams; the new parser still injects the `testkit::serial::lock()` guard so deterministic ordering is preserved. Foundation math tests switched to first-party floating-point helpers (`testing::assert_close[_with]`), letting the workspace drop the `approx` crate. Wallet and remote-signer builds removed the dormant `hidapi` feature flag—HID connectors remain stubbed, but FIRST_PARTY_ONLY builds no longer link native HID toolchains. Dependency inventories and the audit report were refreshed accordingly.
 > **Review (2025-10-13):** Metrics aggregation now anchors on an in-house `AggregatorRecorder` that forwards every `foundation_metrics` macro emission into the existing Prometheus registry while preserving integer TLS fingerprints and runtime histograms. Monitoring utilities install a dedicated `MonitoringRecorder` so the snapshot CLI reports success/error counters through the same facade without reviving the third-party `metrics` stack.
 > **Review (2025-10-12):** Replaced the storage engine’s lingering serde/foundation_sqlite shims with an in-house JSON codec and temp-file harness so manifests, WAL records, and compaction metadata now round-trip exclusively through first-party parsers, eliminating the crate’s dependency on the `foundation_serialization` facade, `serde` derives, `rusqlite`, and the `sys::tempfile` adapter in FIRST_PARTY_ONLY builds. Guarded manifests now decode via deterministic Value helpers, byte slices persist as explicit arrays, and on-disk snapshots rely on an auditable WAL/manifest representation that no longer drags third-party parsers into the first-party pipeline. The global dependency guard learned how to scope `cargo metadata` to the requesting crate’s resolved node set so FIRST_PARTY_ONLY checks flag only the offender’s transitive graph instead of every workspace package, keeping enforcement targeted while we continue retiring legacy crates. Regenerated the dependency inventory snapshot, violations report, and first-party manifest so the audit baseline reflects the storage engine’s leaner dependency DAG and the narrower guard semantics. The runtime stack simultaneously adopted the new `foundation_metrics` facade—runtime installs the recorder that feeds spawn-latency histograms and pending-task gauges into existing telemetry channels while wallet, CLI, and tooling counters now emit through first-party macros, eliminating the crates.io `metrics`/`metrics-macros` pair.
@@ -14,6 +33,48 @@ Grafana dashboards sprout hashed TLS fingerprint gauges, unique-fingerprint tall
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
+
+## Runtime WorkQueue Replacement (2025-10-12)
+
+### Rationale
+
+- **Remove third-party schedulers:** The in-house runtime backend still
+  depended on `crossbeam-deque` for task scheduling and blocking jobs,
+  blocking the dependency guard even though every other async primitive was
+  first-party.
+- **Unify task orchestration:** Separate injector/worker-stealer logic for the
+  async executor and the blocking pool duplicated scheduling semantics and
+  complicated shutdown ordering.
+- **Maintain telemetry:** Runtime metrics expose
+  `runtime_spawn_latency_seconds` and `runtime_pending_tasks`; the replacement
+  queue had to preserve notification semantics so dashboards stayed accurate.
+
+### Implementation Summary
+
+- Added an `Arc`-backed `WorkQueue<T>` inside `runtime/src/inhouse/mod.rs`
+  using `Mutex<VecDeque<T>>` plus a condition variable so tasks and blocking
+  jobs share a first-party scheduler without lock-free dependencies.
+- Rewrote the async worker loop to drain the shared queue, removed
+  `crossbeam-deque`/`Injector`/`Stealer` plumbing, and tightened shutdown by
+  broadcasting notifications when the runtime drops.
+- Mirrored the change in the blocking pool so blocking jobs reuse the same
+  queue abstraction, shrinking the concurrency surface to one implementation
+  while keeping dedicated threads.
+- Updated `crates/runtime/Cargo.toml` to drop the `crossbeam-deque` optional
+  dependency and feature gate, regenerating the dependency inventory to show
+  the slimmer graph.
+
+### Operational Impact
+
+- **FIRST_PARTY_ONLY builds** eliminate another third-party dependency—the
+  runtime no longer relies on crossbeam while `sled` remains the only crate
+  pulling it in.
+- **Runtime behaviour** is unchanged from the caller’s perspective; spawn,
+  cancellation, and shutdown semantics remain identical while telemetry still
+  reports pending tasks and spawn latency via `foundation_metrics`.
+- **Blocking jobs** continue to execute on dedicated threads, but the new
+  queue lets future instrumentation (e.g., queue depth gauges) reuse the same
+  abstraction.
 
 ## Aggregator & Monitoring Recorder Bridge (2025-10-13)
 

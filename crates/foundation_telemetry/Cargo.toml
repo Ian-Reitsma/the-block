@@ -8,3 +8,4 @@ license = "MIT"
 
 [dependencies]
 foundation_serialization = { path = "../foundation_serialization" }
+serde = { workspace = true }

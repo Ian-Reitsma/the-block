@@ -8,7 +8,7 @@ default = []
 telemetry = ["dep:foundation_metrics"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../foundation_serialization" }
 thiserror = { path = "../thiserror" }
 foundation_metrics = { path = "../foundation_metrics", optional = true }

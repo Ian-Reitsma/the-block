@@ -61,8 +61,11 @@ members = [
   "crates/foundation_async",
   "crates/foundation_archive",
   "crates/foundation_serialization",
+  "crates/foundation_bigint",
   "crates/foundation_regex",
   "crates/foundation_rpc",
+  "crates/foundation_serde",
+  "crates/foundation_serde_derive",
   "crates/foundation_math",
   "crates/foundation_telemetry",
   "crates/foundation_profiler",
@@ -87,6 +90,9 @@ default-members = [
   "tools/xtask"
 ]
 resolver = "2"
+
+[workspace.dependencies]
+serde = { package = "foundation_serde", path = "crates/foundation_serde", default-features = false }
 
 [profile.test]
 # Reduce debug info emitted for test builds so the GNU linker stays within the

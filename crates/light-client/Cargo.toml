@@ -21,6 +21,7 @@ foundation_serialization = { path = "../foundation_serialization" }
 foundation_lazy = { path = "../foundation_lazy", optional = true }
 coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }
+serde = { workspace = true }
 tracing = "0.1"
 state = { path = "../../state" }
 thiserror = { path = "../thiserror" }
