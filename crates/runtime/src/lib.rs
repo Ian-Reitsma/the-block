@@ -23,6 +23,8 @@ pub mod sync;
 pub mod telemetry;
 pub mod ws;
 
+pub use foundation_async::future::{join_all, select2, Either};
+
 #[cfg(not(any(feature = "stub-backend", feature = "inhouse-backend")))]
 compile_error!("At least one runtime backend must be enabled for crates/runtime");
 
@@ -70,70 +72,46 @@ pub struct TimeoutError {
     duration: Duration,
 }
 
-pin_project_lite::pin_project! {
-    /// Join handle returned from [`spawn`] and [`spawn_blocking`].
-    pub struct JoinHandle<T> {
-        #[pin]
-        inner: JoinHandleInner<T>,
-    }
+/// Join handle returned from [`spawn`] and [`spawn_blocking`].
+pub struct JoinHandle<T> {
+    inner: JoinHandleInner<T>,
 }
 
 #[cfg(all(feature = "inhouse-backend", feature = "stub-backend"))]
-pin_project_lite::pin_project! {
-    #[project = JoinHandleInnerProj]
-    enum JoinHandleInner<T> {
-        InHouse { #[pin] handle: inhouse::InHouseJoinHandle<T> },
-        Stub { handle: stub_impl::StubJoinHandle<T> },
-    }
+enum JoinHandleInner<T> {
+    InHouse(inhouse::InHouseJoinHandle<T>),
+    Stub(stub_impl::StubJoinHandle<T>),
 }
 
 #[cfg(all(feature = "inhouse-backend", not(feature = "stub-backend")))]
-pin_project_lite::pin_project! {
-    #[project = JoinHandleInnerProj]
-    enum JoinHandleInner<T> {
-        InHouse { #[pin] handle: inhouse::InHouseJoinHandle<T> },
-    }
+enum JoinHandleInner<T> {
+    InHouse(inhouse::InHouseJoinHandle<T>),
 }
 
 #[cfg(all(not(feature = "inhouse-backend"), feature = "stub-backend"))]
-pin_project_lite::pin_project! {
-    #[project = JoinHandleInnerProj]
-    enum JoinHandleInner<T> {
-        Stub { handle: stub_impl::StubJoinHandle<T> },
-    }
+enum JoinHandleInner<T> {
+    Stub(stub_impl::StubJoinHandle<T>),
 }
 
-pin_project_lite::pin_project! {
-    /// Sleep future returned by [`sleep`].
-    pub struct Sleep {
-        #[pin]
-        inner: SleepInner,
-    }
+/// Sleep future returned by [`sleep`].
+pub struct Sleep {
+    inner: SleepInner,
 }
 
 #[cfg(all(feature = "inhouse-backend", feature = "stub-backend"))]
-pin_project_lite::pin_project! {
-    #[project = SleepInnerProj]
-    enum SleepInner {
-        InHouse { #[pin] handle: inhouse::InHouseSleep },
-        Stub { handle: stub_impl::StubSleep },
-    }
+enum SleepInner {
+    InHouse(inhouse::InHouseSleep),
+    Stub(stub_impl::StubSleep),
 }
 
 #[cfg(all(feature = "inhouse-backend", not(feature = "stub-backend")))]
-pin_project_lite::pin_project! {
-    #[project = SleepInnerProj]
-    enum SleepInner {
-        InHouse { #[pin] handle: inhouse::InHouseSleep },
-    }
+enum SleepInner {
+    InHouse(inhouse::InHouseSleep),
 }
 
 #[cfg(all(not(feature = "inhouse-backend"), feature = "stub-backend"))]
-pin_project_lite::pin_project! {
-    #[project = SleepInnerProj]
-    enum SleepInner {
-        Stub { handle: stub_impl::StubSleep },
-    }
+enum SleepInner {
+    Stub(stub_impl::StubSleep),
 }
 
 /// Interval timer returned by [`interval`].
@@ -184,15 +162,11 @@ impl RuntimeHandle {
         match &self.inner {
             #[cfg(feature = "inhouse-backend")]
             BackendHandle::InHouse(rt) => JoinHandle {
-                inner: JoinHandleInner::InHouse {
-                    handle: rt.spawn(future),
-                },
+                inner: JoinHandleInner::InHouse(rt.spawn(future)),
             },
             #[cfg(feature = "stub-backend")]
             BackendHandle::Stub(rt) => JoinHandle {
-                inner: JoinHandleInner::Stub {
-                    handle: rt.spawn(future),
-                },
+                inner: JoinHandleInner::Stub(rt.spawn(future)),
             },
         }
     }
@@ -205,15 +179,11 @@ impl RuntimeHandle {
         match &self.inner {
             #[cfg(feature = "inhouse-backend")]
             BackendHandle::InHouse(rt) => JoinHandle {
-                inner: JoinHandleInner::InHouse {
-                    handle: rt.spawn_blocking(func),
-                },
+                inner: JoinHandleInner::InHouse(rt.spawn_blocking(func)),
             },
             #[cfg(feature = "stub-backend")]
             BackendHandle::Stub(rt) => JoinHandle {
-                inner: JoinHandleInner::Stub {
-                    handle: rt.spawn_blocking(func),
-                },
+                inner: JoinHandleInner::Stub(rt.spawn_blocking(func)),
             },
         }
     }
@@ -222,15 +192,11 @@ impl RuntimeHandle {
         match &self.inner {
             #[cfg(feature = "inhouse-backend")]
             BackendHandle::InHouse(rt) => Sleep {
-                inner: SleepInner::InHouse {
-                    handle: rt.sleep(duration),
-                },
+                inner: SleepInner::InHouse(rt.sleep(duration)),
             },
             #[cfg(feature = "stub-backend")]
             BackendHandle::Stub(rt) => Sleep {
-                inner: SleepInner::Stub {
-                    handle: rt.sleep(duration),
-                },
+                inner: SleepInner::Stub(rt.sleep(duration)),
             },
         }
     }
@@ -380,28 +346,6 @@ where
     handle().timeout(duration, future).await
 }
 
-#[macro_export]
-macro_rules! select {
-    ($($tokens:tt)*) => {{
-        #[cfg(all(feature = "inhouse-backend", not(feature = "stub-backend")))]
-        {
-            $crate::__runtime_select_inhouse! { $($tokens)* }
-        }
-        #[cfg(all(feature = "stub-backend", not(feature = "inhouse-backend")))]
-        {
-            $crate::__runtime_select_stub! { $($tokens)* }
-        }
-        #[cfg(all(feature = "inhouse-backend", feature = "stub-backend"))]
-        {
-            match $crate::handle().backend_name() {
-                "inhouse" => $crate::__runtime_select_inhouse! { $($tokens)* },
-                "stub" => $crate::__runtime_select_stub! { $($tokens)* },
-                other => panic!("unsupported runtime backend {other}"),
-            }
-        }
-    }};
-}
-
 impl fmt::Display for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
@@ -440,9 +384,9 @@ impl<T> JoinHandle<T> {
     pub fn abort(&self) {
         match &self.inner {
             #[cfg(feature = "inhouse-backend")]
-            JoinHandleInner::InHouse { handle } => handle.abort(),
+            JoinHandleInner::InHouse(handle) => handle.abort(),
             #[cfg(feature = "stub-backend")]
-            JoinHandleInner::Stub { handle } => handle.abort(),
+            JoinHandleInner::Stub(handle) => handle.abort(),
         }
     }
 }
@@ -454,16 +398,12 @@ where
     type Output = Result<T, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        match this.inner.as_mut().project() {
+        let this = self.get_mut();
+        match &mut this.inner {
             #[cfg(feature = "inhouse-backend")]
-            JoinHandleInnerProj::InHouse { handle } => {
-                handle.poll(cx).map(|res| res.map_err(Into::into))
-            }
+            JoinHandleInner::InHouse(handle) => handle.poll(cx).map(|res| res.map_err(Into::into)),
             #[cfg(feature = "stub-backend")]
-            JoinHandleInnerProj::Stub { handle } => {
-                handle.poll(cx).map(|res| res.map_err(Into::into))
-            }
+            JoinHandleInner::Stub(handle) => handle.poll(cx).map(|res| res.map_err(Into::into)),
         }
     }
 }
@@ -472,12 +412,12 @@ impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        match this.inner.as_mut().project() {
+        let this = self.get_mut();
+        match &mut this.inner {
             #[cfg(feature = "inhouse-backend")]
-            SleepInnerProj::InHouse { mut handle } => handle.poll(cx),
+            SleepInner::InHouse(handle) => handle.poll(cx),
             #[cfg(feature = "stub-backend")]
-            SleepInnerProj::Stub { handle } => handle.poll(cx),
+            SleepInner::Stub(handle) => handle.poll(cx),
         }
     }
 }

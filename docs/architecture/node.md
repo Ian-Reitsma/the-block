@@ -11,6 +11,13 @@
 > helpers that wrap `httpd::TlsConnector`, so the dependency tree will continue
 > to show `httpd` while HTTPS provisioning is handled entirely through the
 > first-party TLS facade with environment prefixes.
+>
+> **2025-10-12 update:** The runtime crate now delegates `join_all`/`select` and
+> oneshot helpers to `crates/foundation_async`; the in-house backend no longer
+> depends on the removed `futures::FutureExt` shims and the duplicate
+> `sync::oneshot` module has been retired. The next `cargo tree` export will drop
+> the legacy `futures`/`pin-project` nodes once downstream crates finish
+> rebuilding their lockfiles.
 
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
@@ -32,7 +39,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │   │   │           ├── proc-macro2 v1.0.101 (*)
 │   │   │   │   │           ├── quote v1.0.41 (*)
 │   │   │   │   │           └── unicode-ident v1.0.19
-│   │   │   │   └── serde_bytes v0.11.19
 │   │   │   │       └── serde_core v1.0.228
 │   │   │   ├── serde v1.0.228 (*)
 │   │   │   └── thiserror v1.0.69
@@ -315,7 +321,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 ├── rand v0.1.0 (/workspace/the-block/crates/rand) (*)
 ├── runtime v0.1.0 (/workspace/the-block/crates/runtime) (*)
 ├── serde v1.0.228 (*)
-├── serde_bytes v0.11.19 (*)
 ├── sled v0.34.0 (/workspace/the-block/sled) (*)
 ├── state v0.1.0 (/workspace/the-block/state) (*)
 ├── static_assertions v1.1.0

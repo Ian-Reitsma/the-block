@@ -4,9 +4,6 @@
 #[cfg(feature = "quantum")]
 use pqcrypto_dilithium::dilithium3;
 #[cfg(feature = "quantum")]
-use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _, SecretKey as _};
-
-#[cfg(feature = "quantum")]
 /// Generate a Dilithium keypair returning `(public_key, secret_key)` byte vectors.
 pub fn keypair() -> (Vec<u8>, Vec<u8>) {
     let (pk, sk) = dilithium3::keypair();

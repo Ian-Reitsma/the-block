@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-13 19:45:00Z_
+_Last updated: 2025-10-12 00:00:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -245,6 +245,21 @@ tests while the module is phased out.
   clients now source `#[serde(default)]`/`skip_serializing_if` behaviour from
   `foundation_serialization::{defaults, skip}`. This keeps workspace derives on
   the facade without referencing standard-library helpers directly.
+- ✅ `crates/testkit_macros` now parses serial test wrappers without the
+  `syn`/`quote`/`proc-macro2` stack, keeping the serial guard fully
+  first-party while preserving the existing `#[test]` ergonomics.
+- ✅ `foundation_math` tests rely on new in-house floating-point assertion
+  helpers (`testing::assert_close[_with]`), removing the last `approx`
+  dependency from the workspace.
+- ✅ Runtime no longer carries its own oneshot channel; `crates/runtime` now
+  re-exports `foundation_async::sync::oneshot` and relies on the shared
+  `AtomicWaker`. Companion tests in `crates/foundation_async/tests/futures.rs`
+  cover join ordering, select short-circuiting, panic trapping, and oneshot
+  cancellation so FIRST_PARTY_ONLY builds exercise the async facade end to end.
+- ✅ Wallet binaries and the remote-signer CLI dropped the dormant `hidapi`
+  feature flag; the HID placeholder still returns a deterministic error, but
+  `FIRST_PARTY_ONLY` builds no longer link the native HID stack or the `cc`
+  toolchain it pulled in.
 
 Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
 residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`) and
@@ -324,7 +339,7 @@ delivery windows unless otherwise specified.
 | `serde` derives (`serde`, `serde_bytes`) | Residual derives across storage/RPC payloads (`node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
 | `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
 | `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
-| `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
+| `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | **Replaced.** Workspace now ships a first-party stub (`crates/pqcrypto_dilithium`) that provides deterministic keygen, sign, and verify helpers wired into the node, wallet, and commit–reveal paths. | Crypto Suite — W43 |
 | `bytes 1` | Buffer utilities in networking/tests (`node/src/net/*`, benches) | `concurrency::bytes::{Bytes, BytesMut}` wrappers now back all gossip payloads and QUIC cert handling; remaining dependency is indirect via `combine` and will be stubbed next. | Networking — W44 |
 
 The dependency guard in `node/Cargo.toml` should be updated alongside each
@@ -416,3 +431,5 @@ Dependency Migration" milestone) to coordinate the rollout.
   dropped the `httparse` dependency from the workspace.
 - ✅ Implemented `concurrency::filters::xor8::Xor8`, rewired the rate-limit
   filter, and removed the `xorfilter-rs` crate.
+- ✅ Added in-house Dilithium/Kyber stubs (`crates/pqcrypto_dilithium`, `crates/pqcrypto_kyber`) so `quantum`/`pq` builds no longer pull the crates.io PQ stack. CLI, wallet, governance, and commit–reveal flows now sign and encapsulate via the first-party helpers while keeping deterministic encodings for tests and telemetry.
+- ✅ Replaced the external `serde_bytes` crate with `foundation_serialization::serde_bytes`, retaining the `#[serde(with = "serde_bytes")]` annotations while keeping byte buffers on first-party serializers. Node read receipts and exec payloads now round-trip without the third-party shim.

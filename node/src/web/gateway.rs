@@ -216,24 +216,20 @@ async fn ws_peer_metrics(
         let mut rx = crate::net::peer::subscribe_peer_metrics();
         async move {
             loop {
-                runtime::select! {
-                    msg = rx.recv() => {
-                        match msg {
-                            Ok(snap) => {
-                                let payload = json::to_string(&snap).unwrap();
-                                stream.send(WsMessage::Text(payload)).await?;
-                            }
-                            Err(_) => break,
+                match runtime::select2(rx.recv(), stream.recv()).await {
+                    runtime::Either::First(msg) => match msg {
+                        Ok(snap) => {
+                            let payload = json::to_string(&snap).unwrap();
+                            stream.send(WsMessage::Text(payload)).await?;
                         }
-                    }
-                    frame = stream.recv() => {
-                        match frame {
-                            Ok(Some(WsMessage::Close(_))) | Ok(None) => break,
-                            Ok(Some(WsMessage::Ping(_))) | Ok(Some(WsMessage::Pong(_))) => {}
-                            Ok(Some(_)) => {}
-                            Err(err) => return Err(HttpError::from(err)),
-                        }
-                    }
+                        Err(_) => break,
+                    },
+                    runtime::Either::Second(frame) => match frame {
+                        Ok(Some(WsMessage::Close(_))) | Ok(None) => break,
+                        Ok(Some(WsMessage::Ping(_))) | Ok(Some(WsMessage::Pong(_))) => {}
+                        Ok(Some(_)) => {}
+                        Err(err) => return Err(HttpError::from(err)),
+                    },
                 }
             }
             Ok(())

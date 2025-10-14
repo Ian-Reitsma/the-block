@@ -299,19 +299,18 @@ impl<const R: usize, const C: usize> IndexMut<(usize, usize)> for Matrix<R, C> {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
-
     use super::{Matrix, Vector};
+    use crate::testing::{assert_close, assert_close_with};
 
     #[test]
     fn vector_addition() {
         let a = Vector::<4>::from_array([1.0, 2.0, 3.0, 4.0]);
         let b = Vector::<4>::from_array([0.5, -1.0, 0.0, 2.0]);
         let c = a.add(&b);
-        assert_relative_eq!(c[0], 1.5);
-        assert_relative_eq!(c[1], 1.0);
-        assert_relative_eq!(c[2], 3.0);
-        assert_relative_eq!(c[3], 6.0);
+        assert_close(c[0], 1.5);
+        assert_close(c[1], 1.0);
+        assert_close(c[2], 3.0);
+        assert_close(c[3], 6.0);
     }
 
     #[test]
@@ -319,8 +318,8 @@ mod tests {
         let m = Matrix::<2, 3>::from_row_major(&[1.0, 2.0, 3.0, 0.0, -1.0, 4.0]);
         let v = Vector::<3>::from_array([1.0, 0.0, 2.0]);
         let result = m.mul_vector(&v);
-        assert_relative_eq!(result[0], 7.0);
-        assert_relative_eq!(result[1], 8.0);
+        assert_close(result[0], 7.0);
+        assert_close(result[1], 8.0);
     }
 
     #[test]
@@ -333,7 +332,8 @@ mod tests {
         let prod = m.mul_matrix(&inv);
         for r in 0..3 {
             for c in 0..3 {
-                assert_relative_eq!(prod[(r, c)], if r == c { 1.0 } else { 0.0 }, epsilon = 1e-9);
+                let expected = if r == c { 1.0 } else { 0.0 };
+                assert_close_with(prod[(r, c)], expected, 1e-9);
             }
         }
     }

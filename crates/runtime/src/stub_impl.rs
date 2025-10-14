@@ -7,8 +7,7 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use futures::executor;
-use pin_project_lite::pin_project;
+use foundation_async::block_on;
 
 type PendingCounter = Arc<AtomicI64>;
 
@@ -30,7 +29,7 @@ impl StubRuntime {
     where
         F: Future,
     {
-        executor::block_on(future)
+        block_on(future)
     }
 
     pub(crate) fn spawn<F, T>(&self, future: F) -> StubJoinHandle<T>
@@ -290,20 +289,16 @@ impl<'a> Future for StubIntervalTick<'a> {
     }
 }
 
-pin_project! {
-    struct StubTimeoutFuture<F> {
-        #[pin]
-        future: F,
-        #[pin]
-        sleep: StubSleep,
-        duration: Duration,
-    }
+struct StubTimeoutFuture<F> {
+    future: Pin<Box<F>>,
+    sleep: StubSleep,
+    duration: Duration,
 }
 
 impl<F> StubTimeoutFuture<F> {
     fn new(future: F, duration: Duration) -> Self {
         Self {
-            future,
+            future: Box::pin(future),
             sleep: StubSleep::new(duration),
             duration,
         }
@@ -317,54 +312,17 @@ where
     type Output = Result<T, crate::TimeoutError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
+        let this = self.get_mut();
         if let Poll::Ready(output) = this.future.as_mut().poll(cx) {
             return Poll::Ready(Ok(output));
         }
 
-        match this.sleep.as_mut().poll(cx) {
-            Poll::Ready(()) => Poll::Ready(Err(crate::TimeoutError::from(*this.duration))),
+        match this.sleep.poll(cx) {
+            Poll::Ready(()) => Poll::Ready(Err(crate::TimeoutError::from(this.duration))),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 pub(crate) async fn yield_now() {
     std::thread::yield_now();
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __runtime_select_stub {
-    (biased; $($rest:tt)*) => {{
-        use futures::FutureExt;
-        $crate::__runtime_select_stub!(@biased [] $($rest)*)
-    }};
-    ($($rest:tt)*) => {{
-        use futures::FutureExt;
-        $crate::__runtime_select_stub!(@unbiased [] $($rest)*)
-    }};
-    (@unbiased [$($prefix:tt)*] $pat:pat = $expr:expr => $body:block, $($rest:tt)*) => {
-        $crate::__runtime_select_stub!(@unbiased [$($prefix)* $pat = ($expr).fuse() => $body,] $($rest)*)
-    };
-    (@unbiased [$($prefix:tt)*] default => $body:block $(,)?) => {
-        futures::select! { $($prefix)* default => $body }
-    };
-    (@unbiased [$($prefix:tt)*] complete => $body:block $(,)?) => {
-        futures::select! { $($prefix)* complete => $body }
-    };
-    (@unbiased [$($prefix:tt)*]) => {
-        futures::select! { $($prefix)* }
-    };
-    (@biased [$($prefix:tt)*] $pat:pat = $expr:expr => $body:block, $($rest:tt)*) => {
-        $crate::__runtime_select_stub!(@biased [$($prefix)* $pat = ($expr).fuse() => $body,] $($rest)*)
-    };
-    (@biased [$($prefix:tt)*] default => $body:block $(,)?) => {
-        futures::select_biased! { $($prefix)* default => $body }
-    };
-    (@biased [$($prefix:tt)*] complete => $body:block $(,)?) => {
-        futures::select_biased! { $($prefix)* complete => $body }
-    };
-    (@biased [$($prefix:tt)*]) => {
-        futures::select_biased! { $($prefix)* }
-    };
 }

@@ -678,7 +678,7 @@ impl Market {
         for (i, w) in workloads.iter().cloned().enumerate() {
             handles.push(runner.run(i, w));
         }
-        let results = futures::future::join_all(handles).await;
+        let results = runtime::join_all(handles).await;
         let mut total = 0;
         for (expected, (output, w)) in slices
             .into_iter()

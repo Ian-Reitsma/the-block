@@ -1,0 +1,11 @@
+[package]
+name = "pqcrypto-kyber"
+version = "0.1.0"
+edition = "2021"
+description = "First-party Kyber stub for The Block"
+license = "MIT"
+
+[dependencies]
+crypto_suite = { path = "../crypto_suite" }
+sys = { path = "../sys" }
+thiserror = { path = "../thiserror" }

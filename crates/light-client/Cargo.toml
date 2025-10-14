@@ -19,7 +19,6 @@ telemetry = ["dep:foundation_lazy"]
 foundation_archive = { path = "../foundation_archive" }
 foundation_serialization = { path = "../foundation_serialization" }
 foundation_lazy = { path = "../foundation_lazy", optional = true }
-futures = "0.3"
 coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }
 tracing = "0.1"

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use futures::task::AtomicWaker;
+use foundation_async::task::AtomicWaker;
 
 #[derive(Debug)]
 struct Waiter {

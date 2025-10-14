@@ -1,9 +1,8 @@
 use the_block::{
     identity::{
         did::{DidAttestationRecord, DidRecord, DidRegistry},
-        did_binary,
+        did_binary, handle_binary,
         handle_registry::{HandleRecord, HandleRegistry},
-        handle_binary,
     },
     simple_db::{names, SimpleDb},
     util::binary_codec,
@@ -107,31 +106,21 @@ fn handle_registry_reads_mixed_snapshots() {
         let legacy_bytes = binary_codec::serialize(&record_legacy).expect("legacy encode");
         db.insert(&format!("handles/{}", "legacy"), legacy_bytes);
         let owner_bytes = binary_codec::serialize(&"legacy".to_string()).expect("legacy owner");
-        db.insert(
-            &format!("owners/{}", record_legacy.address),
-            owner_bytes,
-        );
+        db.insert(&format!("owners/{}", record_legacy.address), owner_bytes);
         let nonce_bytes = binary_codec::serialize(&record_legacy.nonce).expect("legacy nonce");
-        db.insert(
-            &format!("nonces/{}", record_legacy.address),
-            nonce_bytes,
-        );
+        db.insert(&format!("nonces/{}", record_legacy.address), nonce_bytes);
     }
 
     let registry = HandleRegistry::open(&path);
 
-    let address = registry
-        .resolve_handle("current")
-        .expect("current handle");
+    let address = registry.resolve_handle("current").expect("current handle");
     assert_eq!(address, record_current.address);
     let handle = registry
         .handle_of(&record_current.address)
         .expect("current owner");
     assert_eq!(handle, "current");
 
-    let legacy_address = registry
-        .resolve_handle("legacy")
-        .expect("legacy handle");
+    let legacy_address = registry.resolve_handle("legacy").expect("legacy handle");
     assert_eq!(legacy_address, record_legacy.address);
     let legacy_handle = registry
         .handle_of(&record_legacy.address)

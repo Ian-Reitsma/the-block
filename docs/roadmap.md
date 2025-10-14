@@ -13,7 +13,7 @@ The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI st
 pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
-Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge docs with multisig signer-set payloads plus release-verifier walkthroughs, add end-to-end coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression fuzzing), stand up the dependency fault simulation harness, and finish the multisig wallet UX polish.
+Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge docs with multisig signer-set payloads plus release-verifier walkthroughs, add end-to-end coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression fuzzing), stand up the dependency fault simulation harness, finish the multisig wallet UX polish, and harden the new Dilithium/Kyber stubs into production-ready implementations with full test vectors and telemetry hooks.
 
 ### Tooling migrations
 
@@ -38,6 +38,19 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   variants, legacy payloads that lacked the modern optional fields, and a
   new randomized property harness plus sparse-manifest repair integration test
   keeping parity with the retired binary shim.
+- `crates/testkit_macros` now expands serial test wrappers without the
+  `syn`/`quote`/`proc-macro2` stack, keeping the shared serial guard in-house.
+- `foundation_math` test suites rely on first-party floating-point assertion
+  helpers, removing the external `approx` dependency.
+- Wallet binaries and the remote-signer CLI removed the dormant `hidapi`
+  feature flag; HID connectors remain stubbed but no longer pull native
+  toolchains into FIRST_PARTY_ONLY builds.
+- Runtime’s async facade now routes through `crates/foundation_async`:
+  `join_all`/`select2`/oneshot re-export from the shared crate, the first-party
+  `AtomicWaker` delivers deferred wakeups, and coverage in
+  `crates/foundation_async/tests/futures.rs` exercises join ordering, select
+  short-circuiting, panic capture, and cancellation paths. The legacy runtime
+  oneshot module has been removed.
 - DEX order books, trade logs, AMM pools, and escrow snapshots now persist via
   first-party cursor helpers (`node/src/dex/{storage.rs,storage_binary.rs}`),
   dropping the `binary_codec` shim while regression fixtures and randomized

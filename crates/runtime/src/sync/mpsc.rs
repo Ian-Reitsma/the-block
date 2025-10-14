@@ -6,10 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context, Poll};
 
-use futures::stream::Stream;
-use futures::task::AtomicWaker;
-use pin_project::pin_project;
-use pin_project::pinned_drop;
+use foundation_async::stream::Stream;
+use foundation_async::task::AtomicWaker;
 
 #[derive(Debug)]
 struct Waiter {
@@ -279,7 +277,6 @@ impl<T> Drop for Sender<T> {
     }
 }
 
-#[pin_project(PinnedDrop)]
 pub struct Send<T> {
     inner: Arc<Inner<T>>,
     value: Option<T>,
@@ -290,20 +287,20 @@ impl<T> Future for Send<T> {
     type Output = Result<(), SendError<T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        this.inner.poll_send(this.value, this.waiter, cx)
+        let this = self.get_mut();
+        this.inner.poll_send(&mut this.value, &mut this.waiter, cx)
     }
 }
 
-#[pinned_drop]
-impl<T> PinnedDrop for Send<T> {
-    fn drop(self: Pin<&mut Self>) {
-        let this = self.project();
-        if let Some(waiter) = this.waiter.take() {
-            this.inner.cancel_sender_waiter(&waiter);
+impl<T> Drop for Send<T> {
+    fn drop(&mut self) {
+        if let Some(waiter) = self.waiter.take() {
+            self.inner.cancel_sender_waiter(&waiter);
         }
     }
 }
+
+impl<T> Unpin for Send<T> {}
 
 /// Receives values from the channel.
 #[derive(Debug)]
@@ -508,6 +505,8 @@ impl<T> ReceiverStream<T> {
         }
     }
 }
+
+impl<T> Unpin for ReceiverStream<T> {}
 
 impl<T> Stream for ReceiverStream<T> {
     type Item = T;
