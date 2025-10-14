@@ -14,7 +14,7 @@ httpd = { path = "../httpd" }
 http_env = { path = "../http_env" }
 
 # optional post-quantum encryption
-pqcrypto-kyber = { version = "0.8", optional = true }
+pqcrypto-kyber = { path = "../pqcrypto_kyber", optional = true }
 
 [features]
 default = []

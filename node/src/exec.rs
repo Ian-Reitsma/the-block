@@ -11,8 +11,8 @@ use crate::compute_market::settlement;
 use crate::telemetry::{SUBSIDY_BYTES_TOTAL, SUBSIDY_CPU_MS_TOTAL};
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use foundation_serialization::serde_bytes;
 use foundation_serialization::{Deserialize, Serialize};
-use serde_bytes;
 
 use foundation_serialization::binary;
 

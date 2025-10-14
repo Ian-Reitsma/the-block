@@ -5,7 +5,6 @@
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `ahash` | 0.8.12 | crates.io | MIT OR Apache-2.0 | 7 |
 | unclassified | `allocator-api2` | 0.2.21 | crates.io | MIT OR Apache-2.0 | 7 |
-| unclassified | `approx` | 0.5.1 | crates.io | Apache-2.0 | 2 |
 | unclassified | `autocfg` | 1.5.0 | crates.io | Apache-2.0 OR MIT | 3 |
 | unclassified | `base64_fp` | 0.1.0 | workspace | — | 1 |
 | unclassified | `bitflags` | 2.9.4 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -58,7 +57,6 @@
 | unclassified | `governance` | 0.1.0 | workspace | — | 1 |
 | unclassified | `hashbrown` | 0.14.5 | crates.io | MIT OR Apache-2.0 | 6 |
 | unclassified | `hashlink` | 0.8.4 | crates.io | MIT OR Apache-2.0 | 5 |
-| unclassified | `hidapi` | 2.6.3 | crates.io | MIT | 2 |
 | unclassified | `histogram_fp` | 0.1.0 | workspace | — | 1 |
 | unclassified | `http_env` | 0.1.0 | workspace | Apache-2.0 | 1 |
 | unclassified | `httpd` | 0.1.0 | workspace | — | 1 |
@@ -83,9 +81,8 @@
 | unclassified | `pin-project-lite` | 0.2.16 | crates.io | Apache-2.0 OR MIT | 2 |
 | unclassified | `pin-utils` | 0.1.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `pkg-config` | 0.3.32 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `pqcrypto-dilithium` | 0.5.0 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `pqcrypto-internals` | 0.2.11 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `pqcrypto-traits` | 0.3.5 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `pqcrypto-dilithium` | 0.1.0 | workspace | MIT | 1 |
+| unclassified | `pqcrypto-kyber` | 0.1.0 | workspace | MIT | 1 |
 | unclassified | `probe` | 0.1.0 | workspace | — | 0 |
 | unclassified | `proc-macro2` | 1.0.101 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `quote` | 1.0.41 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -94,7 +91,6 @@
 | unclassified | `rand_core` | 0.1.0 | workspace | — | 2 |
 | unclassified | `runtime` | 0.1.0 | workspace | — | 1 |
 | unclassified | `rusqlite` | 0.30.0 | crates.io | MIT | 4 |
-| unclassified | `serde_bytes` | 0.11.19 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `serde_core` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `serde_derive` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `shlex` | 1.3.0 | crates.io | MIT OR Apache-2.0 | 4 |

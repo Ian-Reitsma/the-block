@@ -3,122 +3,6 @@
     {
       "dependencies": [
         {
-          "name": "serde_core",
-          "version": "1.0.228"
-        },
-        {
-          "name": "serde_derive",
-          "version": "1.0.228"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "bridges",
-          "version": "0.1.0"
-        },
-        {
-          "name": "cargo-platform",
-          "version": "0.1.9"
-        },
-        {
-          "name": "cargo_metadata",
-          "version": "0.18.1"
-        },
-        {
-          "name": "codec",
-          "version": "0.1.0"
-        },
-        {
-          "name": "coding",
-          "version": "0.1.0"
-        },
-        {
-          "name": "concurrency",
-          "version": "0.1.0"
-        },
-        {
-          "name": "contract-cli",
-          "version": "0.1.0"
-        },
-        {
-          "name": "crypto_suite",
-          "version": "0.1.0"
-        },
-        {
-          "name": "dex",
-          "version": "0.1.0"
-        },
-        {
-          "name": "explorer",
-          "version": "0.1.0"
-        },
-        {
-          "name": "foundation_rpc",
-          "version": "0.1.0"
-        },
-        {
-          "name": "foundation_serialization",
-          "version": "0.1.0"
-        },
-        {
-          "name": "gov-graph",
-          "version": "0.1.0"
-        },
-        {
-          "name": "governance",
-          "version": "0.1.0"
-        },
-        {
-          "name": "jurisdiction",
-          "version": "0.1.0"
-        },
-        {
-          "name": "ledger",
-          "version": "0.1.0"
-        },
-        {
-          "name": "p2p_overlay",
-          "version": "0.1.0"
-        },
-        {
-          "name": "semver",
-          "version": "1.0.27"
-        },
-        {
-          "name": "serde_bytes",
-          "version": "0.11.19"
-        },
-        {
-          "name": "serde_json",
-          "version": "1.0.145"
-        },
-        {
-          "name": "storage",
-          "version": "0.1.0"
-        },
-        {
-          "name": "tb-sim",
-          "version": "0.1.0"
-        },
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        },
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 1,
-      "license": "MIT OR Apache-2.0",
-      "name": "serde",
-      "origin": "crates.io",
-      "tier": "replaceable",
-      "version": "1.0.228"
-    },
-    {
-      "dependencies": [
-        {
           "name": "cfg-if",
           "version": "1.0.3"
         },
@@ -162,26 +46,6 @@
       "origin": "crates.io",
       "tier": "unclassified",
       "version": "0.2.21"
-    },
-    {
-      "dependencies": [
-        {
-          "name": "num-traits",
-          "version": "0.2.19"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "foundation_math",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "Apache-2.0",
-      "name": "approx",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.5.1"
     },
     {
       "dependencies": [],
@@ -361,10 +225,6 @@
       ],
       "dependents": [
         {
-          "name": "hidapi",
-          "version": "2.6.3"
-        },
-        {
           "name": "libfuzzer-sys",
           "version": "0.4.10"
         },
@@ -402,10 +262,6 @@
         {
           "name": "getrandom",
           "version": "0.3.3"
-        },
-        {
-          "name": "hidapi",
-          "version": "2.6.3"
         },
         {
           "name": "io-uring",
@@ -718,11 +574,7 @@
         },
         {
           "name": "pqcrypto-dilithium",
-          "version": "0.5.0"
-        },
-        {
-          "name": "pqcrypto-traits",
-          "version": "0.3.5"
+          "version": "0.1.0"
         },
         {
           "name": "sys",
@@ -1368,12 +1220,7 @@
       "version": "0.1.0"
     },
     {
-      "dependencies": [
-        {
-          "name": "approx",
-          "version": "0.5.1"
-        }
-      ],
+      "dependencies": [],
       "dependents": [
         {
           "name": "governance",
@@ -1493,10 +1340,6 @@
         {
           "name": "serde",
           "version": "1.0.228"
-        },
-        {
-          "name": "serde_bytes",
-          "version": "0.11.19"
         }
       ],
       "dependents": [
@@ -2254,46 +2097,6 @@
       "version": "0.8.4"
     },
     {
-      "dependencies": [
-        {
-          "name": "cc",
-          "version": "1.2.41"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "pkg-config",
-          "version": "0.3.32"
-        },
-        {
-          "name": "windows-sys",
-          "version": "0.48.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "remote-signer",
-          "version": "0.1.0"
-        },
-        {
-          "name": "wallet",
-          "version": "0.1.0"
-        }
-      ],
-      "depth": 2,
-      "license": "MIT",
-      "name": "hidapi",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "2.6.3"
-    },
-    {
       "dependencies": [],
       "dependents": [
         {
@@ -2624,10 +2427,6 @@
           "version": "0.3.3"
         },
         {
-          "name": "hidapi",
-          "version": "2.6.3"
-        },
-        {
           "name": "io-uring",
           "version": "0.7.10"
         },
@@ -2942,10 +2741,6 @@
       ],
       "dependents": [
         {
-          "name": "approx",
-          "version": "0.5.1"
-        },
-        {
           "name": "crypto_suite",
           "version": "0.1.0"
         },
@@ -3126,10 +2921,6 @@
       "dependencies": [],
       "dependents": [
         {
-          "name": "hidapi",
-          "version": "2.6.3"
-        },
-        {
           "name": "libsqlite3-sys",
           "version": "0.27.0"
         }
@@ -3144,89 +2935,66 @@
     {
       "dependencies": [
         {
-          "name": "cc",
-          "version": "1.2.41"
+          "name": "crypto_suite",
+          "version": "0.1.0"
         },
         {
-          "name": "glob",
-          "version": "0.3.3"
+          "name": "sys",
+          "version": "0.1.0"
         },
         {
-          "name": "libc",
-          "version": "0.2.177"
-        },
-        {
-          "name": "pqcrypto-internals",
-          "version": "0.2.11"
-        },
-        {
-          "name": "pqcrypto-traits",
-          "version": "0.3.5"
+          "name": "thiserror",
+          "version": "0.0.1"
         }
       ],
       "dependents": [
         {
           "name": "crypto",
           "version": "0.1.0"
+        },
+        {
+          "name": "the_block",
+          "version": "0.1.0"
+        },
+        {
+          "name": "wallet",
+          "version": "0.1.0"
         }
       ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
+      "depth": 1,
+      "license": "MIT",
       "name": "pqcrypto-dilithium",
-      "origin": "crates.io",
+      "origin": "workspace",
       "tier": "unclassified",
-      "version": "0.5.0"
+      "version": "0.1.0"
     },
     {
       "dependencies": [
         {
-          "name": "cc",
-          "version": "1.2.41"
-        },
-        {
-          "name": "dunce",
-          "version": "1.0.5"
-        },
-        {
-          "name": "getrandom",
-          "version": "0.3.3"
-        },
-        {
-          "name": "libc",
-          "version": "0.2.177"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "pqcrypto-dilithium",
-          "version": "0.5.0"
-        }
-      ],
-      "depth": 3,
-      "license": "MIT OR Apache-2.0",
-      "name": "pqcrypto-internals",
-      "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.2.11"
-    },
-    {
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "crypto",
+          "name": "crypto_suite",
           "version": "0.1.0"
         },
         {
-          "name": "pqcrypto-dilithium",
-          "version": "0.5.0"
+          "name": "sys",
+          "version": "0.1.0"
+        },
+        {
+          "name": "thiserror",
+          "version": "0.0.1"
         }
       ],
-      "depth": 2,
-      "license": "MIT OR Apache-2.0",
-      "name": "pqcrypto-traits",
-      "origin": "crates.io",
+      "dependents": [
+        {
+          "name": "jurisdiction",
+          "version": "0.1.0"
+        }
+      ],
+      "depth": 1,
+      "license": "MIT",
+      "name": "pqcrypto-kyber",
+      "origin": "workspace",
       "tier": "unclassified",
-      "version": "0.3.5"
+      "version": "0.1.0"
     },
     {
       "dependencies": [
@@ -3628,30 +3396,114 @@
     {
       "dependencies": [
         {
-          "name": "serde",
+          "name": "serde_core",
           "version": "1.0.228"
         },
         {
-          "name": "serde_core",
+          "name": "serde_derive",
           "version": "1.0.228"
         }
       ],
       "dependents": [
         {
+          "name": "bridges",
+          "version": "0.1.0"
+        },
+        {
+          "name": "cargo-platform",
+          "version": "0.1.9"
+        },
+        {
+          "name": "cargo_metadata",
+          "version": "0.18.1"
+        },
+        {
+          "name": "codec",
+          "version": "0.1.0"
+        },
+        {
+          "name": "coding",
+          "version": "0.1.0"
+        },
+        {
+          "name": "concurrency",
+          "version": "0.1.0"
+        },
+        {
+          "name": "contract-cli",
+          "version": "0.1.0"
+        },
+        {
+          "name": "crypto_suite",
+          "version": "0.1.0"
+        },
+        {
+          "name": "dex",
+          "version": "0.1.0"
+        },
+        {
+          "name": "explorer",
+          "version": "0.1.0"
+        },
+        {
+          "name": "foundation_rpc",
+          "version": "0.1.0"
+        },
+        {
           "name": "foundation_serialization",
+          "version": "0.1.0"
+        },
+        {
+          "name": "gov-graph",
+          "version": "0.1.0"
+        },
+        {
+          "name": "governance",
+          "version": "0.1.0"
+        },
+        {
+          "name": "jurisdiction",
+          "version": "0.1.0"
+        },
+        {
+          "name": "ledger",
+          "version": "0.1.0"
+        },
+        {
+          "name": "p2p_overlay",
+          "version": "0.1.0"
+        },
+        {
+          "name": "semver",
+          "version": "1.0.27"
+        },
+        {
+          "name": "serde_json",
+          "version": "1.0.145"
+        },
+        {
+          "name": "storage",
+          "version": "0.1.0"
+        },
+        {
+          "name": "tb-sim",
           "version": "0.1.0"
         },
         {
           "name": "the_block",
           "version": "0.1.0"
+        },
+        {
+          "name": "wallet",
+          "version": "0.1.0"
         }
       ],
       "depth": 1,
       "license": "MIT OR Apache-2.0",
-      "name": "serde_bytes",
+      "name": "serde",
       "origin": "crates.io",
-      "tier": "unclassified",
-      "version": "0.11.19"
+      "tier": "replaceable",
+      "version": "1.0.228"
     },
     {
       "dependencies": [
@@ -3672,10 +3524,6 @@
         {
           "name": "serde",
           "version": "1.0.228"
-        },
-        {
-          "name": "serde_bytes",
-          "version": "0.11.19"
         },
         {
           "name": "serde_json",
@@ -4452,10 +4300,6 @@
           "version": "1.0.228"
         },
         {
-          "name": "serde_bytes",
-          "version": "0.11.19"
-        },
-        {
           "name": "sled",
           "version": "0.34.0"
         },
@@ -4796,10 +4640,6 @@
           "version": "0.1.0"
         },
         {
-          "name": "hidapi",
-          "version": "2.6.3"
-        },
-        {
           "name": "httpd",
           "version": "0.1.0"
         },
@@ -4920,10 +4760,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "hidapi",
-          "version": "2.6.3"
-        },
         {
           "name": "mio",
           "version": "0.8.11"

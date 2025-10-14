@@ -1,4 +1,5 @@
 # System-Wide Economic Changes
+> **Review (2025-10-12):** Testkit serial wrappers now expand without `syn`/`quote` by consuming raw token streams; the new parser still injects the `testkit::serial::lock()` guard so deterministic ordering is preserved. Foundation math tests switched to first-party floating-point helpers (`testing::assert_close[_with]`), letting the workspace drop the `approx` crate. Wallet and remote-signer builds removed the dormant `hidapi` feature flag—HID connectors remain stubbed, but FIRST_PARTY_ONLY builds no longer link native HID toolchains. Dependency inventories and the audit report were refreshed accordingly.
 > **Review (2025-10-13):** Metrics aggregation now anchors on an in-house `AggregatorRecorder` that forwards every `foundation_metrics` macro emission into the existing Prometheus registry while preserving integer TLS fingerprints and runtime histograms. Monitoring utilities install a dedicated `MonitoringRecorder` so the snapshot CLI reports success/error counters through the same facade without reviving the third-party `metrics` stack.
 > **Review (2025-10-12):** Replaced the storage engine’s lingering serde/foundation_sqlite shims with an in-house JSON codec and temp-file harness so manifests, WAL records, and compaction metadata now round-trip exclusively through first-party parsers, eliminating the crate’s dependency on the `foundation_serialization` facade, `serde` derives, `rusqlite`, and the `sys::tempfile` adapter in FIRST_PARTY_ONLY builds. Guarded manifests now decode via deterministic Value helpers, byte slices persist as explicit arrays, and on-disk snapshots rely on an auditable WAL/manifest representation that no longer drags third-party parsers into the first-party pipeline. The global dependency guard learned how to scope `cargo metadata` to the requesting crate’s resolved node set so FIRST_PARTY_ONLY checks flag only the offender’s transitive graph instead of every workspace package, keeping enforcement targeted while we continue retiring legacy crates. Regenerated the dependency inventory snapshot, violations report, and first-party manifest so the audit baseline reflects the storage engine’s leaner dependency DAG and the narrower guard semantics. The runtime stack simultaneously adopted the new `foundation_metrics` facade—runtime installs the recorder that feeds spawn-latency histograms and pending-task gauges into existing telemetry channels while wallet, CLI, and tooling counters now emit through first-party macros, eliminating the crates.io `metrics`/`metrics-macros` pair.
 
@@ -33,6 +34,66 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - **Aggregator operators** continue scraping existing endpoints while gaining first-party metrics for runtime spawn latency, pending tasks, and TLS fingerprint updates sourced through the shared recorder.
 - **Monitoring automation** can alert on failed snapshot attempts using the recorder-backed counters instead of parsing stderr, and the build process remains lightweight because dashboard generation no longer includes the metrics module.
 - **FIRST_PARTY_ONLY builds** keep passing guard enforcement—the new recorders rely entirely on in-house crates without reintroducing third-party telemetry dependencies.
+
+## Post-Quantum Stub Rollout & Byte Helper Migration (2025-10-13)
+
+### Rationale
+
+- **Unblock FIRST_PARTY_ONLY for PQ builds:** Dilithium/Kyber experiments still depended on the crates.io `pqcrypto-*` stack, preventing guarded builds from compiling when the `quantum`/`pq` features were enabled.
+- **Keep byte helper attributes first party:** Node exec/read-receipt payloads relied on the external `serde_bytes` crate to drive `#[serde(with = "serde_bytes")]` annotations; FIRST_PARTY_ONLY builds still had to link the crates.io shim.
+
+### Implementation Summary
+
+- Added `crates/pqcrypto_dilithium` and `crates/pqcrypto_kyber`, first-party stubs that generate deterministic keys, signatures, ciphertexts, and shared secrets using the in-house BLAKE3 facade plus OS randomness. Node commit–reveal, wallet PQ helpers, CLI identity flows, and governance tests now consume the stubs directly.
+- Removed the `pqcrypto-dilithium`, `pqcrypto-internals`, `pqcrypto-traits`, and `pqcrypto-kyber` crates from workspace manifests; `Cargo.lock`, the dependency inventory, and the audit backlog now record the in-house replacements.
+- Introduced `foundation_serialization::serde_bytes`, a tiny module that mirrors the external helper’s `serialize`/`deserialize` functions so existing `#[serde(with = "serde_bytes")]` annotations continue to compile without pulling in the third-party crate.
+- Updated node exec/read-receipt modules to import the new helper, removed the `serde_bytes` dependency from manifests, and regenerated documentation to reflect the fully first-party path.
+
+### Operational Impact
+
+- **PQ feature gates** compile under FIRST_PARTY_ONLY without disabling the guard; signatures and encapsulations remain deterministic for tests while the real implementations land.
+- **Wallet/CLI operators** retain the same interfaces—the stubs expose `as_bytes`/`from_bytes` helpers and deterministic encodings so existing test vectors stay stable.
+- **Serde attribute usage** continues unchanged while ensuring guarded builds never reach for crates.io just to serialize byte buffers.
+
+## Runtime Async Facade Consolidation (2025-10-12)
+
+### Rationale
+
+- **Eliminate duplicate async primitives:** `crates/runtime` still shipped its
+  own oneshot channel and `pin-project`-derived cancelable future while the new
+  `crates/foundation_async` facade already exposed the same surface.
+- **Harden wake handling without third-party shims:** The interim
+  `foundation_async::task::AtomicWaker` lacked deferred-wake semantics and we
+  still depended on `futures::FutureExt::poll_unpin` in the in-house backend.
+- **Provide test coverage for first-party async helpers:** The async facade had
+  no regression tests covering `join_all`, `select2`, panic capture, or channel
+  cancellation paths.
+
+### Implementation Summary
+
+- Replaced the runtime oneshot module with a re-export of
+  `foundation_async::sync::oneshot`, removed the local file, and updated all
+  call sites (runtime, node, tests) to rely on the shared facade.
+- Strengthened `foundation_async::task::AtomicWaker` with a pending flag so
+  wakeups triggered before registration are delivered once a waker is stored.
+- Refactored `join_all` to avoid unsafe pin projection by using interior
+  mutability, added deferred-output handling, and introduced a dedicated test
+  suite (`crates/foundation_async/tests/futures.rs`) that exercises join
+  ordering, select short-circuiting, panic trapping, and oneshot cancellation.
+- Updated the in-house runtime backend to drop `poll_unpin`, use
+  `Pin::new(receiver).poll(cx)` directly, and restore the internal
+  `CancelOutcome` enum without relying on `pin-project` macros.
+
+### Operational Impact
+
+- **FIRST_PARTY_ONLY builds** now rely on a single async facade; runtime no
+  longer duplicates channel code and the shared AtomicWaker survives deferred
+  wakeups.
+- **Runtime tests** cover the async helpers directly, catching regressions in
+  join/select/oneshot behaviour without reintroducing third-party futures
+  helpers.
+- **Node/gateway stacks** continue to compile unchanged while the shared async
+  crate accrues coverage needed for the remaining runtime primitive migrations.
 
 ## First-Party Metrics Facade Rollout (2025-10-12)
 

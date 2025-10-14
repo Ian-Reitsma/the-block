@@ -165,9 +165,7 @@ pub mod hardware {
         }
     }
 
-    #[cfg(feature = "hid")]
     pub struct LedgerHid;
-    #[cfg(feature = "hid")]
     impl LedgerHid {
         pub fn connect() -> Result<Self, WalletError> {
             Err(WalletError::Failure("ledger hid not implemented".into()))

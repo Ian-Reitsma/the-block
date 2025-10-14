@@ -1,7 +1,7 @@
 #![cfg(feature = "inhouse-backend")]
 #![recursion_limit = "65536"]
 
-use runtime::{self, select};
+use runtime;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
@@ -83,10 +83,11 @@ fn select_macro_observes_first_ready_branch() {
     ensure_inhouse_backend();
 
     let triggered = runtime::block_on(async {
-        select! {
-            _ = runtime::sleep(Duration::from_millis(10)) => {
-                true
-            },
+        let short = runtime::sleep(Duration::from_millis(10));
+        let long = runtime::sleep(Duration::from_millis(100));
+        match runtime::select2(short, long).await {
+            runtime::Either::First(()) => true,
+            runtime::Either::Second(()) => false,
         }
     });
 

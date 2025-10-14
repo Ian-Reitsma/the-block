@@ -8,12 +8,10 @@ build = "build.rs"
 cli_core = { path = "../../crates/cli_core" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 wallet = { path = "../../crates/wallet" }
-hidapi = { version = "2", optional = true }
 qrcode = "0.12"
 
 [features]
-default = ["hid"]
-hid = ["hidapi", "wallet/hid"]
+default = []
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

@@ -1,3 +1,4 @@
+use foundation_async::future::catch_unwind;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
@@ -6,16 +7,14 @@ use std::panic::{self, AssertUnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::sync::oneshot;
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
-use futures::channel::oneshot;
-use futures::task::{waker_ref, ArcWake};
-use futures::FutureExt;
+use foundation_async::block_on;
 use mio::{event::Source, Events, Interest, Poll as MioPoll, Token, Waker as MioWaker};
-use pin_project_lite::pin_project;
 use std::io;
 
 pub(crate) mod net;
@@ -43,7 +42,7 @@ impl InHouseRuntime {
     where
         F: Future,
     {
-        futures::executor::block_on(future)
+        block_on(future)
     }
 
     pub(crate) fn spawn<F, T>(&self, future: F) -> InHouseJoinHandle<T>
@@ -62,7 +61,7 @@ impl InHouseRuntime {
             foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
             let _guard = tracker;
             let cancelable = CancelableFuture::new(future, Arc::clone(&cancel_for_task));
-            let outcome = AssertUnwindSafe(cancelable).catch_unwind().await;
+            let outcome = catch_unwind(AssertUnwindSafe(cancelable)).await;
             match outcome {
                 Ok(CancelOutcome::Completed(value)) => {
                     if let Some(sender) = sender_for_task
@@ -376,8 +375,8 @@ impl Task {
         self.scheduled.store(false, AtomicOrdering::SeqCst);
         let mut slot = self.future.lock().expect("inhouse task mutex poisoned");
         if let Some(mut future) = slot.take() {
-            let waker = waker_ref(&self);
-            let mut cx = Context::from_waker(&*waker);
+            let waker = Waker::from(Arc::clone(&self));
+            let mut cx = Context::from_waker(&waker);
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(()) => {}
                 Poll::Pending => {
@@ -388,9 +387,13 @@ impl Task {
     }
 }
 
-impl ArcWake for Task {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        arc_self.schedule();
+impl Wake for Task {
+    fn wake(self: Arc<Self>) {
+        self.schedule();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.schedule();
     }
 }
 
@@ -1150,20 +1153,17 @@ impl<'a> Future for IntervalTick<'a> {
     }
 }
 
-pin_project! {
-    struct InHouseTimeoutFuture<F> {
-        #[pin]
-        future: F,
-        #[pin]
-        sleep: InHouseSleep,
-        duration: Duration,
-    }
+struct InHouseTimeoutFuture<F> {
+    future: Pin<Box<F>>,
+
+    sleep: InHouseSleep,
+    duration: Duration,
 }
 
 impl<F> InHouseTimeoutFuture<F> {
     fn new(future: F, sleep: InHouseSleep, duration: Duration) -> Self {
         Self {
-            future,
+            future: Box::pin(future),
             sleep,
             duration,
         }
@@ -1177,13 +1177,13 @@ where
     type Output = Result<T, crate::TimeoutError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        if let Poll::Ready(value) = this.future.as_mut().poll(cx) {
-            return Poll::Ready(Ok(value));
+        let this = self.get_mut();
+        if let Poll::Ready(output) = this.future.as_mut().poll(cx) {
+            return Poll::Ready(Ok(output));
         }
 
         match this.sleep.poll(cx) {
-            Poll::Ready(()) => Poll::Ready(Err(crate::TimeoutError::from(*this.duration))),
+            Poll::Ready(()) => Poll::Ready(Err(crate::TimeoutError::from(this.duration))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -1210,45 +1210,6 @@ impl Future for YieldNow {
             Poll::Ready(())
         }
     }
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __runtime_select_inhouse {
-    (biased; $($rest:tt)*) => {
-        $crate::__runtime_select_inhouse_internal!(biased [] $($rest)*)
-    };
-    ($($rest:tt)*) => {
-        $crate::__runtime_select_inhouse_internal!(unbiased [] $($rest)*)
-    };
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __runtime_select_inhouse_internal {
-    ($mode:ident [$($prefix:tt)*] $pat:pat = $expr:expr => $body:block, $($rest:tt)*) => {
-        use futures::FutureExt;
-        $crate::__runtime_select_inhouse_internal!(
-            $mode
-            [$($prefix)* $pat = ($expr).fuse() => $body,]
-            $($rest)*
-        )
-    };
-    ($mode:ident [$($prefix:tt)*] default => $body:block $(,)?) => {
-        $crate::__runtime_select_inhouse_internal!(@final $mode [$($prefix)* default => $body])
-    };
-    ($mode:ident [$($prefix:tt)*] complete => $body:block $(,)?) => {
-        $crate::__runtime_select_inhouse_internal!(@final $mode [$($prefix)* complete => $body])
-    };
-    ($mode:ident [$($prefix:tt)*]) => {
-        $crate::__runtime_select_inhouse_internal!(@final $mode [$($prefix)*])
-    };
-    (@final biased [$($prefix:tt)*]) => {
-        futures::select_biased! { $($prefix)* }
-    };
-    (@final unbiased [$($prefix:tt)*]) => {
-        futures::select! { $($prefix)* }
-    };
 }
 
 #[derive(Debug)]
@@ -1293,7 +1254,7 @@ impl<T> InHouseJoinHandle<T> {
         let receiver = receiver
             .as_mut()
             .expect("inhouse join handle missing receiver");
-        match receiver.poll_unpin(cx) {
+        match Pin::new(receiver).poll(cx) {
             Poll::Ready(Ok(result)) => Poll::Ready(result),
             Poll::Ready(Err(_)) => Poll::Ready(Err(InHouseJoinError::cancelled())),
             Poll::Pending => Poll::Pending,
@@ -1345,17 +1306,17 @@ impl fmt::Display for InHouseJoinError {
 
 impl std::error::Error for InHouseJoinError {}
 
-pin_project! {
-    struct CancelableFuture<F> {
-        #[pin]
-        inner: F,
-        cancelled: Arc<AtomicBool>,
-    }
+struct CancelableFuture<F> {
+    inner: Pin<Box<F>>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl<F> CancelableFuture<F> {
     fn new(inner: F, cancelled: Arc<AtomicBool>) -> Self {
-        Self { inner, cancelled }
+        Self {
+            inner: Box::pin(inner),
+            cancelled,
+        }
     }
 }
 
@@ -1371,11 +1332,11 @@ where
     type Output = CancelOutcome<F::Output>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.cancelled.load(AtomicOrdering::SeqCst) {
+        let this = self.get_mut();
+        if this.cancelled.load(AtomicOrdering::SeqCst) {
             return Poll::Ready(CancelOutcome::Cancelled);
         }
 
-        let mut this = self.project();
         match this.inner.as_mut().poll(cx) {
             Poll::Ready(value) => Poll::Ready(CancelOutcome::Completed(value)),
             Poll::Pending => Poll::Pending,

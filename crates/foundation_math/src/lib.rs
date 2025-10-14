@@ -10,3 +10,6 @@ pub mod distribution;
 pub mod linalg;
 /// Spectral transforms and related helpers.
 pub mod transform;
+
+#[cfg(test)]
+pub mod testing;

@@ -10,14 +10,11 @@ stub-backend = ["dep:foundation_metrics"]
 
 [dependencies]
 concurrency = { path = "../concurrency" }
-futures = { version = "0.3", default-features = false, features = ["async-await", "executor", "std"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+foundation_async = { path = "../foundation_async" }
 crossbeam-deque = { version = "0.8", optional = true }
 mio = { version = "0.8", features = ["os-poll", "os-ext", "net"], optional = true }
 foundation_metrics = { path = "../foundation_metrics", optional = true }
 socket2 = { version = "0.5", optional = true }
-pin-project-lite = "0.2"
-pin-project = "1"
 libc = { version = "0.2", optional = true }
 nix = { version = "0.27", optional = true, default-features = false, features = ["event", "inotify"] }
 base64_fp = { path = "../base64_fp" }

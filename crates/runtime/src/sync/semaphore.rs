@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use futures::task::AtomicWaker;
+use foundation_async::task::AtomicWaker;
 
 /// Error returned when a semaphore is closed and no further permits can be acquired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

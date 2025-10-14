@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used)]
-use futures::future::join_all;
+use runtime::join_all;
 use testkit::tb_prop_test;
 use the_block::compute_market::{Workload, WorkloadRunner};
 

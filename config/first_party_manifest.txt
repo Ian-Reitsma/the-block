@@ -26,6 +26,7 @@ fallible-iterator
 fallible-streaming-iterator
 find-msvc-tools
 foundation_archive
+foundation_async
 foundation_lazy
 foundation_math
 foundation_metrics
@@ -53,7 +54,6 @@ glob
 governance
 hashbrown
 hashlink
-hidapi
 histogram_fp
 http_env
 httpd
@@ -79,8 +79,7 @@ pin-project-lite
 pin-utils
 pkg-config
 pqcrypto-dilithium
-pqcrypto-internals
-pqcrypto-traits
+pqcrypto-kyber
 probe
 proc-macro2
 quote
@@ -90,7 +89,6 @@ rand_core
 runtime
 rusqlite
 serde
-serde_bytes
 serde_core
 serde_derive
 shlex

@@ -1,11 +1,10 @@
+use crate::task::AtomicWaker;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-
-use futures::task::AtomicWaker;
 
 /// Error returned when the sender half of a oneshot channel is dropped before sending a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +51,7 @@ enum State<T> {
 }
 
 /// Sends a single value to the receiving half of the channel.
+#[derive(Debug)]
 pub struct Sender<T> {
     inner: Arc<Inner<T>>,
 }
@@ -92,6 +92,7 @@ impl<T> Drop for Sender<T> {
 }
 
 /// Future that resolves when a value is sent on the channel.
+#[derive(Debug)]
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
@@ -104,7 +105,6 @@ impl<T> Receiver<T> {
             let mut state = self.inner.state.lock().expect("oneshot poisoned");
             if matches!(*state, State::Pending) {
                 *state = State::Closed;
-                drop(state);
             }
         }
     }
@@ -117,10 +117,10 @@ impl<T> Future for Receiver<T> {
         let inner = &self.as_ref().get_ref().inner;
         let mut state = inner.state.lock().expect("oneshot poisoned");
         match std::mem::replace(&mut *state, State::Consumed) {
-            State::Value(v) => {
+            State::Value(value) => {
                 *state = State::Consumed;
                 drop(state);
-                Poll::Ready(Ok(v))
+                Poll::Ready(Ok(value))
             }
             State::Consumed => {
                 *state = State::Consumed;
@@ -150,7 +150,6 @@ impl<T> Drop for Receiver<T> {
             let mut state = self.inner.state.lock().expect("oneshot poisoned");
             if matches!(*state, State::Pending) {
                 *state = State::Closed;
-                drop(state);
             }
         }
     }

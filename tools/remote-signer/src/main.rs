@@ -4,8 +4,6 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-#[cfg(feature = "hid")]
-use hidapi::HidApi;
 use qrcode::{render::unicode, QrCode};
 use std::fs;
 use wallet::{psbt::Psbt, Wallet, WalletSigner};

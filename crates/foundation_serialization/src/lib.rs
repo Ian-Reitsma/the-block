@@ -68,8 +68,6 @@ pub mod serde {
     pub use serde::*;
 }
 
-pub use serde_bytes;
-
 pub mod binary_cursor;
 
 /// Helpers that provide serde-style default values without depending on
@@ -165,6 +163,65 @@ pub mod skip {
         fn is_empty(&self) -> bool {
             self.as_os_str().is_empty()
         }
+    }
+}
+
+/// Byte buffer helpers mirroring the external `serde_bytes` crate.
+pub mod serde_bytes {
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    /// Serialize any byte-like container using the serializer's native
+    /// `serialize_bytes` implementation.
+    pub fn serialize<S, T>(bytes: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: AsRef<[u8]> + ?Sized,
+    {
+        serializer.serialize_bytes(bytes.as_ref())
+    }
+
+    /// Deserialize a byte buffer into a `Vec<u8>`.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BytesVisitor;
+
+        impl<'de> Visitor<'de> for BytesVisitor {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a byte buffer")
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(value.to_vec())
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(value)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut out = Vec::new();
+                while let Some(byte) = seq.next_element::<u8>()? {
+                    out.push(byte);
+                }
+                Ok(out)
+            }
+        }
+
+        deserializer.deserialize_byte_buf(BytesVisitor)
     }
 }
 

@@ -124,14 +124,13 @@ fn ln_gamma(z: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
-
     use super::ChiSquared;
+    use crate::testing::assert_close_with;
 
     #[test]
     fn chi_squared_quantile_matches_reference() {
         let dist = ChiSquared::new(4.0).unwrap();
         let quantile = dist.inverse_cdf(0.99);
-        assert_relative_eq!(quantile, 13.276_704, epsilon = 1e-3);
+        assert_close_with(quantile, 13.276_704, 1e-3);
     }
 }
