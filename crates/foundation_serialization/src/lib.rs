@@ -62,10 +62,10 @@ impl std::error::Error for Error {
     }
 }
 
-pub use serde::{de, ser, Deserialize, Serialize};
+pub use ::serde::{de, ser, Deserialize, Serialize};
 
 pub mod serde {
-    pub use serde::*;
+    pub use ::serde::*;
 }
 
 pub mod binary_cursor;

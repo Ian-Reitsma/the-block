@@ -25,7 +25,7 @@ dependency-fault = [
 
 [dependencies]
 rand = { path = "../crates/rand" }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 light-client = { path = "../crates/light-client" }
 dex = { path = "../dex" }

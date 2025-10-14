@@ -12,7 +12,7 @@ bridges = { path = "../bridges" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
 foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 dkg = { path = "../dkg", optional = true }
 diagnostics = { path = "../crates/diagnostics" }
 dex = { path = "../dex" }

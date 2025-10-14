@@ -239,7 +239,11 @@ impl From<backend::VerifyingKey> for VerifyingKey {
 
 mod serde_impls {
     use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use foundation_serialization::{
+        de::{self, Deserializer},
+        ser::Serializer,
+        Deserialize, Serialize,
+    };
 
     impl Serialize for Signature {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -258,7 +262,7 @@ mod serde_impls {
         {
             let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
             if bytes.len() != SIGNATURE_LENGTH {
-                return Err(serde::de::Error::invalid_length(bytes.len(), &"64"));
+                return Err(de::Error::invalid_length(bytes.len(), &"64"));
             }
             let mut arr = [0u8; SIGNATURE_LENGTH];
             arr.copy_from_slice(&bytes);
@@ -282,11 +286,11 @@ mod serde_impls {
         {
             let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
             if bytes.len() != PUBLIC_KEY_LENGTH {
-                return Err(serde::de::Error::invalid_length(bytes.len(), &"32"));
+                return Err(de::Error::invalid_length(bytes.len(), &"32"));
             }
             let mut arr = [0u8; PUBLIC_KEY_LENGTH];
             arr.copy_from_slice(&bytes);
-            VerifyingKey::from_bytes(&arr).map_err(|e| serde::de::Error::custom(e.to_string()))
+            VerifyingKey::from_bytes(&arr).map_err(|e| de::Error::custom(e.to_string()))
         }
     }
 }

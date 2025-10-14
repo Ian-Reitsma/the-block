@@ -68,7 +68,6 @@ log
 memchr
 mio
 nix
-num-bigint
 num-integer
 num-traits
 once_cell

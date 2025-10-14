@@ -7,3 +7,4 @@ edition = "2021"
 crypto_suite = { path = "../crypto_suite" }
 foundation_serialization = { path = "../foundation_serialization" }
 foundation_lazy = { path = "../foundation_lazy" }
+serde = { workspace = true }

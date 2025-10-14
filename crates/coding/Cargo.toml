@@ -8,7 +8,7 @@ allow-third-party = []
 
 [dependencies]
 thiserror = { path = "../thiserror" }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../foundation_serialization" }
 base64_fp = { path = "../base64_fp" }
 crypto = { path = "../../crypto" }

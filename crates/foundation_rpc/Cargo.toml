@@ -11,4 +11,4 @@ publish = false
 foundation_serialization = { path = "../foundation_serialization" }
 httpd = { path = "../httpd" }
 thiserror = { path = "../thiserror" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }

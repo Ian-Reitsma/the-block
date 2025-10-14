@@ -1,4 +1,4 @@
-use num_bigint::BigUint;
+use foundation_bigint::BigUint;
 use std::sync::OnceLock;
 
 const L_BYTES: [u8; 32] = [

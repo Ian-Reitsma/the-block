@@ -1,4 +1,35 @@
 # Project Progress Snapshot
+> **Review (2025-10-12):** Runtime’s in-house backend now schedules async tasks
+> and blocking jobs via a shared first-party `WorkQueue`, eliminating the
+> `crossbeam-deque`/`crossbeam-epoch` dependency pair while keeping spawn
+> latency and pending-task telemetry intact. `foundation_bigint` now ships a
+> production-grade big-integer engine with an `tests/arithmetic.rs` suite that
+> exercises addition, subtraction, multiplication, decimal/hex parsing,
+> shifting, modular reduction, and modular exponentiation to keep the
+> in-house implementation locked to deterministic vectors.
+> **Review (2025-10-12):** Landed the `foundation_serde` facade and stub
+> backend so every crate toggles serde usage through the first-party wrapper.
+> Workspace manifests now alias `serde` to the facade, and `foundation_bigint`
+> replaces the `num-bigint` stack inside `crypto_suite` so FIRST_PARTY_ONLY
+> builds run without crates.io big integers while residual `num-traits` stays behind image/num-* tooling.
+> `foundation_serialization` still owns mutually exclusive
+> `serde-external`/`serde-stub` features, the stub mirrors serde trait surfaces
+> (serializers, deserializers, visitors, value helpers, primitive
+> implementations, and `IntoDeserializer` adapters), and FIRST_PARTY_ONLY
+> builds compile with the stub via `cargo check -p foundation_serialization
+> --no-default-features --features serde-stub`. Dependency inventory snapshots
+> and the guard backlog were refreshed to capture the new facade boundaries.
+> **Review (2025-10-13):** `foundation_serde_derive` now parses proc-macro
+> input directly with `proc_macro` token trees, eliminating the
+> `proc-macro2`/`quote`/`syn` stack while keeping stub derives for
+> `Serialize`/`Deserialize`. The stub backend gained container coverage for
+> vectors, tuples, hash maps, const arrays, and references so FIRST_PARTY_ONLY
+> builds satisfy workspace trait bounds even when serde would normally generate
+> blanket impls. A workspace-level `serde` alias now points at the facade and
+> manifests across node, governance, wallet, explorer, CLI, light-client,
+> telemetry, inflation, bridges, TLS, and tooling crates consume the shared
+> entry to keep feature selection consistent between stub and external
+> backends.
 > **Review (2025-10-12):** Test infrastructure now compiles without the `syn`/`quote`/`proc-macro2` stack—`crates/testkit_macros` parses serial test wrappers directly and still guards execution behind `testkit::serial::lock()`. Foundation math tests rely on new in-house floating-point helpers (`testing::assert_close[_with]`), eliminating the external `approx` dependency. Wallet and remote-signer binaries removed the dormant `hidapi` feature flag so `FIRST_PARTY_ONLY` builds no longer link native HID toolchains; the Ledger placeholder still returns a deterministic error. Runtime and gateway code now share the `foundation_async` facade: `crates/runtime` re-exports the shared oneshot channel, the first-party `AtomicWaker` gained deferred-wake semantics, and coverage in `crates/foundation_async/tests/futures.rs` locks join ordering, select short-circuiting, panic capture, and cancellation paths. Dependency inventories and the first-party audit were refreshed to reflect the leaner workspace DAG.
 > **Review (2025-10-13):** Metrics aggregation now installs a first-party `AggregatorRecorder` so every `foundation_metrics` macro emitted by runtime backends, TLS sinks, and CLI tools flows back into the Prometheus handles without reintroducing third-party crates. Monitoring utilities gained a lightweight `MonitoringRecorder` that keeps snapshot success/error counters inside the facade, letting the `snapshot` CLI report health without depending on the retired `metrics` stack. Gateway read receipts now bypass serde, encoding and decoding through the new `foundation_serialization::binary_cursor` helpers while retaining the legacy CBOR fallback for older batches. Gossip wire messages follow suit: `node/src/p2p/wire_binary.rs` replaces the serde-derived `WireMessage` encoder/decoder with cursor helpers plus upgraded `binary_struct` guards, and regression tests lock the legacy payload bytes across handshake and gossip variants. Storage sled codecs—rent escrow, manifests, provider profiles, and repair failure records—now share the cursor helpers (`node/src/storage/{fs.rs,manifest_binary.rs,pipeline/binary.rs,repair.rs}`) with expanded regression suites that exercise large manifests, redundancy variants, and historical payloads lacking optional fields, and the new randomized property harness plus sparse-manifest repair integration test keep the first-party codecs in parity with the retired binary shim. Identity DID and handle registries likewise persist through `identity::{did_binary,handle_binary}`, replacing `binary_codec` in sled storage while compatibility fixtures guard remote attestation, pq-key toggles, and truncated payloads, and freshly added seeded property tests plus the `identity_snapshot` integration suite stress randomized identities alongside mixed legacy/current sled dumps. DEX persistence now joins the cursor stack: `node/src/dex/{storage.rs,storage_binary.rs}` encode order books, trade logs, AMM pools, and escrow snapshots via first-party helpers while the new `EscrowSnapshot` type documents the persisted layout and regression suites (`order_book_matches_legacy`, `trade_log_matches_legacy`, `escrow_state_matches_legacy`, `pool_matches_legacy`) lock legacy bytes. The PQ surface now rides on first-party stubs (`crates/pqcrypto_dilithium`, `crates/pqcrypto_kyber`), allowing `quantum` and `pq` builds to generate keys, signatures, and encapsulations without crates.io code while keeping deterministic encodings for commit–reveal, wallet, and governance tests. Byte-array helpers have moved in-house as well: the workspace drops the external `serde_bytes` crate in favour of `foundation_serialization::serde_bytes`, so `#[serde(with = "serde_bytes")]` annotations continue to compile when the FIRST_PARTY_ONLY guard is active.
 > **Review (2025-10-12):** Storage engine manifests and WAL snapshots now round-trip through the new in-house JSON codec and temp-file harness, eliminating the crate’s `foundation_serialization`/`serde`/`sys::tempfile` dependencies and adding regression tests for malformed input, unicode escapes, byte-array coercions, and persist failures. The diagnostics crate no longer links the SQLite facade, `dependency_guard` scopes `cargo metadata` to the requesting crate before enforcing policy, and the dependency inventory snapshots were regenerated to reflect the leaner workspace DAG. Node telemetry now rides on the first-party `foundation_metrics` recorder, bridging runtime spawn-latency histograms, pending-task gauges, and wallet/CLI counters into the existing telemetry surfaces without touching the retired `metrics` crate.
@@ -31,6 +62,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
 - **Current inventory** *(generated at `2025-10-13T19:45:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers, the diagnostics crate’s SQLite-free manifest, the new P2P wire-message manual codec, the identity sled migrations that dropped `binary_codec`, and the expanded randomized coverage guarding DID/handle persistence plus the DEX sled migration.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Latest migrations (2025-10-12)**: Runtime rewired its async executor and
+  blocking pool to use a shared first-party `WorkQueue`, dropping
+  `crossbeam-deque`/`crossbeam-epoch` from the crate while preserving spawn
+  latency/pending task gauges. `foundation_bigint` picked up deterministic
+  arithmetic/parsing/modpow tests that run under both stub and external
+  backends so FIRST_PARTY_ONLY builds validate the new facade in isolation.
 - **Latest migrations (2025-10-13)**: Gossip wire messages now encode/decode
   via `node/src/p2p/wire_binary.rs`, replacing the serde-derived
   `WireMessage` codec with cursor helpers, compatibility fixtures, and a new

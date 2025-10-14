@@ -97,6 +97,13 @@ tests while the module is phased out.
 
 ### Tooling & Support Crate Migrations (2025-10-12)
 
+- ✅ Added the `foundation_serde` facade crate with a fully enumerated stub
+  backend. The stub mirrors serde’s `ser`/`de` traits, visitor hierarchy,
+  primitive implementations, and value helpers so FIRST_PARTY_ONLY builds can
+  compile end-to-end. `foundation_serialization` now toggles backends via
+  features (`serde-external`, `serde-stub`) without ever depending on upstream
+  `serde` directly, and the stub backend passes `cargo check -p
+  foundation_serialization --no-default-features --features serde-stub`.
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
   `foundation_serialization::json` and the in-house HTTP client, eliminating the
   `ureq` dependency entirely.
@@ -260,6 +267,18 @@ tests while the module is phased out.
   feature flag; the HID placeholder still returns a deterministic error, but
   `FIRST_PARTY_ONLY` builds no longer link the native HID stack or the `cc`
   toolchain it pulled in.
+- ✅ Workspace manifests now depend on the `foundation_serde` facade instead of
+  crates.io `serde`, and `foundation_bigint` now provides the full in-house
+  big-integer implementation so `crypto_suite` compiles without the
+  `num-bigint` stack while residual `num-traits` stays with image/num-* tooling outside guard-critical paths.
+- ✅ `crates/runtime` now schedules async tasks and blocking jobs through an
+  in-house `WorkQueue`, removing the `crossbeam-deque`/`crossbeam-epoch`
+  dependency pair from the runtime backend while retaining spawn latency and
+  pending task telemetry.
+- ✅ Added `crates/foundation_bigint/tests/arithmetic.rs` to exercise
+  addition/subtraction/multiplication, decimal and hex parsing, shifting, and
+  modular exponentiation so the in-house implementation stays locked against
+  known-good vectors.
 
 Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
 residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`) and
@@ -336,7 +355,7 @@ delivery windows unless otherwise specified.
 
 | Dependency | Current Usage (Representative Modules) | Stub / Replacement Plan | Owner & Timeline |
 | --- | --- | --- | --- |
-| `serde` derives (`serde`, `serde_bytes`) | Residual derives across storage/RPC payloads (`node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
+| `serde` derives (`serde`, `serde_bytes`) | Residual derives across storage/RPC payloads (`node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; manifests now point at the `foundation_serde` facade so derives resolve to the stub backend when `FIRST_PARTY_ONLY=1`. | Serialization Working Group — W45 |
 | `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
 | `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
 | `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | **Replaced.** Workspace now ships a first-party stub (`crates/pqcrypto_dilithium`) that provides deterministic keygen, sign, and verify helpers wired into the node, wallet, and commit–reveal paths. | Crypto Suite — W43 |

@@ -7,3 +7,4 @@ edition = "2021"
 crypto_suite = { path = "../crates/crypto_suite" }
 rand = { path = "../crates/rand" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+serde = { workspace = true }

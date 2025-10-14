@@ -1,6 +1,6 @@
 use foundation_async::future::catch_unwind;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fmt;
 use std::future::Future;
 use std::panic::{self, AssertUnwindSafe};
@@ -12,7 +12,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::sync::oneshot;
-use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use foundation_async::block_on;
 use mio::{event::Source, Events, Interest, Poll as MioPoll, Token, Waker as MioWaker};
 use std::io;
@@ -194,8 +193,7 @@ impl Drop for PendingTracker {
 }
 
 struct Inner {
-    injector: Arc<Injector<Arc<Task>>>,
-    notify: WorkerNotify,
+    queue: WorkQueue<Arc<Task>>,
     shutdown: AtomicBool,
     pending: PendingCounter,
     reactor: Arc<ReactorInner>,
@@ -209,48 +207,31 @@ impl Inner {
             .map(|v| v.get())
             .unwrap_or(1)
             .max(2);
-        let injector = Arc::new(Injector::new());
-        let mut workers = Vec::with_capacity(worker_count);
-        let mut stealers = Vec::with_capacity(worker_count);
-        for _ in 0..worker_count {
-            let worker = Worker::new_fifo();
-            stealers.push(worker.stealer());
-            workers.push(worker);
-        }
-        let stealers = Arc::new(stealers);
         let reactor = ReactorInner::new();
         let inner = Arc::new(Self {
-            injector: Arc::clone(&injector),
-            notify: WorkerNotify::new(),
+            queue: WorkQueue::new(),
             shutdown: AtomicBool::new(false),
             pending: Arc::new(AtomicI64::new(0)),
             reactor,
             blocking: BlockingPool::new(worker_count.max(2)),
             worker_handles: Mutex::new(Vec::new()),
         });
-        inner.spawn_workers(workers, injector, stealers);
+        inner.spawn_workers(worker_count);
         inner
     }
 
-    fn spawn_workers(
-        self: &Arc<Self>,
-        workers: Vec<Worker<Arc<Task>>>,
-        injector: Arc<Injector<Arc<Task>>>,
-        stealers: Arc<Vec<Stealer<Arc<Task>>>>,
-    ) {
+    fn spawn_workers(self: &Arc<Self>, worker_count: usize) {
         let mut handles = self
             .worker_handles
             .lock()
             .expect("worker handle mutex poisoned");
-        for (index, worker) in workers.into_iter().enumerate() {
+        for index in 0..worker_count {
             let runtime = Arc::clone(self);
-            let injector_clone = Arc::clone(&injector);
-            let stealers_clone = Arc::clone(&stealers);
+            let queue = self.queue.clone();
             let handle = thread::Builder::new()
                 .name(format!("inhouse-runtime-worker-{index}"))
                 .spawn(move || {
-                    SchedulerWorker::new(runtime, worker, injector_clone, stealers_clone, index)
-                        .run();
+                    SchedulerWorker::new(runtime, queue).run();
                 })
                 .expect("failed to spawn in-house runtime worker");
             handles.push(handle);
@@ -258,15 +239,14 @@ impl Inner {
     }
 
     fn schedule(&self, task: Arc<Task>) {
-        self.injector.push(task);
-        self.notify.notify_one();
+        self.queue.push(task);
     }
 }
 
 impl Drop for Inner {
     fn drop(&mut self) {
         self.shutdown.store(true, AtomicOrdering::SeqCst);
-        self.notify.notify_all();
+        self.queue.notify_all();
         self.reactor.shutdown();
         self.blocking.shutdown();
         let mut handles = self
@@ -281,36 +261,21 @@ impl Drop for Inner {
 
 struct SchedulerWorker {
     runtime: Arc<Inner>,
-    local: Worker<Arc<Task>>,
-    injector: Arc<Injector<Arc<Task>>>,
-    stealers: Arc<Vec<Stealer<Arc<Task>>>>,
-    index: usize,
+    queue: WorkQueue<Arc<Task>>,
 }
 
 impl SchedulerWorker {
-    fn new(
-        runtime: Arc<Inner>,
-        local: Worker<Arc<Task>>,
-        injector: Arc<Injector<Arc<Task>>>,
-        stealers: Arc<Vec<Stealer<Arc<Task>>>>,
-        index: usize,
-    ) -> Self {
-        Self {
-            runtime,
-            local,
-            injector,
-            stealers,
-            index,
-        }
+    fn new(runtime: Arc<Inner>, queue: WorkQueue<Arc<Task>>) -> Self {
+        Self { runtime, queue }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         loop {
             if self.runtime.shutdown.load(AtomicOrdering::SeqCst) {
                 break;
             }
 
-            if let Some(task) = self.pop_task() {
+            if let Some(task) = self.queue.pop(&self.runtime.shutdown) {
                 task.run();
                 continue;
             }
@@ -318,31 +283,7 @@ impl SchedulerWorker {
             if self.runtime.shutdown.load(AtomicOrdering::SeqCst) {
                 break;
             }
-
-            self.runtime.notify.wait();
         }
-    }
-
-    fn pop_task(&mut self) -> Option<Arc<Task>> {
-        if let Some(task) = self.local.pop() {
-            return Some(task);
-        }
-
-        if let Steal::Success(task) = self.injector.steal_batch_and_pop(&self.local) {
-            return Some(task);
-        }
-
-        for (idx, stealer) in self.stealers.iter().enumerate() {
-            if idx == self.index {
-                continue;
-            }
-            match stealer.steal() {
-                Steal::Success(task) => return Some(task),
-                Steal::Retry => return self.pop_task(),
-                Steal::Empty => continue,
-            }
-        }
-        None
     }
 }
 
@@ -397,129 +338,97 @@ impl Wake for Task {
     }
 }
 
-#[derive(Clone)]
-struct WorkerNotify {
-    inner: Arc<WorkerNotifyInner>,
+struct WorkQueue<T> {
+    inner: Arc<WorkQueueInner<T>>,
 }
 
-struct WorkerNotifyInner {
-    state: Mutex<usize>,
+struct WorkQueueInner<T> {
+    queue: Mutex<VecDeque<T>>,
     cv: Condvar,
 }
 
-impl WorkerNotify {
+impl<T> Clone for WorkQueue<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl<T> WorkQueue<T> {
     fn new() -> Self {
         Self {
-            inner: Arc::new(WorkerNotifyInner {
-                state: Mutex::new(0),
+            inner: Arc::new(WorkQueueInner {
+                queue: Mutex::new(VecDeque::new()),
                 cv: Condvar::new(),
             }),
         }
     }
 
-    fn notify_one(&self) {
-        let mut guard = self
-            .inner
-            .state
-            .lock()
-            .expect("worker notify mutex poisoned");
-        if *guard != usize::MAX {
-            *guard = guard.saturating_add(1);
-        }
+    fn push(&self, item: T) {
+        let mut guard = self.inner.queue.lock().expect("work queue mutex poisoned");
+        guard.push_back(item);
         self.inner.cv.notify_one();
     }
 
-    fn notify_all(&self) {
-        let mut guard = self
-            .inner
-            .state
-            .lock()
-            .expect("worker notify mutex poisoned");
-        *guard = usize::MAX;
-        self.inner.cv.notify_all();
+    fn pop(&self, shutdown: &AtomicBool) -> Option<T> {
+        let mut guard = self.inner.queue.lock().expect("work queue mutex poisoned");
+        loop {
+            if let Some(item) = guard.pop_front() {
+                return Some(item);
+            }
+
+            if shutdown.load(AtomicOrdering::SeqCst) {
+                return None;
+            }
+
+            guard = self.inner.cv.wait(guard).expect("work queue wait poisoned");
+        }
     }
 
-    fn wait(&self) {
-        let mut guard = self
-            .inner
-            .state
-            .lock()
-            .expect("worker notify mutex poisoned");
-        while *guard == 0 {
-            guard = self
-                .inner
-                .cv
-                .wait(guard)
-                .expect("worker notify wait poisoned");
-        }
-        if *guard != usize::MAX {
-            *guard -= 1;
-        }
+    fn notify_all(&self) {
+        self.inner.cv.notify_all();
     }
 }
 
 struct BlockingPool {
-    injector: Arc<Injector<BlockingJob>>,
-    notify: WorkerNotify,
+    queue: WorkQueue<BlockingJob>,
     shutdown: Arc<AtomicBool>,
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl BlockingPool {
     fn new(worker_count: usize) -> Self {
-        let injector = Arc::new(Injector::new());
-        let mut workers = Vec::with_capacity(worker_count);
-        let mut stealers = Vec::with_capacity(worker_count);
-        for _ in 0..worker_count {
-            let worker = Worker::new_fifo();
-            stealers.push(worker.stealer());
-            workers.push(worker);
-        }
-        let stealers_arc = Arc::new(stealers);
-        let notify = WorkerNotify::new();
+        let queue = WorkQueue::new();
         let shutdown = Arc::new(AtomicBool::new(false));
-        let handles = workers
-            .into_iter()
-            .enumerate()
-            .map(|(index, worker)| {
-                let injector_clone = Arc::clone(&injector);
-                let stealers_clone = Arc::clone(&stealers_arc);
-                let notify_clone = notify.clone();
+        let handles = (0..worker_count)
+            .map(|index| {
+                let queue_clone = queue.clone();
                 let shutdown_clone = Arc::clone(&shutdown);
                 thread::Builder::new()
                     .name(format!("inhouse-blocking-worker-{index}"))
                     .spawn(move || {
-                        BlockingWorker::new(
-                            worker,
-                            injector_clone,
-                            stealers_clone,
-                            notify_clone,
-                            shutdown_clone,
-                            index,
-                        )
-                        .run();
+                        BlockingWorker::new(queue_clone, shutdown_clone).run();
                     })
                     .expect("failed to spawn in-house blocking worker")
             })
             .collect();
         Self {
-            injector,
-            notify,
+            queue,
             shutdown,
             workers: Mutex::new(handles),
         }
     }
 
     fn spawn(&self, job: BlockingJob) {
-        self.injector.push(job);
-        self.notify.notify_one();
+        self.queue.push(job);
     }
 
     fn shutdown(&self) {
         if self.shutdown.swap(true, AtomicOrdering::SeqCst) {
             return;
         }
-        self.notify.notify_all();
+        self.queue.notify_all();
         let mut handles = self.workers.lock().expect("blocking worker mutex poisoned");
         for handle in handles.drain(..) {
             let _ = handle.join();
@@ -528,40 +437,22 @@ impl BlockingPool {
 }
 
 struct BlockingWorker {
-    local: Worker<BlockingJob>,
-    injector: Arc<Injector<BlockingJob>>,
-    stealers: Arc<Vec<Stealer<BlockingJob>>>,
-    notify: WorkerNotify,
+    queue: WorkQueue<BlockingJob>,
     shutdown: Arc<AtomicBool>,
-    index: usize,
 }
 
 impl BlockingWorker {
-    fn new(
-        local: Worker<BlockingJob>,
-        injector: Arc<Injector<BlockingJob>>,
-        stealers: Arc<Vec<Stealer<BlockingJob>>>,
-        notify: WorkerNotify,
-        shutdown: Arc<AtomicBool>,
-        index: usize,
-    ) -> Self {
-        Self {
-            local,
-            injector,
-            stealers,
-            notify,
-            shutdown,
-            index,
-        }
+    fn new(queue: WorkQueue<BlockingJob>, shutdown: Arc<AtomicBool>) -> Self {
+        Self { queue, shutdown }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         loop {
             if self.shutdown.load(AtomicOrdering::SeqCst) {
                 break;
             }
 
-            if let Some(job) = self.pop_job() {
+            if let Some(job) = self.queue.pop(&self.shutdown) {
                 job.run();
                 continue;
             }
@@ -569,31 +460,7 @@ impl BlockingWorker {
             if self.shutdown.load(AtomicOrdering::SeqCst) {
                 break;
             }
-
-            self.notify.wait();
         }
-    }
-
-    fn pop_job(&mut self) -> Option<BlockingJob> {
-        if let Some(job) = self.local.pop() {
-            return Some(job);
-        }
-
-        if let Steal::Success(job) = self.injector.steal_batch_and_pop(&self.local) {
-            return Some(job);
-        }
-
-        for (idx, stealer) in self.stealers.iter().enumerate() {
-            if idx == self.index {
-                continue;
-            }
-            match stealer.steal() {
-                Steal::Success(job) => return Some(job),
-                Steal::Retry => return self.pop_job(),
-                Steal::Empty => continue,
-            }
-        }
-        None
     }
 }
 

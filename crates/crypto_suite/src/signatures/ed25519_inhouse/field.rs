@@ -1,5 +1,4 @@
-use num_bigint::BigUint;
-use num_traits::{One, Zero};
+use foundation_bigint::BigUint;
 use std::sync::OnceLock;
 
 const BASEPOINT_X_BYTES: [u8; 32] = [

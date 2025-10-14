@@ -1,5 +1,6 @@
 use core::ops::Deref;
 
+use foundation_serialization::Serialize;
 use thiserror::Error;
 
 use codec::{profiles, BinaryConfig};
@@ -75,7 +76,7 @@ pub fn canonical_binary_config() -> BinaryConfig {
 #[must_use]
 pub fn canonical_payload_bytes<T>(payload: &T) -> Vec<u8>
 where
-    T: serde::Serialize,
+    T: Serialize,
 {
     try_canonical_payload_bytes(payload)
         .unwrap_or_else(|err| panic!("failed to serialize payload: {err}"))
@@ -84,7 +85,7 @@ where
 /// Serialize a payload using canonical settings, returning the error instead of panicking.
 pub fn try_canonical_payload_bytes<T>(payload: &T) -> Result<Vec<u8>, codec::Error>
 where
-    T: serde::Serialize,
+    T: Serialize,
 {
     codec::serialize(profiles::transaction::codec(), payload)
 }
@@ -181,7 +182,7 @@ impl TransactionSigner {
         payload: &T,
     ) -> Result<(Signature, [u8; PUBLIC_KEY_LENGTH]), TransactionError>
     where
-        T: serde::Serialize,
+        T: Serialize,
     {
         let bytes = try_canonical_payload_bytes(payload)?;
         Ok(self.sign_with_secret(secret, &bytes))
@@ -195,7 +196,7 @@ impl TransactionSigner {
         signature: &Signature,
     ) -> Result<(), TransactionError>
     where
-        T: serde::Serialize,
+        T: Serialize,
     {
         let bytes = try_canonical_payload_bytes(payload)?;
         self.verify_with_public_bytes(verifying_key, &bytes, signature)?;
@@ -210,7 +211,7 @@ mod tests {
 
     use super::*;
 
-    #[derive(serde::Serialize)]
+    #[derive(foundation_serialization::Serialize)]
     struct Payload<'a> {
         name: &'a str,
         value: u64,

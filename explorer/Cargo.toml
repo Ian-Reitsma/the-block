@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 foundation_sqlite = { path = "../crates/foundation_sqlite" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 codec = { path = "../crates/codec" }
 httpd = { path = "../crates/httpd" }
