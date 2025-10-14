@@ -565,6 +565,12 @@ impl QuinnAdapter {
     ) -> Result<ConnectionHandle, quinn_impl::ConnectError> {
         let cert = match cert {
             CertificateHandle::Quinn(cert) => cert,
+            #[cfg(feature = "inhouse")]
+            CertificateHandle::Inhouse(_) => {
+                return Err(quinn_impl::ConnectError::Other(anyhow!(
+                    "certificate incompatible with quinn provider"
+                )))
+            }
         };
         let conn = quinn_impl::connect(addr, cert).await?;
         Ok(ConnectionHandle::Quinn(conn))
@@ -577,6 +583,12 @@ impl QuinnAdapter {
     ) -> Result<ConnectionHandle, quinn_impl::ConnectError> {
         let cert = match cert {
             CertificateHandle::Quinn(cert) => cert,
+            #[cfg(feature = "inhouse")]
+            CertificateHandle::Inhouse(_) => {
+                return Err(quinn_impl::ConnectError::Other(anyhow!(
+                    "certificate incompatible with quinn provider"
+                )))
+            }
         };
         let conn = quinn_impl::get_connection(addr, cert).await?;
         Ok(ConnectionHandle::Quinn(conn))
@@ -593,12 +605,18 @@ impl QuinnAdapter {
     pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> DiagResult<()> {
         match conn {
             ConnectionHandle::Quinn(conn) => quinn_impl::send(conn, data).await.map_err(Into::into),
+            #[cfg(feature = "inhouse")]
+            ConnectionHandle::Inhouse(_) => {
+                Err(anyhow!("connection incompatible with quinn provider"))
+            }
         }
     }
 
     pub async fn recv(&self, conn: &ConnectionHandle) -> Option<Vec<u8>> {
         match conn {
             ConnectionHandle::Quinn(conn) => quinn_impl::recv(conn).await,
+            #[cfg(feature = "inhouse")]
+            ConnectionHandle::Inhouse(_) => None,
         }
     }
 
@@ -675,12 +693,12 @@ impl InhouseAdapter {
                 return Err(anyhow!("certificate incompatible with inhouse provider"));
             }
         };
-        let conn = self.0.backend.connect(addr, cert).await?;
+        let (conn, _meta) = self.0.backend.connect(addr, cert).await?;
         Ok(ConnectionHandle::Inhouse(conn))
     }
 
     pub async fn connect_insecure(&self, addr: SocketAddr) -> DiagResult<ConnectionHandle> {
-        let conn = self.0.backend.connect_insecure(addr).await?;
+        let (conn, _meta) = self.0.backend.connect_insecure(addr).await?;
         Ok(ConnectionHandle::Inhouse(conn))
     }
 
@@ -815,7 +833,7 @@ impl S2nAdapter {
 #[derive(Clone)]
 pub enum ConnectionHandle {
     #[cfg(feature = "quinn")]
-    Quinn(quinn::Connection),
+    Quinn(quinn_impl::Connection),
     #[cfg(feature = "inhouse")]
     Inhouse(Arc<inhouse_impl::Connection>),
 }
@@ -833,7 +851,7 @@ pub enum CertificateHandle {
 #[derive(Clone)]
 pub enum ListenerHandle {
     #[cfg(feature = "quinn")]
-    Quinn(quinn::Endpoint),
+    Quinn(quinn_impl::Endpoint),
     #[cfg(feature = "s2n-quic")]
     S2n(Arc<s2n_impl::Server>),
     #[cfg(feature = "inhouse")]
@@ -842,7 +860,7 @@ pub enum ListenerHandle {
 
 impl ListenerHandle {
     #[cfg(feature = "quinn")]
-    pub fn as_quinn(&self) -> Option<&quinn::Endpoint> {
+    pub fn as_quinn(&self) -> Option<&quinn_impl::Endpoint> {
         match self {
             ListenerHandle::Quinn(endpoint) => Some(endpoint),
             #[cfg(feature = "s2n-quic")]
@@ -853,7 +871,7 @@ impl ListenerHandle {
     }
 
     #[cfg(feature = "quinn")]
-    pub fn into_quinn(self) -> Option<quinn::Endpoint> {
+    pub fn into_quinn(self) -> Option<quinn_impl::Endpoint> {
         match self {
             ListenerHandle::Quinn(endpoint) => Some(endpoint),
             #[cfg(feature = "s2n-quic")]

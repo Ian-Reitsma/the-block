@@ -70,7 +70,6 @@
 | unclassified | `log` | 0.4.28 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `memchr` | 2.7.6 | crates.io | Unlicense OR MIT | 3 |
 | unclassified | `mio` | 0.8.11 | crates.io | MIT | 2 |
-| unclassified | `nix` | 0.27.1 | crates.io | MIT | 2 |
 | unclassified | `once_cell` | 1.21.3 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `p2p_overlay` | 0.1.0 | workspace | — | 1 |
 | unclassified | `pin-project` | 1.1.10 | crates.io | Apache-2.0 OR MIT | 2 |
@@ -148,3 +147,10 @@
 > Note: `crossbeam-deque`/`crossbeam-epoch` remain in the inventory because the
 > vendored `sled` crate still depends on them; the runtime backend now schedules
 > through a first-party `WorkQueue` and no longer links crossbeam.
+> Note: runtime file watching and networking now route through the first-party
+> `sys` inotify/kqueue wrappers, epoll-backed `sys::reactor`, and the new
+> `sys::net` socket constructors, eliminating `mio`, `nix`, and `socket2` from
+> the `runtime` crate. Remaining `libc`/`mio` entries surface only through
+> legacy `tokio` consumers that still depend on the upstream reactor. The Linux
+> integration suite under `crates/sys/tests` continues to exercise the inotify
+> wrapper end to end.

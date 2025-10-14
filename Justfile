@@ -68,3 +68,7 @@ lint:
 
 dependency-audit:
     cargo run -p dependency_registry -- --check config/dependency_policies.toml
+
+check-windows:
+    rustup target add x86_64-pc-windows-gnu
+    FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu -p sys -p runtime

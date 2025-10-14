@@ -4,8 +4,8 @@ mod messages;
 mod store;
 
 pub use adapter::{
-    certificate_store, verify_remote_certificate, Adapter, Connection, ConnectionStatsSnapshot,
-    Endpoint, InhouseEventCallbacks,
+    certificate_store, verify_remote_certificate, Adapter, ConnectOutcome, Connection,
+    ConnectionStatsSnapshot, Endpoint, InhouseEventCallbacks,
 };
 pub use certificate::{fingerprint, fingerprint_history, Certificate};
 pub use store::{Advertisement, InhouseCertificateStore};

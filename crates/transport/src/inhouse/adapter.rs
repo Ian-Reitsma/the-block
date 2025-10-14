@@ -146,9 +146,17 @@ impl Adapter {
         &self,
         addr: SocketAddr,
         cert: &Certificate,
-    ) -> DiagResult<Arc<Connection>> {
+    ) -> DiagResult<(Arc<Connection>, ConnectOutcome)> {
         if let Some(conn) = self.inner.connections.lock().unwrap().get(&addr) {
-            return Ok(conn.clone());
+            let stats = conn.stats();
+            return Ok((
+                conn.clone(),
+                ConnectOutcome {
+                    reused: true,
+                    handshake_latency: stats.handshake_latency,
+                    retransmits: stats.retransmits,
+                },
+            ));
         }
 
         let mut attempts = 0usize;
@@ -156,13 +164,18 @@ impl Adapter {
             attempts += 1;
             match attempt_handshake(addr, cert, self.inner.handshake_timeout).await {
                 Ok(handshake) => {
+                    let outcome = ConnectOutcome {
+                        reused: false,
+                        handshake_latency: handshake.latency,
+                        retransmits: handshake.retransmits,
+                    };
                     let connection = Connection::from_handshake(handshake, cert.clone());
                     if let Some(cb) = &self.inner.callbacks.handshake_success {
                         cb(addr);
                     }
                     let mut connections = self.inner.connections.lock().unwrap();
                     connections.insert(addr, connection.clone());
-                    return Ok(connection);
+                    return Ok((connection, outcome));
                 }
                 Err(err) => {
                     let err_label = err.to_string();
@@ -178,7 +191,10 @@ impl Adapter {
         }
     }
 
-    pub async fn connect_insecure(&self, addr: SocketAddr) -> DiagResult<Arc<Connection>> {
+    pub async fn connect_insecure(
+        &self,
+        addr: SocketAddr,
+    ) -> DiagResult<(Arc<Connection>, ConnectOutcome)> {
         let cert = {
             let endpoints = self.inner.endpoints.lock().unwrap();
             endpoints
@@ -276,6 +292,8 @@ struct ConnectionInner {
     shutdown: CancellationToken,
     deliveries: std::sync::atomic::AtomicU64,
     created_at: SystemTime,
+    handshake_latency: Duration,
+    retransmits: u64,
 }
 
 impl Connection {
@@ -292,6 +310,8 @@ impl Connection {
             shutdown: shutdown.clone(),
             deliveries: std::sync::atomic::AtomicU64::new(0),
             created_at: SystemTime::now(),
+            handshake_latency: handshake.latency,
+            retransmits: handshake.retransmits,
         });
         let worker_inner = Arc::clone(&inner);
         runtime::spawn(async move {
@@ -327,6 +347,8 @@ impl Connection {
                 .inner
                 .deliveries
                 .load(std::sync::atomic::Ordering::SeqCst),
+            handshake_latency: self.inner.handshake_latency,
+            retransmits: self.inner.retransmits,
         }
     }
 
@@ -353,6 +375,15 @@ impl Drop for ConnectionInner {
 pub struct ConnectionStatsSnapshot {
     pub established_at: SystemTime,
     pub deliveries: u64,
+    pub handshake_latency: Duration,
+    pub retransmits: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectOutcome {
+    pub reused: bool,
+    pub handshake_latency: Duration,
+    pub retransmits: u64,
 }
 
 pub fn certificate_store(path: std::path::PathBuf) -> InhouseCertificateStore {
@@ -375,6 +406,8 @@ struct ClientHandshake {
     socket: UdpSocket,
     addr: SocketAddr,
     handshake_id: [u8; 16],
+    latency: Duration,
+    retransmits: u64,
 }
 
 async fn attempt_handshake(
@@ -400,6 +433,8 @@ async fn attempt_handshake(
 
     let mut schedule = RetransmitSchedule::new(timeout_duration);
     let deadline = Instant::now() + timeout_duration;
+    let start = Instant::now();
+    let mut retransmits = 0u64;
     let server_hello = loop {
         let remaining = deadline
             .checked_duration_since(Instant::now())
@@ -409,6 +444,7 @@ async fn attempt_handshake(
             ServerHelloWait::Received(hello) => break hello,
             ServerHelloWait::Timeout => {
                 schedule.on_timeout();
+                retransmits = retransmits.saturating_add(1);
                 socket
                     .send_to(&hello, addr)
                     .await
@@ -436,6 +472,8 @@ async fn attempt_handshake(
         socket,
         addr,
         handshake_id,
+        latency: start.elapsed(),
+        retransmits,
     })
 }
 

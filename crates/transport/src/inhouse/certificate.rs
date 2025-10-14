@@ -5,7 +5,7 @@ use foundation_time::{Duration as TimeDuration, UtcDateTime};
 use foundation_tls::{ed25519_public_key_from_der, sign_self_signed_ed25519, SelfSignedCertParams};
 use rand::{rngs::OsRng, RngCore};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Certificate {
     pub fingerprint: [u8; 32],
     pub verifying_key: [u8; 32],

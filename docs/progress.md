@@ -1,4 +1,49 @@
 # Project Progress Snapshot
+> **Review (2025-10-14, late night):** Restored the runtime watcher modules on
+> Linux and BSD to the first-party `sys::inotify` and `sys::kqueue` shims
+> (`crates/runtime/src/fs/watch.rs`), reinstating recursive registration,
+> overflow handling, and deregistration on drop through the in-house reactor.
+> The Windows watcher now rides the IOCP-backed `DirectoryChangeDriver`
+> (`crates/sys/src/fs/windows.rs`) with explicit `Send` guarantees so the
+> blocking worker satisfies `spawn_blocking` bounds, and
+> `crates/sys/Cargo.toml` declares the `windows-sys` features required for
+> cross-target builds. `FIRST_PARTY_ONLY=1` checks for `sys`/`runtime` now pass
+> on `x86_64-pc-windows-gnu`, closing the gap opened by the watcher rewrite.
+> **Review (2025-10-14, evening):** The cross-platform runtime stack now spans
+> Windows with first-party code and an IOCP-backed reactor. The new
+> `crates/sys/src/reactor/platform_windows.rs` associates every socket with a
+> completion port, shards WSA event waiters that post completions into the queue,
+> and posts runtime wakers via `PostQueuedCompletionStatus`, eliminating the
+> old 64-handle ceiling. `crates/sys/src/net/windows.rs` mirrors the Unix socket
+> constructors via `WSASocketW` while implementing `AsRawSocket` so runtime
+> abstractions can treat handles generically (`ReactorRaw`) across all targets.
+> Regression coverage now includes a Windows scaling check
+> (`crates/sys/tests/reactor_windows_scaling.rs`) alongside the UDP stress loop
+> (`crates/sys/tests/net_udp_stress.rs`) and the existing TCP/Linux/BSD suites,
+> keeping readiness semantics and ordering intact. Runtime’s Windows file
+> watcher temporarily falls back to the polling stub, gated behind a
+> `windows-fs-watcher` feature until the native directory loop lands, and docs +
+> audits note the IOCP rollout, new `just check-windows` recipe, and CI cross-
+> target checks.
+> **Review (2025-10-14):** `crates/sys` now ships an epoll-backed `reactor`
+> (`Poll`, `Events`, `Waker`), a fully in-house kqueue backend for
+> macOS/BSD (including EVFILT_USER wakeups and descriptor registration), and
+> fresh TCP/UDP constructors under `sys::net`, letting the runtime register
+> descriptors and open sockets without touching third-party crates. The
+> in-house backend wires those modules end to end: file watching, TCP
+> listeners/streams, and UDP sockets all register through the first-party
+> reactor, and the `runtime` crate’s `mio`, `nix`, and `socket2`
+> dependencies disappeared. FIRST_PARTY_ONLY builds now compile the watcher
+> and networking stacks exclusively against in-house code, the Linux
+> integration suite (`crates/sys/tests/inotify_linux.rs`) continues to
+> exercise create/delete/directory events, and new coverage hammers the
+> kqueue reactor (`crates/sys/tests/reactor_kqueue.rs`, cfg’d for BSD) plus a
+> 32-iteration TCP send/recv stress loop
+> (`crates/sys/tests/net_tcp_stress.rs`) that guards the non-blocking socket
+> wrappers and the EINPROGRESS handling added to
+> `sys::net::TcpStream::connect`. The dependency inventory/audit notes reflect
+> the slimmer graph alongside a TODO to retire the remaining `tokio` → `mio`
+> edge.
 > **Review (2025-10-12):** Runtime’s in-house backend now schedules async tasks
 > and blocking jobs via a shared first-party `WorkQueue`, eliminating the
 > `crossbeam-deque`/`crossbeam-epoch` dependency pair while keeping spawn
@@ -175,16 +220,23 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 **Evidence**
 - Runtime-owned TCP/UDP reactor now backs the node RPC client/server plumbing (`crates/runtime/src/net.rs`, `node/src/rpc/client.rs`) and the gateway/status HTTP services. Buffered IO helpers live in `crates/runtime/src/io.rs` with integration coverage in `crates/runtime/tests/net.rs`.
+- The `sys` reactor now covers both epoll and kqueue backends: `crates/sys/src/reactor/platform.rs` handles Linux via epoll while `crates/sys/src/reactor/platform_bsd.rs` drives EV_SET/EVFILT_USER paths for macOS/BSD. Linux integration remains in `crates/sys/tests/inotify_linux.rs`, BSD-specific coverage lives in `crates/sys/tests/reactor_kqueue.rs` (cfg’d), and the TCP harness `crates/sys/tests/net_tcp_stress.rs` hammers 32 non-blocking connect/accept/send/recv loops alongside the EINPROGRESS-safe handshake added to `crates/sys/src/net/unix.rs`.
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, provider introspection, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `crates/transport/src/lib.rs`, `crates/transport/src/quinn_backend.rs`, `crates/transport/src/s2n_backend.rs`, and `docs/quic.md`, with telemetry via `quic_cert_rotation_total`, `quic_provider_connect_total{provider}`, and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
 - In-house transport cache honours `TransportConfig.certificate_cache` overrides,
   prunes corrupt DER blobs, and ships a guard in `node/tests/net_quic.rs` that
   asserts handshake payload echoing and DER persistence across restarts.
 - First-party UDP + TLS handshake for the in-house provider lives under `crates/transport/src/inhouse/` with message encoding, certificate generation, retransmission/backoff scheduling, TTL-governed handshake tables, and JSON-backed advertisement storage that now persists Ed25519 verifying keys; end-to-end tests in `crates/transport/tests/inhouse.rs` exercise handshake success, certificate mismatches, rotation persistence, and the retry flow without Quinn/s2n dependencies.
+- Latest transport coverage extends those suites with handshake latency/reuse assertions and Quinn↔in-house mismatch guards. `crates/transport/tests/inhouse.rs` now records callback firing, session reuse, and failure metadata, while `crates/transport/tests/provider_mismatch.rs` validates mixed-provider registries when both features are compiled.
 - Default transport configuration now promotes the in-house provider whenever it is compiled (`crates/transport/src/lib.rs`, `node/Cargo.toml`), ensuring new nodes boot on the first-party adapter while keeping Quinn/s2n available for parity comparisons.
 - Overlay abstraction via `crates/p2p_overlay` with in-house and stub backends, configuration toggles, CLI overrides, JSON-backed persistence, integration tests exercising the in-house backend, telemetry gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts) exposed through `node/src/telemetry.rs`, `cli/src/net.rs`, and `node/src/rpc/peer.rs`, and base58-check peer IDs wired through CLI/RPC/gateway diagnostics, including the latest fanout set surfaced in `net gossip_status`.
 - Provider metadata and certificate validation now flow through `p2p::handshake`, which consumes the registry capability enums, persists provider IDs for CLI/RPC output, and loads retry/certificate policies from `config/quic.toml`.
-- Peer certificate persistence and config reloads rely on the in-house runtime file watcher (`crates/runtime/src/fs/watch.rs`), replacing the former `notify` dependency; coverage lives in `node/tests/net_quic_certs.rs` and `node/tests/config_watch.rs`.
+- Peer certificate persistence and config reloads rely on the in-house runtime
+  file watcher (`crates/runtime/src/fs/watch.rs`) backed by the refreshed
+  `sys::inotify`/`sys::kqueue` wrappers and the first-party `sys::reactor`
+  registration path, removing the last `mio`/`nix`/`libc` bridge while keeping
+  recursive directory coverage first-party. Tests remain in
+  `node/tests/net_quic_certs.rs` and `node/tests/config_watch.rs`.
 - `net.quic_stats` RPC and `blockctl net quic stats` expose cached latency,
   retransmit, and endpoint reuse data with per-peer failure metrics for operators.
 - LRU-backed duplicate suppression, adaptive fanout, and shard-aware persistence documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs` with configurable TTL/fanout stored in `config/gossip.toml`.

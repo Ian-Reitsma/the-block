@@ -1,4 +1,33 @@
 # System-Wide Economic Changes
+> **Review (2025-10-14, late night):** Runtime watchers across Linux, BSD, and
+> Windows now sit entirely on the new first-party surfaces. `crates/runtime/src/fs/watch.rs`
+> reintroduces the inotify and kqueue modules atop `sys::inotify`/`sys::kqueue`
+> while wiring the Windows watcher to the IOCP-backed
+> `DirectoryChangeDriver` from `crates/sys/src/fs/windows.rs`. The driver and
+> completion context now implement `Send` so the blocking worker satisfies the
+> runtime’s `spawn_blocking` bounds, and `crates/sys/Cargo.toml` declares the
+> `windows-sys` feature set needed for cross-target builds.
+> **Review (2025-10-14):** The `sys` crate now exports first-party FFI shims for
+> Linux inotify, BSD/macOS kqueue, and an IOCP-backed Windows reactor. The
+> updated `crates/sys/src/reactor/platform_windows.rs` associates every socket
+> with a completion port, fans out WSA event waiters across shards that post
+> completions back into the queue, and routes waker triggers through
+> `PostQueuedCompletionStatus` so descriptors, timers, and manual wake-ups share
+> one scalable path without the prior 64-handle ceiling. TCP/UDP constructors
+> under `sys::net::{unix,windows}` remain first party, while the Windows module
+> now implements `AsRawSocket` so higher layers can register handles without any
+> shim crates. The `runtime` crate drops `mio`, `socket2`, and `nix` entirely;
+> watcher plumbing now consumes the platform-specific drivers—`sys::inotify`
+> on Linux, `sys::kqueue` on BSD/macOS, and the IOCP `DirectoryChangeDriver` on
+> Windows—so all targets share the first-party reactor. The
+> Linux integration suite (`crates/sys/tests/inotify_linux.rs`) and BSD harness
+> (`crates/sys/tests/reactor_kqueue.rs`) continue to exercise recursive and
+> waker paths, while the socket stress suite pairs the 32-iteration TCP harness
+> with a UDP bidirectional loop (`crates/sys/tests/net_udp_stress.rs`) to guard
+> send/recv ordering across platforms. CI and local automation now run
+> `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` for the `sys`
+> and `runtime` crates so Windows regressions are caught alongside Linux builds
+> without reintroducing third-party dependencies.
 > **Review (2025-10-12):** Replaced the runtime scheduler’s
 > `crossbeam-deque`/`crossbeam-epoch` work queues with a first-party
 > `WorkQueue` that backs both async tasks and the blocking pool while keeping
@@ -454,6 +483,12 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - The new integration coverage codifies the first-party handshake path:
   regression builds will fail if persistence breaks, the override stops working,
   or the adapter no longer echoes application data.
+- Additional regression cases now pin the handshake callbacks and mixed-provider
+  guard rails. `crates/transport/tests/inhouse.rs` asserts that latency,
+  reuse, and failure metadata surface through the first-party callbacks, and
+  `crates/transport/tests/provider_mismatch.rs` exercises Quinn ↔ in-house
+  registries to ensure incompatible handles are rejected without depending on
+  third-party shims.
 
 ### Migration Notes
 
@@ -1120,6 +1155,56 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 - **Telemetry** continues to surface handshake success/failure via the
   existing callbacks, ensuring dashboards reflect the in-house backend just
   like Quinn and s2n.
+
+## Windows IOCP Reactor Migration (2025-10-14)
+
+### Rationale
+
+- **Remove the Windows 64-handle ceiling:** The previous WSA event loop capped
+  the runtime at 64 descriptors per shard, forcing higher-level code to split
+  registrations and juggle per-event wakers. Migrating to IOCP batching removes
+  this constraint so sockets, timers, and custom wake-ups share a single
+  completion queue.
+- **Align wake semantics across platforms:** Posting wakers through
+  `PostQueuedCompletionStatus` mirrors the epoll/kqueue integration, keeping the
+  runtime’s readiness model consistent and avoiding bespoke Windows-only wake
+  paths.
+- **Eliminate third-party Windows bindings:** Implementing the necessary Win32
+  types and FFI in-house lets us drop the lingering `windows_sys` dependency and
+  keep FIRST_PARTY_ONLY builds clean.
+
+### Implementation Summary
+
+- Replaced the WSA event loop with an IOCP-backed reactor that associates every
+  socket with a completion port and drains readiness through
+  `GetQueuedCompletionStatusEx`, including waker triggers posted from the
+  runtime.
+- Sharded the legacy WSA waiters behind lightweight threads that translate WSA
+  signals into IOCP completions so existing registration paths retain their
+  semantics while scaling past the old 64-handle cap.
+- Implemented `AsRawSocket` for the first-party TCP/UDP wrappers and updated the
+  runtime reactor to treat raw handles generically (`ReactorRaw`) across Unix and
+  Windows.
+- Added a Windows-specific stress test (`crates/sys/tests/reactor_windows_scaling.rs`)
+  that registers 96 UDP sockets to ensure the IOCP backend can scale under
+  FIRST_PARTY_ONLY builds.
+- Wired `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` into CI
+  and the `just check-windows` recipe so cross-target regressions surface without
+  reintroducing third-party shims.
+- Temporarily routed the runtime’s Windows file watcher through the existing
+  polling fallback, gating the unfinished native watcher behind a
+  `windows-fs-watcher` feature until an IOCP directory change loop ships.
+
+### Operational Impact
+
+- **Windows hosts** can now register as many sockets as needed without fragmenting
+  watchers, and waker triggers behave identically to Unix, simplifying support
+  and observability.
+- **CI coverage** exercises FIRST_PARTY_ONLY Windows builds alongside Linux,
+  ensuring future regressions are caught before release.
+- **Documentation and tooling** point operators at the new `just check-windows`
+  recipe while noting that Windows file watching currently uses the polling
+  stub, keeping expectations clear until the native watcher lands.
 
 ## Default Transport Provider Switch (2025-10-10)
 

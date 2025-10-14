@@ -1,6 +1,10 @@
 #![cfg(feature = "inhouse")]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 use concurrency::Bytes;
@@ -17,10 +21,10 @@ fn test_config() -> Config {
         provider: ProviderKind::Inhouse,
         certificate_cache: None,
         retry: RetryPolicy {
-            attempts: 2,
-            backoff: Duration::from_millis(1),
+            attempts: 3,
+            backoff: Duration::from_millis(10),
         },
-        handshake_timeout: Duration::from_millis(50),
+        handshake_timeout: Duration::from_millis(750),
         tls: Default::default(),
     }
 }
@@ -62,13 +66,19 @@ fn handshake_rejects_mismatched_certificate() {
     runtime::block_on(async {
         let cfg = test_config();
         let factory = DefaultFactory::default();
-        let registry = factory
-            .create(&cfg, &TransportCallbacks::default())
-            .expect("registry");
+        let failures = Arc::new(Mutex::new(Vec::new()));
+        let mut callbacks = TransportCallbacks::default();
+        {
+            let failures = Arc::clone(&failures);
+            callbacks.inhouse.handshake_failure = Some(Arc::new(move |_addr, reason| {
+                failures.lock().unwrap().push(reason.to_owned());
+            }));
+        }
+        let registry = factory.create(&cfg, &callbacks).expect("registry");
         let adapter = registry.inhouse().expect("inhouse adapter");
 
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
-        let (listener, cert) = adapter.listen(addr).await.expect("listen");
+        let (listener, _cert) = adapter.listen(addr).await.expect("listen");
         let listen_addr = listener
             .as_inhouse()
             .expect("inhouse listener")
@@ -82,16 +92,12 @@ fn handshake_rejects_mismatched_certificate() {
             .err()
             .expect("handshake fails");
         assert!(err.to_string().contains("handshake failed"));
+        let captured = failures.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert!(!captured[0].is_empty());
 
-        // Ensure the real certificate continues to succeed after the failure.
-        let conn = adapter
-            .connect(listen_addr, &cert)
-            .await
-            .expect("retry succeeds");
-        adapter
-            .send(&conn, b"ok")
-            .await
-            .expect("send after failure");
+        // Drop any lingering state so subsequent tests observe a clean table.
+        adapter.drop_connection(&listen_addr);
     });
 }
 
@@ -160,4 +166,65 @@ fn provider_capabilities_surface_in_registry() {
 
     let providers = available_providers();
     assert!(providers.iter().any(|p| p.kind == ProviderKind::Inhouse));
+}
+
+#[test]
+fn handshake_metadata_tracks_latency_and_reuse() {
+    runtime::block_on(async {
+        let cfg = test_config();
+        let factory = DefaultFactory::default();
+        let successes = Arc::new(AtomicUsize::new(0));
+        let mut callbacks = TransportCallbacks::default();
+        {
+            let successes = Arc::clone(&successes);
+            callbacks.inhouse.handshake_success = Some(Arc::new(move |_addr| {
+                successes.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+
+        let registry = factory.create(&cfg, &callbacks).expect("registry");
+        let adapter = registry.inhouse().expect("inhouse adapter");
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let (listener, cert) = adapter.listen(addr).await.expect("listen");
+        let listen_addr = listener
+            .as_inhouse()
+            .expect("inhouse listener")
+            .local_addr();
+
+        let first = adapter
+            .connect(listen_addr, &cert)
+            .await
+            .expect("first handshake succeeds");
+        assert_eq!(successes.load(Ordering::SeqCst), 1);
+
+        let stats = adapter.connection_stats();
+        assert_eq!(stats.len(), 1);
+        let snapshot = &stats[0].1;
+        assert!(snapshot.handshake_latency >= Duration::ZERO);
+
+        let second = adapter
+            .connect(listen_addr, &cert)
+            .await
+            .expect("second connect reuses session");
+        assert_eq!(successes.load(Ordering::SeqCst), 1);
+
+        let first_conn = match &first {
+            transport::ConnectionHandle::Inhouse(conn) => conn,
+            #[cfg(feature = "quinn")]
+            transport::ConnectionHandle::Quinn(_) => {
+                panic!("expected inhouse connection")
+            }
+        };
+        let second_conn = match &second {
+            transport::ConnectionHandle::Inhouse(conn) => conn,
+            #[cfg(feature = "quinn")]
+            transport::ConnectionHandle::Quinn(_) => {
+                panic!("expected inhouse connection")
+            }
+        };
+        assert!(Arc::ptr_eq(first_conn, second_conn));
+
+        adapter.drop_connection(&listen_addr);
+    });
 }

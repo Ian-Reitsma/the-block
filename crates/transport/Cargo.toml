@@ -16,11 +16,10 @@ inhouse = [
     "dep:base64_fp",
 ]
 quinn = [
+    "inhouse",
     "dep:crypto_suite",
-    "dep:quinn",
     "dep:rand",
     "dep:runtime",
-    "dep:rustls",
     "dep:foundation_time",
     "dep:foundation_tls",
 ]
@@ -44,13 +43,8 @@ crypto_suite = { path = "../crypto_suite", optional = true }
 foundation_lazy = { path = "../foundation_lazy" }
 rand = { path = "../rand", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
-quinn = { version = "0.10", features = ["rustls"], optional = true }
-rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
 foundation_time = { path = "../foundation_time", optional = true }
 foundation_serialization = { path = "../foundation_serialization", optional = true }
 concurrency = { path = "../concurrency", features = ["serde"] }
 foundation_tls = { path = "../foundation_tls", optional = true }
-
-[dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread"] }
 

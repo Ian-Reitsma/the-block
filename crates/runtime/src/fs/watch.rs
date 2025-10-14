@@ -73,17 +73,60 @@ impl Watcher {
 #[cfg(feature = "inhouse-backend")]
 mod inhouse {
     use super::{RecursiveMode, WatchEvent, WatchEventKind};
-    use crate::inhouse::{InHouseRuntime, IoRegistration};
-    use mio::Interest;
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    use crate::inhouse::{IoRegistration, ReactorRaw};
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     use std::collections::VecDeque;
-    use std::io;
-    use std::path::PathBuf;
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    use sys::reactor::Interest as ReactorInterest;
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     pub(super) struct BaseWatcher {
         registration: IoRegistration,
         pending: VecDeque<WatchEvent>,
     }
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     impl BaseWatcher {
         fn new(registration: IoRegistration) -> Self {
             Self {
@@ -115,10 +158,28 @@ mod inhouse {
         }
     }
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     struct ReadReadyFuture<'a> {
         registration: &'a IoRegistration,
     }
 
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     impl<'a> std::future::Future for ReadReadyFuture<'a> {
         type Output = io::Result<()>;
 
@@ -133,18 +194,8 @@ mod inhouse {
         }
     }
 
-    fn register_fd(
-        runtime: &InHouseRuntime,
-        source: &mut impl mio::event::Source,
-        interest: Interest,
-    ) -> io::Result<IoRegistration> {
-        let reactor = runtime.reactor();
-        IoRegistration::new(reactor, source, interest)
-    }
-
-    #[cfg(target_os = "linux")]
-    type PlatformWatcher = linux::Watcher;
     #[cfg(any(
+        target_os = "linux",
         target_os = "macos",
         target_os = "ios",
         target_os = "freebsd",
@@ -152,53 +203,53 @@ mod inhouse {
         target_os = "netbsd",
         target_os = "dragonfly"
     ))]
-    type PlatformWatcher = kqueue::Watcher;
-    #[cfg(target_os = "windows")]
-    type PlatformWatcher = windows::Watcher;
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly",
-        target_os = "windows"
-    )))]
-    type PlatformWatcher = polling::Watcher;
-
-    pub(super) struct Watcher {
-        inner: PlatformWatcher,
-    }
-
-    impl Watcher {
-        pub(super) fn new(
-            runtime: &InHouseRuntime,
-            path: PathBuf,
-            recursive: RecursiveMode,
-        ) -> io::Result<Self> {
-            PlatformWatcher::new(runtime, path, recursive).map(|inner| Self { inner })
-        }
-
-        pub(super) async fn next_event(&mut self) -> io::Result<WatchEvent> {
-            self.inner.next_event().await
-        }
+    fn register_fd(
+        runtime: &crate::inhouse::InHouseRuntime,
+        fd: ReactorRaw,
+        interest: ReactorInterest,
+    ) -> std::io::Result<IoRegistration> {
+        let reactor = runtime.reactor();
+        IoRegistration::new(reactor, fd, interest)
     }
 
     #[cfg(target_os = "linux")]
     mod linux {
         use super::{register_fd, BaseWatcher, RecursiveMode, WatchEvent, WatchEventKind};
         use crate::inhouse::InHouseRuntime;
-        use mio::unix::SourceFd;
-        use mio::Interest;
-        use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, InotifyEvent, WatchDescriptor};
         use std::collections::HashMap;
         use std::fs;
         use std::io;
-        use std::os::fd::{AsFd, AsRawFd};
+        use std::os::fd::AsRawFd;
         use std::path::{Path, PathBuf};
+        use sys::inotify::{Event as InotifyEvent, Inotify};
+        use sys::reactor::Interest;
 
-        pub(super) struct Watcher {
+        const IN_ATTRIB: u32 = 0x0000_0004;
+        const IN_CLOSE_WRITE: u32 = 0x0000_0008;
+        const IN_CREATE: u32 = 0x0000_0100;
+        const IN_DELETE: u32 = 0x0000_0200;
+        const IN_DELETE_SELF: u32 = 0x0000_0400;
+        const IN_MODIFY: u32 = 0x0000_0002;
+        const IN_MOVE_SELF: u32 = 0x0000_0800;
+        const IN_MOVED_FROM: u32 = 0x0000_0040;
+        const IN_MOVED_TO: u32 = 0x0000_0080;
+        const IN_IGNORED: u32 = 0x0000_8000;
+        const IN_ISDIR: u32 = 0x4000_0000;
+        const IN_Q_OVERFLOW: u32 = 0x0000_4000;
+
+        const WATCH_MASK: u32 = IN_ATTRIB
+            | IN_CLOSE_WRITE
+            | IN_CREATE
+            | IN_DELETE
+            | IN_DELETE_SELF
+            | IN_MODIFY
+            | IN_MOVE_SELF
+            | IN_MOVED_FROM
+            | IN_MOVED_TO;
+
+        type WatchDescriptor = i32;
+
+        pub(crate) struct Watcher {
             base: BaseWatcher,
             inotify: Inotify,
             watches: HashMap<WatchDescriptor, PathBuf>,
@@ -206,15 +257,14 @@ mod inhouse {
         }
 
         impl Watcher {
-            pub(super) fn new(
+            pub(crate) fn new(
                 runtime: &InHouseRuntime,
                 path: PathBuf,
                 recursive: RecursiveMode,
             ) -> io::Result<Self> {
-                let inotify = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC)?;
-                let raw_fd = inotify.as_fd().as_raw_fd();
-                let mut source = SourceFd(&raw_fd);
-                let registration = register_fd(runtime, &mut source, Interest::READABLE)?;
+                let inotify = Inotify::new()?;
+                let fd = inotify.as_raw_fd();
+                let registration = register_fd(runtime, fd, Interest::READABLE)?;
                 let mut watcher = Self {
                     base: BaseWatcher::new(registration),
                     inotify,
@@ -225,7 +275,7 @@ mod inhouse {
                 Ok(watcher)
             }
 
-            pub(super) async fn next_event(&mut self) -> io::Result<WatchEvent> {
+            pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
                 loop {
                     if let Some(event) = self.base.pop_event() {
                         return Ok(event);
@@ -268,41 +318,35 @@ mod inhouse {
                     return Ok(());
                 }
 
-                let descriptor = self.inotify.add_watch(path, Self::watch_mask())?;
+                let descriptor = self.inotify.add_watch(path, WATCH_MASK)?;
                 self.watches.insert(descriptor, path.to_path_buf());
                 Ok(())
             }
 
             fn read_events(&mut self) -> io::Result<Vec<WatchEvent>> {
                 let mut ready = Vec::new();
-                let events = self.inotify.read_events()?;
-                for event in events {
-                    if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
+                for event in self.inotify.read_events()? {
+                    if event.mask & IN_Q_OVERFLOW != 0 {
                         ready.push(WatchEvent::new(WatchEventKind::Other, Vec::new()));
                         continue;
                     }
-                    if event.mask.contains(AddWatchFlags::IN_IGNORED) {
-                        self.watches.remove(&event.wd);
+                    if event.mask & IN_IGNORED != 0 {
+                        self.watches.remove(&event.watch_descriptor);
                         continue;
                     }
 
                     if let Some(path) = self.resolve_path(&event) {
                         if self.recursive
-                            && event.mask.contains(AddWatchFlags::IN_ISDIR)
-                            && (event.mask.contains(AddWatchFlags::IN_CREATE)
-                                || event.mask.contains(AddWatchFlags::IN_MOVED_TO))
+                            && event.mask & IN_ISDIR != 0
+                            && (event.mask & (IN_CREATE | IN_MOVED_TO)) != 0
                         {
                             let _ = self.register_path(&path);
                         }
-                        if event
-                            .mask
-                            .intersects(AddWatchFlags::IN_DELETE_SELF | AddWatchFlags::IN_MOVE_SELF)
-                        {
-                            self.watches.remove(&event.wd);
+                        if event.mask & (IN_DELETE_SELF | IN_MOVE_SELF) != 0 {
+                            self.watches.remove(&event.watch_descriptor);
                         }
                         let kind = Self::classify(event.mask);
-                        let out_path = path.clone();
-                        ready.push(WatchEvent::new(kind, vec![out_path]));
+                        ready.push(WatchEvent::new(kind, vec![path]));
                     }
                 }
 
@@ -310,7 +354,7 @@ mod inhouse {
             }
 
             fn resolve_path(&self, event: &InotifyEvent) -> Option<PathBuf> {
-                let base = self.watches.get(&event.wd)?.clone();
+                let base = self.watches.get(&event.watch_descriptor)?.clone();
                 if let Some(name) = &event.name {
                     Some(base.join(name))
                 } else {
@@ -318,32 +362,12 @@ mod inhouse {
                 }
             }
 
-            fn watch_mask() -> AddWatchFlags {
-                AddWatchFlags::IN_ATTRIB
-                    | AddWatchFlags::IN_CLOSE_WRITE
-                    | AddWatchFlags::IN_CREATE
-                    | AddWatchFlags::IN_DELETE
-                    | AddWatchFlags::IN_DELETE_SELF
-                    | AddWatchFlags::IN_MODIFY
-                    | AddWatchFlags::IN_MOVE_SELF
-                    | AddWatchFlags::IN_MOVED_FROM
-                    | AddWatchFlags::IN_MOVED_TO
-            }
-
-            fn classify(mask: AddWatchFlags) -> WatchEventKind {
-                if mask.intersects(
-                    AddWatchFlags::IN_DELETE
-                        | AddWatchFlags::IN_DELETE_SELF
-                        | AddWatchFlags::IN_MOVED_FROM,
-                ) {
+            fn classify(mask: u32) -> WatchEventKind {
+                if mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVED_FROM) != 0 {
                     WatchEventKind::Removed
-                } else if mask.intersects(AddWatchFlags::IN_CREATE | AddWatchFlags::IN_MOVED_TO) {
+                } else if mask & (IN_CREATE | IN_MOVED_TO) != 0 {
                     WatchEventKind::Created
-                } else if mask.intersects(
-                    AddWatchFlags::IN_ATTRIB
-                        | AddWatchFlags::IN_CLOSE_WRITE
-                        | AddWatchFlags::IN_MODIFY,
-                ) {
+                } else if mask & (IN_ATTRIB | IN_CLOSE_WRITE | IN_MODIFY) != 0 {
                     WatchEventKind::Modified
                 } else {
                     WatchEventKind::Other
@@ -353,13 +377,10 @@ mod inhouse {
 
         impl Drop for Watcher {
             fn drop(&mut self) {
-                let raw_fd = self.inotify.as_fd().as_raw_fd();
-                let mut source = SourceFd(&raw_fd);
-                let _ = self.base.registration().deregister(&mut source);
+                let _ = self.base.registration().deregister();
             }
         }
     }
-
     #[cfg(any(
         target_os = "macos",
         target_os = "ios",
@@ -371,34 +392,37 @@ mod inhouse {
     mod kqueue {
         use super::{register_fd, BaseWatcher, RecursiveMode, WatchEvent, WatchEventKind};
         use crate::inhouse::InHouseRuntime;
-        use libc::timespec;
-        use mio::unix::SourceFd;
-        use mio::Interest;
-        use nix::sys::event::{EventFilter, EventFlag, FilterFlag, KEvent, Kqueue};
         use std::collections::HashMap;
         use std::fs::{self, File};
         use std::io;
-        use std::os::fd::{AsFd, AsRawFd};
+        use std::os::fd::{AsRawFd, RawFd};
         use std::path::{Path, PathBuf};
+        use sys::kqueue::{self, Kqueue};
+        use sys::reactor::Interest;
 
-        pub(super) struct Watcher {
+        const WATCH_FLAGS: u32 = kqueue::NOTE_WRITE
+            | kqueue::NOTE_EXTEND
+            | kqueue::NOTE_ATTRIB
+            | kqueue::NOTE_RENAME
+            | kqueue::NOTE_DELETE;
+
+        pub(crate) struct Watcher {
             base: BaseWatcher,
             queue: Kqueue,
-            handles: HashMap<i32, File>,
-            paths: HashMap<i32, PathBuf>,
+            handles: HashMap<RawFd, File>,
+            paths: HashMap<RawFd, PathBuf>,
             recursive: bool,
         }
 
         impl Watcher {
-            pub(super) fn new(
+            pub(crate) fn new(
                 runtime: &InHouseRuntime,
                 path: PathBuf,
                 recursive: RecursiveMode,
             ) -> io::Result<Self> {
                 let queue = Kqueue::new()?;
-                let raw_fd = queue.as_fd().as_raw_fd();
-                let mut source = SourceFd(&raw_fd);
-                let registration = register_fd(runtime, &mut source, Interest::READABLE)?;
+                let fd = queue.as_raw_fd();
+                let registration = register_fd(runtime, fd, Interest::READABLE)?;
                 let mut watcher = Self {
                     base: BaseWatcher::new(registration),
                     queue,
@@ -410,11 +434,12 @@ mod inhouse {
                 Ok(watcher)
             }
 
-            pub(super) async fn next_event(&mut self) -> io::Result<WatchEvent> {
+            pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
                 loop {
                     if let Some(event) = self.base.pop_event() {
                         return Ok(event);
                     }
+
                     self.base.wait_ready().await?;
                     let events = self.read_events()?;
                     if events.is_empty() {
@@ -449,86 +474,47 @@ mod inhouse {
             }
 
             fn add_descriptor(&mut self, path: &Path) -> io::Result<()> {
-                let file = File::open(path)?;
-                let fd = file.as_raw_fd();
-                if self.paths.contains_key(&fd) {
+                if self.paths.values().any(|existing| existing == path) {
                     return Ok(());
                 }
 
-                let flags = EventFlag::EV_ADD | EventFlag::EV_CLEAR | EventFlag::EV_ENABLE;
-                let fflags = FilterFlag::NOTE_WRITE
-                    | FilterFlag::NOTE_EXTEND
-                    | FilterFlag::NOTE_DELETE
-                    | FilterFlag::NOTE_RENAME
-                    | FilterFlag::NOTE_ATTRIB;
-                let changelist = [KEvent::new(
-                    fd as usize,
-                    EventFilter::EVFILT_VNODE,
-                    flags,
-                    fflags,
-                    0,
-                    0,
-                )];
-                let mut scratch: [KEvent; 0] = [];
-                let timeout = timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                };
-                let _ = self
-                    .queue
-                    .kevent(&changelist, &mut scratch, Some(timeout))?;
+                let file = File::open(path)?;
+                let fd = file.as_raw_fd();
+                self.queue.register(fd, WATCH_FLAGS)?;
                 self.paths.insert(fd, path.to_path_buf());
                 self.handles.insert(fd, file);
                 Ok(())
             }
 
             fn read_events(&mut self) -> io::Result<Vec<WatchEvent>> {
-                let mut eventlist = vec![
-                    KEvent::new(
-                        0,
-                        EventFilter::EVFILT_VNODE,
-                        EventFlag::empty(),
-                        FilterFlag::empty(),
-                        0,
-                        0,
-                    );
-                    64
-                ];
-                let timeout = timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                };
-                let count = self.queue.kevent(&[], &mut eventlist, Some(timeout))?;
+                let events = self.queue.poll_events(64)?;
                 let mut ready = Vec::new();
-                for event in eventlist.into_iter().take(count) {
-                    if let Some(path) = self.resolve_path(event.ident() as i32) {
-                        let kind = Self::classify(event.fflags());
+                for event in events {
+                    if let Some(path) = self.paths.get(&event.fd).cloned() {
+                        let kind = Self::classify(event.flags);
                         if self.recursive && path.is_dir() {
                             let _ = self.register_path(&path);
                         }
-                        if event.fflags().contains(FilterFlag::NOTE_DELETE) {
-                            let fd = event.ident() as i32;
-                            self.paths.remove(&fd);
-                            self.handles.remove(&fd);
+                        if event.flags & kqueue::NOTE_DELETE != 0 {
+                            self.paths.remove(&event.fd);
+                            self.handles.remove(&event.fd);
                         }
                         ready.push(WatchEvent::new(kind, vec![path]));
                     }
                 }
                 Ok(ready)
             }
+        }
 
-            fn resolve_path(&self, fd: i32) -> Option<PathBuf> {
-                self.paths.get(&fd).cloned()
-            }
-
-            fn classify(flags: FilterFlag) -> WatchEventKind {
-                if flags.intersects(FilterFlag::NOTE_DELETE) {
+        impl Watcher {
+            fn classify(flags: u32) -> WatchEventKind {
+                if flags & kqueue::NOTE_DELETE != 0 {
                     WatchEventKind::Removed
-                } else if flags.intersects(FilterFlag::NOTE_RENAME) {
+                } else if flags & kqueue::NOTE_RENAME != 0 {
                     WatchEventKind::Modified
-                } else if flags.intersects(
-                    FilterFlag::NOTE_WRITE | FilterFlag::NOTE_EXTEND | FilterFlag::NOTE_ATTRIB,
-                ) {
+                } else if flags & (kqueue::NOTE_WRITE | kqueue::NOTE_EXTEND | kqueue::NOTE_ATTRIB)
+                    != 0
+                {
                     WatchEventKind::Modified
                 } else {
                     WatchEventKind::Other
@@ -538,131 +524,150 @@ mod inhouse {
 
         impl Drop for Watcher {
             fn drop(&mut self) {
-                let raw_fd = self.queue.as_fd().as_raw_fd();
-                let mut source = SourceFd(&raw_fd);
-                let _ = self.base.registration().deregister(&mut source);
+                let _ = self.base.registration().deregister();
             }
         }
     }
-
     #[cfg(target_os = "windows")]
     mod windows {
         use super::{RecursiveMode, WatchEvent, WatchEventKind};
         use crate::inhouse::{InHouseJoinHandle, InHouseRuntime};
         use crate::sync::{mpsc, CancellationToken};
-        use std::ffi::OsString;
         use std::io::{self, ErrorKind};
-        use std::mem::size_of;
-        use std::os::windows::ffi::OsStrExt;
-        use std::os::windows::ffi::OsStringExt;
-        use std::os::windows::io::{AsRawHandle, OwnedHandle, RawHandle};
         use std::path::{Path, PathBuf};
-        use std::ptr;
-        use windows_sys::Win32::Foundation::{
-            HANDLE, INVALID_HANDLE_VALUE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        use std::time::Duration;
+
+        use sys::fs::windows::{
+            open_directory_handle, DirectoryAction, DirectoryChange, DirectoryChangeDriver,
+            DirectoryChangeSignal,
         };
-        use windows_sys::Win32::Storage::FileSystem::{
-            CreateFileW, ReadDirectoryChangesW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
-            FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
-            FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION,
-            FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
-            FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SECURITY, FILE_NOTIFY_CHANGE_SIZE,
-            FILE_NOTIFY_INFORMATION, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-            OPEN_EXISTING,
-        };
-        use windows_sys::Win32::System::Threading::{
-            CreateEventW, SetEvent, WaitForMultipleObjects,
-        };
-        use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
         const WATCH_BUFFER_SIZE: usize = 64 * 1024;
-        const INFINITE: u32 = 0xFFFFFFFF;
-        const ERROR_IO_PENDING: i32 = 997;
-        const ERROR_OPERATION_ABORTED: i32 = 995;
+        const POLL_TIMEOUT: Duration = Duration::from_millis(100);
 
+        #[derive(Clone)]
         enum WatchFilter {
             Any,
             File { normalized: String },
         }
 
-        pub(super) struct Watcher {
+        pub(crate) struct Watcher {
             receiver: mpsc::UnboundedReceiver<io::Result<WatchEvent>>,
-            task: InHouseJoinHandle<()>,
+            _task: InHouseJoinHandle<()>,
             cancel_token: CancellationToken,
-            cancel_event: OwnedHandle,
+            signal: DirectoryChangeSignal,
         }
 
         impl Watcher {
-            pub(super) fn new(
+            pub(crate) fn new(
                 runtime: &InHouseRuntime,
                 path: PathBuf,
                 recursive: RecursiveMode,
             ) -> io::Result<Self> {
                 let (root, filter) = determine_target(&path)?;
-                let directory_handle = open_directory_handle(&root)?;
-                let change_event = create_event(false)?;
-                let cancel_event = create_event(true)?;
-                let cancel_event_for_thread = cancel_event.try_clone()?;
+                let directory = open_directory_handle(&root)?;
+                let watch_recursive = matches!(recursive, RecursiveMode::Recursive);
+                let (driver, signal) = DirectoryChangeDriver::new(
+                    directory,
+                    root.clone(),
+                    watch_recursive,
+                    WATCH_BUFFER_SIZE,
+                )?;
                 let (sender, receiver) = mpsc::unbounded_channel();
                 let cancel_token = CancellationToken::new();
-                let watch_recursive = matches!(recursive, RecursiveMode::Recursive);
                 let task = runtime.spawn_blocking({
-                    let root = root.clone();
-                    let cancel_token = cancel_token.clone();
-                    let filter = filter;
-                    move || {
-                        run_watch_loop(
-                            directory_handle,
-                            change_event,
-                            cancel_event_for_thread,
-                            root,
-                            filter,
-                            watch_recursive,
-                            sender,
-                            cancel_token,
-                        )
-                    }
+                    let cancel = cancel_token.clone();
+                    move || run_watch_loop(driver, filter, sender, cancel)
                 });
 
                 Ok(Self {
                     receiver,
-                    task,
+                    _task: task,
                     cancel_token,
-                    cancel_event,
+                    signal,
                 })
             }
 
-            pub(super) async fn next_event(&mut self) -> io::Result<WatchEvent> {
-                loop {
-                    match self.receiver.recv().await {
-                        Some(Ok(event)) => return Ok(event),
-                        Some(Err(err)) => return Err(err),
-                        None => {
-                            return Err(io::Error::new(
-                                ErrorKind::UnexpectedEof,
-                                "file watcher terminated",
-                            ))
-                        }
+            pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
+                while let Some(result) = self.receiver.recv().await {
+                    match result {
+                        Ok(event) => return Ok(event),
+                        Err(err) => return Err(err),
                     }
                 }
+                Err(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "file watcher terminated",
+                ))
             }
         }
 
         impl Drop for Watcher {
             fn drop(&mut self) {
                 self.cancel_token.cancel();
-                unsafe {
-                    let _ = SetEvent(self.cancel_event.as_raw_handle() as HANDLE);
-                }
-                self.task.abort();
-                while self.receiver.try_recv().is_ok() {}
+                let _ = self.signal.wake();
             }
         }
 
+        fn run_watch_loop(
+            mut driver: DirectoryChangeDriver,
+            filter: WatchFilter,
+            sender: mpsc::UnboundedSender<io::Result<WatchEvent>>,
+            cancel: CancellationToken,
+        ) {
+            loop {
+                if cancel.is_cancelled() {
+                    let _ = driver.cancel();
+                }
+                match driver.poll(POLL_TIMEOUT) {
+                    Ok(Some(changes)) => {
+                        if !emit_changes(&sender, &filter, changes) {
+                            break;
+                        }
+                    }
+                    Ok(None) => continue,
+                    Err(err) if err.kind() == ErrorKind::Interrupted => break,
+                    Err(err) => {
+                        let _ = sender.send(Err(err));
+                        break;
+                    }
+                }
+            }
+            let _ = sender.send(Err(io::Error::new(
+                ErrorKind::Interrupted,
+                "file watcher stopped",
+            )));
+        }
+
+        fn emit_changes(
+            sender: &mpsc::UnboundedSender<io::Result<WatchEvent>>,
+            filter: &WatchFilter,
+            changes: Vec<DirectoryChange>,
+        ) -> bool {
+            for change in changes {
+                if !matches_filter(filter, &change.path) {
+                    continue;
+                }
+                let kind = match change.action {
+                    DirectoryAction::Added | DirectoryAction::RenamedNew => WatchEventKind::Created,
+                    DirectoryAction::Removed | DirectoryAction::RenamedOld => {
+                        WatchEventKind::Removed
+                    }
+                    DirectoryAction::Modified => WatchEventKind::Modified,
+                    DirectoryAction::Other => WatchEventKind::Other,
+                };
+                if sender
+                    .send(Ok(WatchEvent::new(kind, vec![change.path])))
+                    .is_err()
+                {
+                    return false;
+                }
+            }
+            true
+        }
+
         fn determine_target(path: &Path) -> io::Result<(PathBuf, WatchFilter)> {
-            let metadata = path.metadata();
-            if metadata.as_ref().map(|meta| meta.is_dir()).unwrap_or(false) {
+            if path.metadata().map(|meta| meta.is_dir()).unwrap_or(false) {
                 Ok((path.to_path_buf(), WatchFilter::Any))
             } else {
                 let parent = path.parent().ok_or_else(|| {
@@ -671,214 +676,13 @@ mod inhouse {
                         "watched file must have a parent directory",
                     )
                 })?;
-                let normalized = normalize_path(path);
-                Ok((parent.to_path_buf(), WatchFilter::File { normalized }))
+                Ok((
+                    parent.to_path_buf(),
+                    WatchFilter::File {
+                        normalized: normalize_path(path),
+                    },
+                ))
             }
-        }
-
-        fn open_directory_handle(path: &Path) -> io::Result<OwnedHandle> {
-            let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-            if !wide.ends_with(&[0]) {
-                wide.push(0);
-            }
-            let handle = unsafe {
-                CreateFileW(
-                    wide.as_ptr(),
-                    FILE_LIST_DIRECTORY,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    ptr::null_mut(),
-                    OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-                    0,
-                )
-            };
-            if handle == INVALID_HANDLE_VALUE {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) })
-        }
-
-        fn create_event(manual_reset: bool) -> io::Result<OwnedHandle> {
-            let handle =
-                unsafe { CreateEventW(ptr::null_mut(), manual_reset as i32, 0, ptr::null()) };
-            if handle == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) })
-        }
-
-        fn run_watch_loop(
-            directory_handle: OwnedHandle,
-            change_event: OwnedHandle,
-            cancel_event: OwnedHandle,
-            root: PathBuf,
-            filter: WatchFilter,
-            recursive: bool,
-            sender: mpsc::UnboundedSender<io::Result<WatchEvent>>,
-            cancel_token: CancellationToken,
-        ) {
-            let mut buffer = vec![0u8; WATCH_BUFFER_SIZE];
-            let mut overlapped = Box::new(unsafe { std::mem::zeroed::<OVERLAPPED>() });
-
-            loop {
-                if cancel_token.is_cancelled() {
-                    break;
-                }
-
-                unsafe {
-                    overlapped.Internal = 0;
-                    overlapped.InternalHigh = 0;
-                    overlapped.Anonymous.Anonymous.Offset = 0;
-                    overlapped.Anonymous.Anonymous.OffsetHigh = 0;
-                    overlapped.hEvent = change_event.as_raw_handle() as HANDLE;
-                }
-
-                let read_result = unsafe {
-                    ReadDirectoryChangesW(
-                        directory_handle.as_raw_handle() as HANDLE,
-                        buffer.as_mut_ptr().cast(),
-                        buffer.len() as u32,
-                        recursive as i32,
-                        FILE_NOTIFY_CHANGE_FILE_NAME
-                            | FILE_NOTIFY_CHANGE_DIR_NAME
-                            | FILE_NOTIFY_CHANGE_ATTRIBUTES
-                            | FILE_NOTIFY_CHANGE_LAST_WRITE
-                            | FILE_NOTIFY_CHANGE_CREATION
-                            | FILE_NOTIFY_CHANGE_SIZE
-                            | FILE_NOTIFY_CHANGE_SECURITY,
-                        ptr::null_mut(),
-                        overlapped.as_mut(),
-                        None,
-                    )
-                };
-
-                if read_result == 0 {
-                    let err = io::Error::last_os_error();
-                    if err.raw_os_error() != Some(ERROR_IO_PENDING) {
-                        let _ = sender.send(Err(err));
-                        break;
-                    }
-                }
-
-                let handles = [
-                    change_event.as_raw_handle() as HANDLE,
-                    cancel_event.as_raw_handle() as HANDLE,
-                ];
-
-                let wait_result = unsafe {
-                    WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), 0, INFINITE)
-                };
-
-                match wait_result {
-                    WAIT_OBJECT_0 => {}
-                    n if n == WAIT_OBJECT_0 + 1 => {
-                        unsafe {
-                            CancelIoEx(
-                                directory_handle.as_raw_handle() as HANDLE,
-                                overlapped.as_mut(),
-                            );
-                        }
-                        break;
-                    }
-                    WAIT_TIMEOUT => continue,
-                    WAIT_FAILED => {
-                        let _ = sender.send(Err(io::Error::last_os_error()));
-                        break;
-                    }
-                    _ => {
-                        let _ = sender.send(Err(io::Error::new(
-                            ErrorKind::Other,
-                            "unexpected wait result",
-                        )));
-                        break;
-                    }
-                }
-
-                let mut bytes_transferred = 0u32;
-                let get_result = unsafe {
-                    GetOverlappedResult(
-                        directory_handle.as_raw_handle() as HANDLE,
-                        overlapped.as_mut(),
-                        &mut bytes_transferred,
-                        0,
-                    )
-                };
-
-                if get_result == 0 {
-                    let err = io::Error::last_os_error();
-                    if cancel_token.is_cancelled()
-                        && err.raw_os_error() == Some(ERROR_OPERATION_ABORTED)
-                    {
-                        break;
-                    }
-                    let _ = sender.send(Err(err));
-                    continue;
-                }
-
-                if bytes_transferred == 0 {
-                    continue;
-                }
-
-                if !dispatch_events(
-                    &sender,
-                    &root,
-                    &filter,
-                    &buffer[..bytes_transferred as usize],
-                ) {
-                    break;
-                }
-            }
-
-            let _ = sender.send(Err(io::Error::new(
-                ErrorKind::Interrupted,
-                "file watcher stopped",
-            )));
-        }
-
-        fn dispatch_events(
-            sender: &mpsc::UnboundedSender<io::Result<WatchEvent>>,
-            root: &Path,
-            filter: &WatchFilter,
-            buffer: &[u8],
-        ) -> bool {
-            let mut offset = 0usize;
-
-            while offset < buffer.len() {
-                if buffer.len() - offset < size_of::<FILE_NOTIFY_INFORMATION>() {
-                    break;
-                }
-                let record =
-                    unsafe { &*(buffer[offset..].as_ptr() as *const FILE_NOTIFY_INFORMATION) };
-
-                let name_len = (record.FileNameLength as usize) / 2;
-                let name_slice =
-                    unsafe { std::slice::from_raw_parts(record.FileName.as_ptr(), name_len) };
-                let name = OsString::from_wide(name_slice);
-                let candidate = root.join(PathBuf::from(name));
-
-                if !matches_filter(filter, &candidate) {
-                    if record.NextEntryOffset == 0 {
-                        break;
-                    }
-                    offset += record.NextEntryOffset as usize;
-                    continue;
-                }
-
-                let kind = map_action(record.Action as u32);
-                if sender
-                    .send(Ok(WatchEvent::new(kind, vec![candidate])))
-                    .is_err()
-                {
-                    return false;
-                }
-
-                if record.NextEntryOffset == 0 {
-                    break;
-                }
-                offset += record.NextEntryOffset as usize;
-            }
-
-            true
         }
 
         fn matches_filter(filter: &WatchFilter, candidate: &Path) -> bool {
@@ -888,20 +692,10 @@ mod inhouse {
             }
         }
 
-        fn map_action(action: u32) -> WatchEventKind {
-            match action {
-                FILE_ACTION_ADDED | FILE_ACTION_RENAMED_NEW_NAME => WatchEventKind::Created,
-                FILE_ACTION_REMOVED | FILE_ACTION_RENAMED_OLD_NAME => WatchEventKind::Removed,
-                FILE_ACTION_MODIFIED => WatchEventKind::Modified,
-                _ => WatchEventKind::Other,
-            }
-        }
-
         fn normalize_path(path: &Path) -> String {
             path.as_os_str().to_string_lossy().to_ascii_lowercase()
         }
     }
-
     #[cfg(not(any(
         target_os = "linux",
         target_os = "macos",
@@ -1069,6 +863,31 @@ mod inhouse {
             }
         }
     }
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    pub(super) use kqueue::Watcher;
+    #[cfg(target_os = "linux")]
+    pub(super) use linux::Watcher;
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
+        target_os = "windows"
+    )))]
+    pub(super) use polling::Watcher;
+    #[cfg(target_os = "windows")]
+    pub(super) use windows::Watcher;
 }
 
 #[cfg(not(feature = "inhouse-backend"))]
