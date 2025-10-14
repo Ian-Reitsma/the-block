@@ -9,15 +9,14 @@ use crate::exec;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::SUBSIDY_BYTES_TOTAL;
 use crypto_suite::hashing::blake3;
-use foundation_serialization::{Deserialize, Serialize};
-
-use foundation_serialization::binary;
+use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 
 use diagnostics::log;
 
 use crate::legacy_cbor;
+use crate::util::binary_struct::{self, DecodeError as BinaryDecodeError};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ReadReceipt {
     pub domain: String,
     pub provider_id: String,
@@ -25,6 +24,76 @@ pub struct ReadReceipt {
     pub ts: u64,
     pub dynamic: bool,
     pub allowed: bool,
+}
+
+impl ReadReceipt {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut writer = BinaryWriter::with_capacity(256);
+        writer.write_struct(|struct_writer| {
+            struct_writer.field_string("domain", &self.domain);
+            struct_writer.field_string("provider_id", &self.provider_id);
+            struct_writer.field_u64("bytes_served", self.bytes_served);
+            struct_writer.field_u64("ts", self.ts);
+            struct_writer.field_bool("dynamic", self.dynamic);
+            struct_writer.field_bool("allowed", self.allowed);
+        });
+        writer.finish()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, BinaryDecodeError> {
+        let mut reader = BinaryReader::new(bytes);
+        let mut domain = None;
+        let mut provider_id = None;
+        let mut bytes_served = None;
+        let mut ts = None;
+        let mut dynamic = None;
+        let mut allowed = None;
+
+        binary_struct::decode_struct(&mut reader, Some(6), |key, reader| match key {
+            "domain" => binary_struct::assign_once(
+                &mut domain,
+                reader.read_string().map_err(BinaryDecodeError::from)?,
+                "domain",
+            ),
+            "provider_id" => binary_struct::assign_once(
+                &mut provider_id,
+                reader.read_string().map_err(BinaryDecodeError::from)?,
+                "provider_id",
+            ),
+            "bytes_served" => binary_struct::assign_once(
+                &mut bytes_served,
+                reader.read_u64().map_err(BinaryDecodeError::from)?,
+                "bytes_served",
+            ),
+            "ts" => binary_struct::assign_once(
+                &mut ts,
+                reader.read_u64().map_err(BinaryDecodeError::from)?,
+                "ts",
+            ),
+            "dynamic" => binary_struct::assign_once(
+                &mut dynamic,
+                reader.read_bool().map_err(BinaryDecodeError::from)?,
+                "dynamic",
+            ),
+            "allowed" => binary_struct::assign_once(
+                &mut allowed,
+                reader.read_bool().map_err(BinaryDecodeError::from)?,
+                "allowed",
+            ),
+            other => Err(BinaryDecodeError::UnknownField(other.into())),
+        })?;
+
+        binary_struct::ensure_exhausted(&reader)?;
+
+        Ok(Self {
+            domain: domain.ok_or(BinaryDecodeError::MissingField("domain"))?,
+            provider_id: provider_id.ok_or(BinaryDecodeError::MissingField("provider_id"))?,
+            bytes_served: bytes_served.ok_or(BinaryDecodeError::MissingField("bytes_served"))?,
+            ts: ts.ok_or(BinaryDecodeError::MissingField("ts"))?,
+            dynamic: dynamic.ok_or(BinaryDecodeError::MissingField("dynamic"))?,
+            allowed: allowed.ok_or(BinaryDecodeError::MissingField("allowed"))?,
+        })
+    }
 }
 
 fn base_dir() -> PathBuf {
@@ -71,7 +140,7 @@ pub fn append(
             crate::telemetry::READ_STATS.record(domain, bytes_served);
         }
     }
-    let data = binary::encode(&receipt).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let data = receipt.to_bytes();
     fs::write(path, data)
 }
 
@@ -214,7 +283,7 @@ fn decode_legacy_receipt(bytes: &[u8]) -> Result<ReadReceipt, legacy_cbor::Error
 enum ReceiptDecodeError {
     Io(io::Error),
     LegacyFallback {
-        binary: foundation_serialization::Error,
+        binary: BinaryDecodeError,
         legacy: legacy_cbor::Error,
     },
 }
@@ -237,7 +306,7 @@ impl std::error::Error for ReceiptDecodeError {}
 
 fn load_receipt(path: &Path) -> Result<ReadReceipt, ReceiptDecodeError> {
     let bytes = fs::read(path).map_err(ReceiptDecodeError::Io)?;
-    match binary::decode::<ReadReceipt>(&bytes) {
+    match ReadReceipt::from_bytes(&bytes) {
         Ok(receipt) => Ok(receipt),
         Err(binary_err) => match decode_legacy_receipt(&bytes) {
             Ok(receipt) => Ok(receipt),
@@ -262,8 +331,6 @@ fn encode_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use foundation_serialization::binary;
 
     #[test]
     fn decode_legacy_read_receipt() {
@@ -299,7 +366,7 @@ mod tests {
             dynamic: true,
             allowed: true,
         };
-        let bytes = binary::encode(&receipt).expect("encode");
+        let bytes = receipt.to_bytes();
         let path = dir.path().join("test.bin");
         fs::write(&path, bytes).expect("write");
 

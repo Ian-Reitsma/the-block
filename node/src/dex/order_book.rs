@@ -30,6 +30,16 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
+    /// Return the identifier that will be assigned to the next order placement.
+    pub fn next_identifier(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Overwrite the next order identifier. Used when restoring persisted state.
+    pub fn set_next_identifier(&mut self, value: u64) {
+        self.next_id = value;
+    }
+
     pub fn place(&mut self, mut order: Order) -> Result<Vec<(Order, Order, u64)>, &'static str> {
         #[cfg(feature = "telemetry")]
         let _trace = crate::telemetry::log_context();

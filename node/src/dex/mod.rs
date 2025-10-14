@@ -4,6 +4,7 @@ pub mod audit;
 pub mod exchange_hooks;
 pub mod order_book;
 pub mod storage;
+mod storage_binary;
 pub mod trust_lines;
 pub use dex::escrow;
 use std::time::{SystemTime, UNIX_EPOCH};

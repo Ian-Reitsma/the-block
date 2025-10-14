@@ -1,14 +1,15 @@
 use std::convert::TryInto;
 use std::path::Path;
 
-use crate::util::binary_codec;
+use crate::util::binary_struct::{self, DecodeError as BinaryDecodeError};
 use crate::{simple_db::names, Block, SimpleDb, TokenAmount};
+use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 
 const RELAYER_PREFIX: &str = "relayers/";
 const RECEIPT_PREFIX: &str = "receipts/";
 const META_PENDING_TOTAL: &str = "meta/pending_total";
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 struct StoredRelayer {
     pending: u64,
     total_proofs: u64,
@@ -16,13 +17,13 @@ struct StoredRelayer {
     last_claim_height: Option<u64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 struct ClaimReceipt {
     amount: u64,
     relayers: Vec<RelayerClaim>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct RelayerClaim {
     id: Vec<u8>,
     amount: u64,
@@ -30,7 +31,7 @@ struct RelayerClaim {
 }
 
 /// Snapshot of a relayer's rebate accounting suitable for CLI inspection.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayerInfo {
     pub pending: u64,
     pub total_proofs: u64,
@@ -39,29 +40,28 @@ pub struct RelayerInfo {
 }
 
 /// Aggregate rebate state exported for monitoring and CLI inspection.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RebateSnapshot {
     pub pending_total: u64,
     pub relayers: Vec<(Vec<u8>, RelayerInfo)>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptRelayer {
     pub id: Vec<u8>,
     pub amount: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptEntry {
     pub height: u64,
     pub amount: u64,
     pub relayers: Vec<ReceiptRelayer>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptPage {
     pub receipts: Vec<ReceiptEntry>,
-    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next: Option<u64>,
 }
 
@@ -103,14 +103,13 @@ impl ProofTracker {
     fn load_relayer(&self, key: &str) -> StoredRelayer {
         self.db
             .get(key)
-            .and_then(|bytes| binary_codec::deserialize(&bytes).ok())
+            .and_then(|bytes| decode_stored_relayer(&bytes).ok())
             .unwrap_or_default()
     }
 
     fn store_relayer(&mut self, key: &str, value: &StoredRelayer) {
-        if let Ok(bytes) = binary_codec::serialize(value) {
-            let _ = self.db.insert(key, bytes);
-        }
+        let bytes = encode_stored_relayer(value);
+        let _ = self.db.insert(key, bytes);
     }
 
     fn relayer_key(id: &[u8]) -> String {
@@ -122,21 +121,19 @@ impl ProofTracker {
     }
 
     fn load_receipt_by_key(&self, key: &str) -> Option<ClaimReceipt> {
-        self.db.get(key).and_then(|bytes| {
-            binary_codec::deserialize::<ClaimReceipt>(&bytes)
-                .ok()
-                .or_else(|| {
-                    if bytes.len() == 8 {
-                        let arr: [u8; 8] = bytes.as_slice().try_into().ok()?;
-                        Some(ClaimReceipt {
-                            amount: u64::from_le_bytes(arr),
-                            relayers: Vec::new(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-        })
+        self.db
+            .get(key)
+            .and_then(|bytes| match decode_claim_receipt(&bytes) {
+                Ok(receipt) => Some(receipt),
+                Err(_) if bytes.len() == 8 => {
+                    let arr: [u8; 8] = bytes.as_slice().try_into().ok()?;
+                    Some(ClaimReceipt {
+                        amount: u64::from_le_bytes(arr),
+                        relayers: Vec::new(),
+                    })
+                }
+                Err(_) => None,
+            })
     }
 
     fn load_receipt(&self, height: u64) -> Option<ClaimReceipt> {
@@ -145,10 +142,9 @@ impl ProofTracker {
     }
 
     fn store_receipt(&mut self, height: u64, receipt: &ClaimReceipt) {
-        if let Ok(bytes) = binary_codec::serialize(receipt) {
-            let key = Self::receipt_key(height);
-            let _ = self.db.insert(&key, bytes);
-        }
+        let bytes = encode_claim_receipt(receipt);
+        let key = Self::receipt_key(height);
+        let _ = self.db.insert(&key, bytes);
     }
 
     fn remove_receipt(&mut self, height: u64) {
@@ -370,10 +366,158 @@ pub fn apply_rebates(block: &mut Block, amount: u64) {
     }
 }
 
+fn encode_stored_relayer(value: &StoredRelayer) -> Vec<u8> {
+    let mut writer = BinaryWriter::with_capacity(64);
+    writer.write_struct(|st| {
+        st.field_u64("pending", value.pending);
+        st.field_u64("total_proofs", value.total_proofs);
+        st.field_u64("total_claimed", value.total_claimed);
+        st.field_option_u64("last_claim_height", value.last_claim_height);
+    });
+    writer.finish()
+}
+
+fn decode_stored_relayer(bytes: &[u8]) -> Result<StoredRelayer, BinaryDecodeError> {
+    let mut reader = BinaryReader::new(bytes);
+    let mut pending = None;
+    let mut total_proofs = None;
+    let mut total_claimed = None;
+    let mut last_claim_height = None;
+
+    binary_struct::decode_struct(&mut reader, Some(4), |key, reader| match key {
+        "pending" => binary_struct::assign_once(
+            &mut pending,
+            reader.read_u64().map_err(BinaryDecodeError::from)?,
+            "pending",
+        ),
+        "total_proofs" => binary_struct::assign_once(
+            &mut total_proofs,
+            reader.read_u64().map_err(BinaryDecodeError::from)?,
+            "total_proofs",
+        ),
+        "total_claimed" => binary_struct::assign_once(
+            &mut total_claimed,
+            reader.read_u64().map_err(BinaryDecodeError::from)?,
+            "total_claimed",
+        ),
+        "last_claim_height" => binary_struct::assign_once(
+            &mut last_claim_height,
+            reader.read_option_with(|reader| reader.read_u64().map_err(BinaryDecodeError::from))?,
+            "last_claim_height",
+        ),
+        other => Err(BinaryDecodeError::UnknownField(other.into())),
+    })?;
+
+    binary_struct::ensure_exhausted(&reader)?;
+
+    Ok(StoredRelayer {
+        pending: pending.ok_or(BinaryDecodeError::MissingField("pending"))?,
+        total_proofs: total_proofs.ok_or(BinaryDecodeError::MissingField("total_proofs"))?,
+        total_claimed: total_claimed.ok_or(BinaryDecodeError::MissingField("total_claimed"))?,
+        last_claim_height: last_claim_height.unwrap_or(None),
+    })
+}
+
+fn encode_claim_receipt(value: &ClaimReceipt) -> Vec<u8> {
+    let mut writer = BinaryWriter::with_capacity(128);
+    writer.write_struct(|st| {
+        st.field_u64("amount", value.amount);
+        st.field_vec_with("relayers", &value.relayers, |writer, claim| {
+            writer.write_struct(|inner| {
+                inner.field_bytes("id", &claim.id);
+                inner.field_u64("amount", claim.amount);
+                inner.field_option_u64("prev_last_claim_height", claim.prev_last_claim_height);
+            });
+        });
+    });
+    writer.finish()
+}
+
+fn decode_relayer_claim(reader: &mut BinaryReader<'_>) -> Result<RelayerClaim, BinaryDecodeError> {
+    let mut id = None;
+    let mut amount = None;
+    let mut prev_last_claim_height: Option<Option<u64>> = None;
+
+    binary_struct::decode_struct(reader, Some(3), |key, reader| match key {
+        "id" => binary_struct::assign_once(
+            &mut id,
+            reader.read_bytes().map_err(BinaryDecodeError::from)?,
+            "id",
+        ),
+        "amount" => binary_struct::assign_once(
+            &mut amount,
+            reader.read_u64().map_err(BinaryDecodeError::from)?,
+            "amount",
+        ),
+        "prev_last_claim_height" => binary_struct::assign_once(
+            &mut prev_last_claim_height,
+            reader.read_option_with(|reader| reader.read_u64().map_err(BinaryDecodeError::from))?,
+            "prev_last_claim_height",
+        ),
+        other => Err(BinaryDecodeError::UnknownField(other.into())),
+    })?;
+
+    Ok(RelayerClaim {
+        id: id.ok_or(BinaryDecodeError::MissingField("id"))?,
+        amount: amount.ok_or(BinaryDecodeError::MissingField("amount"))?,
+        prev_last_claim_height: prev_last_claim_height.unwrap_or(None),
+    })
+}
+
+fn decode_claim_receipt(bytes: &[u8]) -> Result<ClaimReceipt, BinaryDecodeError> {
+    let mut reader = BinaryReader::new(bytes);
+    let mut amount = None;
+    let mut relayers = None;
+
+    binary_struct::decode_struct(&mut reader, Some(2), |key, reader| match key {
+        "amount" => binary_struct::assign_once(
+            &mut amount,
+            reader.read_u64().map_err(BinaryDecodeError::from)?,
+            "amount",
+        ),
+        "relayers" => binary_struct::assign_once(
+            &mut relayers,
+            reader.read_vec_with(|reader| decode_relayer_claim(reader))?,
+            "relayers",
+        ),
+        other => Err(BinaryDecodeError::UnknownField(other.into())),
+    })?;
+
+    binary_struct::ensure_exhausted(&reader)?;
+
+    Ok(ClaimReceipt {
+        amount: amount.ok_or(BinaryDecodeError::MissingField("amount"))?,
+        relayers: relayers.unwrap_or_default(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::binary_codec;
+    use foundation_serialization::Serialize;
     use sys::tempfile::tempdir;
+
+    #[derive(Serialize)]
+    struct LegacyStoredRelayer {
+        pending: u64,
+        total_proofs: u64,
+        total_claimed: u64,
+        last_claim_height: Option<u64>,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyRelayerClaim {
+        id: Vec<u8>,
+        amount: u64,
+        prev_last_claim_height: Option<u64>,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyClaimReceipt {
+        amount: u64,
+        relayers: Vec<LegacyRelayerClaim>,
+    }
 
     fn tracker_with_tempdir() -> ProofTracker {
         let dir = tempdir().expect("tempdir");
@@ -396,6 +540,76 @@ mod tests {
         assert_eq!(snap.pending_total, 5);
         assert_eq!(snap.relayers.len(), 1);
         assert_eq!(snap.relayers[0].1.pending, 5);
+    }
+
+    #[test]
+    fn stored_relayer_encoding_matches_legacy() {
+        let relayer = StoredRelayer {
+            pending: 10,
+            total_proofs: 4,
+            total_claimed: 7,
+            last_claim_height: Some(42),
+        };
+
+        let manual = encode_stored_relayer(&relayer);
+        let legacy = binary_codec::serialize(&LegacyStoredRelayer {
+            pending: relayer.pending,
+            total_proofs: relayer.total_proofs,
+            total_claimed: relayer.total_claimed,
+            last_claim_height: relayer.last_claim_height,
+        })
+        .expect("legacy encode");
+
+        assert_eq!(manual, legacy);
+        let decoded = decode_stored_relayer(&legacy).expect("decode relayer");
+        assert_eq!(decoded.pending, relayer.pending);
+        assert_eq!(decoded.total_proofs, relayer.total_proofs);
+        assert_eq!(decoded.total_claimed, relayer.total_claimed);
+        assert_eq!(decoded.last_claim_height, relayer.last_claim_height);
+    }
+
+    #[test]
+    fn claim_receipt_encoding_matches_legacy() {
+        let claim = ClaimReceipt {
+            amount: 55,
+            relayers: vec![
+                RelayerClaim {
+                    id: vec![1, 2, 3],
+                    amount: 15,
+                    prev_last_claim_height: Some(9),
+                },
+                RelayerClaim {
+                    id: vec![4, 5],
+                    amount: 40,
+                    prev_last_claim_height: None,
+                },
+            ],
+        };
+
+        let manual = encode_claim_receipt(&claim);
+        let legacy = binary_codec::serialize(&LegacyClaimReceipt {
+            amount: claim.amount,
+            relayers: claim
+                .relayers
+                .iter()
+                .map(|rel| LegacyRelayerClaim {
+                    id: rel.id.clone(),
+                    amount: rel.amount,
+                    prev_last_claim_height: rel.prev_last_claim_height,
+                })
+                .collect(),
+        })
+        .expect("legacy encode");
+
+        assert_eq!(manual, legacy);
+        let decoded = decode_claim_receipt(&legacy).expect("decode receipt");
+        assert_eq!(decoded.amount, claim.amount);
+        assert_eq!(decoded.relayers.len(), claim.relayers.len());
+        for (lhs, rhs) in decoded.relayers.iter().zip(&claim.relayers) {
+            assert_eq!(lhs.id, rhs.id);
+            assert_eq!(lhs.amount, rhs.amount);
+            assert_eq!(lhs.prev_last_claim_height, rhs.prev_last_claim_height);
+        }
     }
 
     #[test]

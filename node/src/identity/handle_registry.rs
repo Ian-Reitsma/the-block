@@ -1,4 +1,4 @@
-use crate::{simple_db::names, util::binary_codec, SimpleDb};
+use crate::{identity::handle_binary, simple_db::names, SimpleDb};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
@@ -119,7 +119,7 @@ impl HandleRegistry {
         // nonce check
         let nonce_key = Self::nonce_key(&address);
         if let Some(raw) = self.db.get(&nonce_key) {
-            if let Ok(last) = binary_codec::deserialize::<u64>(&raw) {
+            if let Ok(last) = handle_binary::decode_u64(&raw) {
                 if nonce <= last {
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::IDENTITY_REPLAYS_BLOCKED_TOTAL.inc();
@@ -147,12 +147,14 @@ impl HandleRegistry {
         // handle duplication
         let key = Self::handle_key(&handle_norm);
         if let Some(raw) = self.db.get(&key) {
-            let rec: HandleRecord = binary_codec::deserialize(&raw).unwrap_or(HandleRecord {
+            let rec: HandleRecord = handle_binary::decode_record(&raw).unwrap_or(HandleRecord {
                 address: String::new(),
                 created_at: 0,
                 attest_sig: Vec::new(),
                 nonce: 0,
                 version: 0,
+                #[cfg(feature = "pq-crypto")]
+                pq_pubkey: None,
             });
             if rec.address != address {
                 #[cfg(feature = "telemetry")]
@@ -180,14 +182,13 @@ impl HandleRegistry {
             #[cfg(feature = "pq-crypto")]
             pq_pubkey: pq_pubkey.map(|p| p.to_vec()),
         };
-        let bytes = binary_codec::serialize(&record).map_err(|_| HandleError::Storage)?;
+        let bytes = handle_binary::encode_record(&record);
         self.db.insert(&key, bytes);
         // index owner
-        let owner_bytes =
-            binary_codec::serialize(&handle_norm).map_err(|_| HandleError::Storage)?;
+        let owner_bytes = handle_binary::encode_string(&handle_norm);
         self.db.insert(&Self::owner_key(&address), owner_bytes);
         // update nonce
-        let nonce_bytes = binary_codec::serialize(&nonce).map_err(|_| HandleError::Storage)?;
+        let nonce_bytes = handle_binary::encode_u64(nonce);
         self.db.insert(&nonce_key, nonce_bytes);
         #[cfg(feature = "telemetry")]
         crate::telemetry::IDENTITY_REGISTRATIONS_TOTAL
@@ -206,7 +207,7 @@ impl HandleRegistry {
         let key = Self::handle_key(normalized.value());
         self.db
             .get(&key)
-            .and_then(|raw| binary_codec::deserialize::<HandleRecord>(&raw).ok())
+            .and_then(|raw| handle_binary::decode_record(&raw).ok())
             .map(|r| r.address)
     }
 
@@ -214,7 +215,7 @@ impl HandleRegistry {
         let key = Self::owner_key(address);
         self.db
             .get(&key)
-            .and_then(|raw| binary_codec::deserialize::<String>(&raw).ok())
+            .and_then(|raw| handle_binary::decode_string(&raw).ok())
     }
 
     #[cfg(feature = "pq-crypto")]
@@ -223,7 +224,7 @@ impl HandleRegistry {
         let key = Self::handle_key(normalized.value());
         self.db
             .get(&key)
-            .and_then(|raw| binary_codec::deserialize::<HandleRecord>(&raw).ok())
+            .and_then(|raw| handle_binary::decode_record(&raw).ok())
             .and_then(|r| r.pq_pubkey)
     }
 }

@@ -5,6 +5,7 @@ use super::repair;
 use super::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy, StoreReceipt};
 use crate::compute_market::settlement::Settlement;
 use crate::simple_db::{names, SimpleDb};
+use crate::storage::manifest_binary::{decode_manifest, encode_manifest, encode_store_receipt};
 use crate::storage::settings;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -14,8 +15,6 @@ use crate::telemetry::{
     SUBSIDY_BYTES_TOTAL,
 };
 use crate::transaction::BlobTx;
-use crate::util::binary_codec;
-use codec::profiles;
 use coding::{Compressor, EncryptError, Encryptor};
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{Deserialize, Serialize};
@@ -43,6 +42,9 @@ const LOSS_LO: f64 = 0.002; // 0.2%
 pub const RTT_HI_MS: f64 = 200.0;
 const RTT_LO_MS: f64 = 80.0;
 const QUOTA_BYTES_PER_CREDIT: u64 = 1024 * 1024; // 1 credit == 1 MiB logical quota
+
+mod binary;
+use self::binary::{decode_provider_profile, encode_provider_profile};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -204,7 +206,7 @@ pub trait Provider: Send + Sync {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderProfile {
     pub bw_ewma: f64,
@@ -442,7 +444,7 @@ impl StoragePipeline {
         let mut profile = self
             .db
             .get(&key)
-            .and_then(|b| binary_codec::deserialize(&b).ok())
+            .and_then(|b| decode_provider_profile(&b).ok())
             .unwrap_or_else(ProviderProfile::new);
         profile.ensure_defaults();
         profile
@@ -450,7 +452,7 @@ impl StoragePipeline {
 
     fn save_profile(&mut self, provider: &str, profile: &ProviderProfile) {
         let key = Self::profile_key(provider);
-        if let Ok(bytes) = binary_codec::serialize(profile) {
+        if let Ok(bytes) = encode_provider_profile(profile) {
             let _ = self.db.try_insert(&key, bytes);
         }
     }
@@ -459,7 +461,7 @@ impl StoragePipeline {
         let key = Self::profile_key(provider);
         self.db
             .get(&key)
-            .and_then(|b| binary_codec::deserialize(&b).ok())
+            .and_then(|b| decode_provider_profile(&b).ok())
     }
 
     pub fn provider_profile_snapshots(&self) -> Vec<ProviderProfileSnapshot> {
@@ -887,13 +889,11 @@ impl StoragePipeline {
             provider_chunks: provider_chunk_index.values().cloned().collect(),
         };
         let mut h = Hasher::new();
-        let manifest_bytes_temp = codec::serialize(profiles::storage_manifest::codec(), &manifest)
-            .map_err(|e| e.to_string())?;
+        let manifest_bytes_temp = encode_manifest(&manifest).map_err(|e| e.to_string())?;
         h.update(&manifest_bytes_temp);
         let man_hash = *h.finalize().as_bytes();
         manifest.blake3 = man_hash;
-        let manifest_bytes = codec::serialize(profiles::storage_manifest::codec(), &manifest)
-            .map_err(|e| e.to_string())?;
+        let manifest_bytes = encode_manifest(&manifest).map_err(|e| e.to_string())?;
         self.db
             .try_insert(
                 &format!("manifest/{}", crypto_suite::hex::encode(man_hash)),
@@ -911,8 +911,7 @@ impl StoragePipeline {
             },
             lane: lane.to_string(),
         };
-        let rec_bytes = codec::serialize(profiles::storage_manifest::codec(), &receipt)
-            .map_err(|e| e.to_string())?;
+        let rec_bytes = encode_store_receipt(&receipt).map_err(|e| e.to_string())?;
         self.db
             .try_insert(
                 &format!("receipt/{}", crypto_suite::hex::encode(man_hash)),
@@ -964,9 +963,7 @@ impl StoragePipeline {
     pub fn get_object(&self, manifest_hash: &[u8; 32]) -> Result<Vec<u8>, String> {
         let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         let manifest_bytes = self.db.get(&key).ok_or("missing manifest")?;
-        let manifest: ObjectManifest =
-            codec::deserialize(profiles::storage_manifest::codec(), &manifest_bytes)
-                .map_err(|e| e.to_string())?;
+        let manifest = decode_manifest(&manifest_bytes).map_err(|e| e.to_string())?;
         let encryptor = manifest_encryptor(&manifest)?;
         let compressor = manifest_compressor(&manifest)?;
         let mut out = Vec::with_capacity(manifest.total_len as usize);
@@ -1046,9 +1043,7 @@ impl StoragePipeline {
             let Some(bytes) = self.db.get(&key) else {
                 continue;
             };
-            let Ok(manifest) =
-                codec::deserialize::<ObjectManifest>(profiles::storage_manifest::codec(), &bytes)
-            else {
+            let Ok(manifest) = decode_manifest(&bytes) else {
                 continue;
             };
             let Ok(chunk_count) = u32::try_from(manifest.chunk_count()) else {
@@ -1097,9 +1092,7 @@ impl StoragePipeline {
 
     pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
         let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
-        self.db
-            .get(&key)
-            .and_then(|b| binary_codec::deserialize(&b).ok())
+        self.db.get(&key).and_then(|b| decode_manifest(&b).ok())
     }
 
     pub fn db_mut(&mut self) -> &mut SimpleDb {
@@ -1198,7 +1191,7 @@ mod tests {
             let db = pipeline.db();
             db.get(&key).expect("manifest present")
         };
-        codec::deserialize(profiles::storage_manifest::codec(), &bytes).expect("manifest decode")
+        decode_manifest(&bytes).expect("manifest decode")
     }
 
     fn sample_blob(len: usize) -> Vec<u8> {

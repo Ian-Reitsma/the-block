@@ -1,9 +1,9 @@
+use super::peer_metrics_binary;
 #[cfg(feature = "telemetry")]
 use crate::net::peer::DropReason;
 use crate::net::peer::PeerMetrics;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
-use crate::util::binary_codec;
 use concurrency::{MutexExt, OnceCell};
 use sled::Tree;
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ impl PeerMetricsStore {
         let mut key = Vec::with_capacity(40);
         key.extend_from_slice(pk);
         key.extend_from_slice(&ts.to_be_bytes());
-        if let Ok(val) = binary_codec::serialize(metrics) {
+        if let Ok(val) = peer_metrics_binary::encode(metrics) {
             let _ = self.tree.insert(key, val);
         }
         #[cfg(feature = "telemetry")]
@@ -92,7 +92,7 @@ impl PeerMetricsStore {
                 stale.push(k.to_vec());
                 continue;
             }
-            if let Ok(m) = binary_codec::deserialize::<PeerMetrics>(&res.1) {
+            if let Ok(m) = peer_metrics_binary::decode(&res.1) {
                 match latest.get(&pk) {
                     Some((prev, _)) if *prev >= ts => {}
                     _ => {

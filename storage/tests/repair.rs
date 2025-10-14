@@ -1,6 +1,6 @@
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::binary;
 use the_block::storage::erasure;
+use the_block::storage::manifest_binary::{decode_manifest, encode_manifest};
 use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest};
 use the_block::storage::settings;
 use the_block::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy};
@@ -12,14 +12,14 @@ use the_block::storage::types::{CHACHA20_POLY1305_NONCE_LEN, CHACHA20_POLY1305_T
 fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] {
     let mut tmp = manifest.clone();
     tmp.blake3 = [0u8; 32];
-    let bytes = binary::encode(&tmp).expect("serialize");
+    let bytes = encode_manifest(&tmp).expect("serialize");
     let mut hasher = Hasher::new();
     hasher.update(&bytes);
     let hash = hasher.finalize();
     let mut manifest_hash = [0u8; 32];
     manifest_hash.copy_from_slice(hash.as_bytes());
     manifest.blake3 = manifest_hash;
-    let manifest_bytes = binary::encode(manifest).expect("serialize final");
+    let manifest_bytes = encode_manifest(manifest).expect("serialize final");
     db.try_insert(
         &format!("manifest/{}", crypto_suite::hex::encode(manifest_hash)),
         manifest_bytes,
@@ -204,5 +204,102 @@ fn applies_backoff_after_repeated_failures() {
             .expect(the_block::telemetry::LABEL_REGISTRATION_ERR)
             .get();
         assert!(failures >= 1);
+    }
+}
+
+#[test]
+fn repairs_sparse_manifest_metadata_end_to_end() {
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("db");
+    let mut db = SimpleDb::open(path.to_str().unwrap());
+    let (mut manifest, shards) = sample_manifest(3072);
+
+    // Strip optional tables to exercise cursor defaults while retaining
+    // provider metadata with non-trivial entries.
+    manifest.chunk_lens.clear();
+    manifest.chunk_compressed_lens.clear();
+    manifest.chunk_cipher_lens.clear();
+    manifest.compression_alg = Some("brotli".to_string());
+    manifest.compression_level = Some(3);
+    manifest.encryption_alg = Some("aes-ctr".to_string());
+    manifest.erasure_alg = Some("reed_solomon".to_string());
+    manifest.provider_chunks = vec![
+        ProviderChunkEntry {
+            provider: "alpha".to_string(),
+            chunk_indices: vec![0, 2, 4],
+            chunk_lens: vec![2048, 1024],
+            encryption_key: vec![0xAB, 0xCD, 0xEF],
+        },
+        ProviderChunkEntry {
+            provider: "beta".to_string(),
+            chunk_indices: vec![1, 3],
+            chunk_lens: Vec::new(),
+            encryption_key: vec![0x01, 0x23, 0x45, 0x67],
+        },
+    ];
+    for (idx, chunk) in manifest.chunks.iter_mut().enumerate() {
+        chunk.nodes = vec![format!("node-{idx}"), format!("backup-{idx}")];
+        if idx % 2 == 0 {
+            chunk.provider_chunks = manifest.provider_chunks.clone();
+        } else {
+            chunk.provider_chunks.clear();
+        }
+    }
+
+    let manifest_hash = store_manifest(&mut db, &mut manifest);
+    write_shards(&mut db, &manifest, &shards);
+
+    // Remove a subset of parity shards to require reconstruction.
+    let (_, rs_parity) = erasure::reed_solomon_counts();
+    let removals = rs_parity.max(1).min(3) as usize;
+    let total_shards = manifest.chunks.len();
+    for offset in 0..removals {
+        if offset >= total_shards {
+            break;
+        }
+        let idx = total_shards - 1 - offset;
+        let key = format!(
+            "chunk/{}",
+            crypto_suite::hex::encode(manifest.chunks[idx].id)
+        );
+        db.remove(&key);
+    }
+
+    let log = RepairLog::new(dir.path().join("repair_log"));
+    let summary = repair::run_once(&mut db, &log, RepairRequest::default()).expect("run");
+    assert_eq!(summary.manifests, 1);
+    assert_eq!(summary.successes, 1);
+    assert_eq!(summary.failures, 0);
+    assert!(summary.bytes_repaired > 0);
+
+    let entries = log.recent_entries(8).expect("entries");
+    assert!(entries
+        .iter()
+        .any(|entry| entry.status == RepairLogStatus::Success && entry.bytes > 0));
+
+    let manifest_key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
+    let stored_manifest = db.get(&manifest_key).expect("manifest persisted");
+    let decoded = decode_manifest(&stored_manifest).expect("decode manifest");
+    assert!(decoded.chunk_lens.is_empty());
+    assert!(decoded.chunk_compressed_lens.is_empty());
+    assert!(decoded.chunk_cipher_lens.is_empty());
+    assert_provider_entries_eq(&decoded.provider_chunks, &manifest.provider_chunks);
+    assert_eq!(decoded.chunks.len(), manifest.chunks.len());
+    for (expected, actual) in manifest.chunks.iter().zip(decoded.chunks.iter()) {
+        assert_eq!(actual.nodes, expected.nodes);
+        assert_provider_entries_eq(&actual.provider_chunks, &expected.provider_chunks);
+    }
+}
+
+fn assert_provider_entries_eq(actual: &[ProviderChunkEntry], expected: &[ProviderChunkEntry]) {
+    assert_eq!(actual.len(), expected.len());
+    for (idx, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+        assert_eq!(a.provider, e.provider, "provider mismatch at {idx}");
+        assert_eq!(
+            a.chunk_indices, e.chunk_indices,
+            "indices mismatch at {idx}"
+        );
+        assert_eq!(a.chunk_lens, e.chunk_lens, "lens mismatch at {idx}");
+        assert_eq!(a.encryption_key, e.encryption_key, "key mismatch at {idx}");
     }
 }

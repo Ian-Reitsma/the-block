@@ -3,11 +3,10 @@ use crate::simple_db::{names, SimpleDb};
 use crate::telemetry::{
     RENT_ESCROW_BURNED_CT_TOTAL, RENT_ESCROW_LOCKED_CT_TOTAL, RENT_ESCROW_REFUNDED_CT_TOTAL,
 };
-use crate::util::binary_codec;
-use foundation_serialization::{Deserialize, Serialize};
+use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted};
+use foundation_serialization::binary_cursor::{Reader, Writer};
 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Escrow {
     depositor: String,
     amount: u64,
@@ -46,16 +45,15 @@ impl RentEscrow {
             amount,
             expiry,
         };
-        if let Ok(bytes) = binary_codec::serialize(&e) {
-            let _ = self.db.try_insert(&key, bytes);
-            #[cfg(feature = "telemetry")]
-            RENT_ESCROW_LOCKED_CT_TOTAL.add(amount as i64);
-        }
+        let bytes = encode_escrow(&e);
+        let _ = self.db.try_insert(&key, bytes);
+        #[cfg(feature = "telemetry")]
+        RENT_ESCROW_LOCKED_CT_TOTAL.add(amount as i64);
     }
     pub fn release(&mut self, id: &str) -> Option<(String, u64, u64)> {
         let key = format!("escrow/{id}");
         if let Some(bytes) = self.db.get(&key) {
-            if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
+            if let Ok(e) = decode_escrow(&bytes) {
                 #[cfg(feature = "telemetry")]
                 RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);
                 let _ = self.db.remove(&key);
@@ -74,7 +72,7 @@ impl RentEscrow {
     pub fn balance(&self, id: &str) -> u64 {
         let key = format!("escrow/{id}");
         if let Some(bytes) = self.db.get(&key) {
-            if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
+            if let Ok(e) = decode_escrow(&bytes) {
                 return e.amount;
             }
         }
@@ -84,7 +82,7 @@ impl RentEscrow {
         let mut sum = 0;
         for key in self.db.keys_with_prefix("escrow/") {
             if let Some(bytes) = self.db.get(&key) {
-                if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
+                if let Ok(e) = decode_escrow(&bytes) {
                     if e.depositor == account {
                         sum += e.amount;
                     }
@@ -98,7 +96,7 @@ impl RentEscrow {
         let keys = self.db.keys_with_prefix("escrow/");
         for key in keys {
             if let Some(bytes) = self.db.get(&key) {
-                if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
+                if let Ok(e) = decode_escrow(&bytes) {
                     if e.expiry > 0 && e.expiry <= now {
                         #[cfg(feature = "telemetry")]
                         RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);
@@ -119,9 +117,50 @@ impl RentEscrow {
     }
 }
 
+fn encode_escrow(record: &Escrow) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.write_struct(|s| {
+        s.field_string("depositor", &record.depositor);
+        s.field_u64("amount", record.amount);
+        s.field_u64("expiry", record.expiry);
+    });
+    writer.finish()
+}
+
+fn decode_escrow(bytes: &[u8]) -> binary_struct::Result<Escrow> {
+    let mut reader = Reader::new(bytes);
+    let mut depositor = None;
+    let mut amount = None;
+    let mut expiry = None;
+    decode_struct(&mut reader, Some(3), |key, reader| match key {
+        "depositor" => {
+            let value = reader.read_string()?;
+            assign_once(&mut depositor, value, "depositor")
+        }
+        "amount" => {
+            let value = reader.read_u64()?;
+            assign_once(&mut amount, value, "amount")
+        }
+        "expiry" => {
+            let value = reader.read_u64()?;
+            assign_once(&mut expiry, value, "expiry")
+        }
+        other => Err(binary_struct::DecodeError::UnknownField(other.to_owned())),
+    })?;
+    ensure_exhausted(&reader)?;
+    Ok(Escrow {
+        depositor: depositor.ok_or(binary_struct::DecodeError::MissingField("depositor"))?,
+        amount: amount.ok_or(binary_struct::DecodeError::MissingField("amount"))?,
+        expiry: expiry.ok_or(binary_struct::DecodeError::MissingField("expiry"))?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::RentEscrow;
+    use super::{decode_escrow, encode_escrow, Escrow};
+    use crate::util::binary_codec;
+    use foundation_serialization::{Deserialize, Serialize};
     use sys::tempfile::tempdir;
 
     #[test]
@@ -147,5 +186,32 @@ mod tests {
         assert_eq!(out[0].0, "bob");
         assert_eq!(out[0].1, 900);
         assert_eq!(out[0].2, 100);
+    }
+
+    #[test]
+    fn escrow_binary_matches_legacy() {
+        let record = Escrow {
+            depositor: "alice".to_string(),
+            amount: 4242,
+            expiry: 99,
+        };
+        let encoded = encode_escrow(&record);
+        #[derive(Serialize, Deserialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct LegacyEscrow {
+            depositor: String,
+            amount: u64,
+            expiry: u64,
+        }
+        let legacy_record = LegacyEscrow {
+            depositor: record.depositor.clone(),
+            amount: record.amount,
+            expiry: record.expiry,
+        };
+        let legacy = binary_codec::serialize(&legacy_record).expect("legacy encode");
+        assert_eq!(encoded, legacy);
+
+        let decoded = decode_escrow(&encoded).expect("decode");
+        assert_eq!(decoded, record);
     }
 }

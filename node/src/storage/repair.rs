@@ -1,13 +1,15 @@
 use super::erasure::{self, ErasureParams};
 use super::types::{ObjectManifest, Redundancy};
 use crate::simple_db::{names, SimpleDb};
+use crate::storage::manifest_binary::{decode_manifest, encode_manifest};
 use crate::storage::settings;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
-use crate::util::binary_codec;
+use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted};
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::binary_cursor::{Reader, Writer};
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use foundation_time::UtcDateTime;
@@ -72,7 +74,7 @@ fn manifest_algorithms(db: &SimpleDb, manifest_hex: &str) -> (String, String) {
     let defaults = settings::algorithms();
     let key = format!("manifest/{manifest_hex}");
     if let Some(bytes) = db.get(&key) {
-        if let Ok(manifest) = binary_codec::deserialize::<ObjectManifest>(&bytes) {
+        if let Ok(manifest) = decode_manifest(&bytes) {
             let erasure = manifest
                 .erasure_alg
                 .clone()
@@ -316,7 +318,7 @@ struct ShardWrite {
     value: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct FailureRecord {
     attempts: u32,
     next_retry_at: i64,
@@ -329,6 +331,39 @@ impl Default for FailureRecord {
             next_retry_at: 0,
         }
     }
+}
+
+fn encode_failure_record(record: &FailureRecord) -> Vec<u8> {
+    let mut writer = Writer::new();
+    writer.write_u64(2);
+    writer.write_string("attempts");
+    writer.write_u32(record.attempts);
+    writer.write_string("next_retry_at");
+    writer.write_i64(record.next_retry_at);
+    writer.finish()
+}
+
+fn decode_failure_record(bytes: &[u8]) -> binary_struct::Result<FailureRecord> {
+    let mut reader = Reader::new(bytes);
+    let mut attempts = None;
+    let mut next_retry_at = None;
+    decode_struct(&mut reader, Some(2), |key, reader| match key {
+        "attempts" => {
+            let value = reader.read_u32()?;
+            assign_once(&mut attempts, value, "attempts")
+        }
+        "next_retry_at" => {
+            let value = reader.read_i64()?;
+            assign_once(&mut next_retry_at, value, "next_retry_at")
+        }
+        other => Err(binary_struct::DecodeError::UnknownField(other.to_owned())),
+    })?;
+    ensure_exhausted(&reader)?;
+    Ok(FailureRecord {
+        attempts: attempts.ok_or(binary_struct::DecodeError::MissingField("attempts"))?,
+        next_retry_at: next_retry_at
+            .ok_or(binary_struct::DecodeError::MissingField("next_retry_at"))?,
+    })
 }
 
 #[derive(Debug)]
@@ -380,7 +415,7 @@ pub fn run_once(
                 continue;
             }
         };
-        let manifest: ObjectManifest = match binary_codec::deserialize(&bytes) {
+        let manifest = match decode_manifest(&bytes) {
             Ok(m) => m,
             Err(err) => {
                 summary.failures += 1;
@@ -881,7 +916,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), String> {
 
     let mut copy = manifest.clone();
     copy.blake3 = [0u8; 32];
-    let serialized = binary_codec::serialize(&copy).map_err(|e| e.to_string())?;
+    let serialized = encode_manifest(&copy).map_err(|e| e.to_string())?;
     let mut hasher = Hasher::new();
     hasher.update(&serialized);
     let computed = hasher.finalize();
@@ -894,7 +929,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), String> {
 fn load_failure_record(db: &SimpleDb, key: &str) -> Option<FailureRecord> {
     let store_key = format!("{FAILURE_PREFIX}{key}");
     db.get(&store_key)
-        .and_then(|bytes| binary_codec::deserialize(&bytes).ok())
+        .and_then(|bytes| decode_failure_record(&bytes).ok())
 }
 
 fn update_failure_record(db: &mut SimpleDb, key: &str, success: bool) {
@@ -910,9 +945,8 @@ fn update_failure_record(db: &mut SimpleDb, key: &str, success: bool) {
     let backoff = FAILURE_BACKOFF_BASE_SECS.saturating_mul(multiplier);
     let capped = backoff.min(FAILURE_BACKOFF_CAP_SECS);
     record.next_retry_at = current_timestamp().saturating_add(capped as i64);
-    if let Ok(bytes) = binary_codec::serialize(&record) {
-        let _ = db.try_insert(&store_key, bytes);
-    }
+    let bytes = encode_failure_record(&record);
+    let _ = db.try_insert(&store_key, bytes);
 }
 
 fn failure_key(manifest: &str, chunk_idx: usize) -> String {
@@ -1002,6 +1036,8 @@ fn should_stop() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::binary_codec;
+    use foundation_serialization::{Deserialize, Serialize};
     use sys::tempfile::tempdir;
 
     #[test]
@@ -1026,5 +1062,29 @@ mod tests {
             runtime::sleep(Duration::from_millis(20)).await;
             clear_iteration_hook();
         });
+    }
+
+    #[test]
+    fn failure_record_binary_matches_legacy() {
+        let record = FailureRecord {
+            attempts: 7,
+            next_retry_at: 123_456,
+        };
+        let encoded = encode_failure_record(&record);
+        #[derive(Serialize, Deserialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct LegacyFailureRecord {
+            attempts: u32,
+            next_retry_at: i64,
+        }
+        let legacy_record = LegacyFailureRecord {
+            attempts: record.attempts,
+            next_retry_at: record.next_retry_at,
+        };
+        let legacy = binary_codec::serialize(&legacy_record).expect("legacy encode");
+        assert_eq!(encoded, legacy);
+
+        let decoded = decode_failure_record(&encoded).expect("decode");
+        assert_eq!(decoded, record);
     }
 }
