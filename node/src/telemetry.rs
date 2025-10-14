@@ -13,7 +13,7 @@ use diagnostics::internal::{
     install_tls_env_warning_subscriber, SubscriberGuard as DiagnosticsSubscriberGuard,
 };
 #[cfg(feature = "telemetry")]
-use foundation_metrics::{self, Recorder};
+use foundation_metrics::{self, Recorder as MetricsRecorder};
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
@@ -552,7 +552,7 @@ fn gauge_value(value: f64) -> i64 {
 struct NodeMetricsRecorder;
 
 #[cfg(feature = "telemetry")]
-impl Recorder for NodeMetricsRecorder {
+impl MetricsRecorder for NodeMetricsRecorder {
     fn increment_counter(&self, name: &str, value: f64, labels: &[(String, String)]) {
         match name {
             "codec_operation_fail_total" => {

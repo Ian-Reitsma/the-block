@@ -70,6 +70,8 @@ pub mod serde {
 
 pub use serde_bytes;
 
+pub mod binary_cursor;
+
 /// Helpers that provide serde-style default values without depending on
 /// third-party attribute macros.
 pub mod defaults {

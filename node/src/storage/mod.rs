@@ -1,5 +1,6 @@
 pub mod erasure;
 pub mod fs;
+pub mod manifest_binary;
 pub mod migrate;
 pub mod pipeline;
 pub mod placement;

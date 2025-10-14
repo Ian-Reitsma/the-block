@@ -1,6 +1,6 @@
 # DEX and Trust Lines
-> **Review (2025-09-25):** Synced DEX and Trust Lines guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-13):** Documented the cursor-based persistence stack for order books, trade logs, AMM pools, and escrow snapshots (`node/src/dex/{storage.rs,storage_binary.rs}`) plus the new `EscrowSnapshot` helper that replaces the legacy serde/binary-codec shim. Regression tests (`order_book_matches_legacy`, `trade_log_matches_legacy`, `escrow_state_matches_legacy`, `pool_matches_legacy`) and randomized property coverage keep sled bytes aligned with historical layouts while the DEX crate’s escrow tests validate snapshot round-trips.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization wrappers are live with governance overrides enforced (2025-10-13).
 
 The in-tree DEX exposes a simple order book with slippage checks and trust-line settlement. Routing logic supports multi-hop transfers over a graph of authorised trust lines and returns a fallback path when the cheapest route fails mid-flight.
 
@@ -20,9 +20,28 @@ Trust lines track bilateral credit with three fields:
 
 - When matching, the engine checks that the counter-order price does not exceed the caller's slippage tolerance.
 - Each fill calls `TrustLedger::adjust` to move balances along the settlement path.
-- Trades and order placements persist to `~/.the_block/state/dex/` via a
-  `DexStore` that now routes through `crate::util::binary_codec`, preserving
-  crash durability without touching third-party codecs.
+- Trades, pools, and escrow state persist to `~/.the_block/state/dex/` via a
+  `DexStore` that now routes through the first-party cursor helpers in
+  `node/src/dex/{storage.rs,storage_binary.rs}`, removing the legacy
+  `binary_codec` shim while keeping sled keys and byte layout compatible with
+  historical deployments.
+
+### Persistence format
+
+- `node/src/dex/storage_binary.rs` encodes order books, trade logs, AMM pools,
+  and escrow snapshots with the shared binary cursor helpers and
+  `binary_struct` assignment utilities. Each structure has a regression test
+  that round-trips legacy sled bytes (`order_book_matches_legacy`,
+  `trade_log_matches_legacy`, `escrow_state_matches_legacy`,
+  `pool_matches_legacy`) plus randomized coverage to hammer order depth,
+  partial-proof trees, and liquidity weights.
+- `EscrowState` no longer derives serde; the snapshot/export helpers rely on
+  the new `EscrowSnapshot` container (`dex/src/escrow.rs`) so storage callers
+  can persist and restore the BTree map, next identifier, and aggregate locked
+  total without touching third-party codecs.
+- The DEX crate ships a `snapshot_roundtrip` unit test that exercises the
+  snapshot helpers directly. Add CLI/explorer integration coverage when
+  migrating user-facing tooling to the new codec.
 
 ## 2.1 Escrow and Partial Payments
 
@@ -30,6 +49,11 @@ Before settlement, matched orders lock funds in an on-ledger escrow. The escrow 
 Merkle root over released partial payments. Each release appends a payment amount and recomputes the root, yielding a proof that
 can be verified off-chain. When the cumulative released amount equals the original total the escrow entry is removed and the
 trade is final.
+
+`Escrow::snapshot()` exports the in-memory table into an `EscrowSnapshot`
+capturing the ordered entries, the next identifier, and the aggregate locked
+total. `Escrow::from_snapshot()` restores that state so `DexStore` can persist
+and reload escrows purely through the first-party codecs.
 
 ### CLI Escrow Lifecycle
 

@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-12 16:05:00Z_
+_Last updated: 2025-10-13 19:45:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -18,7 +18,12 @@ explicit.
 
 | Module | File | Line(s) | Third-party usage | Notes |
 | --- | --- | --- | --- | --- |
-| gateway | `node/src/gateway/read_receipt.rs` | 12 | `serde::{Deserialize, Serialize}` derive | Receipt envelopes and gateway attestations remain on serde derives; no facade wrapper yet. |
+| gateway | `node/src/gateway/read_receipt.rs` | 12 | — (manual binary cursor encode/decode) | Read receipts now encode via the first-party binary cursor helpers; serde derives removed while legacy CBOR fallback remains. |
+| light_client | `node/src/light_client/proof_tracker.rs` | 11-90, 277-394 | — (manual binary cursor encode/decode) | Proof-tracker persistence moved off `binary_codec` and serde; new cursor helpers plus `util::binary_struct` cover stored relayers, claim receipts, and the legacy 8-byte fallback while keeping compatibility tests local. |
+| net | `node/src/net/peer_metrics_store.rs` | 6-101 | — (manual binary cursor encode/decode) | Peer metrics sled snapshots now use `peer_metrics_binary` backed by the cursor helpers; serde derives remain for JSON/RPC exports while sled persistence is fully first-party. |
+| p2p | `node/src/p2p/wire_binary.rs` | 1-360 | — (manual binary cursor encode/decode) | `WireMessage` no longer derives serde; the new `wire_binary` module encodes handshake and gossip payloads with the cursor helpers and shared `binary_struct` utilities while compatibility tests lock the legacy layout. |
+| dex | `node/src/dex/storage.rs` | 1-120 | — (manual binary cursor encode/decode) | DEX order books, trade logs, escrow snapshots, and AMM pools now persist through `storage_binary`, eliminating the `binary_codec` shim and serde derives from `EscrowState` while keeping sled keys stable. |
+| dex | `node/src/dex/storage_binary.rs` | 1-720 | — (manual binary cursor encode/decode) | Cursor helpers encode/decode order books, escrow state, trade logs, and pools with legacy-byte regression tests (`order_book_matches_legacy`, `trade_log_matches_legacy`, `escrow_state_matches_legacy`, `pool_matches_legacy`) and randomized coverage across order depths and escrow proofs. |
 | compute_market | `node/src/compute_market/mod.rs` | 5, 57, 81-87, 126, 250, 255 | `foundation_serialization::{Deserialize, Serialize}` derive + facade defaults | Lane policy/state structs now pull defaults/skip handlers from `foundation_serialization::{defaults, skip}`. |
 | compute_market | `node/src/compute_market/cbm.rs` | 1 | facade derive | CBM configuration round-trips via the facade re-export. |
 | compute_market | `node/src/compute_market/courier.rs` | 6 | facade derive | Courier payloads retain facade derives; persistence already uses `foundation_serialization::binary::{encode, decode}`. |
@@ -30,9 +35,15 @@ explicit.
 | compute_market | `node/src/compute_market/settlement.rs` | 22, 62 | facade derive (`foundation_serialization::de::DeserializeOwned`) | Settlement pipeline routes SimpleDb blobs through the facade; optional fields use the facade skip helpers. |
 | compute_market | `node/src/compute_market/workload.rs` | 1 | facade derive | Workload manifests serialize via the facade exports. |
 | storage | `node/src/storage/fs.rs` | 6 | facade derive | Filesystem escrow entries serialize through the facade. |
-| storage | `node/src/storage/pipeline.rs` | 21, 53, 213-225 | facade derive + skip/defaults | Storage pipeline manifests use `foundation_serialization::{defaults, skip}` for optionals and collections. |
+| storage | `node/src/storage/manifest_binary.rs` | 1-420 | — (manual binary cursor encode/decode) | Object manifests, store receipts, chunk/provider tables, and sled receipts now encode via first-party cursor helpers with regression and legacy compatibility tests, plus a randomized property suite that hammers chunk/provider variants against the legacy codec. |
+| storage | `node/src/storage/pipeline.rs` | 21, 53, 213-225 | facade derive + skip/defaults | Storage pipeline manifests use `foundation_serialization::{defaults, skip}` for optionals and collections; sled persistence defers to `pipeline/binary.rs`. |
+| storage | `node/src/storage/pipeline/binary.rs` | 1-220 | — (manual binary cursor encode/decode) | Provider profile sled snapshots round-trip with cursor helpers and legacy parity tests, tolerating historical payloads that lacked the newer EWMA counters while the new property harness randomizes EWMA/throughput fields to guard encoding parity. |
 | storage | `node/src/storage/repair.rs` | 15, 139 | facade derive + rename_all | Repair queue tasks use facade derives with `rename_all`. |
 | storage | `node/src/storage/types.rs` | 1, 19-58 | facade derive + defaults | Storage policy/state structures now reference facade defaults. |
+| identity | `node/src/identity/did.rs` | 1-240 | — (manual binary cursor encode/decode) | DID registry sled persistence now routes through `identity::did_binary`, dropping `binary_codec` in favour of cursor helpers while preserving remote-attestation compatibility and replay detection. |
+| identity | `node/src/identity/did_binary.rs` | 1-240 | — (manual binary cursor encode/decode) | Cursor helpers encode DID records, attestations, and optionals with legacy parity tests (including malformed-hash guards); a seeded property suite now fuzzes randomized addresses/documents and the `identity_snapshot` integration test exercises mixed legacy/current sled dumps. |
+| identity | `node/src/identity/handle_registry.rs` | 1-240 | — (manual binary cursor encode/decode) | Handle registration, owner lookups, and nonce checkpoints now delegate to `identity::handle_binary`, eliminating serde-backed sled blobs while tolerating historical pq-key absence. |
+| identity | `node/src/identity/handle_binary.rs` | 1-240 | — (manual binary cursor encode/decode) | Handle records, owner strings, and nonce counters round-trip through cursor helpers with compatibility fixtures covering pq-key toggles; randomized parity tests now hammer attestation lengths/nonces and the mixed-snapshot integration test verifies sled upgrades. |
 | governance | `node/src/governance/mod.rs` | 35 | facade derive | Module-level envelope derives via the facade. |
 | governance | `node/src/governance/bicameral.rs` | 2 | facade derive | Bicameral state persists via facade derives. |
 | governance | `node/src/governance/inflation_cap.rs` | 8 | `foundation_serialization::Serialize` | Inflation cap reports export using the facade serializer. |
@@ -66,11 +77,23 @@ third-party codecs:
 
 - `node/src/telemetry.rs` and `node/src/telemetry/summary.rs` expose serde
   serialization for metrics payloads.
-- `node/src/identity/*`, `node/src/le_portal.rs`, `node/src/gossip/*`, and
-  transaction/vm modules retain serde derives for persisted state.
-- Integration fixtures now construct payloads through
-  `crate::util::binary_codec`, keeping the shared helpers in one place and
-  routing encode/decode operations through the facade-backed metrics hooks.
+- `node/src/identity/did.rs` and `node/src/identity/handle_registry.rs` now
+  persist sled state through the first-party cursor helpers; `node/src/le_portal.rs`,
+  `node/src/gossip/*`, and transaction/vm modules still derive for JSON/RPC
+  exposures.
+- Integration fixtures and compatibility tests now construct payloads through
+  the cursor helpers (`foundation_serialization::binary_cursor`) and the shared
+  `node/src/util/binary_struct.rs` routines. Peer metrics storage
+  (`node/src/net/peer_metrics_store.rs`), gossip wire payloads
+  (`node/src/p2p/wire_binary.rs`), and the storage sled codecs
+(`node/src/storage/{manifest_binary.rs,pipeline/binary.rs,fs.rs,repair.rs}`)
+now sit on the same manual path with compatibility fixtures that tolerate
+historical payloads missing the modern optional fields. DEX sled persistence
+(`node/src/dex/{storage.rs,storage_binary.rs}`) has joined the cursor-based
+path, removing the `binary_codec` shim while regression fixtures lock order
+books, escrow tables, AMM pools, and trade logs against the legacy bytes. The
+residual `crate::util::binary_codec` usage survives only inside compatibility
+tests while the module is phased out.
 
 ### Tooling & Support Crate Migrations (2025-10-12)
 
@@ -298,7 +321,7 @@ delivery windows unless otherwise specified.
 
 | Dependency | Current Usage (Representative Modules) | Stub / Replacement Plan | Owner & Timeline |
 | --- | --- | --- | --- |
-| `serde` derives (`serde`, `serde_bytes`) | Residual derives across gateway/storage RPCs (`node/src/gateway/read_receipt.rs`, `node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
+| `serde` derives (`serde`, `serde_bytes`) | Residual derives across storage/RPC payloads (`node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
 | `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
 | `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
 | `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
@@ -311,6 +334,10 @@ Dependency Migration" milestone) to coordinate the rollout.
 
 ### Recent Completions
 
+- ✅ Introduced `foundation_serialization::binary_cursor::{Writer, Reader}` and
+  migrated gateway read receipts onto the manual first-party encoder/decoder,
+  removing the last serde derive in that surface while preserving the legacy
+  CBOR fallback path.
 - ✅ Expanded the storage engine test suite to cover malformed JSON, unicode
   escapes, leading-zero rejection, and temp-file persist failures so the new
   first-party codec/harness can detect regressions without third-party

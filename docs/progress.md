@@ -1,5 +1,5 @@
 # Project Progress Snapshot
-> **Review (2025-10-13):** Metrics aggregation now installs a first-party `AggregatorRecorder` so every `foundation_metrics` macro emitted by runtime backends, TLS sinks, and CLI tools flows back into the Prometheus handles without reintroducing third-party crates. Monitoring utilities gained a lightweight `MonitoringRecorder` that keeps snapshot success/error counters inside the facade, letting the `snapshot` CLI report health without depending on the retired `metrics` stack.
+> **Review (2025-10-13):** Metrics aggregation now installs a first-party `AggregatorRecorder` so every `foundation_metrics` macro emitted by runtime backends, TLS sinks, and CLI tools flows back into the Prometheus handles without reintroducing third-party crates. Monitoring utilities gained a lightweight `MonitoringRecorder` that keeps snapshot success/error counters inside the facade, letting the `snapshot` CLI report health without depending on the retired `metrics` stack. Gateway read receipts now bypass serde, encoding and decoding through the new `foundation_serialization::binary_cursor` helpers while retaining the legacy CBOR fallback for older batches. Gossip wire messages follow suit: `node/src/p2p/wire_binary.rs` replaces the serde-derived `WireMessage` encoder/decoder with cursor helpers plus upgraded `binary_struct` guards, and regression tests lock the legacy payload bytes across handshake and gossip variants. Storage sled codecs—rent escrow, manifests, provider profiles, and repair failure records—now share the cursor helpers (`node/src/storage/{fs.rs,manifest_binary.rs,pipeline/binary.rs,repair.rs}`) with expanded regression suites that exercise large manifests, redundancy variants, and historical payloads lacking optional fields, and the new randomized property harness plus sparse-manifest repair integration test keep the first-party codecs in parity with the retired binary shim. Identity DID and handle registries likewise persist through `identity::{did_binary,handle_binary}`, replacing `binary_codec` in sled storage while compatibility fixtures guard remote attestation, pq-key toggles, and truncated payloads, and freshly added seeded property tests plus the `identity_snapshot` integration suite stress randomized identities alongside mixed legacy/current sled dumps. DEX persistence now joins the cursor stack: `node/src/dex/{storage.rs,storage_binary.rs}` encode order books, trade logs, AMM pools, and escrow snapshots via first-party helpers while the new `EscrowSnapshot` type documents the persisted layout and regression suites (`order_book_matches_legacy`, `trade_log_matches_legacy`, `escrow_state_matches_legacy`, `pool_matches_legacy`) lock legacy bytes.
 > **Review (2025-10-12):** Storage engine manifests and WAL snapshots now round-trip through the new in-house JSON codec and temp-file harness, eliminating the crate’s `foundation_serialization`/`serde`/`sys::tempfile` dependencies and adding regression tests for malformed input, unicode escapes, byte-array coercions, and persist failures. The diagnostics crate no longer links the SQLite facade, `dependency_guard` scopes `cargo metadata` to the requesting crate before enforcing policy, and the dependency inventory snapshots were regenerated to reflect the leaner workspace DAG. Node telemetry now rides on the first-party `foundation_metrics` recorder, bridging runtime spawn-latency histograms, pending-task gauges, and wallet/CLI counters into the existing telemetry surfaces without touching the retired `metrics` crate.
 > **Prior update (2025-10-11):** FIRST_PARTY_ONLY transport builds drop the s2n feature, the in-house QUIC certificate store persists DER material with corruption pruning and relocation-friendly overrides, and `transport_quic` routes provider selection through the first-party adapter while surfacing provider identifiers to gossip handshakes. CLI, explorer, wallet, and support tooling now emit `diagnostics::TbError` instead of `anyhow`, the simulation harness writes dashboards via a first-party CSV emitter, and the remote signer trace IDs derive from an in-house generator so the workspace drops the `uuid` crate entirely. Follow-up work removes the `assert_cmd` / `predicates` dev stack from the `xtask` lint harness in favour of standard library process helpers, adds regression coverage that locks the new trace ID format, and refreshes `docs/dependency_inventory.{md,json}` plus the violations snapshot to excise `anyhow`, `csv`, `uuid`, `assert_cmd`, and `predicates` from the manifest.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
@@ -28,9 +28,16 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-10-12T16:05:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers and the diagnostics crate’s SQLite-free manifest.
+- **Current inventory** *(generated at `2025-10-13T19:45:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers, the diagnostics crate’s SQLite-free manifest, the new P2P wire-message manual codec, the identity sled migrations that dropped `binary_codec`, and the expanded randomized coverage guarding DID/handle persistence plus the DEX sled migration.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
-- **Latest migrations (2025-10-13)**: The storage engine now serializes
+- **Latest migrations (2025-10-13)**: Gossip wire messages now encode/decode
+  via `node/src/p2p/wire_binary.rs`, replacing the serde-derived
+  `WireMessage` codec with cursor helpers, compatibility fixtures, and a new
+  invalid-value guard inside `binary_struct`. Gateway read receipts now encode
+  and decode via the first-party `foundation_serialization::binary_cursor`
+  helpers, eliminating the serde derive in that path while retaining the
+  legacy CBOR fallback for historical payloads. The storage engine now
+  serializes
   manifests/WALs via `crates/storage_engine::json` and isolates temp-dir usage
   behind `crates/storage_engine::tempfile`, removing `foundation_serialization`,
   `serde`, and `sys::tempfile` from the crate and adding regression coverage for
@@ -42,6 +49,24 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   lives beside the providers in `crates/transport`), and the s2n backend
   verifies certificates through the new in-house DER parser
   (`crates/transport/src/cert_parser.rs`), replacing `x509-parser` entirely.
+- Newly migrated storage sled codecs in
+  `node/src/storage/{manifest_binary.rs,pipeline/binary.rs,fs.rs,repair.rs}`
+  replace serde/binary-codec persistence with cursor helpers, broaden
+  compatibility coverage (large manifests, `Redundancy::None`, sparse provider
+  tables), and add decode tests that tolerate historical payloads lacking the
+  modern optional fields.
+- Newly migrated DEX sled codecs in
+  `node/src/dex/{storage.rs,storage_binary.rs}` remove the `binary_codec`
+  shim, encode order books, AMM pools, trade logs, and escrow snapshots via the
+  cursor helpers, and add randomized/legacy regression suites that validate the
+  new layouts while documenting the persisted `EscrowSnapshot` schema.
+- Newly migrated identity sled registries in
+  `node/src/identity/{did_binary.rs,handle_binary.rs}` and their callers replace
+  `binary_codec` persistence with cursor helpers, preserve remote-attestation and
+  pq-key toggles via compatibility suites, add seeded parity/fuzz suites for DID
+  and handle records, and feed the DID/handle stores used by CLI, explorer, and
+  governance revocation flows while the `identity_snapshot` integration test
+  verifies mixed legacy/current sled dumps.
 - ✅ `metrics-aggregator` now installs the in-house `AggregatorRecorder` so
   `foundation_metrics` macros emitted across runtime, TLS, and tooling sinks
   flow back into the Prometheus registry without regressing integer TLS
@@ -133,7 +158,8 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
   - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
-    - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`, with dashboards ingesting `GOSSIP_PEER_FAILURE_TOTAL` and `GOSSIP_LATENCY_BUCKETS`.
+- Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`, with dashboards ingesting `GOSSIP_PEER_FAILURE_TOTAL` and `GOSSIP_LATENCY_BUCKETS`.
+    - Peer metrics sled snapshots now encode/decode via `node/src/net/peer_metrics_binary.rs`, keeping persistence on the binary cursor helpers while JSON exports continue to leverage facade derives; compatibility tests guard the legacy layout.
      - Partition watch detects split-brain conditions and stamps gossip with markers (`node/src/net/partition_watch.rs`, `node/src/gossip/relay.rs`).
      - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
     - Shard-aware peer maps and gossip routing limit block broadcasts to interested shards (`node/src/gossip/relay.rs`).
@@ -155,7 +181,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Laplace-noised multiplier releases and miner-count logistic hysteresis (`node/src/governance/params.rs`, `pow/src/reward.rs`).
 - Emergency kill switch `kill_switch_subsidy_reduction` with telemetry counters (`node/src/governance/params.rs`, `docs/monitoring.md`).
 - Subsidy accounting is unified in the CT ledger with migration documented in `docs/system_changes.md`.
-- Proof-rebate tracker persists per-relayer receipts with governance rate clamps and coinbase integration (`node/src/light_client/proof_tracker.rs`, `node/src/blockchain/process.rs`, `docs/light_client_incentives.md`).
+- Proof-rebate tracker now persists per-relayer receipts via the first-party binary cursor (`node/src/light_client/proof_tracker.rs`, `node/src/util/binary_struct.rs`) with governance rate clamps and coinbase integration (`node/src/blockchain/process.rs`, `docs/light_client_incentives.md`).
 - Multi-signature release approvals persist signer sets and thresholds (`node/src/governance/release.rs`), gated fetch/install flows (`node/src/update.rs`, `cli/src/gov.rs`), and explorer/CLI timelines (`explorer/src/release_view.rs`, `contract explorer release-history`).
 - Telemetry counters `release_quorum_fail_total` and `release_installs_total` expose quorum health and rollout adoption for dashboards.
 - Fee-floor window and percentile parameters (`node/src/governance/params.rs`) stream through `GovStore` history with rollback support (`node/src/governance/store.rs`), governance CLI updates (`cli/src/gov.rs`), explorer timelines (`explorer/src/lib.rs`), and regression coverage (`governance/tests/mempool_params.rs`).
@@ -187,6 +213,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - `crates/coding` fronts encryption, erasure, fountain, and compression primitives; XOR parity and RLE fallback compressors respect `config/storage.toml` rollout gates, emit coder/compressor labels on storage latency and failure metrics, log `algorithm_limited` repair skips, and feed the `bench-harness compare-coders` mode for performance baselining (`crates/coding/src`, `node/src/storage/settings.rs`, `tools/bench-harness/src/main.rs`).
 - Base64 snapshots stage through `NamedTempFile::persist` plus `sync_all`, with legacy dumps removed only after durable rename (`node/src/simple_db/memory.rs`, `node/tests/simple_db/memory_tests.rs`).
 - Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
+- Sled-backed rent escrow, manifests, provider profiles, and repair failure
+  records persist via first-party cursor helpers with regression tests covering
+  large manifests, redundancy variants, and legacy payloads that omit modern
+  optional fields, plus a randomized property suite and sparse-metadata repair
+  integration test that keep parity with the legacy binary codec (`node/src/storage/{fs.rs,manifest_binary.rs,pipeline/binary.rs,repair.rs}`, `storage/tests/repair.rs`).
 - Metrics aggregator ingestion now runs on the in-house `httpd` router; outbound log correlation calls continue to use the shared `httpd::HttpClient` (`metrics-aggregator/src/lib.rs`). Snapshot exports now rely on the first-party SigV4 uploader layered on `httpd::HttpClient`, removing the AWS SDK while keeping S3 compatibility against the in-house object store. Runtime-backed ingestion and retention rework remain outstanding.
 - Metrics aggregator leader election now operates on the first-party `InhouseEngine` lease table, eliminating the `etcd-client`/tonic/Tokio stack and keeping coordination inside the runtime facade (`metrics-aggregator/src/leader.rs`, `docs/monitoring.md`).
 - Mobile gateway cache persists ChaCha20-Poly1305–encrypted responses and queued transactions to the first-party sled store with TTL sweeping, eviction guardrails, telemetry counters, CLI `mobile-cache status|flush` commands, RPC inspection endpoints, and invalidation hooks (`node/src/gateway/mobile_cache.rs`, `node/src/rpc/gateway.rs`, `cli/src/gateway.rs`, `docs/mobile_gateway.md`). A min-heap of expirations drives sweep cadence, persistence snapshots reconstruct queues on restart, encryption keys derive from `TB_MOBILE_CACHE_KEY_HEX`/`TB_NODE_KEY_HEX`, and status responses expose per-entry age/expiry plus queue bytes so operators can tune TTL windows and capacity.
@@ -232,10 +263,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - SLA telemetry now powers automated slashing dashboards; remaining work is to wire Grafana alerting and aggregator exports to page when `COMPUTE_SLA_PENDING_TOTAL` grows without matching automated slashes.
 
-## 7. Trust Lines & DEX — 85.9 %
+## 7. Trust Lines & DEX — 87.2 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
+- First-party sled persistence via `node/src/dex/{storage.rs,storage_binary.rs}` encodes order books, trade logs, pools, and escrow state with cursor helpers and randomized regression suites that match the legacy bytes (`order_book_matches_legacy`, `trade_log_matches_legacy`, `escrow_state_matches_legacy`, `pool_matches_legacy`).
 - Cost‑based multi‑hop routing with fallback paths (`node/src/dex/trust_lines.rs`).
 - On-ledger escrow with partial-payment proofs (`dex/src/escrow.rs`, `node/tests/dex.rs`, `dex/tests/escrow.rs`).
 - Trade logging and routing semantics documented in `docs/dex.md`.

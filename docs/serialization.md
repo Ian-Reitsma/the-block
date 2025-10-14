@@ -1,5 +1,5 @@
 # Serialization Guardrails
-> **Review (2025-10-10):** Captured the binary profile consolidation across node, crypto suite, telemetry, and harness tooling; the facade section below notes the new `BinaryProfile` identifiers and telemetry labels.
+> **Review (2025-10-13):** Captured the binary profile consolidation across node, crypto suite, telemetry, and harness tooling; the facade section below notes the new `BinaryProfile` identifiers and telemetry labels. Binary cursor helpers now expose float writers/readers and back the peer-metrics sled store alongside the storage sled codecs (`node/src/storage/{fs.rs,manifest_binary.rs,pipeline/binary.rs,repair.rs}`), with randomized property suites and sparse-manifest repair coverage guarding parity with the legacy codec. Identity sled registries (`node/src/identity/{did_binary.rs,handle_binary.rs}`) now ride the same helpers, replacing the legacy `binary_codec` shim while compatibility suites guard remote attestations, pq-key toggles, and truncated payloads, and newly added seeded parity suites plus the `identity_snapshot` integration test stress randomized DID/handle payloads across mixed legacy/current sled dumps. DEX storage (`node/src/dex/{storage.rs,storage_binary.rs}`) now encodes order books, trade logs, AMM pools, and escrow snapshots via cursor helpers, removing the remaining serde/binary-codec usage and locking legacy bytes through targeted regression/property tests.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-10). Governance, ledger, metrics aggregator, node runtime, and telemetry now encode exclusively through `foundation_serialization`.
 
 The `foundation_serialization` crate fronts every workspace serialization call so
@@ -65,6 +65,26 @@ let snapshot: Snapshot = binary::decode(&bytes)?;
 Binary helpers guarantee deterministic layout and reject trailing data, making
 it safe to persist validator and storage-engine state without third-party
 codecs.
+
+For handwritten payloads, the companion `binary_cursor` module exposes the
+low-level writer/reader used by legacy serde-derived structs. The new
+`StructWriter` wrapper and `Writer::write_struct` helper let callers emit
+field-count-prefixed maps without manually tracking keys, while
+`Reader::read_struct_with`, `read_vec_with`, and `read_option_with` provide
+closure-based visitors that surface decoding errors immediately. Writer/reader
+coverage now includes `f32`/`f64` helpers plus `StructWriter::field_f32` /
+`field_f64`, keeping float persistence aligned with the historical codec. Node
+modules that migrate off `crate::util::binary_codec` should rely on these
+helpers (see `node/src/gateway/read_receipt.rs`,
+`node/src/light_client/proof_tracker.rs`, `node/src/net/peer_metrics_binary.rs`,
+`node/src/storage/{fs.rs,manifest_binary.rs,pipeline/binary.rs,repair.rs}`,
+`node/src/dex/{storage.rs,storage_binary.rs}`,
+`node/src/p2p/wire_binary.rs`, and `node/src/identity/{did_binary.rs,handle_binary.rs}`) and, where shared decode logic is
+required, reuse the `node/src/util/binary_struct.rs` assignment utilities so
+duplicate-field and missing-field checks stay uniform. `binary_struct::DecodeError`
+now surfaces invalid enum discriminants and invalid field values (e.g.,
+malformed socket addresses) to match the guardrails enforced by the legacy
+decoder.
 
 ### TOML
 

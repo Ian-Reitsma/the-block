@@ -3,6 +3,7 @@ pub mod ban_store;
 pub mod discovery;
 mod message;
 pub mod peer;
+mod peer_metrics_binary;
 pub mod peer_metrics_store;
 #[cfg(all(feature = "quic", feature = "quinn"))]
 pub mod quic;

@@ -59,6 +59,17 @@ pub struct Escrow {
     total_locked: u64,
 }
 
+/// Snapshot of the escrow table used for persistence.
+#[derive(Debug, Clone, Default)]
+pub struct EscrowSnapshot {
+    /// Stored escrow entries keyed by their identifier.
+    pub entries: Vec<(EscrowId, EscrowEntry)>,
+    /// Next identifier to allocate when locking funds.
+    pub next_id: EscrowId,
+    /// Total value currently locked across all entries.
+    pub total_locked: u64,
+}
+
 impl Escrow {
     pub fn lock_with_algo(
         &mut self,
@@ -143,6 +154,32 @@ impl Escrow {
         let mut proof = build_proof(&leaves, idx, entry.algo)?;
         proof.algo = entry.algo;
         Some(proof)
+    }
+
+    /// Export the current state into a serializable snapshot.
+    pub fn snapshot(&self) -> EscrowSnapshot {
+        EscrowSnapshot {
+            entries: self
+                .entries
+                .iter()
+                .map(|(id, entry)| (*id, entry.clone()))
+                .collect(),
+            next_id: self.next_id,
+            total_locked: self.total_locked,
+        }
+    }
+
+    /// Reconstruct an escrow table from a serialized snapshot.
+    pub fn from_snapshot(snapshot: EscrowSnapshot) -> Self {
+        let mut entries = BTreeMap::new();
+        for (id, entry) in snapshot.entries {
+            entries.insert(id, entry);
+        }
+        Self {
+            entries,
+            next_id: snapshot.next_id,
+            total_locked: snapshot.total_locked,
+        }
     }
 }
 
@@ -290,5 +327,22 @@ mod tests {
             entry.root,
             proof.algo
         ));
+    }
+
+    #[test]
+    fn snapshot_roundtrip() {
+        let mut es = Escrow::default();
+        let first = es.lock("alice".into(), "bob".into(), 50);
+        let _ = es.lock("carol".into(), "dave".into(), 75);
+        es.release(first, 20).unwrap();
+
+        let snapshot = es.snapshot();
+        let restored = Escrow::from_snapshot(snapshot.clone());
+        let restored_snapshot = restored.snapshot();
+
+        assert_eq!(restored.total_locked(), es.total_locked());
+        assert_eq!(restored.count(), es.count());
+        assert_eq!(restored_snapshot.next_id, snapshot.next_id);
+        assert_eq!(snapshot.entries.len(), 2);
     }
 }
