@@ -1,4 +1,33 @@
 # Status & Roadmap
+> **Review (2025-10-14, afternoon):** TLS automation is now backed by fully
+> first-party serialization. The `foundation_serde` stub grew option/sequence/
+> map/tuple/array coverage, `foundation_serialization::json::Value` regained
+> manual serde parity, and the CLI’s TLS status/snapshot/certificate structs
+> now implement handwritten serializers/deserializers so we can drop derives
+> entirely. `contract tls status --json` and the TLS conversion/staging flows
+> round-trip on the stub backend, and `FIRST_PARTY_ONLY=0 cargo test -p
+> contract-cli --lib` passes end-to-end. Node cleanup landed alongside the
+> serialization work: aggregator/quic configs call the shared default helpers,
+> storage engine selection reuses `default_engine_kind()`, peer reputations seed
+> timers via the shared `instant_now()` guard, compute offers expose an
+> `effective_reputation_multiplier()` helper for telemetry and price board
+> recording, and the pipeline binary codec now validates field counts through
+> the cursor helpers so the overflow guard is exercised. The workspace builds
+> without lingering node warnings, keeping guard runs focused on real gaps while
+> the TLS automation shipped earlier in the week stays intact. Fresh regression
+> coverage now locks the paths in place: `cli/src/tls.rs` ships JSON round-trip
+> tests for warning status/snapshot payloads (including optional-field elision
+> and unknown-field tolerance), `crates/foundation_serialization/tests/json_value.rs`
+> verifies the manual `Value` codec rejects non-finite floats and preserves
+> nested objects, and `node/src/storage/pipeline/binary.rs` exercises the field
+> count guard via `write_field_count_rejects_overflow` so the encoder can’t
+> regress silently.
+> **Review (2025-10-14, mid-morning):** Terminal prompting is now fully
+> first-party and covered by regression tests. `sys::tty` exposes a reusable
+> helper that toggles echo suppression and trims newlines, `foundation_tui::prompt`
+> adds override hooks for scripted inputs, and the CLI log commands gained unit
+> tests for optional/required passphrase flows. FIRST_PARTY_ONLY builds keep
+> interactive commands intact while coverage guards regressions.
 > **Review (2025-10-14):** Cross-platform networking is now anchored on first-party
 > code across Linux, BSD/macOS, and Windows. `crates/sys/src/reactor/platform_windows.rs`
 > now drives an IOCP-backed backend that associates sockets with a completion
@@ -88,9 +117,11 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   `util::binary_struct` routines, removing `binary_codec`/serde from
   `node/src/light_client/proof_tracker.rs` while compatibility tests assert the
   legacy 8-byte fallback.
-- Explorer, CLI, and log/indexer tooling now route SQLite operations through
-  the `foundation_sqlite` facade, removing direct `rusqlite` usage while a
-  stub backend guards `FIRST_PARTY_ONLY` builds until the native engine lands.
+- Explorer, CLI, node, and monitoring tooling now share the sled-backed
+  `log_index` crate for ingestion, search, and key rotation. The optional
+  `sqlite-migration` feature only gates legacy imports via the
+  `foundation_sqlite` facade, so default builds drop direct SQLite usage while
+  retaining compatibility with archived `.db` snapshots.
 - Metrics aggregator timestamp signing, storage repair logging, and QUIC
   certificate rotation now depend on the `foundation_time` facade, centralising
   formatting and removing direct `time` imports ahead of the native certificate

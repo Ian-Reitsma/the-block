@@ -41,9 +41,9 @@ pub struct CorrelateMetricOptions {
 
 #[derive(Debug)]
 pub enum LogCmd {
-    /// Search indexed logs stored in SQLite.
+    /// Search indexed logs stored in the in-house log store.
     Search {
-        /// SQLite database produced by `log indexer`.
+        /// Log store directory produced by `log indexer`.
         db: String,
         /// Filter by peer identifier.
         peer: Option<String>,
@@ -68,7 +68,7 @@ pub enum LogCmd {
     },
     /// Re-encrypt stored messages with a new passphrase.
     RotateKey {
-        /// SQLite database produced by `log indexer`.
+        /// Log store directory produced by `log indexer`.
         db: String,
         /// Existing passphrase protecting log messages.
         old_passphrase: Option<String>,
@@ -103,11 +103,11 @@ impl LogCmd {
             CommandBuilder::new(
                 CommandId("logs.search"),
                 "search",
-                "Search indexed logs stored in SQLite",
+                "Search indexed logs stored in the log store",
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "db",
-                "SQLite database produced by log indexer",
+                "Log store directory produced by log indexer",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "peer",
@@ -169,7 +169,7 @@ impl LogCmd {
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "db",
-                "SQLite database produced by log indexer",
+                "Log store directory produced by log indexer",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "old_passphrase",
@@ -291,72 +291,28 @@ impl LogCmd {
 }
 
 pub fn run_search(options: SearchOptions) {
-    run_search_impl(options);
+    log_store::run_search(options);
 }
 
 pub fn run_rotate_key(options: RotateKeyOptions) {
-    run_rotate_key_impl(options);
+    log_store::run_rotate_key(options);
 }
 
 pub fn run_correlate_metric(options: CorrelateMetricOptions) {
-    run_correlate_metric_impl(options);
+    log_store::run_correlate_metric(options);
 }
 
-#[cfg(feature = "sqlite-storage")]
-fn run_search_impl(options: SearchOptions) {
-    sqlite::run_search(options);
-}
-
-#[cfg(not(feature = "sqlite-storage"))]
-fn run_search_impl(_options: SearchOptions) {
-    emit_missing_sqlite_feature();
-}
-
-#[cfg(feature = "sqlite-storage")]
-fn run_rotate_key_impl(options: RotateKeyOptions) {
-    sqlite::run_rotate_key(options);
-}
-
-#[cfg(not(feature = "sqlite-storage"))]
-fn run_rotate_key_impl(_options: RotateKeyOptions) {
-    emit_missing_sqlite_feature();
-}
-
-#[cfg(feature = "sqlite-storage")]
-fn run_correlate_metric_impl(options: CorrelateMetricOptions) {
-    sqlite::run_correlate_metric(options);
-}
-
-#[cfg(not(feature = "sqlite-storage"))]
-fn run_correlate_metric_impl(_options: CorrelateMetricOptions) {
-    emit_missing_sqlite_feature();
-}
-
-#[cfg(not(feature = "sqlite-storage"))]
-fn emit_missing_sqlite_feature() {
-    eprintln!(
-        "log database commands require the `sqlite-storage` feature. Rebuild contract-cli with `--features sqlite-storage` or `--features full`.",
-    );
-    std::process::exit(1);
-}
-
-#[cfg(feature = "sqlite-storage")]
-mod sqlite {
+mod log_store {
     use super::{CorrelateMetricOptions, RotateKeyOptions, SearchOptions};
     use crate::http_client;
-    use base64_fp::{decode_standard, encode_standard};
-    use coding::Encryptor;
-    use coding::{
-        decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
-        CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
-    };
-    use crypto_suite::hashing::blake3::derive_key;
-    use diagnostics::anyhow::{anyhow, Result as AnyResult};
     use foundation_serialization::Deserialize;
-    use foundation_sqlite::{params, params_from_iter, Connection, Row, Value};
+    use foundation_tui::prompt;
     use httpd::Method;
-    use rpassword::prompt_password;
+    use log_index::{
+        rotate_key, search_logs_in_store, LogEntry, LogFilter, LogIndexError, LogStore,
+    };
     use std::env;
+    use std::path::Path;
 
     #[derive(Debug, Deserialize)]
     struct AggregatorCorrelation {
@@ -384,8 +340,7 @@ mod sqlite {
 
         let passphrase =
             prompt_optional_passphrase(passphrase, "Log passphrase (leave blank for none): ");
-        if let Err(e) = search(
-            db,
+        let filter = LogFilter {
             peer,
             tx,
             block,
@@ -394,11 +349,13 @@ mod sqlite {
             since,
             until,
             after_id,
-            passphrase,
             limit,
-        ) {
-            eprintln!("log search failed: {e}");
-            std::process::exit(1);
+            passphrase,
+        };
+
+        match search(&db, filter) {
+            Ok(entries) => print_entries(&entries),
+            Err(err) => exit_with_error("log search failed", err),
         }
     }
 
@@ -413,17 +370,15 @@ mod sqlite {
             old_passphrase,
             "Current passphrase (leave blank for none): ",
         );
-        let new_pass =
-            match prompt_optional_passphrase(new_passphrase, "New passphrase (required): ") {
-                Some(p) => p,
-                None => {
-                    eprintln!("new passphrase required");
-                    std::process::exit(1);
-                }
-            };
-        if let Err(e) = rotate_key(db, old, new_pass) {
-            eprintln!("rotate failed: {e}");
-            std::process::exit(1);
+        let new_pass = prompt_required_passphrase(
+            new_passphrase,
+            "New passphrase (required): ",
+            "new passphrase required",
+        );
+
+        match rotate(&db, old.as_deref(), &new_pass) {
+            Ok(()) => {}
+            Err(err) => exit_with_error("rotate failed", err),
         }
     }
 
@@ -472,16 +427,26 @@ mod sqlite {
             return;
         }
         records.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        let db_path = match db.or_else(|| env::var("TB_LOG_DB_PATH").ok()) {
-            Some(path) => path,
-            None => {
-                eprintln!("--db must be provided or TB_LOG_DB_PATH set");
+
+        let db_path = match resolve_store_path(db) {
+            Ok(path) => path,
+            Err(msg) => {
+                eprintln!("{msg}");
                 return;
             }
         };
+
         let passphrase =
             prompt_optional_passphrase(passphrase, "Log passphrase (leave blank for none): ");
         let limit = max_correlations.max(1);
+
+        let store = match LogStore::open(Path::new(&db_path)) {
+            Ok(store) => store,
+            Err(err) => {
+                exit_with_error("failed to open log store", err);
+            }
+        };
+
         for record in records.into_iter().take(limit) {
             let value_str = record
                 .value
@@ -491,226 +456,177 @@ mod sqlite {
                 "\nmetric={} correlation={} peer={} value={} timestamp={}",
                 record.metric, record.correlation_id, record.peer_id, value_str, record.timestamp
             );
-            if let Err(err) = search(
-                db_path.clone(),
-                None,
-                None,
-                None,
-                Some(record.correlation_id.clone()),
-                None,
-                None,
-                None,
-                None,
-                passphrase.clone(),
-                Some(rows),
-            ) {
-                eprintln!("log search failed: {err}");
-            }
-        }
-    }
 
-    fn search(
-        db: String,
-        peer: Option<String>,
-        tx: Option<String>,
-        block: Option<u64>,
-        correlation: Option<String>,
-        level: Option<String>,
-        since: Option<u64>,
-        until: Option<u64>,
-        after_id: Option<u64>,
-        passphrase: Option<String>,
-        limit: Option<usize>,
-    ) -> foundation_sqlite::Result<()> {
-        let conn = Connection::open(db)?;
-        let mut clauses = Vec::new();
-        let mut params: Vec<Value> = Vec::new();
-        if let Some(peer) = peer {
-            clauses.push("peer = ?".to_string());
-            params.push(peer.into());
-        }
-        if let Some(tx) = tx {
-            clauses.push("tx = ?".to_string());
-            params.push(tx.into());
-        }
-        if let Some(block) = block {
-            clauses.push("block = ?".to_string());
-            params.push((block as i64).into());
-        }
-        if let Some(corr) = correlation {
-            clauses.push("correlation_id = ?".to_string());
-            params.push(corr.into());
-        }
-        if let Some(level) = level {
-            clauses.push("level = ?".to_string());
-            params.push(level.into());
-        }
-        if let Some(since) = since {
-            clauses.push("timestamp >= ?".to_string());
-            params.push((since as i64).into());
-        }
-        if let Some(until) = until {
-            clauses.push("timestamp <= ?".to_string());
-            params.push((until as i64).into());
-        }
-        if let Some(after_id) = after_id {
-            clauses.push("id > ?".to_string());
-            params.push((after_id as i64).into());
-        }
-        let mut sql = String::from(
-            "SELECT id, timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs",
-        );
-        if !clauses.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&clauses.join(" AND "));
-        }
-        sql.push_str(" ORDER BY timestamp DESC");
-        if let Some(limit) = limit {
-            sql.push_str(" LIMIT ?");
-            params.push((limit as i64).into());
-        }
-        let mut stmt = conn.prepare(&sql)?;
-        let key = passphrase.as_ref().map(|p| derive_key_bytes(p));
-        let key_ref = key.as_ref();
-        let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
-            decode_row(row, key_ref)
-        })?;
-        for row in rows {
-            let entry = row?;
-            println!(
-                "#{} {} [{}] {} :: {}",
-                entry.id.unwrap_or(0),
-                entry.timestamp,
-                entry.level,
-                entry.correlation_id,
-                entry.message
-            );
-        }
-        Ok(())
-    }
-
-    struct QueryRow {
-        id: Option<u64>,
-        timestamp: i64,
-        level: String,
-        message: String,
-        correlation_id: String,
-    }
-
-    fn decode_row(
-        row: &Row<'_>,
-        key: Option<&[u8; CHACHA20_POLY1305_KEY_LEN]>,
-    ) -> foundation_sqlite::Result<QueryRow> {
-        let encrypted: i64 = row.get("encrypted")?;
-        let stored_msg: String = row.get("message")?;
-        let nonce: Option<Vec<u8>> = row.get("nonce")?;
-        let message = if encrypted == 1 {
-            if let (Some(key), Some(nonce)) = (key, nonce.as_ref()) {
-                decrypt_message(key, &stored_msg, nonce)
-                    .unwrap_or_else(|| "<decrypt-failed>".into())
-            } else {
-                "<encrypted>".into()
-            }
-        } else {
-            stored_msg
-        };
-        Ok(QueryRow {
-            id: row.get::<_, Option<i64>>("id")?.map(|v| v.max(0) as u64),
-            timestamp: row.get("timestamp")?,
-            level: row.get("level")?,
-            message,
-            correlation_id: row.get("correlation_id")?,
-        })
-    }
-
-    fn rotate_key(db: String, current: Option<String>, new_pass: String) -> AnyResult<()> {
-        let mut conn = Connection::open(db)?;
-        let old_key = current.as_deref().map(derive_key_bytes);
-        let new_key = derive_key_bytes(&new_pass);
-        let tx = conn.transaction()?;
-        let select_rows = tx
-            .prepare("SELECT id, message, nonce, encrypted FROM logs")?
-            .query_map(params![], |row| {
-                Ok((
-                    row.get::<_, i64>("id")?,
-                    row.get::<_, Option<Vec<u8>>>("nonce")?,
-                    row.get::<_, String>("message")?,
-                    row.get::<_, i64>("encrypted")?,
-                ))
-            })?;
-        let mut updates = Vec::new();
-        for row in select_rows {
-            let (id, nonce, message, encrypted_flag) = row?;
-            let plain = if encrypted_flag == 1 {
-                let key = old_key
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("missing current passphrase"))?;
-                let nonce_bytes = nonce.as_deref().ok_or_else(|| anyhow!("missing nonce"))?;
-                decrypt_message(key, &message, nonce_bytes)
-                    .ok_or_else(|| anyhow!("decrypt failed"))?
-            } else {
-                message.clone()
+            let filter = LogFilter {
+                peer: None,
+                tx: None,
+                block: None,
+                correlation: Some(record.correlation_id.clone()),
+                level: None,
+                since: None,
+                until: None,
+                after_id: None,
+                limit: Some(rows),
+                passphrase: passphrase.clone(),
             };
-            let (cipher, nonce_bytes) = encrypt_message(&new_key, &plain)?;
-            updates.push((id, cipher, nonce_bytes));
-        }
-        {
-            let mut update_stmt = tx
-                .prepare("UPDATE logs SET message = ?1, nonce = ?2, encrypted = 1 WHERE id = ?3")?;
-            for (id, message, nonce) in updates {
-                update_stmt.execute(params![message, nonce, id])?;
+
+            match search_in_store(&store, filter) {
+                Ok(entries) => print_entries(&entries),
+                Err(err) => {
+                    eprintln!("log search failed: {}", format_error(&err));
+                }
             }
         }
-        tx.commit()?;
-        Ok(())
     }
 
-    fn derive_key_bytes(passphrase: &str) -> [u8; CHACHA20_POLY1305_KEY_LEN] {
-        derive_key("the-block-log-indexer", passphrase.as_bytes())
+    fn search(db: &str, filter: LogFilter) -> Result<Vec<LogEntry>, LogIndexError> {
+        let store = LogStore::open(Path::new(db))?;
+        search_logs_in_store(&store, &filter)
     }
 
-    fn encrypt_message(
-        key: &[u8; CHACHA20_POLY1305_KEY_LEN],
-        message: &str,
-    ) -> AnyResult<(String, Vec<u8>)> {
-        let payload = encrypt_xchacha20_poly1305(key, message.as_bytes())
-            .map_err(|e| anyhow!("encrypt: {e}"))?;
-        let (nonce, body) = payload.split_at(XCHACHA20_POLY1305_NONCE_LEN);
-        Ok((encode_standard(body), nonce.to_vec()))
+    fn search_in_store(
+        store: &LogStore,
+        filter: LogFilter,
+    ) -> Result<Vec<LogEntry>, LogIndexError> {
+        search_logs_in_store(store, &filter)
     }
 
-    fn decrypt_message(
-        key: &[u8; CHACHA20_POLY1305_KEY_LEN],
-        data: &str,
-        nonce: &[u8],
-    ) -> Option<String> {
-        let body = decode_standard(data).ok()?;
-        if nonce.is_empty() {
-            return decrypt_xchacha20_poly1305(key, &body)
-                .ok()
-                .and_then(|plain| String::from_utf8(plain).ok());
-        }
-        let mut payload = Vec::with_capacity(nonce.len() + body.len());
-        payload.extend_from_slice(nonce);
-        payload.extend_from_slice(&body);
-        let plaintext = match nonce.len() {
-            XCHACHA20_POLY1305_NONCE_LEN => decrypt_xchacha20_poly1305(key, &payload).ok(),
-            CHACHA20_POLY1305_NONCE_LEN => {
-                let encryptor = ChaCha20Poly1305Encryptor::new(key.as_ref()).ok()?;
-                encryptor.decrypt(&payload).ok()
-            }
-            _ => None,
-        }?;
-        String::from_utf8(plaintext).ok()
+    fn rotate(db: &str, current: Option<&str>, new_passphrase: &str) -> Result<(), LogIndexError> {
+        let store = LogStore::open(Path::new(db))?;
+        rotate_key(&store, current, new_passphrase)
     }
 
     fn prompt_optional_passphrase(existing: Option<String>, prompt: &str) -> Option<String> {
         match existing {
             Some(p) => Some(p),
-            None => prompt_password(prompt)
-                .ok()
-                .map(|input| input.trim().to_string())
-                .filter(|s| !s.is_empty()),
+            None => match prompt::optional_passphrase(prompt) {
+                Ok(pass) => pass
+                    .map(|value| value.trim().to_string())
+                    .filter(|s| !s.is_empty()),
+                Err(err) => {
+                    eprintln!("failed to read passphrase: {err}");
+                    None
+                }
+            },
+        }
+    }
+
+    fn prompt_required_passphrase(
+        existing: Option<String>,
+        prompt: &str,
+        error_msg: &str,
+    ) -> String {
+        match prompt_optional_passphrase(existing, prompt) {
+            Some(pass) => pass,
+            None => {
+                eprintln!("{error_msg}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    fn print_entries(entries: &[LogEntry]) {
+        for entry in entries {
+            println!(
+                "{} [{}] {} :: {}",
+                entry.timestamp, entry.level, entry.correlation_id, entry.message
+            );
+        }
+    }
+
+    fn resolve_store_path(db: Option<String>) -> Result<String, String> {
+        if let Some(path) = db {
+            return Ok(path);
+        }
+        if let Ok(path) = env::var("TB_LOG_STORE_PATH") {
+            return Ok(path);
+        }
+        if let Ok(path) = env::var("TB_LOG_DB_PATH") {
+            return Ok(path);
+        }
+        Err("--db must be provided or TB_LOG_STORE_PATH set".to_string())
+    }
+
+    fn exit_with_error(context: &str, err: LogIndexError) -> ! {
+        eprintln!("{}", format_error_with_context(context, &err));
+        std::process::exit(1);
+    }
+
+    fn format_error(err: &LogIndexError) -> String {
+        match err {
+            LogIndexError::MigrationRequired(path) => format!(
+                "migration required for legacy SQLite database at {}. Rebuild contract-cli with `--features sqlite-storage` to enable migration support",
+                path.display()
+            ),
+            other => other.to_string(),
+        }
+    }
+
+    fn format_error_with_context(context: &str, err: &LogIndexError) -> String {
+        format!("{}: {}", context, format_error(err))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use foundation_tui::prompt::testing::with_passphrase_override;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        #[test]
+        fn prompt_optional_skips_when_existing() {
+            let invoked = Arc::new(AtomicBool::new(false));
+            let captured = Arc::clone(&invoked);
+            let result = with_passphrase_override(
+                move |_| {
+                    captured.store(true, Ordering::SeqCst);
+                    Ok("ignored".to_string())
+                },
+                || prompt_optional_passphrase(Some("existing".into()), "prompt"),
+            );
+
+            assert_eq!(result, Some("existing".to_string()));
+            assert!(!invoked.load(Ordering::SeqCst));
+        }
+
+        #[test]
+        fn prompt_optional_prompts_and_trims() {
+            let value = with_passphrase_override(
+                |_| Ok("  secret  ".to_string()),
+                || prompt_optional_passphrase(None, "prompt"),
+            );
+
+            assert_eq!(value, Some("secret".to_string()));
+        }
+
+        #[test]
+        fn prompt_optional_filters_empty() {
+            let value = with_passphrase_override(
+                |_| Ok("   ".to_string()),
+                || prompt_optional_passphrase(None, "prompt"),
+            );
+
+            assert_eq!(value, None);
+        }
+
+        #[test]
+        fn prompt_required_returns_existing() {
+            let result = with_passphrase_override(
+                |_| Ok("should-not-run".to_string()),
+                || prompt_required_passphrase(Some("value".into()), "prompt", "error"),
+            );
+
+            assert_eq!(result, "value".to_string());
+        }
+
+        #[test]
+        fn prompt_required_reads_when_missing() {
+            let result = with_passphrase_override(
+                |_| Ok("new-pass".to_string()),
+                || prompt_required_passphrase(None, "prompt", "error"),
+            );
+
+            assert_eq!(result, "new-pass".to_string());
         }
     }
 }

@@ -1,4 +1,43 @@
 # Project Progress Snapshot
+> **Review (2025-10-14, evening):** Regression coverage now locks the freshly
+> handwritten TLS serializers and the JSON facade. `cli/src/tls.rs` ships
+> dedicated tests that round-trip `CliTlsWarningStatus`, snapshots, and the
+> aggregated status report through `foundation_serialization::json` while
+> asserting optional-field elision and unknown-field tolerance, preventing the
+> manual deserializers from regressing. `crates/foundation_serialization/tests/
+> json_value.rs` exercises nested objects, duplicate keys, and non-finite float
+> rejection so the manual `Value` impl stays in parity with serde’s semantics,
+> and `node/src/storage/pipeline/binary.rs` gained
+> `write_field_count_rejects_overflow` to prove the cursor guard fires when the
+> provider-profile encoder overflows. Together the suites keep the stub backend
+> honest while FIRST_PARTY_ONLY CLI runs continue to pass against the in-house
+> codec.
+> **Review (2025-10-14, afternoon):** `foundation_serde` now mirrors serde’s
+> visitor coverage for the TLS surfaces we rely on. The stub backend implements
+> option/sequence/map/tuple/array handling, `foundation_serialization::json::Value`
+> regained manual `Serialize`/`Deserialize` parity, and the CLI’s TLS structs
+> (`CliTlsWarningStatus`, snapshots, origins, status reports, and certificate
+> manifests) now ship handwritten serializers/deserializers that drop the legacy
+> derive path entirely. `FIRST_PARTY_ONLY=0 cargo test -p contract-cli --lib`
+> passes on the stub backend, exercising JSON round-trips for status, snapshot,
+> and manifest payloads. Node defaults were tightened at the same time:
+> aggregator/quic configs and storage engine selection now call the in-house
+> default helpers directly, peer reputation records reuse the shared
+> `instant_now()` guard, compute-offer telemetry normalises the reputation
+> multiplier through a first-party helper, and the storage pipeline’s binary
+> encoder checks field counts through the cursor stack so the overflow guard is
+> actually exercised. The cleanup eliminates the lingering `unused` warnings in
+> `node/src` and keeps FIRST_PARTY_ONLY checks noise-free while preserving the
+> TLS automation workflow.
+> **Review (2025-10-14, mid-morning):** Hardened terminal prompting across the
+> stack. `sys::tty` now routes passphrase reads through a generic helper that
+> unit tests exercise with in-memory streams, trimming carriage returns and
+> guaranteeing echo guards run even when stdin is not a TTY. `foundation_tui`
+> adds override hooks so CLI/tests can inject scripted responses without pulling
+> in third-party prompt crates, and `contract-cli`’s log helpers gained unit
+> tests that cover optional/required passphrase flows and whitespace handling.
+> FIRST_PARTY_ONLY builds keep interactive commands functional while the new
+> tests guard regressions.
 > **Review (2025-10-14, late night):** Restored the runtime watcher modules on
 > Linux and BSD to the first-party `sys::inotify` and `sys::kqueue` shims
 > (`crates/runtime/src/fs/watch.rs`), reinstating recursive registration,
@@ -132,6 +171,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   lives beside the providers in `crates/transport`), and the s2n backend
   verifies certificates through the new in-house DER parser
   (`crates/transport/src/cert_parser.rs`), replacing `x509-parser` entirely.
+- **Latest migrations (2025-10-14)**: The new `crates/log_index` library
+  replaces the ad-hoc SQLite helpers with a sled-backed store shared by node,
+  CLI, explorer, and monitoring tooling. `contract logs` and the
+  `log-indexer` CLI now ingest, search, and rotate keys through the crate while
+  telemetry observers emit ingestion counters per correlation ID. The optional
+  `sqlite-migration` feature only gates legacy imports, so default builds stay
+  first party end-to-end. Targeted regression suites cover plaintext,
+  encrypted, and rotation paths, skipping automatically when the
+  `foundation_serde` stub backend is selected.
 - Newly migrated storage sled codecs in
   `node/src/storage/{manifest_binary.rs,pipeline/binary.rs,fs.rs,repair.rs}`
   replace serde/binary-codec persistence with cursor helpers, broaden

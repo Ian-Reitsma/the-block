@@ -19,6 +19,7 @@ pub fn corr_id_random() -> String {
     crypto_suite::hex::encode(bytes)
 }
 
+#[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
 pub(crate) fn info_span_with_field(
     name: &'static str,
     key: &'static str,

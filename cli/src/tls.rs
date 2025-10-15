@@ -5,12 +5,16 @@ use cli_core::{
     parse::Matches,
 };
 use crypto_suite::signatures::ed25519::SigningKey;
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::{self, Map as JsonMap, Value};
+use foundation_serialization::serde::de::{self, DeserializeOwned, Visitor};
+use foundation_serialization::serde::ser::SerializeStruct;
+use foundation_serialization::serde::{Deserializer, Serializer};
 use foundation_serialization::{Deserialize, Serialize};
 use foundation_time::{Duration, UtcDateTime};
 use foundation_tls::ed25519_public_key_from_der;
 use httpd::Method;
 use std::borrow::Cow;
+use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
@@ -519,8 +523,6 @@ pub struct ServiceTarget {
     env_prefix: String,
 }
 
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
 struct ServiceManifest {
     version: u8,
     generated_at: String,
@@ -530,16 +532,11 @@ struct ServiceManifest {
     client_auth: String,
     staged_files: Vec<String>,
     env_exports: Vec<EnvExport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     renewal_timestamp: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     renewal_reminder: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     renewal_window_days: Option<u32>,
 }
 
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
 struct EnvExport {
     key: String,
     value: String,
@@ -587,6 +584,45 @@ impl FromStr for ServiceTarget {
             directory: PathBuf::from(path.trim()),
             env_prefix,
         })
+    }
+}
+
+impl Serialize for ServiceManifest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ServiceManifest", 11)?;
+        state.serialize_field("version", &self.version)?;
+        state.serialize_field("generated_at", &self.generated_at)?;
+        state.serialize_field("service", &self.service)?;
+        state.serialize_field("directory", &self.directory)?;
+        state.serialize_field("env_prefix", &self.env_prefix)?;
+        state.serialize_field("client_auth", &self.client_auth)?;
+        state.serialize_field("staged_files", &self.staged_files)?;
+        state.serialize_field("env_exports", &self.env_exports)?;
+        if let Some(timestamp) = &self.renewal_timestamp {
+            state.serialize_field("renewal_timestamp", timestamp)?;
+        }
+        if let Some(reminder) = &self.renewal_reminder {
+            state.serialize_field("renewal_reminder", reminder)?;
+        }
+        if let Some(days) = &self.renewal_window_days {
+            state.serialize_field("renewal_window_days", days)?;
+        }
+        state.end()
+    }
+}
+
+impl Serialize for EnvExport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("EnvExport", 2)?;
+        state.serialize_field("key", &self.key)?;
+        state.serialize_field("value", &self.value)?;
+        state.end()
     }
 }
 
@@ -780,14 +816,28 @@ fn parse_private_key(bytes: &[u8]) -> Result<[u8; 32], ConvertError> {
     ))
 }
 
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
 struct CertificateEntry {
     version: u8,
     algorithm: &'static str,
     public_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     not_after: Option<String>,
+}
+
+impl Serialize for CertificateEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = if self.not_after.is_some() { 4 } else { 3 };
+        let mut state = serializer.serialize_struct("CertificateEntry", field_count)?;
+        state.serialize_field("version", &self.version)?;
+        state.serialize_field("algorithm", &self.algorithm)?;
+        state.serialize_field("public_key", &self.public_key)?;
+        if let Some(not_after) = &self.not_after {
+            state.serialize_field("not_after", not_after)?;
+        }
+        state.end()
+    }
 }
 
 fn render_certificate_json(
@@ -1296,7 +1346,7 @@ fn required_option(matches: &Matches, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing required option '--{name}'"))
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 struct CliTlsWarningStatus {
     retention_seconds: u64,
     active_snapshots: usize,
@@ -1305,7 +1355,58 @@ struct CliTlsWarningStatus {
     least_recent_last_seen: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+impl Serialize for CliTlsWarningStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("CliTlsWarningStatus", 5)?;
+        state.serialize_field("retention_seconds", &self.retention_seconds)?;
+        state.serialize_field("active_snapshots", &self.active_snapshots)?;
+        state.serialize_field("stale_snapshots", &self.stale_snapshots)?;
+        state.serialize_field("most_recent_last_seen", &self.most_recent_last_seen)?;
+        state.serialize_field("least_recent_last_seen", &self.least_recent_last_seen)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CliTlsWarningStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let mut map = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(de::Error::custom(format!(
+                    "expected status object, found {other:?}"
+                )))
+            }
+        };
+
+        let retention_seconds =
+            decode_required_field::<u64, D::Error>(&mut map, "retention_seconds")?;
+        let active_snapshots =
+            decode_required_field::<usize, D::Error>(&mut map, "active_snapshots")?;
+        let stale_snapshots =
+            decode_required_field::<usize, D::Error>(&mut map, "stale_snapshots")?;
+        let most_recent_last_seen =
+            decode_nullable_field::<u64, D::Error>(&mut map, "most_recent_last_seen")?;
+        let least_recent_last_seen =
+            decode_nullable_field::<u64, D::Error>(&mut map, "least_recent_last_seen")?;
+
+        Ok(CliTlsWarningStatus {
+            retention_seconds,
+            active_snapshots,
+            stale_snapshots,
+            most_recent_last_seen,
+            least_recent_last_seen,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct CliTlsWarningSnapshot {
     prefix: String,
     code: String,
@@ -1318,21 +1419,198 @@ struct CliTlsWarningSnapshot {
     variables: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+impl Serialize for CliTlsWarningSnapshot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("CliTlsWarningSnapshot", 9)?;
+        state.serialize_field("prefix", &self.prefix)?;
+        state.serialize_field("code", &self.code)?;
+        state.serialize_field("total", &self.total)?;
+        state.serialize_field("last_delta", &self.last_delta)?;
+        state.serialize_field("last_seen", &self.last_seen)?;
+        state.serialize_field("origin", &self.origin)?;
+        state.serialize_field("peer_id", &self.peer_id)?;
+        state.serialize_field("detail", &self.detail)?;
+        state.serialize_field("variables", &self.variables)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CliTlsWarningSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let mut map = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(de::Error::custom(format!(
+                    "expected snapshot object, found {other:?}"
+                )))
+            }
+        };
+
+        let prefix = decode_required_field::<String, D::Error>(&mut map, "prefix")?;
+        let code = decode_required_field::<String, D::Error>(&mut map, "code")?;
+        let total = decode_required_field::<u64, D::Error>(&mut map, "total")?;
+        let last_delta = decode_required_field::<u64, D::Error>(&mut map, "last_delta")?;
+        let last_seen = decode_required_field::<u64, D::Error>(&mut map, "last_seen")?;
+        let origin = decode_required_field::<CliTlsWarningOrigin, D::Error>(&mut map, "origin")?;
+        let peer_id = decode_nullable_field::<String, D::Error>(&mut map, "peer_id")?;
+        let detail = decode_nullable_field::<String, D::Error>(&mut map, "detail")?;
+        let variables = decode_required_field::<Vec<String>, D::Error>(&mut map, "variables")?;
+
+        Ok(CliTlsWarningSnapshot {
+            prefix,
+            code,
+            total,
+            last_delta,
+            last_seen,
+            origin,
+            peer_id,
+            detail,
+            variables,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum CliTlsWarningOrigin {
     Diagnostics,
     PeerIngest,
 }
 
-#[derive(Debug, Serialize)]
+impl Serialize for CliTlsWarningOrigin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            CliTlsWarningOrigin::Diagnostics => serializer.serialize_str("diagnostics"),
+            CliTlsWarningOrigin::PeerIngest => serializer.serialize_str("peer_ingest"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CliTlsWarningOrigin {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct OriginVisitor;
+
+        impl<'de> Visitor<'de> for OriginVisitor {
+            type Value = CliTlsWarningOrigin;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("diagnostics or peer_ingest")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value {
+                    "diagnostics" => Ok(CliTlsWarningOrigin::Diagnostics),
+                    "peer_ingest" => Ok(CliTlsWarningOrigin::PeerIngest),
+                    other => Err(E::unknown_variant(other, &["diagnostics", "peer_ingest"])),
+                }
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&value)
+            }
+        }
+
+        deserializer.deserialize_str(OriginVisitor)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct CliTlsStatusReport {
     aggregator: String,
     status: CliTlsWarningStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
     snapshots: Option<Vec<CliTlsWarningSnapshot>>,
     suggestions: Vec<String>,
     generated_at: u64,
+}
+
+impl Serialize for CliTlsStatusReport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = if self.snapshots.is_some() { 5 } else { 4 };
+        let mut state = serializer.serialize_struct("CliTlsStatusReport", field_count)?;
+        state.serialize_field("aggregator", &self.aggregator)?;
+        state.serialize_field("status", &self.status)?;
+        if let Some(snapshots) = &self.snapshots {
+            state.serialize_field("snapshots", snapshots)?;
+        }
+        state.serialize_field("suggestions", &self.suggestions)?;
+        state.serialize_field("generated_at", &self.generated_at)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CliTlsStatusReport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let mut map = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(de::Error::custom(format!(
+                    "expected status report object, found {other:?}"
+                )))
+            }
+        };
+
+        let aggregator = decode_required_field::<String, D::Error>(&mut map, "aggregator")?;
+        let status = decode_required_field::<CliTlsWarningStatus, D::Error>(&mut map, "status")?;
+        let snapshots =
+            decode_nullable_field::<Vec<CliTlsWarningSnapshot>, D::Error>(&mut map, "snapshots")?;
+        let suggestions = decode_required_field::<Vec<String>, D::Error>(&mut map, "suggestions")?;
+        let generated_at = decode_required_field::<u64, D::Error>(&mut map, "generated_at")?;
+
+        Ok(CliTlsStatusReport {
+            aggregator,
+            status,
+            snapshots,
+            suggestions,
+            generated_at,
+        })
+    }
+}
+
+fn decode_required_field<T, E>(map: &mut JsonMap, key: &'static str) -> Result<T, E>
+where
+    T: DeserializeOwned,
+    E: de::Error,
+{
+    let value = map.remove(key).ok_or_else(|| E::missing_field(key))?;
+    json::from_value(value).map_err(|err| E::custom(format!("failed to decode '{key}': {err}")))
+}
+
+fn decode_nullable_field<T, E>(map: &mut JsonMap, key: &'static str) -> Result<Option<T>, E>
+where
+    T: DeserializeOwned,
+    E: de::Error,
+{
+    match map.remove(key) {
+        Some(value) => json::from_value::<Option<T>>(value)
+            .map_err(|err| E::custom(format!("failed to decode '{key}': {err}"))),
+        None => Ok(None),
+    }
 }
 
 fn status_tls(
@@ -1662,16 +1940,38 @@ fn current_unix_timestamp() -> u64 {
     }
 }
 
-#[derive(Serialize)]
 struct AnchorEntry<'a> {
     version: u8,
     allowed: Vec<AnchorIdentity<'a>>,
 }
 
-#[derive(Serialize)]
 struct AnchorIdentity<'a> {
     algorithm: &'a str,
     public_key: String,
+}
+
+impl<'a> Serialize for AnchorEntry<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("AnchorEntry", 2)?;
+        state.serialize_field("version", &self.version)?;
+        state.serialize_field("allowed", &self.allowed)?;
+        state.end()
+    }
+}
+
+impl<'a> Serialize for AnchorIdentity<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("AnchorIdentity", 2)?;
+        state.serialize_field("algorithm", &self.algorithm)?;
+        state.serialize_field("public_key", &self.public_key)?;
+        state.end()
+    }
 }
 
 #[derive(Debug)]
@@ -1708,6 +2008,7 @@ impl std::error::Error for ConvertError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foundation_serialization::json::{self, Value as JsonValue};
     use foundation_time::{Duration, UtcDateTime};
     use foundation_tls::{generate_self_signed_ed25519, SelfSignedCertParams};
     use rand::rngs::OsRng;
@@ -1725,6 +2026,109 @@ mod tests {
         let json = render_certificate_json(&verifying.to_bytes(), None).expect("render cert");
         let parsed = parse_certificate(&json).expect("parse certificate");
         assert_eq!(parsed, verifying.to_bytes());
+    }
+
+    #[test]
+    fn certificate_entry_omits_not_after_when_absent() {
+        let entry = CertificateEntry {
+            version: 1,
+            algorithm: "ed25519",
+            public_key: "base64".into(),
+            not_after: None,
+        };
+
+        let rendered = json::to_value(&entry).expect("serialize entry");
+        let object = rendered.as_object().expect("object value");
+        assert!(object.get("not_after").is_none());
+        assert_eq!(
+            object.get("algorithm").and_then(JsonValue::as_str),
+            Some("ed25519")
+        );
+    }
+
+    #[test]
+    fn tls_status_report_round_trips_through_json() {
+        let status = CliTlsWarningStatus {
+            retention_seconds: 600,
+            active_snapshots: 2,
+            stale_snapshots: 1,
+            most_recent_last_seen: Some(1_000),
+            least_recent_last_seen: None,
+        };
+
+        let snapshot = CliTlsWarningSnapshot {
+            prefix: "TB_NODE_TLS".into(),
+            code: "missing_anchor".into(),
+            total: 4,
+            last_delta: 2,
+            last_seen: 995,
+            origin: CliTlsWarningOrigin::PeerIngest,
+            peer_id: Some("peer-b".into()),
+            detail: Some("anchor missing".into()),
+            variables: vec!["TB_NODE_CERT".into(), "TB_NODE_KEY".into()],
+        };
+
+        let report = CliTlsStatusReport {
+            aggregator: "https://agg".into(),
+            status: status.clone(),
+            snapshots: Some(vec![snapshot.clone()]),
+            suggestions: vec!["rotate anchors".into()],
+            generated_at: 1_111,
+        };
+
+        let encoded = json::to_vec(&report).expect("serialize report");
+        let decoded: CliTlsStatusReport = json::from_slice(&encoded).expect("deserialize report");
+        assert_eq!(decoded, report);
+        assert_eq!(decoded.snapshots.unwrap()[0], snapshot);
+    }
+
+    #[test]
+    fn tls_snapshot_deserializer_ignores_unknown_fields() {
+        let payload = foundation_serialization::json!({
+            "prefix": "TB_GATEWAY_TLS",
+            "code": "expired_certificate",
+            "total": 3,
+            "last_delta": 1,
+            "last_seen": 88,
+            "origin": "diagnostics",
+            "peer_id": null,
+            "detail": "expired",
+            "variables": ["TB_GATEWAY_CERT"],
+            "unexpected": "value"
+        });
+
+        let encoded = json::to_vec(&payload).expect("encode payload");
+        let snapshot: CliTlsWarningSnapshot =
+            json::from_slice(&encoded).expect("deserialize snapshot");
+        assert_eq!(snapshot.prefix, "TB_GATEWAY_TLS");
+        assert_eq!(snapshot.origin, CliTlsWarningOrigin::Diagnostics);
+        assert_eq!(snapshot.variables, vec![String::from("TB_GATEWAY_CERT")]);
+        assert!(snapshot.peer_id.is_none());
+    }
+
+    #[test]
+    fn status_serialization_omits_optional_snapshots_field() {
+        let report = CliTlsStatusReport {
+            aggregator: "https://agg".into(),
+            status: CliTlsWarningStatus {
+                retention_seconds: 900,
+                active_snapshots: 0,
+                stale_snapshots: 0,
+                most_recent_last_seen: None,
+                least_recent_last_seen: None,
+            },
+            snapshots: None,
+            suggestions: vec![],
+            generated_at: 22,
+        };
+
+        let value = json::to_value(&report).expect("serialize");
+        let object = value.as_object().expect("object");
+        assert!(!object.contains_key("snapshots"));
+        assert_eq!(
+            object.get("aggregator").and_then(JsonValue::as_str),
+            Some("https://agg")
+        );
     }
 
     #[test]

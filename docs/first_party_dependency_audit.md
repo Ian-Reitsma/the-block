@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-14 06:00:00Z_
+_Last updated: 2025-10-14 10:45:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -127,6 +127,13 @@ tests while the module is phased out.
   `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` to pass for
   both `sys` and `runtime`. Remaining `mio` references live only behind legacy
   tokio consumers slated for follow-up migration.
+- ✅ Terminal prompting now has first-party coverage: `sys::tty` exposes a
+  generic passphrase reader that unit tests exercise with in-memory streams,
+  `foundation_tui::prompt` adds override hooks so downstream crates can inject
+  scripted responses, and the CLI `logs` helpers now include unit tests that
+  validate optional/required prompting without depending on external crates.
+  Together they keep FIRST_PARTY_ONLY builds interactive-friendly while
+  ensuring prompt behaviour is regression-tested.
 
 ### Tooling & Support Crate Migrations (2025-10-12)
 
@@ -151,13 +158,13 @@ tests while the module is phased out.
 - ✅ `crates/probe` emits RPC payloads through the in-house `json!` macro, and
   `crates/wallet` (including the remote signer tests) round-trips signer
   messages with the same facade.
-- ✅ Introduced the `foundation_sqlite` facade so CLI, explorer, and log/indexer
-  tooling share first-party parameter/value handling. The facade defaults to the
-  `rusqlite` engine but exposes a stub backend for `FIRST_PARTY_ONLY` builds
-  while we bring up a native store. The diagnostics crate no longer depends on
-  the facade (or `foundation_sqlite`) after moving its storage emitters to pure
-  in-house telemetry, so FIRST_PARTY_ONLY builds now link the diagnostics
-  helpers without any SQLite shims.
+- ✅ Replaced the ad-hoc SQLite log tooling with the sled-backed
+  `log_index` crate. CLI, node, explorer, and telemetry utilities now share the
+  first-party store for ingestion, search, and key rotation, while the
+  optional `sqlite-migration` feature only gates legacy imports through the
+  `foundation_sqlite` facade. Diagnostics dropped the facade entirely once its
+  emitters moved to pure telemetry, so FIRST_PARTY_ONLY builds no longer link
+  SQLite shims.
 - ✅ `crates/storage_engine` now ships an in-house JSON codec and temp-file
   harness (`json.rs`, `tempfile.rs`) that replace the old
   `foundation_serialization`/`serde` parsing layers and the `sys::tempfile`
@@ -178,6 +185,31 @@ tests while the module is phased out.
 - ✅ `crates/codec` now wraps the facade’s JSON implementation and ships a
   first-party binary profile, removing the lingering `serde_cbor` dependency
   from production crates.
+- ✅ Expanded the `foundation_serde` stub backend with first-class coverage for
+  primitives, options, tuples, collections, and enum variants so CLI and node
+  crates compile cleanly under `FIRST_PARTY_ONLY=1`. The derive macros now
+  pattern-match on structures to mark every field as used, and a compile test
+  (`crates/foundation_serde/tests/deny_warnings.rs`) runs with `#![deny(warnings)]`
+  to guarantee the stub keeps pace with production derives.
+- ✅ Replaced the CLI’s `rpassword` prompt with the in-house
+  `foundation_tui::prompt` module backed by cross-platform `sys::tty`
+  primitives. Passphrase prompts now disable terminal echo via first-party
+  termios/console bindings, eliminating the final third-party input dependency
+  in the log tooling and keeping rotation/search flows usable in
+  FIRST_PARTY_ONLY builds.
+- ✅ `foundation_serde`’s stub backend now mirrors serde’s option/sequence/map/
+  tuple/array coverage, and `foundation_serialization::json::Value` has manual
+  serde parity. The CLI’s TLS warning/status/certificate structs were rewritten
+  with handwritten serializers/deserializers so the TLS convert/stage/status
+  flows no longer depend on derive macros, and
+  `FIRST_PARTY_ONLY=0 cargo test -p contract-cli --lib` now runs entirely on the
+  stub backend.
+- ✅ Regression coverage now guards those manual codecs: `cli/src/tls.rs` includes
+  JSON round-trip tests for warning status/snapshot/report payloads, the
+  `crates/foundation_serialization/tests/json_value.rs` suite exercises nested
+  structures, duplicate keys, and non-finite float rejection, and
+  `node/src/storage/pipeline/binary.rs` gained
+  `write_field_count_rejects_overflow` to prove the encoder’s guard path fires.
 - ✅ `crates/light-client` device telemetry and state snapshot metrics now feed
   the in-house `runtime::telemetry` registry, removing the optional
   `prometheus` dependency and updating regression tests to assert against the

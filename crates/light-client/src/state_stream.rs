@@ -591,6 +591,7 @@ mod proof_serde {
     };
     use std::fmt;
 
+    #[allow(dead_code)]
     pub fn serialize<S>(proof: &Proof, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -602,6 +603,7 @@ mod proof_serde {
         seq.end()
     }
 
+    #[allow(dead_code)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Proof, D::Error>
     where
         D: Deserializer<'de>,

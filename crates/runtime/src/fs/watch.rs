@@ -72,7 +72,7 @@ impl Watcher {
 
 #[cfg(feature = "inhouse-backend")]
 mod inhouse {
-    use super::{RecursiveMode, WatchEvent, WatchEventKind};
+    use super::{io, RecursiveMode, WatchEvent, WatchEventKind};
     #[cfg(any(
         target_os = "linux",
         target_os = "macos",

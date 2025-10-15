@@ -764,7 +764,7 @@ impl Default for PeerReputation {
     fn default() -> Self {
         Self {
             score: 1.0,
-            last_decay: Instant::now(),
+            last_decay: instant_now(),
         }
     }
 }

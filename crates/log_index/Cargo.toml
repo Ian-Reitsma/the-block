@@ -1,0 +1,22 @@
+[package]
+name = "log_index"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+sqlite-migration = ["dep:foundation_sqlite"]
+telemetry = []
+
+[dependencies]
+base64_fp = { path = "../base64_fp" }
+coding = { path = "../coding" }
+crypto_suite = { path = "../crypto_suite" }
+foundation_serialization = { path = "../foundation_serialization" }
+sled = { path = "../../sled" }
+thiserror = { path = "../thiserror" }
+serde = { workspace = true }
+
+[dependencies.foundation_sqlite]
+path = "../foundation_sqlite"
+optional = true

@@ -189,7 +189,7 @@ impl Default for OverlayConfig {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AggregatorConfig {
     pub url: String,
     pub auth_token: String,
@@ -197,6 +197,17 @@ pub struct AggregatorConfig {
     pub srv_record: Option<String>,
     #[serde(default = "default_retention_secs")]
     pub retention_secs: u64,
+}
+
+impl Default for AggregatorConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            auth_token: String::new(),
+            srv_record: None,
+            retention_secs: default_retention_secs(),
+        }
+    }
 }
 
 fn default_retention_secs() -> u64 {
@@ -571,7 +582,7 @@ pub struct RpcConfig {
     pub relay_only: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct QuicConfig {
     pub port: u16,
     pub cert_path: String,
@@ -580,6 +591,18 @@ pub struct QuicConfig {
     pub cert_ttl_days: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub transport: QuicTransportConfig,
+}
+
+impl Default for QuicConfig {
+    fn default() -> Self {
+        Self {
+            port: 0,
+            cert_path: String::new(),
+            key_path: String::new(),
+            cert_ttl_days: default_cert_ttl_days(),
+            transport: QuicTransportConfig::default(),
+        }
+    }
 }
 
 fn default_cert_ttl_days() -> u64 {

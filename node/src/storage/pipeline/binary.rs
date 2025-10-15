@@ -29,9 +29,11 @@ impl fmt::Display for EncodeError {
 impl std::error::Error for EncodeError {}
 
 /// Encode a [`ProviderProfile`] using the legacy binary layout.
+const PROFILE_FIELD_COUNT: usize = 13;
+
 pub fn encode_provider_profile(profile: &ProviderProfile) -> EncodeResult<Vec<u8>> {
     let mut writer = Writer::new();
-    writer.write_u64(13);
+    write_field_count(&mut writer, PROFILE_FIELD_COUNT)?;
     writer.write_string("bw_ewma");
     writer.write_f64(profile.bw_ewma);
     writer.write_string("rtt_ewma");
@@ -59,6 +61,20 @@ pub fn encode_provider_profile(profile: &ProviderProfile) -> EncodeResult<Vec<u8
     writer.write_string("maintenance");
     writer.write_bool(profile.maintenance);
     Ok(writer.finish())
+}
+
+fn write_field_count(writer: &mut Writer, count: usize) -> EncodeResult<()> {
+    let len = convert_field_count(count as u128)?;
+    writer.write_u64(len);
+    Ok(())
+}
+
+fn convert_field_count(count: u128) -> EncodeResult<u64> {
+    if count > u64::MAX as u128 {
+        Err(EncodeError::LengthOverflow("profile_fields"))
+    } else {
+        Ok(count as u64)
+    }
 }
 
 /// Decode a [`ProviderProfile`] from the legacy binary layout.
@@ -242,6 +258,15 @@ mod tests {
         assert_eq!(decoded.last_upload_bytes, 0);
         assert_eq!(decoded.last_upload_secs, 0.0);
         assert!(!decoded.maintenance);
+    }
+
+    #[test]
+    fn write_field_count_rejects_overflow() {
+        let err =
+            super::convert_field_count(u64::MAX as u128 + 1).expect_err("overflow must error");
+        match err {
+            EncodeError::LengthOverflow(field) => assert_eq!(field, "profile_fields"),
+        }
     }
 
     tb_prop_test!(provider_profile_roundtrip_randomized, |runner| {

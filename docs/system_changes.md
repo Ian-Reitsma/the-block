@@ -1,4 +1,36 @@
 # System-Wide Economic Changes
+> **Review (2025-10-14, afternoon):** Serialization for TLS operations is fully
+> first-party. The `foundation_serde` stub backend now mirrors serde’s visitor
+> hierarchy (options, tuples, arrays, maps, sequences),
+> `foundation_serialization::json::Value` implements manual serde parity, and
+> the CLI’s TLS types were rewritten with handwritten serializers/deserializers
+> that respect the historic snake-case/origin rules while skipping optional
+> fields manually. As a result the TLS manifest/status workflows round-trip
+> cleanly on FIRST_PARTY_ONLY builds and the CLI’s TLS test suite passes without
+> third-party derives. Supporting cleanup tightened node defaults: aggregator
+> and QUIC configs call the shared default helpers, engine selection uses the
+> same `default_engine_kind()` hook we expose to serde, peer reputation records
+> now seed timers via `instant_now()`, compute-market offers expose an
+> `effective_reputation_multiplier()` helper, and the storage pipeline’s binary
+> encoder validates field counts through the cursor helpers so `LengthOverflow`
+> is exercised instead of sitting dormant. These changes eliminate the lingering
+> dead-code/unnecessary-import warnings in `node/src`, keeping guard runs and
+> CI noise-free while preserving the TLS automation introduced earlier in the
+> week. Follow-up regression tests now lock those paths in place:
+> `cli/src/tls.rs` adds JSON round-trip coverage for warning status/snapshot
+> payloads, `crates/foundation_serialization/tests/json_value.rs` verifies the
+> manual `Value` encoder handles nested objects and non-finite float rejection,
+> and `node/src/storage/pipeline/binary.rs` exercises the overflow guard via
+> `write_field_count_rejects_overflow` so future encoder tweaks stay audited.
+> **Review (2025-10-14, mid-morning):** Terminal prompting now runs fully on
+> first-party code with regression coverage. `sys::tty` routes passphrase reads
+> through a reusable helper that toggles echo guards and trims trailing CR/LF,
+> and the module picked up unit tests that drive the logic via in-memory
+> streams. `foundation_tui::prompt` layers override hooks so downstream crates
+> can inject scripted responses, and `contract-cli`’s log flows now include unit
+> tests that exercise optional/required prompting without third-party
+> dependencies. Together they keep FIRST_PARTY_ONLY builds interactive-friendly
+> while guarding regressions.
 > **Review (2025-10-14, late night):** Runtime watchers across Linux, BSD, and
 > Windows now sit entirely on the new first-party surfaces. `crates/runtime/src/fs/watch.rs`
 > reintroduces the inotify and kqueue modules atop `sys::inotify`/`sys::kqueue`
@@ -722,6 +754,40 @@ This living document chronicles every deliberate shift in The‑Block's protocol
   disabling the feature.
 - Follow-up work will replace the stub with a native engine so
   `FIRST_PARTY_ONLY=1` builds succeed end-to-end.
+
+## First-Party Log Store (2025-10-14)
+
+### Rationale
+
+- **SQLite retirement:** The log indexer and CLI now default to the
+  sled-backed `log_index::LogStore`, removing the final runtime dependency on
+  SQLite while preserving optional migrations for historical archives.
+- **Shared ingestion/search code:** Tooling previously duplicated ingestion,
+  encryption, and pagination logic. Consolidating the flow into a single crate
+  ensures CLI, node, explorer, and monitoring surfaces stay in lockstep while
+  telemetry hooks track ingestion outcomes per correlation ID.
+
+### Implementation Summary
+
+- Added `crates/log_index` with sled-backed storage, ingest/seek helpers,
+  optional encryption, legacy SQLite migration shims (behind the
+  `sqlite-migration` feature), and rotate-key utilities.
+- Rebuilt `tools/log_indexer.rs`, `contract logs`, and the node/explorer
+  integrations on top of the crate, wiring observer callbacks into telemetry
+  counters and normalising environment fallbacks (`--db`, `TB_LOG_STORE_PATH`,
+  `TB_LOG_DB_PATH`).
+- Extended unit tests to cover plaintext, encrypted, and rotate-key flows while
+  skipping automatically when the `foundation_serde` stub backend is active.
+
+### Operator & Developer Impact
+
+- Default builds ship a fully first-party log store with key rotation and
+  telemetry hooks. Operators only enable the `sqlite-migration` feature when
+  importing legacy databases.
+- Tooling picks up consistent command/help text and environment overrides,
+  simplifying runbook updates and preventing drift between CLI and REST flows.
+- The shared crate exposes a stable API for future dashboards or automation to
+  embed log ingestion/search without re-implementing storage glue.
 
 ## Foundation Time Facade (2025-10-10)
 

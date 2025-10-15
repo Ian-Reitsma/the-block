@@ -112,6 +112,15 @@ impl Offer {
         }
         Ok(())
     }
+
+    fn effective_reputation_multiplier(&self) -> f64 {
+        let baseline = default_multiplier();
+        if self.reputation_multiplier == 0.0 {
+            baseline
+        } else {
+            self.reputation_multiplier
+        }
+    }
 }
 
 fn default_multiplier() -> f64 {
@@ -339,7 +348,7 @@ impl Market {
             offer.capability.clone(),
             offer.reputation,
             offer.price_per_unit,
-            offer.reputation_multiplier,
+            offer.effective_reputation_multiplier(),
         );
         self.offers.insert(offer.job_id.clone(), offer);
         Ok(())
@@ -413,10 +422,11 @@ impl Market {
         price_board::record_price(
             FeeLane::Industrial,
             offer.price_per_unit,
-            offer.reputation_multiplier,
+            offer.effective_reputation_multiplier(),
         );
         #[cfg(feature = "telemetry")]
-        let effective = (offer.price_per_unit as f64 * offer.reputation_multiplier).round() as u64;
+        let effective =
+            (offer.price_per_unit as f64 * offer.effective_reputation_multiplier()).round() as u64;
         #[cfg(feature = "telemetry")]
         telemetry::SCHEDULER_EFFECTIVE_PRICE
             .ensure_handle_for_label_values(&[&offer.provider])

@@ -34,6 +34,18 @@ pub mod error {
     impl std::error::Error for SysError {}
 
     pub type Result<T> = std::result::Result<T, SysError>;
+
+    impl From<SysError> for io::Error {
+        fn from(value: SysError) -> Self {
+            match value {
+                SysError::Io(err) => err,
+                SysError::Unsupported(feature) => io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!("feature {feature} is not yet implemented"),
+                ),
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -43,6 +55,19 @@ mod unix_ffi {
     pub const STDIN_FILENO: c_int = 0;
     pub const STDOUT_FILENO: c_int = 1;
     pub const TIOCGWINSZ: c_ulong = 0x5413;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub const TCSANOW: c_int = 0;
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    pub const TCSANOW: c_int = 0;
 
     pub const SIGHUP: c_int = 1;
 
@@ -59,6 +84,69 @@ mod unix_ffi {
     pub const LOCK_EX: c_int = 2;
 
     const SIGSET_WORDS: usize = 16;
+
+    #[allow(non_camel_case_types)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub type cc_t = u8;
+    #[allow(non_camel_case_types)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub type speed_t = c_uint;
+    #[allow(non_camel_case_types)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub type tcflag_t = c_uint;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub const NCCS: usize = 32;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub const ECHO: tcflag_t = 0x0000_0008;
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    #[allow(non_camel_case_types)]
+    pub type cc_t = u8;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    #[allow(non_camel_case_types)]
+    pub type speed_t = c_ulong;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    #[allow(non_camel_case_types)]
+    pub type tcflag_t = c_ulong;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    pub const NCCS: usize = 20;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    pub const ECHO: tcflag_t = 0x0000_0008;
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -93,6 +181,40 @@ mod unix_ffi {
         _private: [u8; 128],
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct termios {
+        pub c_iflag: tcflag_t,
+        pub c_oflag: tcflag_t,
+        pub c_cflag: tcflag_t,
+        pub c_lflag: tcflag_t,
+        pub c_line: cc_t,
+        pub c_cc: [cc_t; NCCS],
+        pub c_ispeed: speed_t,
+        pub c_ospeed: speed_t,
+    }
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct termios {
+        pub c_iflag: tcflag_t,
+        pub c_oflag: tcflag_t,
+        pub c_cflag: tcflag_t,
+        pub c_lflag: tcflag_t,
+        pub c_cc: [cc_t; NCCS],
+        pub c_ispeed: speed_t,
+        pub c_ospeed: speed_t,
+    }
+
     #[repr(C)]
     pub struct winsize {
         pub ws_row: c_uint,
@@ -108,6 +230,8 @@ mod unix_ffi {
         pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
         pub fn write(fd: c_int, buf: *const c_void, count: usize) -> isize;
         pub fn flock(fd: c_int, operation: c_int) -> c_int;
+        pub fn tcgetattr(fd: c_int, termios_p: *mut termios) -> c_int;
+        pub fn tcsetattr(fd: c_int, optional_actions: c_int, termios_p: *const termios) -> c_int;
         #[cfg(test)]
         pub fn raise(sig: c_int) -> c_int;
     }
@@ -115,6 +239,7 @@ mod unix_ffi {
     pub use self::sigaction as SigAction;
     pub use self::siginfo_t as SigInfo;
     pub use self::sigset_t as SigSet;
+    pub use self::termios as Termios;
     pub use self::winsize as WinSize;
 }
 
@@ -638,7 +763,8 @@ pub mod random {
 }
 
 pub mod tty {
-    use std::io::{self, IsTerminal};
+    use crate::error::{Result, SysError};
+    use std::io::{self, BufRead, IsTerminal, Write};
 
     #[cfg(unix)]
     pub fn dimensions() -> Option<(u16, u16)> {
@@ -683,6 +809,209 @@ pub mod tty {
     /// Returns `true` when standard input is connected to a terminal.
     pub fn stdin_is_terminal() -> bool {
         io::stdin().is_terminal()
+    }
+
+    /// Prompt for a passphrase while disabling terminal echo when supported.
+    pub fn read_passphrase(prompt: &str) -> Result<String> {
+        read_passphrase_internal(prompt)
+    }
+
+    fn read_passphrase_internal(prompt: &str) -> Result<String> {
+        let stdin = io::stdin();
+        let stderr = io::stderr();
+        let mut reader = stdin.lock();
+        let mut writer = stderr.lock();
+        read_passphrase_with(prompt, &mut reader, &mut writer, EchoGuard::activate)
+    }
+
+    fn read_passphrase_with<R, W, G, Guard>(
+        prompt: &str,
+        reader: &mut R,
+        writer: &mut W,
+        guard: G,
+    ) -> Result<String>
+    where
+        R: BufRead,
+        W: Write,
+        G: FnOnce() -> Result<Guard>,
+    {
+        writer
+            .write_all(prompt.as_bytes())
+            .map_err(SysError::from)?;
+        writer.flush().map_err(SysError::from)?;
+
+        let guard = guard()?;
+
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(SysError::from)?;
+
+        drop(guard);
+
+        // Restore a consistent newline for the caller and separate the prompt.
+        writer.write_all(b"\n").map_err(SysError::from)?;
+        writer.flush().map_err(SysError::from)?;
+
+        while matches!(line.chars().last(), Some('\n') | Some('\r')) {
+            line.pop();
+        }
+
+        Ok(line)
+    }
+
+    struct EchoGuard {
+        #[cfg(unix)]
+        _unix: Option<UnixEchoGuard>,
+        #[cfg(windows)]
+        _windows: Option<WindowsEchoGuard>,
+    }
+
+    impl EchoGuard {
+        fn activate() -> Result<Self> {
+            Ok(Self {
+                #[cfg(unix)]
+                _unix: unix_guard()?,
+                #[cfg(windows)]
+                _windows: windows_guard()?,
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    struct UnixEchoGuard {
+        fd: std::os::fd::RawFd,
+        previous: crate::unix_ffi::Termios,
+    }
+
+    #[cfg(unix)]
+    impl Drop for UnixEchoGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ =
+                    crate::unix_ffi::tcsetattr(self.fd, crate::unix_ffi::TCSANOW, &self.previous);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn unix_guard() -> Result<Option<UnixEchoGuard>> {
+        use std::mem::MaybeUninit;
+        use std::os::fd::AsRawFd;
+
+        if !stdin_is_terminal() {
+            return Ok(None);
+        }
+
+        let stdin = io::stdin();
+        let fd = stdin.as_raw_fd();
+        let mut current = MaybeUninit::<crate::unix_ffi::Termios>::uninit();
+        unsafe {
+            if crate::unix_ffi::tcgetattr(fd, current.as_mut_ptr()) != 0 {
+                return Err(SysError::from(io::Error::last_os_error()));
+            }
+            let mut current = current.assume_init();
+            let previous = current;
+            current.c_lflag &= !crate::unix_ffi::ECHO;
+            if crate::unix_ffi::tcsetattr(fd, crate::unix_ffi::TCSANOW, &current) != 0 {
+                return Err(SysError::from(io::Error::last_os_error()));
+            }
+            Ok(Some(UnixEchoGuard { fd, previous }))
+        }
+    }
+
+    #[cfg(windows)]
+    struct WindowsEchoGuard {
+        handle: std::os::windows::io::RawHandle,
+        previous_mode: u32,
+    }
+
+    #[cfg(windows)]
+    impl Drop for WindowsEchoGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = windows::SetConsoleMode(self.handle as isize, self.previous_mode);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn windows_guard() -> Result<Option<WindowsEchoGuard>> {
+        use std::os::windows::io::AsRawHandle;
+
+        if !stdin_is_terminal() {
+            return Ok(None);
+        }
+
+        let stdin = io::stdin();
+        let handle = stdin.as_raw_handle();
+        unsafe {
+            let mut mode = 0u32;
+            if windows::GetConsoleMode(handle as isize, &mut mode) == 0 {
+                return Ok(None);
+            }
+            let new_mode = mode & !windows::ENABLE_ECHO_INPUT;
+            if new_mode == mode {
+                return Ok(Some(WindowsEchoGuard {
+                    handle,
+                    previous_mode: mode,
+                }));
+            }
+            if windows::SetConsoleMode(handle as isize, new_mode) == 0 {
+                return Err(SysError::from(io::Error::last_os_error()));
+            }
+            Ok(Some(WindowsEchoGuard {
+                handle,
+                previous_mode: mode,
+            }))
+        }
+    }
+
+    #[cfg(windows)]
+    mod windows {
+        pub const ENABLE_ECHO_INPUT: u32 = 0x0004;
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            pub fn GetConsoleMode(handle: isize, mode: *mut u32) -> i32;
+            pub fn SetConsoleMode(handle: isize, mode: u32) -> i32;
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::cell::Cell;
+        use std::io::Cursor;
+
+        #[test]
+        fn read_passphrase_trims_newlines() {
+            let mut output = Vec::new();
+            let mut input = Cursor::new(b"secret\r\n".as_slice());
+            let invoked = Cell::new(false);
+            let guard = || {
+                invoked.set(true);
+                Result::<()>::Ok(())
+            };
+
+            let result = read_passphrase_with("Prompt: ", &mut input, &mut output, guard)
+                .expect("passphrase");
+
+            assert_eq!(result, "secret");
+            assert!(invoked.get());
+            assert_eq!(output, b"Prompt: \n");
+        }
+
+        #[test]
+        fn read_passphrase_allows_empty_input() {
+            let mut output = Vec::new();
+            let mut input = Cursor::new(b"\n".as_slice());
+            let guard = || Result::<()>::Ok(());
+
+            let result = read_passphrase_with("Prompt: ", &mut input, &mut output, guard)
+                .expect("passphrase");
+
+            assert_eq!(result, "");
+            assert_eq!(output, b"Prompt: \n");
+        }
     }
 }
 

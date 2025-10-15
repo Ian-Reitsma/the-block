@@ -11,7 +11,6 @@ governance = { path = "../governance" }
 bridges = { path = "../bridges" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
-foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
 serde = { workspace = true }
 dkg = { path = "../dkg", optional = true }
 diagnostics = { path = "../crates/diagnostics" }
@@ -24,7 +23,7 @@ crypto_suite = { path = "../crates/crypto_suite" }
 codec = { path = "../crates/codec" }
 cli_core = { path = "../crates/cli_core" }
 base64_fp = { path = "../crates/base64_fp" }
-rpassword = "7"
+foundation_tui = { path = "../crates/foundation_tui" }
 rand = { path = "../crates/rand" }
 sys = { path = "../crates/sys" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
@@ -34,6 +33,7 @@ coding = { path = "../crates/coding" }
 http_env = { path = "../crates/http_env" }
 foundation_tls = { path = "../crates/foundation_tls" }
 foundation_time = { path = "../crates/foundation_time" }
+log_index = { path = "../crates/log_index" }
 
 [features]
 default = []
@@ -42,10 +42,11 @@ quantum = ["wallet", "the_block/pq-crypto"]
 pq-crypto = ["quantum"]
 telemetry = ["the_block/telemetry"]
 wasm-metadata = []
-sqlite-storage = ["dep:foundation_sqlite"]
+sqlite-storage = ["log_index/sqlite-migration"]
 full = ["sqlite-storage"]
 
 [dev-dependencies]
+foundation_tui = { path = "../crates/foundation_tui", features = ["test-support"] }
 testkit = { path = "../crates/testkit" }
 
 [build-dependencies]

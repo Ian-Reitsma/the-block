@@ -277,7 +277,7 @@ Mainnet readiness sits at **98.3/100** with vision completion **93.3/100**.
   cached diagnostics via `net.quic_stats`/`blockctl net quic stats`, and TCP fallback; fanout selects
   per-peer transport while chaos tooling surfaces retransmit spikes and the metrics-to-logs pipeline dumps offending sessions automatically.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows. The synchronization model and security trade-offs are described in [docs/light_client.md](docs/light_client.md).
-- SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST. DID anchors feed a dedicated `did_records` table, REST endpoints (`/dids`, `/identity/dids/:address`, `/dids/metrics/anchor_rate`), and an explorer view for cross-navigation with wallet addresses.
+- First-party sled-backed log indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local log store that the explorer queries over REST. DID anchors feed a dedicated `did_records` table, REST endpoints (`/dids`, `/identity/dids/:address`, `/dids/metrics/anchor_rate`), and an explorer view for cross-navigation with wallet addresses. A migration helper behind the `sqlite-migration` feature imports legacy SQLite snapshots before returning to the pure sled path.
 - Incremental log indexer tracks ingest offsets, supports encrypted key rotation,
   serves REST/WebSocket searches, and ships with CLI tooling for live correlation.
 - Explorer release timeline API, schema, and CLI surfacing proposer addresses,
@@ -744,17 +744,18 @@ coding, crypto, and codec crates.
 exclusively through the `foundation_serialization` facade—first-party JSON, binary,
 TOML, and base58 helpers replaced every remaining `serde_json`/`bincode` call in these
 production crates. The in-house base58 encoder also supplanted `bs58` across the
-workspace. Explorer, CLI, and log/indexer SQLite flows now ride the new
-`foundation_sqlite` facade so optional tooling compiles behind a first-party API
-even as the native backend is staged, and runtime/tooling timestamp paths now depend
-on the `foundation_time` facade so S3 signing, storage repair logging, and QUIC
+workspace. Explorer, CLI, and log tooling now consume the sled-backed
+`log_index` crate by default, so indexed search, key rotation, and migrations run on
+first-party storage with telemetry hooks while the optional
+`sqlite-migration` feature only gates legacy imports. Runtime/tooling timestamp paths
+depend on the `foundation_time` facade so S3 signing, storage repair logging, and QUIC
 certificate rotation avoid direct `time` usage. Terminal colour output for the
 network CLI now routes through the new `foundation_tui` crate so the workspace no
 longer links the third-party `colored` dependency. Residual serde_json/bincode
 dependencies live in tooling (`tools/*`, `sim/`, `examples/`) and are tracked in
-`docs/pivot_dependency_strategy.md` with assigned owners; removing them and delivering
-the in-house SQLite engine are the next dependency-guard milestones before we can ban
-the crates globally.
+`docs/pivot_dependency_strategy.md` with assigned owners; removing them and finalising
+the remaining facade rollouts are the next dependency-guard milestones before we can
+ban the crates globally.
 
 ### Staged Rollout Plan (At a Glance)
 

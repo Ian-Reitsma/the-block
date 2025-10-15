@@ -33,16 +33,16 @@ $ cargo run --release --manifest-path tools/log_indexer_cli/Cargo.toml -- index 
 ```
 
 The indexer now persists each entry's timestamp, level, message and
-correlation identifier inside a first-party key-value store backed by
-the in-house storage engine while recording the last file offset it
-processed. Subsequent runs resume automatically from the previous offset
-and every insert increments both the `log_entries_indexed_total`
-counter and the correlation-tagged
-`log_correlation_index_total{correlation_id="…"}` metric for
-observability. If you are upgrading from a legacy SQLite `.db` file,
-pass the existing path to the new indexer and enable the
+correlation identifier inside the first-party, sled-backed
+`log_index::LogStore` while recording the last file offset it processed.
+Subsequent runs resume automatically from the previous offset and every
+insert increments both the `log_entries_indexed_total` counter and the
+correlation-tagged `log_correlation_index_total{correlation_id="…"}`
+metric for observability. If you are upgrading from a legacy SQLite
+`.db` file, pass the existing path to the new indexer and enable the
 `sqlite-migration` feature (`cargo run --features sqlite-migration …`) to
-perform an in-place import before switching back to the default build.
+perform an in-place import before returning to the default sled-backed
+build.
 
 > **Serialization migration.** The logging stack continues to ride the legacy
 > serde-based codecs for JSON indexing and aggregator payloads. Build scripts
@@ -74,9 +74,10 @@ GET http://<aggregator>/correlations/<metric>
 where `<metric>` might be `quic_handshake_fail_total`. When
 `quic_handshake_fail_total` increases for a peer, the aggregator will
 query the node's `/logs/search` endpoint (configured via
-`TB_LOG_API_URL` and `TB_LOG_DB_PATH`) and persist a JSON dump under
-`$TB_LOG_DUMP_DIR` (default `log_dumps/`). Operators receive a log line
-with the dump path and the associated correlation ID.
+`TB_LOG_API_URL`, `TB_LOG_STORE_PATH`, or the legacy `TB_LOG_DB_PATH`) and
+persist a JSON dump under `$TB_LOG_DUMP_DIR` (default `log_dumps/`).
+Operators receive a log line with the dump path and the associated
+correlation ID.
 
 The CLI provides a convenience wrapper that stitches these pieces
 together:
@@ -88,7 +89,9 @@ $ contract logs correlate-metric --metric quic_handshake_fail_total \
 
 The command pulls recent correlations from the aggregator, prompts for a
 passphrase if required, and prints the matching log excerpts. If no
-database path is provided the CLI falls back to `TB_LOG_DB_PATH`.
+database path is provided the CLI resolves one in the order `--db`,
+`TB_LOG_STORE_PATH`, then `TB_LOG_DB_PATH` for compatibility with older
+deployments.
 
 If `--passphrase` is omitted the command prompts securely. Operators can
 rotate encrypted payloads in-place using:
@@ -110,7 +113,8 @@ GET /logs/search?level=ERROR&since=1700000000&until=1700003600&limit=100
 GET /logs/search?correlation=beta&passphrase=secret
 ```
 
-If `db` is omitted the handler uses the `TB_LOG_DB_PATH` environment
+If `db` is omitted the handler first checks the request query, then
+`TB_LOG_STORE_PATH`, and finally the legacy `TB_LOG_DB_PATH` environment
 variable. The same filters as the CLI are available: `peer`, `tx`,
 `block`, `correlation`, `level`, `since`, `until`, `after-id`, `limit`
 and `passphrase`.
@@ -123,7 +127,8 @@ dashboards.
 ### Load testing helper
 
 `scripts/log_indexer_load.sh` stress-tests the indexer against a million
-synthesised log lines and performs a sample filtered query:
+synthesised log lines and performs a sample filtered query against the
+sled-backed store:
 
 ```
 $ ./scripts/log_indexer_load.sh          # default 1,000,000 rows

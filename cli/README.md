@@ -11,9 +11,10 @@ demand.
 - `wasm-metadata` – pulls in `wasmtime` to extract exported symbols from WASM
   blobs during `contract deploy --wasm …`. When disabled the CLI still deploys
   contracts but omits the metadata attachment.
-- `sqlite-storage` – bundles `rusqlite` with the SQLite amalgamation to power
-  `contract logs` subcommands. Without the feature the CLI prints a helpful
-  message directing operators to rebuild with SQLite support.
+- `sqlite-storage` – enables the optional SQLite migration helpers from
+  `foundation_sqlite` so the log commands can import legacy `.db` files into
+  the first-party log store. The default build already ships the sled-backed
+  store, so this flag is only required when upgrading historical archives.
 - `full` – convenience feature that enables both `wasm-metadata` and
   `sqlite-storage`.
 
@@ -25,7 +26,7 @@ Other feature flags remain unchanged (`wallet`, `quantum`, `telemetry`).
   heavy features to avoid linking Wasmtime and the bundled SQLite build. This
   keeps integration tests from exhausting memory on constrained runners.
 - **Full CLI for operators**: enable the convenience feature when running the
-  binary: `cargo run -p contract-cli --features full -- logs search --db logs.db`.
+  binary if you need the SQLite migrator: `cargo run -p contract-cli --features full -- logs search --db ./logs_store`.
   Combine it with other flags as needed, e.g. `--features "full quantum"` for
   Dilithium wallet commands.
 

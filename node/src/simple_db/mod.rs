@@ -107,7 +107,7 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            default_engine: EngineKind::default(),
+            default_engine: default_engine_kind(),
             overrides: HashMap::new(),
         }
     }

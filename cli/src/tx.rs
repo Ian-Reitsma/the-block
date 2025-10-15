@@ -19,6 +19,7 @@ static SIGNER: Lazy<TransactionSigner> = Lazy::new(|| TransactionSigner::from_ch
 
 /// Signature version for transactions.
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub enum TxVersion {
     #[default]
     Ed25519Only,
@@ -45,6 +46,7 @@ pub struct TxSignature {
 #[derive(
     Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default,
 )]
+#[allow(dead_code)]
 pub enum FeeLane {
     #[default]
     Consumer,
