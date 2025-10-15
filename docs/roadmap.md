@@ -1,4 +1,50 @@
 # Status & Roadmap
+> **Review (2025-10-14, afternoon++):** Dependency registry telemetry is wired
+> end-to-end across automation, CI, and dashboards. Release provenance refuses
+> to sign builds without `dependency-check.telemetry`, hashes the file into
+> `provenance.json`, and per-target release jobs upload the full registry/
+> violations/telemetry bundle for auditing. CI archives the same artefacts,
+> prints the check status/detail plus per-kind counts in the step summary, and
+> exposes the telemetry file as a downloadable artifact. Monitoring metrics,
+> dashboards, and alert rules gained dedicated panels for
+> `dependency_registry_check_status`/`_counts`, enabling alerting on drift,
+> policy violations, and baseline load failures. Registry tests now include a
+> 256-package metadata graph and large drift fixture so the handwritten parser
+> and diff engine stay performant without serde.
+> **Review (2025-10-14, midday++):** Registry check mode now publishes drift
+> telemetry and granular diagnostics. The CLI’s failure path stages additions,
+> removals, field updates, policy diffs, and root-package churn before writing
+> `dependency-check.telemetry`, so automation can trip alerts on
+> `status="drift"` or per-kind gauges without re-running the command. Integration
+> coverage drives a failing baseline to assert the narrative and metrics output,
+> and new metadata fixtures capture cfg-targeted dependencies plus
+> `workspace_default_members` fallbacks to keep depth calculations honest across
+> platform-specific workspaces.
+> **Review (2025-10-14, pre-dawn++):** Dependency governance automation gained a
+> reusable CLI runner that writes registry JSON, violations, telemetry manifests,
+> and optional snapshots in one pass, surfaces `RunArtifacts` for automation, and
+> honours a `TB_DEPENDENCY_REGISTRY_DOC_PATH` override so tests don’t touch the
+> committed inventory. A new end-to-end CLI test drives that runner against the
+> fixture workspace, asserting on JSON payloads, telemetry counters, snapshot
+> emission, and manifest contents. Parser coverage now includes a complex
+> metadata fixture with optional/git/duplicate edges to harden adjacency
+> deduplication and origin detection, and log rotation writes gained a rollback
+> guard that restores the original ciphertext if any sled insert fails mid-run.
+> **Review (2025-10-14, late night+):** Dependency registry policy loading and
+> snapshotting now run entirely on the serialization facade. TOML configs parse
+> through the new `foundation_serialization::toml::parse_table` helper, tiers/
+> licenses/settings normalise manually, and JSON registries use handwritten
+> `Value` conversions plus `json::to_vec_value` so serde drops from the crate.
+> Unit/integration suites execute under the stub backend without skips, and the
+> new TOML regression test keeps the low-level parser audited.
+> **Review (2025-10-14, late night):** Log archiving now rotates encryption keys
+> atomically—the CLI stages every entry before writing, adds regression coverage
+> for the failure path, and the JSON availability probe exercises a full
+> `LogEntry` round-trip so FIRST_PARTY_ONLY builds skip cleanly when the stub
+> facade is active. The dependency registry CLI invokes `cargo metadata`
+> directly and parses the graph through the first-party JSON facade, dropping
+> the crates.io `cargo_metadata`/`camino` pair while expanding unit and
+> integration coverage to detect stub backends automatically.
 > **Review (2025-10-14, afternoon):** TLS automation is now backed by fully
 > first-party serialization. The `foundation_serde` stub grew option/sequence/
 > map/tuple/array coverage, `foundation_serialization::json::Value` regained
@@ -75,6 +121,10 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   and crypto helpers now rely on the `foundation_serialization` facade
   (JSON/binary/base58); remaining serde_json/bincode usage is isolated to
   auxiliary tooling tracked in `docs/pivot_dependency_strategy.md`.
+- `tools/dependency_registry` now parses policy TOML via
+  `foundation_serialization::toml::parse_table`, maps structs to manual JSON
+  `Value`s, and emits artifacts with `json::to_vec_value`, dropping serde while
+  keeping stub-mode tests always-on with new regression fixtures.
 - Gateway read receipts now encode/decode via `foundation_serialization::binary_cursor`
   helpers, removing the serde derive in that module while keeping the legacy
   CBOR fallback alive for historical receipts and establishing the cursor API
@@ -201,7 +251,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 | **Compute Marketplace & CBM** | 95.8 % | Capability-aware scheduler weights offers by reputation, lane-aware matching enforces per-`FeeLane` batching with fairness windows and deadlines, starvation detection, staged seeding, batch throttling, and persisted lane-tagged receipts, settlement tracks CT balances with activation metadata, and telemetry/CLI/RPC surfaces expose queue depths, wait ages, latency histograms, and fee floors. | Finish wiring SLA telemetry into the foundation dashboard alerts and surface automated resolutions in explorer timelines. |
 | **Trust Lines & DEX** | 87.2 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). Persistence now runs on first-party codecs in `node/src/dex/{storage.rs,storage_binary.rs}`, removing the legacy `binary_codec` shim while regression suites lock legacy bytes and `EscrowSnapshot` documents sled tables. | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 81.9 % | Per-asset channel persistence via `SimpleDb`, multi-signature relayer quorums, challenge windows with slashing, partition-aware deposits, telemetry (`BRIDGE_CHALLENGES_TOTAL`, `BRIDGE_SLASHES_TOTAL`), and expanded CLI/RPC surfaces for pending withdrawals, relayer sets, and dispute logs. | Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain. |
-| **Wallets, Light Clients & KYC** | 96.6 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. Wallets now consume the shared crypto suite’s first-party Ed25519 backend, propagate escrow hash algorithms and multisig signer sets, export remote signer metrics, integrate platform-specific device probes with telemetry/overrides/log uploads, and now surface rebate history/leaderboards across CLI and explorer. | Polish multisig UX, harden production mobile distributions, and document signer-history exports. |
+| **Wallets, Light Clients & KYC** | 96.6 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. Wallets now consume the shared crypto suite’s first-party Ed25519 backend, propagate escrow hash algorithms and multisig signer sets, export remote signer metrics, integrate platform-specific device probes with telemetry/overrides/log uploads through the new first-party Android/iOS helpers, and now surface rebate history/leaderboards across CLI and explorer. | Polish multisig UX, harden production mobile distributions, and document signer-history exports. |
 | **Monitoring, Debugging & Profiling** | 95.8 % | First-party dashboards rendered from `runtime::telemetry` snapshots, metrics-to-logs correlation with automated QUIC dumps, VM trace counters, DID anchor gauges, per-lane `matches_total`/`match_loop_latency_seconds` charts, mobile cache gauges (`mobile_cache_*`, `mobile_tx_queue_depth`), the `the_block_light_client_device_status{field,freshness}` gauge, and CLI debugger/profiling utilities ship with nodes; wallet QoS events and fee-floor rollbacks now plot alongside DID timelines, bridge/gossip dashboards ingest `BRIDGE_CHALLENGES_TOTAL`, `BRIDGE_SLASHES_TOTAL`, and `GOSSIP_LATENCY_BUCKETS`, `overlay_backend_active`, `overlay_peer_total`, and storage panels differentiate coder/compressor rollout via telemetry labels. | Bridge/VM anomaly detection still pending; dependency wrapper metrics not fully surfaced and overlay soak dashboards pending. |
 | **Identity & Explorer** | 83.4 % | DID registry anchors with replay protection and optional provenance attestations, wallet and light-client commands support anchoring/resolving with sign-only/remote signer flows, explorer `/dids` endpoints expose history/anchor-rate charts with cached pagination, and governance archives revocation history alongside anchor data for audit. | Governance-driven revocation playbooks and mobile identity UX remain to ship. |
 | **Economic Simulation & Formal Verification** | 43.0 % | Bench harness simulates inflation/demand; chaos tests capture seeds and the coder/compressor comparison harness exports throughput deltas for scenario planning. | Scenario coverage still thin and no integrated proof pipeline. |

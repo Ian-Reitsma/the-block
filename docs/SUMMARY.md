@@ -1,4 +1,34 @@
 # Summary
+> **Review (2025-10-15, dawn):** Release and CI automation now require the
+> `dependency-check.telemetry` artifact, archiving drift counters alongside
+> registry snapshots across `scripts/dependency_snapshot.sh`,
+> `scripts/release_provenance.sh`, and the release/CI workflows. Monitoring
+> dashboards and alerts gained dependency-check panels plus PromQL coverage,
+> while `compare_tls_warnings` consumes the first-party JSON facade directly so
+> TLS comparisons no longer depend on external serde crates.
+> **Review (2025-10-14, pre-dawn++):** Dependency governance automation now
+> includes a reusable CLI runner that emits registry JSON, violations, telemetry
+> manifests, and optional snapshots while returning `RunArtifacts` for automation
+> and respecting a `TB_DEPENDENCY_REGISTRY_DOC_PATH` override. A new end-to-end
+> CLI test drives that runner against the fixture workspace, validating JSON
+> payloads, telemetry counters, snapshot output, and manifest listings. Registry
+> parsing gained a complex metadata fixture covering optional/git/duplicate
+> edges to lock adjacency deduplication and origin detection, and log rotation
+> writes now roll back to the original ciphertext if any sled write fails
+> mid-run.
+> **Review (2025-10-14, late night+):** Dependency registry policy parsing and
+> snapshotting run exclusively on the serialization facade. TOML configs flow
+> through `foundation_serialization::toml::parse_table`, registry structs map to
+> manual JSON `Value`s, and CLI outputs use `json::to_vec_value`, so serde drops
+> from the crate while stub-mode tests stay enabled via new regression fixtures
+> (including the TOML parser harness).
+> **Review (2025-10-14, late night):** Log index key rotation now stages entries
+> before writing so failures never leave mixed ciphertext; the suite added an
+> atomic rotation regression test and the JSON probe exercises a `LogEntry`
+> round-trip to skip cleanly when the stub backend is active. The dependency
+> registry CLI drops `cargo_metadata`/`camino`, shells out to `cargo metadata`
+> directly, and parses through the first-party JSON facade with unit and
+> integration coverage that auto-skip on stub builds.
 > **Review (2025-10-14):** `crates/sys` inlines the Linux inotify and BSD/macOS
 > kqueue ABIs, removing the crate’s `libc` dependency while runtime’s
 > `fs::watch` backend drops the `nix` bridge and reuses Mio registration for all
@@ -24,6 +54,7 @@
 > `cargo check -p foundation_serialization --no-default-features --features
 > serde-stub`, and the dependency inventory/guard snapshots were refreshed to
 > capture the new facade boundaries.
+> **Review (2025-10-14, midday++):** Dependency registry check mode now emits structured drift diagnostics and telemetry. The new `check` module stages additions, removals, field-level updates, root package churn, and policy deltas before persisting results via `output::write_check_telemetry`, guaranteeing operators can alert on `dependency_registry_check_status`/`dependency_registry_check_counts` even when rotation fails. `cli_end_to_end` gained a check-mode regression that validates the drift narrative and metrics snapshot, and synthetic metadata fixtures now cover target-gated dependencies plus default-member fallbacks so `compute_depths` stays correct across platform-specific graphs.
 > **Review (2025-10-12):** Delivered first-party PQ stubs (`crates/pqcrypto_dilithium`, `crates/pqcrypto_kyber`) so `quantum`/`pq` builds compile without crates.io dependencies while preserving deterministic signatures and encapsulations for commit–reveal, wallet, and governance flows. Replaced the external `serde_bytes` crate with `foundation_serialization::serde_bytes`, keeping `#[serde(with = "serde_bytes")]` annotations on exec/read-receipt payloads fully first party, and refreshed the dependency inventory accordingly. Runtime concurrency now routes `join_all`/`select2`/oneshot handling through the shared `crates/foundation_async` facade with a first-party `AtomicWaker`, eliminating the duplicate runtime channel implementation. New integration tests (`crates/foundation_async/tests/futures.rs`) exercise join ordering, select short-circuiting, panic capture, and oneshot cancellation so FIRST_PARTY_ONLY builds lean on in-house scheduling primitives with coverage.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, diagnostics, TUI, TLS, and the PQ facades are live with governance overrides enforced (2025-10-12). Log ingestion/search now rides the sled-backed `log_index` crate with optional SQLite migration for legacy archives (2025-10-14).
 

@@ -78,3 +78,26 @@ groups:
           severity: warn
         annotations:
           summary: "TLS warning snapshots stale beyond retention ({{ printf \"%.0f\" $value }} affected)"
+  - name: supply-chain
+    rules:
+      - alert: DependencyRegistryDrift
+        expr: max_over_time(dependency_registry_check_status{status="drift"}[10m]) == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Dependency registry drift detected: {{ $labels.detail }}"
+      - alert: DependencyRegistryViolations
+        expr: max_over_time(dependency_registry_check_status{status="violations"}[10m]) == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Dependency policy violations detected: {{ $labels.detail }}"
+      - alert: DependencyRegistryBaselineLoadFailed
+        expr: max_over_time(dependency_registry_check_status{status="baseline_error"}[10m]) == 1
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Dependency registry baseline failed to load: {{ $labels.detail }}"

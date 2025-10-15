@@ -1,3 +1,4 @@
+use diagnostics::tracing::{debug, warn};
 use foundation_serialization::{Deserialize, Serialize};
 use runtime::sync::Mutex;
 use std::fmt;
@@ -5,7 +6,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tracing::{debug, warn};
 
 #[cfg(feature = "telemetry")]
 mod telemetry;

@@ -1,4 +1,51 @@
 # System-Wide Economic Changes
+> **Review (2025-10-14, mid-morning++):** Release provenance, CI, and
+> monitoring now treat dependency registry check telemetry as a first-class
+> artifact. `scripts/release_provenance.sh` refuses to complete unless
+> `dependency-check.telemetry` is present, records its SHA256 alongside the
+> frozen snapshot in `provenance.json`, and new release tests assert that the
+> script aborts when the telemetry file is absent. The release workflow freezes
+> policy checks into per-target `target/dependency-registry/<target>/` buckets
+> and uploads telemetry/violations/registry blobs for auditing, while CI uploads
+> the telemetry gauge, surfaces drift/violation counters in the job summary, and
+> archives the new artifacts for every run. The monitoring stack gained
+> Prometheus metric definitions, Grafana panels, and alert rules for
+> `dependency_registry_check_status` and
+> `dependency_registry_check_counts`, plus the snapshot helper now emits
+> telemetry counters so dashboards and alerts can page on drift, policy
+> violations, or baseline load failures. Registry tests were extended with a
+> synthetic 256-package metadata graph and large drift fixture to ensure the
+> handwritten parser and `check::compute` scale without serde.
+> **Review (2025-10-14, pre-dawn++):** Log archive key rotation now writes to
+> sled with a rollback guard—updated entries only replace the originals once the
+> full batch re-encrypts successfully, and any storage error rewrites the staged
+> ciphertext back to its prior form before flushing so the log store never lands
+> in a mixed-key state. The dependency registry CLI gained a dedicated runner
+> that resolves config overrides, emits every artifact (registry JSON,
+> violations, telemetry, manifest, snapshot), honours the
+> `TB_DEPENDENCY_REGISTRY_DOC_PATH` override for tests, and returns the
+> `RunArtifacts` struct for automation. A new end-to-end CLI test exercises that
+> runner against the fixture workspace, asserting on JSON payloads, telemetry
+> counters, snapshot emission, and manifest content without mutating repo docs.
+> The registry parser test suite now feeds a complex `cargo metadata` fixture
+> featuring optional, git, and duplicate edges to lock in adjacency deduping,
+> reverse dependency tracking, and origin detection across uncommon graph
+> layouts.
+> **Review (2025-10-14, late night+):** The dependency registry CLI now keeps
+> policy loading, registry modelling, and snapshot emission entirely within the
+> serialization facade. TOML configs parse through the new
+> `foundation_serialization::toml::parse_table` helper, tier/license/settings
+> sections normalise manually, and JSON payloads convert via handwritten Value
+> builders plus `json::to_vec_value`, removing serde while ensuring stub builds
+> exercise the full suite with new regression tests.
+> **Review (2025-10-14, late night):** Log archive key rotation now decrypts and
+> stages every entry before writing so failures never leave the sled store
+> half-migrated; the suite gained an atomic rotation regression test and the
+> JSON probe now round-trips a full `LogEntry` so FIRST_PARTY_ONLY runs skip when
+> the stub facade is active. The dependency registry CLI drops the
+> `cargo_metadata`/`camino` crates, invoking `cargo metadata` directly and
+> parsing the graph through the in-house JSON facade with new unit and
+> integration coverage that auto-skip on the stub backend.
 > **Review (2025-10-14, afternoon):** Serialization for TLS operations is fully
 > first-party. The `foundation_serde` stub backend now mirrors serde’s visitor
 > hierarchy (options, tuples, arrays, maps, sequences),
@@ -39,6 +86,15 @@
 > completion context now implement `Send` so the blocking worker satisfies the
 > runtime’s `spawn_blocking` bounds, and `crates/sys/Cargo.toml` declares the
 > `windows-sys` feature set needed for cross-target builds.
+> **Review (2025-10-14, evening):** Mobile device probes now rely purely on
+> first-party code. The iOS probe (`crates/light-client/src/device/ios.rs`)
+> issues Objective-C messages and CoreFoundation queries through local FFI
+> shims, removing the `objc`, `objc-foundation`, `objc_id`, and
+> `core-foundation` crates. Android’s probe delegates to
+> `sys::device::{battery,network}` for charging, capacity, and Wi-Fi checks
+> sourced from `/sys/class/power_supply` and `/proc/net/wireless`, eliminating
+> the `jni`, `ndk`, and `ndk-context` stacks and exposing reusable helpers for
+> other tooling.
 > **Review (2025-10-14):** The `sys` crate now exports first-party FFI shims for
 > Linux inotify, BSD/macOS kqueue, and an IOCP-backed Windows reactor. The
 > updated `crates/sys/src/reactor/platform_windows.rs` associates every socket
@@ -1271,6 +1327,43 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 - **Documentation and tooling** point operators at the new `just check-windows`
   recipe while noting that Windows file watching currently uses the polling
   stub, keeping expectations clear until the native watcher lands.
+
+## Dependency Registry Check Telemetry (2025-10-14)
+
+### Rationale
+
+- **All-or-nothing checks:** Prior runs reported drift only as a boolean,
+  leaving operators blind once the CLI bailed. Persisting the full diff and
+  telemetry snapshot keeps automation informed even when the command aborts.
+- **Structured diagnostics:** Enumerating additions, removals, policy diffs, and
+  root-package churn clarifies what changed so follow-up triage doesn’t require
+  manual diff tooling.
+
+### Implementation Summary
+
+- Added a `check` module that compares baseline/generated comparison keys and
+  records additions, removals, field-level updates, policy changes, and root
+  package churn.
+- Updated `runner::execute` to emit detailed drift narratives, surface policy
+  violation counts, and persist outcomes through
+  `output::write_check_telemetry` before returning.
+- Introduced `dependency-check.telemetry` with a status gauge and per-kind
+  counters so CI/alerting can watch `status="drift"` and the associated counts.
+- Extended the CLI integration suite with a failing-baseline test that asserts
+  the narrative, telemetry labels, and metrics payload alongside existing
+  artifact checks.
+- Seeded an additional metadata fixture covering cfg-targeted dependencies and
+  `workspace_default_members` fallbacks to ensure depth calculations remain
+  accurate across platform-specific graphs.
+
+### Operational Impact
+
+- **CI/alerting** can now scrape `dependency-check.telemetry` to detect drift or
+  policy violations without rerunning the CLI.
+- **Operator workflows** receive actionable messages listing the exact crates and
+  policies that changed, reducing mean time to remediation.
+- **Future migrations** can rely on the telemetry snapshot to compare drift over
+  time, even when check mode exits early.
 
 ## Default Transport Provider Switch (2025-10-10)
 

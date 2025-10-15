@@ -190,6 +190,23 @@ impl LogStore {
         Ok(())
     }
 
+    pub fn store_entries_with_rollback(
+        &self,
+        updated: &[StoredEntry],
+        original: &[StoredEntry],
+    ) -> Result<()> {
+        for entry in updated {
+            if let Err(err) = self.store_entry(entry) {
+                for original_entry in original {
+                    let _ = self.store_entry(original_entry);
+                }
+                let _ = self.flush();
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
     pub fn load_entries(&self) -> Result<Vec<StoredEntry>> {
         let mut items = Vec::new();
         for result in self.entries.iter() {
@@ -561,7 +578,10 @@ pub fn rotate_key(store: &LogStore, current: Option<&str>, new_passphrase: &str)
     let old_key = current.map(derive_encryption_key);
     let new_key = derive_encryption_key(new_passphrase);
     let entries = store.load_entries()?;
-    for mut entry in entries {
+    let originals = entries.clone();
+
+    let mut staged: Vec<(StoredEntry, String)> = Vec::with_capacity(entries.len());
+    for entry in entries {
         let plaintext = if entry.encrypted {
             let key = old_key
                 .as_ref()
@@ -575,12 +595,19 @@ pub fn rotate_key(store: &LogStore, current: Option<&str>, new_passphrase: &str)
         } else {
             entry.message.clone()
         };
+        staged.push((entry, plaintext));
+    }
+
+    let mut updated = Vec::with_capacity(staged.len());
+    for (mut entry, plaintext) in staged {
         let (cipher, nonce) = encrypt_message(&new_key, &plaintext)?;
         entry.message = cipher;
         entry.nonce = Some(nonce);
         entry.encrypted = true;
-        store.store_entry(&entry)?;
+        updated.push(entry);
     }
+
+    store.store_entries_with_rollback(&updated, &originals)?;
     store.flush()?;
     Ok(())
 }
@@ -641,7 +668,25 @@ mod tests {
     }
 
     fn json_backend_available() -> bool {
-        foundation_serialization::json::from_str::<u64>("0").is_ok()
+        if foundation_serialization::json::from_str::<u64>("0").is_err() {
+            return false;
+        }
+        let probe = LogEntry {
+            id: None,
+            timestamp: 0,
+            level: String::new(),
+            message: String::new(),
+            correlation_id: String::new(),
+            peer: None,
+            tx: None,
+            block: None,
+        };
+        match foundation_serialization::json::to_string(&probe) {
+            Ok(serialized) => {
+                foundation_serialization::json::from_str::<LogEntry>(&serialized).is_ok()
+            }
+            Err(_) => false,
+        }
     }
 
     fn temp_store_path(suffix: &str) -> PathBuf {
@@ -808,6 +853,62 @@ mod tests {
 
         filter.passphrase = Some("old".into());
         let results = search_logs_in_store(&store, &filter).expect("search with old key");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].message, "<decrypt-failed>");
+
+        fs::remove_dir_all(path).expect("cleanup temp store");
+    }
+
+    #[test]
+    fn rotate_key_is_atomic_on_failure() {
+        if !json_backend_available() {
+            eprintln!(
+                "skipping rotate_key_is_atomic_on_failure: foundation_serde stub backend active"
+            );
+            return;
+        }
+        let path = temp_store_path("rotate-failure");
+        let store = LogStore::open(&path).expect("open store");
+        let entry = LogEntry {
+            id: None,
+            timestamp: 500,
+            level: "INFO".into(),
+            message: "sealed".into(),
+            correlation_id: "corr-failure".into(),
+            peer: None,
+            tx: None,
+            block: None,
+        };
+        let payload = encode_entry(&entry);
+        let mut options = IndexOptions::default();
+        options.passphrase = Some("correct".into());
+        ingest_reader(
+            Cursor::new(format!("{payload}\n").into_bytes()),
+            "rotate-failure",
+            &options,
+            &store,
+        )
+        .expect("ingest encrypted");
+
+        let err = rotate_key(&store, Some("wrong"), "new").expect_err("rotation should fail");
+        match err {
+            LogIndexError::Encryption(message) => {
+                assert!(message.contains("decrypt") || message.contains("passphrase"))
+            }
+            other => panic!("unexpected error: {other:?}", other = other),
+        }
+
+        let mut filter = LogFilter {
+            correlation: Some("corr-failure".into()),
+            passphrase: Some("correct".into()),
+            ..Default::default()
+        };
+        let results = search_logs_in_store(&store, &filter).expect("search with original key");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].message, "sealed");
+
+        filter.passphrase = Some("new".into());
+        let results = search_logs_in_store(&store, &filter).expect("search with new key");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].message, "<decrypt-failed>");
 

@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-14 10:45:00Z_
+_Last updated: 2025-10-15 05:45:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -95,8 +95,31 @@ books, escrow tables, AMM pools, and trade logs against the legacy bytes. The
 residual `crate::util::binary_codec` usage survives only inside compatibility
 tests while the module is phased out.
 
+### Tooling & Support Crate Migrations (2025-10-15 update)
+
+- ✅ Release workflows and provenance tooling now require the
+  `dependency-check.telemetry` artifact. `scripts/dependency_snapshot.sh`,
+  `scripts/release_provenance.sh`, the release workflow, and CI summary steps
+  archive telemetry alongside registry snapshots so drift counters surface in
+  every promotion gate.
+- ✅ Monitoring dashboards, alert rules, and Prometheus snapshots gained
+  dependency-check panels and selectors. The TLS warning comparison utility now
+  parses JSON through `foundation_serialization::json`, eliminating the
+  external serde derive path from `compare_tls_warnings` while preserving the
+  snapshot harness.
+
 ### Tooling & Support Crate Migrations (2025-10-14 update)
 
+- ✅ `tools/dependency_registry` exposes a reusable `run_cli` helper that writes
+  registry JSON, violation reports, telemetry, manifest manifests, and optional
+  snapshots while honouring a `TB_DEPENDENCY_REGISTRY_DOC_PATH` override for
+  sandboxed runs. The function returns `RunArtifacts` so automation can inspect
+  emitted paths without rehydrating the filesystem, and a new integration test
+  exercises the full CLI flow against the fixture workspace. Parser coverage now
+  includes a complex metadata fixture with optional/git/duplicate edges to lock
+  adjacency deduplication and origin detection. Log archive key rotation gained
+  a rollback guard so sled writes either complete fully or restore the original
+  ciphertext when any storage error surfaces.
 - ✅ `crates/sys` now ships first-party FFI shims for Linux inotify and the
   BSD/macOS kqueue family, exposes a matching epoll-backed `reactor`
   (`Poll`, `Events`, `Waker`), and adds a `sys::net` module that constructs
@@ -127,6 +150,16 @@ tests while the module is phased out.
   `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` to pass for
   both `sys` and `runtime`. Remaining `mio` references live only behind legacy
   tokio consumers slated for follow-up migration.
+- ✅ Mobile probes no longer depend on Objective-C or Android JNI bindings.
+  `crates/light-client/src/device/ios.rs` now issues Objective-C messages and
+  CoreFoundation queries through dedicated FFI helpers, removing the
+  `objc`, `objc-foundation`, `objc_id`, and `core-foundation` crates while
+  keeping battery monitoring and Wi-Fi checks intact. On Android, the probe
+  delegates to new `sys::device::{battery,network}` modules that read
+  `/sys/class/power_supply` and `/proc/net/wireless`, eliminating the `jni`,
+  `ndk`, and `ndk-context` stacks. The shared helpers expose
+  `battery::capacity_percent`/`is_charging` and `network::wifi_connected` so
+  future CLI or runtime code can reuse the same first-party telemetry.
 - ✅ Terminal prompting now has first-party coverage: `sys::tty` exposes a
   generic passphrase reader that unit tests exercise with in-memory streams,
   `foundation_tui::prompt` adds override hooks so downstream crates can inject
@@ -134,6 +167,21 @@ tests while the module is phased out.
   validate optional/required prompting without depending on external crates.
   Together they keep FIRST_PARTY_ONLY builds interactive-friendly while
   ensuring prompt behaviour is regression-tested.
+- ✅ `tools/dependency_registry` now shells out to `cargo metadata` through a
+  first-party parser layered on `foundation_serialization::json`, removing the
+  crates.io `cargo_metadata` and `camino` crates. The registry builder stages
+  metadata JSON through the facade, unit-tests the parser, and teaches the
+  integration suite to skip automatically when the stub backend is active so
+  FIRST_PARTY_ONLY runs stay green while policy enforcement continues to
+  operate on in-house code.
+- ✅ Policy loading and registry snapshots no longer depend on serde derives.
+  `foundation_serialization::toml::parse_table` exposes the raw TOML document,
+  `tools/dependency_registry::config` normalises tiers/licenses with manual
+  validation, and the registry/model/output layers convert structs to and from
+  `foundation_serialization::json::Value`. The CLI now writes snapshots and
+  violations via `json::to_vec_value`, test fixtures run under the stub backend
+  without skipping, and the crate’s `Cargo.toml` drops the workspace `serde`
+  dependency entirely.
 
 ### Tooling & Support Crate Migrations (2025-10-12)
 
@@ -437,6 +485,12 @@ Dependency Migration" milestone) to coordinate the rollout.
   migrated gateway read receipts onto the manual first-party encoder/decoder,
   removing the last serde derive in that surface while preserving the legacy
   CBOR fallback path.
+- ✅ Dependency registry check mode now stages drift summaries and emits
+  `dependency-check.telemetry`, ensuring FIRST_PARTY_ONLY tooling surfaces
+  detailed additions/removals/policy diffs even when the CLI aborts. A new
+  integration test validates the narrative and metrics payloads, and fixtures
+  now cover cfg-targeted dependencies plus default-member fallbacks to keep
+  depth calculations accurate.
 - ✅ Expanded the storage engine test suite to cover malformed JSON, unicode
   escapes, leading-zero rejection, and temp-file persist failures so the new
   first-party codec/harness can detect regressions without third-party

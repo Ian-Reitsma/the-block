@@ -2453,6 +2453,44 @@
       },
       "targets": [
         {
+          "expr": "dependency_registry_check_status"
+        }
+      ],
+      "title": "dependency_registry_check_status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 133,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_registry_check_counts"
+        }
+      ],
+      "title": "dependency_registry_check_counts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 134,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
           "expr": "overlay_backend_active"
         }
       ],
@@ -2464,7 +2502,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 133,
+      "id": 135,
       "options": {
         "legend": {
           "showLegend": false
@@ -2483,7 +2521,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 134,
+      "id": 136,
       "options": {
         "legend": {
           "showLegend": false
@@ -2502,7 +2540,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 135,
+      "id": 137,
       "options": {
         "legend": {
           "showLegend": false
@@ -2521,7 +2559,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 136,
+      "id": 138,
       "options": {
         "legend": {
           "showLegend": false
@@ -2540,7 +2578,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 137,
+      "id": 139,
       "options": {
         "legend": {
           "showLegend": false
@@ -2559,7 +2597,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 138,
+      "id": 140,
       "options": {
         "legend": {
           "showLegend": false
@@ -2578,7 +2616,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 139,
+      "id": 141,
       "options": {
         "legend": {
           "showLegend": false
@@ -2597,7 +2635,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 140,
+      "id": 142,
       "options": {
         "legend": {
           "showLegend": false
@@ -2616,7 +2654,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 141,
+      "id": 143,
       "options": {
         "legend": {
           "showLegend": false
@@ -2635,7 +2673,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 142,
+      "id": 144,
       "options": {
         "legend": {
           "showLegend": false
@@ -2654,7 +2692,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 143,
+      "id": 145,
       "options": {
         "legend": {
           "showLegend": false
@@ -2673,7 +2711,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 144,
+      "id": 146,
       "options": {
         "legend": {
           "showLegend": false
@@ -2692,7 +2730,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 145,
+      "id": 147,
       "options": {
         "legend": {
           "showLegend": false
@@ -2711,7 +2749,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 146,
+      "id": 148,
       "options": {
         "legend": {
           "showLegend": false
@@ -2730,7 +2768,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 147,
+      "id": 149,
       "options": {
         "legend": {
           "showLegend": false
@@ -2749,7 +2787,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 148,
+      "id": 150,
       "options": {
         "legend": {
           "showLegend": false
@@ -2768,7 +2806,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 149,
+      "id": 151,
       "options": {
         "legend": {
           "showLegend": false
@@ -2787,7 +2825,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 150,
+      "id": 152,
       "options": {
         "legend": {
           "showLegend": false
@@ -2806,7 +2844,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 151,
+      "id": 153,
       "options": {
         "legend": {
           "showLegend": false
@@ -2825,7 +2863,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 152,
+      "id": 154,
       "options": {
         "legend": {
           "showLegend": false
@@ -2844,7 +2882,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 153,
+      "id": 155,
       "options": {
         "legend": {
           "showLegend": false
@@ -2863,7 +2901,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 154,
+      "id": 156,
       "options": {
         "legend": {
           "showLegend": false
@@ -2882,7 +2920,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 155,
+      "id": 157,
       "options": {
         "legend": {
           "showLegend": false
@@ -2901,7 +2939,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 156,
+      "id": 158,
       "options": {
         "legend": {
           "showLegend": false
@@ -2920,7 +2958,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 157,
+      "id": 159,
       "options": {
         "legend": {
           "showLegend": false
@@ -2939,7 +2977,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 158,
+      "id": 160,
       "options": {
         "legend": {
           "showLegend": false
@@ -2958,7 +2996,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 159,
+      "id": 161,
       "options": {
         "legend": {
           "showLegend": false
@@ -2977,7 +3015,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 160,
+      "id": 162,
       "options": {
         "legend": {
           "showLegend": false
@@ -2996,7 +3034,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 161,
+      "id": 163,
       "options": {
         "legend": {
           "showLegend": false
@@ -3015,7 +3053,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 162,
+      "id": 164,
       "options": {
         "legend": {
           "showLegend": false
@@ -3034,7 +3072,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 163,
+      "id": 165,
       "options": {
         "legend": {
           "showLegend": false
@@ -3053,7 +3091,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 164,
+      "id": 166,
       "options": {
         "legend": {
           "showLegend": false
@@ -3072,7 +3110,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 165,
+      "id": 167,
       "options": {
         "legend": {
           "showLegend": false
@@ -3091,7 +3129,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 166,
+      "id": 168,
       "options": {
         "legend": {
           "showLegend": false
@@ -3110,7 +3148,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 167,
+      "id": 169,
       "options": {
         "legend": {
           "showLegend": false
@@ -3129,7 +3167,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 168,
+      "id": 170,
       "options": {
         "legend": {
           "showLegend": false
@@ -3148,7 +3186,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 169,
+      "id": 171,
       "options": {
         "legend": {
           "showLegend": false
@@ -3167,7 +3205,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 170,
+      "id": 172,
       "options": {
         "legend": {
           "showLegend": false
@@ -3186,7 +3224,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 171,
+      "id": 173,
       "options": {
         "legend": {
           "showLegend": false
@@ -3205,7 +3243,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 172,
+      "id": 174,
       "options": {
         "legend": {
           "showLegend": false
@@ -3224,7 +3262,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 173,
+      "id": 175,
       "options": {
         "legend": {
           "showLegend": false
@@ -3243,7 +3281,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 174,
+      "id": 176,
       "options": {
         "legend": {
           "showLegend": false
@@ -3262,7 +3300,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 175,
+      "id": 177,
       "options": {
         "legend": {
           "showLegend": false
@@ -3281,7 +3319,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 176,
+      "id": 178,
       "options": {
         "legend": {
           "showLegend": false
@@ -3300,7 +3338,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 177,
+      "id": 179,
       "options": {
         "legend": {
           "showLegend": false
@@ -3319,7 +3357,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 178,
+      "id": 180,
       "options": {
         "legend": {
           "showLegend": false
@@ -3338,7 +3376,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 179,
+      "id": 181,
       "options": {
         "legend": {
           "showLegend": false
@@ -3357,7 +3395,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 180,
+      "id": 182,
       "options": {
         "legend": {
           "showLegend": false
@@ -3376,7 +3414,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 181,
+      "id": 183,
       "options": {
         "legend": {
           "showLegend": false
@@ -3395,7 +3433,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 182,
+      "id": 184,
       "options": {
         "legend": {
           "showLegend": false
@@ -3414,7 +3452,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 183,
+      "id": 185,
       "options": {
         "legend": {
           "showLegend": false
@@ -3433,7 +3471,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 184,
+      "id": 186,
       "options": {
         "legend": {
           "showLegend": false
@@ -3452,7 +3490,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 185,
+      "id": 187,
       "options": {
         "legend": {
           "showLegend": false
@@ -3471,7 +3509,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 186,
+      "id": 188,
       "options": {
         "legend": {
           "showLegend": false
@@ -3490,7 +3528,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 187,
+      "id": 189,
       "options": {
         "legend": {
           "showLegend": false
@@ -3509,7 +3547,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 188,
+      "id": 190,
       "options": {
         "legend": {
           "showLegend": false
@@ -3528,7 +3566,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 189,
+      "id": 191,
       "options": {
         "legend": {
           "showLegend": false
@@ -3547,7 +3585,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 190,
+      "id": 192,
       "options": {
         "legend": {
           "showLegend": false
@@ -3566,7 +3604,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 191,
+      "id": 193,
       "options": {
         "legend": {
           "showLegend": false
@@ -3585,7 +3623,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 192,
+      "id": 194,
       "options": {
         "legend": {
           "showLegend": false
@@ -3604,7 +3642,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 193,
+      "id": 195,
       "options": {
         "legend": {
           "showLegend": false
@@ -3623,7 +3661,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 194,
+      "id": 196,
       "options": {
         "legend": {
           "showLegend": false
@@ -3642,7 +3680,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 195,
+      "id": 197,
       "options": {
         "legend": {
           "showLegend": false
@@ -3661,7 +3699,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 196,
+      "id": 198,
       "options": {
         "legend": {
           "showLegend": false
@@ -3680,7 +3718,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 197,
+      "id": 199,
       "options": {
         "legend": {
           "showLegend": false
@@ -3699,7 +3737,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 198,
+      "id": 200,
       "options": {
         "legend": {
           "showLegend": false
@@ -3718,7 +3756,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 199,
+      "id": 201,
       "options": {
         "legend": {
           "showLegend": false
@@ -3737,7 +3775,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 200,
+      "id": 202,
       "options": {
         "legend": {
           "showLegend": false
@@ -3756,7 +3794,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 201,
+      "id": 203,
       "options": {
         "legend": {
           "showLegend": false
@@ -3775,7 +3813,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 202,
+      "id": 204,
       "options": {
         "legend": {
           "showLegend": false
@@ -3794,7 +3832,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 203,
+      "id": 205,
       "options": {
         "legend": {
           "showLegend": false
@@ -3813,7 +3851,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 204,
+      "id": 206,
       "options": {
         "legend": {
           "showLegend": false
@@ -3832,7 +3870,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 205,
+      "id": 207,
       "options": {
         "legend": {
           "showLegend": false
@@ -3851,7 +3889,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 206,
+      "id": 208,
       "options": {
         "legend": {
           "showLegend": false
@@ -3870,7 +3908,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 207,
+      "id": 209,
       "options": {
         "legend": {
           "showLegend": false
@@ -3889,7 +3927,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 208,
+      "id": 210,
       "options": {
         "legend": {
           "showLegend": false
@@ -3908,7 +3946,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 209,
+      "id": 211,
       "options": {
         "legend": {
           "showLegend": false
@@ -3927,7 +3965,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 210,
+      "id": 212,
       "options": {
         "legend": {
           "showLegend": false
@@ -3946,7 +3984,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 211,
+      "id": 213,
       "options": {
         "legend": {
           "showLegend": false

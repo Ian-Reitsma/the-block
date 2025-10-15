@@ -6,10 +6,10 @@ use cli_core::{
     parse::{ParseError, Parser},
 };
 use diagnostics::anyhow as diag_anyhow;
-use diagnostics::anyhow::{Context, Result};
+use diagnostics::anyhow::Result;
 use std::env;
 
-use dependency_registry::{build_registry, output, BuildOptions, Cli, PolicyConfig};
+use dependency_registry::{output, run_cli, Cli};
 
 fn main() -> Result<()> {
     let mut argv = env::args();
@@ -47,44 +47,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let config_path = cli.resolved_config();
-    let policy = PolicyConfig::load(&config_path)?;
-
-    let build = build_registry(BuildOptions {
-        manifest_path: cli.manifest_path.as_deref(),
-        policy: &policy,
-        config_path: &config_path,
-        override_depth: cli.max_depth,
-    })?;
-
-    output::write_registry_json(&build.registry, &cli.out_dir)?;
-    output::write_crate_manifest(&build.registry, &cli.manifest_out)?;
-    if let Some(snapshot_path) = &cli.snapshot {
-        output::write_snapshot(&build.registry, snapshot_path)?;
-    }
-    let markdown_path = PathBuf::from("docs/dependency_inventory.md");
-    output::write_markdown(&build.registry, &markdown_path)?;
-    output::write_violations(&build.violations, &cli.out_dir)?;
-    output::write_telemetry_metrics(&build.violations, &cli.out_dir)?;
-
-    if cli.check {
-        let baseline = output::load_registry(&cli.baseline)
-            .with_context(|| format!("unable to load baseline from {}", cli.baseline.display()))?;
-        if baseline.comparison_key() != build.registry.comparison_key() {
-            diag_anyhow::bail!(
-                "dependency registry drift detected relative to baseline {}",
-                cli.baseline.display()
-            );
-        }
-        if !build.violations.is_empty() {
-            diag_anyhow::bail!(
-                "policy violations detected; see {}",
-                cli.out_dir.join("dependency-violations.json").display()
-            );
-        }
-    }
-
-    Ok(())
+    run_cli(&cli).map(|_| ())
 }
 
 fn print_root_help(command: &Command, bin: &str) {

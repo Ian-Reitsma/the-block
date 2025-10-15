@@ -1,19 +1,14 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use diagnostics::anyhow::Context;
-use foundation_serialization::toml;
-use foundation_serialization::Deserialize;
+use diagnostics::anyhow::{bail, Context};
+use foundation_serialization::toml::{self, Table as TomlTable, Value as TomlValue};
 
 use crate::model::RiskTier;
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone, Default)]
 pub struct PolicyConfig {
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub tiers: TierConfig,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub licenses: LicenseConfig,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub settings: SettingsConfig,
 }
 
@@ -22,11 +17,40 @@ impl PolicyConfig {
         let raw = fs::read_to_string(path).with_context(|| {
             format!("unable to read policy configuration at {}", path.display())
         })?;
-        let mut config: PolicyConfig = toml::from_str(&raw).with_context(|| {
+        let table = toml::parse_table(&raw).with_context(|| {
             format!("unable to parse policy configuration at {}", path.display())
         })?;
+        let mut config = PolicyConfig::from_table(table)
+            .with_context(|| format!("invalid policy configuration at {}", path.display()))?;
         config.normalise();
         Ok(config)
+    }
+
+    fn from_table(mut table: TomlTable) -> diagnostics::Result<Self> {
+        let tiers = match table.remove("tiers") {
+            Some(value) => TierConfig::from_value(value).context("invalid [tiers] section")?,
+            None => TierConfig::default(),
+        };
+
+        let licenses = match table.remove("licenses") {
+            Some(value) => {
+                LicenseConfig::from_value(value).context("invalid [licenses] section")?
+            }
+            None => LicenseConfig::default(),
+        };
+
+        let settings = match table.remove("settings") {
+            Some(value) => {
+                SettingsConfig::from_value(value).context("invalid [settings] section")?
+            }
+            None => SettingsConfig::default(),
+        };
+
+        Ok(Self {
+            tiers,
+            licenses,
+            settings,
+        })
     }
 
     fn normalise(&mut self) {
@@ -68,10 +92,8 @@ impl PolicyConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone)]
 pub struct SettingsConfig {
-    #[serde(default = "SettingsConfig::default_max_depth")]
     pub max_depth: usize,
 }
 
@@ -87,16 +109,21 @@ impl SettingsConfig {
     pub fn default_max_depth() -> usize {
         3
     }
+
+    fn from_value(value: TomlValue) -> diagnostics::Result<Self> {
+        let mut table = expect_table(value, "settings")?;
+        let max_depth = match table.remove("max_depth") {
+            Some(value) => parse_usize(value, "settings.max_depth")?,
+            None => Self::default_max_depth(),
+        };
+        Ok(Self { max_depth })
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone, Default)]
 pub struct TierConfig {
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub strategic: Vec<String>,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub replaceable: Vec<String>,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub forbidden: Vec<String>,
 }
 
@@ -106,18 +133,46 @@ impl TierConfig {
         self.replaceable = normalise_list(&self.replaceable);
         self.forbidden = normalise_list(&self.forbidden);
     }
+
+    fn from_value(value: TomlValue) -> diagnostics::Result<Self> {
+        let mut table = expect_table(value, "tiers")?;
+        let strategic = match table.remove("strategic") {
+            Some(value) => parse_string_array(value, "tiers.strategic")?,
+            None => Vec::new(),
+        };
+        let replaceable = match table.remove("replaceable") {
+            Some(value) => parse_string_array(value, "tiers.replaceable")?,
+            None => Vec::new(),
+        };
+        let forbidden = match table.remove("forbidden") {
+            Some(value) => parse_string_array(value, "tiers.forbidden")?,
+            None => Vec::new(),
+        };
+        Ok(Self {
+            strategic,
+            replaceable,
+            forbidden,
+        })
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone, Default)]
 pub struct LicenseConfig {
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub forbidden: Vec<String>,
 }
 
 impl LicenseConfig {
     fn normalise(&mut self) {
         self.forbidden = normalise_list_case_insensitive(&self.forbidden);
+    }
+
+    fn from_value(value: TomlValue) -> diagnostics::Result<Self> {
+        let mut table = expect_table(value, "licenses")?;
+        let forbidden = match table.remove("forbidden") {
+            Some(value) => parse_string_array(value, "licenses.forbidden")?,
+            None => Vec::new(),
+        };
+        Ok(Self { forbidden })
     }
 }
 
@@ -133,4 +188,65 @@ fn normalise_list_case_insensitive(values: &[String]) -> Vec<String> {
     deduped.sort();
     deduped.dedup();
     deduped
+}
+
+fn expect_table(value: TomlValue, context: &str) -> diagnostics::Result<TomlTable> {
+    match value {
+        TomlValue::Object(map) => Ok(map),
+        other => bail!(
+            "{context} must be a table, found {}",
+            describe_value(&other)
+        ),
+    }
+}
+
+fn parse_string_array(value: TomlValue, context: &str) -> diagnostics::Result<Vec<String>> {
+    match value {
+        TomlValue::Array(items) => {
+            let mut result = Vec::with_capacity(items.len());
+            for (index, item) in items.into_iter().enumerate() {
+                match item {
+                    TomlValue::String(s) => result.push(s),
+                    other => bail!(
+                        "{context}[{index}] must be a string, found {}",
+                        describe_value(&other)
+                    ),
+                }
+            }
+            Ok(result)
+        }
+        other => bail!(
+            "{context} must be an array of strings, found {}",
+            describe_value(&other)
+        ),
+    }
+}
+
+fn parse_usize(value: TomlValue, context: &str) -> diagnostics::Result<usize> {
+    match value {
+        TomlValue::Number(number) => {
+            let Some(raw) = number.as_u64() else {
+                bail!("{context} must be a non-negative integer");
+            };
+            if raw > usize::MAX as u64 {
+                bail!("{context} is too large: {raw}");
+            }
+            Ok(raw as usize)
+        }
+        other => bail!(
+            "{context} must be an integer, found {}",
+            describe_value(&other)
+        ),
+    }
+}
+
+fn describe_value(value: &TomlValue) -> &'static str {
+    match value {
+        TomlValue::Null => "null",
+        TomlValue::Bool(_) => "boolean",
+        TomlValue::Number(_) => "number",
+        TomlValue::String(_) => "string",
+        TomlValue::Array(_) => "array",
+        TomlValue::Object(_) => "table",
+    }
 }

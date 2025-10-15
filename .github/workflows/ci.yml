@@ -131,6 +131,8 @@ jobs:
           path: |
             target/dependency-registry/dependency-registry.json
             target/dependency-registry/dependency-violations.json
+            target/dependency-registry/dependency-check.telemetry
+            target/dependency-registry/dependency-metrics.telemetry
           if-no-files-found: warn
       - name: dependency policy summary
         if: always()
@@ -142,10 +144,12 @@ jobs:
 
             const registryPath = 'target/dependency-registry/dependency-registry.json';
             const violationsPath = 'target/dependency-registry/dependency-violations.json';
+            const telemetryPath = 'target/dependency-registry/dependency-check.telemetry';
             const outcome = '${{ steps.dependency_audit.outcome }}';
 
             let registry = null;
             let violations = { entries: [] };
+            let telemetry = null;
 
             const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 
@@ -169,6 +173,16 @@ jobs:
               }
             } else {
               summary.addRaw(`Violation report not found at \`${violationsPath}\`.`, true);
+            }
+
+            if (fs.existsSync(telemetryPath)) {
+              try {
+                telemetry = fs.readFileSync(telemetryPath, 'utf8');
+              } catch (error) {
+                summary.addRaw(`Failed to read \`${telemetryPath}\`: ${error.message}`, true);
+              }
+            } else {
+              summary.addRaw(`Telemetry output not found at \`${telemetryPath}\`.`, true);
             }
 
             if (registry && Array.isArray(registry.entries)) {
@@ -203,6 +217,48 @@ jobs:
               summary.addTable(rows);
             } else if (registry && Array.isArray(violations.entries)) {
               summary.addRaw('No dependency policy violations detected. ✅', true);
+            }
+
+            if (telemetry) {
+              const lines = telemetry.split('\n').filter((line) => line.trim().length > 0);
+              const parseLabels = (line) => {
+                const start = line.indexOf('{');
+                const end = line.indexOf('}');
+                if (start === -1 || end === -1 || end <= start) {
+                  return {};
+                }
+                const body = line.slice(start + 1, end);
+                return body.split(',').reduce((acc, pair) => {
+                  const [rawKey, rawValue] = pair.split('=');
+                  if (!rawKey || !rawValue) {
+                    return acc;
+                  }
+                  acc[rawKey.trim()] = rawValue.trim().replace(/^"|"$/g, '');
+                  return acc;
+                }, {});
+              };
+
+              const statusLine = lines.find((line) => line.startsWith('dependency_registry_check_status')) || null;
+              if (statusLine) {
+                const labels = parseLabels(statusLine);
+                summary.addRaw(`Check status: **${labels.status ?? 'unknown'}**`, true);
+                if (labels.detail) {
+                  summary.addRaw(`Detail: \`${labels.detail}\``, true);
+                }
+              } else {
+                summary.addRaw('Check status metric missing from telemetry.', true);
+              }
+
+              const countLines = lines.filter((line) => line.startsWith('dependency_registry_check_counts'));
+              if (countLines.length > 0) {
+                summary.addHeading('Check counters');
+                for (const line of countLines) {
+                  const labels = parseLabels(line);
+                  const valueToken = line.split(' ').filter((token) => token.trim().length > 0).pop();
+                  const value = valueToken ?? '0';
+                  summary.addRaw(`- ${labels.kind ?? 'unknown'}: **${value}**`, true);
+                }
+              }
             }
 
             await summary.write();

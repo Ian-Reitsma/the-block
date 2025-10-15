@@ -18,6 +18,12 @@ if [ ! -s "$SNAPSHOT_PATH" ]; then
   exit 1
 fi
 
+CHECK_TELEMETRY_PATH="$OUTDIR/dependency-check.telemetry"
+if [ ! -s "$CHECK_TELEMETRY_PATH" ]; then
+  echo "dependency check telemetry missing; ensure dependency_registry emits dependency-check.telemetry" >&2
+  exit 1
+fi
+
 # Freeze the vendor tree for provenance and hash it deterministically.
 rm -rf "$VENDOR_STAGE"
 cargo vendor --locked --versioned-dirs "$VENDOR_STAGE" >/dev/null
@@ -30,6 +36,7 @@ VENDOR_HASH=$(cd "$VENDOR_STAGE" && tar --sort=name --owner=0 --group=0 --numeri
 rm -rf "$VENDOR_STAGE"
 echo "$VENDOR_HASH" > "$OUTDIR/vendor-sha256.txt"
 SNAPSHOT_HASH=$(sha256sum "$SNAPSHOT_PATH" | awk '{print $1}')
+CHECK_TELEMETRY_HASH=$(sha256sum "$CHECK_TELEMETRY_PATH" | awk '{print $1}')
 
 # Build binaries
 cargo build --release
@@ -66,6 +73,10 @@ cat > "$OUTDIR/provenance.json" <<JSON
   "dependency_snapshot": {
     "path": "$(basename "$SNAPSHOT_PATH")",
     "sha256": "$SNAPSHOT_HASH"
+  },
+  "dependency_check_telemetry": {
+    "path": "$(basename "$CHECK_TELEMETRY_PATH")",
+    "sha256": "$CHECK_TELEMETRY_HASH"
   },
   "vendor_tree_sha256": "$VENDOR_HASH"
 }

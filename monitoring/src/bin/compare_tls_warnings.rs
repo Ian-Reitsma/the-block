@@ -1,16 +1,10 @@
-use foundation_serialization::{
-    json,
-    serde::{Deserialize},
-};
+use foundation_serialization::json;
 use http_env::blocking_client;
-use httpd::{client::ClientError, Method, StatusCode};
-use monitoring_build::{parse_prometheus_snapshot, MetricSnapshot, MetricValue};
+use httpd::{Method, StatusCode, client::ClientError};
+use monitoring_build::{MetricSnapshot, MetricValue, parse_prometheus_snapshot};
 use std::{
     collections::{BTreeMap, HashMap},
-    env,
-    fs,
-    io,
-    process,
+    env, fs, io, process,
     time::Duration,
 };
 
@@ -21,16 +15,68 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const TLS_PREFIXES: &[&str] = &["TB_AGGREGATOR_TLS", "TB_MONITORING_TLS", "TB_HTTP_TLS"];
 const EPSILON: f64 = 1e-6;
 
-#[derive(Debug, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone)]
 struct Snapshot {
     prefix: String,
     code: String,
     total: u64,
-    #[serde(default)]
     detail_fingerprint_counts: BTreeMap<String, u64>,
-    #[serde(default)]
     variables_fingerprint_counts: BTreeMap<String, u64>,
+}
+
+impl Snapshot {
+    fn from_value(value: &json::Value) -> Result<Self, CompareError> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| invalid_snapshot("snapshot entries must be JSON objects"))?;
+
+        let prefix = map
+            .get("prefix")
+            .and_then(json::Value::as_str)
+            .ok_or_else(|| invalid_snapshot("snapshot entries must include a 'prefix' string"))?
+            .to_owned();
+
+        let code = map
+            .get("code")
+            .and_then(json::Value::as_str)
+            .ok_or_else(|| invalid_snapshot("snapshot entries must include a 'code' string"))?
+            .to_owned();
+
+        let total = map
+            .get("total")
+            .and_then(json::Value::as_u64)
+            .ok_or_else(|| invalid_snapshot("snapshot entries must include a 'total' integer"))?;
+
+        let detail_fingerprint_counts = Self::counts_field(map, "detail_fingerprint_counts")?;
+        let variables_fingerprint_counts = Self::counts_field(map, "variables_fingerprint_counts")?;
+
+        Ok(Self {
+            prefix,
+            code,
+            total,
+            detail_fingerprint_counts,
+            variables_fingerprint_counts,
+        })
+    }
+
+    fn counts_field(map: &json::Map, key: &str) -> Result<BTreeMap<String, u64>, CompareError> {
+        match map.get(key) {
+            Some(value) => {
+                let object = value.as_object().ok_or_else(|| {
+                    invalid_snapshot("snapshot count fields must be JSON objects")
+                })?;
+                let mut counts = BTreeMap::new();
+                for (fingerprint, entry) in object {
+                    let count = entry.as_u64().ok_or_else(|| {
+                        invalid_snapshot("snapshot count entries must be integers")
+                    })?;
+                    counts.insert(fingerprint.clone(), count);
+                }
+                Ok(counts)
+            }
+            None => Ok(BTreeMap::new()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -43,6 +89,7 @@ enum CompareError {
     Http(ClientError),
     Status(StatusCode, String),
     Mismatch(Vec<String>),
+    InvalidSnapshot(String),
 }
 
 impl std::fmt::Display for CompareError {
@@ -73,8 +120,14 @@ impl std::fmt::Display for CompareError {
                 }
             }
             CompareError::Mismatch(details) => {
-                write!(f, "{} mismatch{} detected", details.len(), if details.len() == 1 { "" } else { "es" })
+                write!(
+                    f,
+                    "{} mismatch{} detected",
+                    details.len(),
+                    if details.len() == 1 { "" } else { "es" }
+                )
             }
+            CompareError::InvalidSnapshot(message) => f.write_str(message),
         }
     }
 }
@@ -148,8 +201,7 @@ fn run() -> Result<(), CompareError> {
 
 fn load_cli_snapshots(path: &str) -> Result<Vec<Snapshot>, CompareError> {
     let raw = fs::read_to_string(path)?;
-    let snapshots = json::from_str(&raw)?;
-    Ok(snapshots)
+    parse_snapshots(&raw)
 }
 
 fn fetch_aggregator_snapshots(base: &str) -> Result<Vec<Snapshot>, CompareError> {
@@ -165,7 +217,20 @@ fn fetch_aggregator_snapshots(base: &str) -> Result<Vec<Snapshot>, CompareError>
         return Err(CompareError::Status(response.status(), body));
     }
     let body = response.text().map_err(CompareError::Http)?;
-    let snapshots = json::from_str(&body)?;
+    parse_snapshots(&body)
+}
+
+fn parse_snapshots(raw: &str) -> Result<Vec<Snapshot>, CompareError> {
+    let value: json::Value = json::from_str(raw)?;
+    let entries = value
+        .as_array()
+        .ok_or_else(|| invalid_snapshot("snapshot payload must be a JSON array"))?;
+
+    let mut snapshots = Vec::with_capacity(entries.len());
+    for entry in entries {
+        snapshots.push(Snapshot::from_value(entry)?);
+    }
+
     Ok(snapshots)
 }
 
@@ -301,6 +366,10 @@ fn compare_snapshots(
     }
 
     mismatches
+}
+
+fn invalid_snapshot(message: impl Into<String>) -> CompareError {
+    CompareError::InvalidSnapshot(message.into())
 }
 
 fn check_unique_counts(

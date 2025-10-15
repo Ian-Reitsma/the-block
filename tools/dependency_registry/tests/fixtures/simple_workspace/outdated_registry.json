@@ -1,0 +1,75 @@
+{
+  "entries": [
+    {
+      "dependencies": [
+        { "name": "dep_a", "version": "0.1.0" },
+        { "name": "dep_b", "version": "0.1.0" }
+      ],
+      "dependents": [],
+      "depth": 0,
+      "license": "MIT",
+      "name": "app",
+      "origin": "workspace",
+      "tier": "strategic",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [
+        { "name": "deep_dep", "version": "0.1.0" }
+      ],
+      "dependents": [
+        { "name": "app", "version": "0.1.0" }
+      ],
+      "depth": 1,
+      "license": "Apache-2.0",
+      "name": "dep_a",
+      "origin": "workspace",
+      "tier": "strategic",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        { "name": "dep_a", "version": "0.1.0" }
+      ],
+      "depth": 2,
+      "license": "MIT",
+      "name": "deep_dep",
+      "origin": "workspace",
+      "tier": "replaceable",
+      "version": "0.1.0"
+    },
+    {
+      "dependencies": [],
+      "dependents": [
+        { "name": "node", "version": "0.1.0" }
+      ],
+      "depth": 1,
+      "license": "MIT",
+      "name": "libp2p",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.0.1"
+    },
+    {
+      "dependencies": [
+        { "name": "libp2p", "version": "0.0.1" }
+      ],
+      "dependents": [],
+      "depth": 0,
+      "license": "MIT",
+      "name": "node",
+      "origin": "workspace",
+      "tier": "unclassified",
+      "version": "0.1.0"
+    }
+  ],
+  "generated_at": "2025-10-10T00:00:00Z",
+  "policy": {
+    "config_path": "tools/dependency_registry/tests/fixtures/simple_workspace/policy.toml",
+    "forbidden_licenses": ["AGPL-3.0"],
+    "max_depth": 2
+  },
+  "root_packages": ["app", "dep_a", "dep_b"],
+  "workspace_root": "/workspace/the-block/tools/dependency_registry/tests/fixtures/simple_workspace"
+}

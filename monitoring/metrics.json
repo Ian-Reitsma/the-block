@@ -779,6 +779,23 @@
     },
     {
       "deprecated": false,
+      "description": "Status of the most recent dependency registry check",
+      "labels": [
+        "status",
+        "detail"
+      ],
+      "name": "dependency_registry_check_status"
+    },
+    {
+      "deprecated": false,
+      "description": "Counters emitted by dependency registry check outcomes",
+      "labels": [
+        "kind"
+      ],
+      "name": "dependency_registry_check_counts"
+    },
+    {
+      "deprecated": false,
       "description": "Indicator gauge for the active overlay backend (1 active / 0 inactive)",
       "labels": [
         "backend"
