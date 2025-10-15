@@ -78,3 +78,33 @@ groups:
           severity: warn
         annotations:
           summary: "TLS warning snapshots stale beyond retention ({{ printf \"%.0f\" $value }} affected)"
+  - name: dependency-registry
+    rules:
+      - alert: DependencyRegistryDriftDetected
+        expr: max(dependency_registry_check_status{status="drift"}) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Dependency registry drift detected ({{ $labels.detail }})"
+      - alert: DependencyRegistryPolicyViolations
+        expr: max(dependency_registry_check_status{status="violations"}) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Dependency policy violations present; see dependency-violations.json"
+      - alert: DependencyRegistryBaselineError
+        expr: max(dependency_registry_check_status{status="baseline_error"}) > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "Dependency registry baseline failed to load"
+      - alert: DependencyPolicyViolationSpike
+        expr: increase(dependency_policy_violation_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Dependency policy violations surfaced during latest check"

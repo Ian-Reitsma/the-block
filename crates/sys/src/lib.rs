@@ -274,6 +274,7 @@ pub mod cpu {
     }
 }
 
+pub mod device;
 pub mod net;
 
 pub mod reactor;

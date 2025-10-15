@@ -18,6 +18,31 @@ if [ ! -s "$SNAPSHOT_PATH" ]; then
   exit 1
 fi
 
+CHECK_TELEMETRY_PATH="$OUTDIR/dependency-check.telemetry"
+CHECK_SUMMARY_PATH="$OUTDIR/dependency-check.summary.json"
+METRICS_TELEMETRY_PATH="$OUTDIR/dependency-metrics.telemetry"
+REGISTRY_PATH="$OUTDIR/dependency-registry.json"
+VIOLATIONS_PATH="$OUTDIR/dependency-violations.json"
+
+for required in \
+  "$CHECK_TELEMETRY_PATH" \
+  "$CHECK_SUMMARY_PATH" \
+  "$METRICS_TELEMETRY_PATH" \
+  "$REGISTRY_PATH" \
+  "$VIOLATIONS_PATH"
+do
+  if [ ! -s "$required" ]; then
+    echo "release provenance missing artifact: $required" >&2
+    exit 1
+  fi
+done
+
+CHECK_TELEMETRY_HASH=$(sha256sum "$CHECK_TELEMETRY_PATH" | awk '{print $1}')
+CHECK_SUMMARY_HASH=$(sha256sum "$CHECK_SUMMARY_PATH" | awk '{print $1}')
+METRICS_TELEMETRY_HASH=$(sha256sum "$METRICS_TELEMETRY_PATH" | awk '{print $1}')
+REGISTRY_HASH=$(sha256sum "$REGISTRY_PATH" | awk '{print $1}')
+VIOLATIONS_HASH=$(sha256sum "$VIOLATIONS_PATH" | awk '{print $1}')
+
 # Freeze the vendor tree for provenance and hash it deterministically.
 rm -rf "$VENDOR_STAGE"
 cargo vendor --locked --versioned-dirs "$VENDOR_STAGE" >/dev/null
@@ -66,6 +91,28 @@ cat > "$OUTDIR/provenance.json" <<JSON
   "dependency_snapshot": {
     "path": "$(basename "$SNAPSHOT_PATH")",
     "sha256": "$SNAPSHOT_HASH"
+  },
+  "dependency_check": {
+    "registry": {
+      "path": "$(basename "$REGISTRY_PATH")",
+      "sha256": "$REGISTRY_HASH"
+    },
+    "violations": {
+      "path": "$(basename "$VIOLATIONS_PATH")",
+      "sha256": "$VIOLATIONS_HASH"
+    },
+    "telemetry": {
+      "path": "$(basename "$CHECK_TELEMETRY_PATH")",
+      "sha256": "$CHECK_TELEMETRY_HASH"
+    },
+    "summary": {
+      "path": "$(basename "$CHECK_SUMMARY_PATH")",
+      "sha256": "$CHECK_SUMMARY_HASH"
+    }
+  },
+  "dependency_metrics": {
+    "path": "$(basename "$METRICS_TELEMETRY_PATH")",
+    "sha256": "$METRICS_TELEMETRY_HASH"
   },
   "vendor_tree_sha256": "$VENDOR_HASH"
 }

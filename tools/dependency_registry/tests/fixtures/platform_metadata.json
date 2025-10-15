@@ -1,0 +1,97 @@
+{
+  "packages": [
+    {
+      "name": "root",
+      "version": "0.1.0",
+      "id": "root 0.1.0 (path+file:///workspace/root)",
+      "manifest_path": "/workspace/root/Cargo.toml"
+    },
+    {
+      "name": "shared",
+      "version": "0.1.0",
+      "id": "shared 0.1.0 (path+file:///workspace/shared)",
+      "manifest_path": "/workspace/shared/Cargo.toml"
+    },
+    {
+      "name": "linux_only",
+      "version": "0.1.0",
+      "id": "linux_only 0.1.0 (path+file:///workspace/linux_only)",
+      "manifest_path": "/workspace/linux_only/Cargo.toml"
+    },
+    {
+      "name": "windows_only",
+      "version": "0.1.0",
+      "id": "windows_only 0.1.0 (path+file:///workspace/windows_only)",
+      "manifest_path": "/workspace/windows_only/Cargo.toml"
+    },
+    {
+      "name": "transitive",
+      "version": "0.1.0",
+      "id": "transitive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+      "manifest_path": "/registry/transitive/Cargo.toml",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    }
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "root 0.1.0 (path+file:///workspace/root)",
+        "deps": [
+          {
+            "name": "shared",
+            "pkg": "shared 0.1.0 (path+file:///workspace/shared)"
+          },
+          {
+            "name": "linux_only",
+            "pkg": "linux_only 0.1.0 (path+file:///workspace/linux_only)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": "cfg(target_os = \"linux\")"
+              }
+            ]
+          },
+          {
+            "name": "windows_only",
+            "pkg": "windows_only 0.1.0 (path+file:///workspace/windows_only)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": "cfg(target_os = \"windows\")"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "shared 0.1.0 (path+file:///workspace/shared)",
+        "deps": [
+          {
+            "name": "transitive",
+            "pkg": "transitive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)"
+          }
+        ]
+      },
+      {
+        "id": "linux_only 0.1.0 (path+file:///workspace/linux_only)",
+        "deps": []
+      },
+      {
+        "id": "windows_only 0.1.0 (path+file:///workspace/windows_only)",
+        "deps": []
+      },
+      {
+        "id": "transitive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+        "deps": []
+      }
+    ]
+  },
+  "workspace_members": [
+    "root 0.1.0 (path+file:///workspace/root)",
+    "shared 0.1.0 (path+file:///workspace/shared)",
+    "linux_only 0.1.0 (path+file:///workspace/linux_only)",
+    "windows_only 0.1.0 (path+file:///workspace/windows_only)"
+  ],
+  "workspace_default_members": [],
+  "workspace_root": "/workspace"
+}

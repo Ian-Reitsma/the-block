@@ -5,6 +5,14 @@ use serde::de::DeserializeOwned;
 
 use crate::json_impl::{self, Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
+/// Representation of a TOML value using the crate's JSON backing types.
+pub type Value = JsonValue;
+
+/// Representation of a TOML table.
+pub type Table = JsonMap;
+
+/// Representation of a TOML number.
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -84,9 +92,18 @@ impl std::error::Error for Error {
 }
 
 pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
-    let document = Parser::new(input).parse()?;
-    let value = JsonValue::Object(document);
+    let value = parse_value(input)?;
     json_impl::from_value(value).map_err(Error::json)
+}
+
+/// Parse a TOML document into a [`Value`].
+pub fn parse_value(input: &str) -> Result<Value> {
+    Ok(Value::Object(parse_table(input)?))
+}
+
+/// Parse a TOML document into a [`Table`].
+pub fn parse_table(input: &str) -> Result<Table> {
+    Parser::new(input).parse()
 }
 
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {

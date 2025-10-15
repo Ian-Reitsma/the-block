@@ -6,13 +6,8 @@ edition = "2021"
 [features]
 default = ["desktop-probe"]
 desktop-probe = []
-android-probe = ["dep:ndk", "dep:ndk-context", "dep:jni"]
-ios-probe = [
-    "dep:objc",
-    "dep:objc-foundation",
-    "dep:objc_id",
-    "dep:core-foundation",
-]
+android-probe = []
+ios-probe = []
 telemetry = ["dep:foundation_lazy"]
 
 [dependencies]
@@ -22,39 +17,11 @@ foundation_lazy = { path = "../foundation_lazy", optional = true }
 coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }
 serde = { workspace = true }
-tracing = "0.1"
+diagnostics = { path = "../diagnostics" }
 state = { path = "../../state" }
 thiserror = { path = "../thiserror" }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"] }
 sys = { path = "../sys" }
-
-[dependencies.ndk]
-version = "0.8"
-optional = true
-
-[dependencies.ndk-context]
-version = "0.1"
-optional = true
-
-[dependencies.jni]
-version = "0.21"
-optional = true
-
-[dependencies.objc]
-version = "0.2"
-optional = true
-
-[dependencies.objc-foundation]
-version = "0.1"
-optional = true
-
-[dependencies.objc_id]
-version = "0.1"
-optional = true
-
-[dependencies.core-foundation]
-version = "0.9"
-optional = true
 
 [dev-dependencies]
 rand = { path = "../rand" }

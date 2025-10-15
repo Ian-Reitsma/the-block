@@ -6,8 +6,12 @@ use cli_core::{
 };
 use diagnostics::{anyhow, bail, Context, Result, TbError};
 use foundation_serialization::json;
-use std::io::{self, Write};
-use std::process::Command as StdCommand;
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path,
+    process::Command as StdCommand,
+};
 
 #[derive(Default)]
 struct Summary {
@@ -262,6 +266,45 @@ fn run_check_deps(matches: &cli_core::parse::Matches) -> Result<()> {
         .context("failed to execute dependency-registry")?;
     if !status.success() {
         bail!("dependency registry check failed with status {status}");
+    }
+
+    let out_dir_path = Path::new(&out_dir);
+    let summary_path = out_dir_path.join("dependency-check.summary.json");
+    let summary_bytes = fs::read(&summary_path)
+        .with_context(|| format!("failed to read {}", summary_path.display()))?;
+    let summary_value = json::value_from_slice(&summary_bytes)
+        .context("failed to parse dependency-check.summary.json")?;
+    let status_label = summary_value
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let detail = summary_value
+        .get("detail")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    println!("dependency registry check status: {status_label} ({detail})",);
+
+    if let Some(counts) = summary_value
+        .get("counts")
+        .and_then(|value| value.as_object())
+    {
+        if !counts.is_empty() {
+            let mut kinds: Vec<_> = counts.keys().cloned().collect();
+            kinds.sort();
+            println!("dependency registry drift counters:");
+            for kind in kinds {
+                let rendered = counts
+                    .get(&kind)
+                    .and_then(|value| value.as_i64().map(|v| v.to_string()))
+                    .or_else(|| {
+                        counts
+                            .get(&kind)
+                            .and_then(|value| value.as_u64().map(|v| v.to_string()))
+                    })
+                    .unwrap_or_else(|| counts.get(&kind).unwrap().to_string());
+                println!("  {kind}: {rendered}");
+            }
+        }
     }
     Ok(())
 }

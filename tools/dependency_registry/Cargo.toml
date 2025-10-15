@@ -6,9 +6,7 @@ build = "build.rs"
 
 [dependencies]
 diagnostics = { path = "../../crates/diagnostics" }
-cargo_metadata = "0.18"
 cli_core = { path = "../../crates/cli_core" }
-camino = "1.1"
 concurrency = { path = "../../crates/concurrency" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 foundation_time = { path = "../../crates/foundation_time" }

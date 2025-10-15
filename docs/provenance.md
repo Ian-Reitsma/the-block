@@ -29,6 +29,10 @@ the vendored source tree before any binaries are built:
   embedded in `provenance.json` and appears in `checksums.txt` so downstream
   auditors can verify that their local policy baseline matches the published
   release.
+- The same run writes `dependency-check.telemetry`,
+  `dependency-check.summary.json`, and `dependency-metrics.telemetry`, hashing
+  each artefact into `provenance.json`/`checksums.txt` so release consumers see
+  the drift verdict and metrics that backed the promotion decision.
 - The same script runs `cargo vendor` into a staging directory, normalises the
   tree with sorted metadata, and records the resulting SHA-256 digest in both
   `vendor-sha256.txt` and the provenance record. Consumers can compare the

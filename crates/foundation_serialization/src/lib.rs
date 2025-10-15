@@ -574,6 +574,8 @@ pub mod toml {
 
     use super::{toml_impl, Error, Result};
 
+    pub use super::toml_impl::{parse_table, parse_value, Table, Value};
+
     /// Deserialize a value from a TOML string slice.
     pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
         toml_impl::from_str(input).map_err(Error::toml)
