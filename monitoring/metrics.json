@@ -1385,6 +1385,41 @@
       "description": "Telemetry memory allocation in bytes",
       "labels": [],
       "name": "telemetry_alloc_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Outcome of the latest dependency registry check",
+      "labels": [
+        "status",
+        "detail"
+      ],
+      "name": "dependency_registry_check_status"
+    },
+    {
+      "deprecated": false,
+      "description": "Counts associated with dependency registry check outcomes",
+      "labels": [
+        "kind"
+      ],
+      "name": "dependency_registry_check_counts"
+    },
+    {
+      "deprecated": false,
+      "description": "Total dependency policy violations detected during the last run",
+      "labels": [],
+      "name": "dependency_policy_violation_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Dependency policy violations grouped by crate, version, kind, and depth",
+      "labels": [
+        "crate",
+        "version",
+        "kind",
+        "detail",
+        "depth"
+      ],
+      "name": "dependency_policy_violation"
     }
   ]
 }

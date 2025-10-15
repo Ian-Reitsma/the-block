@@ -103,6 +103,14 @@ const TLS_VARIABLES_FINGERPRINT_DELTA_PANEL_TITLE: &str =
     "TLS env warnings (variables fingerprint 5m delta)";
 const TLS_VARIABLES_FINGERPRINT_DELTA_EXPR: &str =
     "sum by (prefix, code, fingerprint)(increase(tls_env_warning_variables_fingerprint_total[5m]))";
+const DEP_STATUS_PANEL_TITLE: &str = "Dependency registry check status";
+const DEP_STATUS_EXPR: &str = "dependency_registry_check_status";
+const DEP_COUNTS_PANEL_TITLE: &str = "Dependency registry drift counts";
+const DEP_COUNTS_EXPR: &str = "dependency_registry_check_counts";
+const DEP_VIOLATION_TOTAL_PANEL_TITLE: &str = "Dependency policy violations (total)";
+const DEP_VIOLATION_TOTAL_EXPR: &str = "dependency_policy_violation_total";
+const DEP_VIOLATION_PANEL_TITLE: &str = "Dependency policy violations by crate";
+const DEP_VIOLATION_EXPR: &str = "dependency_policy_violation";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -196,9 +204,26 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut compute = Vec::new();
     let mut gossip = Vec::new();
     let mut tls = Vec::new();
+    let mut dependency = Vec::new();
     let mut other = Vec::new();
 
     for metric in metrics.iter().filter(|m| !m.deprecated) {
+        if metric.name == DEP_STATUS_EXPR {
+            dependency.push(build_dependency_status_panel(metric));
+            continue;
+        }
+        if metric.name == DEP_COUNTS_EXPR {
+            dependency.push(build_dependency_counts_panel(metric));
+            continue;
+        }
+        if metric.name == DEP_VIOLATION_TOTAL_EXPR {
+            dependency.push(build_dependency_violation_total_panel(metric));
+            continue;
+        }
+        if metric.name == DEP_VIOLATION_EXPR {
+            dependency.push(build_dependency_violation_panel(metric));
+            continue;
+        }
         if metric.name == "tls_env_warning_total" {
             tls.push(build_tls_panel(metric));
             continue;
@@ -308,6 +333,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("Compute", compute),
         ("Gossip", gossip),
         ("TLS", tls),
+        ("Dependencies", dependency),
         ("Other", other),
     ] {
         if entries.is_empty() {
@@ -354,6 +380,128 @@ fn build_tls_panel(metric: &Metric) -> Value {
     let mut target = Map::new();
     target.insert("expr".into(), Value::from(TLS_PANEL_EXPR));
     target.insert("legendFormat".into(), Value::from("{{prefix}} · {{code}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_dependency_status_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(DEP_STATUS_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(DEP_STATUS_EXPR));
+    target.insert("legendFormat".into(), Value::from("{{status}} · {{detail}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_dependency_counts_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(DEP_COUNTS_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(DEP_COUNTS_EXPR));
+    target.insert("legendFormat".into(), Value::from("{{kind}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_dependency_violation_total_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(DEP_VIOLATION_TOTAL_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(DEP_VIOLATION_TOTAL_EXPR));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(false));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_dependency_violation_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(DEP_VIOLATION_PANEL_TITLE));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(DEP_VIOLATION_EXPR));
+    target.insert(
+        "legendFormat".into(),
+        Value::from("{{crate}} {{version}} · {{kind}}"),
+    );
     panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
 
     let mut legend = Map::new();

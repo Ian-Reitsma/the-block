@@ -1,4 +1,56 @@
 # Project Progress Snapshot
+> **Review (2025-10-14, late evening+++):** Dependency governance automation now
+> ships machine-readable summaries and dashboard coverage. The registry runner
+> writes `dependency-check.summary.json` alongside telemetry/violations,
+> `tools/xtask` prints the parsed verdict during CI preflights, and
+> `scripts/release_provenance.sh` hashes the summary plus telemetry artefacts
+> before signing provenance so releases publish drift context with the binary
+> SBOM. Monitoring picked up dedicated dependency panels/alerts: new metrics
+> definitions render policy status, drift counts, and registry freshness in the
+> Grafana JSON, and alert rules page when drift reappears or snapshots go stale.
+> CLI/release integration tests enforce the summary contract while regenerated
+> dashboards and snapshots keep monitoring builds green.
+> **Review (2025-10-14, midday++):** Dependency registry check mode emits
+> actionable telemetry and drift narratives. The new `check` module compares
+> baseline and generated registries, enumerating additions, removals,
+> field-level changes, root-package churn, and policy diffs before persisting a
+> `dependency-check.telemetry` snapshot. CLI coverage exercises the failure path
+> end-to-end, asserting the drift message, `dependency_registry_check_status`
+> label, and per-kind gauges while verifying snapshot/violation artefacts stay
+> intact after an error. Metadata coverage added a platform-target fixture that
+> validates optional dependencies, cfg-gated edges, and default-member fallbacks
+> so `compute_depths` remains correct across large and platform-specific graphs.
+> **Review (2025-10-14, pre-dawn++):** Tooling automation now owns the
+> dependency registry end-to-end. The CLI exposes a reusable runner that writes
+> registry JSON, snapshots, manifest lists, telemetry, and violation reports in
+> one pass, returns `RunArtifacts` for downstream automation, and honours a
+> `TB_DEPENDENCY_REGISTRY_DOC_PATH` override so integration tests can exercise
+> the full flow without mutating committed docs. A new CLI integration test
+> drives that runner against the fixture workspace, asserting JSON payloads,
+> telemetry counters, snapshot emission, and manifest contents. Registry parser
+> coverage now includes a synthetic metadata graph with optional, git, and
+> duplicate edges to lock in adjacency deduplication, reverse-dependency
+> tracking, and origin detection across less-common workspace layouts, while log
+> rotation writes gained a rollback guard to restore the prior ciphertext if any
+> sled write fails mid-rotation.
+> **Review (2025-10-14, late night+):** Dependency-policy tooling is now fully
+> first party. `foundation_serialization::toml` exposes low-level
+> `parse_table`/`parse_value` helpers so the dependency registry parses policy
+> files without serde derives, the config layer normalises tiers/settings by
+> hand, and JSON snapshots round-trip through handwritten
+> `foundation_serialization::json::Value` conversions. Unit/integration tests
+> run under the stub backend without skips, and a new TOML fixture exercises the
+> raw parser to guard regressions while the CLI emits snapshots/violations via
+> `json::to_vec_value`.
+> **Review (2025-10-14, late night):** Log index key rotation now stages every
+> decrypted payload before writing so failures never leave the sled store in a
+> mixed-key state. The test suite gained explicit coverage for the failure path
+> (`rotate_key_is_atomic_on_failure`) and the JSON backend probe now attempts a
+> full `LogEntry` round-trip so FIRST_PARTY_ONLY runs skip gracefully when the
+> stub facade is active. `tools/dependency_registry` shells out to `cargo
+> metadata` through the in-house JSON facade, dropping the crates.io
+> `cargo_metadata`/`camino` pair while adding unit coverage for the parser and
+> teaching integration tests to auto-skip on the stub backend.
 > **Review (2025-10-14, evening):** Regression coverage now locks the freshly
 > handwritten TLS serializers and the JSON facade. `cli/src/tls.rs` ships
 > dedicated tests that round-trip `CliTlsWarningStatus`, snapshots, and the
@@ -146,6 +198,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
 - **Current inventory** *(generated at `2025-10-13T19:45:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers, the diagnostics crate’s SQLite-free manifest, the new P2P wire-message manual codec, the identity sled migrations that dropped `binary_codec`, and the expanded randomized coverage guarding DID/handle persistence plus the DEX sled migration.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Latest migrations (2025-10-14)**: Dependency registry automation now emits
+  a structured `dependency-check.summary.json` alongside telemetry, and both
+  `tools/xtask` plus `scripts/release_provenance.sh` parse/hash the summary so
+  CI preflights and release artefacts surface the drift verdict with matching
+  checksums. Monitoring’s metric catalogue, Grafana templates, and alert rules
+  now expose dependency policy status, drift counts, and snapshot freshness, with
+  regenerated dashboards and snapshot fixtures keeping build/test coverage
+  aligned.
 - **Latest migrations (2025-10-12)**: Runtime rewired its async executor and
   blocking pool to use a shared first-party `WorkQueue`, dropping
   `crossbeam-deque`/`crossbeam-epoch` from the crate while preserving spawn
@@ -171,6 +231,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   lives beside the providers in `crates/transport`), and the s2n backend
   verifies certificates through the new in-house DER parser
   (`crates/transport/src/cert_parser.rs`), replacing `x509-parser` entirely.
+- **Latest migrations (2025-10-14, late night+)**: `tools/dependency_registry` now parses
+  policy TOML via the facade’s new low-level helpers and serializes snapshots
+  with handwritten JSON conversions, removing the crate’s last serde dependency.
+  Tests execute under the stub backend without skips, and
+  `crates/foundation_serialization/tests/toml_policy.rs` locks the parser
+  against regression inputs while `json::to_vec_value` powers CLI outputs.
 - **Latest migrations (2025-10-14)**: The new `crates/log_index` library
   replaces the ad-hoc SQLite helpers with a sled-backed store shared by node,
   CLI, explorer, and monitoring tooling. `contract logs` and the
@@ -432,7 +498,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   `metrics-aggregator/src/object_store.rs`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
-- Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`).
+- Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`). The Android and iOS implementations now depend solely on first-party helpers—`sys::device::{battery,network}` reads `/sys` and `/proc` sensors while the iOS probe issues Objective-C/CoreFoundation calls through in-house FFI—dropping the legacy `jni`, `ndk`, and `objc` stacks.
 - Real-time state streaming over WebSockets with hybrid (lz77-rle) snapshots (`docs/light_client_stream.md`, `node/src/rpc/state_stream.rs`).
 - Optional KYC provider wiring (`docs/kyc.md`).
 - Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).

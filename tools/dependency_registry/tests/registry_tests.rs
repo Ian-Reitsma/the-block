@@ -8,11 +8,17 @@ fn fixture_path(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+fn load_policy() -> (PolicyConfig, PathBuf) {
+    let policy_path = fixture_path("policy.toml");
+    let policy =
+        PolicyConfig::load(&policy_path).unwrap_or_else(|err| panic!("policy should load: {err}"));
+    (policy, policy_path)
+}
+
 #[test]
 fn assigns_policy_tiers_and_detects_license_violations() {
     let manifest = fixture_path("Cargo.toml");
-    let policy_path = fixture_path("policy.toml");
-    let policy = PolicyConfig::load(&policy_path).expect("policy should load");
+    let (policy, policy_path) = load_policy();
 
     let build = build_registry(BuildOptions {
         manifest_path: Some(manifest.as_path()),
@@ -49,8 +55,7 @@ fn assigns_policy_tiers_and_detects_license_violations() {
 #[test]
 fn enforces_maximum_depth() {
     let manifest = fixture_path("Cargo.toml");
-    let policy_path = fixture_path("policy.toml");
-    let policy = PolicyConfig::load(&policy_path).expect("policy should load");
+    let (policy, policy_path) = load_policy();
 
     let build = build_registry(BuildOptions {
         manifest_path: Some(manifest.as_path()),
@@ -70,8 +75,7 @@ fn enforces_maximum_depth() {
 #[test]
 fn flags_direct_libp2p_usage() {
     let manifest = fixture_path("Cargo.toml");
-    let policy_path = fixture_path("policy.toml");
-    let policy = PolicyConfig::load(&policy_path).expect("policy should load");
+    let (policy, policy_path) = load_policy();
 
     let build = build_registry(BuildOptions {
         manifest_path: Some(manifest.as_path()),

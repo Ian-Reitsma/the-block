@@ -1,11 +1,115 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs, io::Write, path::Path};
 
 use diagnostics::anyhow as diag_anyhow;
 use diagnostics::anyhow::{Context, Result};
 
-use crate::model::{DependencyEntry, DependencyRegistry, ViolationReport};
-use foundation_serialization::json;
+use crate::{
+    check::DriftCounts,
+    model::{DependencyEntry, DependencyRegistry, ViolationReport},
+};
+use foundation_serialization::json::{
+    self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+};
 use runtime::telemetry::{IntGaugeVec, Opts, Registry};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckStatus {
+    Pass,
+    Drift,
+    Violations,
+    BaselineError,
+}
+
+impl CheckStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            CheckStatus::Pass => "pass",
+            CheckStatus::Drift => "drift",
+            CheckStatus::Violations => "violations",
+            CheckStatus::BaselineError => "baseline_error",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckTelemetry {
+    status: CheckStatus,
+    detail: String,
+    counts: Vec<(&'static str, i64)>,
+}
+
+impl CheckTelemetry {
+    pub fn pass() -> Self {
+        Self {
+            status: CheckStatus::Pass,
+            detail: "ok".to_string(),
+            counts: Vec::new(),
+        }
+    }
+
+    pub fn drift(counts: DriftCounts) -> Self {
+        Self {
+            status: CheckStatus::Drift,
+            detail: format!(
+                "add={},remove={},field={},policy={},root_add={},root_remove={}",
+                counts.additions,
+                counts.removals,
+                counts.field_changes,
+                counts.policy_changes,
+                counts.root_additions,
+                counts.root_removals
+            ),
+            counts: vec![
+                ("additions", counts.additions as i64),
+                ("removals", counts.removals as i64),
+                ("field_changes", counts.field_changes as i64),
+                ("policy_changes", counts.policy_changes as i64),
+                ("root_additions", counts.root_additions as i64),
+                ("root_removals", counts.root_removals as i64),
+            ],
+        }
+    }
+
+    pub fn violations(count: usize) -> Self {
+        Self {
+            status: CheckStatus::Violations,
+            detail: format!("violations={count}"),
+            counts: vec![("violations", count as i64)],
+        }
+    }
+
+    pub fn baseline_error(detail: impl Into<String>) -> Self {
+        Self {
+            status: CheckStatus::BaselineError,
+            detail: detail.into(),
+            counts: Vec::new(),
+        }
+    }
+
+    fn status_label(&self) -> &'static str {
+        self.status.label()
+    }
+
+    pub fn to_json_value(&self) -> JsonValue {
+        let mut root = JsonMap::new();
+        root.insert(
+            "status".to_string(),
+            JsonValue::String(self.status_label().to_string()),
+        );
+        root.insert("detail".to_string(), JsonValue::String(self.detail.clone()));
+
+        let mut counts_map = JsonMap::new();
+        for (kind, value) in &self.counts {
+            counts_map.insert(
+                (*kind).to_string(),
+                JsonValue::Number(JsonNumber::from(*value)),
+            );
+        }
+        root.insert("counts".to_string(), JsonValue::Object(counts_map));
+
+        JsonValue::Object(root)
+    }
+}
 
 pub fn write_registry_json(registry: &DependencyRegistry, out_dir: &Path) -> Result<()> {
     fs::create_dir_all(out_dir)
@@ -13,7 +117,9 @@ pub fn write_registry_json(registry: &DependencyRegistry, out_dir: &Path) -> Res
     let path = out_dir.join("dependency-registry.json");
     let file =
         fs::File::create(&path).with_context(|| format!("unable to create {}", path.display()))?;
-    json::to_writer_pretty(file, registry)
+    let buffer = json::to_vec_value(&registry.to_json_value());
+    (&file)
+        .write_all(&buffer)
         .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to serialise registry to {}", path.display()))?;
     Ok(())
@@ -27,7 +133,9 @@ pub fn write_snapshot(registry: &DependencyRegistry, snapshot_path: &Path) -> Re
     let snapshot = registry.comparison_key();
     let file = fs::File::create(snapshot_path)
         .with_context(|| format!("unable to create {}", snapshot_path.display()))?;
-    json::to_writer_pretty(file, &snapshot)
+    let buffer = json::to_vec_value(&snapshot.to_json_value());
+    (&file)
+        .write_all(&buffer)
         .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| {
             format!(
@@ -98,7 +206,9 @@ pub fn write_violations(report: &ViolationReport, out_dir: &Path) -> Result<()> 
     let path = out_dir.join("dependency-violations.json");
     let file =
         fs::File::create(&path).with_context(|| format!("unable to create {}", path.display()))?;
-    json::to_writer_pretty(file, report)
+    let buffer = json::to_vec_value(&report.to_json_value());
+    (&file)
+        .write_all(&buffer)
         .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to serialise violations to {}", path.display()))?;
     Ok(())
@@ -151,6 +261,60 @@ pub fn write_telemetry_metrics(report: &ViolationReport, out_dir: &Path) -> Resu
 
     fs::write(&path, registry.render_bytes())
         .with_context(|| format!("unable to write {}", path.display()))
+}
+
+pub fn write_check_telemetry(out_dir: &Path, telemetry: &CheckTelemetry) -> Result<()> {
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed to create {}", out_dir.display()))?;
+    let path = out_dir.join("dependency-check.telemetry");
+    let registry = Registry::new();
+
+    let status_vec = IntGaugeVec::new(
+        Opts::new(
+            "dependency_registry_check_status",
+            "Status of the most recent dependency registry check",
+        ),
+        &["status", "detail"],
+    )
+    .map_err(|err| diag_anyhow::anyhow!(err))?;
+    registry
+        .register(Box::new(status_vec.clone()))
+        .map_err(|err| diag_anyhow::anyhow!(err))?;
+    let status_handle = status_vec
+        .ensure_handle_for_label_values(&[telemetry.status_label(), telemetry.detail.as_str()])
+        .map_err(|err| diag_anyhow::anyhow!(err))?;
+    status_handle.set(1);
+
+    if !telemetry.counts.is_empty() {
+        let counts_vec = IntGaugeVec::new(
+            Opts::new(
+                "dependency_registry_check_counts",
+                "Counts associated with dependency registry check outcomes",
+            ),
+            &["kind"],
+        )
+        .map_err(|err| diag_anyhow::anyhow!(err))?;
+        registry
+            .register(Box::new(counts_vec.clone()))
+            .map_err(|err| diag_anyhow::anyhow!(err))?;
+        for (kind, value) in &telemetry.counts {
+            let handle = counts_vec
+                .ensure_handle_for_label_values(&[*kind])
+                .map_err(|err| diag_anyhow::anyhow!(err))?;
+            handle.set(*value);
+        }
+    }
+
+    fs::write(&path, registry.render_bytes())
+        .with_context(|| format!("unable to write {}", path.display()))
+}
+
+pub fn write_check_summary(out_dir: &Path, telemetry: &CheckTelemetry) -> Result<()> {
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed to create {}", out_dir.display()))?;
+    let path = out_dir.join("dependency-check.summary.json");
+    let buffer = json::to_vec_value(&telemetry.to_json_value());
+    fs::write(&path, buffer).with_context(|| format!("unable to write {}", path.display()))
 }
 
 pub fn diff_registries(old_path: &Path, new_path: &Path) -> Result<()> {
@@ -317,10 +481,11 @@ pub fn explain_crate(crate_name: &str, registry_path: &Path) -> Result<()> {
 pub fn load_registry(path: &Path) -> Result<DependencyRegistry> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("unable to read registry at {}", path.display()))?;
-    let registry: DependencyRegistry = json::from_slice(contents.as_bytes())
+    let value = json::value_from_slice(contents.as_bytes())
         .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to parse registry at {}", path.display()))?;
-    Ok(registry)
+    DependencyRegistry::from_json_value(value)
+        .with_context(|| format!("unable to decode registry at {}", path.display()))
 }
 
 fn index_by_crate(entries: &[DependencyEntry]) -> HashMap<(String, String), DependencyEntry> {

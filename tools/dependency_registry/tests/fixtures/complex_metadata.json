@@ -1,0 +1,138 @@
+{
+  "packages": [
+    {
+      "name": "root",
+      "version": "0.1.0",
+      "id": "root 0.1.0 (path+file:///workspace/root)",
+      "manifest_path": "/workspace/root/Cargo.toml",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "shared",
+      "version": "0.2.0",
+      "id": "shared 0.2.0 (path+file:///workspace/shared)",
+      "manifest_path": "/workspace/shared/Cargo.toml",
+      "license_file": "LICENSE"
+    },
+    {
+      "name": "optional_dep",
+      "version": "0.3.0",
+      "id": "optional_dep 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+      "manifest_path": "/registry/optional_dep/Cargo.toml",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "target_dep",
+      "version": "0.4.0",
+      "id": "target_dep 0.4.0 (git+https://example.com/target_dep?rev=12345)",
+      "manifest_path": "/workspace/target_dep/Cargo.toml",
+      "source": "git+https://example.com/target_dep?rev=12345"
+    },
+    {
+      "name": "duplicate_dep",
+      "version": "0.5.0",
+      "id": "duplicate_dep 0.5.0 (path+file:///workspace/duplicate_dep)",
+      "manifest_path": "/workspace/duplicate_dep/Cargo.toml"
+    },
+    {
+      "name": "transitive",
+      "version": "0.6.1",
+      "id": "transitive 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+      "manifest_path": "/registry/transitive/Cargo.toml",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    }
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "root 0.1.0 (path+file:///workspace/root)",
+        "deps": [
+          {
+            "name": "shared",
+            "pkg": "shared 0.2.0 (path+file:///workspace/shared)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "optional_dep",
+            "pkg": "optional_dep 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null,
+                "requires": [
+                  "optional"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "target_dep",
+            "pkg": "target_dep 0.4.0 (git+https://example.com/target_dep?rev=12345)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": "cfg(target_os = \"linux\")"
+              }
+            ]
+          },
+          {
+            "name": "duplicate_dep",
+            "pkg": "duplicate_dep 0.5.0 (path+file:///workspace/duplicate_dep)"
+          },
+          {
+            "name": "duplicate_dep",
+            "pkg": "duplicate_dep 0.5.0 (path+file:///workspace/duplicate_dep)"
+          }
+        ]
+      },
+      {
+        "id": "shared 0.2.0 (path+file:///workspace/shared)",
+        "deps": [
+          {
+            "name": "transitive",
+            "pkg": "transitive 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)"
+          },
+          {
+            "name": "target_dep",
+            "pkg": "target_dep 0.4.0 (git+https://example.com/target_dep?rev=12345)",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": "cfg(target_arch = \"x86_64\")"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "optional_dep 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+        "deps": []
+      },
+      {
+        "id": "target_dep 0.4.0 (git+https://example.com/target_dep?rev=12345)",
+        "deps": []
+      },
+      {
+        "id": "duplicate_dep 0.5.0 (path+file:///workspace/duplicate_dep)",
+        "deps": []
+      },
+      {
+        "id": "transitive 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+        "deps": []
+      }
+    ]
+  },
+  "workspace_members": [
+    "root 0.1.0 (path+file:///workspace/root)",
+    "shared 0.2.0 (path+file:///workspace/shared)"
+  ],
+  "workspace_default_members": [
+    "root 0.1.0 (path+file:///workspace/root)"
+  ],
+  "workspace_root": "/workspace"
+}

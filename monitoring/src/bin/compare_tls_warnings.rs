@@ -1,7 +1,6 @@
-use foundation_serialization::{
-    json,
-    serde::{Deserialize},
-};
+extern crate foundation_serialization as serde;
+
+use foundation_serialization::{json, Deserialize};
 use http_env::blocking_client;
 use httpd::{client::ClientError, Method, StatusCode};
 use monitoring_build::{parse_prometheus_snapshot, MetricSnapshot, MetricValue};

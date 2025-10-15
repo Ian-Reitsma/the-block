@@ -59,6 +59,13 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
 
+Dependency policy status now lives in the same generated dashboard row. Panels
+plot `dependency_registry_check_status{status}` gauges, drift counters, and the
+age of the latest snapshot so operations can verify registry health without
+leaving the first-party stack. The Prometheus alert group `dependency_registry`
+pages when drift reappears or snapshots go stale, mirroring the telemetry stored
+alongside release provenance.
+
 ### Snapshot CLI
 
 Operators that prefer to run the snapshotter manually can invoke it directly:
