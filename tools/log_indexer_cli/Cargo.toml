@@ -5,17 +5,12 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-base64_fp = { path = "../../crates/base64_fp" }
-crypto_suite = { path = "../../crates/crypto_suite" }
 cli_core = { path = "../../crates/cli_core" }
-foundation_sqlite = { path = "../../crates/foundation_sqlite", optional = true }
-sled = { path = "../../sled" }
-foundation_serialization = { path = "../../crates/foundation_serialization" }
-coding = { path = "../../crates/coding" }
+log_index = { path = "../../crates/log_index" }
 
 [features]
 default = []
-sqlite-migration = ["dep:foundation_sqlite"]
+sqlite-migration = ["log_index/sqlite-migration"]
 telemetry = []
 
 [build-dependencies]

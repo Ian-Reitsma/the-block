@@ -366,36 +366,118 @@ pub mod ser {
         }
     }
 
-    macro_rules! unsupported_serialize {
-        ($($ty:ty => $op:literal),* $(,)?) => {
+    macro_rules! serialize_primitive {
+        ($($ty:ty => $method:ident),+ $(,)?) => {
             $(impl Serialize for $ty {
                 fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                 where
                     S: Serializer,
                 {
-                    let _ = serializer;
-                    Err(S::Error::unsupported($op))
+                    serializer.$method(*self)
                 }
-            })*
+            })+
         };
     }
 
-    unsupported_serialize! {
-        bool => "serialize_bool",
-        i8 => "serialize_i8",
-        i16 => "serialize_i16",
-        i32 => "serialize_i32",
-        i64 => "serialize_i64",
-        i128 => "serialize_i128",
-        u8 => "serialize_u8",
-        u16 => "serialize_u16",
-        u32 => "serialize_u32",
-        u64 => "serialize_u64",
-        u128 => "serialize_u128",
-        f32 => "serialize_f32",
-        f64 => "serialize_f64",
-        char => "serialize_char",
-        ::std::string::String => "serialize_str",
+    serialize_primitive! {
+        bool => serialize_bool,
+        i8 => serialize_i8,
+        i16 => serialize_i16,
+        i32 => serialize_i32,
+        i64 => serialize_i64,
+        i128 => serialize_i128,
+        u8 => serialize_u8,
+        u16 => serialize_u16,
+        u32 => serialize_u32,
+        u64 => serialize_u64,
+        u128 => serialize_u128,
+        f32 => serialize_f32,
+        f64 => serialize_f64,
+    }
+
+    impl Serialize for isize {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_i64(*self as i64)
+        }
+    }
+
+    impl Serialize for usize {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_u64(*self as u64)
+        }
+    }
+
+    impl Serialize for char {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_char(*self)
+        }
+    }
+
+    impl Serialize for ::std::string::String {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(self)
+        }
+    }
+
+    impl Serialize for str {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(self)
+        }
+    }
+
+    impl Serialize for () {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_unit()
+        }
+    }
+
+    impl<T> Serialize for Option<T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match self {
+                Some(value) => serializer.serialize_some(value),
+                None => serializer.serialize_none(),
+            }
+        }
+    }
+
+    impl<T, E> Serialize for Result<T, E>
+    where
+        T: Serialize,
+        E: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match self {
+                Ok(value) => serializer.serialize_newtype_variant("Result", 0, "Ok", value),
+                Err(err) => serializer.serialize_newtype_variant("Result", 1, "Err", err),
+            }
+        }
     }
 
     impl<T> Serialize for ::std::vec::Vec<T>
@@ -406,8 +488,27 @@ pub mod ser {
         where
             S: Serializer,
         {
-            let _ = (self, serializer);
-            Err(S::Error::unsupported("serialize_vec"))
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for value in self {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
+        }
+    }
+
+    impl<T> Serialize for ::std::collections::VecDeque<T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for value in self {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
         }
     }
 
@@ -420,8 +521,94 @@ pub mod ser {
         where
             S: Serializer,
         {
-            let _ = (self, serializer);
-            Err(S::Error::unsupported("serialize_tuple2"))
+            let mut tuple = serializer.serialize_tuple(2)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.0)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.1)?;
+            tuple.end()
+        }
+    }
+
+    impl<A, B, C> Serialize for (A, B, C)
+    where
+        A: Serialize,
+        B: Serialize,
+        C: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut tuple = serializer.serialize_tuple(3)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.0)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.1)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.2)?;
+            tuple.end()
+        }
+    }
+
+    impl<A, B, C, D> Serialize for (A, B, C, D)
+    where
+        A: Serialize,
+        B: Serialize,
+        C: Serialize,
+        D: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut tuple = serializer.serialize_tuple(4)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.0)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.1)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.2)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.3)?;
+            tuple.end()
+        }
+    }
+
+    impl<A, B, C, D, E> Serialize for (A, B, C, D, E)
+    where
+        A: Serialize,
+        B: Serialize,
+        C: Serialize,
+        D: Serialize,
+        E: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut tuple = serializer.serialize_tuple(5)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.0)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.1)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.2)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.3)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.4)?;
+            tuple.end()
+        }
+    }
+
+    impl<A, B, C, D, E, F> Serialize for (A, B, C, D, E, F)
+    where
+        A: Serialize,
+        B: Serialize,
+        C: Serialize,
+        D: Serialize,
+        E: Serialize,
+        F: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut tuple = serializer.serialize_tuple(6)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.0)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.1)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.2)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.3)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.4)?;
+            SerializeTuple::serialize_element(&mut tuple, &self.5)?;
+            tuple.end()
         }
     }
 
@@ -434,8 +621,62 @@ pub mod ser {
         where
             S: Serializer,
         {
-            let _ = (self, serializer);
-            Err(S::Error::unsupported("serialize_hashmap"))
+            let mut map = serializer.serialize_map(Some(self.len()))?;
+            for (key, value) in self {
+                SerializeMap::serialize_key(&mut map, key)?;
+                SerializeMap::serialize_value(&mut map, value)?;
+            }
+            map.end()
+        }
+    }
+
+    impl<K, V> Serialize for ::std::collections::BTreeMap<K, V>
+    where
+        K: Serialize,
+        V: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut map = serializer.serialize_map(Some(self.len()))?;
+            for (key, value) in self {
+                SerializeMap::serialize_key(&mut map, key)?;
+                SerializeMap::serialize_value(&mut map, value)?;
+            }
+            map.end()
+        }
+    }
+
+    impl<T> Serialize for ::std::collections::HashSet<T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for value in self {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
+        }
+    }
+
+    impl<T> Serialize for ::std::collections::BTreeSet<T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for value in self {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
         }
     }
 
@@ -447,8 +688,11 @@ pub mod ser {
         where
             S: Serializer,
         {
-            let _ = (self, serializer);
-            Err(S::Error::unsupported("serialize_array"))
+            let mut seq = serializer.serialize_seq(Some(N))?;
+            for value in self {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
         }
     }
 
@@ -475,11 +719,29 @@ pub mod ser {
             (**self).serialize(serializer)
         }
     }
+
+    impl<'a, T> Serialize for ::std::slice::Iter<'a, T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut iter = self.clone();
+            let mut seq = serializer.serialize_seq(None)?;
+            while let Some(value) = iter.next() {
+                SerializeSeq::serialize_element(&mut seq, value)?;
+            }
+            seq.end()
+        }
+    }
 }
 
 pub mod de {
     use super::StubError;
     use core::fmt;
+    use core::marker::PhantomData;
 
     pub trait Deserialize<'de>: Sized {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -796,6 +1058,1013 @@ pub mod de {
     impl fmt::Display for DisplayExpected<'_> {
         fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             self.0.fmt(formatter)
+        }
+    }
+
+    struct BoolVisitor;
+
+    impl<'de> Visitor<'de> for BoolVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a boolean")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for bool {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_bool(BoolVisitor)
+        }
+    }
+
+    macro_rules! deserialize_signed {
+        ($($ty:ty => $name:ident),+ $(,)?) => {
+            $(
+                struct $name;
+
+                impl<'de> Visitor<'de> for $name {
+                    type Value = $ty;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str(stringify!($ty))
+                    }
+
+                    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+                    where
+                        E: Error,
+                    {
+                        if value >= <$ty>::MIN as i64 && value <= <$ty>::MAX as i64 {
+                            Ok(value as $ty)
+                        } else {
+                            Err(E::invalid_value(Unexpected::Signed(value), &self))
+                        }
+                    }
+
+                    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+                    where
+                        E: Error,
+                    {
+                        if value <= <$ty>::MAX as u64 {
+                            Ok(value as $ty)
+                        } else {
+                            Err(E::invalid_value(Unexpected::Unsigned(value), &self))
+                        }
+                    }
+                }
+
+                impl<'de> Deserialize<'de> for $ty {
+                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                    where
+                        D: Deserializer<'de>,
+                    {
+                        deserializer.deserialize_i64($name)
+                    }
+                }
+            )+
+        };
+    }
+
+    deserialize_signed! {
+        i8 => I8Visitor,
+        i16 => I16Visitor,
+        i32 => I32Visitor,
+        i64 => I64Visitor,
+        isize => IsizeVisitor
+    }
+
+    struct I128Visitor;
+
+    impl<'de> Visitor<'de> for I128Visitor {
+        type Value = i128;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a 128-bit signed integer")
+        }
+
+        fn visit_i128<E>(self, value: i128) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as i128)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as i128)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for i128 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_i64(I128Visitor)
+        }
+    }
+
+    macro_rules! deserialize_unsigned {
+        ($($ty:ty => $name:ident),+ $(,)?) => {
+            $(
+                struct $name;
+
+                impl<'de> Visitor<'de> for $name {
+                    type Value = $ty;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str(stringify!($ty))
+                    }
+
+                    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+                    where
+                        E: Error,
+                    {
+                        if value <= <$ty>::MAX as u64 {
+                            Ok(value as $ty)
+                        } else {
+                            Err(E::invalid_value(Unexpected::Unsigned(value), &self))
+                        }
+                    }
+
+                    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+                    where
+                        E: Error,
+                    {
+                        if value >= 0 && (value as u64) <= <$ty>::MAX as u64 {
+                            Ok(value as $ty)
+                        } else {
+                            Err(E::invalid_value(Unexpected::Signed(value), &self))
+                        }
+                    }
+                }
+
+                impl<'de> Deserialize<'de> for $ty {
+                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                    where
+                        D: Deserializer<'de>,
+                    {
+                        deserializer.deserialize_u64($name)
+                    }
+                }
+            )+
+        };
+    }
+
+    deserialize_unsigned! {
+        u8 => U8Visitor,
+        u16 => U16Visitor,
+        u32 => U32Visitor,
+        u64 => U64Visitor,
+        usize => UsizeVisitor
+    }
+
+    struct U128Visitor;
+
+    impl<'de> Visitor<'de> for U128Visitor {
+        type Value = u128;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a 128-bit unsigned integer")
+        }
+
+        fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as u128)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            if value >= 0 {
+                Ok(value as u128)
+            } else {
+                Err(E::invalid_value(Unexpected::Signed(value), &self))
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for u128 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_u128(U128Visitor)
+        }
+    }
+
+    struct F32Visitor;
+
+    impl<'de> Visitor<'de> for F32Visitor {
+        type Value = f32;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a 32-bit float")
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as f32)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as f32)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as f32)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for f32 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_f64(F32Visitor)
+        }
+    }
+
+    struct F64Visitor;
+
+    impl<'de> Visitor<'de> for F64Visitor {
+        type Value = f64;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a 64-bit float")
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as f64)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value as f64)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for f64 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_f64(F64Visitor)
+        }
+    }
+
+    struct CharVisitor;
+
+    impl<'de> Visitor<'de> for CharVisitor {
+        type Value = char;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a character")
+        }
+
+        fn visit_char<E>(self, value: char) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            let mut chars = value.chars();
+            if let (Some(ch), None) = (chars.next(), chars.next()) {
+                Ok(ch)
+            } else {
+                Err(E::invalid_value(Unexpected::Str(value), &self))
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for char {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_char(CharVisitor)
+        }
+    }
+
+    struct StringVisitor;
+
+    impl<'de> Visitor<'de> for StringVisitor {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a string")
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(value.to_owned())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for String {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_string(StringVisitor)
+        }
+    }
+
+    struct UnitVisitor;
+
+    impl<'de> Visitor<'de> for UnitVisitor {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("unit value")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            Ok(())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for () {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_unit(UnitVisitor)
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::option::Option<T>
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct OptionVisitor<T>(PhantomData<T>);
+
+            impl<'de, T> Visitor<'de> for OptionVisitor<T>
+            where
+                T: Deserialize<'de>,
+            {
+                type Value = Option<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("an optional value")
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E>
+                where
+                    E: Error,
+                {
+                    Ok(None)
+                }
+
+                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    T::deserialize(deserializer).map(Some)
+                }
+            }
+
+            deserializer.deserialize_option(OptionVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T, E> Deserialize<'de> for Result<T, E>
+    where
+        T: Deserialize<'de>,
+        E: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            enum Variant<T, E> {
+                Ok(T),
+                Err(E),
+            }
+
+            struct ResultVisitor<T, E>(PhantomData<(T, E)>);
+
+            impl<'de, T, E> Visitor<'de> for ResultVisitor<T, E>
+            where
+                T: Deserialize<'de>,
+                E: Deserialize<'de>,
+            {
+                type Value = Result<T, E>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a result enum")
+                }
+
+                fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+                where
+                    A: EnumAccess<'de>,
+                {
+                    let (variant, value) = data.variant::<String>()?;
+                    match variant.as_str() {
+                        "Ok" => value.newtype_variant().map(Result::Ok),
+                        "Err" => value.newtype_variant().map(Result::Err),
+                        _ => Err(A::Error::unknown_variant(variant.as_ref(), &["Ok", "Err"])),
+                    }
+                }
+            }
+
+            deserializer.deserialize_enum("Result", &["Ok", "Err"], ResultVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::vec::Vec<T>
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct VecVisitor<T>(PhantomData<T>);
+
+            impl<'de, T> Visitor<'de> for VecVisitor<T>
+            where
+                T: Deserialize<'de>,
+            {
+                type Value = Vec<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a sequence")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                    while let Some(value) = seq.next_element()? {
+                        values.push(value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_seq(VecVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::collections::VecDeque<T>
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct VecDequeVisitor<T>(PhantomData<T>);
+
+            impl<'de, T> Visitor<'de> for VecDequeVisitor<T>
+            where
+                T: Deserialize<'de>,
+            {
+                type Value = std::collections::VecDeque<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a sequence")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values =
+                        std::collections::VecDeque::with_capacity(seq.size_hint().unwrap_or(0));
+                    while let Some(value) = seq.next_element()? {
+                        values.push_back(value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_seq(VecDequeVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::boxed::Box<T>
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            T::deserialize(deserializer).map(Box::new)
+        }
+    }
+
+    impl<'de, T, const N: usize> Deserialize<'de> for [T; N]
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct ArrayVisitor<T, const N: usize>(PhantomData<T>);
+
+            impl<'de, T, const N: usize> Visitor<'de> for ArrayVisitor<T, N>
+            where
+                T: Deserialize<'de>,
+            {
+                type Value = [T; N];
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    write!(formatter, "an array of length {N}")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values = Vec::with_capacity(N);
+                    while let Some(value) = seq.next_element()? {
+                        values.push(value);
+                    }
+                    if values.len() != N {
+                        return Err(A::Error::invalid_length(values.len(), &self));
+                    }
+                    let mut iter = values.into_iter();
+                    Ok(core::array::from_fn(|_| {
+                        iter.next().expect("length checked")
+                    }))
+                }
+            }
+
+            deserializer.deserialize_tuple(N, ArrayVisitor::<T, N>(PhantomData))
+        }
+    }
+
+    impl<'de, K, V> Deserialize<'de> for ::std::collections::HashMap<K, V>
+    where
+        K: Deserialize<'de> + Eq + std::hash::Hash,
+        V: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct MapVisitor<K, V>(PhantomData<(K, V)>);
+
+            impl<'de, K, V> Visitor<'de> for MapVisitor<K, V>
+            where
+                K: Deserialize<'de> + Eq + std::hash::Hash,
+                V: Deserialize<'de>,
+            {
+                type Value = std::collections::HashMap<K, V>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a map")
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut values =
+                        std::collections::HashMap::with_capacity(map.size_hint().unwrap_or(0));
+                    while let Some((key, value)) = map.next_entry()? {
+                        values.insert(key, value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_map(MapVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, K, V> Deserialize<'de> for ::std::collections::BTreeMap<K, V>
+    where
+        K: Deserialize<'de> + Ord,
+        V: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct BTreeMapVisitor<K, V>(PhantomData<(K, V)>);
+
+            impl<'de, K, V> Visitor<'de> for BTreeMapVisitor<K, V>
+            where
+                K: Deserialize<'de> + Ord,
+                V: Deserialize<'de>,
+            {
+                type Value = std::collections::BTreeMap<K, V>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a map")
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut values = std::collections::BTreeMap::new();
+                    while let Some((key, value)) = map.next_entry()? {
+                        values.insert(key, value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_map(BTreeMapVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::collections::HashSet<T>
+    where
+        T: Deserialize<'de> + Eq + std::hash::Hash,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct HashSetVisitor<T>(PhantomData<T>);
+
+            impl<'de, T> Visitor<'de> for HashSetVisitor<T>
+            where
+                T: Deserialize<'de> + Eq + std::hash::Hash,
+            {
+                type Value = std::collections::HashSet<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a sequence")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values =
+                        std::collections::HashSet::with_capacity(seq.size_hint().unwrap_or(0));
+                    while let Some(value) = seq.next_element()? {
+                        values.insert(value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_seq(HashSetVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ::std::collections::BTreeSet<T>
+    where
+        T: Deserialize<'de> + Ord,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct BTreeSetVisitor<T>(PhantomData<T>);
+
+            impl<'de, T> Visitor<'de> for BTreeSetVisitor<T>
+            where
+                T: Deserialize<'de> + Ord,
+            {
+                type Value = std::collections::BTreeSet<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a sequence")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values = std::collections::BTreeSet::new();
+                    while let Some(value) = seq.next_element()? {
+                        values.insert(value);
+                    }
+                    Ok(values)
+                }
+            }
+
+            deserializer.deserialize_seq(BTreeSetVisitor(PhantomData))
+        }
+    }
+
+    impl<'de, A, B> Deserialize<'de> for (A, B)
+    where
+        A: Deserialize<'de>,
+        B: Deserialize<'de>,
+    {
+        fn deserialize<Des>(deserializer: Des) -> Result<Self, Des::Error>
+        where
+            Des: Deserializer<'de>,
+        {
+            struct Tuple2Visitor<A, B>(PhantomData<(A, B)>);
+
+            impl<'de, A, B> Visitor<'de> for Tuple2Visitor<A, B>
+            where
+                A: Deserialize<'de>,
+                B: Deserialize<'de>,
+            {
+                type Value = (A, B);
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a two-element tuple")
+                }
+
+                fn visit_seq<Access>(self, mut seq: Access) -> Result<Self::Value, Access::Error>
+                where
+                    Access: SeqAccess<'de>,
+                {
+                    let first = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(0, &self))?;
+                    let second = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(1, &self))?;
+                    Ok((first, second))
+                }
+            }
+
+            deserializer.deserialize_tuple(2, Tuple2Visitor(PhantomData))
+        }
+    }
+
+    impl<'de, A, B, C> Deserialize<'de> for (A, B, C)
+    where
+        A: Deserialize<'de>,
+        B: Deserialize<'de>,
+        C: Deserialize<'de>,
+    {
+        fn deserialize<Des>(deserializer: Des) -> Result<Self, Des::Error>
+        where
+            Des: Deserializer<'de>,
+        {
+            struct Tuple3Visitor<A, B, C>(PhantomData<(A, B, C)>);
+
+            impl<'de, A, B, C> Visitor<'de> for Tuple3Visitor<A, B, C>
+            where
+                A: Deserialize<'de>,
+                B: Deserialize<'de>,
+                C: Deserialize<'de>,
+            {
+                type Value = (A, B, C);
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a three-element tuple")
+                }
+
+                fn visit_seq<Access>(self, mut seq: Access) -> Result<Self::Value, Access::Error>
+                where
+                    Access: SeqAccess<'de>,
+                {
+                    let first = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(0, &self))?;
+                    let second = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(1, &self))?;
+                    let third = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(2, &self))?;
+                    Ok((first, second, third))
+                }
+            }
+
+            deserializer.deserialize_tuple(3, Tuple3Visitor(PhantomData))
+        }
+    }
+
+    impl<'de, A, B, C, D> Deserialize<'de> for (A, B, C, D)
+    where
+        A: Deserialize<'de>,
+        B: Deserialize<'de>,
+        C: Deserialize<'de>,
+        D: Deserialize<'de>,
+    {
+        fn deserialize<Des>(deserializer: Des) -> Result<Self, Des::Error>
+        where
+            Des: Deserializer<'de>,
+        {
+            struct Tuple4Visitor<A, B, C, D>(PhantomData<(A, B, C, D)>);
+
+            impl<'de, A, B, C, D> Visitor<'de> for Tuple4Visitor<A, B, C, D>
+            where
+                A: Deserialize<'de>,
+                B: Deserialize<'de>,
+                C: Deserialize<'de>,
+                D: Deserialize<'de>,
+            {
+                type Value = (A, B, C, D);
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a four-element tuple")
+                }
+
+                fn visit_seq<Access>(self, mut seq: Access) -> Result<Self::Value, Access::Error>
+                where
+                    Access: SeqAccess<'de>,
+                {
+                    let first = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(0, &self))?;
+                    let second = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(1, &self))?;
+                    let third = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(2, &self))?;
+                    let fourth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(3, &self))?;
+                    Ok((first, second, third, fourth))
+                }
+            }
+
+            deserializer.deserialize_tuple(4, Tuple4Visitor(PhantomData))
+        }
+    }
+
+    impl<'de, A, B, C, D, E> Deserialize<'de> for (A, B, C, D, E)
+    where
+        A: Deserialize<'de>,
+        B: Deserialize<'de>,
+        C: Deserialize<'de>,
+        D: Deserialize<'de>,
+        E: Deserialize<'de>,
+    {
+        fn deserialize<Des>(deserializer: Des) -> Result<Self, Des::Error>
+        where
+            Des: Deserializer<'de>,
+        {
+            struct Tuple5Visitor<A, B, C, D, E>(PhantomData<(A, B, C, D, E)>);
+
+            impl<'de, A, B, C, D, E> Visitor<'de> for Tuple5Visitor<A, B, C, D, E>
+            where
+                A: Deserialize<'de>,
+                B: Deserialize<'de>,
+                C: Deserialize<'de>,
+                D: Deserialize<'de>,
+                E: Deserialize<'de>,
+            {
+                type Value = (A, B, C, D, E);
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a five-element tuple")
+                }
+
+                fn visit_seq<Access>(self, mut seq: Access) -> Result<Self::Value, Access::Error>
+                where
+                    Access: SeqAccess<'de>,
+                {
+                    let first = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(0, &self))?;
+                    let second = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(1, &self))?;
+                    let third = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(2, &self))?;
+                    let fourth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(3, &self))?;
+                    let fifth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(4, &self))?;
+                    Ok((first, second, third, fourth, fifth))
+                }
+            }
+
+            deserializer.deserialize_tuple(5, Tuple5Visitor(PhantomData))
+        }
+    }
+
+    impl<'de, A, B, C, D, E, F> Deserialize<'de> for (A, B, C, D, E, F)
+    where
+        A: Deserialize<'de>,
+        B: Deserialize<'de>,
+        C: Deserialize<'de>,
+        D: Deserialize<'de>,
+        E: Deserialize<'de>,
+        F: Deserialize<'de>,
+    {
+        fn deserialize<Des>(deserializer: Des) -> Result<Self, Des::Error>
+        where
+            Des: Deserializer<'de>,
+        {
+            struct Tuple6Visitor<A, B, C, D, E, F>(PhantomData<(A, B, C, D, E, F)>);
+
+            impl<'de, A, B, C, D, E, F> Visitor<'de> for Tuple6Visitor<A, B, C, D, E, F>
+            where
+                A: Deserialize<'de>,
+                B: Deserialize<'de>,
+                C: Deserialize<'de>,
+                D: Deserialize<'de>,
+                E: Deserialize<'de>,
+                F: Deserialize<'de>,
+            {
+                type Value = (A, B, C, D, E, F);
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a six-element tuple")
+                }
+
+                fn visit_seq<Access>(self, mut seq: Access) -> Result<Self::Value, Access::Error>
+                where
+                    Access: SeqAccess<'de>,
+                {
+                    let first = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(0, &self))?;
+                    let second = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(1, &self))?;
+                    let third = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(2, &self))?;
+                    let fourth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(3, &self))?;
+                    let fifth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(4, &self))?;
+                    let sixth = seq
+                        .next_element()?
+                        .ok_or_else(|| Access::Error::invalid_length(5, &self))?;
+                    Ok((first, second, third, fourth, fifth, sixth))
+                }
+            }
+
+            deserializer.deserialize_tuple(6, Tuple6Visitor(PhantomData))
         }
     }
 
@@ -1251,94 +2520,6 @@ pub mod de {
             StubError::new(msg)
         }
     }
-
-    macro_rules! unsupported_deserialize {
-        ($($ty:ty => $op:literal),* $(,)?) => {
-            $(impl<'de> Deserialize<'de> for $ty {
-                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                where
-                    D: Deserializer<'de>,
-                {
-                    let _ = deserializer;
-                    Err(D::Error::unsupported($op))
-                }
-            })*
-        };
-    }
-
-    unsupported_deserialize! {
-        bool => "deserialize_bool",
-        i8 => "deserialize_i8",
-        i16 => "deserialize_i16",
-        i32 => "deserialize_i32",
-        i64 => "deserialize_i64",
-        i128 => "deserialize_i128",
-        u8 => "deserialize_u8",
-        u16 => "deserialize_u16",
-        u32 => "deserialize_u32",
-        u64 => "deserialize_u64",
-        u128 => "deserialize_u128",
-        f32 => "deserialize_f32",
-        f64 => "deserialize_f64",
-        char => "deserialize_char",
-        ::std::string::String => "deserialize_string",
-    }
-
-    impl<'de, T> Deserialize<'de> for ::std::vec::Vec<T>
-    where
-        T: Deserialize<'de>,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let _ = deserializer;
-            Err(D::Error::unsupported("deserialize_vec"))
-        }
-    }
-
-    impl<'de, A, B> Deserialize<'de> for (A, B)
-    where
-        A: Deserialize<'de>,
-        B: Deserialize<'de>,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let _ = deserializer;
-            Err(D::Error::unsupported("deserialize_tuple2"))
-        }
-    }
-
-    impl<'de, K, V> Deserialize<'de> for ::std::collections::HashMap<K, V>
-    where
-        K: Deserialize<'de> + Eq + std::hash::Hash,
-        V: Deserialize<'de>,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let _ = deserializer;
-            Err(D::Error::unsupported("deserialize_hashmap"))
-        }
-    }
-
-    impl<'de, T, const N: usize> Deserialize<'de> for [T; N]
-    where
-        T: Deserialize<'de>,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let _ = deserializer;
-            Err(D::Error::unsupported("deserialize_array"))
-        }
-    }
-
-    use core::marker::PhantomData;
 
     pub struct UnsupportedDeserializer<E> {
         op: &'static str,

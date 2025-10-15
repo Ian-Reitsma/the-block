@@ -8,6 +8,102 @@ use std::env;
 use std::fmt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
+
+pub mod prompt {
+    use super::{Arc, Mutex, OnceLock};
+    use std::io;
+
+    /// Prompt the user for a passphrase while suppressing terminal echo when supported.
+    pub fn passphrase(prompt: &str) -> io::Result<String> {
+        dispatch(prompt)
+    }
+
+    /// Prompt the user for an optional passphrase, returning `None` when left blank.
+    pub fn optional_passphrase(prompt: &str) -> io::Result<Option<String>> {
+        let entered = passphrase(prompt)?;
+        if entered.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(entered))
+        }
+    }
+
+    type Handler = Arc<dyn Fn(&str) -> io::Result<String> + Send + Sync>;
+
+    fn backend() -> &'static Mutex<Option<Handler>> {
+        static BACKEND: OnceLock<Mutex<Option<Handler>>> = OnceLock::new();
+        BACKEND.get_or_init(|| Mutex::new(None))
+    }
+
+    fn dispatch(prompt: &str) -> io::Result<String> {
+        let handler = {
+            let guard = backend().lock().expect("prompt backend lock poisoned");
+            guard.clone()
+        };
+        match handler {
+            Some(custom) => custom(prompt),
+            None => sys::tty::read_passphrase(prompt).map_err(io::Error::from),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub mod testing {
+        use super::*;
+        use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
+        pub fn with_passphrase_override<F, R>(override_fn: F, action: impl FnOnce() -> R) -> R
+        where
+            F: Fn(&str) -> io::Result<String> + Send + Sync + 'static,
+        {
+            let previous = {
+                let mut guard = backend().lock().expect("prompt backend lock poisoned");
+                std::mem::replace(&mut *guard, Some(Arc::new(override_fn)))
+            };
+            let result = catch_unwind(AssertUnwindSafe(action));
+            {
+                let mut guard = backend().lock().expect("prompt backend lock poisoned");
+                *guard = previous;
+            }
+            match result {
+                Ok(value) => value,
+                Err(panic) => resume_unwind(panic),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn override_returns_value() {
+            let value = testing::with_passphrase_override(
+                |_| Ok("secret".to_string()),
+                || passphrase("Prompt").expect("passphrase"),
+            );
+            assert_eq!(value, "secret");
+        }
+
+        #[test]
+        fn optional_returns_whitespace_as_entered() {
+            let result = testing::with_passphrase_override(
+                |_| Ok("   ".to_string()),
+                || optional_passphrase("Prompt").expect("optional"),
+            );
+            assert_eq!(result, Some("   ".to_string()));
+        }
+
+        #[test]
+        fn optional_filters_empty_input() {
+            let result = testing::with_passphrase_override(
+                |_| Ok(String::new()),
+                || optional_passphrase("Prompt").expect("optional"),
+            );
+            assert_eq!(result, None);
+        }
+    }
+}
 
 /// Foreground colour selections supported by the styling helpers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

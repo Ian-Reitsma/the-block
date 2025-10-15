@@ -3,5 +3,9 @@ name = "foundation_tui"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+test-support = []
+
 [dependencies]
 sys = { path = "../sys" }

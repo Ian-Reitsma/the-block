@@ -43,6 +43,7 @@ base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }
 foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
 state = { path = "../state" }
+log_index = { path = "../crates/log_index" }
 # shared TLS warning helpers
 tls_warning = { path = "../crates/tls_warning" }
 # probabilistic rate-limit filter

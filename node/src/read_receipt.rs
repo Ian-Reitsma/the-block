@@ -1,6 +1,5 @@
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use foundation_serialization::serde_bytes;
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Client-signed acknowledgement that a path was read from a manifest.
@@ -19,7 +18,7 @@ pub struct ReadAck {
     /// Client public key used for signing.
     pub pk: [u8; 32],
     /// Ed25519 signature over the acknowledgement payload.
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "foundation_serialization::serde_bytes")]
     pub sig: Vec<u8>,
 }
 

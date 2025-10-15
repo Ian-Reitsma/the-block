@@ -18,6 +18,19 @@ literals and raw map/object literals that assume serde_json’s macro semantics.
   facade returns `foundation_serialization::json::Value` which does not implement
   `Display` or `ToString`.
 
+## Recent progress (2025-10-14)
+
+- `foundation_serialization::json::Value` now implements manual
+  `Serialize`/`Deserialize` so RPC handlers depending on the facade no longer
+  require the external backend for basic value round-trips.
+- The CLI’s TLS consumers moved to handwritten serializers/deserializers backed
+  by the stubbed visitor hierarchy, proving the stub backend handles complex
+  nested objects without serde derives.
+- Added `crates/foundation_serialization/tests/json_value.rs` to validate nested
+  literals, duplicate keys, and non-finite float rejection so the manual JSON
+  value implementation stays aligned with the legacy macro semantics we rely on
+  in RPC handlers.
+
 ## Proposed next steps
 
 1. Port the `serde_json::json!` macro implementation (MIT/Apache 2.0) and

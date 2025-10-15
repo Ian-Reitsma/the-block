@@ -76,6 +76,10 @@
 - Cross-chain exchange adapters for Uniswap and Osmosis with slippage tests ([node/src/dex/exchange_hooks.rs](../node/src/dex/exchange_hooks.rs), [node/tests/dex_hooks.rs](../node/tests/dex_hooks.rs)).
 - Light-client library with FFI helpers and mobile example ([crates/light-client](../crates/light-client), [examples/mobile](../examples/mobile)).
 - In-house log indexer and web explorer ([tools/indexer](../tools/indexer)).
+- Sled-backed `log_index` crate with ingestion observers, encryption rotation,
+  and optional SQLite migration used by CLI, node, and monitoring
+  ([crates/log_index](../crates/log_index), [cli/src/logs.rs](../cli/src/logs.rs),
+  [tools/log_indexer.rs](../tools/log_indexer.rs)).
 - Distributed benchmark harness for multi-node deployments ([tools/bench-harness](../tools/bench-harness)).
 - Simulation modules for inflation, liquidity, bridging, and demand with governance exports ([sim/src](../sim/src)).
 - Installer CLI producing signed archives and auto-update stubs ([tools/installer](../tools/installer)).

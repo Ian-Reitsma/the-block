@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-use proc_macro::{Delimiter, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
+use std::iter::Peekable;
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -8,6 +9,27 @@ struct TypeDef {
     name: String,
     generics: String,
     where_predicates: Option<String>,
+    kind: TypeKind,
+}
+
+#[derive(Debug)]
+enum TypeKind {
+    Struct(StructForm),
+    Enum(Vec<EnumVariant>),
+    Union,
+}
+
+#[derive(Debug)]
+enum StructForm {
+    Unit,
+    Named(Vec<String>),
+    Tuple(usize),
+}
+
+#[derive(Debug)]
+struct EnumVariant {
+    name: String,
+    form: StructForm,
 }
 
 #[proc_macro_derive(Serialize, attributes(serde))]
@@ -30,6 +52,112 @@ fn compile_error(message: String) -> TokenStream {
     let escaped = escape_literal(&message);
     TokenStream::from_str(&format!("compile_error!(\"{}\");", escaped))
         .expect("compile_error token")
+}
+
+fn render_touch_match(kind: &TypeKind) -> String {
+    match kind {
+        TypeKind::Struct(form) => render_touch_struct(form, "self"),
+        TypeKind::Enum(variants) => render_touch_enum(variants),
+        TypeKind::Union => String::new(),
+    }
+}
+
+fn render_touch_struct(form: &StructForm, self_expr: &str) -> String {
+    match form {
+        StructForm::Unit => String::new(),
+        StructForm::Named(fields) if fields.is_empty() => String::new(),
+        StructForm::Named(fields) => {
+            let bindings = fields
+                .iter()
+                .map(|field| format!("{field}: ref __foundation_{field}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let refs = fields
+                .iter()
+                .map(|field| format!("__foundation_{field}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "match {self_expr} {{ Self {{ {bindings} }} => {{ let _ = ({refs}); }} }};",
+                self_expr = self_expr,
+                bindings = bindings,
+                refs = refs,
+            )
+        }
+        StructForm::Tuple(count) if *count == 0 => String::new(),
+        StructForm::Tuple(count) => {
+            let bindings = (0..*count)
+                .map(|idx| format!("ref __foundation_field{idx}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let refs = (0..*count)
+                .map(|idx| format!("__foundation_field{idx}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "match {self_expr} {{ Self({bindings}) => {{ let _ = ({refs}); }} }};",
+                self_expr = self_expr,
+                bindings = bindings,
+                refs = refs,
+            )
+        }
+    }
+}
+
+fn render_touch_enum(variants: &[EnumVariant]) -> String {
+    if variants.is_empty() {
+        return String::new();
+    }
+
+    let arms = variants
+        .iter()
+        .map(|variant| match &variant.form {
+            StructForm::Unit => format!("Self::{} => {{}}", variant.name),
+            StructForm::Named(fields) if fields.is_empty() => {
+                format!("Self::{} {{}} => {{}}", variant.name)
+            }
+            StructForm::Named(fields) => {
+                let bindings = fields
+                    .iter()
+                    .map(|field| format!("{field}: ref __foundation_{field}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let refs = fields
+                    .iter()
+                    .map(|field| format!("__foundation_{field}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Self::{} {{ {} }} => {{ let _ = ({refs}); }}",
+                    variant.name,
+                    bindings,
+                    refs = refs,
+                )
+            }
+            StructForm::Tuple(count) if *count == 0 => {
+                format!("Self::{}() => {{}}", variant.name)
+            }
+            StructForm::Tuple(count) => {
+                let bindings = (0..*count)
+                    .map(|idx| format!("ref __foundation_variant_field{idx}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let refs = (0..*count)
+                    .map(|idx| format!("__foundation_variant_field{idx}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Self::{}({}) => {{ let _ = ({refs}); }}",
+                    variant.name,
+                    bindings,
+                    refs = refs,
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!("match self {{ {arms} }};", arms = arms)
 }
 
 impl TypeDef {
@@ -55,14 +183,15 @@ impl TypeDef {
             }
         }
 
-        match tokens.get(idx) {
+        let ty_keyword = match tokens.get(idx) {
             Some(TokenTree::Ident(ident))
                 if matches!(ident.to_string().as_str(), "struct" | "enum" | "union") =>
             {
                 idx += 1;
+                ident.to_string()
             }
             _ => return Err("expected `struct`, `enum`, or `union`".into()),
-        }
+        };
 
         let name = match tokens.get(idx) {
             Some(TokenTree::Ident(ident)) => {
@@ -142,10 +271,28 @@ impl TypeDef {
             None
         };
 
+        let kind = match ty_keyword.as_str() {
+            "struct" => TypeKind::Struct(parse_struct_kind(tokens.get(idx))?),
+            "enum" => {
+                if let Some(TokenTree::Group(group)) = tokens.get(idx) {
+                    if group.delimiter() == Delimiter::Brace {
+                        TypeKind::Enum(parse_enum_variants(group)?)
+                    } else {
+                        TypeKind::Enum(Vec::new())
+                    }
+                } else {
+                    TypeKind::Enum(Vec::new())
+                }
+            }
+            "union" => TypeKind::Union,
+            _ => TypeKind::Union,
+        };
+
         Ok(Self {
             name,
             generics,
             where_predicates,
+            kind,
         })
     }
 
@@ -155,12 +302,14 @@ impl TypeDef {
         let type_generics = self.generics.clone();
         let where_clause = self.format_where_clause();
         let msg_literal = escape_literal(&msg);
+        let touch = render_touch_match(&self.kind);
         let source = format!(
-            "impl{impl_generics} ::serde::ser::Serialize for {name}{type_generics}{where_clause} {{ fn serialize<S>(&self, _serializer: S) -> ::core::result::Result<S::Ok, S::Error> where S: ::serde::ser::Serializer {{ Err(<S::Error as ::serde::ser::Error>::custom(\"{msg}\")) }} }}",
+            "impl{impl_generics} ::serde::ser::Serialize for {name}{type_generics}{where_clause} {{ fn serialize<S>(&self, _serializer: S) -> ::core::result::Result<S::Ok, S::Error> where S: ::serde::ser::Serializer {{ {touch} Err(<S::Error as ::serde::ser::Error>::custom(\"{msg}\")) }} }}",
             impl_generics = impl_generics,
             name = self.name,
             type_generics = type_generics,
             where_clause = where_clause,
+            touch = touch,
             msg = msg_literal,
         );
         TokenStream::from_str(&source).expect("generated serialize tokens")
@@ -209,6 +358,159 @@ impl TypeDef {
             None => String::new(),
             Some(predicates) if predicates.is_empty() => " where".to_string(),
             Some(predicates) => format!(" where {}", predicates),
+        }
+    }
+}
+
+fn parse_struct_kind(token: Option<&TokenTree>) -> Result<StructForm, String> {
+    match token {
+        Some(TokenTree::Group(group)) => match group.delimiter() {
+            Delimiter::Brace => Ok(StructForm::Named(parse_named_fields(group))),
+            Delimiter::Parenthesis => Ok(StructForm::Tuple(parse_tuple_fields(group))),
+            _ => Ok(StructForm::Unit),
+        },
+        _ => Ok(StructForm::Unit),
+    }
+}
+
+fn parse_named_fields(group: &Group) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut iter = group.stream().into_iter().peekable();
+    while let Some(token) = iter.next() {
+        match token {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                skip_attribute(&mut iter);
+            }
+            TokenTree::Ident(ident) if ident.to_string() == "pub" => {}
+            TokenTree::Ident(ident) => {
+                let name = ident.to_string();
+                while let Some(next) = iter.next() {
+                    match next {
+                        TokenTree::Punct(p) if p.as_char() == ':' => {
+                            fields.push(name.clone());
+                            skip_field_type(&mut iter);
+                            break;
+                        }
+                        TokenTree::Punct(p) if p.as_char() == ',' => {
+                            break;
+                        }
+                        TokenTree::Group(_) => {}
+                        TokenTree::Ident(id) if id.to_string() == "pub" => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            TokenTree::Punct(p) if p.as_char() == ',' => {}
+            _ => {}
+        }
+    }
+    fields
+}
+
+fn parse_tuple_fields(group: &Group) -> usize {
+    let mut iter = group.stream().into_iter().peekable();
+    let mut count = 0usize;
+    let mut seen_tokens = false;
+    while let Some(token) = iter.next() {
+        match token {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                skip_attribute(&mut iter);
+            }
+            TokenTree::Punct(p) if p.as_char() == ',' => {
+                if seen_tokens {
+                    count += 1;
+                    seen_tokens = false;
+                }
+            }
+            _ => {
+                seen_tokens = true;
+            }
+        }
+    }
+    if seen_tokens {
+        count += 1;
+    }
+    count
+}
+
+fn parse_enum_variants(group: &Group) -> Result<Vec<EnumVariant>, String> {
+    let mut variants = Vec::new();
+    let mut iter = group.stream().into_iter().peekable();
+    while let Some(token) = iter.next() {
+        match token {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                skip_attribute(&mut iter);
+            }
+            TokenTree::Ident(ident) => {
+                let name = ident.to_string();
+                let form = match iter.next_if(|token| matches!(token, TokenTree::Group(_))) {
+                    Some(TokenTree::Group(group_token)) => match group_token.delimiter() {
+                        Delimiter::Parenthesis => {
+                            StructForm::Tuple(parse_tuple_fields(&group_token))
+                        }
+                        Delimiter::Brace => StructForm::Named(parse_named_fields(&group_token)),
+                        _ => StructForm::Unit,
+                    },
+                    _ => StructForm::Unit,
+                };
+                variants.push(EnumVariant { name, form });
+
+                // Consume until the next comma or variant.
+                loop {
+                    let next = iter.peek().cloned();
+                    match next {
+                        Some(TokenTree::Punct(ref p)) if p.as_char() == ',' => {
+                            iter.next();
+                            break;
+                        }
+                        Some(TokenTree::Ident(_)) => break,
+                        Some(TokenTree::Punct(ref p)) if p.as_char() == '#' => break,
+                        Some(_) => {
+                            iter.next();
+                        }
+                        None => break,
+                    }
+                }
+            }
+            TokenTree::Punct(p) if p.as_char() == ',' => {}
+            _ => {}
+        }
+    }
+    Ok(variants)
+}
+
+fn skip_attribute<I>(iter: &mut Peekable<I>)
+where
+    I: Iterator<Item = TokenTree>,
+{
+    if let Some(TokenTree::Group(_)) = iter.next() {
+        // attribute body consumed
+    }
+}
+
+fn skip_field_type<I>(iter: &mut Peekable<I>)
+where
+    I: Iterator<Item = TokenTree>,
+{
+    let mut depth = 0isize;
+    while let Some(token) = iter.next() {
+        match token {
+            TokenTree::Punct(p) => match p.as_char() {
+                '<' | '(' | '[' | '{' => {
+                    depth += 1;
+                }
+                '>' | ')' | ']' | '}' => {
+                    if depth > 0 {
+                        depth -= 1;
+                    }
+                }
+                ',' if depth == 0 => break,
+                _ => {}
+            },
+            TokenTree::Group(_) => {}
+            _ => {}
         }
     }
 }
