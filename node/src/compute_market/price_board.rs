@@ -1,6 +1,11 @@
 use crate::transaction::FeeLane;
 use concurrency::{Lazy, OnceCell};
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::serde::{
+    self,
+    de::{self, MapAccess, SeqAccess, Visitor},
+    ser::SerializeStruct,
+};
+use foundation_serialization::{binary, Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt;
 use std::io;
@@ -17,7 +22,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::util::atomic_file::write_atomic;
 use crate::util::clock::{Clock, MonotonicClock};
 use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRICE_BOARD};
-use foundation_serialization::binary;
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use diagnostics::tracing::{info, warn};
@@ -31,19 +35,296 @@ const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
 const VERSION: u16 = 3;
 
 /// Sliding window of recent prices with quantile bands per lane.
-#[derive(Serialize, Deserialize, Clone, Copy)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Copy)]
 struct PriceEntry {
     price: u64,
     weighted: u64,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
 pub struct PriceBoard {
     pub window: usize,
     consumer: VecDeque<PriceEntry>,
     industrial: VecDeque<PriceEntry>,
+}
+
+impl Serialize for PriceEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("PriceEntry", 2)?;
+        state.serialize_field("price", &self.price)?;
+        state.serialize_field("weighted", &self.weighted)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PriceEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        enum Field {
+            Price,
+            Weighted,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("`price` or `weighted`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "price" => Ok(Field::Price),
+                            "weighted" => Ok(Field::Weighted),
+                            _ => Err(E::unknown_field(value, &FIELDS)),
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"price" => Ok(Field::Price),
+                            b"weighted" => Ok(Field::Weighted),
+                            _ => {
+                                let field = std::str::from_utf8(value).unwrap_or("");
+                                Err(E::unknown_field(field, &FIELDS))
+                            }
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct PriceEntryVisitor;
+
+        impl<'de> Visitor<'de> for PriceEntryVisitor {
+            type Value = PriceEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("price entry")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let price: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::missing_field("price"))?;
+                let weighted: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::missing_field("weighted"))?;
+                Ok(PriceEntry { price, weighted })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut price = None;
+                let mut weighted = None;
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Price => {
+                            if price.is_some() {
+                                return Err(de::Error::duplicate_field("price"));
+                            }
+                            price = Some(map.next_value()?);
+                        }
+                        Field::Weighted => {
+                            if weighted.is_some() {
+                                return Err(de::Error::duplicate_field("weighted"));
+                            }
+                            weighted = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let price = price.ok_or_else(|| de::Error::missing_field("price"))?;
+                let weighted = weighted.ok_or_else(|| de::Error::missing_field("weighted"))?;
+                Ok(PriceEntry { price, weighted })
+            }
+        }
+
+        const FIELDS: &[&str] = &["price", "weighted"];
+        deserializer.deserialize_struct("PriceEntry", FIELDS, PriceEntryVisitor)
+    }
+}
+
+impl Serialize for PriceBoard {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("PriceBoard", 3)?;
+        state.serialize_field("window", &self.window)?;
+        state.serialize_field("consumer", &self.consumer)?;
+        state.serialize_field("industrial", &self.industrial)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PriceBoard {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        enum Field {
+            Window,
+            Consumer,
+            Industrial,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("`window`, `consumer`, or `industrial`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "window" => Ok(Field::Window),
+                            "consumer" => Ok(Field::Consumer),
+                            "industrial" => Ok(Field::Industrial),
+                            _ => Err(E::unknown_field(value, &FIELDS)),
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"window" => Ok(Field::Window),
+                            b"consumer" => Ok(Field::Consumer),
+                            b"industrial" => Ok(Field::Industrial),
+                            _ => {
+                                let field = std::str::from_utf8(value).unwrap_or("");
+                                Err(E::unknown_field(field, &FIELDS))
+                            }
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct PriceBoardVisitor;
+
+        impl<'de> Visitor<'de> for PriceBoardVisitor {
+            type Value = PriceBoard;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("price board")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let window: usize = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::missing_field("window"))?;
+                let consumer: VecDeque<PriceEntry> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::missing_field("consumer"))?;
+                let industrial: VecDeque<PriceEntry> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::missing_field("industrial"))?;
+                Ok(PriceBoard {
+                    window,
+                    consumer,
+                    industrial,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut window = None;
+                let mut consumer = None;
+                let mut industrial = None;
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Window => {
+                            if window.is_some() {
+                                return Err(de::Error::duplicate_field("window"));
+                            }
+                            window = Some(map.next_value()?);
+                        }
+                        Field::Consumer => {
+                            if consumer.is_some() {
+                                return Err(de::Error::duplicate_field("consumer"));
+                            }
+                            consumer = Some(map.next_value()?);
+                        }
+                        Field::Industrial => {
+                            if industrial.is_some() {
+                                return Err(de::Error::duplicate_field("industrial"));
+                            }
+                            industrial = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let window = window.ok_or_else(|| de::Error::missing_field("window"))?;
+                let consumer = consumer.ok_or_else(|| de::Error::missing_field("consumer"))?;
+                let industrial =
+                    industrial.ok_or_else(|| de::Error::missing_field("industrial"))?;
+                Ok(PriceBoard {
+                    window,
+                    consumer,
+                    industrial,
+                })
+            }
+        }
+
+        const FIELDS: &[&str] = &["window", "consumer", "industrial"];
+        deserializer.deserialize_struct("PriceBoard", FIELDS, PriceBoardVisitor)
+    }
 }
 
 impl PriceBoard {
@@ -359,6 +640,105 @@ pub fn persist() {
     stop_saver();
     if let Some(path) = board_path() {
         save_with_metrics(&path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transaction::FeeLane;
+
+    const PRICE_BOARD_FIXTURE: &[u8] = &[
+        3, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 119, 105, 110, 100, 111, 119, 5, 0, 0, 0,
+        0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 99, 111, 110, 115, 117, 109, 101, 114, 2, 0, 0, 0, 0,
+        0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 112, 114, 105, 99, 101, 10, 0, 0,
+        0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 119, 101, 105, 103, 104, 116, 101, 100, 10, 0, 0, 0,
+        0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 112, 114, 105, 99, 101, 12, 0,
+        0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 119, 101, 105, 103, 104, 116, 101, 100, 14, 0, 0,
+        0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 105, 110, 100, 117, 115, 116, 114, 105, 97, 108, 3,
+        0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 112, 114, 105, 99,
+        101, 25, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 119, 101, 105, 103, 104, 116, 101,
+        100, 38, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 112, 114,
+        105, 99, 101, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 119, 101, 105, 103, 104,
+        116, 101, 100, 20, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0,
+        112, 114, 105, 99, 101, 22, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 119, 101, 105,
+        103, 104, 116, 101, 100, 18, 0, 0, 0, 0, 0, 0, 0,
+    ];
+
+    fn sample_board() -> PriceBoard {
+        let mut board = PriceBoard::new(5);
+        board.record(FeeLane::Consumer, 10, 1.0);
+        board.record(FeeLane::Consumer, 12, 1.2);
+        board.record(FeeLane::Industrial, 25, 1.5);
+        board.record(FeeLane::Industrial, 20, 1.0);
+        board.record(FeeLane::Industrial, 22, 0.8);
+        board
+    }
+
+    fn with_first_party_only_env<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
+        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let lock = GUARD
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env guard");
+
+        let original = std::env::var("FIRST_PARTY_ONLY").ok();
+        match value {
+            Some(v) => std::env::set_var("FIRST_PARTY_ONLY", v),
+            None => std::env::remove_var("FIRST_PARTY_ONLY"),
+        }
+
+        let result = f();
+
+        match original {
+            Some(v) => std::env::set_var("FIRST_PARTY_ONLY", v),
+            None => std::env::remove_var("FIRST_PARTY_ONLY"),
+        }
+
+        drop(lock);
+        result
+    }
+
+    #[test]
+    fn price_board_roundtrip_matches_fixture() {
+        let board = sample_board();
+        let encoded = binary::encode(&board).expect("encode board");
+        if PRICE_BOARD_FIXTURE.is_empty() {
+            panic!("fixture pending: {:?}", encoded);
+        }
+        assert_eq!(
+            encoded, PRICE_BOARD_FIXTURE,
+            "encoding should match fixture"
+        );
+
+        let decoded: PriceBoard = binary::decode(&PRICE_BOARD_FIXTURE).expect("decode board");
+        assert_eq!(decoded.window, board.window);
+        assert_eq!(decoded.consumer.len(), board.consumer.len());
+        assert_eq!(decoded.industrial.len(), board.industrial.len());
+        // Compare concrete entries to avoid relying on VecDeque Eq semantics (not derived).
+        for (lhs, rhs) in decoded.consumer.iter().zip(board.consumer.iter()) {
+            assert_eq!(lhs.price, rhs.price);
+            assert_eq!(lhs.weighted, rhs.weighted);
+        }
+        for (lhs, rhs) in decoded.industrial.iter().zip(board.industrial.iter()) {
+            assert_eq!(lhs.price, rhs.price);
+            assert_eq!(lhs.weighted, rhs.weighted);
+        }
+    }
+
+    #[test]
+    fn price_board_roundtrip_respects_first_party_only_flag() {
+        let board = sample_board();
+
+        for flag in [Some("1"), Some("0"), None] {
+            with_first_party_only_env(flag, || {
+                let encoded = binary::encode(&board).expect("encode board with flag");
+                let decoded: PriceBoard = binary::decode(&encoded).expect("decode board with flag");
+                assert_eq!(decoded.window, board.window);
+                assert_eq!(decoded.consumer.len(), board.consumer.len());
+                assert_eq!(decoded.industrial.len(), board.industrial.len());
+            });
+        }
     }
 }
 
