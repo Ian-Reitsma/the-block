@@ -5,10 +5,10 @@ edition = "2021"
 publish = false
 
 [dependencies]
-libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = ["derive"] }
+foundation_fuzz = { path = "../crates/foundation_fuzz" }
 sys = { path = "../crates/sys" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_rpc = { path = "../crates/foundation_rpc" }
 
 the_block = { path = "../node", features = ["fuzzy"] }
 crypto_suite = { path = "../crates/crypto_suite" }

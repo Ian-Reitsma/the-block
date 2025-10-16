@@ -30,6 +30,9 @@ literals and raw map/object literals that assume serde_json’s macro semantics.
   literals, duplicate keys, and non-finite float rejection so the manual JSON
   value implementation stays aligned with the legacy macro semantics we rely on
   in RPC handlers.
+- The `foundation_serde` crate no longer exposes the external-backend feature,
+  ensuring every RPC dependency compiles against the stubbed visitor hierarchy
+  even when FIRST_PARTY_ONLY is unset.
 
 ## Proposed next steps
 

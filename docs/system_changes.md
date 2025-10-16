@@ -393,10 +393,9 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - Pointed wallet and light-client modules at `diagnostics::tracing`, matching
   the rest of the workspace so spans/fields stay intact without linking the
   external `tracing` crates.
-- Added the `foundation_qrcode` facade: default builds use the in-house stub to
-  render deterministic unicode QR blocks while the optional
-  `external-qrcode` feature re-enables the legacy backend for operators that
-  still require the crates.io implementation.
+- Added the `foundation_qrcode` facade: builds now use the in-house stub to
+  render deterministic unicode QR blocks; the legacy crates.io backend has been
+  removed entirely.
 - Updated the remote-signer CLI to depend on the new facade and export the
   renderer trait so existing `.render::<unicode::Dense1x2>().build()` call sites
   continue to compile.
@@ -407,9 +406,9 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 
 - Logging semantics are unchanged but all runtime binaries now route through the
   same diagnostics macros, simplifying observability rollouts.
-- First-party builds of the remote-signer CLI generate deterministic unicode QR
-  art without touching crates.io dependencies; production builds can opt into
-  the legacy encoder via `--features external-qrcode` during the transition.
+- Remote-signer CLI builds now always generate deterministic unicode QR art
+  without touching crates.io dependencies; there is no longer a fallback
+  feature for the legacy encoder.
 - Dependency guard diffs shrink further—CI now surfaces only the Windows
   bindings now routed through `foundation_windows`.
 
@@ -417,8 +416,8 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 
 - Update any downstream tooling to import `diagnostics::tracing` instead of the
   upstream `tracing` crate.
-- Operators relying on the legacy QR encoder should build the remote-signer CLI
-  with `--features external-qrcode` until the first-party implementation gains
+- Operators relying on the legacy QR encoder need to adopt the first-party stub;
+  the crates.io backend is no longer shipped alongside the CLI.
   production coverage.
 - No action is required for compile-time assertions; standard `const` checks
   continue to guard invariants.

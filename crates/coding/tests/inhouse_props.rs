@@ -1,11 +1,9 @@
-#![cfg(feature = "allow-third-party")]
-
 use coding::{
     decrypt_xchacha20_poly1305, default_compressor, default_encryptor, encrypt_xchacha20_poly1305,
     ErasureCoder, FountainCoder, CHACHA20_POLY1305_KEY_LEN, XCHACHA20_POLY1305_NONCE_LEN,
 };
 use rand::seq::SliceRandom;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 
 #[test]
 fn encrypt_round_trip_random_inputs() {
@@ -130,5 +128,74 @@ fn fountain_recovers_after_packet_loss() {
     let losses = packets.len() / 5;
     packets.truncate(packets.len() - losses);
     let recovered = coder.decode(&metadata, &packets).expect("decode");
+    assert_eq!(recovered, data);
+}
+
+#[test]
+fn fountain_survives_systematic_data_losses() {
+    use coding::InhouseLtFountain;
+    let coder = InhouseLtFountain::new(256, 1.4).expect("fountain");
+    let mut rng = StdRng::seed_from_u64(0x4142_4344);
+    let mut data = vec![0u8; 16 * 1024];
+    rng.fill(data.as_mut_slice());
+    let batch = coder.encode(&data).expect("encode");
+    let (metadata, packets) = batch.into_parts();
+    let parity = metadata.parity_count();
+    assert!(parity > 0, "expected parity packets for rate > 1");
+
+    let mut survivors = Vec::with_capacity(packets.len() - parity);
+    let mut dropped = 0usize;
+    for packet in packets {
+        let bytes = packet.as_bytes();
+        if dropped < parity && !bytes.is_empty() && bytes[0] == 0 {
+            dropped += 1;
+            continue;
+        }
+        survivors.push(packet);
+    }
+
+    assert_eq!(
+        dropped, parity,
+        "should drop exactly the parity budget in data shards"
+    );
+    let recovered = coder
+        .decode(&metadata, &survivors)
+        .expect("decode survivors");
+    assert_eq!(recovered, data);
+}
+
+#[test]
+fn fountain_handles_large_payload_chunks() {
+    use coding::InhouseLtFountain;
+    let coder = InhouseLtFountain::new(1024, 1.3).expect("fountain");
+    let mut rng = StdRng::seed_from_u64(0x5152_5354);
+    let mut data = vec![0u8; 128 * 1024];
+    rng.fill(data.as_mut_slice());
+    let batch = coder.encode(&data).expect("encode");
+    let (metadata, mut packets) = batch.into_parts();
+    packets.shuffle(&mut rng);
+    let parity = metadata.parity_count();
+    assert!(parity > 0, "expected non-zero parity for rate > 1");
+    let mut dropped = 0usize;
+    let drop_budget = parity.saturating_sub(1);
+    let retained: Vec<_> = packets
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, packet)| {
+            if dropped < drop_budget && idx % 5 == 2 {
+                dropped += 1;
+                None
+            } else {
+                Some(packet)
+            }
+        })
+        .collect();
+    assert!(
+        dropped > 0 && dropped <= drop_budget,
+        "should exercise parity without exhausting it"
+    );
+    let recovered = coder
+        .decode(&metadata, &retained)
+        .expect("decode alternating survivors");
     assert_eq!(recovered, data);
 }

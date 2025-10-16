@@ -1,0 +1,12 @@
+[package]
+name = "legacy_manifest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+storage_engine = { path = "../../crates/storage_engine" }
+foundation_serialization = { path = "../../crates/foundation_serialization" }
+crypto_suite = { path = "../../crates/crypto_suite" }
+
+[dev-dependencies]
+storage_engine = { path = "../../crates/storage_engine" }

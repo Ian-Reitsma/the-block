@@ -1,0 +1,8 @@
+[package]
+name = "foundation_fuzz"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "First-party fuzzing harness, arbitrary data generator, and libFuzzer-compatible shim"
+
+[dependencies]

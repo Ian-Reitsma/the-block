@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-libfuzzer-sys = "0.4"
 p2p_overlay = { path = "../../crates/p2p_overlay" }
 
 [package.metadata]

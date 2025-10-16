@@ -8,15 +8,6 @@ pub struct Error {
     message: String,
 }
 
-impl Error {
-    #[cfg(feature = "external-backend")]
-    fn from_backend(err: qrcode::types::QrError) -> Self {
-        Self {
-            message: err.to_string(),
-        }
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
@@ -174,28 +165,6 @@ pub mod render {
     }
 }
 
-#[cfg(feature = "external-backend")]
-mod backend {
-    use super::{Error, QrCode};
-
-    pub fn build(data: &[u8]) -> Result<QrCode, Error> {
-        let code = qrcode::QrCode::new(data).map_err(Error::from_backend)?;
-        let width = code.width();
-        let mut modules = Vec::with_capacity(width * width);
-        for y in 0..width {
-            for x in 0..width {
-                let color = code[(x, y)] != qrcode::Color::Light;
-                modules.push(color);
-            }
-        }
-        Ok(QrCode {
-            size: width,
-            modules,
-        })
-    }
-}
-
-#[cfg(not(feature = "external-backend"))]
 mod backend {
     use super::{Error, QrCode};
 

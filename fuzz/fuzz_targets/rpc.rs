@@ -1,7 +1,10 @@
-#![no_main]
-use libfuzzer_sys::fuzz_target;
+#![forbid(unsafe_code)]
+
+#[path = "../rpc/mod.rs"]
 mod rpc;
 
-fuzz_target!(|data: &[u8]| {
+pub fn run(data: &[u8]) {
     rpc::run(data);
-});
+}
+
+fn main() {}

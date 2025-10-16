@@ -3,9 +3,6 @@ name = "coding"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-allow-third-party = []
-
 [dependencies]
 thiserror = { path = "../thiserror" }
 serde = { workspace = true }
@@ -13,3 +10,6 @@ foundation_serialization = { path = "../foundation_serialization" }
 base64_fp = { path = "../base64_fp" }
 crypto = { path = "../../crypto" }
 sys = { path = "../sys" }
+
+[dev-dependencies]
+rand = { path = "../rand" }
