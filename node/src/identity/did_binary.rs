@@ -153,6 +153,47 @@ mod tests {
     use foundation_serialization::binary_cursor::Writer;
     use rand::{rngs::StdRng, RngCore};
 
+    const DID_RECORD_FIXTURE: &[u8] = &[
+        7, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 97, 100, 100, 114, 101, 115, 115, 15, 0, 0,
+        0, 0, 0, 0, 0, 100, 105, 100, 58, 98, 108, 111, 99, 107, 58, 97, 108, 105, 99, 101, 8, 0,
+        0, 0, 0, 0, 0, 0, 100, 111, 99, 117, 109, 101, 110, 116, 14, 0, 0, 0, 0, 0, 0, 0, 123, 34,
+        115, 101, 114, 118, 105, 99, 101, 34, 58, 91, 93, 125, 4, 0, 0, 0, 0, 0, 0, 0, 104, 97,
+        115, 104, 32, 0, 0, 0, 0, 0, 0, 0, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170,
+        170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170, 170,
+        170, 170, 170, 5, 0, 0, 0, 0, 0, 0, 0, 110, 111, 110, 99, 101, 42, 0, 0, 0, 0, 0, 0, 0, 10,
+        0, 0, 0, 0, 0, 0, 0, 117, 112, 100, 97, 116, 101, 100, 95, 97, 116, 64, 226, 1, 0, 0, 0, 0,
+        0, 10, 0, 0, 0, 0, 0, 0, 0, 112, 117, 98, 108, 105, 99, 95, 107, 101, 121, 5, 0, 0, 0, 0,
+        0, 0, 0, 1, 2, 3, 4, 5, 18, 0, 0, 0, 0, 0, 0, 0, 114, 101, 109, 111, 116, 101, 95, 97, 116,
+        116, 101, 115, 116, 97, 116, 105, 111, 110, 1, 2, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0,
+        0, 115, 105, 103, 110, 101, 114, 8, 0, 0, 0, 0, 0, 0, 0, 100, 101, 97, 100, 98, 101, 101,
+        102, 9, 0, 0, 0, 0, 0, 0, 0, 115, 105, 103, 110, 97, 116, 117, 114, 101, 8, 0, 0, 0, 0, 0,
+        0, 0, 99, 97, 102, 101, 98, 97, 98, 101,
+    ];
+
+    fn with_first_party_only_env<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
+        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let lock = GUARD
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env guard");
+
+        let original = std::env::var("FIRST_PARTY_ONLY").ok();
+        match value {
+            Some(v) => std::env::set_var("FIRST_PARTY_ONLY", v),
+            None => std::env::remove_var("FIRST_PARTY_ONLY"),
+        }
+
+        let result = f();
+
+        match original {
+            Some(v) => std::env::set_var("FIRST_PARTY_ONLY", v),
+            None => std::env::remove_var("FIRST_PARTY_ONLY"),
+        }
+
+        drop(lock);
+        result
+    }
+
     fn sample_record() -> DidRecord {
         DidRecord {
             address: "did:block:alice".into(),
@@ -207,6 +248,31 @@ mod tests {
 
         let decoded = decode_record(&legacy).expect("manual decode");
         assert_eq!(record, decoded);
+    }
+
+    #[test]
+    fn did_record_roundtrip_matches_fixture() {
+        let record = sample_record();
+        let encoded = encode_record(&record);
+        if DID_RECORD_FIXTURE.is_empty() {
+            panic!("fixture pending: {:?}", encoded);
+        }
+        assert_eq!(encoded, DID_RECORD_FIXTURE);
+
+        let decoded = decode_record(DID_RECORD_FIXTURE).expect("decode fixture");
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn did_record_roundtrip_respects_first_party_only_flag() {
+        let record = sample_record();
+        for flag in [Some("1"), Some("0"), None] {
+            with_first_party_only_env(flag, || {
+                let encoded = encode_record(&record);
+                let decoded = decode_record(&encoded).expect("decode under flag");
+                assert_eq!(decoded, record);
+            });
+        }
     }
 
     #[test]

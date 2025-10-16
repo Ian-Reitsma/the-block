@@ -1,0 +1,31 @@
+name: Architecture Docs Guard
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  FIRST_PARTY_ONLY: 1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+      - name: Regenerate architecture documentation
+        run: ./scripts/gen-architecture.sh
+      - name: Ensure architecture docs are up to date
+        run: |
+          if ! git diff --quiet -- docs/architecture/node.md docs/architecture/node-deps.svg; then
+            echo "::error ::Architecture documentation is out of date. Run ./scripts/gen-architecture.sh";
+            git diff -- docs/architecture/node.md docs/architecture/node-deps.svg;
+            exit 1;
+          fi
