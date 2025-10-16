@@ -14,6 +14,8 @@ During startup the registry loads `transport::Config`, instantiates the configur
 
 Per-peer certificate fingerprints are cached on disk (`~/.the_block/quic_peer_certs.json`) and are now partitioned by provider so history survives backend swaps. The cache is exposed via `transport::CertificateStore::snapshot` and surfaced through `net::peer_cert_snapshot()` for tooling and explorer integration. Retention is governed by `rotation_history` and `rotation_max_age_secs` in `config/quic.toml`.
 
+Disk persistence rewrites the cache using a peer-sorted, provider-sorted layout so subsequent runs and guard fixtures observe identical JSON output regardless of the in-memory `HashMap` iteration order. Unit tests cover the helper that builds the serialized entries—verifying peers, providers, history vectors, and rotation counters retain their order—while integration parity remains enforced through `peer_cert_history()` snapshots. This keeps `FIRST_PARTY_ONLY` fixtures stable and hardens drift detection for operators auditing cache changes.
+
 ## Provider registry and configuration
 
 Runtime configuration is split between `config/default.toml` (ports and legacy flags) and `config/quic.toml`, which feeds the transport layer. The following keys map directly onto `transport::Config`:

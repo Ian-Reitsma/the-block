@@ -985,25 +985,27 @@ fn ensure_peer_cert_store_loaded() {
     PEER_CERTS_INITIALIZED.store(true, Ordering::SeqCst);
 }
 
-fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
-    if !peer_cert_persistence_enabled() {
-        return;
-    }
-    let path = peer_cert_store_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let now = unix_now();
-    for stores in map.values_mut() {
-        for store in stores.values_mut() {
-            prune_store_entry(store, now);
-        }
-    }
-    let entries: Vec<PeerCertDiskEntry> = map
-        .iter()
+fn sorted_peer_provider_entries<'a>(
+    map: &'a HashMap<[u8; 32], ProviderCertStores>,
+) -> Vec<([u8; 32], Vec<(&'a String, &'a PeerCertStore)>)> {
+    let mut peers: Vec<_> = map.iter().collect();
+    peers.sort_by(|(a, _), (b, _)| a.cmp(b));
+    peers
+        .into_iter()
+        .map(|(peer, providers)| {
+            let mut provider_entries: Vec<_> = providers.iter().collect();
+            provider_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+            (*peer, provider_entries)
+        })
+        .collect()
+}
+
+fn disk_entries_from_map(map: &HashMap<[u8; 32], ProviderCertStores>) -> Vec<PeerCertDiskEntry> {
+    sorted_peer_provider_entries(map)
+        .into_iter()
         .map(|(peer, providers)| {
             let provider_records: Vec<ProviderDiskRecord> = providers
-                .iter()
+                .into_iter()
                 .map(|(provider, store)| ProviderDiskRecord {
                     provider: provider.clone(),
                     current: Some(snapshot_to_disk(&store.current)),
@@ -1019,7 +1021,24 @@ fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
                 rotations: None,
             }
         })
-        .collect();
+        .collect()
+}
+
+fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
+    if !peer_cert_persistence_enabled() {
+        return;
+    }
+    let path = peer_cert_store_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let now = unix_now();
+    for stores in map.values_mut() {
+        for store in stores.values_mut() {
+            prune_store_entry(store, now);
+        }
+    }
+    let entries = disk_entries_from_map(map);
     if let Ok(json) = json::to_vec_pretty(&entries) {
         let _ = fs::write(path, json);
     }
@@ -1204,10 +1223,10 @@ pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
     ensure_peer_cert_store_loaded();
     let map = PEER_CERTS.read().unwrap();
     let mut snapshots = Vec::new();
-    for (peer, stores) in map.iter() {
-        for (provider, store) in stores.iter() {
+    for (peer, providers) in sorted_peer_provider_entries(&map) {
+        for (provider, store) in providers {
             snapshots.push(PeerCertSnapshot {
-                peer: *peer,
+                peer,
                 provider: provider.clone(),
                 fingerprint: store.current.fingerprint,
                 updated_at: store.current.updated_at,
@@ -1231,8 +1250,8 @@ pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
     let now = unix_now();
     let map = PEER_CERTS.read().unwrap();
     let mut entries: Vec<_> = Vec::new();
-    for (peer, stores) in map.iter() {
-        for (provider, store) in stores.iter() {
+    for (peer, providers) in sorted_peer_provider_entries(&map) {
+        for (provider, store) in providers {
             entries.push(PeerCertHistoryEntry {
                 peer: crypto_suite::hex::encode(peer),
                 provider: provider.clone(),
@@ -1246,15 +1265,106 @@ pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
             });
         }
     }
-    entries.sort_by(|a, b| {
-        let ord = a.peer.cmp(&b.peer);
-        if ord == std::cmp::Ordering::Equal {
-            a.provider.cmp(&b.provider)
-        } else {
-            ord
-        }
-    });
     entries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        disk_entries_from_map, sorted_peer_provider_entries, CertSnapshot, PeerCertStore,
+        ProviderCertStores,
+    };
+    use concurrency::Bytes;
+    use std::collections::{HashMap, VecDeque};
+
+    fn make_store(current: u8, history: &[(u8, u64)], rotations: u64) -> PeerCertStore {
+        let current_snapshot = CertSnapshot {
+            fingerprint: [current; 32],
+            cert: Bytes::from_static(b"cert"),
+            updated_at: 100,
+        };
+        let history_entries: Vec<_> = history
+            .iter()
+            .map(|(fp, ts)| CertSnapshot {
+                fingerprint: [*fp; 32],
+                cert: Bytes::new(),
+                updated_at: *ts,
+            })
+            .collect();
+        PeerCertStore {
+            current: current_snapshot,
+            history: VecDeque::from(history_entries),
+            rotations,
+        }
+    }
+
+    #[test]
+    fn sorted_peer_entries_order_peers_and_providers() {
+        let mut first = ProviderCertStores::new();
+        first.insert("beta".to_string(), make_store(2, &[], 0));
+        first.insert("alpha".to_string(), make_store(1, &[], 0));
+
+        let mut second = ProviderCertStores::new();
+        second.insert("gamma".to_string(), make_store(4, &[], 0));
+        second.insert("delta".to_string(), make_store(3, &[], 0));
+
+        let mut map = HashMap::new();
+        map.insert([9u8; 32], first);
+        map.insert([1u8; 32], second);
+
+        let entries = sorted_peer_provider_entries(&map);
+        let peer_hex: Vec<String> = entries
+            .iter()
+            .map(|(peer, _)| crypto_suite::hex::encode(peer))
+            .collect();
+        assert_eq!(
+            peer_hex,
+            vec![
+                crypto_suite::hex::encode([1u8; 32]),
+                crypto_suite::hex::encode([9u8; 32])
+            ]
+        );
+
+        let providers_first: Vec<&str> = entries[0].1.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(providers_first, vec!["delta", "gamma"]);
+
+        let providers_second: Vec<&str> = entries[1].1.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(providers_second, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn disk_entries_preserve_history_and_rotations() {
+        let mut providers = ProviderCertStores::new();
+        let history = [(7u8, 50u64), (6u8, 40u64), (5u8, 30u64)];
+        providers.insert("alpha".to_string(), make_store(9, &history, 12));
+
+        let mut map = HashMap::new();
+        map.insert([3u8; 32], providers);
+
+        let entries = disk_entries_from_map(&map);
+        assert_eq!(entries.len(), 1);
+        let peer_entry = &entries[0];
+        assert_eq!(peer_entry.peer, crypto_suite::hex::encode([3u8; 32]));
+        assert_eq!(peer_entry.providers.len(), 1);
+        let provider = &peer_entry.providers[0];
+        assert_eq!(provider.provider, "alpha");
+        assert_eq!(provider.rotations, Some(12));
+        assert_eq!(provider.history.len(), history.len());
+        let recorded_updates: Vec<u64> = provider.history.iter().map(|h| h.updated_at).collect();
+        assert_eq!(
+            recorded_updates,
+            history.iter().map(|(_, ts)| *ts).collect::<Vec<_>>()
+        );
+        let recorded_fps: Vec<u8> = provider
+            .history
+            .iter()
+            .map(|h| u8::from_str_radix(&h.fingerprint[..2], 16).unwrap())
+            .collect();
+        assert_eq!(
+            recorded_fps,
+            history.iter().map(|(fp, _)| *fp).collect::<Vec<_>>()
+        );
+    }
 }
 
 pub fn refresh_peer_cert_store_from_disk() -> bool {

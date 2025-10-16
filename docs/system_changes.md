@@ -1,4 +1,6 @@
 # System-Wide Economic Changes
+> **Review (2025-10-16, midday):** QUIC peer-cert persistence writes `quic_peer_certs.json` through a deterministic peer/provider sorter so cache bytes remain stable across restarts and guard fixtures. New unit tests assert the serialized entry helper preserves peer ordering, provider ordering, rotation counters, and history chronology, and `peer_cert_snapshot()` now rides the same sorted view to keep CLI/RPC output stable for auditors.
+> **Review (2025-10-16, dawn+):** Light-client persistence and snapshot delivery now emit deterministic bytes through first-party serializers. `crates/light-client/src/state_stream.rs` sorts `StateChunk`, snapshot, and cache maps before encoding, adds the `SNAPSHOT_FIXTURE` regression lock, and extends FIRST_PARTY_ONLY parity tests across guard-on/off permutations plus compressed snapshot recovery. Integration coverage exercises the in-house `coding::compressor_for("lz77-rle", 4)` path so compressed snapshots replay identically during resume flows.
 > **Review (2025-10-14, near midnight++):** `crates/jurisdiction` no longer
 > depends on third-party logging or serde derives. Policy packs and signed
 > registry entries convert through handwritten `foundation_serialization::json`
