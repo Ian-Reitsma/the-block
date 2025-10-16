@@ -2,7 +2,7 @@ use diagnostics::tracing::{debug, warn};
 use foundation_serialization::serde::{
     self,
     de::{self, MapAccess, SeqAccess, Visitor},
-    ser::SerializeStruct,
+    ser::{SerializeMap, SerializeSeq, SerializeStruct},
 };
 use foundation_serialization::{binary, Deserialize, Serialize};
 use state::Proof;
@@ -59,6 +59,38 @@ pub use telemetry::{
     LIGHT_STATE_SNAPSHOT_DECOMPRESS_ERRORS_TOTAL, REGISTRY as STATE_STREAM_TELEMETRY_REGISTRY,
 };
 
+trait AddressOrd {
+    fn address_str(&self) -> &str;
+}
+
+struct SortedAccountSeq<'a, T: AddressOrd> {
+    accounts: &'a [T],
+}
+
+impl<'a, T: AddressOrd> SortedAccountSeq<'a, T> {
+    fn new(accounts: &'a [T]) -> Self {
+        Self { accounts }
+    }
+}
+
+impl<'a, T> Serialize for SortedAccountSeq<'a, T>
+where
+    T: AddressOrd + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut entries: Vec<&T> = self.accounts.iter().collect();
+        entries.sort_by(|a, b| a.address_str().cmp(b.address_str()));
+        let mut seq = serializer.serialize_seq(Some(entries.len()))?;
+        for account in entries {
+            seq.serialize_element(account)?;
+        }
+        seq.end()
+    }
+}
+
 /// Account-level update carried by a [`StateChunk`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountChunk {
@@ -66,6 +98,12 @@ pub struct AccountChunk {
     pub balance: u64,
     pub account_seq: u64,
     pub proof: Proof,
+}
+
+impl AddressOrd for AccountChunk {
+    fn address_str(&self) -> &str {
+        &self.address
+    }
 }
 
 impl Serialize for AccountChunk {
@@ -260,7 +298,7 @@ impl Serialize for StateChunk {
         let mut state = serializer.serialize_struct("StateChunk", 5)?;
         state.serialize_field("seq", &self.seq)?;
         state.serialize_field("tip_height", &self.tip_height)?;
-        state.serialize_field("accounts", &self.accounts)?;
+        state.serialize_field("accounts", &SortedAccountSeq::new(&self.accounts))?;
         state.serialize_field("root", &self.root)?;
         state.serialize_field("compressed", &self.compressed)?;
         state.end()
@@ -588,13 +626,38 @@ struct PersistedStateRef<'a> {
     next_seq: u64,
 }
 
+struct SortedAccountMap<'a> {
+    entries: Vec<(&'a String, &'a CachedAccount)>,
+}
+
+impl<'a> SortedAccountMap<'a> {
+    fn new(accounts: &'a HashMap<String, CachedAccount>) -> Self {
+        let mut entries: Vec<_> = accounts.iter().collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        Self { entries }
+    }
+}
+
+impl<'a> Serialize for SortedAccountMap<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.entries.len()))?;
+        for (address, account) in &self.entries {
+            map.serialize_entry(address.as_str(), *account)?;
+        }
+        map.end()
+    }
+}
+
 impl Serialize for PersistedState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         let mut state = serializer.serialize_struct("PersistedState", 2)?;
-        state.serialize_field("accounts", &self.accounts)?;
+        state.serialize_field("accounts", &SortedAccountMap::new(&self.accounts))?;
         state.serialize_field("next_seq", &self.next_seq)?;
         state.end()
     }
@@ -726,25 +789,312 @@ impl<'a> Serialize for PersistedStateRef<'a> {
         S: serde::Serializer,
     {
         let mut state = serializer.serialize_struct("PersistedState", 2)?;
-        state.serialize_field("accounts", &self.accounts)?;
+        state.serialize_field("accounts", &SortedAccountMap::new(self.accounts))?;
         state.serialize_field("next_seq", &self.next_seq)?;
         state.end()
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SnapshotAccount {
     address: String,
     balance: u64,
     seq: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(crate = "foundation_serialization::serde")]
+impl AddressOrd for SnapshotAccount {
+    fn address_str(&self) -> &str {
+        &self.address
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SnapshotPayload {
     accounts: Vec<SnapshotAccount>,
     next_seq: u64,
+}
+
+impl Serialize for SnapshotAccount {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("SnapshotAccount", 3)?;
+        state.serialize_field("address", &self.address)?;
+        state.serialize_field("balance", &self.balance)?;
+        state.serialize_field("seq", &self.seq)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SnapshotAccount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        enum Field {
+            Address,
+            Balance,
+            Seq,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str("`address`, `balance`, or `seq`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "address" => Ok(Field::Address),
+                            "balance" => Ok(Field::Balance),
+                            "seq" => Ok(Field::Seq),
+                            _ => Err(E::unknown_field(value, &FIELDS)),
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"address" => Ok(Field::Address),
+                            b"balance" => Ok(Field::Balance),
+                            b"seq" => Ok(Field::Seq),
+                            _ => {
+                                let field = std::str::from_utf8(value).unwrap_or("");
+                                Err(E::unknown_field(field, &FIELDS))
+                            }
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct SnapshotAccountVisitor;
+
+        impl<'de> Visitor<'de> for SnapshotAccountVisitor {
+            type Value = SnapshotAccount;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("snapshot account")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let address = seq
+                    .next_element::<String>()?
+                    .ok_or_else(|| de::Error::missing_field("address"))?;
+                let balance = seq
+                    .next_element::<u64>()?
+                    .ok_or_else(|| de::Error::missing_field("balance"))?;
+                let seq_no = seq
+                    .next_element::<u64>()?
+                    .ok_or_else(|| de::Error::missing_field("seq"))?;
+                Ok(SnapshotAccount {
+                    address,
+                    balance,
+                    seq: seq_no,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut address = None;
+                let mut balance = None;
+                let mut seq_no = None;
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Address => {
+                            if address.is_some() {
+                                return Err(de::Error::duplicate_field("address"));
+                            }
+                            address = Some(map.next_value()?);
+                        }
+                        Field::Balance => {
+                            if balance.is_some() {
+                                return Err(de::Error::duplicate_field("balance"));
+                            }
+                            balance = Some(map.next_value()?);
+                        }
+                        Field::Seq => {
+                            if seq_no.is_some() {
+                                return Err(de::Error::duplicate_field("seq"));
+                            }
+                            seq_no = Some(map.next_value()?);
+                        }
+                    }
+                }
+                Ok(SnapshotAccount {
+                    address: address.ok_or_else(|| de::Error::missing_field("address"))?,
+                    balance: balance.ok_or_else(|| de::Error::missing_field("balance"))?,
+                    seq: seq_no.ok_or_else(|| de::Error::missing_field("seq"))?,
+                })
+            }
+        }
+
+        const FIELDS: &[&str] = &["address", "balance", "seq"];
+        deserializer.deserialize_struct("SnapshotAccount", FIELDS, SnapshotAccountVisitor)
+    }
+}
+
+impl Serialize for SnapshotPayload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("SnapshotPayload", 2)?;
+        state.serialize_field("accounts", &SortedAccountSeq::new(&self.accounts))?;
+        state.serialize_field("next_seq", &self.next_seq)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SnapshotPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        enum Field {
+            Accounts,
+            NextSeq,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str("`accounts` or `next_seq`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "accounts" => Ok(Field::Accounts),
+                            "next_seq" => Ok(Field::NextSeq),
+                            _ => Err(E::unknown_field(value, &FIELDS)),
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"accounts" => Ok(Field::Accounts),
+                            b"next_seq" => Ok(Field::NextSeq),
+                            _ => {
+                                let field = std::str::from_utf8(value).unwrap_or("");
+                                Err(E::unknown_field(field, &FIELDS))
+                            }
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct SnapshotPayloadVisitor;
+
+        impl<'de> Visitor<'de> for SnapshotPayloadVisitor {
+            type Value = SnapshotPayload;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("snapshot payload")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let accounts = seq
+                    .next_element::<Vec<SnapshotAccount>>()?
+                    .ok_or_else(|| de::Error::missing_field("accounts"))?;
+                let next_seq = seq
+                    .next_element::<u64>()?
+                    .ok_or_else(|| de::Error::missing_field("next_seq"))?;
+                Ok(SnapshotPayload { accounts, next_seq })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut accounts = None;
+                let mut next_seq = None;
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Accounts => {
+                            if accounts.is_some() {
+                                return Err(de::Error::duplicate_field("accounts"));
+                            }
+                            accounts = Some(map.next_value()?);
+                        }
+                        Field::NextSeq => {
+                            if next_seq.is_some() {
+                                return Err(de::Error::duplicate_field("next_seq"));
+                            }
+                            next_seq = Some(map.next_value()?);
+                        }
+                    }
+                }
+                Ok(SnapshotPayload {
+                    accounts: accounts.ok_or_else(|| de::Error::missing_field("accounts"))?,
+                    next_seq: next_seq.ok_or_else(|| de::Error::missing_field("next_seq"))?,
+                })
+            }
+        }
+
+        const FIELDS: &[&str] = &["accounts", "next_seq"];
+        deserializer.deserialize_struct("SnapshotPayload", FIELDS, SnapshotPayloadVisitor)
+    }
 }
 
 /// Callback invoked when the client detects a sequence gap.
@@ -1226,6 +1576,21 @@ mod tests {
         0, 0, 0, 110, 101, 120, 116, 95, 115, 101, 113, 42, 0, 0, 0, 0, 0, 0, 0,
     ];
 
+    const SNAPSHOT_FIXTURE: &[u8] = &[
+        2, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 97, 99, 99, 111, 117, 110, 116, 115, 3, 0,
+        0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 97, 100, 100, 114, 101,
+        115, 115, 5, 0, 0, 0, 0, 0, 0, 0, 97, 108, 105, 99, 101, 7, 0, 0, 0, 0, 0, 0, 0, 98, 97,
+        108, 97, 110, 99, 101, 232, 3, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 115, 101, 113, 7,
+        0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 97, 100, 100, 114,
+        101, 115, 115, 3, 0, 0, 0, 0, 0, 0, 0, 98, 111, 98, 7, 0, 0, 0, 0, 0, 0, 0, 98, 97, 108,
+        97, 110, 99, 101, 196, 9, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 115, 101, 113, 11, 0,
+        0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 97, 100, 100, 114, 101,
+        115, 115, 5, 0, 0, 0, 0, 0, 0, 0, 99, 97, 114, 111, 108, 7, 0, 0, 0, 0, 0, 0, 0, 98, 97,
+        108, 97, 110, 99, 101, 136, 19, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 115, 101, 113, 3,
+        0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 110, 101, 120, 116, 95, 115, 101, 113, 77, 0,
+        0, 0, 0, 0, 0, 0,
+    ];
+
     fn sample_state() -> PersistedState {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -1308,6 +1673,102 @@ mod tests {
         }
     }
 
+    fn sample_snapshot() -> SnapshotPayload {
+        SnapshotPayload {
+            accounts: vec![
+                SnapshotAccount {
+                    address: "carol".to_string(),
+                    balance: 5_000,
+                    seq: 3,
+                },
+                SnapshotAccount {
+                    address: "alice".to_string(),
+                    balance: 1_000,
+                    seq: 7,
+                },
+                SnapshotAccount {
+                    address: "bob".to_string(),
+                    balance: 2_500,
+                    seq: 11,
+                },
+            ],
+            next_seq: 77,
+        }
+    }
+
+    #[test]
+    fn snapshot_fixture_matches_deterministic_encoding() {
+        let snapshot = sample_snapshot();
+        let encoded = binary::encode(&snapshot).expect("encode snapshot");
+        if SNAPSHOT_FIXTURE.is_empty() {
+            panic!("snapshot fixture pending: {:?}", encoded);
+        }
+        assert_eq!(encoded, SNAPSHOT_FIXTURE);
+
+        let decoded: SnapshotPayload =
+            binary::decode(SNAPSHOT_FIXTURE).expect("decode snapshot fixture");
+        assert_eq!(decoded.next_seq, snapshot.next_seq);
+        assert_eq!(decoded.accounts.len(), snapshot.accounts.len());
+
+        let addresses: Vec<&str> = decoded
+            .accounts
+            .iter()
+            .map(|account| account.address.as_str())
+            .collect();
+        let mut sorted = addresses.clone();
+        sorted.sort_unstable();
+        assert_eq!(addresses, sorted);
+    }
+
+    #[test]
+    fn snapshot_roundtrip_respects_first_party_only_flag() {
+        let snapshot = sample_snapshot();
+
+        for flag in [Some("1"), Some("0"), None] {
+            with_first_party_only_env(flag, || {
+                let encoded = binary::encode(&snapshot).expect("encode snapshot");
+                let decoded: SnapshotPayload = binary::decode(&encoded).expect("decode snapshot");
+                assert_eq!(decoded.next_seq, snapshot.next_seq);
+                assert_eq!(decoded.accounts.len(), snapshot.accounts.len());
+            });
+        }
+    }
+
+    fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+        fn helper<T: Clone>(items: &mut Vec<T>, start: usize, acc: &mut Vec<Vec<T>>) {
+            if start == items.len() {
+                acc.push(items.clone());
+                return;
+            }
+            for index in start..items.len() {
+                items.swap(start, index);
+                helper(items, start + 1, acc);
+                items.swap(start, index);
+            }
+        }
+
+        let mut working = items.to_vec();
+        let mut acc = Vec::new();
+        helper(&mut working, 0, &mut acc);
+        acc
+    }
+
+    #[test]
+    fn snapshot_serialization_orders_accounts() {
+        let snapshot = sample_snapshot();
+        let expected = binary::encode(&snapshot).expect("encode canonical snapshot");
+
+        let accounts = snapshot.accounts.clone();
+        for perm in permutations(&accounts) {
+            let payload = SnapshotPayload {
+                accounts: perm.clone(),
+                next_seq: snapshot.next_seq,
+            };
+            let encoded = binary::encode(&payload).expect("encode permuted snapshot");
+            assert_eq!(encoded, expected);
+        }
+    }
+
     #[test]
     fn persisted_state_roundtrip_respects_first_party_only_flag() {
         let state = sample_state();
@@ -1321,6 +1782,217 @@ mod tests {
                 assert_eq!(decoded.accounts.len(), state.accounts.len());
             });
         }
+    }
+
+    #[derive(Debug)]
+    struct PersistedStateWithVec {
+        accounts: Vec<(String, CachedAccount)>,
+        next_seq: u64,
+    }
+
+    struct AccountsVec(Vec<(String, CachedAccount)>);
+
+    impl<'de> Deserialize<'de> for AccountsVec {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct AccountsVisitor;
+
+            impl<'de> Visitor<'de> for AccountsVisitor {
+                type Value = AccountsVec;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("map of account entries")
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut entries = Vec::new();
+                    while let Some((address, account)) =
+                        map.next_entry::<String, CachedAccount>()?
+                    {
+                        entries.push((address, account));
+                    }
+                    Ok(AccountsVec(entries))
+                }
+            }
+
+            deserializer.deserialize_map(AccountsVisitor)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for PersistedStateWithVec {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            enum Field {
+                Accounts,
+                NextSeq,
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    struct FieldVisitor;
+
+                    impl<'de> Visitor<'de> for FieldVisitor {
+                        type Value = Field;
+
+                        fn expecting(
+                            &self,
+                            formatter: &mut std::fmt::Formatter<'_>,
+                        ) -> std::fmt::Result {
+                            formatter.write_str("`accounts` or `next_seq`")
+                        }
+
+                        fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                        where
+                            E: de::Error,
+                        {
+                            match value {
+                                "accounts" => Ok(Field::Accounts),
+                                "next_seq" => Ok(Field::NextSeq),
+                                _ => Err(E::unknown_field(value, &FIELDS)),
+                            }
+                        }
+
+                        fn visit_string<E>(self, value: String) -> Result<Field, E>
+                        where
+                            E: de::Error,
+                        {
+                            self.visit_str(&value)
+                        }
+
+                        fn visit_bytes<E>(self, value: &[u8]) -> Result<Field, E>
+                        where
+                            E: de::Error,
+                        {
+                            match value {
+                                b"accounts" => Ok(Field::Accounts),
+                                b"next_seq" => Ok(Field::NextSeq),
+                                _ => {
+                                    let field = std::str::from_utf8(value).unwrap_or("");
+                                    Err(E::unknown_field(field, &FIELDS))
+                                }
+                            }
+                        }
+                    }
+
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct PersistedStateWithVecVisitor;
+
+            impl<'de> Visitor<'de> for PersistedStateWithVecVisitor {
+                type Value = PersistedStateWithVec;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("persisted state with ordered accounts")
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let AccountsVec(accounts) = seq
+                        .next_element::<AccountsVec>()?
+                        .ok_or_else(|| de::Error::missing_field("accounts"))?;
+                    let next_seq = seq
+                        .next_element::<u64>()?
+                        .ok_or_else(|| de::Error::missing_field("next_seq"))?;
+                    Ok(PersistedStateWithVec { accounts, next_seq })
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut accounts = None;
+                    let mut next_seq = None;
+                    while let Some(key) = map.next_key::<Field>()? {
+                        match key {
+                            Field::Accounts => {
+                                if accounts.is_some() {
+                                    return Err(de::Error::duplicate_field("accounts"));
+                                }
+                                let AccountsVec(entries) = map.next_value::<AccountsVec>()?;
+                                accounts = Some(entries);
+                            }
+                            Field::NextSeq => {
+                                if next_seq.is_some() {
+                                    return Err(de::Error::duplicate_field("next_seq"));
+                                }
+                                next_seq = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(PersistedStateWithVec {
+                        accounts: accounts.ok_or_else(|| de::Error::missing_field("accounts"))?,
+                        next_seq: next_seq.ok_or_else(|| de::Error::missing_field("next_seq"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["accounts", "next_seq"];
+            deserializer.deserialize_struct(
+                "PersistedStateWithVec",
+                FIELDS,
+                PersistedStateWithVecVisitor,
+            )
+        }
+    }
+
+    #[test]
+    fn persisted_state_serialization_orders_accounts() {
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            "carol".to_string(),
+            CachedAccount {
+                balance: 3_000,
+                seq: 5,
+            },
+        );
+        accounts.insert(
+            "alice".to_string(),
+            CachedAccount {
+                balance: 1_000,
+                seq: 7,
+            },
+        );
+        accounts.insert(
+            "bob".to_string(),
+            CachedAccount {
+                balance: 2_500,
+                seq: 11,
+            },
+        );
+
+        let state = PersistedState {
+            accounts,
+            next_seq: 99,
+        };
+
+        let encoded_state = binary::encode(&state).expect("encode unordered state");
+        let decoded: PersistedStateWithVec =
+            binary::decode(&encoded_state).expect("decode ordered view");
+
+        assert_eq!(decoded.next_seq, state.next_seq);
+
+        let addresses: Vec<&str> = decoded
+            .accounts
+            .iter()
+            .map(|(address, _)| address.as_str())
+            .collect();
+        let mut sorted = addresses.clone();
+        sorted.sort_unstable();
+        assert_eq!(addresses, sorted);
     }
 }
 

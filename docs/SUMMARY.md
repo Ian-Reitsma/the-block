@@ -1,4 +1,6 @@
 # Summary
+> **Review (2025-10-16, midday):** QUIC peer-cert caches now serialize through a sorted peer/provider view so `quic_peer_certs.json` stays byte-identical across runs and guard fixtures. New unit tests lock ordering, history, and rotation counters while `peer_cert_snapshot()` reuses the same sorted iterator to keep CLI/RPC payloads deterministic.
+> **Review (2025-10-16, dawn+):** Light-client persistence, snapshots, and chunk serialization now run through deterministic first-party serializers with fixtures (`PERSISTED_STATE_FIXTURE`, `SNAPSHOT_FIXTURE`) and guard-parity tests covering account permutations plus compressed snapshot recovery. Integration coverage drives the in-house `coding::compressor_for("lz77-rle", 4)` path so resume flows remain identical under `FIRST_PARTY_ONLY`.
 > **Review (2025-10-14, late evening+++):** Dependency governance now emits a
 > structured summary and monitoring coverage. `dependency-check.summary.json`
 > ships with every registry run, `tools/xtask` surfaces the parsed verdict,

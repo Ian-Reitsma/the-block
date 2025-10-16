@@ -1,4 +1,13 @@
 # Project Progress Snapshot
+> **Review (2025-10-16, midday):** QUIC peer-cert persistence now rewrites `quic_peer_certs.json` in a peer-sorted,
+> provider-sorted layout so guard fixtures and operator diffs remain stable even when the in-memory cache shuffles.
+> Fresh unit tests cover the disk-entry helper—verifying peer/provider ordering, history vectors, and rotation counters—while
+> snapshot helpers reuse the same sorted view so CLI/RPC surfaces continue to emit deterministic payloads.
+> **Review (2025-10-16, dawn+):** Light-client persistence now carries first-party ordering guarantees across chunks, snapshots,
+> and disk caches. Manual serializers sort account entries before emitting bytes so the new `SNAPSHOT_FIXTURE` and refreshed
+> `PERSISTED_STATE_FIXTURE` stay stable with `FIRST_PARTY_ONLY` forced to `1`, `0`, or unset. Unit and integration tests permute
+> account orderings, run guard-on/off encode/decode cycles, and exercise the compressed snapshot path via the in-house
+> `coding::compressor_for("lz77-rle", 4)` facade, ensuring both parity and rollback coverage.
 > **Review (2025-10-14, closing push+++):** RPC fuzz harnesses now build identity
 > state inside per-run `sys::tempfile` directories and exercise
 > `run`/`run_with_response`/`run_request` directly, removing the shared
