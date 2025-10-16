@@ -5,7 +5,8 @@ edition = "2021"
 
 [features]
 default = []
-legacy-format = ["dep:sled-legacy"]
+legacy-format = []
+telemetry = ["dep:runtime"]
 
 [dependencies]
 storage_engine = { path = "../crates/storage_engine" }
@@ -13,8 +14,6 @@ thiserror = { path = "../crates/thiserror" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
 crypto_suite = { path = "../crates/crypto_suite" }
 sys = { path = "../crates/sys" }
+foundation_serialization = { path = "../crates/foundation_serialization" }
+runtime = { path = "../crates/runtime", optional = true }
 
-[dependencies.sled-legacy]
-package = "sled"
-version = "0.34"
-optional = true

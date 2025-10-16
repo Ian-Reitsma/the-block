@@ -27,11 +27,16 @@ impl FountainPacket {
 pub struct FountainMetadata {
     symbol_size: u16,
     symbol_count: usize,
+    parity_count: usize,
     original_len: usize,
 }
 
 impl FountainMetadata {
     pub fn new(symbol_size: u16, original_len: usize) -> Self {
+        Self::with_parity(symbol_size, original_len, 0)
+    }
+
+    pub fn with_parity(symbol_size: u16, original_len: usize, parity_count: usize) -> Self {
         let count = if symbol_size == 0 {
             0
         } else if original_len == 0 {
@@ -42,6 +47,7 @@ impl FountainMetadata {
         Self {
             symbol_size,
             symbol_count: count,
+            parity_count,
             original_len,
         }
     }
@@ -52,6 +58,10 @@ impl FountainMetadata {
 
     pub fn symbol_count(&self) -> usize {
         self.symbol_count
+    }
+
+    pub fn parity_count(&self) -> usize {
+        self.parity_count
     }
 
     pub fn original_len(&self) -> usize {

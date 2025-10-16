@@ -2494,7 +2494,7 @@ pub async fn run_rpc_server(
     serve(listener, router, server_cfg).await
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "fuzzy"))]
 pub fn fuzz_runtime_config() -> Arc<RpcRuntimeConfig> {
     Arc::new(RpcRuntimeConfig {
         allowed_hosts: vec!["localhost".into()],
@@ -2505,4 +2505,33 @@ pub fn fuzz_runtime_config() -> Arc<RpcRuntimeConfig> {
         admin_token: None,
         relay_only: false,
     })
+}
+
+#[cfg(any(test, feature = "fuzzy"))]
+pub fn fuzz_dispatch_request(
+    bc: Arc<Mutex<Blockchain>>,
+    mining: Arc<AtomicBool>,
+    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
+    handles: Arc<Mutex<HandleRegistry>>,
+    dids: Arc<Mutex<DidRegistry>>,
+    runtime_cfg: Arc<RpcRuntimeConfig>,
+    request: RpcRequest,
+    auth_header: Option<String>,
+    peer_ip: Option<IpAddr>,
+) -> RpcResponse {
+    let state = RpcState {
+        bc,
+        mining,
+        nonces,
+        handles,
+        dids,
+        runtime_cfg: Arc::clone(&runtime_cfg),
+        clients: Arc::new(Mutex::new(HashMap::new())),
+        tokens_per_sec: 128.0,
+        ban_secs: 1,
+        client_timeout: 1,
+        concurrent: Arc::new(Semaphore::new(64)),
+    };
+
+    execute_rpc(&state, request, auth_header.as_deref(), peer_ip)
 }

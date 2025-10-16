@@ -1,6 +1,14 @@
 # Pivot Dependency Strategy Runbook
-> **Review (2025-10-12):** Converted the storage engine to a first-party JSON codec and temp-file harness, trimmed the diagnostics crate off the SQLite facade, and tightened the dependency guard so crate-level checks surface only the offending dependency graph while regenerating the inventory snapshots with the leaner DAG. The remaining serde/bincode usage is isolated to tooling crates tracked below. The latest log-indexer migration (2025-10-14) replaces the SQLite-backed flows with the sled-powered `log_index` crate while keeping a gated migration feature for archived `.db` snapshots.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, and diagnostics facades are live with governance overrides enforced (2025-10-12); node telemetry and harness automation now emit binary profile labels instead of bincode.
+> **Review (2025-10-14):** Tooling finished migrating onto the `foundation_serialization`
+> facade and the dependency guard now enforces a first-party-only lockfile on every
+> build. Inventory snapshots regenerate from the leaner DAG, CLI/reporting helpers emit
+> structured telemetry for guard runs, and the log-indexer migration replaces the
+> SQLite-backed flow with the sled-powered `log_index` crate while retaining a gated
+> migration path for archived `.db` snapshots.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
+> crypto_suite, codec, serialization, SQLite, and diagnostics facades are live with
+> governance overrides enforced; guard tooling blocks releases if any crate reintroduces
+> third-party dependencies.
 
 This runbook aligns engineering and operations on the hybrid dependency strategy that
 pairs runtime-selectable wrappers with policy-governed in-house fallbacks. It expands on
@@ -27,13 +35,18 @@ summaries, letting governance stage cutovers with confidence.
 vendor hashes, and policy attestations. The `tools/vendor_sync` helper keeps the vendored
 tree reproducible, while `tools/dependency_registry` records policy-compliant snapshots
 for auditing.
-Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap. As of 2025-10-12 the storage engine persists manifests/WAL entries through the new first-party JSON codec, diagnostics no longer links the SQLite facade, and the dependency guard scopes `cargo metadata` to the requesting crate before enforcing policy. The dependency registry CLI now invokes `cargo metadata` directly and parses the graph through the `foundation_serialization` facade, removing the crates.io `cargo_metadata` helper and its `camino` dependency while keeping policy enforcement first-party. Workspace manifests now alias `serde` to the `foundation_serde` facade, `foundation_bigint` replaces the `num-bigint` stack inside crypto_suite so FIRST_PARTY_ONLY builds avoid crates.io big integers while residual `num-traits` stays with image/num-* tooling, the runtime backend schedules tasks through a first-party `WorkQueue` instead of `crossbeam-deque`, and the ledger migration CLI, governance history store, metrics aggregator, node runtime, telemetry, and crypto suite continue to persist through `foundation_serialization` and the base58 facade, eliminating direct `serde_json`, `bincode`, and `bs58` usage from production crates. Remaining serde_json/bincode links are isolated to tooling (`tools/*`, `examples/`, `bridges/`, `inflation/`, `crates/cli_core`, `crates/probe`, `crates/wallet`, `crates/jurisdiction`) with owners listed below—dropping them is prerequisite to enforcing the guard at the workspace level.
+Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap. The storage engine persists manifests/WAL entries through the first-party JSON codec, diagnostics no longer links the SQLite facade, and the dependency guard scopes `cargo metadata` to the requesting crate before enforcing policy. The dependency registry CLI invokes `cargo metadata` directly and parses the graph through the `foundation_serialization` facade, removing the crates.io `cargo_metadata` helper and its `camino` dependency while keeping policy enforcement first-party. Workspace manifests alias `serde` to the `foundation_serde` facade, `foundation_bigint` replaces the `num-bigint` stack inside crypto_suite so FIRST_PARTY_ONLY builds avoid crates.io big integers while residual `num-traits` stays with image/num-* tooling, the runtime backend schedules tasks through a first-party `WorkQueue` instead of `crossbeam-deque`, and the ledger migration CLI, governance history store, metrics aggregator, node runtime, telemetry, and crypto suite continue to persist through `foundation_serialization` and the base58 facade, eliminating direct `serde_json`, `bincode`, and `bs58` usage from production crates. Tooling crates have now joined the facade and run under the guard, so any new binary or script must register with the dependency inventory before landing.
 
-**Serialization facade checkpoint — 2025-10-10**
+**Serialization facade checkpoint — 2025-10-14**
 
 - ✅ Governance (store/bootstrap helpers), ledger (migration CLI, shard/UTXO persistence), and metrics aggregator (leader election, correlation/naming/telemetry suites) call only into `foundation_serialization`.
 - ✅ Base58 peer IDs now flow through `foundation_serialization::base58`, allowing removal of the `bs58` crate from the workspace.
-- ⚠️ Tooling crates (`tools/indexer`, `tools/remote-signer`, `tools/dependency_registry`, `tools/log_indexer_cli`, `tools/release_notes`, `tools/bench-harness`, `tools/dual-key-migrate`, `examples/*`, `bridges/`, `inflation/`, `crates/cli_core`, `crates/probe`, `crates/wallet`, `crates/jurisdiction`) still depend on `serde_json`/`bincode`. Each owner must stage migrations to the facade before we flip the dependency guard.
+- ✅ Tooling crates (`tools/indexer`, `tools/remote-signer`, `tools/dependency_registry`,
+  `tools/log_indexer_cli`, `tools/release_notes`, `tools/bench-harness`,
+  `tools/dual-key-migrate`, `examples/*`, `bridges/`, `inflation/`, `crates/cli_core`,
+  `crates/probe`, `crates/wallet`, `crates/jurisdiction`) now route through
+  `foundation_serialization`; guard runs enforce the dependency inventory on every
+  commit.
 - ✅ Simulation, fuzzing, and storage repair harnesses route binary payloads through `foundation_serialization::binary`, and the CLI defaults now advertise `--codec binary` when exercising the dependency-fault harness.
 - ✅ `tools/gov_graph` now routes its graph export through `foundation_serialization::binary`, dropping the lingering `bincode` dependency from the DOT generator.
 - ✅ Peer metrics exports, support bundles, and light-client log uploads rely on `foundation_archive` (in-house TAR/Gzip) so the `tar`/`flate2` crates are no longer part of the workspace build graph.

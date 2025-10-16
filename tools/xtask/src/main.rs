@@ -1,5 +1,5 @@
 use cli_core::{
-    arg::{ArgSpec, FlagSpec, OptionSpec},
+    arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{ParseError, Parser},
@@ -126,11 +126,6 @@ fn build_command() -> Command {
                 "baseline",
                 "Baseline registry snapshot used for drift detection",
             )))
-            .arg(ArgSpec::Flag(FlagSpec::new(
-                "allow-third-party",
-                "allow-third-party",
-                "Temporarily disable the FIRST_PARTY_ONLY guard while running the check",
-            )))
             .build(),
         )
         .build()
@@ -234,7 +229,6 @@ fn run_check_deps(matches: &cli_core::parse::Matches) -> Result<()> {
         .unwrap_or_else(|| "target/dependency-registry".to_string());
     let config = matches.get_string("config");
     let baseline = matches.get_string("baseline");
-    let allow_third_party = matches.get_flag("allow-third-party");
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut command = StdCommand::new(cargo);
@@ -255,10 +249,6 @@ fn run_check_deps(matches: &cli_core::parse::Matches) -> Result<()> {
     }
     if let Some(baseline_path) = baseline {
         command.arg("--baseline").arg(baseline_path);
-    }
-
-    if allow_third_party {
-        command.env("FIRST_PARTY_ONLY", "0");
     }
 
     let status = command

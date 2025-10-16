@@ -1,11 +1,12 @@
-#![no_main]
+#![forbid(unsafe_code)]
 
 use foundation_serialization::binary;
-use libfuzzer_sys::fuzz_target;
-use the_block::net::message;
+use the_block::net::fuzz_decode_message;
 
-fuzz_target!(|data: &[u8]| {
-    if let Ok(msg) = message::decode(data) {
+pub fn run(data: &[u8]) {
+    if let Ok(msg) = fuzz_decode_message(data) {
         let _ = binary::encode(&msg).ok();
     }
-});
+}
+
+fn main() {}

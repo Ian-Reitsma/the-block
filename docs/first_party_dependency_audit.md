@@ -1,6 +1,26 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-14 23:59:45Z_
+_Last updated: 2025-10-14 23:59:59Z_
+
+> **2025-10-14 update (closing push+++):** RPC fuzz harnesses now seed identity
+> state through `sys::tempfile` scratch directories, letting FIRST_PARTY_ONLY
+> runs avoid shared sled paths while the new smoke tests hit
+> `run`/`run_with_response`/`run_request` directly. The sled legacy importer’s
+> builder (`legacy::Config`) now drives migration, and fresh tests populate and
+> reopen multi-tree manifests to lock the first-party JSON shim in place. The
+> `tools/legacy_manifest` CLI gained deterministic column-family ordering and
+> default-column coverage under integration tests, keeping the export story
+> entirely in-house as we expand operator tooling.
+> **2025-10-14 update (endgame)**: Net and gateway fuzz harnesses now reuse the
+> shared `foundation_fuzz` modules, replacing `libfuzzer-sys`/`arbitrary`
+> while `foundation_serde` and `foundation_qrcode` permanently drop their
+> external-backend escape hatches. Remote-signer, the fuzz binaries, and
+> every serialization call site now compile exclusively against first-party
+> code paths, leaving the workspace lockfile free of crates.io entries.
+> **2025-10-14 update:** The optional sled legacy importer now runs on a
+> first-party manifest shim, so the workspace lockfile contains zero
+> crates.io entries. `FIRST_PARTY_ONLY=1 cargo check` now succeeds for every
+> crate—including all fuzz binaries—without needing feature gates.
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -97,6 +117,23 @@ tests while the module is phased out.
 
 ### Tooling & Support Crate Migrations (2025-10-14 update)
 
+- ✅ The workspace `sled` crate now ships a first-party JSON manifest importer
+  for the `legacy-format` feature, eliminating the crates.io `sled`
+  dependency chain while preserving on-disk upgrade support.
+- ✅ Net and gateway fuzz harnesses now mirror the shared
+  `foundation_fuzz` modules, retire `libfuzzer-sys`/`arbitrary`, and ship
+  smoke tests that exercise their entry points without libFuzzer glue.
+- ✅ `crates/coding` dropped the `allow-third-party` feature flag; the LT fountain
+  coder now encodes/decodes via the in-house Reed–Solomon engine and the
+  property harness runs entirely on the workspace RNG (`crates/coding/tests/
+  inhouse_props.rs`). `crates/rand` gained deterministic `fill` and
+  slice-selection helpers with dedicated tests (`crates/rand/tests/seq.rs`), and
+  simulation tooling (`sim/did.rs`) consumes the new APIs so account rotation
+  stays first party.
+- ✅ `foundation_serde` and `foundation_qrcode` permanently retired their
+  external-backend features; every consumer (including the remote signer CLI)
+  now relies on the in-house stubs so the workspace no longer references
+  crates.io fallbacks even optionally.
 - ✅ `tools/dependency_registry` exposes a reusable `run_cli` helper that writes
   registry JSON, violation reports, telemetry, manifest manifests, and optional
   snapshots while honouring a `TB_DEPENDENCY_REGISTRY_DOC_PATH` override for
@@ -385,10 +422,11 @@ tests while the module is phased out.
   modular exponentiation so the in-house implementation stays locked against
   known-good vectors.
 
-Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
-residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`) and
-wiring the remaining CLI/tooling surfaces to the `foundation_metrics`
-recorder so every consumer emits first-party telemetry without bespoke shims.
+FIRST_PARTY_ONLY is now enforced across the workspace. Ongoing maintenance
+focuses on guarding this posture: new tooling must route through the
+`foundation_serialization` and telemetry facades, inventory refreshes should
+run whenever crates are added or removed, and CI keeps the guard binary wired
+to prevent accidental third-party reintroductions.
 
 ## 2. Third-Party Math, FFT, and Parallelism Inventory
 
@@ -411,20 +449,23 @@ recorder so every consumer emits first-party telemetry without bespoke shims.
   `FIRST_PARTY_ONLY=1` until downstream crates migrate to the new
   `BinaryProfile` aliases.
 
-## 3. Next Steps Toward Full Migration
+## 3. Guardrail & Maintenance Work
 
-1. **Finalize facade ergonomics:** now that defaults/skip helpers are wired
-   across runtime/tooling crates, capture any bespoke predicates (e.g., non-zero
-   numeric guards) inside `foundation_serialization` so downstream code stops
-   shadowing std helpers entirely. Promote derive macros once coverage is
-   exhaustive.
-2. **Refactor Call Sites:** replace direct serde derives with the new helpers,
-   ensuring deterministic round-trips. Update persistence layers and RPC
-   handlers to consume the facade APIs instead of `serde_json` or `bincode`.
-3. **Fixture Updates:** port test fixtures to use `crates/codec` (or new
-   first-party binary encoders) and run `FIRST_PARTY_ONLY=0 cargo test -p
-   the_block` after each migration stage.
-4. **Math/FFT/Parallelism Replacement:** design in-house primitives under
+1. **Harden facade ergonomics:** continue upstreaming bespoke predicates (for
+   example non-zero numeric guards) into `foundation_serialization` so callers
+   never reintroduce ad-hoc helpers.
+2. **Extend policy automation:** keep `tools/xtask` and CI workflows blocking on
+   the dependency guard, publishing telemetry snapshots on every run so drift is
+   visible in dashboards.
+3. **Audit ecosystem hooks:** when SDKs or operator tooling branch from the
+   workspace, verify their manifests re-export the in-house crates; publish
+   checklists alongside the dependency registry exporter so downstream teams
+   stay aligned with the first-party posture.
+4. **Fixture Updates:** port test fixtures to use `crates/codec` (or new
+   first-party binary encoders) and run both `FIRST_PARTY_ONLY=1 cargo test -p
+   the_block` and `FIRST_PARTY_ONLY=0 cargo test -p the_block` after each
+   migration stage.
+5. **Math/FFT/Parallelism Replacement:** design in-house primitives under
    `crates/coding` or a new math crate to cover matrix algebra, chi-squared CDF,
    and DCT operations. Wire node/governance modules to the replacements and drop
    the third-party crates from manifests, then benchmark the new stacks.
@@ -476,11 +517,22 @@ Dependency Migration" milestone) to coordinate the rollout.
 - ✅ Wallet, light-client, and diagnostics surfaces now exclusively emit logs
   through `diagnostics::tracing`, removing the third-party `tracing` stack from
   the workspace manifests while preserving existing span/field semantics.
-- ✅ Introduced the `foundation_qrcode` facade so the remote-signer CLI can
-  render QR output via a first-party stub when `FIRST_PARTY_ONLY=1` and opt into
-  the legacy `qrcode` backend via the new `external-qrcode` feature for release
-  builds. Dependency guard coverage now passes for the CLI once Windows-specific
-  crates are migrated.
+- ✅ Every fuzz harness (`fuzz`, `gateway/fuzz`, `net/fuzz`) now relies on the
+  in-house `foundation_fuzz` crate (Unstructured reader + `fuzz_target!` macro),
+  eliminating the `libfuzzer-sys`/`arbitrary` toolchain from the workspace and
+  keeping FIRST_PARTY_ONLY builds feature-complete.
+- ✅ `foundation_qrcode` always renders through the first-party backend; the
+  optional crates.io `qrcode` feature flag was removed alongside the CLI toggle,
+  dropping the `image`/`num-*` stack from the lockfile entirely.
+- ✅ `foundation_serde` now exports only the first-party stub backend, retiring
+  the external `serde` escape hatch and ensuring serialization derives always
+  resolve to in-house implementations.
+- ✅ Range sampling in `crates/rand` now uses rejection sampling so
+  `u64`/`usize`/`i64` domains avoid modulo bias. New regression tests
+  (`crates/rand/tests/range.rs`) cover tail-heavy spans, and the fountain
+  property harness exercises parity-budget and burst-loss recovery. `tools/xtask`
+  removed the `--allow-third-party` toggle, so dependency audits always run with
+  `FIRST_PARTY_ONLY` enforcement.
 - ✅ Dropped the dormant `static_assertions` crate from `node/Cargo.toml` and the
   first-party manifest, keeping compile-time checks on the standard library and
   shrinking the guard violation surface.

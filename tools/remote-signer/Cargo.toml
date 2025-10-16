@@ -10,9 +10,5 @@ foundation_serialization = { path = "../../crates/foundation_serialization" }
 wallet = { path = "../../crates/wallet" }
 foundation_qrcode = { path = "../../crates/foundation_qrcode" }
 
-[features]
-default = []
-external-qrcode = ["foundation_qrcode/external-backend"]
-
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

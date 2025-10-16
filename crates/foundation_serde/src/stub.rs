@@ -2,7 +2,6 @@
 
 use core::fmt;
 
-#[cfg(feature = "stub-backend")]
 pub use foundation_serde_derive::{Deserialize, Serialize};
 
 pub mod ser {

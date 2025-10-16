@@ -1,7 +1,9 @@
-#![no_main]
-use libfuzzer_sys::fuzz_target;
+#![forbid(unsafe_code)]
+
 use the_block::range_boost::parse_discovery_packet;
 
-fuzz_target!(|data: &[u8]| {
+pub fn run(data: &[u8]) {
     let _ = parse_discovery_packet(data);
-});
+}
+
+fn main() {}

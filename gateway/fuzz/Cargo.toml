@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-libfuzzer-sys = "0.4"
 the_block = { path = "../../node", features = ["fuzzy"] }
 
 [package.metadata]

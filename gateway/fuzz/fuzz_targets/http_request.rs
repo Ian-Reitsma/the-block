@@ -1,7 +1,10 @@
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use the_block::gateway::http::parse_request;
+#![forbid(unsafe_code)]
 
-fuzz_target!(|data: &[u8]| {
-    parse_request(data);
-});
+#[path = "../http_request/mod.rs"]
+mod http_request;
+
+pub fn run(data: &[u8]) {
+    http_request::run(data);
+}
+
+fn main() {}

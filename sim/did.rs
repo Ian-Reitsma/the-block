@@ -1,7 +1,7 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::{did_view, DidDocumentView, Explorer, MetricPoint};
 use foundation_serialization::json;
-use rand::{rngs::StdRng, Rng};
+use rand::{rngs::StdRng, seq::SliceRandom};
 use std::convert::TryInto;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -85,8 +85,9 @@ fn main() {
         .as_secs() as i64;
 
     for step in 0..total_updates {
-        let idx = rng.gen_range(0..accounts.len());
-        let account = &mut accounts[idx];
+        let account = accounts
+            .choose_mut(&mut rng)
+            .expect("simulation accounts populated");
         account.nonce += 1;
         let nonce = account.nonce;
         let document_value = foundation_serialization::json!({

@@ -1,4 +1,14 @@
 # Project Progress Snapshot
+> **Review (2025-10-14, closing push+++):** RPC fuzz harnesses now build identity
+> state inside per-run `sys::tempfile` directories and exercise
+> `run`/`run_with_response`/`run_request` directly, removing the shared
+> `fuzz_handles`/`fuzz_dids` paths that previously leaked sled state across runs.
+> The sled legacy importer’s builder (`legacy::Config`) now drives the node’s
+> migration path and ships new round-trip tests that populate multiple trees,
+> flush manifests, and reopen them through the first-party reader. The legacy
+> manifest CLI gained deterministic ordering and default-column coverage with
+> fresh integration tests that hammer multi-CF exports, proving the manifest
+> shim stays purely in-house while tooling migrations continue.
 > **Review (2025-10-14, near midnight++):** Jurisdiction policy packs now round-
 > trip via handwritten JSON helpers instead of serde derives. `PolicyPack` and
 > `SignedPack` expose `from_json_value`, `from_json_slice`, and `to_json_value`
@@ -204,14 +214,20 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-10-13T19:45:00Z`)*: 0 strategic crates, 1 replaceable crate, and 253 unclassified dependencies in the resolved workspace DAG. The refreshed snapshot reflects the storage engine’s in-house JSON/tempfile helpers, the diagnostics crate’s SQLite-free manifest, the new P2P wire-message manual codec, the identity sled migrations that dropped `binary_codec`, and the expanded randomized coverage guarding DID/handle persistence plus the DEX sled migration.
-- **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
-- **Latest migrations (2025-10-14)**: Dependency registry automation now emits
-  a structured `dependency-check.summary.json` alongside telemetry, and both
-  `tools/xtask` plus `scripts/release_provenance.sh` parse/hash the summary so
-  CI preflights and release artefacts surface the drift verdict with matching
-  checksums. Monitoring’s metric catalogue, Grafana templates, and alert rules
-  now expose dependency policy status, drift counts, and snapshot freshness, with
+- **Current inventory** *(generated at `2025-10-14T17:20:00Z`)*: 0 strategic crates, 0 replaceable crates, and 0 unclassified dependencies in the resolved workspace DAG. The new snapshot captures the `foundation_fuzz` rollout, the retirement of the external QR/serde backends, and the first-party sled legacy shim.
+- **Outstanding drift**: 0 — the dependency inventory and violations report are empty now that the sled legacy importer is first-party. CI still publishes the registry/violations bundle each pull request to catch regressions immediately.
+- **Latest migrations (2025-10-14)**: `foundation_fuzz` replaces the libFuzzer
+  bridge, the net/gateway harnesses reuse the shared modules and ship smoke
+  coverage, `foundation_qrcode` ships as a pure in-house backend,
+  `foundation_serde` drops the external escape hatch, and the sled
+  `legacy-format` importer now reads JSON manifests through first-party code—
+  removing `libfuzzer-sys`, `arbitrary`, `qrcode`, the upstream `serde` stack,
+  and the crates.io `sled` cluster from the workspace. Remote-signer now emits
+  QR codes solely through the stub facade. `tools/xtask` plus
+  `scripts/release_provenance.sh` parse/hash the summary so CI preflights and
+  release artefacts surface the drift verdict with matching checksums.
+  Monitoring’s metric catalogue, Grafana templates, and alert rules now expose
+  dependency policy status, drift counts, and snapshot freshness, with
   regenerated dashboards and snapshot fixtures keeping build/test coverage
   aligned.
 - **Latest migrations (2025-10-14, evening++)**: Retired the third-party
@@ -220,6 +236,21 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   first-party QR stub for the remote-signer CLI, and dropped the unused
   `static_assertions` crate from the node manifest/first-party manifest. The
   guard backlog now focuses on migrating residual tooling to `foundation_windows`.
+- **Latest migrations (2025-10-14, late)**: `crates/coding` removed the
+  `allow-third-party` escape hatch; the property harness now runs entirely on the
+  workspace RNG while the LT fountain coder encodes/decodes through the
+  first-party Reed–Solomon backend (`crates/coding/src/fountain/inhouse.rs`),
+  replacing the "requires RNG" stub. `crates/rand` picked up deterministic
+  `fill`, `choose[_mut]`, and slice sampling helpers with dedicated tests
+  (`crates/rand/tests/seq.rs`), and simulation tooling (`sim/did.rs`) switched to
+  the new APIs so account rotation stays first party without manual indexing.
+- **Latest migrations (2025-10-14, final pass)**: `crates/rand` now samples
+  `u64`/`usize`/`i64` ranges via rejection sampling so large domains avoid modulo
+  bias; range tests (`crates/rand/tests/range.rs`) cover tail-heavy spans and the
+  full signed range. The fountain harness picked up parity-budget and burst-loss
+  regression tests to validate the new LT implementation under systematic
+  packet drops. `tools/xtask` dropped the `--allow-third-party` escape hatch, so
+  dependency audits always run with `FIRST_PARTY_ONLY` enforcement.
 - **Latest migrations (2025-10-12)**: Runtime rewired its async executor and
   blocking pool to use a shared first-party `WorkQueue`, dropping
   `crossbeam-deque`/`crossbeam-epoch` from the crate while preserving spawn

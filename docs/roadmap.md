@@ -1,4 +1,19 @@
 # Status & Roadmap
+> **Review (2025-10-14, endgame++):** Net and gateway fuzz harnesses now reuse
+> the shared `foundation_fuzz` modules, removing `libfuzzer-sys`/`arbitrary`
+> while smoke tests exercise the entry points directly. `foundation_serde` and
+> `foundation_qrcode` permanently dropped their external-backend toggles so the
+> remote signer, CLI, and tooling all build on stubbed first-party code. With the
+> last optional crates.io hooks gone, the workspace lockfile resolves solely to
+> in-house crates and FIRST_PARTY_ONLY runs cover every target.
+> **Review (2025-10-14, closing push+++):** RPC fuzz harnesses now spin up
+> per-test identity state via `sys::tempfile`, eliminating shared sled
+> directories while the new smoke suite calls the in-house `run_request`
+> dispatcher directly. The sled legacy importer’s builder powers the migration
+> path and ships regression tests that reopen flushed manifests across multiple
+> trees, and the legacy manifest CLI now enforces deterministic CF ordering plus
+> default-column emission through first-party integration tests. Together these
+> close the remaining fuzz/legacy-tooling gaps for FIRST_PARTY_ONLY runs.
 > **Review (2025-10-14, near midnight++):** Jurisdiction policy packs now rely
 > on handwritten JSON conversions and `diagnostics::log` instead of serde + the
 > third-party `log` crate. The crate exposes `PolicyPack::from_json_value`,
@@ -110,7 +125,19 @@ The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI st
 pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
-Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, tighten regression fixtures plus `FIRST_PARTY_ONLY` CI coverage now that workspace manifests alias `serde` to the `foundation_serde` facade and `crypto_suite` runs on the `foundation_bigint` engine, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge docs with multisig signer-set payloads plus release-verifier walkthroughs, add end-to-end coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression fuzzing), stand up the dependency fault simulation harness, finish the multisig wallet UX polish, and harden the new Dilithium/Kyber stubs into production-ready implementations with full test vectors and telemetry hooks. Remote-signer now ships on the `foundation_qrcode` facade; remaining work tracks tooling integrations that still need to adopt `foundation_windows` before we flip FIRST_PARTY_ONLY=1 globally.
+Known focus areas: harden the dependency guard by keeping CI and `tools/xtask`
+blocking on the new first-party inventory, publish dashboard alerts for drift, and
+document the runbook for downstream teams consuming the in-house crates. Expand
+coverage around treasury disbursement visuals in explorer dashboards, integrate
+compute-market SLA metrics with automated alerting, extend bridge docs with
+multisig signer-set walkthroughs plus release-verifier guides, add end-to-end
+coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression
+fuzzing), stand up the dependency fault simulation harness, finish the multisig
+wallet UX polish, and harden the Dilithium/Kyber stubs with production-ready
+test vectors and telemetry hooks. Remote-signer already ships on the
+`foundation_qrcode` facade; remaining platform work focuses on rolling the
+`foundation_windows` bindings through ancillary tooling so operators inherit the
+same first-party APIs as the core node.
 
 ### Tooling migrations
 
@@ -198,8 +225,14 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   handle required transliteration so operators can intervene before
   registration.
 - A workspace-local `rand` crate and stubbed `rand_core` now back all
-  randomness helpers, allowing node/CLI/runtime components to compile without
-  pulling external RNG stacks while the in-house engines are completed.
+  randomness helpers. The crate exposes deterministic `fill`, `choose[_mut]`, and
+  slice sampling APIs with dedicated coverage (`crates/rand/tests/seq.rs`) plus
+  rejection-sampling range helpers (`crates/rand/tests/range.rs`) so large
+  domains avoid modulo bias. The coding fountain harness runs entirely on the
+  first-party RNG with new parity-budget and burst-loss regression tests, and
+  simulation tooling (`sim/did.rs`) consumes the helpers so account rotation
+  never falls back to crates.io RNGs. `tools/xtask` enforces `FIRST_PARTY_ONLY`
+  on dependency audits now that the `--allow-third-party` escape hatch is gone.
 - CLI, light-client, and transport path discovery flow through the new
   `sys::paths` adapters, removing the legacy `dirs` dependency and aligning
   migration scripts with the first-party OS abstraction.

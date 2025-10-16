@@ -11,6 +11,9 @@ use storage_engine::{KeyValue, KeyValueIterator, StorageError};
 use sys::{error::SysError, tempfile::TempDir};
 use thiserror::Error;
 
+#[cfg(feature = "legacy-format")]
+mod legacy;
+
 pub type Result<T> = std::result::Result<T, Error>;
 pub type IVec = Vec<u8>;
 
@@ -47,13 +50,6 @@ impl From<SysError> for Error {
             SysError::Io(io) => Error::Io(io.to_string()),
             SysError::Unsupported(feature) => Error::Unsupported(feature.into()),
         }
-    }
-}
-
-#[cfg(feature = "legacy-format")]
-impl From<sled_legacy::Error> for Error {
-    fn from(err: sled_legacy::Error) -> Self {
-        Error::Storage(err.to_string())
     }
 }
 
@@ -314,7 +310,7 @@ fn migrate_legacy_if_needed(base: &Path, data_path: &Path) -> Result<()> {
     if legacy_entries == 0 {
         return Ok(());
     }
-    let legacy_db = sled_legacy::open(base)?;
+    let legacy_db = legacy::Config::new().path(base).open()?;
     let engine = InhouseEngine::open(path_to_str(data_path)?)?;
     for name in legacy_db.tree_names() {
         let name_bytes = name.to_vec();
@@ -473,7 +469,7 @@ mod tests {
     fn migrates_existing_legacy_database() {
         let dir = tempdir().unwrap();
         let path = dir.keep();
-        let legacy = sled_legacy::Config::new().path(&path).open().unwrap();
+        let legacy = legacy::Config::new().path(&path).open().unwrap();
         let legacy_tree = legacy.open_tree("old").unwrap();
         legacy_tree.insert(b"hello", b"world").unwrap();
         legacy_tree.insert(b"prefix:1", b"one").unwrap();

@@ -1,7 +1,10 @@
-#![no_main]
-use libfuzzer_sys::fuzz_target;
+#![forbid(unsafe_code)]
+
+#[path = "../compute_market/mod.rs"]
 mod compute_market;
 
-fuzz_target!(|data: &[u8]| {
+pub fn run(data: &[u8]) {
     compute_market::run(data);
-});
+}
+
+fn main() {}

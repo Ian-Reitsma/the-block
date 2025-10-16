@@ -52,6 +52,9 @@ pub mod quic_stats {
 pub mod partition_watch;
 pub mod turbine;
 
+#[cfg(feature = "fuzzy")]
+pub use message::decode as fuzz_decode_message;
+
 use crate::config::{OverlayBackend, OverlayConfig};
 use crate::net::peer::pk_from_addr;
 use crate::util::binary_codec;

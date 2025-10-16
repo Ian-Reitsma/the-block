@@ -154,6 +154,14 @@ pub trait Rng: RngCore + Sized {
         let threshold = if p.is_nan() { 0.0 } else { p.clamp(0.0, 1.0) };
         self.gen::<f64>() < threshold
     }
+
+    fn fill<T: AsMut<[u8]>>(&mut self, mut dest: T) {
+        self.fill_bytes(dest.as_mut());
+    }
+
+    fn try_fill<T: AsMut<[u8]>>(&mut self, mut dest: T) -> Result<(), Error> {
+        self.try_fill_bytes(dest.as_mut())
+    }
 }
 
 impl<T: RngCore> Rng for T {}
@@ -194,58 +202,177 @@ impl UniformSampler<bool> for SampleUniform<bool> {
     }
 }
 
+fn uniform_sample_u64<R: RngCore + ?Sized>(rng: &mut R, span: u64) -> u64 {
+    assert!(span > 0, "span must be > 0");
+    let limit = u64::MAX - (u64::MAX % span);
+    loop {
+        let value = rng.next_u64();
+        if value < limit {
+            return value % span;
+        }
+    }
+}
+
+fn uniform_sample_u128<R: RngCore + ?Sized>(rng: &mut R, upper: u128) -> u128 {
+    assert!(upper > 0, "upper bound must be > 0");
+    if upper <= u64::MAX as u128 {
+        return uniform_sample_u64(rng, upper as u64) as u128;
+    }
+    let limit = u128::MAX - (u128::MAX % upper);
+    loop {
+        let hi = rng.next_u64() as u128;
+        let lo = rng.next_u64() as u128;
+        let value = (hi << 64) | lo;
+        if value < limit {
+            return value % upper;
+        }
+    }
+}
+
+fn sample_range_exclusive_u64<R: RngCore + ?Sized>(rng: &mut R, start: u64, end: u64) -> u64 {
+    assert!(start < end, "invalid range: start >= end");
+    let span = end - start;
+    start + uniform_sample_u64(rng, span)
+}
+
+fn sample_range_inclusive_u64<R: RngCore + ?Sized>(rng: &mut R, start: u64, end: u64) -> u64 {
+    if start >= end {
+        return start;
+    }
+    let span = end - start;
+    if span == u64::MAX {
+        return rng.next_u64();
+    }
+    start + uniform_sample_u64(rng, span + 1)
+}
+
+fn sample_range_exclusive_usize<R: RngCore + ?Sized>(
+    rng: &mut R,
+    start: usize,
+    end: usize,
+) -> usize {
+    assert!(start < end, "invalid range: start >= end");
+    let span = end - start;
+    if span == 0 {
+        return start;
+    }
+    if span as u128 > u64::MAX as u128 {
+        let offset = uniform_sample_u128(rng, span as u128);
+        start + offset as usize
+    } else {
+        start + uniform_sample_u64(rng, span as u64) as usize
+    }
+}
+
+fn sample_range_inclusive_usize<R: RngCore + ?Sized>(
+    rng: &mut R,
+    start: usize,
+    end: usize,
+) -> usize {
+    if start >= end {
+        return start;
+    }
+    let span = end - start;
+    if span == usize::MAX {
+        // Covers the full domain; rely on the underlying RNG width.
+        return rng.next_u64() as usize;
+    }
+    if span as u128 >= u64::MAX as u128 {
+        let offset = uniform_sample_u128(rng, span as u128 + 1);
+        start + offset as usize
+    } else {
+        start + uniform_sample_u64(rng, span as u64 + 1) as usize
+    }
+}
+
+fn sample_range_exclusive_i64<R: RngCore + ?Sized>(rng: &mut R, start: i64, end: i64) -> i64 {
+    assert!(start < end, "invalid range: start >= end");
+    let span = (end as i128) - (start as i128);
+    let offset = uniform_sample_u128(rng, span as u128) as i128;
+    (start as i128 + offset) as i64
+}
+
+fn sample_range_inclusive_i64<R: RngCore + ?Sized>(rng: &mut R, start: i64, end: i64) -> i64 {
+    if end <= start {
+        return start;
+    }
+    let span = (end as i128) - (start as i128);
+    if span as u128 == u64::MAX as u128 {
+        // Entire domain; bias-correct by translating the raw u64 into i64 space.
+        let raw = rng.next_u64();
+        let signed = (raw as i128) + i64::MIN as i128;
+        return signed as i64;
+    }
+    let offset = uniform_sample_u128(rng, span as u128 + 1) as i128;
+    (start as i128 + offset) as i64
+}
+
 pub trait SampleRange<T> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> T;
 }
 
 impl SampleRange<u64> for Range<u64> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> u64 {
-        let span = self.end - self.start;
-        self.start + (rng.next_u64() % span)
+        sample_range_exclusive_u64(rng, self.start, self.end)
     }
 }
 
 impl SampleRange<u64> for RangeInclusive<u64> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> u64 {
         let (start, end) = self.into_inner();
-        if end <= start {
-            return start;
-        }
-        start + (rng.next_u64() % (end - start + 1))
+        sample_range_inclusive_u64(rng, start, end)
+    }
+}
+
+impl SampleRange<u32> for Range<u32> {
+    fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> u32 {
+        sample_range_exclusive_u64(rng, self.start as u64, self.end as u64) as u32
+    }
+}
+
+impl SampleRange<u32> for RangeInclusive<u32> {
+    fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> u32 {
+        let (start, end) = self.into_inner();
+        sample_range_inclusive_u64(rng, start as u64, end as u64) as u32
     }
 }
 
 impl SampleRange<usize> for Range<usize> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> usize {
-        let span = self.end - self.start;
-        self.start + (rng.next_u64() as usize % span)
+        sample_range_exclusive_usize(rng, self.start, self.end)
     }
 }
 
 impl SampleRange<usize> for RangeInclusive<usize> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> usize {
         let (start, end) = self.into_inner();
-        if end <= start {
-            return start;
-        }
-        start + (rng.next_u64() as usize % (end - start + 1))
+        sample_range_inclusive_usize(rng, start, end)
     }
 }
 
 impl SampleRange<i64> for Range<i64> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> i64 {
-        let span = self.end - self.start;
-        self.start + (rng.next_u64() as i64 % span)
+        sample_range_exclusive_i64(rng, self.start, self.end)
     }
 }
 
 impl SampleRange<i64> for RangeInclusive<i64> {
     fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> i64 {
         let (start, end) = self.into_inner();
-        if end <= start {
-            return start;
-        }
-        start + (rng.next_u64() as i64 % (end - start + 1))
+        sample_range_inclusive_i64(rng, start, end)
+    }
+}
+
+impl SampleRange<i32> for Range<i32> {
+    fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> i32 {
+        sample_range_exclusive_i64(rng, self.start as i64, self.end as i64) as i32
+    }
+}
+
+impl SampleRange<i32> for RangeInclusive<i32> {
+    fn sample<R: RngCore + ?Sized>(self, rng: &mut R) -> i32 {
+        let (start, end) = self.into_inner();
+        sample_range_inclusive_i64(rng, start as i64, end as i64) as i32
     }
 }
 
@@ -267,10 +394,25 @@ impl SampleRange<f64> for RangeInclusive<f64> {
 }
 
 pub mod seq {
-    use super::RngCore;
+    use super::{uniform_sample_u64, RngCore};
+    use std::vec::Vec;
 
     pub trait SliceRandom<T> {
         fn shuffle<R: RngCore>(&mut self, rng: &mut R);
+
+        fn choose<'a, R: RngCore>(&'a self, rng: &mut R) -> Option<&'a T>;
+
+        fn choose_mut<'a, R: RngCore>(&'a mut self, rng: &mut R) -> Option<&'a mut T>;
+
+        fn choose_multiple<'a, R: RngCore>(&'a self, rng: &mut R, amount: usize) -> Vec<&'a T>;
+    }
+
+    fn random_index(len: usize, rng: &mut impl RngCore) -> usize {
+        if len <= 1 {
+            return 0;
+        }
+        let span = len as u64;
+        uniform_sample_u64(rng, span) as usize
     }
 
     impl<T> SliceRandom<T> for [T] {
@@ -280,9 +422,40 @@ pub mod seq {
                 return;
             }
             for i in (1..len).rev() {
-                let j = (rng.next_u64() as usize) % (i + 1);
+                let j = random_index(i + 1, rng);
                 self.swap(i, j);
             }
+        }
+
+        fn choose<'a, R: RngCore>(&'a self, rng: &mut R) -> Option<&'a T> {
+            if self.is_empty() {
+                return None;
+            }
+            let idx = random_index(self.len(), rng);
+            self.get(idx)
+        }
+
+        fn choose_mut<'a, R: RngCore>(&'a mut self, rng: &mut R) -> Option<&'a mut T> {
+            if self.is_empty() {
+                return None;
+            }
+            let idx = random_index(self.len(), rng);
+            self.get_mut(idx)
+        }
+
+        fn choose_multiple<'a, R: RngCore>(&'a self, rng: &mut R, amount: usize) -> Vec<&'a T> {
+            if amount == 0 || self.is_empty() {
+                return Vec::new();
+            }
+            let take = amount.min(self.len());
+            let mut indices: Vec<usize> = (0..self.len()).collect();
+            indices.shuffle(rng);
+            indices.truncate(take);
+            indices.sort_unstable();
+            indices
+                .into_iter()
+                .filter_map(|idx| self.get(idx))
+                .collect()
         }
     }
 }
