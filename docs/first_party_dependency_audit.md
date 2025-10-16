@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-14 23:58:00Z_
+_Last updated: 2025-10-14 23:59:45Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -133,9 +133,9 @@ tests while the module is phased out.
   now consume these surfaces directly: Linux/BSD modules reuse the
   first-party inotify/kqueue shims and Windows binds to the IOCP-backed
   `DirectoryChangeDriver` with explicit `Send` guarantees plus the
-  `windows-sys` feature set declared in `crates/sys/Cargo.toml`, allowing
-  `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` to pass for
-  both `sys` and `runtime`. Remaining `mio` references live only behind legacy
+  new `foundation_windows` FFI crate declared in `crates/sys/Cargo.toml`,
+  allowing `FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu` to
+  pass for both `sys` and `runtime`. Remaining `mio` references live only behind legacy
   tokio consumers slated for follow-up migration.
 - ✅ Mobile probes no longer depend on Objective-C or Android JNI bindings.
   `crates/light-client/src/device/ios.rs` now issues Objective-C messages and
@@ -180,8 +180,13 @@ tests while the module is phased out.
   `serde` directly, and the stub backend passes `cargo check -p
   foundation_serialization --no-default-features --features serde-stub`.
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
-  `foundation_serialization::json` and the in-house HTTP client, eliminating the
-  `ureq` dependency entirely.
+  handwritten `foundation_serialization::json` conversions
+  (`PolicyPack::from_json_value`, `SignedPack::from_json_slice`,
+  `to_json_value`) and the in-house HTTP client, eliminating the `ureq` and
+  `log` dependencies entirely. Law-enforcement logging emits
+  `diagnostics::log` info records when appends succeed, and the refreshed test
+  suite covers array/base64 signatures plus malformed pack rejection so the
+  manual paths stay hardened.
 - ✅ Governance webhook notifications dispatch through `httpd::BlockingClient`
   so telemetry alerts ride first-party HTTP primitives instead of `ureq`.
 - ✅ `tb-sim`'s dependency-fault harness defaults to the first-party binary codec;
@@ -432,7 +437,7 @@ ancillary tooling, but several third-party crates still block
 
 | Crate | Primary Consumers | Notes |
 | --- | --- | --- |
-| `rusqlite` | `cli`, `explorer`, `tools/{indexer,log_indexer_cli}` | ✅ Direct call-sites now route through the new `foundation_sqlite` facade. The default `rusqlite-backend` feature supplies the engine for standard builds while `FIRST_PARTY_ONLY` compiles against the stub that returns backend-unavailable errors. Follow-up: replace the backend shim with an in-house engine. |
+| `rusqlite` | `cli`, `explorer`, `tools/{indexer,log_indexer_cli}` | ✅ Direct call-sites now route through the new `foundation_sqlite` facade. The facade persists via the in-house JSON helpers (`database_to_json`/`database_from_json`), eliminating the temporary binary encoder. Follow-up: migrate explorer/indexer import paths to the JSON snapshots and delete any residual `.db` bootstrap assets. |
 | `sled` | `the_block::SimpleDb`, storage tests, log indexer | Runtime already wraps sled; deliver an in-house key-value engine stub (even if backed by sled) so `FIRST_PARTY_ONLY` can compile without linking the crate. |
 | `openssl`/`openssl-sys` | transitive via TLS tooling | QUIC/TLS stacks still pull these in when the bundled providers are enabled. Scope a lightweight first-party crypto shim (or the minimal FFI needed for mutual TLS) so the guard can be satisfied without OpenSSL. |
 
@@ -467,6 +472,23 @@ issues for each item have been filed in `docs/roadmap.md` (see the "First-party
 Dependency Migration" milestone) to coordinate the rollout.
 
 ### Recent Completions
+
+- ✅ Wallet, light-client, and diagnostics surfaces now exclusively emit logs
+  through `diagnostics::tracing`, removing the third-party `tracing` stack from
+  the workspace manifests while preserving existing span/field semantics.
+- ✅ Introduced the `foundation_qrcode` facade so the remote-signer CLI can
+  render QR output via a first-party stub when `FIRST_PARTY_ONLY=1` and opt into
+  the legacy `qrcode` backend via the new `external-qrcode` feature for release
+  builds. Dependency guard coverage now passes for the CLI once Windows-specific
+  crates are migrated.
+- ✅ Dropped the dormant `static_assertions` crate from `node/Cargo.toml` and the
+  first-party manifest, keeping compile-time checks on the standard library and
+  shrinking the guard violation surface.
+
+Windows bindings now ride `foundation_windows` for console/IOCP primitives, so
+`FIRST_PARTY_ONLY=1` builds no longer flag the `sys` crate on Windows targets.
+Follow-up work focuses on migrating remaining tooling consumers to the new FFI
+facade and extending the crate with richer console abstractions.
 
 - ✅ The dependency registry runner now emits `dependency-check.summary.json`
   alongside telemetry/violations, `tools/xtask` prints the parsed verdict during

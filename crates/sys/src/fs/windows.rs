@@ -10,11 +10,7 @@ use std::ptr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, HANDLE, INVALID_HANDLE_VALUE,
-    WAIT_TIMEOUT,
-};
-use windows_sys::Win32::Storage::FileSystem::{
+use foundation_windows::file_system::{
     CreateFileW, ReadDirectoryChangesW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
     FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
@@ -23,7 +19,11 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_INFORMATION, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows_sys::Win32::System::IO::{
+use foundation_windows::foundation::{
+    CloseHandle, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_TIMEOUT,
+};
+use foundation_windows::io::{
     CancelIoEx, CreateIoCompletionPort, GetQueuedCompletionStatusEx, PostQueuedCompletionStatus,
     OVERLAPPED, OVERLAPPED_ENTRY,
 };

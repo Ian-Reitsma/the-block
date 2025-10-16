@@ -1,4 +1,12 @@
 # Status & Roadmap
+> **Review (2025-10-14, near midnight++):** Jurisdiction policy packs now rely
+> on handwritten JSON conversions and `diagnostics::log` instead of serde + the
+> third-party `log` crate. The crate exposes `PolicyPack::from_json_value`,
+> `from_json_slice`, and matching `SignedPack` helpers so RPC, CLI, and
+> governance modules can manipulate raw JSON without external codecs while
+> FIRST_PARTY_ONLY builds stay green. Fresh unit tests cover signature array/
+> base64 decoding and malformed pack rejection, and the dependency inventory
+> reflects the removed `log` edge.
 > **Review (2025-10-14, late evening+++):** Dependency governance artifacts now
 > include machine-readable summaries and dashboard hooks. The CLI runner emits
 > `dependency-check.summary.json`, CI preflights (`tools/xtask`) print the parsed
@@ -79,7 +87,7 @@
 > of `socket2`/`mio` on Windows. Runtime file watchers now reuse the same stack:
 > Linux/BSD modules ride the `sys::inotify`/`sys::kqueue` shims, and Windows
 > consumes the IOCP-backed `DirectoryChangeDriver` (`crates/sys/src/fs/windows.rs`)
-> with explicit `Send` guarantees and the required `windows-sys` feature set in
+> with explicit `Send` guarantees and the new `foundation_windows` bindings in
 > `crates/sys/Cargo.toml`. Regression coverage adds
 > `crates/sys/tests/reactor_windows_scaling.rs` alongside the UDP stress harness
 > (`crates/sys/tests/net_udp_stress.rs`) and existing TCP suites to guard
@@ -102,7 +110,7 @@ The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI st
 pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
-Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, tighten regression fixtures plus `FIRST_PARTY_ONLY` CI coverage now that workspace manifests alias `serde` to the `foundation_serde` facade and `crypto_suite` runs on the `foundation_bigint` engine, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge docs with multisig signer-set payloads plus release-verifier walkthroughs, add end-to-end coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression fuzzing), stand up the dependency fault simulation harness, finish the multisig wallet UX polish, and harden the new Dilithium/Kyber stubs into production-ready implementations with full test vectors and telemetry hooks.
+Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, tighten regression fixtures plus `FIRST_PARTY_ONLY` CI coverage now that workspace manifests alias `serde` to the `foundation_serde` facade and `crypto_suite` runs on the `foundation_bigint` engine, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge docs with multisig signer-set payloads plus release-verifier walkthroughs, add end-to-end coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression fuzzing), stand up the dependency fault simulation harness, finish the multisig wallet UX polish, and harden the new Dilithium/Kyber stubs into production-ready implementations with full test vectors and telemetry hooks. Remote-signer now ships on the `foundation_qrcode` facade; remaining work tracks tooling integrations that still need to adopt `foundation_windows` before we flip FIRST_PARTY_ONLY=1 globally.
 
 ### Tooling migrations
 
@@ -166,7 +174,11 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
   `log_index` crate for ingestion, search, and key rotation. The optional
   `sqlite-migration` feature only gates legacy imports via the
   `foundation_sqlite` facade, so default builds drop direct SQLite usage while
-  retaining compatibility with archived `.db` snapshots.
+  retaining compatibility with archived `.db` snapshots. The facade now loads
+  and saves through the in-house JSON helpers (`database_to_json` /
+  `database_from_json`), and the focused test suite locks conflict resolution,
+  ORDER/LIMIT evaluation, LIKE predicates, and provider join emulation to the
+  first-party engine.
 - Metrics aggregator timestamp signing, storage repair logging, and QUIC
   certificate rotation now depend on the `foundation_time` facade, centralising
   formatting and removing direct `time` imports ahead of the native certificate

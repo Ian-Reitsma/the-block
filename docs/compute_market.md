@@ -165,7 +165,7 @@ time on the runtime. Between batches the loop sleeps for `MATCH_INTERVAL` (250
 ms) so sustained bursts do not starve other subsystems.
 
 Each lane enforces back-pressure through its `max_queue_depth`. When a lane is
-full the matcher rejects further orders and emits a warning via `tracing`. This
+full the matcher rejects further orders and emits a warning via `diagnostics::tracing`. This
 prevents runaway memory use if a client floods a lane faster than providers can
 clear it. CLI and RPC surfaces expose current queue depth so operators can
 expand capacity or rebalance senders before the queue saturates.

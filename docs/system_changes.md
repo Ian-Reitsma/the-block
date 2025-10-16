@@ -1,4 +1,14 @@
 # System-Wide Economic Changes
+> **Review (2025-10-14, near midnight++):** `crates/jurisdiction` no longer
+> depends on third-party logging or serde derives. Policy packs and signed
+> registry entries convert through handwritten `foundation_serialization::json`
+> helpers (`PolicyPack::from_json_value`, `SignedPack::from_json_slice`,
+> `to_json_value`), exposing precise invalid-field errors and keeping
+> FIRST_PARTY_ONLY builds green. Law-enforcement logging now routes through the
+> `diagnostics::log` facade, emitting structured info messages whenever an
+> append succeeds, and new unit tests cover array/base64 signatures plus
+> malformed payload rejection. The dependency inventory drops the `log`
+> reference accordingly.
 > **Review (2025-10-14, late evening+++):** Dependency registry automation now
 > publishes a signed drift summary and monitoring surfaces. The CLI runner emits
 > `dependency-check.summary.json` beside telemetry/violations, the release
@@ -76,8 +86,8 @@
 > while wiring the Windows watcher to the IOCP-backed
 > `DirectoryChangeDriver` from `crates/sys/src/fs/windows.rs`. The driver and
 > completion context now implement `Send` so the blocking worker satisfies the
-> runtime’s `spawn_blocking` bounds, and `crates/sys/Cargo.toml` declares the
-> `windows-sys` feature set needed for cross-target builds.
+> runtime’s `spawn_blocking` bounds, and `crates/sys/Cargo.toml` now depends on
+> the in-house `foundation_windows` bindings required for cross-target builds.
 > **Review (2025-10-14, evening):** Mobile device probes now rely purely on
 > first-party code. The iOS probe (`crates/light-client/src/device/ios.rs`)
 > issues Objective-C messages and CoreFoundation queries through local FFI
@@ -129,6 +139,7 @@
 > boundaries.
 > **Review (2025-10-12):** Testkit serial wrappers now expand without `syn`/`quote` by consuming raw token streams; the new parser still injects the `testkit::serial::lock()` guard so deterministic ordering is preserved. Foundation math tests switched to first-party floating-point helpers (`testing::assert_close[_with]`), letting the workspace drop the `approx` crate. Wallet and remote-signer builds removed the dormant `hidapi` feature flag—HID connectors remain stubbed, but FIRST_PARTY_ONLY builds no longer link native HID toolchains. Dependency inventories and the audit report were refreshed accordingly.
 > **Review (2025-10-13):** Metrics aggregation now anchors on an in-house `AggregatorRecorder` that forwards every `foundation_metrics` macro emission into the existing Prometheus registry while preserving integer TLS fingerprints and runtime histograms. Monitoring utilities install a dedicated `MonitoringRecorder` so the snapshot CLI reports success/error counters through the same facade without reviving the third-party `metrics` stack.
+> **Review (2025-10-14):** Completed the `foundation_sqlite` backend rewrite by wiring `DatabaseFile::load`/`save` through the new JSON helpers, removing the temporary binary encoder shim. Persistence now round-trips via `database_to_json`/`database_from_json`, blob columns serialize as explicit byte arrays, and row projections/order clauses operate on the in-memory tables so ORDER/LIMIT clauses accept non-selected columns. Added targeted unit tests (`insert_conflict_updates_existing`, `order_and_limit`, `provider_join_counts_contracts`, `like_filter_matches_patterns`) to lock conflict resolution, LIKE predicates, ordering, and join emulation against the in-house engine.
 > **Review (2025-10-12):** Replaced the storage engine’s lingering serde/foundation_sqlite shims with an in-house JSON codec and temp-file harness so manifests, WAL records, and compaction metadata now round-trip exclusively through first-party parsers, eliminating the crate’s dependency on the `foundation_serialization` facade, `serde` derives, `rusqlite`, and the `sys::tempfile` adapter in FIRST_PARTY_ONLY builds. Guarded manifests now decode via deterministic Value helpers, byte slices persist as explicit arrays, and on-disk snapshots rely on an auditable WAL/manifest representation that no longer drags third-party parsers into the first-party pipeline. The global dependency guard learned how to scope `cargo metadata` to the requesting crate’s resolved node set so FIRST_PARTY_ONLY checks flag only the offender’s transitive graph instead of every workspace package, keeping enforcement targeted while we continue retiring legacy crates. Regenerated the dependency inventory snapshot, violations report, and first-party manifest so the audit baseline reflects the storage engine’s leaner dependency DAG and the narrower guard semantics. The runtime stack simultaneously adopted the new `foundation_metrics` facade—runtime installs the recorder that feeds spawn-latency histograms and pending-task gauges into existing telemetry channels while wallet, CLI, and tooling counters now emit through first-party macros, eliminating the crates.io `metrics`/`metrics-macros` pair.
 
 > **Review (2025-10-11):** Hardened the `http_env` TLS environment harness with a multi-sink `TLS_ENV_WARNING` registry so diagnostics, telemetry, tests, and services can all observe structured events without bespoke subscribers, expanded the HTTPS integration suite to round-trip CLI-converted identities, extended the TLS tooling surface with `contract tls stage` (`--env-file`, environment-prefix overrides, canonical export paths) so operators can fan identities out to per-service directories without bespoke scripting while retaining the prior `foundation_*` facade rollouts, shipped the `tls-manifest-guard` validator for manifest-driven reloads (now stripping optional quotes from env-file values before comparison), and wired the metrics aggregator to surface both `tls_env_warning_total{prefix,code}` and `tls_env_warning_last_seen_seconds{prefix,code}` via the shared sink. The sink now forwards BLAKE3 fingerprints through `tls_env_warning_detail_fingerprint{prefix,code}` / `tls_env_warning_variables_fingerprint{prefix,code}` and accumulates hashed occurrences on `tls_env_warning_detail_fingerprint_total{prefix,code,fingerprint}` / `tls_env_warning_variables_fingerprint_total{prefix,code,fingerprint}` so dashboards can correlate warning variants without exposing raw detail strings, while the new `tls_env_warning_detail_unique_fingerprints{prefix,code}` / `tls_env_warning_variables_unique_fingerprints{prefix,code}` gauges and accompanying `observed new tls env warning … fingerprint` info logs highlight previously unseen hashes. Warning snapshots now retain structured detail, per-fingerprint counts, rehydrate from node-exported gauges after restarts, respect the configurable `AGGREGATOR_TLS_WARNING_RETENTION_SECS` window, and remain available at `/tls/warnings/latest`, while `tls-manifest-guard` grows a `--report <path>` option that emits a machine-readable JSON summary of errors and warnings for automation hooks. `/export/all` support bundles now include `tls_warnings/latest.json` and `tls_warnings/status.json` so offline analyses carry hashed payloads and retention metadata. Follow-up work adds seven-day snapshot pruning plus a diagnostics-to-HTTP integration test, and tightens `tls-manifest-guard` with directory confinement, prefix enforcement, duplicate detection, and env-file drift warnings. The node now ships a diagnostics bridge that mirrors `TLS_ENV_WARNING` log lines into telemetry when no sinks are active (`ensure_tls_env_warning_diagnostics_bridge`) alongside a reset hook for tests, ensuring dashboards still surface structured counters during integration runs and dry deployments.
@@ -362,6 +373,55 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - Reset helpers (`reset_quinn_tls` / `reset_s2n_tls`) clear global state when a
   provider is not selected, so out-of-band installs should migrate to the shared
   configuration surface.
+
+## Diagnostics Logging & Remote-Signer QR Stub (2025-10-14)
+
+### Rationale
+
+- **Eliminate remaining `tracing` crates:** Wallet and light-client binaries
+  still depended on the crates.io `tracing` stack for logging, pulling
+  `tracing`, `tracing-core`, and `tracing-attributes` into guarded builds.
+- **Break the `qrcode` dependency surface:** The remote-signer CLI relied on the
+  external `qrcode` crate for ASCII rendering, preventing `FIRST_PARTY_ONLY`
+  guard runs from succeeding.
+- **Retire unused compile-time helpers:** The node crate carried the
+  `static_assertions` dependency even though all compile-time checks had already
+  migrated to standard `const` evaluations.
+
+### Implementation Summary
+
+- Pointed wallet and light-client modules at `diagnostics::tracing`, matching
+  the rest of the workspace so spans/fields stay intact without linking the
+  external `tracing` crates.
+- Added the `foundation_qrcode` facade: default builds use the in-house stub to
+  render deterministic unicode QR blocks while the optional
+  `external-qrcode` feature re-enables the legacy backend for operators that
+  still require the crates.io implementation.
+- Updated the remote-signer CLI to depend on the new facade and export the
+  renderer trait so existing `.render::<unicode::Dense1x2>().build()` call sites
+  continue to compile.
+- Dropped `static_assertions` from `node/Cargo.toml` and pruned the entries from
+  `config/first_party_manifest.txt` alongside the retired `tracing` crates.
+
+### Operator & Developer Impact
+
+- Logging semantics are unchanged but all runtime binaries now route through the
+  same diagnostics macros, simplifying observability rollouts.
+- First-party builds of the remote-signer CLI generate deterministic unicode QR
+  art without touching crates.io dependencies; production builds can opt into
+  the legacy encoder via `--features external-qrcode` during the transition.
+- Dependency guard diffs shrink further—CI now surfaces only the Windows
+  bindings now routed through `foundation_windows`.
+
+### Migration Notes
+
+- Update any downstream tooling to import `diagnostics::tracing` instead of the
+  upstream `tracing` crate.
+- Operators relying on the legacy QR encoder should build the remote-signer CLI
+  with `--features external-qrcode` until the first-party implementation gains
+  production coverage.
+- No action is required for compile-time assertions; standard `const` checks
+  continue to guard invariants.
 
 ## First-Party Error Handling & Utility Replacements (2025-10-12)
 
@@ -770,16 +830,17 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 
 - Added `crates/foundation_sqlite` exporting `Connection`, `Statement`, `Row`,
   `params!`/`params_from_iter!`, and a lightweight `Value` enum covering the
-  rusqlite types we use today.
-- Default builds enable the `rusqlite-backend` feature, delegating to the
-  existing engine while unifying parameter conversion and query helpers.
+  SQL value set we surface across tooling.
+- Implemented an in-house engine that persists tables through
+  `database_to_json`/`database_from_json`, eliminating the temporary
+  `rusqlite` feature flag and binary shim.
 - Introduced a first-party `FromValue` decoding trait plus
   `ValueConversionError`, letting the facade translate rows without depending on
-  `rusqlite::types::FromSql` so stub and future native engines share identical
-  call sites.
-- `foundation_sqlite` exposes a stub backend when the feature is disabled,
-  returning `backend_unavailable` errors so `FIRST_PARTY_ONLY=1 cargo check`
-  surfaces missing implementations without pulling third-party code.
+  external traits while sharing call sites between the facade and downstream
+  tests.
+- Extended the crate with focused unit tests covering conflict resolution,
+  ORDER/LIMIT evaluation, LIKE predicates, and join emulation so
+  `cargo test -p foundation_sqlite` guards the engine.
 - Migrated explorer query helpers, the CLI `logs` command, and the
   indexer/log-indexer tooling to call the facade (including the new
   `query_map` collector) instead of `rusqlite` directly.
@@ -797,11 +858,9 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 ### Migration Notes
 
 - Downstream tooling must depend on `foundation_sqlite` instead of `rusqlite`.
-- Keep the `rusqlite-backend` feature enabled for production until the in-house
-  engine lands; tests can exercise the stub by setting `FIRST_PARTY_ONLY=1` or
-  disabling the feature.
-- Follow-up work will replace the stub with a native engine so
-  `FIRST_PARTY_ONLY=1` builds succeed end-to-end.
+- Plan follow-up migrations to convert any archived `.db` bootstrap assets to
+  the JSON snapshot format emitted by the new engine and update importer paths
+  accordingly.
 
 ## First-Party Log Store (2025-10-14)
 

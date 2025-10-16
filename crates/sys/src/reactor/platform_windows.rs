@@ -1,6 +1,13 @@
 #![cfg(target_os = "windows")]
 
 use super::{Event, Interest, Token};
+use foundation_windows::foundation::{
+    CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
+};
+use foundation_windows::io::{
+    CreateIoCompletionPort, GetQueuedCompletionStatusEx, PostQueuedCompletionStatus,
+    OVERLAPPED_ENTRY,
+};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::mem::MaybeUninit;
@@ -12,12 +19,11 @@ use std::time::Duration;
 
 type Socket = RawSocket;
 type WsaEvent = isize;
-type Handle = isize;
+type Handle = HANDLE;
 
 type CompletionKey = usize;
 
 const SOCKET_ERROR: i32 = -1;
-const INVALID_HANDLE_VALUE: Handle = -1;
 const FD_READ: i32 = 0x0001;
 const FD_WRITE: i32 = 0x0002;
 const FD_ACCEPT: i32 = 0x0008;
@@ -36,7 +42,6 @@ const WSA_INFINITE: u32 = 0xFFFF_FFFF;
 const WSA_WAIT_FAILED: u32 = 0xFFFF_FFFF;
 const WSA_WAIT_EVENT_0: u32 = 0;
 const WSA_MAXIMUM_WAIT_EVENTS: usize = 64;
-const WAIT_TIMEOUT: u32 = 0x0000_0102;
 const MAX_COMPLETIONS: usize = 128;
 const CONTROL_SLOT: usize = 1;
 
@@ -61,32 +66,12 @@ impl Default for WsanetworkEvents {
     }
 }
 
-#[repr(C)]
-struct Overlapped {
-    internal: usize,
-    internal_high: usize,
-    offset: u32,
-    offset_high: u32,
-    h_event: Handle,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct OverlappedEntry {
-    lp_completion_key: CompletionKey,
-    lp_overlapped: *mut Overlapped,
-    internal: usize,
-    dw_number_of_bytes_transferred: u32,
-}
-
-impl OverlappedEntry {
-    fn zeroed() -> Self {
-        Self {
-            lp_completion_key: 0,
-            lp_overlapped: std::ptr::null_mut(),
-            internal: 0,
-            dw_number_of_bytes_transferred: 0,
-        }
+fn zero_entry() -> OVERLAPPED_ENTRY {
+    OVERLAPPED_ENTRY {
+        lpCompletionKey: 0,
+        lpOverlapped: std::ptr::null_mut(),
+        Internal: 0,
+        dwNumberOfBytesTransferred: 0,
     }
 }
 
@@ -110,29 +95,6 @@ extern "system" {
         timeout: u32,
         alertable: i32,
     ) -> u32;
-
-    fn CreateIoCompletionPort(
-        file_handle: Handle,
-        existing_completion_port: Handle,
-        completion_key: CompletionKey,
-        number_of_concurrent_threads: u32,
-    ) -> Handle;
-    fn PostQueuedCompletionStatus(
-        completion_port: Handle,
-        number_of_bytes_transferred: u32,
-        completion_key: CompletionKey,
-        overlapped: *mut Overlapped,
-    ) -> i32;
-    fn GetQueuedCompletionStatusEx(
-        completion_port: Handle,
-        completion_port_entries: *mut OverlappedEntry,
-        ul_count: u32,
-        ul_num_entries_removed: *mut u32,
-        dw_milliseconds: u32,
-        alertable: i32,
-    ) -> i32;
-    fn CloseHandle(handle: Handle) -> i32;
-    fn GetLastError() -> u32;
 }
 
 fn ensure_wsa_started() -> io::Result<()> {
@@ -265,7 +227,7 @@ impl Inner {
 
     fn poll(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         events.clear();
-        let mut entries = vec![OverlappedEntry::zeroed(); MAX_COMPLETIONS];
+        let mut entries = vec![zero_entry(); MAX_COMPLETIONS];
         let mut removed: u32 = 0;
         let timeout_ms = duration_to_timeout(timeout);
 
@@ -292,12 +254,11 @@ impl Inner {
         }
 
         for entry in entries.iter().take(removed as usize) {
-            if entry.lp_overlapped.is_null() {
-                let completion =
-                    unsafe { Box::from_raw(entry.lp_completion_key as *mut Completion) };
+            if entry.lpOverlapped.is_null() {
+                let completion = unsafe { Box::from_raw(entry.lpCompletionKey as *mut Completion) };
                 events.push(completion.event);
             } else {
-                let token = Token(entry.lp_completion_key as usize);
+                let token = Token(entry.lpCompletionKey as usize);
                 events.push(Event::new(token, true, true, false, false, false, true));
             }
         }

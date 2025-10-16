@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 serde = { workspace = true }
 foundation_serialization = { path = "../foundation_serialization" }
-log = "0.4"
+diagnostics = { path = "../diagnostics" }
 base64_fp = { path = "../base64_fp" }
 crypto_suite = { path = "../crypto_suite" }
 foundation_lazy = { path = "../foundation_lazy" }

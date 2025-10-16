@@ -235,15 +235,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   [build-dependencies]
 │   │   └── dependency_guard v0.1.0 (/workspace/the-block/crates/dependency_guard)
 │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)
-│   ├── thiserror v1.0.69 (*)
-│   └── tracing v0.1.41
-│       ├── pin-project-lite v0.2.16
-│       ├── tracing-attributes v0.1.30 (proc-macro)
-│       │   ├── proc-macro2 v1.0.101 (*)
-│       │   ├── quote v1.0.41 (*)
-│       │   └── syn v2.0.106 (*)
-│       └── tracing-core v0.1.34
-│           └── once_cell v1.21.3
+│   └── thiserror v1.0.69 (*)
 ├── p2p_overlay v0.1.0 (/workspace/the-block/crates/p2p_overlay)
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
 │   ├── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
@@ -351,7 +343,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── serde v1.0.228 (*)
 │   ├── subtle v2.6.1
 │   ├── thiserror v1.0.69 (*)
-│   ├── tracing v0.1.41 (*)
 │   └── uuid v1.18.1 (*)
     ├── asn1-rs v0.6.2
     │   ├── asn1-rs-derive v0.5.1 (proc-macro)
@@ -412,20 +403,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── httpd v0.1.0 (/workspace/the-block/crates/httpd) (*)
 │   │   ├── runtime v0.1.0 (/workspace/the-block/crates/runtime) (*)
 │   │   ├── foundation_sqlite v0.1.0 (/workspace/the-block/crates/foundation_sqlite)
-│   │   │   └── rusqlite v0.30.0
-│   │   │       ├── bitflags v2.9.4
-│   │   │       ├── fallible-iterator v0.3.0
-│   │   │       ├── fallible-streaming-iterator v0.1.9
-│   │   │       ├── hashlink v0.8.4
-│   │   │       │   └── hashbrown v0.14.5
-│   │   │       │       ├── ahash v0.8.12 (*)
-│   │   │       │       └── allocator-api2 v0.2.21
-│   │   │       ├── libsqlite3-sys v0.27.0
-│   │   │       │   [build-dependencies]
-│   │   │       │   ├── cc v1.2.40 (*)
-│   │   │       │   ├── pkg-config v0.3.32
-│   │   │       │   └── vcpkg v0.2.15
-│   │   │       └── smallvec v1.15.1
+│   │   │   └── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
 │   │   ├── serde v1.0.228 (*)
 │   │   ├── storage v0.1.0 (/workspace/the-block/storage) (*)
 │   │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)

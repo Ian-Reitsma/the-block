@@ -35,7 +35,7 @@ surfaced to the caller.
 
 Clients can tune lag sensitivity with `StateStream::set_lag_threshold`. When
 `StateStream::lagging()` detects the stream is more than the configured number of
-blocks behind the reported `tip_height`, a warning is emitted via `tracing` so
+blocks behind the reported `tip_height`, a warning is emitted via `diagnostics::tracing` so
 CLI output and logs highlight the backlog.
 
 ## Snapshot Application & Persistence
@@ -73,5 +73,5 @@ sides agree on validation semantics.
 The `light-sync` CLI command loads `LightClientConfig`, instantiates
 `StateStream::from_config`, and applies streamed chunks. Errors such as proof
 failures, stale updates, or gap recovery issues are surfaced directly to the
-user, while lag warnings are logged via `tracing` whenever the stream falls
+user, while lag warnings are logged via `diagnostics::tracing` whenever the stream falls
 behind the configured threshold.

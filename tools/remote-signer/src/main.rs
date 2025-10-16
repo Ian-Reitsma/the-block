@@ -4,7 +4,8 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-use qrcode::{render::unicode, QrCode};
+use foundation_qrcode::{render::unicode, QrCode, Renderer};
+use foundation_serialization::json;
 use std::fs;
 use wallet::{psbt::Psbt, Wallet, WalletSigner};
 
