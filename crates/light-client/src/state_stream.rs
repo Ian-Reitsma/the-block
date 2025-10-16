@@ -1,10 +1,10 @@
+use diagnostics::tracing::{debug, warn};
 use foundation_serialization::{binary, Deserialize, Serialize};
 use state::Proof;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{debug, warn};
 
 use crate::config::{load_user_config, state_cache_path, LightClientConfig};
 

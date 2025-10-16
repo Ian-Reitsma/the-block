@@ -8,10 +8,11 @@ build = "build.rs"
 cli_core = { path = "../../crates/cli_core" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 wallet = { path = "../../crates/wallet" }
-qrcode = "0.12"
+foundation_qrcode = { path = "../../crates/foundation_qrcode" }
 
 [features]
 default = []
+external-qrcode = ["foundation_qrcode/external-backend"]
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

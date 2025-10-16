@@ -4,6 +4,7 @@ use crypto_suite::{
     hashing::sha1,
     signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH},
 };
+use diagnostics::tracing::{info, warn};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
@@ -15,7 +16,6 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
 
 /// Cache of signer public keys with an expiry.
 static PUBKEY_CACHE: Lazy<Mutex<HashMap<String, (VerifyingKey, Instant)>>> =

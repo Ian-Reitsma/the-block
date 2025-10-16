@@ -1,0 +1,11 @@
+[package]
+name = "foundation_qrcode"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+external-backend = ["dep:qrcode"]
+
+[dependencies]
+qrcode = { version = "0.12", optional = true }

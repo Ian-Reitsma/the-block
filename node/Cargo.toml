@@ -37,7 +37,6 @@ foundation_metrics = { path = "../crates/foundation_metrics" }
 foundation_profiler = { path = "../crates/foundation_profiler" }
 foundation_archive = { path = "../crates/foundation_archive" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
-static_assertions = "1"
 foundation_tui = { path = "../crates/foundation_tui" }
 base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }

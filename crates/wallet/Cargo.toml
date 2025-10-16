@@ -10,7 +10,7 @@ thiserror = { path = "../thiserror" }
 httpd = { path = "../httpd" }
 serde = { workspace = true }
 foundation_serialization = { path = "../foundation_serialization" }
-tracing = "0.1"
+diagnostics = { path = "../diagnostics" }
 ledger = { path = "../../ledger" }
 foundation_lazy = { path = "../foundation_lazy" }
 base64_fp = { path = "../base64_fp" }

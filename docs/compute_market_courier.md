@@ -41,7 +41,7 @@ For each receipt:
 
 This geometric backoff smooths network hiccups while bounding worst-case latency.
 
-Telemetry features (`--features telemetry`) increment `COURIER_FLUSH_ATTEMPT_TOTAL` and `COURIER_FLUSH_FAILURE_TOTAL` counters with optional `tracing` logs.
+Telemetry features (`--features telemetry`) increment `COURIER_FLUSH_ATTEMPT_TOTAL` and `COURIER_FLUSH_FAILURE_TOTAL` counters with optional `diagnostics::tracing` logs.
 
 ## 4. Operational Guidelines
 

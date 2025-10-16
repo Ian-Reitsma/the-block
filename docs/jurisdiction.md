@@ -9,8 +9,9 @@ regulations while keeping transparency logs intact.
 ## Policy Packs
 
 A `PolicyPack` is a JSON file describing the default consent rules and feature
-toggles for a particular region.  The loader accepts any path and deserializes
-it into the following structure:
+toggles for a particular region.  The loader accepts any path and validates it
+through handwritten JSON conversions (no serde derives remain) before building
+the following structure:
 
 ```json
 {
@@ -26,11 +27,24 @@ it into the following structure:
 - `features` – list of module names (e.g., `wallet`, `staking`) that are
   enabled when this pack is active.
 
+The crate exposes helpers for every layer that needs to work with the raw JSON
+value instead of touching serde:
+
 ```rust
-use jurisdiction::PolicyPack;
+use jurisdiction::{PolicyPack, SignedPack};
+
+// Load from disk or from an in-memory JSON Value.
 let pack = PolicyPack::load("/etc/the-block/policy.json")?;
-assert!(pack.consent_required);
+let roundtrip = PolicyPack::from_json_value(&pack.to_json_value())?;
+assert_eq!(pack, roundtrip);
+
+// Signed registry entries convert through the same helpers.
+let signed = SignedPack::from_json_slice(include_bytes!("/tmp/signed-pack.json"))?;
+let json_value = signed.to_json_value();
 ```
+
+Manual conversion keeps FIRST_PARTY_ONLY builds green while surfacing precise
+errors (field name + expectation) when policy packs are malformed.
 
 Policy packs live alongside the node configuration and can be swapped without
 recompiling.  Governance may distribute canonical packs and validators can load
@@ -71,7 +85,10 @@ rustc tools/jurisdiction_check.rs && ./jurisdiction_check examples/jurisdiction/
 ## Law-Enforcement Request Log
 
 `log_law_enforcement_request` appends a metadata string to a log file so
-operators can publish transparency reports.  When compiled with the `pq`
+operators can publish transparency reports.  Each append now emits a
+`diagnostics::log::info!` record that mirrors the on-disk write, allowing
+aggregators and operators to trace law-enforcement activity without the third-
+party `log` crate.  When compiled with the `pq`
 feature flag, metadata is encrypted using the Kyber1024 KEM before being
 base64‑encoded and written:
 
