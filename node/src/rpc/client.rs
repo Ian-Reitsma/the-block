@@ -118,6 +118,16 @@ impl RpcClient {
             }
         }
     }
+
+    fn send_request(
+        &self,
+        url: &str,
+        request: &RpcEnvelopeRequest,
+    ) -> Result<RpcEnvelopeResponse, RpcClientError> {
+        self.call(url, request)?
+            .json::<RpcEnvelopeResponse>()
+            .map_err(RpcClientError::from)
+    }
 }
 
 #[derive(Debug)]
@@ -173,20 +183,15 @@ pub struct InflationParams {
 impl RpcClient {
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
         let params = foundation_serialization::json!({ "lane": lane.as_str() });
-        let mut request = RpcEnvelopeRequest::new("mempool.stats", params);
-        request.id = Some(json::Value::from(1));
+        let request =
+            RpcEnvelopeRequest::new("mempool.stats", params).with_id(json::Value::from(1u64));
 
-        let response = self
-            .call(url, &request)?
-            .json::<RpcEnvelopeResponse>()
-            .map_err(RpcClientError::from)?;
+        let payload = self
+            .send_request(url, &request)?
+            .into_payload::<MempoolStats>()
+            .map_err(RpcClientError::Decode)?;
 
-        match response {
-            RpcEnvelopeResponse::Result { result, .. } => {
-                json::from_value(result).map_err(RpcClientError::Decode)
-            }
-            RpcEnvelopeResponse::Error { error, .. } => Err(RpcClientError::Rpc(error)),
-        }
+        payload.into_result().map_err(RpcClientError::Rpc)
     }
 
     pub fn record_wallet_qos_event(
@@ -194,57 +199,32 @@ impl RpcClient {
         url: &str,
         event: WalletQosEvent<'_>,
     ) -> Result<(), WalletQosError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: WalletQosParams<'a>,
-        }
-
-        #[derive(Serialize)]
-        struct WalletQosParams<'a> {
-            event: &'a str,
-            lane: &'a str,
-            fee: u64,
-            floor: u64,
-        }
-
         #[derive(Deserialize)]
         struct WalletQosAck {
             status: Option<String>,
         }
 
-        let params = WalletQosParams {
-            event: event.event,
-            lane: event.lane,
-            fee: event.fee,
-            floor: event.floor,
-        };
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "mempool.qos_event",
-            params,
-        };
-        let envelope = self
-            .call(url, &payload)
+        let params = foundation_serialization::json!({
+            "event": event.event,
+            "lane": event.lane,
+            "fee": event.fee,
+            "floor": event.floor,
+        });
+        let request =
+            RpcEnvelopeRequest::new("mempool.qos_event", params).with_id(json::Value::from(1u64));
+        let payload = self
+            .send_request(url, &request)
             .map_err(WalletQosError::from)?
-            .json::<RpcEnvelope<WalletQosAck>>()
-            .map_err(RpcClientError::from)
+            .into_payload::<WalletQosAck>()
+            .map_err(RpcClientError::Decode)
             .map_err(WalletQosError::from)?;
 
-        if let Some(error) = envelope.error {
-            return Err(WalletQosError::Rpc {
-                code: error.code,
-                message: error.message,
-            });
-        }
+        let ack = payload.into_result().map_err(|error| WalletQosError::Rpc {
+            code: i64::from(error.code),
+            message: error.message().to_string(),
+        })?;
 
-        let status = envelope
-            .result
-            .and_then(|ack| ack.status)
-            .ok_or(WalletQosError::MissingStatus)?;
+        let status = ack.status.ok_or(WalletQosError::MissingStatus)?;
 
         if status != "ok" {
             return Err(WalletQosError::InvalidStatus(status));
@@ -254,75 +234,32 @@ impl RpcClient {
     }
 
     pub fn inflation_params(&self, url: &str) -> Result<InflationParams, RpcClientError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: &'a foundation_serialization::json::Value,
-        }
-        #[derive(Deserialize)]
-        struct Envelope<T> {
-            result: T,
-        }
-        let params = foundation_serialization::json::Value::Null;
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "inflation.params",
-            params: &params,
-        };
-        let res = self
-            .call(url, &payload)?
-            .json::<Envelope<InflationParams>>()
-            .map_err(RpcClientError::from)?;
-        Ok(res.result)
+        let request = RpcEnvelopeRequest::new("inflation.params", json::Value::Null)
+            .with_id(json::Value::from(1u64));
+        let payload = self
+            .send_request(url, &request)?
+            .into_payload::<InflationParams>()
+            .map_err(RpcClientError::Decode)?;
+        payload.into_result().map_err(RpcClientError::Rpc)
     }
 
     pub fn stake_role(&self, url: &str, id: &str, role: &str) -> Result<u64, RpcClientError> {
-        #[derive(Serialize)]
-        struct Payload {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: foundation_serialization::json::Value,
+        #[derive(Deserialize, Default)]
+        struct StakeRoleResponse {
+            #[serde(default)]
+            stake: Option<u64>,
         }
-        #[derive(Deserialize)]
-        struct Envelope {
-            result: foundation_serialization::json::Value,
-        }
+
         let params = foundation_serialization::json!({"id": id, "role": role});
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "stake.role",
-            params,
-        };
-        let res = self
-            .call(url, &payload)?
-            .json::<Envelope>()
-            .map_err(RpcClientError::from)?;
-        let stake = res
-            .result
-            .as_object()
-            .and_then(|map| map.get("stake"))
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0);
-        Ok(stake)
+        let request =
+            RpcEnvelopeRequest::new("stake.role", params).with_id(json::Value::from(1u64));
+        let payload = self
+            .send_request(url, &request)?
+            .into_payload::<StakeRoleResponse>()
+            .map_err(RpcClientError::Decode)?;
+        let body = payload.into_result().map_err(RpcClientError::Rpc)?;
+        Ok(body.stake.unwrap_or(0))
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct RpcErrorBody {
-    code: i64,
-    message: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(bound(deserialize = "T: Deserialize<'de>"))]
-struct RpcEnvelope<T> {
-    result: Option<T>,
-    error: Option<RpcErrorBody>,
 }
 
 #[derive(Debug, Deserialize)]

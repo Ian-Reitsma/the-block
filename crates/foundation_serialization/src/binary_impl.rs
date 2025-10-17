@@ -1185,14 +1185,157 @@ impl<'de, 'a> VariantAccess<'de> for VariantDeserializer<'a, 'de> {
 mod tests {
     use super::*;
 
-    use crate::{Deserialize, Serialize};
+    use crate::ser::SerializeStruct;
+    use crate::{de, ser, Deserialize, Serialize};
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    use core::{fmt, result::Result as StdResult};
+
+    #[derive(Debug, PartialEq)]
     struct Example {
         id: u64,
         label: String,
         flags: Vec<bool>,
         tuple: (u32, u32),
+    }
+
+    impl Serialize for Example {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Example", 4)?;
+            state.serialize_field("id", &self.id)?;
+            state.serialize_field("label", &self.label)?;
+            state.serialize_field("flags", &self.flags)?;
+            state.serialize_field("tuple", &self.tuple)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Example {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Id,
+                Label,
+                Flags,
+                Tuple,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`id`, `label`, `flags`, or `tuple`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "id" => Ok(Field::Id),
+                        "label" => Ok(Field::Label),
+                        "flags" => Ok(Field::Flags),
+                        "tuple" => Ok(Field::Tuple),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"id" => Ok(Field::Id),
+                        b"label" => Ok(Field::Label),
+                        b"flags" => Ok(Field::Flags),
+                        b"tuple" => Ok(Field::Tuple),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct ExampleVisitor;
+
+            impl<'de> de::Visitor<'de> for ExampleVisitor {
+                type Value = Example;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Example struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Example, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut id = None;
+                    let mut label = None;
+                    let mut flags = None;
+                    let mut tuple = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Id => {
+                                if id.is_some() {
+                                    return Err(de::Error::duplicate_field("id"));
+                                }
+                                id = Some(map.next_value()?);
+                            }
+                            Field::Label => {
+                                if label.is_some() {
+                                    return Err(de::Error::duplicate_field("label"));
+                                }
+                                label = Some(map.next_value()?);
+                            }
+                            Field::Flags => {
+                                if flags.is_some() {
+                                    return Err(de::Error::duplicate_field("flags"));
+                                }
+                                flags = Some(map.next_value()?);
+                            }
+                            Field::Tuple => {
+                                if tuple.is_some() {
+                                    return Err(de::Error::duplicate_field("tuple"));
+                                }
+                                tuple = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Example {
+                        id: id.ok_or_else(|| de::Error::missing_field("id"))?,
+                        label: label.ok_or_else(|| de::Error::missing_field("label"))?,
+                        flags: flags.ok_or_else(|| de::Error::missing_field("flags"))?,
+                        tuple: tuple.ok_or_else(|| de::Error::missing_field("tuple"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["id", "label", "flags", "tuple"];
+            deserializer.deserialize_struct("Example", FIELDS, ExampleVisitor)
+        }
     }
 
     #[test]

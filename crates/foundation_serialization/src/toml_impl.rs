@@ -892,20 +892,292 @@ fn validate_number_literal(slice: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    use crate::ser::SerializeStruct;
+    use crate::{de, defaults, ser, Deserialize, Serialize};
+    use core::{fmt, result::Result as StdResult};
+
+    #[derive(Debug, PartialEq)]
     struct Sample {
         enabled: bool,
         port: u16,
         name: String,
         values: Vec<u32>,
-        #[serde(default = "crate::defaults::default")]
         nested: Option<Nested>,
     }
 
-    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    impl Serialize for Sample {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Sample", 5)?;
+            state.serialize_field("enabled", &self.enabled)?;
+            state.serialize_field("port", &self.port)?;
+            state.serialize_field("name", &self.name)?;
+            state.serialize_field("values", &self.values)?;
+            state.serialize_field("nested", &self.nested)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Sample {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Enabled,
+                Port,
+                Name,
+                Values,
+                Nested,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`enabled`, `port`, `name`, `values`, or `nested`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "enabled" => Ok(Field::Enabled),
+                        "port" => Ok(Field::Port),
+                        "name" => Ok(Field::Name),
+                        "values" => Ok(Field::Values),
+                        "nested" => Ok(Field::Nested),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"enabled" => Ok(Field::Enabled),
+                        b"port" => Ok(Field::Port),
+                        b"name" => Ok(Field::Name),
+                        b"values" => Ok(Field::Values),
+                        b"nested" => Ok(Field::Nested),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct SampleVisitor;
+
+            impl<'de> de::Visitor<'de> for SampleVisitor {
+                type Value = Sample;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Sample struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Sample, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut enabled = None;
+                    let mut port = None;
+                    let mut name = None;
+                    let mut values = None;
+                    let mut nested: Option<Option<Nested>> = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Enabled => {
+                                if enabled.is_some() {
+                                    return Err(de::Error::duplicate_field("enabled"));
+                                }
+                                enabled = Some(map.next_value()?);
+                            }
+                            Field::Port => {
+                                if port.is_some() {
+                                    return Err(de::Error::duplicate_field("port"));
+                                }
+                                port = Some(map.next_value()?);
+                            }
+                            Field::Name => {
+                                if name.is_some() {
+                                    return Err(de::Error::duplicate_field("name"));
+                                }
+                                name = Some(map.next_value()?);
+                            }
+                            Field::Values => {
+                                if values.is_some() {
+                                    return Err(de::Error::duplicate_field("values"));
+                                }
+                                values = Some(map.next_value()?);
+                            }
+                            Field::Nested => {
+                                if nested.is_some() {
+                                    return Err(de::Error::duplicate_field("nested"));
+                                }
+                                nested = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Sample {
+                        enabled: enabled.ok_or_else(|| de::Error::missing_field("enabled"))?,
+                        port: port.ok_or_else(|| de::Error::missing_field("port"))?,
+                        name: name.ok_or_else(|| de::Error::missing_field("name"))?,
+                        values: values.ok_or_else(|| de::Error::missing_field("values"))?,
+                        nested: nested.unwrap_or_else(defaults::default),
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["enabled", "port", "name", "values", "nested"];
+            deserializer.deserialize_struct("Sample", FIELDS, SampleVisitor)
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
     struct Nested {
         threshold: f64,
         note: String,
+    }
+
+    impl Serialize for Nested {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Nested", 2)?;
+            state.serialize_field("threshold", &self.threshold)?;
+            state.serialize_field("note", &self.note)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Nested {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Threshold,
+                Note,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`threshold` or `note`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "threshold" => Ok(Field::Threshold),
+                        "note" => Ok(Field::Note),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"threshold" => Ok(Field::Threshold),
+                        b"note" => Ok(Field::Note),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct NestedVisitor;
+
+            impl<'de> de::Visitor<'de> for NestedVisitor {
+                type Value = Nested;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Nested struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Nested, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut threshold = None;
+                    let mut note = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Threshold => {
+                                if threshold.is_some() {
+                                    return Err(de::Error::duplicate_field("threshold"));
+                                }
+                                threshold = Some(map.next_value()?);
+                            }
+                            Field::Note => {
+                                if note.is_some() {
+                                    return Err(de::Error::duplicate_field("note"));
+                                }
+                                note = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Nested {
+                        threshold: threshold
+                            .ok_or_else(|| de::Error::missing_field("threshold"))?,
+                        note: note.ok_or_else(|| de::Error::missing_field("note"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["threshold", "note"];
+            deserializer.deserialize_struct("Nested", FIELDS, NestedVisitor)
+        }
     }
 
     #[test]
@@ -947,15 +1219,235 @@ mod tests {
         assert_eq!(sample, reparsed);
     }
 
-    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, PartialEq)]
     struct DeviceConfig {
         devices: Vec<Device>,
     }
 
-    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    impl Serialize for DeviceConfig {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("DeviceConfig", 1)?;
+            state.serialize_field("devices", &self.devices)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for DeviceConfig {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Devices,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`devices`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "devices" => Ok(Field::Devices),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"devices" => Ok(Field::Devices),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct DeviceConfigVisitor;
+
+            impl<'de> de::Visitor<'de> for DeviceConfigVisitor {
+                type Value = DeviceConfig;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("DeviceConfig struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<DeviceConfig, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut devices = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Devices => {
+                                if devices.is_some() {
+                                    return Err(de::Error::duplicate_field("devices"));
+                                }
+                                devices = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(DeviceConfig {
+                        devices: devices.ok_or_else(|| de::Error::missing_field("devices"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["devices"];
+            deserializer.deserialize_struct("DeviceConfig", FIELDS, DeviceConfigVisitor)
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
     struct Device {
         name: String,
         enabled: bool,
+    }
+
+    impl Serialize for Device {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Device", 2)?;
+            state.serialize_field("name", &self.name)?;
+            state.serialize_field("enabled", &self.enabled)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Device {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Name,
+                Enabled,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`name` or `enabled`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "name" => Ok(Field::Name),
+                        "enabled" => Ok(Field::Enabled),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"name" => Ok(Field::Name),
+                        b"enabled" => Ok(Field::Enabled),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct DeviceVisitor;
+
+            impl<'de> de::Visitor<'de> for DeviceVisitor {
+                type Value = Device;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Device struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Device, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut name = None;
+                    let mut enabled = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Name => {
+                                if name.is_some() {
+                                    return Err(de::Error::duplicate_field("name"));
+                                }
+                                name = Some(map.next_value()?);
+                            }
+                            Field::Enabled => {
+                                if enabled.is_some() {
+                                    return Err(de::Error::duplicate_field("enabled"));
+                                }
+                                enabled = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Device {
+                        name: name.ok_or_else(|| de::Error::missing_field("name"))?,
+                        enabled: enabled.ok_or_else(|| de::Error::missing_field("enabled"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["name", "enabled"];
+            deserializer.deserialize_struct("Device", FIELDS, DeviceVisitor)
+        }
     }
 
     #[test]
@@ -983,10 +1475,114 @@ mod tests {
         assert!(!compact.contains("\n\n[[devices]]"));
     }
 
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug)]
     struct Flags {
         value: i64,
         flag: bool,
+    }
+
+    impl<'de> Deserialize<'de> for Flags {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Value,
+                Flag,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`value` or `flag`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "value" => Ok(Field::Value),
+                        "flag" => Ok(Field::Flag),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"value" => Ok(Field::Value),
+                        b"flag" => Ok(Field::Flag),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct FlagsVisitor;
+
+            impl<'de> de::Visitor<'de> for FlagsVisitor {
+                type Value = Flags;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Flags struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Flags, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut value = None;
+                    let mut flag = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Value => {
+                                if value.is_some() {
+                                    return Err(de::Error::duplicate_field("value"));
+                                }
+                                value = Some(map.next_value()?);
+                            }
+                            Field::Flag => {
+                                if flag.is_some() {
+                                    return Err(de::Error::duplicate_field("flag"));
+                                }
+                                flag = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Flags {
+                        value: value.ok_or_else(|| de::Error::missing_field("value"))?,
+                        flag: flag.ok_or_else(|| de::Error::missing_field("flag"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["value", "flag"];
+            deserializer.deserialize_struct("Flags", FIELDS, FlagsVisitor)
+        }
     }
 
     #[test]
@@ -999,10 +1595,103 @@ mod tests {
 
     #[test]
     fn reject_invalid_numeric_literal() {
-        #[derive(Debug, serde::Deserialize)]
+        #[derive(Debug)]
         struct Number {
             #[allow(dead_code)]
             value: i32,
+        }
+
+        impl<'de> Deserialize<'de> for Number {
+            fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+            where
+                D: de::Deserializer<'de>,
+            {
+                enum Field {
+                    Value,
+                }
+
+                struct FieldVisitor;
+
+                impl<'de> de::Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("`value`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "value" => Ok(Field::Value),
+                            other => Err(de::Error::unknown_field(other, FIELDS)),
+                        }
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"value" => Ok(Field::Value),
+                            other => {
+                                let text = core::str::from_utf8(other).unwrap_or("");
+                                Err(de::Error::unknown_field(text, FIELDS))
+                            }
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+                }
+
+                impl<'de> Deserialize<'de> for Field {
+                    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                    where
+                        D: de::Deserializer<'de>,
+                    {
+                        deserializer.deserialize_identifier(FieldVisitor)
+                    }
+                }
+
+                struct NumberVisitor;
+
+                impl<'de> de::Visitor<'de> for NumberVisitor {
+                    type Value = Number;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("Number struct")
+                    }
+
+                    fn visit_map<M>(self, mut map: M) -> StdResult<Number, M::Error>
+                    where
+                        M: de::MapAccess<'de>,
+                    {
+                        let mut value = None;
+                        while let Some(field) = map.next_key::<Field>()? {
+                            match field {
+                                Field::Value => {
+                                    if value.is_some() {
+                                        return Err(de::Error::duplicate_field("value"));
+                                    }
+                                    value = Some(map.next_value()?);
+                                }
+                            }
+                        }
+                        Ok(Number {
+                            value: value.ok_or_else(|| de::Error::missing_field("value"))?,
+                        })
+                    }
+                }
+
+                const FIELDS: &[&str] = &["value"];
+                deserializer.deserialize_struct("Number", FIELDS, NumberVisitor)
+            }
         }
 
         let err = from_str::<Number>("value = 1__0").expect_err("underscore error");
@@ -1011,10 +1700,103 @@ mod tests {
 
     #[test]
     fn reject_boolean_without_boundary() {
-        #[derive(Debug, serde::Deserialize)]
+        #[derive(Debug)]
         struct Flag {
             #[allow(dead_code)]
             flag: bool,
+        }
+
+        impl<'de> Deserialize<'de> for Flag {
+            fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+            where
+                D: de::Deserializer<'de>,
+            {
+                enum Field {
+                    Flag,
+                }
+
+                struct FieldVisitor;
+
+                impl<'de> de::Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("`flag`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "flag" => Ok(Field::Flag),
+                            other => Err(de::Error::unknown_field(other, FIELDS)),
+                        }
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            b"flag" => Ok(Field::Flag),
+                            other => {
+                                let text = core::str::from_utf8(other).unwrap_or("");
+                                Err(de::Error::unknown_field(text, FIELDS))
+                            }
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+                }
+
+                impl<'de> Deserialize<'de> for Field {
+                    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                    where
+                        D: de::Deserializer<'de>,
+                    {
+                        deserializer.deserialize_identifier(FieldVisitor)
+                    }
+                }
+
+                struct FlagVisitor;
+
+                impl<'de> de::Visitor<'de> for FlagVisitor {
+                    type Value = Flag;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("Flag struct")
+                    }
+
+                    fn visit_map<M>(self, mut map: M) -> StdResult<Flag, M::Error>
+                    where
+                        M: de::MapAccess<'de>,
+                    {
+                        let mut flag = None;
+                        while let Some(field) = map.next_key::<Field>()? {
+                            match field {
+                                Field::Flag => {
+                                    if flag.is_some() {
+                                        return Err(de::Error::duplicate_field("flag"));
+                                    }
+                                    flag = Some(map.next_value()?);
+                                }
+                            }
+                        }
+                        Ok(Flag {
+                            flag: flag.ok_or_else(|| de::Error::missing_field("flag"))?,
+                        })
+                    }
+                }
+
+                const FIELDS: &[&str] = &["flag"];
+                deserializer.deserialize_struct("Flag", FIELDS, FlagVisitor)
+            }
         }
 
         let err = from_str::<Flag>("flag = trueish").expect_err("boundary");

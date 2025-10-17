@@ -1,4 +1,10 @@
 # Summary
+> **Review (2025-10-16, evening++)**: `foundation_serialization` now passes its
+> full stub-backed test suite. The refreshed `json!` macro handles nested
+> literals and identifier keys, binary/TOML fixtures ship handwritten
+> serializers, and the `foundation_serde` stub exposes direct primitive visitors
+> so tuple decoding no longer panics under FIRST_PARTY_ONLY. Serialization docs
+> and guards now treat the facade as fully first party.
 > **Review (2025-10-16, midday):** QUIC peer-cert caches now serialize through a sorted peer/provider view so `quic_peer_certs.json` stays byte-identical across runs and guard fixtures. New unit tests lock ordering, history, and rotation counters while `peer_cert_snapshot()` reuses the same sorted iterator to keep CLI/RPC payloads deterministic.
 > **Review (2025-10-16, dawn+):** Light-client persistence, snapshots, and chunk serialization now run through deterministic first-party serializers with fixtures (`PERSISTED_STATE_FIXTURE`, `SNAPSHOT_FIXTURE`) and guard-parity tests covering account permutations plus compressed snapshot recovery. Integration coverage drives the in-house `coding::compressor_for("lz77-rle", 4)` path so resume flows remain identical under `FIRST_PARTY_ONLY`.
 > **Review (2025-10-14, late evening+++):** Dependency governance now emits a
