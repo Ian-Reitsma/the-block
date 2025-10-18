@@ -422,10 +422,10 @@ impl StructWriter {
 #[cfg(test)]
 mod tests {
     use super::{Reader, Writer};
-    use crate::binary;
-    use crate::Serialize;
+    use crate::ser::SerializeStruct;
+    use crate::{binary, ser, Serialize};
+    use core::result::Result as StdResult;
 
-    #[derive(Serialize)]
     struct Sample<'a> {
         domain: &'a str,
         provider_id: &'a str,
@@ -435,10 +435,37 @@ mod tests {
         allowed: bool,
     }
 
-    #[derive(Serialize)]
     struct FloatSample {
         ratio: f64,
         weight: f32,
+    }
+
+    impl<'a> Serialize for Sample<'a> {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Sample", 6)?;
+            state.serialize_field("domain", &self.domain)?;
+            state.serialize_field("provider_id", &self.provider_id)?;
+            state.serialize_field("bytes_served", &self.bytes_served)?;
+            state.serialize_field("ts", &self.ts)?;
+            state.serialize_field("dynamic", &self.dynamic)?;
+            state.serialize_field("allowed", &self.allowed)?;
+            state.end()
+        }
+    }
+
+    impl Serialize for FloatSample {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("FloatSample", 2)?;
+            state.serialize_field("ratio", &self.ratio)?;
+            state.serialize_field("weight", &self.weight)?;
+            state.end()
+        }
     }
 
     #[test]

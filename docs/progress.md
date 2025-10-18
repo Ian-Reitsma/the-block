@@ -1,4 +1,20 @@
 # Project Progress Snapshot
+> **Review (2025-10-16, evening++)**: The serialization facade now passes its
+> full stub-backed test suite. The `foundation_serialization::json!` macro gained
+> nested-object and identifier-key support with regression tests, every binary,
+> JSON, and TOML fixture ships handwritten `Serialize`/`Deserialize`
+> implementations, and the `foundation_serde` stub now exposes direct `visit_u8`
+> / `visit_u16` / `visit_u32` hooks so tuple decoding no longer panics under the
+> guard. FIRST_PARTY_ONLY runs can rely on the facade without skipping fixtures
+> or falling back to legacy derives.
+> **Review (2025-10-16, late afternoon):** RPC envelopes now stay entirely inside
+> the first-party stack. `foundation_rpc::Request` picked up `with_id`/`with_badge`
+> builders and `Response::into_payload` decodes typed payloads through the new
+> `ResponsePayload<T>` helper, letting `node/src/rpc/client.rs` drop bespoke JSON
+> structs and depend solely on the facade for success/error branching. Paired
+> updates add `Display` to `foundation_serialization::json::Value` plus a compact
+> renderer regression test so RPC callers regain `.to_string()` ergonomics
+> without reintroducing serde_json.
 > **Review (2025-10-16, midday):** QUIC peer-cert persistence now rewrites `quic_peer_certs.json` in a peer-sorted,
 > provider-sorted layout so guard fixtures and operator diffs remain stable even when the in-memory cache shuffles.
 > Fresh unit tests cover the disk-entry helper—verifying peer/provider ordering, history vectors, and rotation counters—while

@@ -53,10 +53,7 @@ impl InhouseLtFountain {
         FountainPacket::new(bytes)
     }
 
-    fn decode_packet(
-        packet: &FountainPacket,
-        total: usize,
-    ) -> Result<ErasureShard, FountainError> {
+    fn decode_packet(packet: &FountainPacket, total: usize) -> Result<ErasureShard, FountainError> {
         let bytes = packet.as_bytes();
         if bytes.len() < HEADER_LEN {
             return Err(FountainError::Decode(
@@ -68,13 +65,15 @@ impl InhouseLtFountain {
             1 => ErasureShardKind::Parity,
             other => {
                 return Err(FountainError::Decode(format!(
-                    "unknown fountain packet kind {other}")))
+                    "unknown fountain packet kind {other}"
+                )))
             }
         };
         let index = u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
         if index >= total {
             return Err(FountainError::Decode(format!(
-                "fountain shard index {index} out of range {total}" )));
+                "fountain shard index {index} out of range {total}"
+            )));
         }
         Ok(ErasureShard {
             index,
@@ -90,11 +89,7 @@ impl FountainCoder for InhouseLtFountain {
     }
 
     fn encode(&self, data: &[u8]) -> Result<FountainBatch, FountainError> {
-        let metadata = FountainMetadata::with_parity(
-            self._symbol_size,
-            data.len(),
-            0,
-        );
+        let metadata = FountainMetadata::with_parity(self._symbol_size, data.len(), 0);
         if metadata.symbol_size() == 0 {
             return Err(FountainError::InvalidSymbolSize {
                 size: self._symbol_size,
@@ -108,21 +103,13 @@ impl FountainCoder for InhouseLtFountain {
             });
         }
         let parity_shards = self.parity_shards(data_shards);
-        let metadata = FountainMetadata::with_parity(
-            self._symbol_size,
-            data.len(),
-            parity_shards,
-        );
+        let metadata = FountainMetadata::with_parity(self._symbol_size, data.len(), parity_shards);
         let coder = InhouseReedSolomon::new(data_shards, parity_shards)
             .map_err(|err| FountainError::Encode(err.to_string()))?;
         let batch = coder
             .encode(data)
             .map_err(|err| FountainError::Encode(err.to_string()))?;
-        let packets = batch
-            .shards
-            .into_iter()
-            .map(Self::encode_packet)
-            .collect();
+        let packets = batch.shards.into_iter().map(Self::encode_packet).collect();
         Ok(FountainBatch { metadata, packets })
     }
 

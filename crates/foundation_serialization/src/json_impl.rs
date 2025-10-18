@@ -738,10 +738,9 @@ impl IndexMut<usize> for Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match crate::json_impl::to_string(self) {
-            Ok(rendered) => f.write_str(&rendered),
-            Err(_) => Err(fmt::Error),
-        }
+        let mut rendered = String::new();
+        self.render_compact(&mut rendered);
+        f.write_str(&rendered)
     }
 }
 
@@ -2108,13 +2107,144 @@ fn decode_surrogate_pair(high: u16, low: u16) -> Option<char> {
 mod tests {
     use super::*;
 
-    use crate::{Deserialize, Serialize};
+    use crate::ser::SerializeStruct;
+    use crate::{de, ser, Deserialize, Serialize};
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    use core::{fmt, result::Result as StdResult};
+
+    #[derive(Debug, PartialEq)]
     struct Sample {
         id: u32,
         name: String,
         flags: Vec<bool>,
+    }
+
+    impl Serialize for Sample {
+        fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let mut state = serializer.serialize_struct("Sample", 3)?;
+            state.serialize_field("id", &self.id)?;
+            state.serialize_field("name", &self.name)?;
+            state.serialize_field("flags", &self.flags)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Sample {
+        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            enum Field {
+                Id,
+                Name,
+                Flags,
+            }
+
+            struct FieldVisitor;
+
+            impl<'de> de::Visitor<'de> for FieldVisitor {
+                type Value = Field;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("`id`, `name`, or `flags`")
+                }
+
+                fn visit_str<E>(self, value: &str) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        "id" => Ok(Field::Id),
+                        "name" => Ok(Field::Name),
+                        "flags" => Ok(Field::Flags),
+                        other => Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    match value {
+                        b"id" => Ok(Field::Id),
+                        b"name" => Ok(Field::Name),
+                        b"flags" => Ok(Field::Flags),
+                        other => {
+                            let text = core::str::from_utf8(other).unwrap_or("");
+                            Err(de::Error::unknown_field(text, FIELDS))
+                        }
+                    }
+                }
+
+                fn visit_string<E>(self, value: String) -> StdResult<Field, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+                where
+                    D: de::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct SampleVisitor;
+
+            impl<'de> de::Visitor<'de> for SampleVisitor {
+                type Value = Sample;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("Sample struct")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> StdResult<Sample, M::Error>
+                where
+                    M: de::MapAccess<'de>,
+                {
+                    let mut id = None;
+                    let mut name = None;
+                    let mut flags = None;
+                    while let Some(field) = map.next_key::<Field>()? {
+                        match field {
+                            Field::Id => {
+                                if id.is_some() {
+                                    return Err(de::Error::duplicate_field("id"));
+                                }
+                                id = Some(map.next_value()?);
+                            }
+                            Field::Name => {
+                                if name.is_some() {
+                                    return Err(de::Error::duplicate_field("name"));
+                                }
+                                name = Some(map.next_value()?);
+                            }
+                            Field::Flags => {
+                                if flags.is_some() {
+                                    return Err(de::Error::duplicate_field("flags"));
+                                }
+                                flags = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(Sample {
+                        id: id.ok_or_else(|| de::Error::missing_field("id"))?,
+                        name: name.ok_or_else(|| de::Error::missing_field("name"))?,
+                        flags: flags.ok_or_else(|| de::Error::missing_field("flags"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["id", "name", "flags"];
+            deserializer.deserialize_struct("Sample", FIELDS, SampleVisitor)
+        }
     }
 
     #[test]
@@ -2139,6 +2269,31 @@ mod tests {
         let string = to_string(&value).expect("serialize value");
         let parsed: Value = from_str(&string).expect("parse");
         assert_eq!(parsed, value);
+    }
+
+    #[test]
+    fn json_macro_nested_objects_round_trip() {
+        let value = crate::json!({
+            "outer": {
+                "inner": {
+                    "leaf": 7,
+                    "list": [1, 2, {"deep": null}],
+                },
+                "flag": true,
+            },
+        });
+
+        let encoded = to_string(&value).expect("encode nested object");
+        let reparsed: Value = from_str(&encoded).expect("reparse nested object");
+        assert_eq!(reparsed, value);
+    }
+
+    #[test]
+    fn json_macro_identifier_keys_are_stringified() {
+        let value = crate::json!({ status: true, count: 3 });
+        let map = value.as_object().expect("object");
+        assert_eq!(map.get("status"), Some(&Value::Bool(true)));
+        assert_eq!(map.get("count"), Some(&Value::from(3)));
     }
 
     #[test]
@@ -2205,6 +2360,19 @@ mod tests {
             }
             _ => panic!("array mutated to non-array"),
         }
+    }
+
+    #[test]
+    fn display_matches_compact_serializer() {
+        let value = crate::json!({
+            "array": [1, 2, 3],
+            "nested": {"flag": true, "label": "ok"},
+            "nullish": null,
+        });
+
+        let rendered = value.to_string();
+        let expected = to_string_value(&value);
+        assert_eq!(rendered, expected);
     }
 
     #[test]

@@ -1182,7 +1182,13 @@ pub mod de {
     }
 
     macro_rules! deserialize_unsigned {
-        ($($ty:ty => $name:ident),+ $(,)?) => {
+        (
+            $(
+                $ty:ty => $method:ident => $name:ident
+                $(=> { $visit:ident, $visit_ty:ty })?
+            ),+
+            $(,)?
+        ) => {
             $(
                 struct $name;
 
@@ -1192,6 +1198,15 @@ pub mod de {
                     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                         formatter.write_str(stringify!($ty))
                     }
+
+                    $(
+                        fn $visit<E>(self, value: $visit_ty) -> Result<Self::Value, E>
+                        where
+                            E: Error,
+                        {
+                            Ok(value as $ty)
+                        }
+                    )?
 
                     fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
                     where
@@ -1221,7 +1236,7 @@ pub mod de {
                     where
                         D: Deserializer<'de>,
                     {
-                        deserializer.deserialize_u64($name)
+                        deserializer.$method($name)
                     }
                 }
             )+
@@ -1229,11 +1244,11 @@ pub mod de {
     }
 
     deserialize_unsigned! {
-        u8 => U8Visitor,
-        u16 => U16Visitor,
-        u32 => U32Visitor,
-        u64 => U64Visitor,
-        usize => UsizeVisitor
+        u8 => deserialize_u8 => U8Visitor => { visit_u8, u8 },
+        u16 => deserialize_u16 => U16Visitor => { visit_u16, u16 },
+        u32 => deserialize_u32 => U32Visitor => { visit_u32, u32 },
+        u64 => deserialize_u64 => U64Visitor,
+        usize => deserialize_u64 => UsizeVisitor
     }
 
     struct U128Visitor;

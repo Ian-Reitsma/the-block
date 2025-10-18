@@ -1,7 +1,14 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-14 23:59:59Z_
+_Last updated: 2025-10-16 22:30:00Z_
 
+> **2025-10-16 update (evening++)**: The serialization facade’s test suite now
+> passes under the stub backend. `foundation_serialization::json!` supports
+> nested objects, identifier keys, and trailing commas; every binary/JSON/TOML
+> fixture ships handwritten serializers; and the `foundation_serde` stub adds
+> direct primitive visitors (`visit_u8`/`visit_u16`/`visit_u32`) so tuple decoding
+> works without the external derive stack. FIRST_PARTY_ONLY runs no longer skip
+> serialization fixtures.
 > **2025-10-14 update (closing push+++):** RPC fuzz harnesses now seed identity
 > state through `sys::tempfile` scratch directories, letting FIRST_PARTY_ONLY
 > runs avoid shared sled paths while the new smoke tests hit
@@ -78,7 +85,7 @@ explicit.
 | governance | `node/src/governance/variance.rs` | (see §2) | — | Burst veto DCT now routes through `foundation_math::transform::dct2_inplace`. |
 | governance | `node/src/governance` (misc) | — | `serde_json` — none observed | Runtime crate already routes JSON through facade; governance code has no direct serde_json usage. |
 | rpc | `node/src/rpc/mod.rs` | 21-32, 364-620 | **Migrated to `foundation_rpc` request/response envelope** | Runtime handlers now parse via the first-party `foundation_rpc` crate; remaining serde derives only cover auxiliary payload structs. |
-| rpc | `node/src/rpc/client.rs` | 1-340 | serde derive + skip/default bounds | Client helpers now emit/parse `foundation_rpc::{Request, Response}` envelopes but still deserialize typed payloads through serde. |
+| rpc | `node/src/rpc/client.rs` | 1-360 | facade wrappers + typed payload helpers | Client helpers now build envelopes via `Request::with_id/with_params` and decode responses through `foundation_rpc::ResponsePayload<T>`, removing bespoke JSON-RPC structs and keeping error propagation first-party. |
 
 > **New first-party RPC facade:** the `foundation_rpc` crate now anchors the
 > workspace-wide request/response schema, allowing `jsonrpc-core` to be removed
@@ -116,7 +123,7 @@ books, escrow tables, AMM pools, and trade logs against the legacy bytes. The
 residual `crate::util::binary_codec` usage survives only inside compatibility
 tests while the module is phased out.
 
-### Tooling & Support Crate Migrations (2025-10-14 update)
+### Tooling & Support Crate Migrations (2025-10-16 update)
 
 - ✅ The workspace `sled` crate now ships a first-party JSON manifest importer
   for the `legacy-format` feature, eliminating the crates.io `sled`
@@ -216,7 +223,9 @@ tests while the module is phased out.
   compile end-to-end. `foundation_serialization` now toggles backends via
   features (`serde-external`, `serde-stub`) without ever depending on upstream
   `serde` directly, and the stub backend passes `cargo check -p
-  foundation_serialization --no-default-features --features serde-stub`.
+  foundation_serialization --no-default-features --features serde-stub`. The
+  stub has since grown direct `visit_u8`/`visit_u16`/`visit_u32` hooks so tuple
+  decoding works without falling back to `visit_u64`.
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
   handwritten `foundation_serialization::json` conversions
   (`PolicyPack::from_json_value`, `SignedPack::from_json_slice`,
@@ -235,7 +244,8 @@ tests while the module is phased out.
   `ureq` crate.
 - ✅ `crates/probe` emits RPC payloads through the in-house `json!` macro, and
   `crates/wallet` (including the remote signer tests) round-trips signer
-  messages with the same facade.
+  messages with the same facade. The macro now handles nested literals and
+  identifier keys with regression coverage mirroring serde_json.
 - ✅ Replaced the ad-hoc SQLite log tooling with the sled-backed
   `log_index` crate. CLI, node, explorer, and telemetry utilities now share the
   first-party store for ingestion, search, and key rotation, while the
@@ -515,6 +525,14 @@ Dependency Migration" milestone) to coordinate the rollout.
 
 ### Recent Completions
 
+- ✅ `foundation_rpc` now exposes typed `ResponsePayload<T>` helpers plus
+  `Request::with_id/with_params` builders, and the node RPC client consumes them
+  directly. This removes bespoke JSON-RPC structs, keeps error propagation
+  inside the first-party facade, and unlocks guard-on/off parity for envelope
+  handling.
+- ✅ `foundation_serialization::json::Value` implements `Display`, restoring the
+  `.to_string()` ergonomics expected by RPC callers while keeping output locked
+  to the compact renderer via a new regression test.
 - ✅ Wallet, light-client, and diagnostics surfaces now exclusively emit logs
   through `diagnostics::tracing`, removing the third-party `tracing` stack from
   the workspace manifests while preserving existing span/field semantics.

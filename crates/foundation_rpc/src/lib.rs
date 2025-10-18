@@ -7,6 +7,7 @@
 //! response structures round-trip through `foundation_serialization` and provide
 //! utilities for bridging to the in-house `httpd` layer.
 
+use foundation_serialization::de::DeserializeOwned;
 use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{HttpError, Request as HttpRequest, Response as HttpResponse, StatusCode};
@@ -126,6 +127,34 @@ impl Request {
         }
     }
 
+    /// Attach an identifier to the request and return the updated envelope.
+    pub fn with_id(mut self, id: impl Into<Value>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// Attach a badge to the request envelope.
+    pub fn with_badge(mut self, badge: impl Into<String>) -> Self {
+        self.badge = Some(badge.into());
+        self
+    }
+
+    /// Override the parameters carried by this request.
+    pub fn with_params(mut self, params: impl Into<Params>) -> Self {
+        self.params = params.into();
+        self
+    }
+
+    /// Borrow the identifier associated with this request, when present.
+    pub fn id(&self) -> Option<&Value> {
+        self.id.as_ref()
+    }
+
+    /// Borrow the parameters embedded in the request.
+    pub fn params(&self) -> &Params {
+        &self.params
+    }
+
     /// Parse a request from a slice of bytes using the first-party JSON codec.
     pub fn from_slice(bytes: &[u8]) -> Result<Self, foundation_serialization::Error> {
         json::from_slice(bytes)
@@ -196,9 +225,115 @@ impl Response {
         json::to_vec(self)
     }
 
+    /// Borrow the identifier attached to this response, if present.
+    pub fn id(&self) -> Option<&Value> {
+        match self {
+            Response::Result { id, .. } | Response::Error { id, .. } => id.as_ref(),
+        }
+    }
+
+    /// Convert this response into a typed payload, decoding the success branch
+    /// into `T` while preserving RPC errors.
+    pub fn into_payload<T>(self) -> Result<ResponsePayload<T>, foundation_serialization::Error>
+    where
+        T: DeserializeOwned,
+    {
+        match self {
+            Response::Result { result, id, .. } => {
+                let typed = json::from_value(result)?;
+                Ok(ResponsePayload::Success { id, result: typed })
+            }
+            Response::Error { error, id, .. } => Ok(ResponsePayload::Error { id, error }),
+        }
+    }
+
     /// Convert the response into an [`httpd::Response`] with the supplied status.
     pub fn into_http(self, status: StatusCode) -> Result<HttpResponse, HttpError> {
         HttpResponse::new(status).json(&self)
+    }
+}
+
+/// Typed representation of a JSON-RPC response payload.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResponsePayload<T> {
+    /// Successful response carrying a typed result.
+    Success { id: Option<Value>, result: T },
+    /// Error response carrying the RPC error.
+    Error { id: Option<Value>, error: RpcError },
+}
+
+impl<T> ResponsePayload<T> {
+    /// Borrow the identifier associated with this payload, when present.
+    pub fn id(&self) -> Option<&Value> {
+        match self {
+            ResponsePayload::Success { id, .. } | ResponsePayload::Error { id, .. } => id.as_ref(),
+        }
+    }
+
+    /// Map the success payload into a different type.
+    pub fn map<U, F>(self, func: F) -> ResponsePayload<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            ResponsePayload::Success { id, result } => ResponsePayload::Success {
+                id,
+                result: func(result),
+            },
+            ResponsePayload::Error { id, error } => ResponsePayload::Error { id, error },
+        }
+    }
+
+    /// Convert the payload into a `Result`, propagating RPC errors.
+    pub fn into_result(self) -> Result<T, RpcError> {
+        match self {
+            ResponsePayload::Success { result, .. } => Ok(result),
+            ResponsePayload::Error { error, .. } => Err(error),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_payload_decodes_success() {
+        let response = Response::success(json::Value::from(42u64), Some(json::Value::from(7u64)));
+        let payload = response.into_payload::<u64>().expect("decode");
+        match payload {
+            ResponsePayload::Success { id, result } => {
+                assert_eq!(id, Some(json::Value::from(7u64)));
+                assert_eq!(result, 42);
+            }
+            ResponsePayload::Error { .. } => panic!("expected success payload"),
+        }
+    }
+
+    #[test]
+    fn into_payload_preserves_error() {
+        let err = RpcError::new(-32000, "kaboom");
+        let response = Response::error(err.clone(), None);
+        let payload = response.into_payload::<u64>().expect("decode");
+        match payload {
+            ResponsePayload::Success { .. } => panic!("expected error payload"),
+            ResponsePayload::Error { id, error } => {
+                assert_eq!(id, None);
+                assert_eq!(error, err);
+            }
+        }
+    }
+
+    #[test]
+    fn into_payload_reports_decode_errors() {
+        let response = Response::success(json::Value::from("not a number"), None);
+        let err = response
+            .into_payload::<u64>()
+            .expect_err("decode should fail");
+        match err {
+            foundation_serialization::Error::Json(_) => {}
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }
 

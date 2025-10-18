@@ -33,8 +33,9 @@ call sites outside the module stay unchanged.
 > snapshots, contract stores, schema markers, and audit appenders directly.
 > These flows emit deterministic binary blobs or escaped JSON without touching
 > `serde`. The remaining crates keep targeting the
-> `foundation_serialization` helpers, which still return `Err(Unimplemented)`
-> until their respective codecs are ported.
+> `foundation_serialization` helpers, which now ship fully-implemented codecs
+> with stub-backed regression tests so guard runs never hit
+> `Err(Unimplemented)`.
 
 ### 0.1 In-house LSM tree
 
