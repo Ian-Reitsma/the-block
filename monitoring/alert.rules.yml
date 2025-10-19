@@ -108,3 +108,19 @@ groups:
           severity: warn
         annotations:
           summary: "Dependency policy violations surfaced during latest check"
+  - name: treasury
+    rules:
+      - alert: TreasuryDisbursementSnapshotStale
+        expr: treasury_disbursement_snapshot_age_seconds > 900
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Treasury disbursement snapshot stale (age {{ printf \"%.0f\" $value }}s)"
+      - alert: TreasuryDisbursementScheduleOverdue
+        expr: treasury_disbursement_scheduled_oldest_age_seconds > 7200
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Oldest scheduled treasury disbursement pending for {{ printf \"%.0f\" $value }} seconds"

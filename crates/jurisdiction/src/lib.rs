@@ -1,3 +1,5 @@
+pub mod codec;
+
 use base64_fp::decode_standard;
 #[cfg(feature = "pq")]
 use base64_fp::encode_standard;
@@ -305,22 +307,32 @@ impl PolicyPack {
     pub fn diff(old: &Self, new: &Self) -> json::Value {
         let mut changed = JsonMap::new();
         if old.consent_required != new.consent_required {
-            changed.insert(
-                "consent_required".into(),
-                foundation_serialization::json!({
-                    "old": old.consent_required,
-                    "new": new.consent_required
-                }),
-            );
+            let mut entry = JsonMap::new();
+            entry.insert("old".into(), JsonValue::Bool(old.consent_required));
+            entry.insert("new".into(), JsonValue::Bool(new.consent_required));
+            changed.insert("consent_required".into(), JsonValue::Object(entry));
         }
         if old.features != new.features {
-            changed.insert(
-                "features".into(),
-                foundation_serialization::json!({
-                    "old": old.features.clone(),
-                    "new": new.features.clone()
-                }),
+            let mut entry = JsonMap::new();
+            entry.insert(
+                "old".into(),
+                JsonValue::Array(
+                    old.features
+                        .iter()
+                        .map(|f| JsonValue::String(f.clone()))
+                        .collect(),
+                ),
             );
+            entry.insert(
+                "new".into(),
+                JsonValue::Array(
+                    new.features
+                        .iter()
+                        .map(|f| JsonValue::String(f.clone()))
+                        .collect(),
+                ),
+            );
+            changed.insert("features".into(), JsonValue::Object(entry));
         }
         JsonValue::Object(changed)
     }

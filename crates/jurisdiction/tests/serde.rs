@@ -1,4 +1,5 @@
 use foundation_serialization::json;
+use foundation_serialization::json::Value;
 use jurisdiction::{PolicyPack, SignedPack};
 
 #[test]
@@ -89,4 +90,42 @@ fn signed_pack_accepts_base64_signature() {
     let parsed = SignedPack::from_json_value(&value).expect("base64 signature");
     assert_eq!(parsed.signature, vec![1, 2, 3]);
     assert_eq!(parsed.pack.region, "EU");
+}
+
+#[test]
+fn diff_reports_changed_fields() {
+    let base = PolicyPack {
+        region: "US".into(),
+        consent_required: false,
+        features: vec!["wallet".into()],
+        parent: None,
+    };
+    let updated = PolicyPack {
+        consent_required: true,
+        features: vec!["wallet".into(), "dex".into()],
+        ..base.clone()
+    };
+
+    let diff = PolicyPack::diff(&base, &updated);
+    let object = match diff {
+        Value::Object(map) => map,
+        other => panic!("expected object diff, got {other:?}"),
+    };
+
+    let consent = object
+        .get("consent_required")
+        .expect("consent diff present");
+    assert_eq!(
+        consent,
+        &foundation_serialization::json!({"old": false, "new": true})
+    );
+
+    let features = object.get("features").expect("features diff present");
+    assert_eq!(
+        features,
+        &foundation_serialization::json!({
+            "old": ["wallet"],
+            "new": ["wallet", "dex"],
+        })
+    );
 }

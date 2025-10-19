@@ -1,4 +1,5 @@
 pub mod bicameral;
+mod codec;
 pub mod controller;
 pub mod inflation_cap;
 mod kalman;
@@ -9,6 +10,8 @@ mod state;
 mod store;
 mod token;
 mod variance;
+
+use concurrency::Lazy;
 
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
@@ -21,13 +24,18 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
-    QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryBalanceSnapshot,
+    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 
 /// Simplified address type reused across governance records.
 pub type Address = String;
+
+pub static NODE_GOV_STORE: Lazy<GovStore> = Lazy::new(|| {
+    let path = std::env::var("TB_GOVERNANCE_DB_PATH").unwrap_or_else(|_| "governance_db".into());
+    GovStore::open(path)
+});
 
 #[cfg(doctest)]
 #[doc = concat!("```rust\n", include_str!("../../examples/governance.rs"), "\n```")]
@@ -46,6 +54,7 @@ pub enum ParamKey {
     GammaReadSubCt,
     KappaCpuSubCt,
     LambdaBytesOutSubCt,
+    TreasuryPercentCt,
     ProofRebateLimitCt,
     RentRateCtPerByte,
     KillSwitchSubsidyReduction,

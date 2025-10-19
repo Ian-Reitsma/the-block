@@ -23,8 +23,16 @@ fn main() {
         let tls_warning_retention = env::var("AGGREGATOR_TLS_WARNING_RETENTION_SECS")
             .ok()
             .and_then(|s| s.parse().ok());
-        let state =
-            AppState::new_with_opts(token, None, &db, retention, None, tls_warning_retention);
+        let treasury_path = env::var("AGGREGATOR_TREASURY_FILE").ok().map(PathBuf::from);
+        let state = AppState::new_with_opts(
+            token,
+            None,
+            &db,
+            retention,
+            None,
+            tls_warning_retention,
+            treasury_path,
+        );
         state.spawn_cleanup();
         let app = router(state);
         let listener = TcpListener::bind(addr).await.expect("bind listener");

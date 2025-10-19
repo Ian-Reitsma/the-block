@@ -61,3 +61,43 @@ pub fn mark_cancelled(disbursement: &mut TreasuryDisbursement, reason: String) {
         cancelled_at: now_ts(),
     };
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub enum TreasuryBalanceEventKind {
+    Accrual,
+    Queued,
+    Executed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct TreasuryBalanceSnapshot {
+    pub id: u64,
+    pub balance_ct: u64,
+    pub delta_ct: i64,
+    pub recorded_at: u64,
+    pub event: TreasuryBalanceEventKind,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub disbursement_id: Option<u64>,
+}
+
+impl TreasuryBalanceSnapshot {
+    pub fn new(
+        id: u64,
+        balance_ct: u64,
+        delta_ct: i64,
+        event: TreasuryBalanceEventKind,
+        disbursement_id: Option<u64>,
+    ) -> Self {
+        Self {
+            id,
+            balance_ct,
+            delta_ct,
+            recorded_at: now_ts(),
+            event,
+            disbursement_id,
+        }
+    }
+}

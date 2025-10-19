@@ -1,4 +1,5 @@
 pub mod bicameral;
+pub mod codec;
 pub mod controller;
 pub mod kalman;
 pub mod params;
@@ -31,7 +32,9 @@ pub use store::{
     DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
     QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
-pub use treasury::{DisbursementStatus, TreasuryDisbursement};
+pub use treasury::{
+    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+};
 
 /// Simplified address type reused across governance records.
 pub type Address = String;
@@ -54,6 +57,7 @@ pub enum ParamKey {
     GammaReadSubCt,
     KappaCpuSubCt,
     LambdaBytesOutSubCt,
+    TreasuryPercentCt,
     ProofRebateLimitCt,
     RentRateCtPerByte,
     KillSwitchSubsidyReduction,

@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
+    governance::{DisbursementStatus, TreasuryDisbursement},
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
     Block,
@@ -85,6 +86,7 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/mempool/fee_floor", fee_floor_history)
         .get("/mempool/fee_floor_policy", fee_floor_policy_history)
         .get("/governance/dependency_policy", dependency_policy_history)
+        .get("/governance/treasury/disbursements", treasury_disbursements)
         .get("/network/certs", network_certs)
         .get("/network/overlay", network_overlay)
         .get("/blocks/:hash/proof", block_proof)
@@ -491,6 +493,68 @@ async fn dependency_policy_history(
     }
 }
 
+async fn treasury_disbursements(
+    request: Request<ExplorerHttpState>,
+) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let page = request
+        .query_param("page")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page' query parameter".into()))?
+        .unwrap_or(0);
+    let page_size = request
+        .query_param("page_size")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page_size' query parameter".into()))?
+        .unwrap_or(25);
+    let status = match request.query_param("status") {
+        Some(value) => {
+            let normalized = value.to_ascii_lowercase();
+            match normalized.as_str() {
+                "scheduled" => Some(TreasuryDisbursementStatusFilter::Scheduled),
+                "executed" => Some(TreasuryDisbursementStatusFilter::Executed),
+                "cancelled" => Some(TreasuryDisbursementStatusFilter::Cancelled),
+                _ => {
+                    return Err(HttpError::Handler(
+                        "invalid 'status' query parameter".into(),
+                    ))
+                }
+            }
+        }
+        None => None,
+    };
+    let destination = request
+        .query_param("destination")
+        .map(|value| value.to_string());
+    let min_epoch = request
+        .query_param("min_epoch")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'min_epoch' query parameter".into()))?;
+    let max_epoch = request
+        .query_param("max_epoch")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'max_epoch' query parameter".into()))?;
+
+    let filter = TreasuryDisbursementFilter {
+        status,
+        destination,
+        min_epoch,
+        max_epoch,
+    };
+
+    match explorer.treasury_disbursements(page, page_size, filter) {
+        Ok(result) => Ok(Response::new(StatusCode::OK).json(&result)),
+        Err(err) => {
+            log_error("treasury disbursement query failed", &err);
+            Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
+}
+
 async fn network_certs(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
     let certs = net_view::list_peer_certs();
     Response::new(StatusCode::OK).json(&certs)
@@ -712,6 +776,83 @@ pub struct LightProof {
     pub proof: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryDisbursementRow {
+    pub id: u64,
+    pub destination: String,
+    pub amount_ct: u64,
+    pub memo: String,
+    pub scheduled_epoch: u64,
+    pub created_at: u64,
+    pub status_label: String,
+    pub status_timestamp: u64,
+    pub status: DisbursementStatus,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub executed_tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub cancel_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryDisbursementPage {
+    pub total: usize,
+    pub page: usize,
+    pub page_size: usize,
+    pub disbursements: Vec<TreasuryDisbursementRow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreasuryDisbursementStatusFilter {
+    Scheduled,
+    Executed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TreasuryDisbursementFilter {
+    pub status: Option<TreasuryDisbursementStatusFilter>,
+    pub destination: Option<String>,
+    pub min_epoch: Option<u64>,
+    pub max_epoch: Option<u64>,
+}
+
+impl TreasuryDisbursementFilter {
+    fn matches(&self, row: &TreasuryDisbursementRow) -> bool {
+        if let Some(status) = self.status {
+            let matches_status = match status {
+                TreasuryDisbursementStatusFilter::Scheduled => {
+                    matches!(row.status, DisbursementStatus::Scheduled)
+                }
+                TreasuryDisbursementStatusFilter::Executed => {
+                    matches!(row.status, DisbursementStatus::Executed { .. })
+                }
+                TreasuryDisbursementStatusFilter::Cancelled => {
+                    matches!(row.status, DisbursementStatus::Cancelled { .. })
+                }
+            };
+            if !matches_status {
+                return false;
+            }
+        }
+        if let Some(dest) = &self.destination {
+            if !row.destination.eq_ignore_ascii_case(dest) {
+                return false;
+            }
+        }
+        if let Some(min_epoch) = self.min_epoch {
+            if row.scheduled_epoch < min_epoch {
+                return false;
+            }
+        }
+        if let Some(max_epoch) = self.max_epoch {
+            if row.scheduled_epoch > max_epoch {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DidDocumentView {
     pub address: String,
@@ -858,6 +999,18 @@ impl Explorer {
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS release_history (hash TEXT PRIMARY KEY, proposer TEXT, activation_epoch INTEGER, install_count INTEGER)",
+            params![],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount_ct INTEGER NOT NULL, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT)",
+            params![],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_treasury_disbursements_status ON treasury_disbursements(status)",
+            params![],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_treasury_disbursements_schedule ON treasury_disbursements(scheduled_epoch DESC, id DESC)",
             params![],
         )?;
         conn.execute(
@@ -1599,6 +1752,128 @@ impl Explorer {
             .into_iter()
             .map(|entry| (entry.activated_epoch, entry.install_count))
             .collect())
+    }
+
+    pub fn index_treasury_disbursements(&self, records: &[TreasuryDisbursement]) -> DbResult<()> {
+        let conn = self.conn()?;
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM treasury_disbursements", params![])?;
+        for record in records {
+            let (status_label, status_ts, tx_hash, cancel_reason) = match &record.status {
+                DisbursementStatus::Scheduled => {
+                    ("scheduled", record.created_at, None::<&str>, None::<&str>)
+                }
+                DisbursementStatus::Executed {
+                    tx_hash,
+                    executed_at,
+                } => (
+                    "executed",
+                    *executed_at,
+                    Some(tx_hash.as_str()),
+                    None::<&str>,
+                ),
+                DisbursementStatus::Cancelled {
+                    reason,
+                    cancelled_at,
+                } => (
+                    "cancelled",
+                    *cancelled_at,
+                    None::<&str>,
+                    Some(reason.as_str()),
+                ),
+            };
+            tx.execute(
+                "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    record.id as i64,
+                    &record.destination,
+                    record.amount_ct as i64,
+                    &record.memo,
+                    record.scheduled_epoch as i64,
+                    record.created_at as i64,
+                    status_label,
+                    status_ts as i64,
+                    tx_hash,
+                    cancel_reason,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn treasury_disbursements(
+        &self,
+        page: usize,
+        page_size: usize,
+        filter: TreasuryDisbursementFilter,
+    ) -> DbResult<TreasuryDisbursementPage> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT id, destination, amount_ct, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason FROM treasury_disbursements ORDER BY scheduled_epoch DESC, id DESC")?;
+        let rows = stmt.query_map(params![], |row| {
+            let status_text: String = row.get(6)?;
+            let status_ts: i64 = row.get(7)?;
+            let tx_hash: Option<String> = row.get(8)?;
+            let cancel_reason: Option<String> = row.get(9)?;
+            let status = match status_text.as_str() {
+                "scheduled" => DisbursementStatus::Scheduled,
+                "executed" => DisbursementStatus::Executed {
+                    tx_hash: tx_hash.clone().unwrap_or_default(),
+                    executed_at: status_ts.max(0) as u64,
+                },
+                "cancelled" => DisbursementStatus::Cancelled {
+                    reason: cancel_reason.clone().unwrap_or_default(),
+                    cancelled_at: status_ts.max(0) as u64,
+                },
+                _ => DisbursementStatus::Scheduled,
+            };
+            let executed_tx_hash = if matches!(status, DisbursementStatus::Executed { .. }) {
+                tx_hash.clone()
+            } else {
+                None
+            };
+            let cancel_text = if matches!(status, DisbursementStatus::Cancelled { .. }) {
+                cancel_reason.clone()
+            } else {
+                None
+            };
+            Ok(TreasuryDisbursementRow {
+                id: row.get::<_, i64>(0)? as u64,
+                destination: row.get(1)?,
+                amount_ct: row.get::<_, i64>(2)? as u64,
+                memo: row.get(3)?,
+                scheduled_epoch: row.get::<_, i64>(4)? as u64,
+                created_at: row.get::<_, i64>(5)? as u64,
+                status_label: status_text,
+                status_timestamp: status_ts.max(0) as u64,
+                status,
+                executed_tx_hash,
+                cancel_reason: cancel_text,
+            })
+        })?;
+        let mut records = Vec::new();
+        for entry in rows {
+            records.push(entry?);
+        }
+        let filtered: Vec<TreasuryDisbursementRow> = records
+            .into_iter()
+            .filter(|row| filter.matches(row))
+            .collect();
+        let total = filtered.len();
+        let size = page_size.max(1);
+        let start = page.saturating_mul(size);
+        let end = (start + size).min(total);
+        let disbursements = if start >= total {
+            Vec::new()
+        } else {
+            filtered[start..end].to_vec()
+        };
+        Ok(TreasuryDisbursementPage {
+            total,
+            page,
+            page_size: size,
+            disbursements,
+        })
     }
 
     pub fn ingest_dir(&self, dir: &Path) -> DbResult<()> {

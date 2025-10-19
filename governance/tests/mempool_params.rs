@@ -1,15 +1,13 @@
 use std::fs;
 use std::time::Duration;
 
-use foundation_serialization::{json, Deserialize};
+use foundation_serialization::json::Value;
 use governance::{
-    controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
-    RuntimeAdapter, Vote, VoteChoice,
+    codec::json_from_bytes, controller, registry, GovStore, ParamKey, Params, Proposal,
+    ProposalStatus, Runtime, RuntimeAdapter, Vote, VoteChoice,
 };
 use sys::tempfile::tempdir;
 
-#[derive(Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
 #[allow(dead_code)]
 struct FeeFloorEvent {
     epoch: u64,
@@ -18,10 +16,28 @@ struct FeeFloorEvent {
     percentile: i64,
 }
 
+impl FeeFloorEvent {
+    fn from_json(value: &Value) -> Option<Self> {
+        let obj = value.as_object()?;
+        Some(Self {
+            epoch: obj.get("epoch")?.as_u64()?,
+            proposal_id: obj.get("proposal_id")?.as_u64()?,
+            window: obj.get("window")?.as_i64()?,
+            percentile: obj.get("percentile")?.as_i64()?,
+        })
+    }
+}
+
 fn read_fee_floor_history(base: &std::path::Path) -> Vec<FeeFloorEvent> {
     let path = base.join("governance/history/fee_floor_policy.json");
     let bytes = fs::read(path).expect("history file");
-    json::from_slice(&bytes).expect("fee floor history json")
+    let value = json_from_bytes(&bytes).expect("fee floor history json");
+    value
+        .as_array()
+        .expect("fee floor history array")
+        .iter()
+        .map(|entry| FeeFloorEvent::from_json(entry).expect("fee floor history entry"))
+        .collect()
 }
 
 fn submit_and_activate(

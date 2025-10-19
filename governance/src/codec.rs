@@ -1,0 +1,1032 @@
+// Manual binary and JSON codecs for governance data structures.
+use crate::treasury::{
+    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+};
+use crate::{
+    ApprovedRelease, ParamKey, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot,
+    ReleaseVote, Vote, VoteChoice,
+};
+use foundation_serialization::json::{self, Map, Value};
+use std::convert::TryInto;
+
+pub type Result<T> = std::result::Result<T, sled::Error>;
+
+fn codec_error(msg: impl Into<String>) -> sled::Error {
+    sled::Error::Unsupported(msg.into().into_boxed_str())
+}
+
+#[derive(Default)]
+pub struct BinaryWriter {
+    buf: Vec<u8>,
+}
+
+impl BinaryWriter {
+    pub fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.buf
+    }
+
+    pub fn write_u8(&mut self, value: u8) {
+        self.buf.push(value);
+    }
+
+    pub fn write_bool(&mut self, value: bool) {
+        self.write_u8(if value { 1 } else { 0 });
+    }
+
+    pub fn write_u32(&mut self, value: u32) {
+        self.buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn write_u64(&mut self, value: u64) {
+        self.buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn write_i64(&mut self, value: i64) {
+        self.buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        self.write_u64(bytes.len() as u64);
+        self.buf.extend_from_slice(bytes);
+    }
+
+    pub fn write_string(&mut self, value: &str) {
+        self.write_bytes(value.as_bytes());
+    }
+}
+
+pub struct BinaryReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> BinaryReader<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    fn read_exact(&mut self, len: usize) -> Result<&'a [u8]> {
+        if self.remaining() < len {
+            return Err(codec_error("binary decode: unexpected end of input"));
+        }
+        let start = self.pos;
+        self.pos += len;
+        Ok(&self.data[start..self.pos])
+    }
+
+    pub fn read_u8(&mut self) -> Result<u8> {
+        Ok(self.read_exact(1)?[0])
+    }
+
+    pub fn read_bool(&mut self) -> Result<bool> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(codec_error(format!(
+                "binary decode: invalid bool tag {other}"
+            ))),
+        }
+    }
+
+    pub fn read_u32(&mut self) -> Result<u32> {
+        let bytes: [u8; 4] = self
+            .read_exact(4)?
+            .try_into()
+            .expect("slice with exact length");
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    pub fn read_u64(&mut self) -> Result<u64> {
+        let bytes: [u8; 8] = self
+            .read_exact(8)?
+            .try_into()
+            .expect("slice with exact length");
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    pub fn read_i64(&mut self) -> Result<i64> {
+        let bytes: [u8; 8] = self
+            .read_exact(8)?
+            .try_into()
+            .expect("slice with exact length");
+        Ok(i64::from_le_bytes(bytes))
+    }
+
+    pub fn read_bytes(&mut self) -> Result<Vec<u8>> {
+        let len = self.read_u64()? as usize;
+        let bytes = self.read_exact(len)?;
+        Ok(bytes.to_vec())
+    }
+
+    pub fn read_string(&mut self) -> Result<String> {
+        let bytes = self.read_bytes()?;
+        String::from_utf8(bytes).map_err(|e| codec_error(format!("utf8: {e}")))
+    }
+
+    pub fn finish(self) -> Result<()> {
+        if self.pos == self.data.len() {
+            Ok(())
+        } else {
+            Err(codec_error("binary decode: trailing bytes"))
+        }
+    }
+}
+
+pub trait BinaryCodec: Sized {
+    fn encode(&self, writer: &mut BinaryWriter);
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self>;
+}
+
+impl BinaryCodec for u8 {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(*self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_u8()
+    }
+}
+
+impl BinaryCodec for u32 {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u32(*self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_u32()
+    }
+}
+
+impl BinaryCodec for u64 {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u64(*self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_u64()
+    }
+}
+
+impl BinaryCodec for i64 {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_i64(*self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_i64()
+    }
+}
+
+impl BinaryCodec for bool {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_bool(*self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_bool()
+    }
+}
+
+impl BinaryCodec for String {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_string(self);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        reader.read_string()
+    }
+}
+
+impl<T: BinaryCodec> BinaryCodec for Vec<T> {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u64(self.len() as u64);
+        for item in self {
+            item.encode(writer);
+        }
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        let len = reader.read_u64()? as usize;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            out.push(T::decode(reader)?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T: BinaryCodec> BinaryCodec for Option<T> {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        match self {
+            Some(value) => {
+                writer.write_bool(true);
+                value.encode(writer);
+            }
+            None => writer.write_bool(false),
+        }
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        if reader.read_bool()? {
+            Ok(Some(T::decode(reader)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn param_key_to_tag(key: ParamKey) -> u8 {
+    match key {
+        ParamKey::SnapshotIntervalSecs => 0,
+        ParamKey::ConsumerFeeComfortP90Microunits => 1,
+        ParamKey::IndustrialAdmissionMinCapacity => 2,
+        ParamKey::FairshareGlobalMax => 3,
+        ParamKey::BurstRefillRatePerS => 4,
+        ParamKey::BetaStorageSubCt => 5,
+        ParamKey::GammaReadSubCt => 6,
+        ParamKey::KappaCpuSubCt => 7,
+        ParamKey::LambdaBytesOutSubCt => 8,
+        ParamKey::TreasuryPercentCt => 9,
+        ParamKey::ProofRebateLimitCt => 10,
+        ParamKey::RentRateCtPerByte => 11,
+        ParamKey::KillSwitchSubsidyReduction => 12,
+        ParamKey::MinerRewardLogisticTarget => 13,
+        ParamKey::LogisticSlope => 14,
+        ParamKey::MinerHysteresis => 15,
+        ParamKey::HeuristicMuMilli => 16,
+        ParamKey::FeeFloorWindow => 17,
+        ParamKey::FeeFloorPercentile => 18,
+        ParamKey::BadgeExpirySecs => 19,
+        ParamKey::BadgeIssueUptime => 20,
+        ParamKey::BadgeRevokeUptime => 21,
+        ParamKey::JurisdictionRegion => 22,
+        ParamKey::AiDiagnosticsEnabled => 23,
+        ParamKey::KalmanRShort => 24,
+        ParamKey::KalmanRMed => 25,
+        ParamKey::KalmanRLong => 26,
+        ParamKey::SchedulerWeightGossip => 27,
+        ParamKey::SchedulerWeightCompute => 28,
+        ParamKey::SchedulerWeightStorage => 29,
+        ParamKey::RuntimeBackend => 30,
+        ParamKey::TransportProvider => 31,
+        ParamKey::StorageEnginePolicy => 32,
+    }
+}
+
+fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
+    let key = match tag {
+        0 => ParamKey::SnapshotIntervalSecs,
+        1 => ParamKey::ConsumerFeeComfortP90Microunits,
+        2 => ParamKey::IndustrialAdmissionMinCapacity,
+        3 => ParamKey::FairshareGlobalMax,
+        4 => ParamKey::BurstRefillRatePerS,
+        5 => ParamKey::BetaStorageSubCt,
+        6 => ParamKey::GammaReadSubCt,
+        7 => ParamKey::KappaCpuSubCt,
+        8 => ParamKey::LambdaBytesOutSubCt,
+        9 => ParamKey::TreasuryPercentCt,
+        10 => ParamKey::ProofRebateLimitCt,
+        11 => ParamKey::RentRateCtPerByte,
+        12 => ParamKey::KillSwitchSubsidyReduction,
+        13 => ParamKey::MinerRewardLogisticTarget,
+        14 => ParamKey::LogisticSlope,
+        15 => ParamKey::MinerHysteresis,
+        16 => ParamKey::HeuristicMuMilli,
+        17 => ParamKey::FeeFloorWindow,
+        18 => ParamKey::FeeFloorPercentile,
+        19 => ParamKey::BadgeExpirySecs,
+        20 => ParamKey::BadgeIssueUptime,
+        21 => ParamKey::BadgeRevokeUptime,
+        22 => ParamKey::JurisdictionRegion,
+        23 => ParamKey::AiDiagnosticsEnabled,
+        24 => ParamKey::KalmanRShort,
+        25 => ParamKey::KalmanRMed,
+        26 => ParamKey::KalmanRLong,
+        27 => ParamKey::SchedulerWeightGossip,
+        28 => ParamKey::SchedulerWeightCompute,
+        29 => ParamKey::SchedulerWeightStorage,
+        30 => ParamKey::RuntimeBackend,
+        31 => ParamKey::TransportProvider,
+        32 => ParamKey::StorageEnginePolicy,
+        other => {
+            return Err(codec_error(format!(
+                "binary decode: unknown ParamKey tag {other}"
+            )))
+        }
+    };
+    Ok(key)
+}
+
+impl BinaryCodec for ParamKey {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(param_key_to_tag(*self));
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        param_key_from_tag(reader.read_u8()?)
+    }
+}
+
+fn proposal_status_to_tag(status: ProposalStatus) -> u8 {
+    match status {
+        ProposalStatus::Open => 0,
+        ProposalStatus::Passed => 1,
+        ProposalStatus::Rejected => 2,
+        ProposalStatus::Activated => 3,
+        ProposalStatus::RolledBack => 4,
+    }
+}
+
+fn proposal_status_from_tag(tag: u8) -> Result<ProposalStatus> {
+    let status = match tag {
+        0 => ProposalStatus::Open,
+        1 => ProposalStatus::Passed,
+        2 => ProposalStatus::Rejected,
+        3 => ProposalStatus::Activated,
+        4 => ProposalStatus::RolledBack,
+        other => {
+            return Err(codec_error(format!(
+                "binary decode: unknown ProposalStatus tag {other}"
+            )))
+        }
+    };
+    Ok(status)
+}
+
+impl BinaryCodec for ProposalStatus {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(proposal_status_to_tag(*self));
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        proposal_status_from_tag(reader.read_u8()?)
+    }
+}
+
+fn vote_choice_to_tag(choice: VoteChoice) -> u8 {
+    match choice {
+        VoteChoice::Yes => 0,
+        VoteChoice::No => 1,
+        VoteChoice::Abstain => 2,
+    }
+}
+
+fn vote_choice_from_tag(tag: u8) -> Result<VoteChoice> {
+    let choice = match tag {
+        0 => VoteChoice::Yes,
+        1 => VoteChoice::No,
+        2 => VoteChoice::Abstain,
+        other => {
+            return Err(codec_error(format!(
+                "binary decode: unknown VoteChoice tag {other}"
+            )))
+        }
+    };
+    Ok(choice)
+}
+
+impl BinaryCodec for VoteChoice {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(vote_choice_to_tag(*self));
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        vote_choice_from_tag(reader.read_u8()?)
+    }
+}
+
+fn balance_event_to_tag(event: &TreasuryBalanceEventKind) -> u8 {
+    match event {
+        TreasuryBalanceEventKind::Accrual => 0,
+        TreasuryBalanceEventKind::Queued => 1,
+        TreasuryBalanceEventKind::Executed => 2,
+        TreasuryBalanceEventKind::Cancelled => 3,
+    }
+}
+
+fn balance_event_from_tag(tag: u8) -> Result<TreasuryBalanceEventKind> {
+    let event = match tag {
+        0 => TreasuryBalanceEventKind::Accrual,
+        1 => TreasuryBalanceEventKind::Queued,
+        2 => TreasuryBalanceEventKind::Executed,
+        3 => TreasuryBalanceEventKind::Cancelled,
+        other => {
+            return Err(codec_error(format!(
+                "binary decode: unknown TreasuryBalanceEventKind tag {other}"
+            )))
+        }
+    };
+    Ok(event)
+}
+
+impl BinaryCodec for TreasuryBalanceEventKind {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(balance_event_to_tag(self));
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        balance_event_from_tag(reader.read_u8()?)
+    }
+}
+
+impl BinaryCodec for Proposal {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.id.encode(writer);
+        self.key.encode(writer);
+        self.new_value.encode(writer);
+        self.min.encode(writer);
+        self.max.encode(writer);
+        self.proposer.encode(writer);
+        self.created_epoch.encode(writer);
+        self.vote_deadline_epoch.encode(writer);
+        self.activation_epoch.encode(writer);
+        self.status.encode(writer);
+        self.deps.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            id: u64::decode(reader)?,
+            key: ParamKey::decode(reader)?,
+            new_value: i64::decode(reader)?,
+            min: i64::decode(reader)?,
+            max: i64::decode(reader)?,
+            proposer: String::decode(reader)?,
+            created_epoch: u64::decode(reader)?,
+            vote_deadline_epoch: u64::decode(reader)?,
+            activation_epoch: Option::<u64>::decode(reader)?,
+            status: ProposalStatus::decode(reader)?,
+            deps: Vec::<u64>::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for Vote {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.proposal_id.encode(writer);
+        self.voter.encode(writer);
+        self.choice.encode(writer);
+        self.weight.encode(writer);
+        self.received_at.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            proposal_id: u64::decode(reader)?,
+            voter: String::decode(reader)?,
+            choice: VoteChoice::decode(reader)?,
+            weight: u64::decode(reader)?,
+            received_at: u64::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for ReleaseAttestation {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.signer.encode(writer);
+        self.signature.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            signer: String::decode(reader)?,
+            signature: String::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for ReleaseVote {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.id.encode(writer);
+        self.build_hash.encode(writer);
+        self.signatures.encode(writer);
+        self.signature_threshold.encode(writer);
+        self.signer_set.encode(writer);
+        self.proposer.encode(writer);
+        self.created_epoch.encode(writer);
+        self.vote_deadline_epoch.encode(writer);
+        self.activation_epoch.encode(writer);
+        self.status.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            id: u64::decode(reader)?,
+            build_hash: String::decode(reader)?,
+            signatures: Vec::<ReleaseAttestation>::decode(reader)?,
+            signature_threshold: u32::decode(reader)?,
+            signer_set: Vec::<String>::decode(reader)?,
+            proposer: String::decode(reader)?,
+            created_epoch: u64::decode(reader)?,
+            vote_deadline_epoch: u64::decode(reader)?,
+            activation_epoch: Option::<u64>::decode(reader)?,
+            status: ProposalStatus::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for ReleaseBallot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.proposal_id.encode(writer);
+        self.voter.encode(writer);
+        self.choice.encode(writer);
+        self.weight.encode(writer);
+        self.received_at.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            proposal_id: u64::decode(reader)?,
+            voter: String::decode(reader)?,
+            choice: VoteChoice::decode(reader)?,
+            weight: u64::decode(reader)?,
+            received_at: u64::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for ApprovedRelease {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.build_hash.encode(writer);
+        self.activated_epoch.encode(writer);
+        self.proposer.encode(writer);
+        self.signatures.encode(writer);
+        self.signature_threshold.encode(writer);
+        self.signer_set.encode(writer);
+        self.install_times.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            build_hash: String::decode(reader)?,
+            activated_epoch: u64::decode(reader)?,
+            proposer: String::decode(reader)?,
+            signatures: Vec::<ReleaseAttestation>::decode(reader)?,
+            signature_threshold: u32::decode(reader)?,
+            signer_set: Vec::<String>::decode(reader)?,
+            install_times: Vec::<u64>::decode(reader)?,
+        })
+    }
+}
+
+fn disbursement_status_to_tag(status: &DisbursementStatus) -> u8 {
+    match status {
+        DisbursementStatus::Scheduled => 0,
+        DisbursementStatus::Executed { .. } => 1,
+        DisbursementStatus::Cancelled { .. } => 2,
+    }
+}
+
+impl BinaryCodec for DisbursementStatus {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(disbursement_status_to_tag(self));
+        match self {
+            DisbursementStatus::Scheduled => {}
+            DisbursementStatus::Executed {
+                tx_hash,
+                executed_at,
+            } => {
+                tx_hash.encode(writer);
+                executed_at.encode(writer);
+            }
+            DisbursementStatus::Cancelled {
+                reason,
+                cancelled_at,
+            } => {
+                reason.encode(writer);
+                cancelled_at.encode(writer);
+            }
+        }
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        match reader.read_u8()? {
+            0 => Ok(DisbursementStatus::Scheduled),
+            1 => {
+                let tx_hash = String::decode(reader)?;
+                let executed_at = u64::decode(reader)?;
+                Ok(DisbursementStatus::Executed {
+                    tx_hash,
+                    executed_at,
+                })
+            }
+            2 => {
+                let reason = String::decode(reader)?;
+                let cancelled_at = u64::decode(reader)?;
+                Ok(DisbursementStatus::Cancelled {
+                    reason,
+                    cancelled_at,
+                })
+            }
+            other => Err(codec_error(format!(
+                "binary decode: unknown DisbursementStatus tag {other}"
+            ))),
+        }
+    }
+}
+
+impl BinaryCodec for TreasuryDisbursement {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.id.encode(writer);
+        self.destination.encode(writer);
+        self.amount_ct.encode(writer);
+        self.memo.encode(writer);
+        self.scheduled_epoch.encode(writer);
+        self.created_at.encode(writer);
+        self.status.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            id: u64::decode(reader)?,
+            destination: String::decode(reader)?,
+            amount_ct: u64::decode(reader)?,
+            memo: String::decode(reader)?,
+            scheduled_epoch: u64::decode(reader)?,
+            created_at: u64::decode(reader)?,
+            status: DisbursementStatus::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for TreasuryBalanceSnapshot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.id.encode(writer);
+        self.balance_ct.encode(writer);
+        self.delta_ct.encode(writer);
+        self.recorded_at.encode(writer);
+        self.event.encode(writer);
+        self.disbursement_id.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            id: u64::decode(reader)?,
+            balance_ct: u64::decode(reader)?,
+            delta_ct: i64::decode(reader)?,
+            recorded_at: u64::decode(reader)?,
+            event: TreasuryBalanceEventKind::decode(reader)?,
+            disbursement_id: Option::<u64>::decode(reader)?,
+        })
+    }
+}
+
+fn status_value(status: &DisbursementStatus) -> Value {
+    match status {
+        DisbursementStatus::Scheduled => Value::Object(Map::new()),
+        DisbursementStatus::Executed {
+            tx_hash,
+            executed_at,
+        } => {
+            let mut map = Map::new();
+            map.insert("tx_hash".into(), Value::String(tx_hash.clone()));
+            map.insert("executed_at".into(), Value::Number((*executed_at).into()));
+            Value::Object(map)
+        }
+        DisbursementStatus::Cancelled {
+            reason,
+            cancelled_at,
+        } => {
+            let mut map = Map::new();
+            map.insert("reason".into(), Value::String(reason.clone()));
+            map.insert("cancelled_at".into(), Value::Number((*cancelled_at).into()));
+            Value::Object(map)
+        }
+    }
+}
+
+fn status_from_value(variant: &str, map: &Map) -> Result<DisbursementStatus> {
+    match variant {
+        "Scheduled" => Ok(DisbursementStatus::Scheduled),
+        "Executed" => {
+            let tx_hash = map
+                .get("tx_hash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| codec_error("treasury JSON: missing tx_hash"))?;
+            let executed_at = map
+                .get("executed_at")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing executed_at"))?;
+            Ok(DisbursementStatus::Executed {
+                tx_hash: tx_hash.to_string(),
+                executed_at,
+            })
+        }
+        "Cancelled" => {
+            let reason = map
+                .get("reason")
+                .and_then(Value::as_str)
+                .ok_or_else(|| codec_error("treasury JSON: missing reason"))?;
+            let cancelled_at = map
+                .get("cancelled_at")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing cancelled_at"))?;
+            Ok(DisbursementStatus::Cancelled {
+                reason: reason.to_string(),
+                cancelled_at,
+            })
+        }
+        other => Err(codec_error(format!(
+            "treasury JSON: unknown disbursement status {other}"
+        ))),
+    }
+}
+
+pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
+    let mut map = Map::new();
+    map.insert("id".into(), Value::Number(disbursement.id.into()));
+    map.insert(
+        "destination".into(),
+        Value::String(disbursement.destination.clone()),
+    );
+    map.insert(
+        "amount_ct".into(),
+        Value::Number(disbursement.amount_ct.into()),
+    );
+    map.insert("memo".into(), Value::String(disbursement.memo.clone()));
+    map.insert(
+        "scheduled_epoch".into(),
+        Value::Number(disbursement.scheduled_epoch.into()),
+    );
+    map.insert(
+        "created_at".into(),
+        Value::Number(disbursement.created_at.into()),
+    );
+    let status_variant = match &disbursement.status {
+        DisbursementStatus::Scheduled => "Scheduled",
+        DisbursementStatus::Executed { .. } => "Executed",
+        DisbursementStatus::Cancelled { .. } => "Cancelled",
+    };
+    let mut status_map = Map::new();
+    status_map.insert(status_variant.into(), status_value(&disbursement.status));
+    map.insert("status".into(), Value::Object(status_map));
+    Value::Object(map)
+}
+
+pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| codec_error("treasury JSON: expected object"))?;
+    let id = obj
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury JSON: missing id"))?;
+    let destination = obj
+        .get("destination")
+        .and_then(Value::as_str)
+        .ok_or_else(|| codec_error("treasury JSON: missing destination"))?
+        .to_string();
+    let amount_ct = obj
+        .get("amount_ct")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury JSON: missing amount_ct"))?;
+    let memo = obj
+        .get("memo")
+        .and_then(Value::as_str)
+        .ok_or_else(|| codec_error("treasury JSON: missing memo"))?
+        .to_string();
+    let scheduled_epoch = obj
+        .get("scheduled_epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury JSON: missing scheduled_epoch"))?;
+    let created_at = obj
+        .get("created_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury JSON: missing created_at"))?;
+    let status_obj = obj
+        .get("status")
+        .and_then(Value::as_object)
+        .ok_or_else(|| codec_error("treasury JSON: missing status"))?;
+    if status_obj.len() != 1 {
+        return Err(codec_error("treasury JSON: invalid status payload"));
+    }
+    let (variant, payload) = status_obj.iter().next().unwrap();
+    let payload_obj = payload
+        .as_object()
+        .ok_or_else(|| codec_error("treasury JSON: invalid status value"))?;
+    let status = status_from_value(variant, payload_obj)?;
+    Ok(TreasuryDisbursement {
+        id,
+        destination,
+        amount_ct,
+        memo,
+        scheduled_epoch,
+        created_at,
+        status,
+    })
+}
+
+pub fn balance_snapshot_to_json(snapshot: &TreasuryBalanceSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert("id".into(), Value::Number(snapshot.id.into()));
+    map.insert(
+        "balance_ct".into(),
+        Value::Number(snapshot.balance_ct.into()),
+    );
+    map.insert("delta_ct".into(), Value::Number(snapshot.delta_ct.into()));
+    map.insert(
+        "recorded_at".into(),
+        Value::Number(snapshot.recorded_at.into()),
+    );
+    let event_str = match snapshot.event {
+        TreasuryBalanceEventKind::Accrual => "Accrual",
+        TreasuryBalanceEventKind::Queued => "Queued",
+        TreasuryBalanceEventKind::Executed => "Executed",
+        TreasuryBalanceEventKind::Cancelled => "Cancelled",
+    };
+    map.insert("event".into(), Value::String(event_str.into()));
+    if let Some(id) = snapshot.disbursement_id {
+        map.insert("disbursement_id".into(), Value::Number(id.into()));
+    }
+    Value::Object(map)
+}
+
+pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapshot> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| codec_error("treasury balance JSON: expected object"))?;
+    let id = obj
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury balance JSON: missing id"))?;
+    let balance_ct = obj
+        .get("balance_ct")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury balance JSON: missing balance_ct"))?;
+    let delta_ct = obj
+        .get("delta_ct")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| codec_error("treasury balance JSON: missing delta_ct"))?;
+    let recorded_at = obj
+        .get("recorded_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| codec_error("treasury balance JSON: missing recorded_at"))?;
+    let event = match obj
+        .get("event")
+        .and_then(Value::as_str)
+        .ok_or_else(|| codec_error("treasury balance JSON: missing event"))?
+    {
+        "Accrual" => TreasuryBalanceEventKind::Accrual,
+        "Queued" => TreasuryBalanceEventKind::Queued,
+        "Executed" => TreasuryBalanceEventKind::Executed,
+        "Cancelled" => TreasuryBalanceEventKind::Cancelled,
+        other => {
+            return Err(codec_error(format!(
+                "treasury balance JSON: unknown event {other}"
+            )))
+        }
+    };
+    let disbursement_id = obj.get("disbursement_id").and_then(Value::as_u64);
+    Ok(TreasuryBalanceSnapshot {
+        id,
+        balance_ct,
+        delta_ct,
+        recorded_at,
+        event,
+        disbursement_id,
+    })
+}
+
+pub fn encode_binary<T: BinaryCodec>(value: &T) -> Result<Vec<u8>> {
+    let mut writer = BinaryWriter::new();
+    value.encode(&mut writer);
+    Ok(writer.into_inner())
+}
+
+pub fn decode_binary<T: BinaryCodec>(bytes: &[u8]) -> Result<T> {
+    let mut reader = BinaryReader::new(bytes);
+    let value = T::decode(&mut reader)?;
+    reader.finish()?;
+    Ok(value)
+}
+
+pub fn encode_binary_vec<T: BinaryCodec>(values: &[T]) -> Result<Vec<u8>> {
+    let mut writer = BinaryWriter::new();
+    writer.write_u64(values.len() as u64);
+    for value in values {
+        value.encode(&mut writer);
+    }
+    Ok(writer.into_inner())
+}
+
+pub fn decode_binary_vec<T: BinaryCodec>(bytes: &[u8]) -> Result<Vec<T>> {
+    let mut reader = BinaryReader::new(bytes);
+    let values = Vec::<T>::decode(&mut reader)?;
+    reader.finish()?;
+    Ok(values)
+}
+
+pub fn disbursements_to_json_array(records: &[TreasuryDisbursement]) -> Value {
+    Value::Array(records.iter().map(disbursement_to_json).collect())
+}
+
+pub fn disbursements_from_json_array(value: &Value) -> Result<Vec<TreasuryDisbursement>> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| codec_error("treasury JSON: expected array"))?;
+    arr.iter().map(disbursement_from_json).collect()
+}
+
+pub fn balance_history_to_json(history: &[TreasuryBalanceSnapshot]) -> Value {
+    Value::Array(history.iter().map(balance_snapshot_to_json).collect())
+}
+
+pub fn balance_history_from_json(value: &Value) -> Result<Vec<TreasuryBalanceSnapshot>> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| codec_error("treasury balance JSON: expected array"))?;
+    arr.iter().map(balance_snapshot_from_json).collect()
+}
+
+pub fn param_key_to_string(key: ParamKey) -> &'static str {
+    match key {
+        ParamKey::SnapshotIntervalSecs => "SnapshotIntervalSecs",
+        ParamKey::ConsumerFeeComfortP90Microunits => "ConsumerFeeComfortP90Microunits",
+        ParamKey::IndustrialAdmissionMinCapacity => "IndustrialAdmissionMinCapacity",
+        ParamKey::FairshareGlobalMax => "FairshareGlobalMax",
+        ParamKey::BurstRefillRatePerS => "BurstRefillRatePerS",
+        ParamKey::BetaStorageSubCt => "BetaStorageSubCt",
+        ParamKey::GammaReadSubCt => "GammaReadSubCt",
+        ParamKey::KappaCpuSubCt => "KappaCpuSubCt",
+        ParamKey::LambdaBytesOutSubCt => "LambdaBytesOutSubCt",
+        ParamKey::TreasuryPercentCt => "TreasuryPercentCt",
+        ParamKey::ProofRebateLimitCt => "ProofRebateLimitCt",
+        ParamKey::RentRateCtPerByte => "RentRateCtPerByte",
+        ParamKey::KillSwitchSubsidyReduction => "KillSwitchSubsidyReduction",
+        ParamKey::MinerRewardLogisticTarget => "MinerRewardLogisticTarget",
+        ParamKey::LogisticSlope => "LogisticSlope",
+        ParamKey::MinerHysteresis => "MinerHysteresis",
+        ParamKey::HeuristicMuMilli => "HeuristicMuMilli",
+        ParamKey::FeeFloorWindow => "FeeFloorWindow",
+        ParamKey::FeeFloorPercentile => "FeeFloorPercentile",
+        ParamKey::BadgeExpirySecs => "BadgeExpirySecs",
+        ParamKey::BadgeIssueUptime => "BadgeIssueUptime",
+        ParamKey::BadgeRevokeUptime => "BadgeRevokeUptime",
+        ParamKey::JurisdictionRegion => "JurisdictionRegion",
+        ParamKey::AiDiagnosticsEnabled => "AiDiagnosticsEnabled",
+        ParamKey::KalmanRShort => "KalmanRShort",
+        ParamKey::KalmanRMed => "KalmanRMed",
+        ParamKey::KalmanRLong => "KalmanRLong",
+        ParamKey::SchedulerWeightGossip => "SchedulerWeightGossip",
+        ParamKey::SchedulerWeightCompute => "SchedulerWeightCompute",
+        ParamKey::SchedulerWeightStorage => "SchedulerWeightStorage",
+        ParamKey::RuntimeBackend => "RuntimeBackend",
+        ParamKey::TransportProvider => "TransportProvider",
+        ParamKey::StorageEnginePolicy => "StorageEnginePolicy",
+    }
+}
+
+pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
+    match value {
+        "SnapshotIntervalSecs" => Ok(ParamKey::SnapshotIntervalSecs),
+        "ConsumerFeeComfortP90Microunits" => Ok(ParamKey::ConsumerFeeComfortP90Microunits),
+        "IndustrialAdmissionMinCapacity" => Ok(ParamKey::IndustrialAdmissionMinCapacity),
+        "FairshareGlobalMax" => Ok(ParamKey::FairshareGlobalMax),
+        "BurstRefillRatePerS" => Ok(ParamKey::BurstRefillRatePerS),
+        "BetaStorageSubCt" => Ok(ParamKey::BetaStorageSubCt),
+        "GammaReadSubCt" => Ok(ParamKey::GammaReadSubCt),
+        "KappaCpuSubCt" => Ok(ParamKey::KappaCpuSubCt),
+        "LambdaBytesOutSubCt" => Ok(ParamKey::LambdaBytesOutSubCt),
+        "TreasuryPercentCt" => Ok(ParamKey::TreasuryPercentCt),
+        "ProofRebateLimitCt" => Ok(ParamKey::ProofRebateLimitCt),
+        "RentRateCtPerByte" => Ok(ParamKey::RentRateCtPerByte),
+        "KillSwitchSubsidyReduction" => Ok(ParamKey::KillSwitchSubsidyReduction),
+        "MinerRewardLogisticTarget" => Ok(ParamKey::MinerRewardLogisticTarget),
+        "LogisticSlope" => Ok(ParamKey::LogisticSlope),
+        "MinerHysteresis" => Ok(ParamKey::MinerHysteresis),
+        "HeuristicMuMilli" => Ok(ParamKey::HeuristicMuMilli),
+        "FeeFloorWindow" => Ok(ParamKey::FeeFloorWindow),
+        "FeeFloorPercentile" => Ok(ParamKey::FeeFloorPercentile),
+        "BadgeExpirySecs" => Ok(ParamKey::BadgeExpirySecs),
+        "BadgeIssueUptime" => Ok(ParamKey::BadgeIssueUptime),
+        "BadgeRevokeUptime" => Ok(ParamKey::BadgeRevokeUptime),
+        "JurisdictionRegion" => Ok(ParamKey::JurisdictionRegion),
+        "AiDiagnosticsEnabled" => Ok(ParamKey::AiDiagnosticsEnabled),
+        "KalmanRShort" => Ok(ParamKey::KalmanRShort),
+        "KalmanRMed" => Ok(ParamKey::KalmanRMed),
+        "KalmanRLong" => Ok(ParamKey::KalmanRLong),
+        "SchedulerWeightGossip" => Ok(ParamKey::SchedulerWeightGossip),
+        "SchedulerWeightCompute" => Ok(ParamKey::SchedulerWeightCompute),
+        "SchedulerWeightStorage" => Ok(ParamKey::SchedulerWeightStorage),
+        "RuntimeBackend" => Ok(ParamKey::RuntimeBackend),
+        "TransportProvider" => Ok(ParamKey::TransportProvider),
+        "StorageEnginePolicy" => Ok(ParamKey::StorageEnginePolicy),
+        other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
+    }
+}
+
+pub fn json_to_bytes(value: &Value) -> Vec<u8> {
+    json::to_vec_value(value)
+}
+
+pub fn json_from_bytes(bytes: &[u8]) -> Result<Value> {
+    json::value_from_slice(bytes).map_err(|e| codec_error(format!("json decode: {e}")))
+}

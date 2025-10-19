@@ -46,6 +46,19 @@ let json_value = signed.to_json_value();
 Manual conversion keeps FIRST_PARTY_ONLY builds green while surfacing precise
 errors (field name + expectation) when policy packs are malformed.
 
+### Binary codec
+
+The crate now ships a `codec` module that mirrors the legacy struct encoder
+without relying on serde-derived binary formats. `codec::encode_policy_pack` and
+`codec::decode_policy_pack` encode field-count-prefixed structs through the
+first-party `foundation_serialization::binary_cursor` helpers, while
+`encode_signed_pack`/`decode_signed_pack` wrap the nested pack and signature in
+the same layout. The regression suite covers happy paths and error cases
+(missing fields, duplicate keys, unexpected fields, trailing bytes) so both the
+JSON and binary representations stay in sync. Downstream sled trees, explorers,
+and CLI tooling can swap in the binary codec immediately without pulling in
+third-party serializers.
+
 Policy packs live alongside the node configuration and can be swapped without
 recompiling.  Governance may distribute canonical packs and validators can load
 them at runtime.  Built‑in templates are available via `PolicyPack::template("US")`

@@ -301,7 +301,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 - **Run fleet-scale QUIC chaos drills** – invoke `scripts/chaos.sh --quic-loss 0.15 --quic-dup 0.03` across multi-region clusters, harvest retransmit deltas via `sim/quic_chaos_summary.rs`, and extend `docs/networking.md` with mitigation guidance pulled from the new telemetry traces.
 - **Document multisig signer payloads and release verification** – extend `docs/dex.md` and `docs/bridges.md` with the expanded signer-set schema, add release-verifier walkthroughs, update explorer guides, and ensure CLI examples mirror the JSON payload emitted by the wallet.
-- **Publish treasury dashboard alerts** – render queued/executed disbursements in explorer widgets, feed the aggregator with treasury metrics, and document operator response workflows in `docs/governance.md`.
+- **Publish treasury dashboard alerts** – explorer widgets remain pending; aggregator ingestion, warning surfaces, and documentation in `docs/governance.md` have landed alongside the new `gov.treasury.*` RPC coverage.
 - **Automate release rollout alerting** – add explorer jobs that reconcile `release_history` installs against the signer threshold, publish Grafana panels for stale nodes, and raise alerts when `release_quorum_fail_total` moves without a corresponding signer update.
 - **Stand up anomaly heuristics in the aggregator** – feed correlation caches into preliminary anomaly scoring, auto-request log dumps on clustered `quic_handshake_fail_total{peer}` spikes, and document the response workflow in `docs/monitoring.md`.
 - **Ship operator rollback drills** – expand `docs/governance_release.md` with staged rollback exercises that rehearse `update::rollback_failed_startup`, including guidance for restoring prior binaries and verifying provenance signatures after a revert.
@@ -327,6 +327,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 - **Smart-contract VM and SDK release** – design a deterministic instruction set with gas accounting, ship developer tooling and ABI specs, host example apps, audit and formally verify the stack.
 - **Permissionless compute marketplace** – integrate heterogeneous GPU/CPU scheduling, enable provider reputation scoring, support escrowed cross-chain payments, build an SLA arbitration framework, and release marketplace analytics.
 - **Global jurisdiction compliance framework** – publish regional policy packs, add PQ encryption, maintain transparency logs, allow per-region feature toggles, and run forkability trials.
+  - Progress: jurisdiction crate now ships first-party JSON + binary codecs, drops the last `serde` dependency, and adds regression coverage for sled-backed disbursement history.
 - **Decentralized storage and bandwidth markets** – incentivize DHT storage, reward long-range mesh relays, integrate content addressing, benchmark large file transfers, and provide retrieval SDKs.
 - **Mainnet launch and sustainability** – lock protocol parameters via governance, run multi-phase audits and bug bounties, schedule staged token releases, set up long-term funding mechanisms, and establish community maintenance committees.
 

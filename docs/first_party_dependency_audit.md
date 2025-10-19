@@ -1,6 +1,16 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-16 22:30:00Z_
+_Last updated: 2025-10-18 23:30:00Z_
+
+> **2025-10-18 update (treasury RPC + aggregator):** Governance RPC handlers now
+> surface typed `gov.treasury.*` endpoints that decode through the
+> `foundation_serialization` facade and share pagination helpers with the CLI.
+> `contract gov treasury fetch` consumes those endpoints with first-party
+> envelope parsing and emits actionable transport diagnostics, while the metrics
+> aggregator reuses the sled-backed snapshots, tolerates legacy JSON records
+> that stored numeric fields as strings, and warns when disbursements exist
+> without matching balance history. The end-to-end HTTP integration test keeps
+> the dispatcher on the first-party stack and guards the new RPC wiring.
 
 > **2025-10-16 update (evening++)**: The serialization facade’s test suite now
 > passes under the stub backend. `foundation_serialization::json!` supports
@@ -91,6 +101,12 @@ explicit.
 > workspace-wide request/response schema, allowing `jsonrpc-core` to be removed
 > from manifests while keeping CLI and runtime handlers on a shared, audited
 > envelope.
+> **2025-10-18 update (treasury + bridge RPC):** `governance::Params` now exposes
+> `to_value`/`deserialize`, letting RPC handlers clone parameter envelopes through
+> the facade instead of hand-rolled JSON maps. Bridge endpoints accept typed
+> request/response structs, reuse a shared commitment decoder, and serialize every
+> payload via `foundation_serialization::json`, eliminating the bespoke builders
+> that previously lived in `node/src/rpc/bridge.rs`.
 | rpc | `node/src/rpc/analytics.rs` | 3 | serde derive | Analytics endpoints encode serde payloads. |
 | rpc | `node/src/rpc/light.rs` | 2, 17, 43 | serde serialize + skip attributes | Light-client responses rely on serde. |
 | rpc | `node/src/rpc/logs.rs` | 9 | serde serialize | Log export stream uses serde for structured frames. |
@@ -226,14 +242,16 @@ tests while the module is phased out.
   foundation_serialization --no-default-features --features serde-stub`. The
   stub has since grown direct `visit_u8`/`visit_u16`/`visit_u32` hooks so tuple
   decoding works without falling back to `visit_u64`.
-- ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
-  handwritten `foundation_serialization::json` conversions
-  (`PolicyPack::from_json_value`, `SignedPack::from_json_slice`,
-  `to_json_value`) and the in-house HTTP client, eliminating the `ureq` and
-  `log` dependencies entirely. Law-enforcement logging emits
-  `diagnostics::log` info records when appends succeed, and the refreshed test
-  suite covers array/base64 signatures plus malformed pack rejection so the
-  manual paths stay hardened.
+- ✅ `crates/jurisdiction` now signs, fetches, diffs, **and encodes** policy packs
+  via first-party helpers. JSON conversions continue to run through
+  `foundation_serialization::json`, while the new `codec` module introduces
+  handwritten binary cursors for `PolicyPack`/`SignedPack`, drops the workspace
+  `serde` dependency entirely, and ships regression coverage that rejects
+  missing/duplicate fields, unexpected keys, and trailing bytes. Law-enforcement
+  logging still emits `diagnostics::log` info records on success, the in-house
+  HTTP client remains the only transport, and the refreshed suite keeps legacy
+  diff handling intact while guaranteeing sled-backed trees and
+  FIRST_PARTY_ONLY builds rely solely on in-house codecs.
 - ✅ Governance webhook notifications dispatch through `httpd::BlockingClient`
   so telemetry alerts ride first-party HTTP primitives instead of `ureq`.
 - ✅ `tb-sim`'s dependency-fault harness defaults to the first-party binary codec;
