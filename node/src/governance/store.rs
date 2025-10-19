@@ -1,4 +1,10 @@
 use super::{
+    codec::{
+        balance_history_from_json, balance_history_to_json, decode_binary,
+        disbursements_from_json_array, disbursements_to_json_array, encode_binary, json_from_bytes,
+        json_to_bytes, param_key_from_string, param_key_to_string, BinaryCodec, BinaryWriter,
+        Result as CodecResult,
+    },
     registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
     ReleaseVote, Runtime, Vote, VoteChoice,
 };
@@ -7,15 +13,20 @@ use crate::telemetry::{
     governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_PROPOSALS_PENDING, GOV_ROLLBACK_TOTAL,
     GOV_VOTES_TOTAL, PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
+use crate::treasury::{
+    mark_cancelled, mark_executed, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    TreasuryDisbursement,
+};
 use concurrency::Lazy;
-use foundation_serialization::de::DeserializeOwned;
-use foundation_serialization::{binary, json, Deserialize, Serialize};
+use foundation_serialization::json::{Map, Value};
+use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
 use sled::Config;
 use std::collections::HashMap;
 use std::env;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +36,8 @@ pub const ROLLBACK_WINDOW_EPOCHS: u64 = 1;
 pub const QUORUM: u64 = 1;
 const PARAM_HISTORY_LIMIT: usize = 512;
 const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
+const TREASURY_HISTORY_LIMIT: usize = 1024;
+const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -34,6 +47,26 @@ pub struct LastActivation {
     pub old_value: i64,
     pub new_value: i64,
     pub activated_epoch: u64,
+}
+
+impl BinaryCodec for LastActivation {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.proposal_id.encode(writer);
+        self.key.encode(writer);
+        self.old_value.encode(writer);
+        self.new_value.encode(writer);
+        self.activated_epoch.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            proposal_id: u64::decode(reader)?,
+            key: ParamKey::decode(reader)?,
+            old_value: i64::decode(reader)?,
+            new_value: i64::decode(reader)?,
+            activated_epoch: u64::decode(reader)?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,11 +83,49 @@ struct ParamChangeRecord {
     dependency_policy: Option<DependencyPolicySnapshot>,
 }
 
+impl BinaryCodec for ParamChangeRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.key.encode(writer);
+        self.proposal_id.encode(writer);
+        self.epoch.encode(writer);
+        self.old_value.encode(writer);
+        self.new_value.encode(writer);
+        self.fee_floor.encode(writer);
+        self.dependency_policy.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            key: ParamKey::decode(reader)?,
+            proposal_id: u64::decode(reader)?,
+            epoch: u64::decode(reader)?,
+            old_value: i64::decode(reader)?,
+            new_value: i64::decode(reader)?,
+            fee_floor: Option::<FeeFloorPolicySnapshot>::decode(reader)?,
+            dependency_policy: Option::<DependencyPolicySnapshot>::decode(reader)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 struct FeeFloorPolicySnapshot {
     window: i64,
     percentile: i64,
+}
+
+impl BinaryCodec for FeeFloorPolicySnapshot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.window.encode(writer);
+        self.percentile.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            window: i64::decode(reader)?,
+            percentile: i64::decode(reader)?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +144,20 @@ struct DependencyPolicySnapshot {
     allowed: Vec<String>,
 }
 
+impl BinaryCodec for DependencyPolicySnapshot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.kind.encode(writer);
+        self.allowed.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            kind: String::decode(reader)?,
+            allowed: Vec::<String>::decode(reader)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct DependencyPolicyRecord {
@@ -80,6 +165,24 @@ pub struct DependencyPolicyRecord {
     pub proposal_id: u64,
     pub kind: String,
     pub allowed: Vec<String>,
+}
+
+impl BinaryCodec for DependencyPolicyRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.epoch.encode(writer);
+        self.proposal_id.encode(writer);
+        self.kind.encode(writer);
+        self.allowed.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            epoch: u64::decode(reader)?,
+            proposal_id: u64::decode(reader)?,
+            kind: String::decode(reader)?,
+            allowed: Vec::<String>::decode(reader)?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +194,24 @@ pub struct DidRevocationRecord {
     pub revoked_at: u64,
 }
 
+impl BinaryCodec for DidRevocationRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.address.encode(writer);
+        self.reason.encode(writer);
+        self.epoch.encode(writer);
+        self.revoked_at.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            address: String::decode(reader)?,
+            reason: String::decode(reader)?,
+            epoch: u64::decode(reader)?,
+            revoked_at: u64::decode(reader)?,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct GovStore {
     db: Arc<sled::Db>,
@@ -100,12 +221,12 @@ pub struct GovStore {
 static GOV_DB_REGISTRY: Lazy<Mutex<HashMap<PathBuf, Weak<sled::Db>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
-    binary::encode(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
+fn ser<T: BinaryCodec>(value: &T) -> sled::Result<Vec<u8>> {
+    encode_binary(value)
 }
 
-fn de<T: DeserializeOwned>(bytes: &[u8]) -> sled::Result<T> {
-    binary::decode(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
+fn de<T: BinaryCodec>(bytes: &[u8]) -> sled::Result<T> {
+    decode_binary(bytes)
 }
 
 fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
@@ -113,6 +234,314 @@ fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
         Ok(list) => Ok(list),
         Err(_) => de::<u64>(bytes).map(|single| vec![single]),
     }
+}
+
+fn did_revocation_to_json(record: &DidRevocationRecord) -> Value {
+    let mut map = Map::new();
+    map.insert("address".into(), Value::String(record.address.clone()));
+    map.insert("reason".into(), Value::String(record.reason.clone()));
+    map.insert("epoch".into(), Value::Number(record.epoch.into()));
+    map.insert("revoked_at".into(), Value::Number(record.revoked_at.into()));
+    Value::Object(map)
+}
+
+fn did_revocation_from_json(value: &Value) -> CodecResult<DidRevocationRecord> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| sled::Error::Unsupported("did revocation JSON: expected object".into()))?;
+    let address = obj
+        .get("address")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("did revocation JSON: missing address".into()))?;
+    let reason = obj
+        .get("reason")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("did revocation JSON: missing reason".into()))?;
+    let epoch = obj
+        .get("epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| sled::Error::Unsupported("did revocation JSON: missing epoch".into()))?;
+    let revoked_at = obj
+        .get("revoked_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("did revocation JSON: missing revoked_at".into())
+        })?;
+    Ok(DidRevocationRecord {
+        address: address.to_string(),
+        reason: reason.to_string(),
+        epoch,
+        revoked_at,
+    })
+}
+
+fn fee_floor_snapshot_to_json(snapshot: &FeeFloorPolicySnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert("window".into(), Value::Number(snapshot.window.into()));
+    map.insert(
+        "percentile".into(),
+        Value::Number(snapshot.percentile.into()),
+    );
+    Value::Object(map)
+}
+
+fn fee_floor_snapshot_from_json(value: &Value) -> CodecResult<FeeFloorPolicySnapshot> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("fee floor snapshot JSON: expected object".into())
+    })?;
+    let window = obj.get("window").and_then(Value::as_i64).ok_or_else(|| {
+        sled::Error::Unsupported("fee floor snapshot JSON: missing window".into())
+    })?;
+    let percentile = obj
+        .get("percentile")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("fee floor snapshot JSON: missing percentile".into())
+        })?;
+    Ok(FeeFloorPolicySnapshot { window, percentile })
+}
+
+fn dependency_snapshot_to_json(snapshot: &DependencyPolicySnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert("kind".into(), Value::String(snapshot.kind.clone()));
+    map.insert(
+        "allowed".into(),
+        Value::Array(
+            snapshot
+                .allowed
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+    Value::Object(map)
+}
+
+fn dependency_snapshot_from_json(value: &Value) -> CodecResult<DependencyPolicySnapshot> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("dependency snapshot JSON: expected object".into())
+    })?;
+    let kind = obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("dependency snapshot JSON: missing kind".into()))?;
+    let allowed = obj
+        .get("allowed")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("dependency snapshot JSON: missing allowed".into())
+        })?
+        .iter()
+        .map(|v| {
+            v.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                sled::Error::Unsupported("dependency snapshot JSON: invalid allowed entry".into())
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DependencyPolicySnapshot {
+        kind: kind.to_string(),
+        allowed,
+    })
+}
+
+fn dependency_policy_record_to_json(record: &DependencyPolicyRecord) -> Value {
+    let mut map = Map::new();
+    map.insert("epoch".into(), Value::Number(record.epoch.into()));
+    map.insert(
+        "proposal_id".into(),
+        Value::Number(record.proposal_id.into()),
+    );
+    map.insert("kind".into(), Value::String(record.kind.clone()));
+    map.insert(
+        "allowed".into(),
+        Value::Array(
+            record
+                .allowed
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+    Value::Object(map)
+}
+
+fn dependency_policy_record_from_json(value: &Value) -> CodecResult<DependencyPolicyRecord> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("dependency policy JSON: expected object".into())
+    })?;
+    let epoch = obj
+        .get("epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| sled::Error::Unsupported("dependency policy JSON: missing epoch".into()))?;
+    let proposal_id = obj
+        .get("proposal_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("dependency policy JSON: missing proposal_id".into())
+        })?;
+    let kind = obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("dependency policy JSON: missing kind".into()))?;
+    let allowed = obj
+        .get("allowed")
+        .and_then(Value::as_array)
+        .ok_or_else(|| sled::Error::Unsupported("dependency policy JSON: missing allowed".into()))?
+        .iter()
+        .map(|v| {
+            v.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                sled::Error::Unsupported("dependency policy JSON: invalid allowed entry".into())
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DependencyPolicyRecord {
+        epoch,
+        proposal_id,
+        kind: kind.to_string(),
+        allowed,
+    })
+}
+
+fn fee_floor_record_to_json(record: &FeeFloorPolicyRecord) -> Value {
+    let mut map = Map::new();
+    map.insert("epoch".into(), Value::Number(record.epoch.into()));
+    map.insert(
+        "proposal_id".into(),
+        Value::Number(record.proposal_id.into()),
+    );
+    map.insert("window".into(), Value::Number(record.window.into()));
+    map.insert("percentile".into(), Value::Number(record.percentile.into()));
+    Value::Object(map)
+}
+
+fn fee_floor_record_from_json(value: &Value) -> CodecResult<FeeFloorPolicyRecord> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("fee floor history JSON: expected object".into())
+    })?;
+    let epoch = obj
+        .get("epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| sled::Error::Unsupported("fee floor history JSON: missing epoch".into()))?;
+    let proposal_id = obj
+        .get("proposal_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("fee floor history JSON: missing proposal_id".into())
+        })?;
+    let window = obj
+        .get("window")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| sled::Error::Unsupported("fee floor history JSON: missing window".into()))?;
+    let percentile = obj
+        .get("percentile")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("fee floor history JSON: missing percentile".into())
+        })?;
+    Ok(FeeFloorPolicyRecord {
+        epoch,
+        proposal_id,
+        window,
+        percentile,
+    })
+}
+
+fn param_change_to_json(record: &ParamChangeRecord) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "key".into(),
+        Value::String(param_key_to_string(record.key).into()),
+    );
+    map.insert(
+        "proposal_id".into(),
+        Value::Number(record.proposal_id.into()),
+    );
+    map.insert("epoch".into(), Value::Number(record.epoch.into()));
+    map.insert("old_value".into(), Value::Number(record.old_value.into()));
+    map.insert("new_value".into(), Value::Number(record.new_value.into()));
+    if let Some(snapshot) = &record.fee_floor {
+        map.insert("fee_floor".into(), fee_floor_snapshot_to_json(snapshot));
+    }
+    if let Some(snapshot) = &record.dependency_policy {
+        map.insert(
+            "dependency_policy".into(),
+            dependency_snapshot_to_json(snapshot),
+        );
+    }
+    Value::Object(map)
+}
+
+fn param_change_from_json(value: &Value) -> CodecResult<ParamChangeRecord> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: expected object".into()))?;
+    let key = obj
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: missing key".into()))?;
+    let proposal_id = obj
+        .get("proposal_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: missing proposal_id".into()))?;
+    let epoch = obj
+        .get("epoch")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: missing epoch".into()))?;
+    let old_value = obj
+        .get("old_value")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: missing old_value".into()))?;
+    let new_value = obj
+        .get("new_value")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| sled::Error::Unsupported("param change JSON: missing new_value".into()))?;
+    let fee_floor = obj
+        .get("fee_floor")
+        .map(fee_floor_snapshot_from_json)
+        .transpose()?;
+    let dependency_policy = obj
+        .get("dependency_policy")
+        .map(dependency_snapshot_from_json)
+        .transpose()?;
+    Ok(ParamChangeRecord {
+        key: param_key_from_string(key)?,
+        proposal_id,
+        epoch,
+        old_value,
+        new_value,
+        fee_floor,
+        dependency_policy,
+    })
+}
+
+fn load_json_array<T, F>(path: &Path, parse: F) -> Vec<T>
+where
+    F: Fn(&Value) -> CodecResult<T>,
+{
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(value) = json_from_bytes(&bytes) {
+            if let Some(array) = value.as_array() {
+                let mut out = Vec::with_capacity(array.len());
+                for entry in array {
+                    match parse(entry) {
+                        Ok(item) => out.push(item),
+                        Err(_) => return Vec::new(),
+                    }
+                }
+                return out;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn write_json_array<T, F>(path: &Path, items: &[T], render: F)
+where
+    F: Fn(&T) -> Value,
+{
+    let value = Value::Array(items.iter().map(render).collect());
+    let bytes = json_to_bytes(&value);
+    let _ = std::fs::write(path, bytes);
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -195,17 +624,239 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let _ = std::fs::create_dir_all(&hist_dir);
         let path = hist_dir.join("did_revocations.json");
-        let mut history: Vec<DidRevocationRecord> = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut history = load_json_array(&path, did_revocation_from_json);
         history.push(record.clone());
         if history.len() > DID_REVOCATION_HISTORY_LIMIT {
             history.drain(0..history.len() - DID_REVOCATION_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = json::to_vec(&history) {
-            let _ = std::fs::write(&path, bytes);
+        write_json_array(&path, &history, did_revocation_to_json);
+    }
+
+    fn treasury_disbursement_path(&self) -> PathBuf {
+        self.base_path
+            .join("governance")
+            .join("treasury_disbursements.json")
+    }
+
+    fn treasury_balance_path(&self) -> PathBuf {
+        self.base_path
+            .join("governance")
+            .join("treasury_balance.json")
+    }
+
+    fn treasury_disbursements_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("treasury/disbursements")
+            .unwrap_or_else(|e| panic!("open treasury disbursements tree: {e}"))
+    }
+
+    fn treasury_balance_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("treasury/balance_state")
+            .unwrap_or_else(|e| panic!("open treasury balance tree: {e}"))
+    }
+
+    fn treasury_balance_history_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("treasury/balance_history")
+            .unwrap_or_else(|e| panic!("open treasury balance history tree: {e}"))
+    }
+
+    fn load_disbursements(&self) -> sled::Result<Vec<TreasuryDisbursement>> {
+        let tree = self.treasury_disbursements_tree();
+        let mut from_tree = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let record: TreasuryDisbursement = de(&raw)?;
+            from_tree.push(record);
         }
+        if !from_tree.is_empty() {
+            from_tree.sort_by_key(|record| record.id);
+            return Ok(from_tree);
+        }
+
+        let path = self.treasury_disbursement_path();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    let value = json_from_bytes(&bytes).map_err(|e| {
+                        sled::Error::Unsupported(
+                            format!("decode treasury disbursements: {e}").into(),
+                        )
+                    })?;
+                    let mut decoded = disbursements_from_json_array(&value)?;
+                    decoded.sort_by_key(|record| record.id);
+                    if !decoded.is_empty() {
+                        let _ = self.persist_disbursements(&decoded);
+                    }
+                    Ok(decoded)
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
+            Err(err) => Err(sled::Error::Unsupported(
+                format!("read treasury disbursements: {err}").into(),
+            )),
+        }
+    }
+
+    fn persist_disbursements(&self, records: &[TreasuryDisbursement]) -> sled::Result<()> {
+        let mut trimmed = records.to_vec();
+        trimmed.sort_by_key(|record| record.id);
+        if trimmed.len() > TREASURY_HISTORY_LIMIT {
+            let drop = trimmed.len() - TREASURY_HISTORY_LIMIT;
+            trimmed.drain(0..drop);
+        }
+
+        let tree = self.treasury_disbursements_tree();
+        let mut existing: Vec<Vec<u8>> = Vec::new();
+        for entry in tree.iter() {
+            let (k, _) = entry?;
+            existing.push(k.to_vec());
+        }
+
+        for record in &trimmed {
+            let key = ser(&record.id)?;
+            tree.insert(&key, ser(record)?)?;
+            if let Some(pos) = existing.iter().position(|candidate| candidate == &key) {
+                existing.swap_remove(pos);
+            }
+        }
+
+        for key in existing {
+            tree.remove(key)?;
+        }
+
+        let value = disbursements_to_json_array(&trimmed);
+        let bytes = json_to_bytes(&value);
+        let path = self.treasury_disbursement_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&path, bytes).map_err(|e| {
+            sled::Error::Unsupported(format!("write treasury disbursements: {e}").into())
+        })
+    }
+
+    fn load_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {
+        let tree = self.treasury_balance_history_tree();
+        let mut history = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let snapshot: TreasuryBalanceSnapshot = de(&raw)?;
+            history.push(snapshot);
+        }
+        if !history.is_empty() {
+            history.sort_by_key(|snap| snap.id);
+            return Ok(history);
+        }
+
+        let path = self.treasury_balance_path();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    let value = json_from_bytes(&bytes).map_err(|e| {
+                        sled::Error::Unsupported(
+                            format!("decode treasury balance history: {e}").into(),
+                        )
+                    })?;
+                    let mut decoded = balance_history_from_json(&value)?;
+                    decoded.sort_by_key(|snap| snap.id);
+                    if !decoded.is_empty() {
+                        let _ = self.persist_balance_history(&decoded);
+                    }
+                    Ok(decoded)
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
+            Err(err) => Err(sled::Error::Unsupported(
+                format!("read treasury balance history: {err}").into(),
+            )),
+        }
+    }
+
+    fn persist_balance_history(&self, history: &[TreasuryBalanceSnapshot]) -> sled::Result<()> {
+        let mut trimmed = history.to_vec();
+        trimmed.sort_by_key(|snap| snap.id);
+        if trimmed.len() > TREASURY_BALANCE_HISTORY_LIMIT {
+            let drop = trimmed.len() - TREASURY_BALANCE_HISTORY_LIMIT;
+            trimmed.drain(0..drop);
+        }
+
+        let tree = self.treasury_balance_history_tree();
+        let mut existing: Vec<Vec<u8>> = Vec::new();
+        for item in tree.iter() {
+            let (k, _) = item?;
+            existing.push(k.to_vec());
+        }
+
+        for snap in &trimmed {
+            let key = ser(&snap.id)?;
+            tree.insert(&key, ser(snap)?)?;
+            if let Some(pos) = existing.iter().position(|candidate| candidate == &key) {
+                existing.swap_remove(pos);
+            }
+        }
+
+        for key in existing {
+            tree.remove(key)?;
+        }
+
+        let value = balance_history_to_json(&trimmed);
+        let bytes = json_to_bytes(&value);
+        let path = self.treasury_balance_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&path, bytes).map_err(|e| {
+            sled::Error::Unsupported(format!("write treasury balance history: {e}").into())
+        })?;
+
+        let state = self.treasury_balance_tree();
+        if let Some(last) = trimmed.last() {
+            state.insert(b"current", ser(&last.balance_ct)?)?;
+            state.insert(b"next_snapshot_id", ser(&(last.id.saturating_add(1)))?)?;
+        } else {
+            state.insert(b"current", ser(&0u64)?)?;
+            state.insert(b"next_snapshot_id", ser(&1u64)?)?;
+        }
+        Ok(())
+    }
+
+    fn next_balance_snapshot_id(&self) -> sled::Result<u64> {
+        let state = self.treasury_balance_tree();
+        let next = state
+            .get(b"next_snapshot_id")?
+            .map(|raw| de::<u64>(&raw))
+            .transpose()?;
+        let id = next.unwrap_or(1);
+        state.insert(b"next_snapshot_id", ser(&(id.saturating_add(1)))?)?;
+        Ok(id)
+    }
+
+    fn record_balance_event(
+        &self,
+        event: TreasuryBalanceEventKind,
+        disbursement_id: Option<u64>,
+        delta_ct: i64,
+    ) -> sled::Result<TreasuryBalanceSnapshot> {
+        let current = self.treasury_balance()? as i128;
+        let updated = current + i128::from(delta_ct);
+        if updated < 0 {
+            return Err(sled::Error::Unsupported(
+                "treasury balance underflow".into(),
+            ));
+        }
+        let id = self.next_balance_snapshot_id()?;
+        let snapshot =
+            TreasuryBalanceSnapshot::new(id, updated as u64, delta_ct, event, disbursement_id);
+        let mut history = self.load_balance_history()?;
+        history.push(snapshot.clone());
+        self.persist_balance_history(&history)?;
+        Ok(snapshot)
     }
 
     fn persist_fee_floor_policy(
@@ -216,10 +867,7 @@ impl GovStore {
         snapshot: FeeFloorPolicySnapshot,
     ) {
         let path = hist_dir.join("fee_floor_policy.json");
-        let mut history: Vec<FeeFloorPolicyRecord> = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut history = load_json_array(&path, fee_floor_record_from_json);
         history.push(FeeFloorPolicyRecord {
             epoch,
             proposal_id,
@@ -229,9 +877,7 @@ impl GovStore {
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = json::to_vec(&history) {
-            let _ = std::fs::write(&path, bytes);
-        }
+        write_json_array(&path, &history, fee_floor_record_to_json);
     }
 
     fn persist_dependency_policy(
@@ -242,10 +888,7 @@ impl GovStore {
         snapshot: &DependencyPolicySnapshot,
     ) {
         let path = hist_dir.join("dependency_policy.json");
-        let mut history: Vec<DependencyPolicyRecord> = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut history = load_json_array(&path, dependency_policy_record_from_json);
         history.push(DependencyPolicyRecord {
             epoch,
             proposal_id,
@@ -255,9 +898,7 @@ impl GovStore {
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = json::to_vec(&history) {
-            let _ = std::fs::write(&path, bytes);
-        }
+        write_json_array(&path, &history, dependency_policy_record_to_json);
     }
 
     fn persist_param_change(
@@ -307,17 +948,12 @@ impl GovStore {
         };
 
         let path = hist_dir.join("param_changes.json");
-        let mut history: Vec<ParamChangeRecord> = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut history = load_json_array(&path, param_change_from_json);
         history.push(record);
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = json::to_vec(&history) {
-            let _ = std::fs::write(&path, bytes);
-        }
+        write_json_array(&path, &history, param_change_to_json);
 
         if let Some(snapshot) = fee_snapshot {
             self.persist_fee_floor_policy(hist_dir, epoch, proposal_id, snapshot);
@@ -393,25 +1029,13 @@ impl GovStore {
     pub fn did_revocation_history(&self) -> sled::Result<Vec<DidRevocationRecord>> {
         let hist_dir = self.base_path.join("governance/history");
         let path = hist_dir.join("did_revocations.json");
-        if let Ok(bytes) = std::fs::read(&path) {
-            json::from_slice(&bytes).map_err(|e| {
-                sled::Error::Unsupported(format!("de did revocation history: {e}").into())
-            })
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(load_json_array(&path, did_revocation_from_json))
     }
 
     pub fn dependency_policy_history(&self) -> sled::Result<Vec<DependencyPolicyRecord>> {
         let hist_dir = self.base_path.join("governance/history");
         let path = hist_dir.join("dependency_policy.json");
-        if let Ok(bytes) = std::fs::read(&path) {
-            json::from_slice(&bytes).map_err(|e| {
-                sled::Error::Unsupported(format!("de dependency policy history: {e}").into())
-            })
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(load_json_array(&path, dependency_policy_record_from_json))
     }
 
     pub fn proposals(&self) -> sled::Tree {
@@ -830,6 +1454,118 @@ impl GovStore {
         Ok(installs)
     }
 
+    pub fn treasury_balance(&self) -> sled::Result<u64> {
+        let state = self.treasury_balance_tree();
+        if let Some(raw) = state.get(b"current")? {
+            return de(&raw);
+        }
+        let history = self.load_balance_history()?;
+        let balance = history.last().map(|snap| snap.balance_ct).unwrap_or(0);
+        state.insert(b"current", ser(&balance)?)?;
+        if state.get(b"next_snapshot_id")?.is_none() {
+            state.insert(b"next_snapshot_id", ser(&1u64)?)?;
+        }
+        Ok(balance)
+    }
+
+    pub fn treasury_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {
+        self.load_balance_history()
+    }
+
+    pub fn record_treasury_accrual(&self, amount_ct: u64) -> sled::Result<TreasuryBalanceSnapshot> {
+        if amount_ct == 0 {
+            return self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, 0);
+        }
+        self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, amount_ct as i64)
+    }
+
+    pub fn queue_disbursement(
+        &self,
+        destination: &str,
+        amount_ct: u64,
+        memo: &str,
+        scheduled_epoch: u64,
+    ) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let next_id = records
+            .iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let record = TreasuryDisbursement::new(
+            next_id,
+            destination.to_string(),
+            amount_ct,
+            memo.to_string(),
+            scheduled_epoch,
+        );
+        records.push(record.clone());
+        self.persist_disbursements(&records)?;
+        self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0)?;
+        Ok(record)
+    }
+
+    pub fn disbursements(&self) -> sled::Result<Vec<TreasuryDisbursement>> {
+        self.load_disbursements()
+    }
+
+    pub fn execute_disbursement(
+        &self,
+        id: u64,
+        tx_hash: &str,
+    ) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let mut record = None;
+        for entry in records.iter_mut() {
+            if entry.id == id {
+                let balance = self.treasury_balance()?;
+                if balance < entry.amount_ct {
+                    return Err(sled::Error::Unsupported(
+                        format!("treasury balance insufficient for disbursement {id}").into(),
+                    ));
+                }
+                mark_executed(entry, tx_hash.to_string());
+                record = Some(entry.clone());
+                break;
+            }
+        }
+        if let Some(updated) = record.clone() {
+            self.persist_disbursements(&records)?;
+            self.record_balance_event(
+                TreasuryBalanceEventKind::Executed,
+                Some(updated.id),
+                -(updated.amount_ct as i64),
+            )?;
+            Ok(updated)
+        } else {
+            Err(sled::Error::Unsupported(
+                format!("unknown treasury disbursement id {id}").into(),
+            ))
+        }
+    }
+
+    pub fn cancel_disbursement(&self, id: u64, reason: &str) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let mut record = None;
+        for entry in records.iter_mut() {
+            if entry.id == id {
+                mark_cancelled(entry, reason.to_string());
+                record = Some(entry.clone());
+                break;
+            }
+        }
+        if let Some(updated) = record.clone() {
+            self.persist_disbursements(&records)?;
+            self.record_balance_event(TreasuryBalanceEventKind::Cancelled, Some(updated.id), 0)?;
+            Ok(updated)
+        } else {
+            Err(sled::Error::Unsupported(
+                format!("unknown treasury disbursement id {id}").into(),
+            ))
+        }
+    }
+
     pub fn activate_ready(
         &self,
         current_epoch: u64,
@@ -840,7 +1576,8 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let _ = std::fs::create_dir_all(&hist_dir);
         let snap_path = hist_dir.join(format!("{}.json", current_epoch));
-        if let Ok(bytes) = json::to_vec(params) {
+        if let Ok(value) = params.to_value() {
+            let bytes = json_to_bytes(&value);
             let _ = std::fs::write(&snap_path, bytes);
         }
 
@@ -896,6 +1633,7 @@ impl GovStore {
                                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
                                 ParamKey::RuntimeBackend => params.runtime_backend_policy,
                                 ParamKey::TransportProvider => params.transport_provider_policy,
+                                ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
                                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
@@ -1057,8 +1795,9 @@ impl GovStore {
         let _ = std::fs::create_dir_all(&hist_dir);
         let bytes =
             std::fs::read(&snap_path).map_err(|_| sled::Error::Unsupported("snapshot".into()))?;
-        let prev: Params =
-            json::from_slice(&bytes).map_err(|_| sled::Error::Unsupported("parse".into()))?;
+        let value =
+            json_from_bytes(&bytes).map_err(|_| sled::Error::Unsupported("parse".into()))?;
+        let prev = Params::deserialize(&value)?;
         *params = prev.clone();
         for spec in registry() {
             let val = match spec.key {
@@ -1097,6 +1836,7 @@ impl GovStore {
                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
                 ParamKey::RuntimeBackend => params.runtime_backend_policy,
                 ParamKey::TransportProvider => params.transport_provider_policy,
+                ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
             };
             (spec.apply_runtime)(val, rt)
@@ -1135,6 +1875,7 @@ impl GovStore {
             ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
             ParamKey::RuntimeBackend => params.runtime_backend_policy,
             ParamKey::TransportProvider => params.transport_provider_policy,
+            ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
             ParamKey::StorageEnginePolicy => params.storage_engine_policy,
         };
         self.persist_param_change(

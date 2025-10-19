@@ -18,6 +18,7 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "GammaReadSubCt" => Some(ParamKey::GammaReadSubCt),
         "KappaCpuSubCt" => Some(ParamKey::KappaCpuSubCt),
         "LambdaBytesOutSubCt" => Some(ParamKey::LambdaBytesOutSubCt),
+        "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
         "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
         "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         "BadgeExpirySecs" => Some(ParamKey::BadgeExpirySecs),
@@ -154,26 +155,48 @@ pub fn gov_params(
     params: &Params,
     epoch: u64,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    Ok(foundation_serialization::json!({
-        "epoch": epoch,
-        "snapshot_interval_secs": params.snapshot_interval_secs,
-        "consumer_fee_comfort_p90_microunits": params.consumer_fee_comfort_p90_microunits,
-        "fee_floor_window": params.fee_floor_window,
-        "fee_floor_percentile": params.fee_floor_percentile,
-        "industrial_admission_min_capacity": params.industrial_admission_min_capacity,
-        "beta_storage_sub_ct": params.beta_storage_sub_ct,
-        "gamma_read_sub_ct": params.gamma_read_sub_ct,
-        "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
-        "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
-        "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
-        "miner_hysteresis": params.miner_hysteresis,
-        "runtime_backend_mask": params.runtime_backend_policy,
-        "runtime_backend_policy": decode_runtime_backend_policy(params.runtime_backend_policy),
-        "transport_provider_mask": params.transport_provider_policy,
-        "transport_provider_policy": decode_transport_provider_policy(params.transport_provider_policy),
-        "storage_engine_mask": params.storage_engine_policy,
-        "storage_engine_policy": decode_storage_engine_policy(params.storage_engine_policy),
-    }))
+    let value = params
+        .to_value()
+        .map_err(|_| RpcError::new(-32066, "json"))?;
+    if let foundation_serialization::json::Value::Object(mut map) = value {
+        map.insert(
+            "epoch".to_string(),
+            foundation_serialization::json::Value::from(epoch),
+        );
+        map.insert(
+            "runtime_backend_policy".to_string(),
+            foundation_serialization::json::Value::from(decode_runtime_backend_policy(
+                params.runtime_backend_policy,
+            )),
+        );
+        map.insert(
+            "runtime_backend_mask".to_string(),
+            foundation_serialization::json::Value::from(params.runtime_backend_policy),
+        );
+        map.insert(
+            "transport_provider_policy".to_string(),
+            foundation_serialization::json::Value::from(decode_transport_provider_policy(
+                params.transport_provider_policy,
+            )),
+        );
+        map.insert(
+            "transport_provider_mask".to_string(),
+            foundation_serialization::json::Value::from(params.transport_provider_policy),
+        );
+        map.insert(
+            "storage_engine_policy".to_string(),
+            foundation_serialization::json::Value::from(decode_storage_engine_policy(
+                params.storage_engine_policy,
+            )),
+        );
+        map.insert(
+            "storage_engine_mask".to_string(),
+            foundation_serialization::json::Value::from(params.storage_engine_policy),
+        );
+        Ok(foundation_serialization::json::Value::Object(map))
+    } else {
+        Err(RpcError::new(-32066, "json"))
+    }
 }
 
 pub fn release_signers(

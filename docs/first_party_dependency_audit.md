@@ -1,6 +1,25 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-16 22:30:00Z_
+_Last updated: 2025-10-19 02:10:00Z_
+
+> **2025-10-19 update (jurisdiction codec):** `crates/jurisdiction` now exposes
+> first-party binary encoders/decoders for policy packs, signed packs, and typed
+> diffs through the shared cursor helpers. CLI/RPC callers consume the new
+> `PolicyDiff` struct instead of raw JSON blobs, while `persist_signed_pack` keeps
+> JSON and `.bin` snapshots synchronized so sled-backed stores never rely on
+> serde. Regression suites (`cargo test -p jurisdiction`,
+> `tests/jurisdiction_dynamic.rs`) cover JSON, binary, and dual-format flows, and
+> workspace callers can delete legacy `binary_codec` shims when migrating to the
+> new helpers.
+> **2025-10-18 update (treasury RPC + aggregator):** Governance RPC handlers now
+> surface typed `gov.treasury.*` endpoints that decode through the
+> `foundation_serialization` facade and share pagination helpers with the CLI.
+> `contract gov treasury fetch` consumes those endpoints with first-party
+> envelope parsing and emits actionable transport diagnostics, while the metrics
+> aggregator reuses the sled-backed snapshots, tolerates legacy JSON records
+> that stored numeric fields as strings, and warns when disbursements exist
+> without matching balance history. The end-to-end HTTP integration test keeps
+> the dispatcher on the first-party stack and guards the new RPC wiring.
 
 > **2025-10-16 update (evening++)**: The serialization facade’s test suite now
 > passes under the stub backend. `foundation_serialization::json!` supports
@@ -91,6 +110,12 @@ explicit.
 > workspace-wide request/response schema, allowing `jsonrpc-core` to be removed
 > from manifests while keeping CLI and runtime handlers on a shared, audited
 > envelope.
+> **2025-10-18 update (treasury + bridge RPC):** `governance::Params` now exposes
+> `to_value`/`deserialize`, letting RPC handlers clone parameter envelopes through
+> the facade instead of hand-rolled JSON maps. Bridge endpoints accept typed
+> request/response structs, reuse a shared commitment decoder, and serialize every
+> payload via `foundation_serialization::json`, eliminating the bespoke builders
+> that previously lived in `node/src/rpc/bridge.rs`.
 | rpc | `node/src/rpc/analytics.rs` | 3 | serde derive | Analytics endpoints encode serde payloads. |
 | rpc | `node/src/rpc/light.rs` | 2, 17, 43 | serde serialize + skip attributes | Light-client responses rely on serde. |
 | rpc | `node/src/rpc/logs.rs` | 9 | serde serialize | Log export stream uses serde for structured frames. |

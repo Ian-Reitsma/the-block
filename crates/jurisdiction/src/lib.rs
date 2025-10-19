@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::path::Path;
 
+mod codec;
+
 /// Region specific policy pack controlling default consent and feature toggles.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyPack {
@@ -111,6 +113,129 @@ impl SignedPack {
 
 /// Simple in-memory cache keyed by region.
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change<T> {
+    pub old: T,
+    pub new: T,
+}
+
+impl<T> Change<T> {
+    pub fn new(old: T, new: T) -> Self {
+        Self { old, new }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PolicyDiff {
+    pub consent_required: Option<Change<bool>>,
+    pub features: Option<Change<Vec<String>>>,
+}
+
+impl PolicyDiff {
+    pub fn is_empty(&self) -> bool {
+        self.consent_required.is_none() && self.features.is_none()
+    }
+
+    pub fn to_json_value(&self) -> JsonValue {
+        let mut map = JsonMap::new();
+        if let Some(change) = &self.consent_required {
+            let mut change_map = JsonMap::new();
+            change_map.insert("old".into(), JsonValue::Bool(change.old));
+            change_map.insert("new".into(), JsonValue::Bool(change.new));
+            map.insert("consent_required".into(), JsonValue::Object(change_map));
+        }
+        if let Some(change) = &self.features {
+            let mut change_map = JsonMap::new();
+            let old_features = change.old.iter().cloned().map(JsonValue::String).collect();
+            let new_features = change.new.iter().cloned().map(JsonValue::String).collect();
+            change_map.insert("old".into(), JsonValue::Array(old_features));
+            change_map.insert("new".into(), JsonValue::Array(new_features));
+            map.insert("features".into(), JsonValue::Object(change_map));
+        }
+        JsonValue::Object(map)
+    }
+
+    pub fn from_json_value(value: &JsonValue) -> std::io::Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| invalid_data("policy diff must be a JSON object"))?;
+
+        let consent_required = map
+            .get("consent_required")
+            .map(|entry| parse_bool_change(entry, "consent_required"))
+            .transpose()?;
+
+        let features = map
+            .get("features")
+            .map(|entry| parse_vec_change(entry, "features"))
+            .transpose()?;
+
+        Ok(PolicyDiff {
+            consent_required,
+            features,
+        })
+    }
+}
+
+impl From<PolicyDiff> for JsonValue {
+    fn from(diff: PolicyDiff) -> Self {
+        diff.to_json_value()
+    }
+}
+
+impl From<&PolicyDiff> for JsonValue {
+    fn from(diff: &PolicyDiff) -> Self {
+        diff.to_json_value()
+    }
+}
+
+pub use codec::{
+    decode_policy_diff, decode_policy_pack, decode_signed_pack, encode_policy_diff,
+    encode_policy_pack, encode_signed_pack, CodecError, CodecResult,
+};
+
+fn parse_bool_change(value: &JsonValue, field: &str) -> std::io::Result<Change<bool>> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_field(field, "expected object"))?;
+    let old = map
+        .get("old")
+        .and_then(JsonValue::as_bool)
+        .ok_or_else(|| invalid_field(field, "missing or invalid old value"))?;
+    let new = map
+        .get("new")
+        .and_then(JsonValue::as_bool)
+        .ok_or_else(|| invalid_field(field, "missing or invalid new value"))?;
+    Ok(Change::new(old, new))
+}
+
+fn parse_vec_change(value: &JsonValue, field: &str) -> std::io::Result<Change<Vec<String>>> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_field(field, "expected object"))?;
+    let parse_vec = |key: &str| -> std::io::Result<Vec<String>> {
+        let array = map
+            .get(key)
+            .ok_or_else(|| invalid_field(field, format!("missing {key} value")))?
+            .as_array()
+            .ok_or_else(|| invalid_field(field, format!("{key} must be array")))?;
+        let mut out = Vec::with_capacity(array.len());
+        for (index, entry) in array.iter().enumerate() {
+            let Some(text) = entry.as_str() else {
+                return Err(invalid_field(
+                    field,
+                    format!("{key}[{index}] must be string"),
+                ));
+            };
+            out.push(text.to_owned());
+        }
+        Ok(out)
+    };
+    let old = parse_vec("old")?;
+    let new = parse_vec("new")?;
+    Ok(Change::new(old, new))
+}
+
 static CACHE: Lazy<std::sync::Mutex<HashMap<String, PolicyPack>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
@@ -171,6 +296,33 @@ pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack>
         pack.features.len()
     );
     Ok(pack)
+}
+
+pub fn persist_signed_pack(path: impl AsRef<Path>, signed: &SignedPack) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let json_text = json::to_string_value(&signed.to_json_value());
+    std::fs::write(path, json_text)?;
+    let binary_path = path.with_extension("bin");
+    let encoded = encode_signed_pack(signed);
+    std::fs::write(binary_path, encoded)?;
+    Ok(())
+}
+
+pub fn load_signed_pack(path: impl AsRef<Path>) -> std::io::Result<SignedPack> {
+    let path = path.as_ref();
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let value =
+                json::value_from_slice(&bytes).map_err(|err| invalid_data(err.to_string()))?;
+            return SignedPack::from_json_value(&value);
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+
+    let binary_path = path.with_extension("bin");
+    let bytes = std::fs::read(&binary_path)?;
+    decode_signed_pack(&bytes).map_err(|err| invalid_data(err.to_string()))
 }
 
 impl PolicyPack {
@@ -302,27 +454,15 @@ impl PolicyPack {
     }
 
     /// Compute a semantic diff between two packs for RPC consumption.
-    pub fn diff(old: &Self, new: &Self) -> json::Value {
-        let mut changed = JsonMap::new();
+    pub fn diff(old: &Self, new: &Self) -> PolicyDiff {
+        let mut diff = PolicyDiff::default();
         if old.consent_required != new.consent_required {
-            changed.insert(
-                "consent_required".into(),
-                foundation_serialization::json!({
-                    "old": old.consent_required,
-                    "new": new.consent_required
-                }),
-            );
+            diff.consent_required = Some(Change::new(old.consent_required, new.consent_required));
         }
         if old.features != new.features {
-            changed.insert(
-                "features".into(),
-                foundation_serialization::json!({
-                    "old": old.features.clone(),
-                    "new": new.features.clone()
-                }),
-            );
+            diff.features = Some(Change::new(old.features.clone(), new.features.clone()));
         }
-        JsonValue::Object(changed)
+        diff
     }
 }
 

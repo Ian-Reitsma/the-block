@@ -3,7 +3,7 @@ use crate::{
     config::RpcConfig,
     consensus::pow::{self, BlockHeader},
     gateway,
-    governance::{GovStore, Params},
+    governance::{GovStore, Params, NODE_GOV_STORE},
     identity::{handle_registry::HandleRegistry, DidRegistry},
     kyc,
     localnet::{validate_proximity, AssistReceipt},
@@ -21,9 +21,10 @@ use crypto_suite::ConstantTimeEq;
 use foundation_rpc::{
     Params as RpcParams, Request as RpcRequest, Response as RpcResponse, RpcError,
 };
-use foundation_serialization::binary;
+use foundation_serialization::de::DeserializeOwned;
 #[cfg(feature = "telemetry")]
 use foundation_serialization::Deserialize;
+use foundation_serialization::{binary, json, Serialize};
 use httpd::{
     form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -69,7 +70,6 @@ pub mod storage;
 pub mod vm;
 pub mod vm_trace;
 
-static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
 static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
@@ -369,6 +369,20 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
 
 fn rpc_error(code: i32, message: &'static str) -> RpcError {
     RpcError::new(code, message)
+}
+
+fn parse_params<T: DeserializeOwned>(params: &RpcParams) -> Result<T, RpcError> {
+    let mut value = params.as_value();
+    if value.is_null() {
+        value = json::Value::Object(json::Map::new());
+    }
+    json::from_value(value).map_err(|_| rpc_error(-32602, "invalid params"))
+}
+
+fn serialize_response<T: Serialize>(
+    value: T,
+) -> Result<foundation_serialization::json::Value, RpcError> {
+    json::to_value(value).map_err(|_| rpc_error(-32603, "failed to serialize response"))
 }
 
 fn check_nonce(
@@ -802,167 +816,49 @@ fn dispatch(
         }
         "settlement.audit" => compute_market::settlement_audit(),
         "bridge.relayer_status" => {
-            let relayer = req
-                .params
-                .get("relayer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let asset = req.params.get("asset").and_then(|v| v.as_str());
-            bridge::relayer_status(asset, relayer)
+            let params = parse_params::<bridge::RelayerStatusRequest>(&req.params)?;
+            serialize_response(bridge::relayer_status(params)?)?
         }
         "bridge.bond_relayer" => {
-            let relayer = req
-                .params
-                .get("relayer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let amount = req
-                .params
-                .get("amount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            bridge::bond_relayer(relayer, amount)?
+            let params = parse_params::<bridge::BondRelayerRequest>(&req.params)?;
+            serialize_response(bridge::bond_relayer(params)?)?
         }
         "bridge.verify_deposit" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .unwrap_or("native");
-            let relayer = req
-                .params
-                .get("relayer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let user = req
-                .params
-                .get("user")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let amount = req
-                .params
-                .get("amount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let header = req
-                .params
-                .get("header")
-                .ok_or(rpc_error(-32602, "invalid params"))
-                .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone())
-                        .map_err(|_| rpc_error(-32602, "invalid params"))
-                })?;
-            let proof = req
-                .params
-                .get("proof")
-                .ok_or(rpc_error(-32602, "invalid params"))
-                .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone())
-                        .map_err(|_| rpc_error(-32602, "invalid params"))
-                })?;
-            let proofs = req
-                .params
-                .get("relayer_proofs")
-                .ok_or(rpc_error(-32602, "invalid params"))
-                .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone())
-                        .map_err(|_| rpc_error(-32602, "invalid params"))
-                })?;
-            bridge::verify_deposit(asset, relayer, user, amount, header, proof, proofs)?
+            let params = parse_params::<bridge::VerifyDepositRequest>(&req.params)?;
+            serialize_response(bridge::verify_deposit(params)?)?
         }
         "bridge.request_withdrawal" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .unwrap_or("native");
-            let relayer = req
-                .params
-                .get("relayer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let user = req
-                .params
-                .get("user")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let amount = req
-                .params
-                .get("amount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let proofs = req
-                .params
-                .get("relayer_proofs")
-                .ok_or(rpc_error(-32602, "invalid params"))
-                .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone())
-                        .map_err(|_| rpc_error(-32602, "invalid params"))
-                })?;
-            bridge::request_withdrawal(asset, relayer, user, amount, proofs)?
+            let params = parse_params::<bridge::RequestWithdrawalRequest>(&req.params)?;
+            serialize_response(bridge::request_withdrawal(params)?)?
         }
         "bridge.challenge_withdrawal" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .unwrap_or("native");
-            let commitment = req
-                .params
-                .get("commitment")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let challenger = req
-                .params
-                .get("challenger")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            bridge::challenge_withdrawal(asset, commitment, challenger)?
+            let params = parse_params::<bridge::ChallengeWithdrawalRequest>(&req.params)?;
+            serialize_response(bridge::challenge_withdrawal(params)?)?
         }
         "bridge.finalize_withdrawal" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .unwrap_or("native");
-            let commitment = req
-                .params
-                .get("commitment")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            bridge::finalize_withdrawal(asset, commitment)?
+            let params = parse_params::<bridge::FinalizeWithdrawalRequest>(&req.params)?;
+            serialize_response(bridge::finalize_withdrawal(params)?)?
         }
         "bridge.pending_withdrawals" => {
-            let asset = req.params.get("asset").and_then(|v| v.as_str());
-            bridge::pending_withdrawals(asset)?
+            let params = parse_params::<bridge::PendingWithdrawalsRequest>(&req.params)?;
+            serialize_response(bridge::pending_withdrawals(params)?)?
         }
         "bridge.active_challenges" => {
-            let asset = req.params.get("asset").and_then(|v| v.as_str());
-            bridge::active_challenges(asset)?
+            let params = parse_params::<bridge::ActiveChallengesRequest>(&req.params)?;
+            serialize_response(bridge::active_challenges(params)?)?
         }
         "bridge.relayer_quorum" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .ok_or(rpc_error(-32602, "invalid params"))?;
-            bridge::relayer_quorum(asset)?
+            let params = parse_params::<bridge::RelayerQuorumRequest>(&req.params)?;
+            serialize_response(bridge::relayer_quorum(params)?)?
         }
         "bridge.deposit_history" => {
-            let asset = req
-                .params
-                .get("asset")
-                .and_then(|v| v.as_str())
-                .ok_or(rpc_error(-32602, "invalid params"))?;
-            let cursor = req.params.get("cursor").and_then(|v| v.as_u64());
-            let limit = req
-                .params
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(100) as usize;
-            bridge::deposit_history(asset, cursor, limit)?
+            let params = parse_params::<bridge::DepositHistoryRequest>(&req.params)?;
+            serialize_response(bridge::deposit_history(params)?)?
         }
-        "bridge.slash_log" => bridge::slash_log()?,
+        "bridge.slash_log" => {
+            let params = parse_params::<bridge::SlashLogRequest>(&req.params)?;
+            serialize_response(bridge::slash_log(params)?)?
+        }
         "localnet.submit_receipt" => {
             let hex = req
                 .params
@@ -1741,7 +1637,7 @@ fn dispatch(
             check_nonce(scope, &req.params, &nonces)?;
             match dids.lock() {
                 Ok(mut reg) => {
-                    match identity::anchor_did(req.params.as_value(), &mut reg, &GOV_STORE) {
+                    match identity::anchor_did(req.params.as_value(), &mut reg, &NODE_GOV_STORE) {
                         Ok(v) => v,
                         Err(e) => foundation_serialization::json!({"error": e.code()}),
                     }
@@ -2251,7 +2147,14 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(epoch);
             governance::gov_propose(
-                &GOV_STORE, proposer, key, new_value, min, max, epoch, deadline,
+                &NODE_GOV_STORE,
+                proposer,
+                key,
+                new_value,
+                min,
+                max,
+                epoch,
+                deadline,
             )?
         }
         "gov_vote" => {
@@ -2276,7 +2179,7 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            governance::gov_vote(&GOV_STORE, voter, pid, choice, epoch)?
+            governance::gov_vote(&NODE_GOV_STORE, voter, pid, choice, epoch)?
         }
         "submit_proposal" => {
             let proposer = req
@@ -2310,7 +2213,15 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(epoch);
             governance::submit_proposal(
-                &GOV_STORE, proposer, key, new_value, min, max, deps, epoch, deadline,
+                &NODE_GOV_STORE,
+                proposer,
+                key,
+                new_value,
+                min,
+                max,
+                deps,
+                epoch,
+                deadline,
             )?
         }
         "vote_proposal" => {
@@ -2335,10 +2246,10 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            governance::vote_proposal(&GOV_STORE, voter, pid, choice, epoch)?
+            governance::vote_proposal(&NODE_GOV_STORE, voter, pid, choice, epoch)?
         }
-        "gov.release_signers" => governance::release_signers(&GOV_STORE)?,
-        "gov_list" => governance::gov_list(&GOV_STORE)?,
+        "gov.release_signers" => governance::release_signers(&NODE_GOV_STORE)?,
+        "gov_list" => governance::gov_list(&NODE_GOV_STORE)?,
         "gov_params" => {
             let epoch = req
                 .params
@@ -2357,7 +2268,7 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
-            governance::gov_rollback_last(&GOV_STORE, &mut params, &mut rt, epoch)?
+            governance::gov_rollback_last(&NODE_GOV_STORE, &mut params, &mut rt, epoch)?
         }
         "gov_rollback" => {
             let epoch = req
@@ -2369,7 +2280,7 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
-            governance::gov_rollback(&GOV_STORE, id, &mut params, &mut rt, epoch)?
+            governance::gov_rollback(&NODE_GOV_STORE, id, &mut params, &mut rt, epoch)?
         }
         "vm.estimate_gas" => {
             let code_hex = req

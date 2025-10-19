@@ -268,10 +268,10 @@ fn bridge_rejects_replay_and_persists_state() {
     let pending = bridge.pending_withdrawals(None);
     let expected_commitment = crypto_suite::hex::encode(commitment);
     assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0]["asset"].as_str(), Some("native"));
+    assert_eq!(pending[0].asset, "native");
     assert_eq!(
-        pending[0]["commitment"].as_str(),
-        Some(expected_commitment.as_str())
+        crypto_suite::hex::encode(pending[0].commitment),
+        expected_commitment
     );
 
     thread::sleep(Duration::from_secs(2));

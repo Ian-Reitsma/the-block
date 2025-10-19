@@ -19,6 +19,19 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-18)
+
+- Treasury RPC handlers expose typed `gov.treasury.disbursements`,
+  `gov.treasury.balance`, and `gov.treasury.balance_history` endpoints using the
+  shared request/response structs, and the new `node/tests/rpc_treasury.rs`
+  integration test drives the HTTP server to lock cursor pagination and balance
+  semantics. `contract gov treasury fetch` now consumes these endpoints via the
+  first-party JSON facade and reports transport failures with actionable
+  messaging, keeping CLI automation inside the dependency boundary. The metrics
+  aggregator reuses the same sled snapshots, tolerates legacy string-encoded
+  balance history, and emits warnings when disbursement history lacks matching
+  balance entries, closing the remaining treasury observability gaps.
+
 ## Recent progress (2025-10-16)
 
 - `foundation_serialization::json!` now supports nested object literals,
@@ -36,6 +49,11 @@ RPC client.
   preserving the original RPC error. The `ResponsePayload<T>` helper exposes
   `into_result`/`map`/`id` APIs, and `node/src/rpc/client.rs` now routes every
   client call through the typed wrapper instead of bespoke envelopes.
+- Bridge RPC handlers now accept typed request/response structs and reuse a
+  shared commitment decoder, while `governance::Params::to_value`/`deserialize`
+  let governance responders clone parameter envelopes without bespoke JSON
+  maps. Explorer/CLI surfaces share the sled-backed treasury snapshots, keeping
+  treasury RPC responses entirely first party.
 
 ## Proposed next steps
 

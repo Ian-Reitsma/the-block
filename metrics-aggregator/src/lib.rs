@@ -4,6 +4,10 @@ use diagnostics::{
     tracing::{info, warn},
 };
 use foundation_metrics::{gauge, increment_counter, Recorder, RecorderInstallError};
+use governance::{
+    DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    TreasuryDisbursement,
+};
 use http_env::{http_client as env_http_client, register_tls_warning_sink, TlsEnvWarningSinkGuard};
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
@@ -46,6 +50,7 @@ use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{json, Deserialize, Serialize};
 use foundation_telemetry::{TelemetrySummary, WrapperSummaryEntry};
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet, VecDeque};
+use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -109,6 +114,17 @@ const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_variables_unique_fingerprints";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
+const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
+const METRIC_TREASURY_AMOUNT_CT: &str = "treasury_disbursement_amount_ct";
+const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_seconds";
+const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
+    "treasury_disbursement_scheduled_oldest_age_seconds";
+const METRIC_TREASURY_NEXT_EPOCH: &str = "treasury_disbursement_next_epoch";
+const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current_ct";
+const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta_ct";
+const METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT: &str = "treasury_balance_snapshot_count";
+const METRIC_TREASURY_BALANCE_EVENT_AGE: &str = "treasury_balance_last_event_age_seconds";
+const TREASURY_STATUS_LABELS: [&str; 3] = ["scheduled", "executed", "cancelled"];
 
 const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
 const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
@@ -162,6 +178,13 @@ pub struct AppState {
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
+    treasury_source: Option<TreasurySource>,
+}
+
+#[derive(Clone)]
+enum TreasurySource {
+    Json(PathBuf),
+    Store(GovStore),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,7 +196,7 @@ pub struct LeaderSnapshot {
 
 impl AppState {
     pub fn new(token: String, path: impl AsRef<Path>, retention_secs: u64) -> Self {
-        Self::new_with_opts(token, None, path, retention_secs, None, None)
+        Self::new_with_opts(token, None, path, retention_secs, None, None, None)
     }
 
     pub fn new_with_opts(
@@ -183,6 +206,7 @@ impl AppState {
         retention_secs: u64,
         wal: Option<PathBuf>,
         tls_warning_retention_secs: Option<u64>,
+        treasury_path: Option<PathBuf>,
     ) -> Self {
         ensure_foundation_metrics_recorder();
         let db_path = path.as_ref().to_path_buf();
@@ -205,6 +229,10 @@ impl AppState {
         let retention = tls_warning_retention_secs.unwrap_or(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
         TLS_WARNING_RETENTION_SECS.store(retention, Ordering::Relaxed);
         gauge!(METRIC_TLS_ENV_WARNING_RETENTION_SECONDS, retention as f64);
+        let treasury_source = match env::var("AGGREGATOR_TREASURY_DB") {
+            Ok(path) if !path.is_empty() => Some(TreasurySource::Store(GovStore::open(path))),
+            _ => treasury_path.clone().map(TreasurySource::Json),
+        };
         let state = Self {
             data: Arc::new(Mutex::new(data)),
             token: Arc::new(RwLock::new(token)),
@@ -221,8 +249,10 @@ impl AppState {
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
+            treasury_source,
         };
         state.prune();
+        state.refresh_treasury_metrics();
         state
     }
 
@@ -260,6 +290,163 @@ impl AppState {
         removed
     }
 
+    fn refresh_treasury_metrics(&self) {
+        let metrics = aggregator_metrics();
+        let Some(source) = &self.treasury_source else {
+            Self::reset_treasury_metrics(metrics);
+            return;
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        match source {
+            TreasurySource::Json(path) => match load_treasury_records(path) {
+                Ok(records) => {
+                    let summary = TreasurySummary::from_records(&records);
+                    Self::apply_disbursement_metrics(metrics, &summary, now);
+                    match load_treasury_balance_history(path) {
+                        Ok(history) => {
+                            if history.is_empty() && !records.is_empty() {
+                                warn!(
+                                    target: "aggregator",
+                                    path = %balance_history_path(path).display(),
+                                    "treasury disbursements present but no balance snapshots found"
+                                );
+                            }
+                            Self::apply_balance_metrics(metrics, &history, None, now);
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                path = %balance_history_path(path).display(),
+                                "failed to refresh treasury balance history"
+                            );
+                            Self::zero_balance_metrics(metrics);
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        target: "aggregator",
+                        error = %err,
+                        path = %path.display(),
+                        "failed to refresh treasury metrics"
+                    );
+                    Self::reset_treasury_metrics(metrics);
+                }
+            },
+            TreasurySource::Store(store) => {
+                match (
+                    store.disbursements(),
+                    store.treasury_balance_history(),
+                    store.treasury_balance(),
+                ) {
+                    (Ok(records), Ok(history), Ok(current_balance)) => {
+                        let summary = TreasurySummary::from_records(&records);
+                        Self::apply_disbursement_metrics(metrics, &summary, now);
+                        if history.is_empty() && !records.is_empty() {
+                            warn!(
+                                target: "aggregator",
+                                "treasury store reported disbursements without balance history"
+                            );
+                        }
+                        Self::apply_balance_metrics(metrics, &history, Some(current_balance), now);
+                    }
+                    (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
+                        warn!(
+                            target: "aggregator",
+                            error = %err,
+                            "failed to refresh treasury store metrics"
+                        );
+                        Self::reset_treasury_metrics(metrics);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_disbursement_metrics(
+        metrics: &AggregatorMetrics,
+        summary: &TreasurySummary,
+        now: u64,
+    ) {
+        for status in TREASURY_STATUS_LABELS {
+            let (count, amount) = summary.metrics_for_status(status);
+            metrics
+                .treasury_disbursement_count
+                .with_label_values(&[status])
+                .set(count as f64);
+            metrics
+                .treasury_disbursement_amount
+                .with_label_values(&[status])
+                .set(amount as f64);
+        }
+        metrics
+            .treasury_disbursement_snapshot_age
+            .set(summary.snapshot_age(now) as f64);
+        metrics
+            .treasury_disbursement_scheduled_oldest_age
+            .set(summary.scheduled_oldest_age(now) as f64);
+        metrics
+            .treasury_disbursement_next_epoch
+            .set(summary.next_epoch_value() as f64);
+    }
+
+    fn apply_balance_metrics(
+        metrics: &AggregatorMetrics,
+        history: &[TreasuryBalanceSnapshot],
+        balance_override: Option<u64>,
+        now: u64,
+    ) {
+        let current_balance = balance_override
+            .or_else(|| history.last().map(|snap| snap.balance_ct))
+            .unwrap_or(0);
+        metrics.treasury_balance_current.set(current_balance as f64);
+        let last_delta = history
+            .last()
+            .map(|snap| snap.delta_ct as f64)
+            .unwrap_or(0.0);
+        metrics.treasury_balance_last_delta.set(last_delta);
+        metrics
+            .treasury_balance_snapshot_count
+            .set(history.len() as f64);
+        let age = history
+            .last()
+            .map(|snap| now.saturating_sub(snap.recorded_at))
+            .unwrap_or(0);
+        metrics.treasury_balance_last_event_age.set(age as f64);
+    }
+
+    fn zero_disbursement_metrics(metrics: &AggregatorMetrics) {
+        for status in TREASURY_STATUS_LABELS {
+            metrics
+                .treasury_disbursement_count
+                .with_label_values(&[status])
+                .set(0.0);
+            metrics
+                .treasury_disbursement_amount
+                .with_label_values(&[status])
+                .set(0.0);
+        }
+        metrics.treasury_disbursement_snapshot_age.set(0.0);
+        metrics.treasury_disbursement_scheduled_oldest_age.set(0.0);
+        metrics.treasury_disbursement_next_epoch.set(0.0);
+    }
+
+    fn zero_balance_metrics(metrics: &AggregatorMetrics) {
+        metrics.treasury_balance_current.set(0.0);
+        metrics.treasury_balance_last_delta.set(0.0);
+        metrics.treasury_balance_snapshot_count.set(0.0);
+        metrics.treasury_balance_last_event_age.set(0.0);
+    }
+
+    fn reset_treasury_metrics(metrics: &AggregatorMetrics) {
+        Self::zero_disbursement_metrics(metrics);
+        Self::zero_balance_metrics(metrics);
+    }
+
     fn current_token(&self) -> String {
         if let Some(path) = &self.token_path {
             if let Ok(t) = std::fs::read_to_string(path) {
@@ -276,10 +463,12 @@ impl AppState {
     pub fn spawn_cleanup(&self) {
         let state = self.clone();
         spawn(async move {
+            state.refresh_treasury_metrics();
             let mut ticker = runtime::interval(Duration::from_secs(60));
             loop {
                 ticker.tick().await;
                 state.prune();
+                state.refresh_treasury_metrics();
             }
         });
     }
@@ -588,6 +777,15 @@ struct AggregatorMetrics {
     tls_env_warning_variables_fingerprint_total: CounterVec,
     tls_env_warning_detail_unique_fingerprints: IntGaugeVec,
     tls_env_warning_variables_unique_fingerprints: IntGaugeVec,
+    treasury_disbursement_count: GaugeVec,
+    treasury_disbursement_amount: GaugeVec,
+    treasury_disbursement_snapshot_age: Gauge,
+    treasury_disbursement_scheduled_oldest_age: Gauge,
+    treasury_disbursement_next_epoch: Gauge,
+    treasury_balance_current: Gauge,
+    treasury_balance_last_delta: Gauge,
+    treasury_balance_snapshot_count: Gauge,
+    treasury_balance_last_event_age: Gauge,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
@@ -1288,6 +1486,75 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             tls_env_warning_variables_fingerprint_total.clone(),
         ))
         .expect("register tls_env_warning_variables_fingerprint_total");
+    let treasury_disbursement_count = GaugeVec::new(
+        Opts::new(
+            METRIC_TREASURY_COUNT,
+            "Treasury disbursement counts grouped by status",
+        ),
+        &["status"],
+    );
+    registry
+        .register(Box::new(treasury_disbursement_count.clone()))
+        .expect("register treasury_disbursement_count");
+    let treasury_disbursement_amount = GaugeVec::new(
+        Opts::new(
+            METRIC_TREASURY_AMOUNT_CT,
+            "Treasury disbursement CT totals grouped by status",
+        ),
+        &["status"],
+    );
+    registry
+        .register(Box::new(treasury_disbursement_amount.clone()))
+        .expect("register treasury_disbursement_amount");
+    let treasury_disbursement_snapshot_age = Gauge::new(
+        METRIC_TREASURY_SNAPSHOT_AGE,
+        "Seconds since the most recent treasury disbursement snapshot",
+    );
+    registry
+        .register(Box::new(treasury_disbursement_snapshot_age.clone()))
+        .expect("register treasury_disbursement_snapshot_age");
+    let treasury_disbursement_scheduled_oldest_age = Gauge::new(
+        METRIC_TREASURY_SCHEDULED_OLDEST_AGE,
+        "Age in seconds of the oldest scheduled treasury disbursement",
+    );
+    registry
+        .register(Box::new(treasury_disbursement_scheduled_oldest_age.clone()))
+        .expect("register treasury_disbursement_scheduled_oldest_age");
+    let treasury_disbursement_next_epoch = Gauge::new(
+        METRIC_TREASURY_NEXT_EPOCH,
+        "Next scheduled treasury disbursement epoch (0 when none queued)",
+    );
+    registry
+        .register(Box::new(treasury_disbursement_next_epoch.clone()))
+        .expect("register treasury_disbursement_next_epoch");
+    let treasury_balance_current = Gauge::new(
+        METRIC_TREASURY_BALANCE_CURRENT,
+        "Current treasury balance in CT",
+    );
+    registry
+        .register(Box::new(treasury_balance_current.clone()))
+        .expect("register treasury_balance_current");
+    let treasury_balance_last_delta = Gauge::new(
+        METRIC_TREASURY_BALANCE_LAST_DELTA,
+        "Most recent treasury balance delta in CT",
+    );
+    registry
+        .register(Box::new(treasury_balance_last_delta.clone()))
+        .expect("register treasury_balance_last_delta");
+    let treasury_balance_snapshot_count = Gauge::new(
+        METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT,
+        "Number of treasury balance snapshots recorded",
+    );
+    registry
+        .register(Box::new(treasury_balance_snapshot_count.clone()))
+        .expect("register treasury_balance_snapshot_count");
+    let treasury_balance_last_event_age = Gauge::new(
+        METRIC_TREASURY_BALANCE_EVENT_AGE,
+        "Seconds since the latest treasury balance snapshot was recorded",
+    );
+    registry
+        .register(Box::new(treasury_balance_last_event_age.clone()))
+        .expect("register treasury_balance_last_event_age");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -1313,6 +1580,15 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         tls_env_warning_variables_fingerprint_total,
         tls_env_warning_detail_unique_fingerprints,
         tls_env_warning_variables_unique_fingerprints,
+        treasury_disbursement_count,
+        treasury_disbursement_amount,
+        treasury_disbursement_snapshot_age,
+        treasury_disbursement_scheduled_oldest_age,
+        treasury_disbursement_next_epoch,
+        treasury_balance_current,
+        treasury_balance_last_delta,
+        treasury_balance_snapshot_count,
+        treasury_balance_last_event_age,
     }
 });
 
@@ -2620,6 +2896,244 @@ impl Wal {
     }
 }
 
+fn load_treasury_records(path: &Path) -> io::Result<Vec<TreasuryDisbursement>> {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            if bytes.is_empty() {
+                Ok(Vec::new())
+            } else {
+                json::from_slice(&bytes)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(err),
+    }
+}
+
+fn balance_history_path(disbursement_path: &Path) -> PathBuf {
+    let mut path = disbursement_path.to_path_buf();
+    path.set_file_name("treasury_balance.json");
+    path
+}
+
+fn load_treasury_balance_history(path: &Path) -> io::Result<Vec<TreasuryBalanceSnapshot>> {
+    let history_path = balance_history_path(path);
+    match std::fs::read(&history_path) {
+        Ok(bytes) => {
+            if bytes.is_empty() {
+                Ok(Vec::new())
+            } else {
+                match json::from_slice(&bytes) {
+                    Ok(history) => Ok(history),
+                    Err(err) => match parse_legacy_balance_history(&bytes) {
+                        Ok(history) => {
+                            warn!(
+                                target: "aggregator",
+                                path = %history_path.display(),
+                                error = %err,
+                                "parsed treasury balance history via legacy schema"
+                            );
+                            Ok(history)
+                        }
+                        Err(fallback) => Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "decode treasury balance history: {err}; legacy fallback failed: {fallback}"
+                            ),
+                        )),
+                    },
+                }
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(err),
+    }
+}
+
+fn parse_legacy_balance_history(bytes: &[u8]) -> io::Result<Vec<TreasuryBalanceSnapshot>> {
+    let value: Value =
+        json::from_slice(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let array = value.as_array().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "treasury balance JSON: expected array",
+        )
+    })?;
+    let mut snapshots = Vec::with_capacity(array.len());
+    for entry in array {
+        let obj = entry.as_object().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "treasury balance JSON: expected object",
+            )
+        })?;
+        let id = parse_u64_field(obj.get("id"), "id")?;
+        let balance_ct = parse_u64_field(obj.get("balance_ct"), "balance_ct")?;
+        let delta_ct = parse_i64_field(obj.get("delta_ct"), "delta_ct")?;
+        let recorded_at = parse_u64_field(obj.get("recorded_at"), "recorded_at")?;
+        let event = parse_event_field(obj.get("event"))?;
+        let disbursement_id = match obj.get("disbursement_id") {
+            Some(value) => Some(parse_u64_field(Some(value), "disbursement_id")?),
+            None => None,
+        };
+        snapshots.push(TreasuryBalanceSnapshot {
+            id,
+            balance_ct,
+            delta_ct,
+            recorded_at,
+            event,
+            disbursement_id,
+        });
+    }
+    Ok(snapshots)
+}
+
+fn parse_u64_field(value: Option<&Value>, field: &str) -> io::Result<u64> {
+    match value {
+        Some(Value::Number(num)) => num.as_u64().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("{field} is not a u64"))
+        }),
+        Some(Value::String(raw)) => raw.parse::<u64>().map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{field} string parse error: {err}"),
+            )
+        }),
+        Some(other) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{field} has unexpected type {other:?}"),
+        )),
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("missing field {field}"),
+        )),
+    }
+}
+
+fn parse_i64_field(value: Option<&Value>, field: &str) -> io::Result<i64> {
+    match value {
+        Some(Value::Number(num)) => num.as_i64().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("{field} is not an i64"))
+        }),
+        Some(Value::String(raw)) => raw.parse::<i64>().map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{field} string parse error: {err}"),
+            )
+        }),
+        Some(other) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{field} has unexpected type {other:?}"),
+        )),
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("missing field {field}"),
+        )),
+    }
+}
+
+fn parse_event_field(value: Option<&Value>) -> io::Result<TreasuryBalanceEventKind> {
+    let Some(Value::String(raw)) = value else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "treasury balance JSON: missing event",
+        ));
+    };
+    match raw {
+        s if s.eq_ignore_ascii_case("accrual") => Ok(TreasuryBalanceEventKind::Accrual),
+        s if s.eq_ignore_ascii_case("queued") => Ok(TreasuryBalanceEventKind::Queued),
+        s if s.eq_ignore_ascii_case("executed") => Ok(TreasuryBalanceEventKind::Executed),
+        s if s.eq_ignore_ascii_case("cancelled") => Ok(TreasuryBalanceEventKind::Cancelled),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("treasury balance JSON: unknown event {other}"),
+        )),
+    }
+}
+
+#[derive(Default)]
+struct TreasurySummary {
+    scheduled_count: u64,
+    scheduled_amount: u64,
+    executed_count: u64,
+    executed_amount: u64,
+    cancelled_count: u64,
+    cancelled_amount: u64,
+    latest_timestamp: Option<u64>,
+    oldest_scheduled_created: Option<u64>,
+    next_epoch: Option<u64>,
+}
+
+impl TreasurySummary {
+    fn from_records(records: &[TreasuryDisbursement]) -> Self {
+        let mut summary = TreasurySummary::default();
+        for record in records {
+            match &record.status {
+                DisbursementStatus::Scheduled => {
+                    summary.scheduled_count = summary.scheduled_count.saturating_add(1);
+                    summary.scheduled_amount =
+                        summary.scheduled_amount.saturating_add(record.amount_ct);
+                    summary.update_latest(record.created_at);
+                    summary.oldest_scheduled_created = match summary.oldest_scheduled_created {
+                        Some(oldest) => Some(oldest.min(record.created_at)),
+                        None => Some(record.created_at),
+                    };
+                    summary.next_epoch = match summary.next_epoch {
+                        Some(epoch) => Some(epoch.min(record.scheduled_epoch)),
+                        None => Some(record.scheduled_epoch),
+                    };
+                }
+                DisbursementStatus::Executed { executed_at, .. } => {
+                    summary.executed_count = summary.executed_count.saturating_add(1);
+                    summary.executed_amount =
+                        summary.executed_amount.saturating_add(record.amount_ct);
+                    summary.update_latest(*executed_at);
+                }
+                DisbursementStatus::Cancelled { cancelled_at, .. } => {
+                    summary.cancelled_count = summary.cancelled_count.saturating_add(1);
+                    summary.cancelled_amount =
+                        summary.cancelled_amount.saturating_add(record.amount_ct);
+                    summary.update_latest(*cancelled_at);
+                }
+            }
+        }
+        summary
+    }
+
+    fn update_latest(&mut self, ts: u64) {
+        self.latest_timestamp = Some(match self.latest_timestamp {
+            Some(prev) => prev.max(ts),
+            None => ts,
+        });
+    }
+
+    fn metrics_for_status(&self, status: &str) -> (u64, u64) {
+        match status {
+            "scheduled" => (self.scheduled_count, self.scheduled_amount),
+            "executed" => (self.executed_count, self.executed_amount),
+            "cancelled" => (self.cancelled_count, self.cancelled_amount),
+            _ => (0, 0),
+        }
+    }
+
+    fn snapshot_age(&self, now: u64) -> u64 {
+        self.latest_timestamp
+            .map(|ts| now.saturating_sub(ts))
+            .unwrap_or(0)
+    }
+
+    fn scheduled_oldest_age(&self, now: u64) -> u64 {
+        self.oldest_scheduled_created
+            .map(|ts| now.saturating_sub(ts))
+            .unwrap_or(0)
+    }
+
+    fn next_epoch_value(&self) -> u64 {
+        self.next_epoch.unwrap_or(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3056,6 +3570,7 @@ mod tests {
             60,
             None,
             Some(10),
+            None,
         );
 
         {
@@ -3092,6 +3607,7 @@ mod tests {
             60,
             None,
             Some(15),
+            None,
         );
 
         record_tls_env_warning_event(
@@ -3139,6 +3655,7 @@ mod tests {
                 60,
                 None,
                 Some(42),
+                None,
             );
             let app = router(state.clone());
 

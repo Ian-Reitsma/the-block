@@ -44,7 +44,31 @@ let json_value = signed.to_json_value();
 ```
 
 Manual conversion keeps FIRST_PARTY_ONLY builds green while surfacing precise
-errors (field name + expectation) when policy packs are malformed.
+errors (field name + expectation) when policy packs are malformed. Packs now
+expose a typed `PolicyDiff` helper that records consent/feature deltas without
+falling back to raw JSON: callers receive `Change<bool>`/`Change<Vec<String>>`
+records, can render them via `PolicyDiff::to_json_value()`, or parse stored
+diffs with `PolicyDiff::from_json_value()` when replaying governance history.
+
+The crate also provides binary codecs implemented on top of the shared
+`foundation_serialization::binary_cursor` helpers:
+
+```rust
+use jurisdiction::{encode_policy_pack, decode_policy_pack};
+
+let bytes = encode_policy_pack(&pack);
+let restored = decode_policy_pack(&bytes)?;
+assert_eq!(restored, pack);
+```
+
+`encode_signed_pack`/`decode_signed_pack` and the matching
+`encode_policy_diff`/`decode_policy_diff` helpers keep sled snapshots and
+integration fixtures byte-stable without depending on serde or the legacy
+`binary_codec` shim. Regression tests in
+[`crates/jurisdiction/tests/codec.rs`](../crates/jurisdiction/tests/codec.rs)
+cover pack/diff round-trips, and the workspace
+[`tests/jurisdiction_dynamic.rs`](../tests/jurisdiction_dynamic.rs) suite
+exercises the typed diff API end to end.
 
 Policy packs live alongside the node configuration and can be swapped without
 recompiling.  Governance may distribute canonical packs and validators can load
@@ -75,6 +99,23 @@ appropriate pack per region.
 
 Example packs live under [`examples/jurisdiction/`](../examples/jurisdiction/)
 for quick testing.
+
+Persist signed registry entries with the dual-format helper so both legacy JSON
+tools and the new sled snapshots stay in sync:
+
+```rust
+use jurisdiction::{load_signed_pack, persist_signed_pack};
+
+persist_signed_pack("/etc/the-block/policy.json", &signed)?;
+let restored = load_signed_pack("/etc/the-block/policy.json")?;
+assert_eq!(restored, signed);
+```
+
+`persist_signed_pack` writes the JSON file alongside a `.bin` companion encoded
+via the manual cursor helpers; `load_signed_pack` prefers JSON but falls back to
+the binary snapshot so operators can drop serde tooling without losing history.
+Both flows surface precise IO/validation errors and power the new codec
+regression tests.
 
 Validate a custom pack before deployment with `tools/jurisdiction_check.rs`:
 

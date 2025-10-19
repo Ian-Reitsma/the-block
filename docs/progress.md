@@ -1,4 +1,30 @@
 # Project Progress Snapshot
+> **Review (2025-10-18, late night+++):** Jurisdiction policy packs gained typed
+> diff helpers, manual binary codecs, and dual-format persistence. `PolicyDiff`
+> now records consent/feature deltas as structured `Change<T>` records that round-
+> trip through the JSON facade, the new `codec` module encodes packs, signed
+> entries, and diffs via the cursor helpers with dedicated regression tests, and
+> `persist_signed_pack` writes both JSON and `.bin` snapshots so sled-backed
+> stores and legacy tooling stay in sync. Workspace tests exercise the diff API
+> end to end (`tests/jurisdiction_dynamic.rs`) while `cargo test -p jurisdiction`
+> locks codec coverage on the stub backend.
+> **Review (2025-10-18, late night):** Treasury RPC coverage now spans the HTTP
+> server and CLI. `gov.treasury.disbursements`, `gov.treasury.balance`, and
+> `gov.treasury.balance_history` ship typed request/response structs, the new
+> integration test (`node/tests/rpc_treasury.rs`) exercises the dispatcher end
+> to end, and `contract gov treasury fetch` folds the responses into a single
+> document with user-friendly transport error reporting. The metrics aggregator
+> accepts legacy balance snapshots that encoded numbers as strings, warns when
+> disbursement state exists without matching balance history, and continues to
+> prefer sled data when `AGGREGATOR_TREASURY_DB` is set.
+> **Review (2025-10-18, evening):** Treasury persistence now writes sled-backed
+> balance/disbursement trees alongside the JSON snapshots, and the node mirrors
+> the same helpers so explorer/CLI callers see consistent history. Miner rewards
+> honour the new `treasury.percent_ct` parameter—coinbase amounts divert the
+> configured share into the governance store before updating emission totals.
+> `governance::Params` exposes `to_value`/`deserialize`, bridge RPC handlers use
+> typed request/response structs with shared commitment decoding, and new tests
+> cover treasury accrual/execute/cancel flows plus mining-driven balance growth.
 > **Review (2025-10-16, evening++)**: The serialization facade now passes its
 > full stub-backed test suite. The `foundation_serialization::json!` macro gained
 > nested-object and identifier-key support with regression tests, every binary,
