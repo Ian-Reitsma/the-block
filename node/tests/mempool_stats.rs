@@ -79,8 +79,7 @@ fn mempool_stats_rpc() {
         let val = rpc(
             &addr,
             r#"{"method":"mempool.stats","params":{"lane":"consumer"}}"#,
-        )
-        .await;
+        );
         assert_eq!(val["result"]["size"].as_u64().unwrap(), 2);
         assert_eq!(val["result"]["fee_p90"].as_u64().unwrap(), 20);
         assert_eq!(val["result"]["fee_floor"].as_u64().unwrap(), expected_floor);
@@ -119,17 +118,21 @@ fn mempool_qos_event_public_rpc() {
         let client_ack = client.clone();
         let url_ack = url.clone();
         let ack = the_block::spawn_blocking(move || {
-            let payload = foundation_serialization::json!({
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "mempool.qos_event",
-                "params": {
-                    "event": event.event,
-                    "lane": event.lane,
-                    "fee": event.fee,
-                    "floor": event.floor,
-                }
-            });
+            use foundation_serialization::json::{Map, Number, Value};
+
+            let mut params = Map::new();
+            params.insert("event".to_string(), Value::String(event.event.to_string()));
+            params.insert("lane".to_string(), Value::String(event.lane.to_string()));
+            params.insert("fee".to_string(), Value::Number(Number::from(event.fee)));
+            params.insert("floor".to_string(), Value::Number(Number::from(event.floor)));
+
+            let mut payload_map = Map::new();
+            payload_map.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+            payload_map.insert("id".to_string(), Value::Number(Number::from(7))); 
+            payload_map.insert("method".to_string(), Value::String("mempool.qos_event".to_string()));
+            payload_map.insert("params".to_string(), Value::Object(params));
+            let payload = Value::Object(payload_map);
+
             client_ack
                 .call(&url_ack, &payload)
                 .expect("send QoS event")
@@ -138,7 +141,7 @@ fn mempool_qos_event_public_rpc() {
         })
         .await
         .unwrap();
-        assert_eq!(ack["result"]["status"], "ok");
+        assert_eq!(ack["result"]["status"].as_str(), Some("ok"));
         assert!(ack.get("error").is_none());
 
         let client_send = client.clone();
@@ -153,7 +156,7 @@ fn mempool_qos_event_public_rpc() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let stub_addr = listener.local_addr().unwrap();
         let stub_handle = thread::spawn(move || {
-            use std::io::{Read, Write};
+            use std::io::Write;
 
             let (mut stream, _) = listener.accept().unwrap();
             consume_http_request(&mut stream).unwrap();

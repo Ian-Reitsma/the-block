@@ -3,7 +3,10 @@ mod store {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use foundation_serialization::Serialize;
+    use foundation_serialization::{
+        json::{self, Map, Number, Value},
+        Serialize,
+    };
     use httpd::{form_urlencoded, StatusCode};
     use runtime::ws::{Message as WsMessage, ServerStream};
 
@@ -26,6 +29,22 @@ mod store {
         pub interval: Duration,
     }
 
+    fn error_value(message: impl Into<String>) -> Value {
+        let mut map = Map::new();
+        map.insert("error".to_string(), Value::String(message.into()));
+        Value::Object(map)
+    }
+
+    fn status_body_value(status: StatusCode, body: String) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "status".to_string(),
+            Value::Number(Number::from(status.as_u16())),
+        );
+        map.insert("body".to_string(), Value::String(body));
+        Value::Object(map)
+    }
+
     pub fn search_response(path: &str) -> (StatusCode, String) {
         match build_search_response(path) {
             Ok(body) => (StatusCode::OK, body),
@@ -39,8 +58,7 @@ mod store {
     }
 
     fn encode_rows<T: Serialize>(rows: &T) -> Result<String, SearchError> {
-        foundation_serialization::json::to_string(rows)
-            .map_err(|err| SearchError::EncodeFailed(err.to_string()))
+        json::to_string(rows).map_err(|err| SearchError::EncodeFailed(err.to_string()))
     }
 
     fn run_query(path: &str) -> Result<Vec<LogEntry>, SearchError> {
@@ -127,30 +145,22 @@ mod store {
         match err {
             SearchError::MissingDatabase => (
                 StatusCode::NOT_FOUND,
-                foundation_serialization::json::to_string_value(
-                    &foundation_serialization::json!({"error": "log database unavailable"}),
-                ),
+                json::to_string_value(&error_value("log database unavailable")),
             ),
             SearchError::InvalidQuery(msg) => (
                 StatusCode::BAD_REQUEST,
-                foundation_serialization::json::to_string_value(
-                    &foundation_serialization::json!({"error": msg}),
-                ),
+                json::to_string_value(&error_value(msg)),
             ),
             SearchError::QueryFailed(err) => {
                 log_query_failure(&err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    foundation_serialization::json::to_string_value(
-                        &foundation_serialization::json!({"error": "log query failed"}),
-                    ),
+                    json::to_string_value(&error_value("log query failed")),
                 )
             }
             SearchError::EncodeFailed(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                foundation_serialization::json::to_string_value(&foundation_serialization::json!({
-                    "error": format!("serialization failed: {err}"),
-                })),
+                json::to_string_value(&error_value(format!("serialization failed: {err}"))),
             ),
         }
     }
@@ -176,7 +186,7 @@ mod store {
                 Ok(entries) if entries.is_empty() => {}
                 Ok(entries) => {
                     last_id = entries.last().and_then(|row| row.id).unwrap_or(last_id);
-                    if let Ok(body) = foundation_serialization::json::to_string(&entries) {
+                    if let Ok(body) = json::to_string(&entries) {
                         if ws.send(WsMessage::Text(body)).await.is_err() {
                             break;
                         }
@@ -184,18 +194,8 @@ mod store {
                 }
                 Err(err) => {
                     let (status, body) = map_search_error(SearchError::QueryFailed(err));
-                    if ws
-                        .send(WsMessage::Text(
-                            foundation_serialization::json::to_string_value(
-                                &foundation_serialization::json!({
-                                    "status": status.as_u16(),
-                                    "body": body,
-                                }),
-                            ),
-                        ))
-                        .await
-                        .is_err()
-                    {
+                    let response = json::to_string_value(&status_body_value(status, body));
+                    if ws.send(WsMessage::Text(response)).await.is_err() {
                         break;
                     }
                 }
@@ -207,16 +207,8 @@ mod store {
     pub async fn serve_tail(mut stream: ServerStream, key: Vec<u8>, path: &str) {
         if key.is_empty() {
             let (status, body) = map_search_error(SearchError::MissingDatabase);
-            let _ = stream
-                .send(WsMessage::Text(
-                    foundation_serialization::json::to_string_value(
-                        &foundation_serialization::json!({
-                            "status": status.as_u16(),
-                            "body": body,
-                        }),
-                    ),
-                ))
-                .await;
+            let payload = json::to_string_value(&status_body_value(status, body));
+            let _ = stream.send(WsMessage::Text(payload)).await;
             return;
         }
 
@@ -224,16 +216,8 @@ mod store {
             Ok(cfg) => run_tail(stream, cfg).await,
             Err(err) => {
                 let (status, body) = map_search_error(err);
-                let _ = stream
-                    .send(WsMessage::Text(
-                        foundation_serialization::json::to_string_value(
-                            &foundation_serialization::json!({
-                                "status": status.as_u16(),
-                                "body": body,
-                            }),
-                        ),
-                    ))
-                    .await;
+                let payload = json::to_string_value(&status_body_value(status, body));
+                let _ = stream.send(WsMessage::Text(payload)).await;
             }
         }
     }

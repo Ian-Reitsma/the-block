@@ -60,51 +60,45 @@ fn timeout_factor() -> u64 {
         .unwrap_or(1)
 }
 
-fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
-    runtime::block_on(async {
-        let start = Instant::now();
-        loop {
-            let first = nodes[0].blockchain().block_height;
-            if nodes.iter().all(|n| n.blockchain().block_height == first) {
-                return true;
-            }
-            if start.elapsed() > max {
-                return false;
-            }
-            the_block::sleep(Duration::from_millis(20)).await;
+async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        let first = nodes[0].blockchain().block_height;
+        if nodes.iter().all(|n| n.blockchain().block_height == first) {
+            return true;
         }
-    })
+        if start.elapsed() > max {
+            return false;
+        }
+        the_block::sleep(Duration::from_millis(20)).await;
+    }
 }
 
-fn wait_until_peers(nodes: &[&Node], expected: usize, max: Duration) -> bool {
-    runtime::block_on(async {
-        let start = Instant::now();
-        loop {
-            if nodes.iter().all(|n| n.peer_addrs().len() == expected) {
-                return true;
-            }
-            if start.elapsed() > max {
-                return false;
-            }
-            the_block::sleep(Duration::from_millis(20)).await;
+async fn wait_until_peers(nodes: &[&Node], expected: usize, max: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        if nodes.iter().all(|n| n.peer_addrs().len() == expected) {
+            return true;
         }
-    })
+        if start.elapsed() > max {
+            return false;
+        }
+        the_block::sleep(Duration::from_millis(20)).await;
+    }
 }
 
-fn broadcast_until(node: &Node, group: &[&Node]) {
-    runtime::block_on(async {
-        let deadline = Instant::now() + Duration::from_secs(30 * timeout_factor());
-        loop {
-            node.broadcast_chain();
-            if wait_until_converged(group, Duration::from_secs(3)).await {
-                break;
-            }
-            if Instant::now() > deadline {
-                panic!("gossip convergence failed");
-            }
-            the_block::sleep(Duration::from_millis(50)).await;
+async fn broadcast_until(node: &Node, group: &[&Node]) {
+    let deadline = Instant::now() + Duration::from_secs(30 * timeout_factor());
+    loop {
+        node.broadcast_chain();
+        if wait_until_converged(group, Duration::from_secs(3)).await {
+            break;
         }
-    });
+        if Instant::now() > deadline {
+            panic!("gossip convergence failed");
+        }
+        the_block::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Spin up three nodes that exchange transactions and blocks, ensuring

@@ -1,11 +1,19 @@
 use std::sync::{Arc, Mutex};
 
-use foundation_serialization::json::Value;
+use foundation_serialization::Serialize;
 
 use crate::Blockchain;
 
 /// Return the current PoW difficulty.
-pub fn difficulty(bc: &Arc<Mutex<Blockchain>>) -> Value {
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DifficultyResponse {
+    pub difficulty: u64,
+}
+
+pub fn difficulty(bc: &Arc<Mutex<Blockchain>>) -> DifficultyResponse {
     let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
-    foundation_serialization::json!({"difficulty": guard.difficulty})
+    DifficultyResponse {
+        difficulty: guard.difficulty,
+    }
 }

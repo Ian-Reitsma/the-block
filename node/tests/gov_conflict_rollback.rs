@@ -26,7 +26,7 @@ fn rollback_conflicting_proposals() {
         1,
     )
     .unwrap_or_else(|_| panic!("propose1"));
-    let id1 = p1["id"].as_u64().unwrap();
+    let id1 = p1.id;
     gov_vote(&store, "bob".into(), id1, "yes", 0).unwrap_or_else(|_| panic!("vote1"));
     assert_eq!(
         store.tally_and_queue(id1, 1).unwrap(),
@@ -49,7 +49,7 @@ fn rollback_conflicting_proposals() {
         4,
     )
     .unwrap_or_else(|_| panic!("propose2"));
-    let id2 = p2["id"].as_u64().unwrap();
+    let id2 = p2.id;
     gov_vote(&store, "dave".into(), id2, "yes", 3).unwrap_or_else(|_| panic!("vote2"));
     assert_eq!(
         store.tally_and_queue(id2, 4).unwrap(),

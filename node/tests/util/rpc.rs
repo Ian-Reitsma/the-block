@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use super::seed::record_seed;
 use rand::thread_rng;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 
 /// Randomize the RPC client timeout for tests to surface edge conditions.
 #[allow(dead_code)]

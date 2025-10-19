@@ -17,6 +17,7 @@ fn run_search(path: &str) -> Result<Vec<the_block::log_indexer::LogEntry>> {
             SearchError::MissingDatabase => "log database unavailable".to_string(),
             SearchError::InvalidQuery(msg) => msg,
             SearchError::QueryFailed(inner) => inner.to_string(),
+            SearchError::EncodeFailed(msg) => msg,
         };
         io::Error::new(io::ErrorKind::Other, message).into()
     })

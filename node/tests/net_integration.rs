@@ -22,20 +22,18 @@ fn init_env() -> sys::tempfile::TempDir {
     dir
 }
 
-fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
-    runtime::block_on(async {
-        let start = Instant::now();
-        loop {
-            let first = nodes[0].blockchain().block_height;
-            if nodes.iter().all(|n| n.blockchain().block_height == first) {
-                return true;
-            }
-            if start.elapsed() > max {
-                return false;
-            }
-            the_block::sleep(Duration::from_millis(20)).await;
+async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        let first = nodes[0].blockchain().block_height;
+        if nodes.iter().all(|n| n.blockchain().block_height == first) {
+            return true;
         }
-    })
+        if start.elapsed() > max {
+            return false;
+        }
+        the_block::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 struct TestNode {

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use concurrency::Lazy;
-use foundation_serialization::json;
+use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::Serialize;
 
 use super::{
@@ -239,14 +239,16 @@ impl Debugger {
         }
         let mut events = Vec::new();
         for (i, step) in self.trace.iter().enumerate() {
-            events.push(foundation_serialization::json!({
-                "name": step.op.clone(),
-                "ph": "X",
-                "ts": i as u64,
-                "dur": 1,
-            }));
+            let mut map = Map::new();
+            map.insert("name".to_string(), Value::String(step.op.clone()));
+            map.insert("ph".to_string(), Value::String("X".to_string()));
+            map.insert("ts".to_string(), Value::Number((i as u64).into()));
+            map.insert("dur".to_string(), Value::Number(1u64.into()));
+            events.push(Value::Object(map));
         }
-        let out = foundation_serialization::json!({"traceEvents": events});
+        let mut outer = Map::new();
+        outer.insert("traceEvents".to_string(), Value::Array(events));
+        let out = Value::Object(outer);
         let _ = std::fs::write(path, json::to_vec_pretty(&out).unwrap());
     }
 

@@ -2,7 +2,7 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_serialization::binary;
 use std::sync::{Arc, Mutex};
-use sys::temp;
+use sys::tempfile::tempdir;
 use testkit::tb_prop_test;
 use the_block::{
     net::{self, Message, Payload, PeerSet},
@@ -17,7 +17,7 @@ fn sample_sk() -> SigningKey {
 tb_prop_test!(fuzz_identifier_exchange, |runner| {
     runner
         .add_case("default handshake", || {
-            let dir = temp::tempdir().unwrap();
+            let dir = tempdir().unwrap();
             net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
             std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
             let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -45,7 +45,7 @@ tb_prop_test!(fuzz_identifier_exchange, |runner| {
         .add_random_case("handshake permutations", 64, |rng| {
             let proto_version = rng.range_u16(0..=u16::MAX);
             let feature_bits = rng.range_u32(0..=u32::MAX);
-            let dir = temp::tempdir().unwrap();
+            let dir = tempdir().unwrap();
             net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
             std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
             let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -74,7 +74,7 @@ tb_prop_test!(fuzz_malformed_handshake, |runner| {
     runner
         .add_random_case("deserialize fuzz", 96, |rng| {
             let raw = rng.bytes(0..=256);
-            let dir = temp::tempdir().unwrap();
+            let dir = tempdir().unwrap();
             net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
             std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
             let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));

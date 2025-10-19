@@ -71,8 +71,8 @@ fn dns_publish_invalid_sig_rejected() {
             pk_hex,
             crypto_suite::hex::encode(bad_sig)
         );
-        let val = expect_timeout(rpc(&addr, &body)).await;
-        assert_eq!(val["error"]["message"], "ERR_DNS_SIG_INVALID");
+        let val = rpc(&addr, &body);
+        assert_eq!(val["error"]["message"].as_str(), Some("ERR_DNS_SIG_INVALID"));
 
         Settlement::shutdown();
         handle.abort();

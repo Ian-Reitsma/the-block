@@ -11,7 +11,7 @@ use bridges::{
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::json::{self, Number, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fs;
@@ -279,14 +279,29 @@ mod state_codec {
     }
 
     fn encode_config(cfg: &ChannelConfig) -> Value {
-        foundation_serialization::json!({
-            "asset": cfg.asset.clone(),
-            "confirm_depth": cfg.confirm_depth,
-            "fee_per_byte": cfg.fee_per_byte,
-            "challenge_period_secs": cfg.challenge_period_secs,
-            "relayer_quorum": cfg.relayer_quorum,
-            "headers_dir": cfg.headers_dir.clone(),
-        })
+        let mut map = Map::new();
+        map.insert("asset".to_string(), Value::String(cfg.asset.clone()));
+        map.insert(
+            "confirm_depth".to_string(),
+            Value::Number(Number::from(cfg.confirm_depth)),
+        );
+        map.insert(
+            "fee_per_byte".to_string(),
+            Value::Number(Number::from(cfg.fee_per_byte)),
+        );
+        map.insert(
+            "challenge_period_secs".to_string(),
+            Value::Number(Number::from(cfg.challenge_period_secs)),
+        );
+        map.insert(
+            "relayer_quorum".to_string(),
+            Value::Number(Number::from(cfg.relayer_quorum as u64)),
+        );
+        map.insert(
+            "headers_dir".to_string(),
+            Value::String(cfg.headers_dir.clone()),
+        );
+        Value::Object(map)
     }
 
     fn decode_config(value: &Value) -> Result<ChannelConfig, CodecError> {
@@ -368,18 +383,45 @@ mod state_codec {
     }
 
     fn encode_receipt(receipt: &DepositReceipt) -> Value {
-        foundation_serialization::json!({
-            "asset": receipt.asset.clone(),
-            "nonce": receipt.nonce,
-            "user": receipt.user.clone(),
-            "amount": receipt.amount,
-            "relayer": receipt.relayer.clone(),
-            "header_hash": crypto_suite::hex::encode(&receipt.header_hash),
-            "relayer_commitment": crypto_suite::hex::encode(&receipt.relayer_commitment),
-            "proof_fingerprint": crypto_suite::hex::encode(&receipt.proof_fingerprint),
-            "bundle_relayers": receipt.bundle_relayers.clone(),
-            "recorded_at": receipt.recorded_at,
-        })
+        let bundle_relayers = receipt
+            .bundle_relayers
+            .iter()
+            .cloned()
+            .map(Value::String)
+            .collect();
+        let mut map = Map::new();
+        map.insert("asset".to_string(), Value::String(receipt.asset.clone()));
+        map.insert(
+            "nonce".to_string(),
+            Value::Number(Number::from(receipt.nonce)),
+        );
+        map.insert("user".to_string(), Value::String(receipt.user.clone()));
+        map.insert(
+            "amount".to_string(),
+            Value::Number(Number::from(receipt.amount)),
+        );
+        map.insert(
+            "relayer".to_string(),
+            Value::String(receipt.relayer.clone()),
+        );
+        map.insert(
+            "header_hash".to_string(),
+            Value::String(crypto_suite::hex::encode(&receipt.header_hash)),
+        );
+        map.insert(
+            "relayer_commitment".to_string(),
+            Value::String(crypto_suite::hex::encode(&receipt.relayer_commitment)),
+        );
+        map.insert(
+            "proof_fingerprint".to_string(),
+            Value::String(crypto_suite::hex::encode(&receipt.proof_fingerprint)),
+        );
+        map.insert("bundle_relayers".to_string(), Value::Array(bundle_relayers));
+        map.insert(
+            "recorded_at".to_string(),
+            Value::Number(Number::from(receipt.recorded_at)),
+        );
+        Value::Object(map)
     }
 
     fn decode_receipt(value: &Value) -> Result<DepositReceipt, CodecError> {
@@ -426,12 +468,21 @@ mod state_codec {
     }
 
     fn encode_challenge(record: &ChallengeRecord) -> Value {
-        foundation_serialization::json!({
-            "asset": record.asset.clone(),
-            "commitment": crypto_suite::hex::encode(&record.commitment),
-            "challenger": record.challenger.clone(),
-            "challenged_at": record.challenged_at,
-        })
+        let mut map = Map::new();
+        map.insert("asset".to_string(), Value::String(record.asset.clone()));
+        map.insert(
+            "commitment".to_string(),
+            Value::String(crypto_suite::hex::encode(&record.commitment)),
+        );
+        map.insert(
+            "challenger".to_string(),
+            Value::String(record.challenger.clone()),
+        );
+        map.insert(
+            "challenged_at".to_string(),
+            Value::Number(Number::from(record.challenged_at)),
+        );
+        Value::Object(map)
     }
 
     fn decode_challenge(value: &Value) -> Result<ChallengeRecord, CodecError> {
@@ -452,13 +503,22 @@ mod state_codec {
     }
 
     fn encode_slash(record: &SlashRecord) -> Value {
-        foundation_serialization::json!({
-            "relayer": record.relayer.clone(),
-            "asset": record.asset.clone(),
-            "slashes": record.slashes,
-            "remaining_bond": record.remaining_bond,
-            "occurred_at": record.occurred_at,
-        })
+        let mut map = Map::new();
+        map.insert("relayer".to_string(), Value::String(record.relayer.clone()));
+        map.insert("asset".to_string(), Value::String(record.asset.clone()));
+        map.insert(
+            "slashes".to_string(),
+            Value::Number(Number::from(record.slashes)),
+        );
+        map.insert(
+            "remaining_bond".to_string(),
+            Value::Number(Number::from(record.remaining_bond)),
+        );
+        map.insert(
+            "occurred_at".to_string(),
+            Value::Number(Number::from(record.occurred_at)),
+        );
+        Value::Object(map)
     }
 
     fn decode_slash(value: &Value) -> Result<SlashRecord, CodecError> {
@@ -480,15 +540,18 @@ mod state_codec {
             .iter()
             .map(|fp| Value::String(crypto_suite::hex::encode(fp)))
             .collect();
-        foundation_serialization::json!({
-            "config": encode_config(&channel.config),
-            "bridge": encode_snapshot(&channel.bridge),
-            "relayers": channel.relayers.to_value(),
-            "receipts": Value::Array(receipts),
-            "challenges": Value::Array(challenges),
-            "seen_fingerprints": Value::Array(fingerprints),
-            "next_nonce": channel.next_nonce,
-        })
+        let mut map = Map::new();
+        map.insert("config".to_string(), encode_config(&channel.config));
+        map.insert("bridge".to_string(), encode_snapshot(&channel.bridge));
+        map.insert("relayers".to_string(), channel.relayers.to_value());
+        map.insert("receipts".to_string(), Value::Array(receipts));
+        map.insert("challenges".to_string(), Value::Array(challenges));
+        map.insert("seen_fingerprints".to_string(), Value::Array(fingerprints));
+        map.insert(
+            "next_nonce".to_string(),
+            Value::Number(Number::from(channel.next_nonce)),
+        );
+        Value::Object(map)
     }
 
     fn decode_channel(value: &Value) -> Result<ChannelState, CodecError> {

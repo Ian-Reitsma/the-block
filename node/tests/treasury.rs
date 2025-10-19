@@ -1,5 +1,5 @@
-use node::governance::{GovStore, TreasuryBalanceEventKind, NODE_GOV_STORE};
-use node::Blockchain;
+use the_block::governance::{DisbursementStatus, GovStore, TreasuryBalanceEventKind, NODE_GOV_STORE};
+use the_block::Blockchain;
 use sys::tempfile::tempdir;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -21,7 +21,7 @@ fn node_treasury_accrual_flow() -> Result<()> {
     let executed = store.execute_disbursement(queued.id, "0xabc")?;
     assert!(matches!(
         executed.status,
-        node::governance::DisbursementStatus::Executed { .. }
+        DisbursementStatus::Executed { .. }
     ));
     assert_eq!(store.treasury_balance()?, 54);
 

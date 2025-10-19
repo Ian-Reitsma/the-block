@@ -17,6 +17,10 @@ impl Drop for OverlayRestore {
     }
 }
 
+fn seeded_peer_id(seed: u8) -> discovery::PeerId {
+    net::overlay_peer_from_bytes(&[seed; 32]).expect("overlay peer")
+}
+
 #[test]
 fn relay_status_emits_base58_peers() {
     let mut cfg = GossipConfig::default();
@@ -112,9 +116,9 @@ fn overlay_swap_end_to_end() {
     net::configure_overlay(&inhouse_cfg);
     ensure_overlay_sanity(&inhouse_cfg).expect("in-house overlay sanity");
 
-    let local = discovery::PeerId::random();
+    let local = seeded_peer_id(11);
     let mut inhouse_discovery = discovery::new(local.clone());
-    let other = discovery::PeerId::random();
+    let other = seeded_peer_id(12);
     let addr = PeerEndpoint::new("127.0.0.1:9100".parse().unwrap());
     inhouse_discovery.add_peer(other.clone(), addr.clone());
     inhouse_discovery.persist();
@@ -134,8 +138,8 @@ fn overlay_swap_end_to_end() {
     net::configure_overlay(&stub_cfg);
     ensure_overlay_sanity(&stub_cfg).expect("stub overlay sanity");
 
-    let mut stub_discovery = discovery::new(discovery::PeerId::random());
-    let stub_peer = discovery::PeerId::random();
+    let mut stub_discovery = discovery::new(seeded_peer_id(13));
+    let stub_peer = seeded_peer_id(14);
     stub_discovery.add_peer(stub_peer.clone(), addr);
     stub_discovery.persist();
     uptime::note_seen(stub_peer);

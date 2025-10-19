@@ -5,8 +5,67 @@ use crate::identity::{
 };
 use crate::transaction::TxDidAnchor;
 use foundation_serialization::json::Value;
+use foundation_serialization::Serialize;
 
-pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value, HandleError> {
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct HandleRegistrationResponse {
+    pub address: String,
+    pub normalized_handle: String,
+    pub normalization_accuracy: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct HandleResolutionResponse {
+    pub address: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct WhoAmIResponse {
+    pub address: String,
+    pub handle: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DidAttestationResponse {
+    pub signer: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DidRecordResponse {
+    pub address: String,
+    pub document: String,
+    pub hash: String,
+    pub nonce: u64,
+    pub updated_at: u64,
+    pub public_key: String,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub remote_attestation: Option<DidAttestationResponse>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DidResolutionResponse {
+    pub address: String,
+    pub document: Option<String>,
+    pub hash: Option<String>,
+    pub nonce: Option<u64>,
+    pub updated_at: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub public_key: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub remote_attestation: Option<DidAttestationResponse>,
+}
+
+pub fn register_handle(
+    params: &Value,
+    reg: &mut HandleRegistry,
+) -> Result<HandleRegistrationResponse, HandleError> {
     let handle = params
         .get("handle")
         .and_then(|v| v.as_str())
@@ -35,60 +94,77 @@ pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value
     let outcome = reg.register_handle(handle, &pk_bytes, pq_bytes.as_deref(), &sig_bytes, nonce)?;
     #[cfg(not(feature = "pq-crypto"))]
     let outcome = reg.register_handle(handle, &pk_bytes, &sig_bytes, nonce)?;
-    Ok(foundation_serialization::json!({
-        "address": outcome.address,
-        "normalized_handle": outcome.normalized_handle,
-        "normalization_accuracy": outcome.accuracy.as_str(),
-    }))
+    Ok(HandleRegistrationResponse {
+        address: outcome.address,
+        normalized_handle: outcome.normalized_handle,
+        normalization_accuracy: outcome.accuracy.as_str().to_string(),
+    })
 }
 
-pub fn resolve_handle(params: &Value, reg: &HandleRegistry) -> Value {
+pub fn resolve_handle(params: &Value, reg: &HandleRegistry) -> HandleResolutionResponse {
     let handle = params.get("handle").and_then(|v| v.as_str()).unwrap_or("");
     let addr = reg.resolve_handle(handle);
-    foundation_serialization::json!({"address": addr})
+    HandleResolutionResponse { address: addr }
 }
 
-pub fn whoami(params: &Value, reg: &HandleRegistry) -> Value {
+pub fn whoami(params: &Value, reg: &HandleRegistry) -> WhoAmIResponse {
     let addr = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
     let handle = reg.handle_of(addr);
-    foundation_serialization::json!({"address": addr, "handle": handle})
+    WhoAmIResponse {
+        address: addr.to_string(),
+        handle,
+    }
 }
 
-fn did_record_json(record: DidRecord) -> Value {
-    foundation_serialization::json!({
-        "address": record.address,
-        "document": record.document,
-        "hash": crypto_suite::hex::encode(record.hash),
-        "nonce": record.nonce,
-        "updated_at": record.updated_at,
-        "public_key": crypto_suite::hex::encode(record.public_key),
-        "remote_attestation": record.remote_attestation.map(|att| {
-            foundation_serialization::json!({"signer": att.signer, "signature": att.signature})
+fn did_record_json(record: DidRecord) -> DidRecordResponse {
+    DidRecordResponse {
+        address: record.address,
+        document: record.document,
+        hash: crypto_suite::hex::encode(record.hash),
+        nonce: record.nonce,
+        updated_at: record.updated_at,
+        public_key: crypto_suite::hex::encode(record.public_key),
+        remote_attestation: record.remote_attestation.map(|att| DidAttestationResponse {
+            signer: att.signer,
+            signature: att.signature,
         }),
-    })
+    }
 }
 
 pub fn anchor_did(
     params: &Value,
     reg: &mut DidRegistry,
     gov: &GovStore,
-) -> Result<Value, DidError> {
+) -> Result<DidRecordResponse, DidError> {
     let tx: TxDidAnchor = foundation_serialization::json::from_value(params.clone())
         .map_err(|_| DidError::InvalidRequest)?;
     let record = reg.anchor(&tx, Some(gov))?;
     Ok(did_record_json(record))
 }
 
-pub fn resolve_did(params: &Value, reg: &DidRegistry) -> Value {
+pub fn resolve_did(params: &Value, reg: &DidRegistry) -> DidResolutionResponse {
     let address = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
     match reg.resolve(address) {
-        Some(record) => did_record_json(record),
-        None => foundation_serialization::json!({
-            "address": address,
-            "document": Value::Null,
-            "hash": Value::Null,
-            "nonce": Value::Null,
-            "updated_at": Value::Null,
-        }),
+        Some(record) => {
+            let payload = did_record_json(record);
+            DidResolutionResponse {
+                address: payload.address.clone(),
+                document: Some(payload.document),
+                hash: Some(payload.hash),
+                nonce: Some(payload.nonce),
+                updated_at: Some(payload.updated_at),
+                public_key: Some(payload.public_key),
+                remote_attestation: payload.remote_attestation,
+            }
+        }
+        None => DidResolutionResponse {
+            address: address.to_string(),
+            document: None,
+            hash: None,
+            nonce: None,
+            updated_at: None,
+            public_key: None,
+            remote_attestation: None,
+        },
     }
 }

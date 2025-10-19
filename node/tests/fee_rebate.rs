@@ -1,9 +1,9 @@
 #![cfg(feature = "integration-tests")]
-use the_block::net::uptime::{self, PeerId};
+use the_block::net::{overlay_peer_from_bytes, uptime};
 
 #[test]
 fn rebate_claim_once_per_epoch() {
-    let peer = PeerId::random();
+    let peer = overlay_peer_from_bytes(&[7u8; 32]).expect("peer id");
     uptime::note_seen(peer.clone());
     assert_eq!(uptime::claim(peer.clone(), 0, 1, 10), Some(10));
     // second claim in same epoch rejected

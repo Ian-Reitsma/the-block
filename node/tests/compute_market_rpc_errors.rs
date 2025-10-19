@@ -49,9 +49,9 @@ fn price_board_no_data_errors() {
         let addr = expect_timeout(rx).await.unwrap();
 
         let req = r#"{"method":"price_board_get"}"#;
-        let val = expect_timeout(rpc(&addr, req)).await;
-        assert_eq!(val["error"]["code"], -33000);
-        assert_eq!(val["error"]["message"], "no price data");
+        let val = rpc(&addr, req);
+        assert_eq!(val["error"]["code"].as_i64(), Some(-33000));
+        assert_eq!(val["error"]["message"].as_str(), Some("no price data"));
         handle.abort();
         let _ = handle.await;
     });

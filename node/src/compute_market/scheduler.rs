@@ -1,5 +1,5 @@
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
@@ -14,6 +14,18 @@ use sys::paths;
 use super::{courier, Accelerator};
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
+
+fn json_map(pairs: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
+
+fn status_value(status: &str) -> Value {
+    json_map(vec![("status", Value::String(status.to_string()))])
+}
 
 /// Hardware capability descriptor for a provider or workload.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -55,7 +67,7 @@ pub struct SchedulerStats {
     pub pending: Vec<PendingJob>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct PendingJob {
     pub job_id: String,
@@ -673,10 +685,16 @@ impl SchedulerState {
     }
 
     fn metrics(&self) -> Value {
-        foundation_serialization::json!({
-            "reputation": self.reputation.clone(),
-            "utilization": self.utilization.clone(),
-        })
+        json_map(vec![
+            (
+                "reputation",
+                json::to_value(&self.reputation).unwrap_or(Value::Null),
+            ),
+            (
+                "utilization",
+                json::to_value(&self.utilization).unwrap_or(Value::Null),
+            ),
+        ])
     }
 
     fn stats(&self) -> SchedulerStats {
@@ -1058,13 +1076,16 @@ fn lookup_cancellation(job_id: &str) -> Option<String> {
 pub fn job_status(job_id: &str) -> Value {
     let sched = scheduler();
     if sched.active.contains_key(job_id) {
-        foundation_serialization::json!({"status": "active"})
+        status_value("active")
     } else if sched.pending.iter().any(|j| j.job_id == job_id) {
-        foundation_serialization::json!({"status": "queued"})
+        status_value("queued")
     } else if let Some(reason) = lookup_cancellation(job_id) {
-        foundation_serialization::json!({"status": "canceled", "reason": reason})
+        json_map(vec![
+            ("status", Value::String("canceled".to_string())),
+            ("reason", Value::String(reason)),
+        ])
     } else {
-        foundation_serialization::json!({"status": "unknown"})
+        status_value("unknown")
     }
 }
 

@@ -3,7 +3,7 @@ use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex::encode as hex_encode;
 use diagnostics::anyhow::{self, Result as AnyhowResult};
 use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
-use foundation_sqlite::{params, Connection, OptionalExtension};
+use foundation_sqlite::{params, Connection, OptionalExtension, Value as SqlValue};
 use httpd::{HttpError, Request, Response, Router, StatusCode};
 use std::env;
 use std::num::NonZeroUsize;
@@ -547,7 +547,7 @@ async fn treasury_disbursements(
     };
 
     match explorer.treasury_disbursements(page, page_size, filter) {
-        Ok(result) => Ok(Response::new(StatusCode::OK).json(&result)),
+        Ok(result) => Response::new(StatusCode::OK).json(&result),
         Err(err) => {
             log_error("treasury disbursement query failed", &err);
             Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
@@ -1050,7 +1050,7 @@ impl Explorer {
     }
 
     pub fn record_bridge_challenge(&self, rec: &BridgeChallengeRecord) -> DbResult<()> {
-        let conn = self.conn()?;
+        let mut conn = self.conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO bridge_challenges (commitment, user, amount, challenged, initiated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -1755,7 +1755,7 @@ impl Explorer {
     }
 
     pub fn index_treasury_disbursements(&self, records: &[TreasuryDisbursement]) -> DbResult<()> {
-        let conn = self.conn()?;
+        let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM treasury_disbursements", params![])?;
         for record in records {
@@ -1782,6 +1782,12 @@ impl Explorer {
                     Some(reason.as_str()),
                 ),
             };
+            let tx_hash_value = tx_hash
+                .map(SqlValue::from)
+                .unwrap_or(SqlValue::Null);
+            let cancel_reason_value = cancel_reason
+                .map(SqlValue::from)
+                .unwrap_or(SqlValue::Null);
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
@@ -1793,8 +1799,8 @@ impl Explorer {
                     record.created_at as i64,
                     status_label,
                     status_ts as i64,
-                    tx_hash,
-                    cancel_reason,
+                    tx_hash_value,
+                    cancel_reason_value,
                 ],
             )?;
         }

@@ -1355,12 +1355,22 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
                 .append(true)
                 .open(&path)
                 .unwrap();
-            let entry = foundation_serialization::json!({
-                "old": crypto_suite::hex::encode(old),
-                "new": crypto_suite::hex::encode(new),
-                "ts": now_secs(),
-            });
-            let _ = writeln!(file, "{}", json::to_string_value(&entry));
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct RotationHistoryEntry {
+                old: String,
+                new: String,
+                ts: u64,
+            }
+
+            let entry = RotationHistoryEntry {
+                old: crypto_suite::hex::encode(old),
+                new: crypto_suite::hex::encode(new),
+                ts: now_secs(),
+            };
+            if let Ok(entry_value) = json::to_value(entry) {
+                let _ = writeln!(file, "{}", json::to_string_value(&entry_value));
+            }
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
         ROTATED_KEYS.guard().insert(*old, (new, revoke));
@@ -2308,13 +2318,23 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
         guard.clone()
     } {
         #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct RotationMetrics {
+            key_rotation: String,
+        }
+
+        #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
         struct RotationEvent {
             peer_id: String,
-            metrics: Value,
+            metrics: RotationMetrics,
         }
+
         let event = RotationEvent {
             peer_id: overlay_peer_label(old),
-            metrics: foundation_serialization::json!({ "key_rotation": crypto_suite::hex::encode(new) }),
+            metrics: RotationMetrics {
+                key_rotation: crypto_suite::hex::encode(new),
+            },
         };
         let fut_client = client.clone();
         client.spawn(async move {

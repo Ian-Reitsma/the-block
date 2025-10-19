@@ -5,26 +5,44 @@ use crate::Blockchain;
 use crypto_suite::signatures::ed25519::VerifyingKey;
 use std::sync::{Arc, Mutex};
 
-pub fn status(
-    bc: &Arc<Mutex<Blockchain>>,
-) -> Result<foundation_serialization::json::Value, RpcError> {
+use foundation_serialization::Serialize;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde", untagged)]
+pub enum JurisdictionStatusResponse {
+    Detailed {
+        jurisdiction: String,
+        consent_required: bool,
+        features: Vec<String>,
+    },
+    Summary {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jurisdiction: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct JurisdictionSetResponse {
+    pub status: &'static str,
+    pub jurisdiction: String,
+}
+
+pub fn status(bc: &Arc<Mutex<Blockchain>>) -> Result<JurisdictionStatusResponse, RpcError> {
     let j = bc.lock().unwrap().config.jurisdiction.clone();
     if let Some(ref region) = j {
         if let Some(pack) = jurisdiction::PolicyPack::template(region) {
-            return Ok(foundation_serialization::json!({
-                "jurisdiction": pack.region,
-                "consent_required": pack.consent_required,
-                "features": pack.features,
-            }));
+            return Ok(JurisdictionStatusResponse::Detailed {
+                jurisdiction: pack.region,
+                consent_required: pack.consent_required,
+                features: pack.features,
+            });
         }
     }
-    Ok(foundation_serialization::json!({"jurisdiction": j}))
+    Ok(JurisdictionStatusResponse::Summary { jurisdiction: j })
 }
 
-pub fn set(
-    bc: &Arc<Mutex<Blockchain>>,
-    path: &str,
-) -> Result<foundation_serialization::json::Value, RpcError> {
+pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<JurisdictionSetResponse, RpcError> {
     let pack_res = if path.starts_with("http") {
         // placeholder: use zero key for demo
         let pk = VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
@@ -44,10 +62,10 @@ pub fn set(
                 "le_jurisdiction.log",
                 &format!("rpc set {}", pack.region),
             );
-            Ok(foundation_serialization::json!({
-                "status": "ok",
-                "jurisdiction": pack.region,
-            }))
+            Ok(JurisdictionSetResponse {
+                status: "ok",
+                jurisdiction: pack.region,
+            })
         }
         Err(_) => Err(RpcError::new(-32070, "load failed")),
     }

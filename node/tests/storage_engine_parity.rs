@@ -8,12 +8,13 @@ use std::sync::Mutex;
 use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::gossip::{config::GossipConfig, relay::Relay};
+use the_block::net::{overlay_peer_from_bytes, overlay_peer_to_base58};
 use the_block::simple_db::{self, EngineConfig, EngineKind};
 
 static ENGINE_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 fn supported_engines() -> Vec<EngineKind> {
-    [EngineKind::Memory, EngineKind::RocksDb, EngineKind::Sled]
+    [EngineKind::Memory, EngineKind::Inhouse, EngineKind::RocksDb]
         .into_iter()
         .filter(|kind| kind.is_available())
         .collect()
@@ -39,13 +40,14 @@ fn gossip_relay_engine_parity() {
         cfg.shard_store_path = store_dir.to_string_lossy().into_owned();
         let relay = Relay::new(cfg.clone());
         let shard: ShardId = 1;
-        let mut peer = [0u8; 32];
-        peer[0] = engine.label().as_bytes()[0];
-        relay.register_peer(shard, peer);
+        let mut peer_bytes = [0u8; 32];
+        peer_bytes[0] = engine.label().as_bytes()[0];
+        let peer = overlay_peer_from_bytes(&peer_bytes).expect("overlay peer");
+        let expected = overlay_peer_to_base58(&peer);
+        relay.register_peer(shard, peer.clone());
         drop(relay);
         let relay = Relay::new(cfg);
         let status = relay.status();
-        let expected = crypto_suite::hex::encode(peer);
         let peers = status
             .shard_affinity
             .into_iter()

@@ -3,7 +3,7 @@ use crate::{
     config::RpcConfig,
     consensus::pow::{self, BlockHeader},
     gateway,
-    governance::{GovStore, Params, NODE_GOV_STORE},
+    governance::{Params, NODE_GOV_STORE},
     identity::{handle_registry::HandleRegistry, DidRegistry},
     kyc,
     localnet::{validate_proximity, AssistReceipt},
@@ -22,6 +22,7 @@ use foundation_rpc::{
     Params as RpcParams, Request as RpcRequest, Response as RpcResponse, RpcError,
 };
 use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::json::{Map, Number, Value};
 #[cfg(feature = "telemetry")]
 use foundation_serialization::Deserialize;
 use foundation_serialization::{binary, json, Serialize};
@@ -67,6 +68,7 @@ pub mod peer;
 pub mod pos;
 pub mod state_stream;
 pub mod storage;
+pub mod treasury;
 pub mod vm;
 pub mod vm_trace;
 
@@ -75,6 +77,40 @@ static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
     Mutex::new(SimpleDb::open_named(names::LOCALNET_RECEIPTS, &path))
 });
+
+fn json_map(pairs: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
+
+fn status_value(status: &str) -> Value {
+    Value::Object({
+        let mut map = Map::new();
+        map.insert("status".to_string(), Value::String(status.to_string()));
+        map
+    })
+}
+
+fn error_value(message: impl Into<String>) -> Value {
+    Value::Object({
+        let mut map = Map::new();
+        map.insert("error".to_string(), Value::String(message.into()));
+        map
+    })
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct BadgeStatusResponse {
+    active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_mint: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_burn: Option<u64>,
+}
 
 struct RpcState {
     bc: Arc<Mutex<Blockchain>>,
@@ -372,10 +408,10 @@ fn rpc_error(code: i32, message: &'static str) -> RpcError {
 }
 
 fn parse_params<T: DeserializeOwned>(params: &RpcParams) -> Result<T, RpcError> {
-    let mut value = params.as_value();
-    if value.is_null() {
-        value = json::Value::Object(json::Map::new());
-    }
+    let value = match params.as_value() {
+        json::Value::Null => json::Value::Object(json::Map::new()),
+        other => other.clone(),
+    };
     json::from_value(value).map_err(|_| rpc_error(-32602, "invalid params"))
 }
 
@@ -698,11 +734,13 @@ async fn handle_badge_status(request: Request<RpcState>) -> Result<Response, Htt
         chain.check_badges();
         chain.badge_status()
     };
-    let body = foundation_serialization::json::to_string_value(&foundation_serialization::json!({
-        "active": active,
-        "last_mint": last_mint,
-        "last_burn": last_burn,
-    }));
+    let snapshot = BadgeStatusResponse {
+        active,
+        last_mint,
+        last_burn,
+    };
+    let snapshot_value = foundation_serialization::json::to_value(snapshot).unwrap_or(Value::Null);
+    let body = foundation_serialization::json::to_string_value(&snapshot_value);
     let response = Response::new(StatusCode::OK)
         .with_header("content-type", "application/json")
         .with_body(body.into_bytes());
@@ -760,9 +798,9 @@ fn dispatch(
             match bc.lock() {
                 Ok(mut guard) => {
                     guard.difficulty = val;
-                    foundation_serialization::json!({"status": "ok"})
+                    status_value("ok")
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "balance" => {
@@ -773,12 +811,21 @@ fn dispatch(
                 .unwrap_or("");
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(acct) = guard.accounts.get(addr) {
-                foundation_serialization::json!({
-                    "consumer": acct.balance.consumer,
-                    "industrial": acct.balance.industrial,
-                })
+                json_map(vec![
+                    (
+                        "consumer",
+                        Value::Number(Number::from(acct.balance.consumer)),
+                    ),
+                    (
+                        "industrial",
+                        Value::Number(Number::from(acct.balance.industrial)),
+                    ),
+                ])
             } else {
-                foundation_serialization::json!({"consumer": 0, "industrial": 0})
+                json_map(vec![
+                    ("consumer", Value::Number(Number::from(0))),
+                    ("industrial", Value::Number(Number::from(0))),
+                ])
             }
         }
         "ledger.shard_of" => {
@@ -788,7 +835,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let shard = ledger::shard_of(addr);
-            foundation_serialization::json!({"shard": shard})
+            json_map(vec![("shard", Value::Number(Number::from(shard)))])
         }
         "anomaly.label" => {
             let _label = req
@@ -798,7 +845,7 @@ fn dispatch(
                 .unwrap_or("");
             #[cfg(feature = "telemetry")]
             crate::telemetry::ANOMALY_LABEL_TOTAL.inc();
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "settlement_status" => {
             let provider = req.params.get("provider").and_then(|v| v.as_str());
@@ -809,9 +856,14 @@ fn dispatch(
             };
             if let Some(p) = provider {
                 let (ct, industrial) = Settlement::balance_split(p);
-                foundation_serialization::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
+                json_map(vec![
+                    ("mode", Value::String(mode.to_string())),
+                    ("balance", Value::Number(Number::from(ct))),
+                    ("ct", Value::Number(Number::from(ct))),
+                    ("industrial", Value::Number(Number::from(industrial))),
+                ])
             } else {
-                foundation_serialization::json!({"mode": mode})
+                json_map(vec![("mode", Value::String(mode.to_string()))])
             }
         }
         "settlement.audit" => compute_market::settlement_audit(),
@@ -882,10 +934,10 @@ fn dispatch(
             let key = format!("localnet_receipts/{}", hash);
             let mut db = LOCALNET_RECEIPTS.lock().unwrap_or_else(|e| e.into_inner());
             if db.get(&key).is_some() {
-                foundation_serialization::json!({"status":"ignored"})
+                status_value("ignored")
             } else {
                 db.insert(&key, Vec::new());
-                foundation_serialization::json!({"status":"ok"})
+                status_value("ok")
             }
         }
         "dns.publish_record" => match gateway::dns::publish_record(req.params.as_value()) {
@@ -895,8 +947,10 @@ fn dispatch(
         "gateway.policy" => gateway::dns::gateway_policy(req.params.as_value()),
         "gateway.reads_since" => gateway::dns::reads_since(req.params.as_value()),
         "gateway.dns_lookup" => gateway::dns::dns_lookup(req.params.as_value()),
-        "gateway.mobile_cache_status" => gateway::mobile_cache::status_snapshot(),
-        "gateway.mobile_cache_flush" => gateway::mobile_cache::flush_cache(),
+        "gateway.mobile_cache_status" => {
+            serialize_response(gateway::mobile_cache::status_snapshot())?
+        }
+        "gateway.mobile_cache_flush" => serialize_response(gateway::mobile_cache::flush_cache())?,
         #[cfg(feature = "telemetry")]
         "telemetry.configure" => {
             #[derive(Deserialize)]
@@ -917,11 +971,17 @@ fn dispatch(
             if let Some(secs) = cfg.compaction_secs {
                 crate::telemetry::set_compaction_interval(secs);
             }
-            foundation_serialization::json!({
-                "status": "ok",
-                "sample_rate_ppm": crate::telemetry::sample_rate_ppm(),
-                "compaction_secs": crate::telemetry::compaction_interval_secs(),
-            })
+            json_map(vec![
+                ("status", Value::String("ok".to_string())),
+                (
+                    "sample_rate_ppm",
+                    Value::Number(Number::from(crate::telemetry::sample_rate_ppm())),
+                ),
+                (
+                    "compaction_secs",
+                    Value::Number(Number::from(crate::telemetry::compaction_interval_secs())),
+                ),
+            ])
         }
         #[cfg(not(feature = "telemetry"))]
         "telemetry.configure" => {
@@ -940,7 +1000,7 @@ fn dispatch(
         }
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-            compute_market::recent_roots(n)
+            serialize_response(compute_market::recent_roots(n))?
         }
         "mempool.stats" => {
             let lane_str = req
@@ -954,14 +1014,14 @@ fn dispatch(
             };
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             let stats = guard.mempool_stats(lane);
-            foundation_serialization::json!({
-                "size": stats.size,
-                "age_p50": stats.age_p50,
-                "age_p95": stats.age_p95,
-                "fee_p50": stats.fee_p50,
-                "fee_p90": stats.fee_p90,
-                "fee_floor": stats.fee_floor,
-            })
+            json_map(vec![
+                ("size", Value::Number(Number::from(stats.size as u64))),
+                ("age_p50", Value::Number(Number::from(stats.age_p50))),
+                ("age_p95", Value::Number(Number::from(stats.age_p95))),
+                ("fee_p50", Value::Number(Number::from(stats.fee_p50))),
+                ("fee_p90", Value::Number(Number::from(stats.fee_p90))),
+                ("fee_floor", Value::Number(Number::from(stats.fee_floor))),
+            ])
         }
         "mempool.qos_event" => {
             let lane = req
@@ -1007,16 +1067,28 @@ fn dispatch(
             {
                 let _ = (lane, event, fee, floor);
             }
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "net.overlay_status" => {
             let status = net::overlay_status();
-            foundation_serialization::json!({
-                "backend": status.backend,
-                "active_peers": status.active_peers,
-                "persisted_peers": status.persisted_peers,
-                "database_path": status.database_path,
-            })
+            json_map(vec![
+                ("backend", Value::String(status.backend)),
+                (
+                    "active_peers",
+                    Value::Number(Number::from(status.active_peers as u64)),
+                ),
+                (
+                    "persisted_peers",
+                    Value::Number(Number::from(status.persisted_peers as u64)),
+                ),
+                (
+                    "database_path",
+                    status
+                        .database_path
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                ),
+            ])
         }
         "net.peer_stats" => {
             let id = req
@@ -1026,15 +1098,24 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             let m = net::peer_stats(&pk).ok_or(rpc_error(-32602, "unknown peer"))?;
-            foundation_serialization::json!({
-                "requests": m.requests,
-                "bytes_sent": m.bytes_sent,
-                "drops": m.drops,
-                "handshake_fail": m.handshake_fail,
-                "reputation": m.reputation.score,
-                "throttle_reason": m.throttle_reason,
-                "throttled_until": m.throttled_until,
-            })
+            json_map(vec![
+                ("requests", Value::Number(Number::from(m.requests))),
+                ("bytes_sent", Value::Number(Number::from(m.bytes_sent))),
+                ("drops", json::to_value(&m.drops).unwrap_or(Value::Null)),
+                (
+                    "handshake_fail",
+                    json::to_value(&m.handshake_fail).unwrap_or(Value::Null),
+                ),
+                ("reputation", Value::from(m.reputation.score)),
+                (
+                    "throttle_reason",
+                    m.throttle_reason.map(Value::String).unwrap_or(Value::Null),
+                ),
+                (
+                    "throttled_until",
+                    Value::Number(Number::from(m.throttled_until)),
+                ),
+            ])
         }
         "net.peer_stats_all" => {
             let offset = req
@@ -1058,7 +1139,7 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::reset_peer_metrics(&pk) {
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             } else {
                 return Err(rpc_error(-32602, "unknown peer"));
             }
@@ -1078,9 +1159,10 @@ fn dispatch(
             let active = req.params.get("active_within").and_then(|v| v.as_u64());
             if all {
                 match net::export_all_peer_stats(path, min_rep, active) {
-                    Ok(over) => {
-                        foundation_serialization::json!({"status": "ok", "overwritten": over})
-                    }
+                    Ok(over) => json_map(vec![
+                        ("status", Value::String("ok".to_string())),
+                        ("overwritten", Value::Bool(over)),
+                    ]),
                     Err(e) => {
                         return Err(rpc_error(-32602, io_err_msg(&e)));
                     }
@@ -1093,9 +1175,10 @@ fn dispatch(
                     .unwrap_or("");
                 let pk = parse_overlay_peer_param(id)?;
                 match net::export_peer_stats(&pk, path) {
-                    Ok(over) => {
-                        foundation_serialization::json!({"status": "ok", "overwritten": over})
-                    }
+                    Ok(over) => json_map(vec![
+                        ("status", Value::String("ok".to_string())),
+                        ("overwritten", Value::Bool(over)),
+                    ]),
                     Err(e) => {
                         return Err(rpc_error(-32602, io_err_msg(&e)));
                     }
@@ -1109,7 +1192,7 @@ fn dispatch(
             foundation_serialization::json::to_value(map).unwrap()
         }
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
-            Ok(()) => foundation_serialization::json!({"status": "ok"}),
+            Ok(()) => status_value("ok"),
             Err(_) => {
                 return Err(rpc_error(-32603, "persist failed"));
             }
@@ -1128,13 +1211,13 @@ fn dispatch(
             let pk = parse_overlay_peer_param(id)?;
             if clear {
                 if net::clear_throttle(&pk) {
-                    foundation_serialization::json!({"status": "ok"})
+                    status_value("ok")
                 } else {
                     return Err(rpc_error(-32602, "unknown peer"));
                 }
             } else {
                 net::throttle_peer(&pk, "manual");
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             }
         }
         "net.backpressure_clear" => {
@@ -1145,14 +1228,14 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::clear_throttle(&pk) {
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             } else {
                 return Err(rpc_error(-32602, "unknown peer"));
             }
         }
         "net.reputation_sync" => {
             net::reputation_sync();
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "net.rotate_cert" => {
             #[cfg(feature = "quic")]
@@ -1165,11 +1248,17 @@ fn dispatch(
                             .iter()
                             .map(|fp| crypto_suite::hex::encode(fp))
                             .collect();
-                        foundation_serialization::json!({
-                            "status": "ok",
-                            "fingerprint": crypto_suite::hex::encode(advert.fingerprint),
-                            "previous": previous,
-                        })
+                        json_map(vec![
+                            ("status", Value::String("ok".to_string())),
+                            (
+                                "fingerprint",
+                                Value::String(crypto_suite::hex::encode(advert.fingerprint)),
+                            ),
+                            (
+                                "previous",
+                                Value::Array(previous.into_iter().map(Value::String).collect()),
+                            ),
+                        ])
                     }
                     Err(err) => {
                         #[cfg(feature = "telemetry")]
@@ -1233,7 +1322,7 @@ fn dispatch(
                     .ensure_handle_for_label_values(&["ok"])
                     .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
-                foundation_serialization::json!({"status":"ok"})
+                status_value("ok")
             } else {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
@@ -1245,7 +1334,8 @@ fn dispatch(
         }
         "net.handshake_failures" => {
             let entries = net::recent_handshake_failures();
-            foundation_serialization::json!({"failures": entries})
+            let failures = foundation_serialization::json::to_value(entries).unwrap_or(Value::Null);
+            json_map(vec![("failures", failures)])
         }
         "net.quic_stats" => match foundation_serialization::json::to_value(net::quic_stats()) {
             Ok(val) => val,
@@ -1271,7 +1361,7 @@ fn dispatch(
         }
         "net.quic_certs_refresh" => {
             let refreshed = net::refresh_peer_cert_store_from_disk();
-            foundation_serialization::json!({ "reloaded": refreshed })
+            json_map(vec![("reloaded", Value::Bool(refreshed))])
         }
         "peer.rebate_status" => {
             let peer = req
@@ -1293,7 +1383,7 @@ fn dispatch(
                 net::uptime::peer_from_bytes(&crypto_suite::hex::decode(peer).unwrap_or_default())
                     .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
-            foundation_serialization::json!({"eligible": eligible})
+            json_map(vec![("eligible", Value::Bool(eligible))])
         }
         "peer.rebate_claim" => {
             let peer = req
@@ -1320,11 +1410,11 @@ fn dispatch(
                 net::uptime::peer_from_bytes(&crypto_suite::hex::decode(peer).unwrap_or_default())
                     .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
-            foundation_serialization::json!({"voucher": voucher})
+            json_map(vec![("voucher", Value::Number(Number::from(voucher)))])
         }
         "net.config_reload" => {
             if crate::config::reload() {
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             } else {
                 return Err(rpc_error(-32603, "reload failed"));
             }
@@ -1336,8 +1426,8 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             match kyc::verify(user) {
-                Ok(true) => foundation_serialization::json!({"status": "verified"}),
-                Ok(false) => foundation_serialization::json!({"status": "denied"}),
+                Ok(true) => status_value("verified"),
+                Ok(false) => status_value("denied"),
                 Err(_) => {
                     return Err(rpc_error(-32080, "kyc failure"));
                 }
@@ -1346,14 +1436,26 @@ fn dispatch(
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
             let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1, 0);
-            foundation_serialization::json!({
-                "prev_hash": crypto_suite::hex::encode(tmpl.prev_hash),
-                "merkle_root": crypto_suite::hex::encode(tmpl.merkle_root),
-                "checkpoint_hash": crypto_suite::hex::encode(tmpl.checkpoint_hash),
-                "difficulty": tmpl.difficulty,
-                "base_fee": tmpl.base_fee,
-                "timestamp_millis": tmpl.timestamp_millis
-            })
+            json_map(vec![
+                (
+                    "prev_hash",
+                    Value::String(crypto_suite::hex::encode(tmpl.prev_hash)),
+                ),
+                (
+                    "merkle_root",
+                    Value::String(crypto_suite::hex::encode(tmpl.merkle_root)),
+                ),
+                (
+                    "checkpoint_hash",
+                    Value::String(crypto_suite::hex::encode(tmpl.checkpoint_hash)),
+                ),
+                ("difficulty", Value::Number(Number::from(tmpl.difficulty))),
+                ("base_fee", Value::Number(Number::from(tmpl.base_fee))),
+                (
+                    "timestamp_millis",
+                    Value::Number(Number::from(tmpl.timestamp_millis)),
+                ),
+            ])
         }
         "pow.submit" => {
             let header_value = req
@@ -1427,16 +1529,16 @@ fn dispatch(
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
             if val <= u64::MAX / difficulty.max(1) {
-                foundation_serialization::json!({"status":"accepted"})
+                status_value("accepted")
             } else {
                 return Err(rpc_error(-32082, "invalid pow"));
             }
         }
-        "consensus.difficulty" => consensus::difficulty(&bc),
-        "consensus.pos.register" => pos::register(req.params.as_value())?,
-        "consensus.pos.bond" => pos::bond(req.params.as_value())?,
-        "consensus.pos.unbond" => pos::unbond(req.params.as_value())?,
-        "consensus.pos.slash" => pos::slash(req.params.as_value())?,
+        "consensus.difficulty" => serialize_response(consensus::difficulty(&bc))?,
+        "consensus.pos.register" => serialize_response(pos::register(req.params.as_value())?)?,
+        "consensus.pos.bond" => serialize_response(pos::bond(req.params.as_value())?)?,
+        "consensus.pos.unbond" => serialize_response(pos::unbond(req.params.as_value())?)?,
+        "consensus.pos.slash" => serialize_response(pos::slash(req.params.as_value())?)?,
         "light.latest_header" => {
             let guard = bc.lock().unwrap();
             foundation_serialization::json::to_value(light::latest_header(&guard)).unwrap()
@@ -1516,17 +1618,24 @@ fn dispatch(
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
             if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
-                foundation_serialization::json!({"balance": esc.balance(id)})
+                json_map(vec![(
+                    "balance",
+                    Value::Number(Number::from(esc.balance(id))),
+                )])
             } else if let Some(acct) = req.params.get("account").and_then(|v| v.as_str()) {
-                foundation_serialization::json!({"balance": esc.balance_account(acct)})
+                json_map(vec![(
+                    "balance",
+                    Value::Number(Number::from(esc.balance_account(acct))),
+                )])
             } else {
-                foundation_serialization::json!({"balance": 0})
+                json_map(vec![("balance", Value::Number(Number::from(0)))])
             }
         }
-        "mesh.peers" => {
-            foundation_serialization::json!({"peers": range_boost::peers()})
-        }
-        "inflation.params" => inflation::params(&bc),
+        "mesh.peers" => json_map(vec![(
+            "peers",
+            foundation_serialization::json::to_value(range_boost::peers()).unwrap_or(Value::Null),
+        )]),
+        "inflation.params" => serialize_response(inflation::params(&bc))?,
         "compute_market.stats" => {
             let accel = req
                 .params
@@ -1537,13 +1646,15 @@ fn dispatch(
                     "tpu" => Some(crate::compute_market::Accelerator::Tpu),
                     _ => None,
                 });
-            compute_market::stats(accel)
+            serialize_response(compute_market::stats(accel))?
         }
-        "compute_market.provider_balances" => compute_market::provider_balances(),
+        "compute_market.provider_balances" => {
+            serialize_response(compute_market::provider_balances())?
+        }
         "compute_market.audit" => compute_market::settlement_audit(),
         "compute_market.recent_roots" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-            compute_market::recent_roots(n)
+            serialize_response(compute_market::recent_roots(n))?
         }
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
@@ -1562,7 +1673,7 @@ fn dispatch(
                 .get("provider")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            compute_market::reputation_get(provider)
+            serialize_response(compute_market::reputation_get(provider))?
         }
         "compute.job_requirements" => {
             let job_id = req
@@ -1578,7 +1689,7 @@ fn dispatch(
                 .get("job_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            compute_market::job_cancel(job_id)
+            serialize_response(compute_market::job_cancel(job_id))?
         }
         "compute.provider_hardware" => {
             let provider = req
@@ -1594,14 +1705,14 @@ fn dispatch(
                 .get("peer")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            net::reputation_show(peer)
+            serialize_response(net::reputation_show(peer))?
         }
         "net.gossip_status" => {
             if let Some(status) = net::gossip_status() {
                 foundation_serialization::json::to_value(status)
-                    .unwrap_or_else(|_| foundation_serialization::json!({}))
+                    .unwrap_or_else(|_| Value::Object(Map::new()))
             } else {
-                foundation_serialization::json!({"status": "unavailable"})
+                status_value("unavailable")
             }
         }
         "net.dns_verify" => {
@@ -1610,21 +1721,21 @@ fn dispatch(
                 .get("domain")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            net::dns_verify(domain)
+            serialize_response(net::dns_verify(domain))?
         }
-        "stake.role" => pos::role(req.params.as_value())?,
+        "stake.role" => serialize_response(pos::role(req.params.as_value())?)?,
         "config.reload" => {
             let ok = crate::config::reload();
-            foundation_serialization::json!({"reloaded": ok})
+            json_map(vec![("reloaded", Value::Bool(ok))])
         }
         "register_handle" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             match handles.lock() {
                 Ok(mut reg) => match identity::register_handle(req.params.as_value(), &mut reg) {
-                    Ok(v) => v,
-                    Err(e) => foundation_serialization::json!({"error": e.code()}),
+                    Ok(v) => serialize_response(v)?,
+                    Err(e) => error_value(e.code()),
                 },
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "identity.anchor" => {
@@ -1638,30 +1749,35 @@ fn dispatch(
             match dids.lock() {
                 Ok(mut reg) => {
                     match identity::anchor_did(req.params.as_value(), &mut reg, &NODE_GOV_STORE) {
-                        Ok(v) => v,
-                        Err(e) => foundation_serialization::json!({"error": e.code()}),
+                        Ok(v) => serialize_response(v)?,
+                        Err(e) => error_value(e.code()),
                     }
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "resolve_handle" => match handles.lock() {
-            Ok(reg) => identity::resolve_handle(req.params.as_value(), &reg),
-            Err(_) => foundation_serialization::json!({"address": null}),
+            Ok(reg) => serialize_response(identity::resolve_handle(req.params.as_value(), &reg))?,
+            Err(_) => serialize_response(identity::HandleResolutionResponse { address: None })?,
         },
         "identity.resolve" => match dids.lock() {
-            Ok(reg) => identity::resolve_did(req.params.as_value(), &reg),
-            Err(_) => foundation_serialization::json!({
-                "address": foundation_serialization::json::Value::Null,
-                "document": foundation_serialization::json::Value::Null,
-                "hash": foundation_serialization::json::Value::Null,
-                "nonce": foundation_serialization::json::Value::Null,
-                "updated_at": foundation_serialization::json::Value::Null,
-            }),
+            Ok(reg) => serialize_response(identity::resolve_did(req.params.as_value(), &reg))?,
+            Err(_) => serialize_response(identity::DidResolutionResponse {
+                address: String::new(),
+                document: None,
+                hash: None,
+                nonce: None,
+                updated_at: None,
+                public_key: None,
+                remote_attestation: None,
+            })?,
         },
         "whoami" => match handles.lock() {
-            Ok(reg) => identity::whoami(req.params.as_value(), &reg),
-            Err(_) => foundation_serialization::json!({"address": null, "handle": null}),
+            Ok(reg) => serialize_response(identity::whoami(req.params.as_value(), &reg))?,
+            Err(_) => serialize_response(identity::WhoAmIResponse {
+                address: String::new(),
+                handle: None,
+            })?,
         },
         "record_le_request" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -1686,11 +1802,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_request(&base, agency, case, jurisdiction, lang)
                     {
-                        Ok(_) => foundation_serialization::json!({"status": "ok"}),
-                        Err(_) => foundation_serialization::json!({"error": "io"}),
+                        Ok(_) => status_value("ok"),
+                        Err(_) => error_value("io"),
                     }
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "warrant_canary" => {
@@ -1704,11 +1820,11 @@ fn dispatch(
                 Ok(guard) => {
                     let base = guard.path.clone();
                     match crate::le_portal::record_canary(&base, msg) {
-                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json!({"error": "io"}),
+                        Ok(hash) => json_map(vec![("hash", Value::String(hash))]),
+                        Err(_) => error_value("io"),
                     }
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "le.list_requests" => match bc.lock() {
@@ -1716,10 +1832,10 @@ fn dispatch(
                 let base = guard.path.clone();
                 match crate::le_portal::list_requests(&base) {
                     Ok(v) => foundation_serialization::json::to_value(v).unwrap_or_default(),
-                    Err(_) => foundation_serialization::json!({"error": "io"}),
+                    Err(_) => error_value("io"),
                 }
             }
-            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+            Err(_) => error_value("lock poisoned"),
         },
         "le.record_action" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -1744,11 +1860,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_action(&base, agency, action, jurisdiction, lang)
                     {
-                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json!({"error": "io"}),
+                        Ok(hash) => json_map(vec![("hash", Value::String(hash))]),
+                        Err(_) => error_value("io"),
                     }
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "le.upload_evidence" => {
@@ -1770,7 +1886,7 @@ fn dispatch(
                 .unwrap_or("");
             let data = match decode_standard(data_b64) {
                 Ok(d) => d,
-                Err(_) => return Ok(foundation_serialization::json!({"error": "decode"})),
+                Err(_) => return Ok(error_value("decode")),
             };
             match bc.lock() {
                 Ok(guard) => {
@@ -1789,26 +1905,26 @@ fn dispatch(
                         lang,
                         &data,
                     ) {
-                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json!({"error": "io"}),
+                        Ok(hash) => json_map(vec![("hash", Value::String(hash))]),
+                        Err(_) => error_value("io"),
                     }
                 }
-                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                Err(_) => error_value("lock poisoned"),
             }
         }
         "service_badge_issue" => match bc.lock() {
             Ok(mut guard) => {
                 let token = guard.badge_tracker_mut().force_issue();
-                foundation_serialization::json!({"badge": token})
+                json_map(vec![("badge", Value::String(token))])
             }
-            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+            Err(_) => error_value("lock poisoned"),
         },
         "service_badge_revoke" => match bc.lock() {
             Ok(mut guard) => {
                 guard.badge_tracker_mut().revoke();
-                foundation_serialization::json!({"revoked": true})
+                json_map(vec![("revoked", Value::Bool(true))])
             }
-            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+            Err(_) => error_value("lock poisoned"),
         },
         "service_badge_verify" => {
             let badge = req
@@ -1816,7 +1932,10 @@ fn dispatch(
                 .get("badge")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            foundation_serialization::json!({"valid": crate::service_badge::verify(badge)})
+            json_map(vec![(
+                "valid",
+                Value::Bool(crate::service_badge::verify(badge)),
+            )])
         }
         "submit_tx" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -1834,12 +1953,10 @@ fn dispatch(
                     }
                     match bc.lock() {
                         Ok(mut guard) => match guard.submit_transaction(tx) {
-                            Ok(()) => foundation_serialization::json!({"status": "ok"}),
-                            Err(e) => {
-                                foundation_serialization::json!({"error": format!("{e:?}")})
-                            }
+                            Ok(()) => status_value("ok"),
+                            Err(e) => error_value(format!("{e:?}")),
                         },
-                        Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
+                        Err(_) => error_value("lock poisoned"),
                     }
                 }
                 None => return Err(rpc_error(-32602, "invalid params")),
@@ -1868,13 +1985,17 @@ fn dispatch(
             }
             #[cfg(feature = "telemetry")]
             diagnostics::log::info!("snapshot_interval_changed {interval}");
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "start_mining" => {
             if runtime_cfg.relay_only {
-                foundation_serialization::json!({
-                    "error": {"code": -32075, "message": "relay_only"}
-                })
+                let mut inner = Map::new();
+                inner.insert("code".to_string(), Value::Number(Number::from(-32075)));
+                inner.insert(
+                    "message".to_string(),
+                    Value::String("relay_only".to_string()),
+                );
+                json_map(vec![("error", Value::Object(inner))])
             } else {
                 check_nonce(req.method.as_str(), &req.params, &nonces)?;
                 let miner = req
@@ -1894,15 +2015,15 @@ fn dispatch(
                         }
                     });
                 }
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             }
         }
         "stop_mining" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
-        "jurisdiction.status" => jurisdiction::status(&bc)?,
+        "jurisdiction.status" => serialize_response(jurisdiction::status(&bc)?)?,
         "jurisdiction.set" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let path = req
@@ -1910,7 +2031,7 @@ fn dispatch(
                 .get("path")
                 .and_then(|v| v.as_str())
                 .ok_or(rpc_error(-32072, "missing path"))?;
-            jurisdiction::set(&bc, path)?
+            serialize_response(jurisdiction::set(&bc, path)?)?
         }
         "jurisdiction.policy_diff" => {
             let path = req
@@ -1924,11 +2045,11 @@ fn dispatch(
             #[cfg(feature = "telemetry")]
             {
                 let m = crate::gather_metrics().unwrap_or_default();
-                foundation_serialization::json!(m)
+                foundation_serialization::json::to_value(m).unwrap_or(Value::Null)
             }
             #[cfg(not(feature = "telemetry"))]
             {
-                foundation_serialization::json!("telemetry disabled")
+                Value::String("telemetry disabled".to_string())
             }
         }
         "price_board_get" => {
@@ -1943,9 +2064,11 @@ fn dispatch(
                 FeeLane::Consumer
             };
             match crate::compute_market::price_board::bands(lane) {
-                Some((p25, median, p75)) => {
-                    foundation_serialization::json!({"p25": p25, "median": median, "p75": p75})
-                }
+                Some((p25, median, p75)) => json_map(vec![
+                    ("p25", Value::Number(Number::from(p25))),
+                    ("median", Value::Number(Number::from(median))),
+                    ("p75", Value::Number(Number::from(p75))),
+                ]),
                 None => {
                     return Err(crate::compute_market::MarketError::NoPriceData.into());
                 }
@@ -1959,11 +2082,11 @@ fn dispatch(
                 .unwrap_or(0);
             let height = bc.lock().unwrap_or_else(|e| e.into_inner()).block_height;
             crate::compute_market::settlement::Settlement::arm(delay, height);
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "compute_cancel_arm" => {
             crate::compute_market::settlement::Settlement::cancel_arm();
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "compute_back_to_dry_run" => {
             let reason = req
@@ -1972,7 +2095,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             crate::compute_market::settlement::Settlement::back_to_dry_run(reason);
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         "dex_escrow_status" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2006,12 +2129,12 @@ fn dispatch(
         }
         "htlc_status" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            htlc::status(id)
+            serialize_response(htlc::status(id))?
         }
         "htlc_refund" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let now = req.params.get("now").and_then(|v| v.as_u64()).unwrap_or(0);
-            htlc::refund(id, now)
+            serialize_response(htlc::refund(id, now))?
         }
         "storage_upload" => {
             let object_id = req
@@ -2146,7 +2269,7 @@ fn dispatch(
                 .get("vote_deadline")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(epoch);
-            governance::gov_propose(
+            serialize_response(governance::gov_propose(
                 &NODE_GOV_STORE,
                 proposer,
                 key,
@@ -2155,7 +2278,7 @@ fn dispatch(
                 max,
                 epoch,
                 deadline,
-            )?
+            )?)?
         }
         "gov_vote" => {
             let voter = req
@@ -2179,7 +2302,13 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            governance::gov_vote(&NODE_GOV_STORE, voter, pid, choice, epoch)?
+            serialize_response(governance::gov_vote(
+                &NODE_GOV_STORE,
+                voter,
+                pid,
+                choice,
+                epoch,
+            )?)?
         }
         "submit_proposal" => {
             let proposer = req
@@ -2212,7 +2341,7 @@ fn dispatch(
                 .get("vote_deadline")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(epoch);
-            governance::submit_proposal(
+            serialize_response(governance::submit_proposal(
                 &NODE_GOV_STORE,
                 proposer,
                 key,
@@ -2222,7 +2351,7 @@ fn dispatch(
                 deps,
                 epoch,
                 deadline,
-            )?
+            )?)?
         }
         "vote_proposal" => {
             let voter = req
@@ -2246,10 +2375,25 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            governance::vote_proposal(&NODE_GOV_STORE, voter, pid, choice, epoch)?
+            serialize_response(governance::vote_proposal(
+                &NODE_GOV_STORE,
+                voter,
+                pid,
+                choice,
+                epoch,
+            )?)?
         }
-        "gov.release_signers" => governance::release_signers(&NODE_GOV_STORE)?,
-        "gov_list" => governance::gov_list(&NODE_GOV_STORE)?,
+        "gov.treasury.disbursements" => {
+            let params = parse_params::<treasury::TreasuryDisbursementsRequest>(&req.params)?;
+            serialize_response(treasury::disbursements(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.treasury.balance" => serialize_response(treasury::balance(&NODE_GOV_STORE)?)?,
+        "gov.treasury.balance_history" => {
+            let params = parse_params::<treasury::TreasuryBalanceHistoryRequest>(&req.params)?;
+            serialize_response(treasury::balance_history(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.release_signers" => serialize_response(governance::release_signers(&NODE_GOV_STORE)?)?,
+        "gov_list" => serialize_response(governance::gov_list(&NODE_GOV_STORE)?)?,
         "gov_params" => {
             let epoch = req
                 .params
@@ -2257,7 +2401,7 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
-            governance::gov_params(&params, epoch)?
+            serialize_response(governance::gov_params(&params, epoch)?)?
         }
         "gov_rollback_last" => {
             let epoch = req
@@ -2268,7 +2412,12 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
-            governance::gov_rollback_last(&NODE_GOV_STORE, &mut params, &mut rt, epoch)?
+            serialize_response(governance::gov_rollback_last(
+                &NODE_GOV_STORE,
+                &mut params,
+                &mut rt,
+                epoch,
+            )?)?
         }
         "gov_rollback" => {
             let epoch = req
@@ -2280,7 +2429,13 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
-            governance::gov_rollback(&NODE_GOV_STORE, id, &mut params, &mut rt, epoch)?
+            serialize_response(governance::gov_rollback(
+                &NODE_GOV_STORE,
+                id,
+                &mut params,
+                &mut rt,
+                epoch,
+            )?)?
         }
         "vm.estimate_gas" => {
             let code_hex = req
@@ -2291,7 +2446,7 @@ fn dispatch(
             let code = crypto_suite::hex::decode(code_hex)
                 .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let gas = vm::estimate_gas(code);
-            foundation_serialization::json!({"gas_used": gas})
+            json_map(vec![("gas_used", Value::Number(Number::from(gas)))])
         }
         "vm.exec_trace" => {
             let code_hex = req
@@ -2302,12 +2457,16 @@ fn dispatch(
             let code = crypto_suite::hex::decode(code_hex)
                 .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let trace = vm::exec_trace(code);
-            foundation_serialization::json!({"trace": trace})
+            foundation_serialization::json::to_value(trace)
+                .unwrap_or_else(|_| Value::Object(Map::new()))
         }
         "vm.storage_read" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let data = vm::storage_read(id).unwrap_or_default();
-            foundation_serialization::json!({"data": crypto_suite::hex::encode(data)})
+            json_map(vec![(
+                "data",
+                Value::String(crypto_suite::hex::encode(data)),
+            )])
         }
         "vm.storage_write" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2319,7 +2478,7 @@ fn dispatch(
             let bytes = crypto_suite::hex::decode(data_hex)
                 .map_err(|_| rpc_error(-32602, "invalid params"))?;
             vm::storage_write(id, bytes);
-            foundation_serialization::json!({"status": "ok"})
+            status_value("ok")
         }
         _ => return Err(rpc_error(-32601, "method not found")),
     })
