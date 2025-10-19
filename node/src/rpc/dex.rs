@@ -15,19 +15,52 @@ pub fn escrow_status(id: u64) -> foundation_serialization::json::Value {
         let mut proofs = Vec::new();
         for (idx, amount) in entry.payments.iter().enumerate() {
             if let Some(p) = state.escrow.proof(id, idx) {
-                proofs.push(foundation_serialization::json!({"amount": amount, "proof": p}));
+                let mut proof_obj = foundation_serialization::json::Map::new();
+                proof_obj.insert(
+                    "amount".to_string(),
+                    foundation_serialization::json::Value::from(*amount),
+                );
+                proof_obj.insert(
+                    "proof".to_string(),
+                    foundation_serialization::json::to_value(p)
+                        .unwrap_or(foundation_serialization::json::Value::Null),
+                );
+                proofs.push(foundation_serialization::json::Value::Object(proof_obj));
             }
         }
-        foundation_serialization::json!({
-            "from": &entry.from,
-            "to": &entry.to,
-            "total": entry.total,
-            "released": entry.released,
-            "outstanding": entry.total - entry.released,
-            "proofs": proofs
-        })
+        let mut obj = foundation_serialization::json::Map::new();
+        obj.insert(
+            "from".to_string(),
+            foundation_serialization::json::Value::String(entry.from.clone()),
+        );
+        obj.insert(
+            "to".to_string(),
+            foundation_serialization::json::Value::String(entry.to.clone()),
+        );
+        obj.insert(
+            "total".to_string(),
+            foundation_serialization::json::Value::from(entry.total),
+        );
+        obj.insert(
+            "released".to_string(),
+            foundation_serialization::json::Value::from(entry.released),
+        );
+        obj.insert(
+            "outstanding".to_string(),
+            foundation_serialization::json::Value::from(entry.total - entry.released),
+        );
+        obj.insert(
+            "proofs".to_string(),
+            foundation_serialization::json::Value::Array(proofs),
+        );
+        foundation_serialization::json::Value::Object(obj)
     } else {
-        foundation_serialization::json!({"error": "not_found"})
+        let mut obj = foundation_serialization::json::Map::new();
+        obj.insert(
+            "error".to_string(),
+            foundation_serialization::json::Value::String("not_found".to_string()),
+        );
+        foundation_serialization::json::Value::Object(obj)
     }
 }
 
@@ -64,7 +97,24 @@ pub fn escrow_release(
         .status(id)
         .map(|e| e.payments.len().saturating_sub(1))
         .unwrap_or(0);
-    Ok(foundation_serialization::json!({"proof": proof.clone(), "root": root, "idx": idx}))
+    let mut obj = foundation_serialization::json::Map::new();
+    obj.insert(
+        "proof".to_string(),
+        foundation_serialization::json::to_value(proof.clone())
+            .unwrap_or(foundation_serialization::json::Value::Null),
+    );
+    if let Some(root) = root {
+        obj.insert(
+            "root".to_string(),
+            foundation_serialization::json::to_value(root)
+                .unwrap_or(foundation_serialization::json::Value::Null),
+        );
+    }
+    obj.insert(
+        "idx".to_string(),
+        foundation_serialization::json::Value::from(idx as u64),
+    );
+    Ok(foundation_serialization::json::Value::Object(obj))
 }
 
 pub fn escrow_proof(id: u64, idx: usize) -> Option<PaymentProof> {

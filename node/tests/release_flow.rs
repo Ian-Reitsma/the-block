@@ -7,7 +7,7 @@ use the_block::governance::{
 };
 use the_block::provenance;
 
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use rand::rngs::OsRng;
 
 #[test]

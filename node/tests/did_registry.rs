@@ -1,8 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use crypto_suite::signatures::{
-    ed25519::{Signature, SigningKey, VerifyingKey, SIGNATURE_LENGTH},
-    Signer,
-};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey, SIGNATURE_LENGTH};
 use std::convert::TryInto;
 use sys::tempfile::tempdir;
 use the_block::generate_keypair;

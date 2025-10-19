@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use runtime::{io::read_to_end, net::TcpStream};
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -27,26 +27,24 @@ fn init_env() -> sys::tempfile::TempDir {
     dir
 }
 
-fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
-    runtime::block_on(async {
-        let addr: SocketAddr = addr.parse().unwrap();
-        let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
-        let req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        expect_timeout(stream.write_all(req.as_bytes()))
-            .await
-            .unwrap();
-        let mut resp = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let resp = String::from_utf8(resp).unwrap();
-        let body_idx = resp.find("\r\n\r\n").unwrap();
-        foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
-    })
+async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
+    let addr: SocketAddr = addr.parse().unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
+    let req = format!(
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
+    let mut resp = Vec::new();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
+    let resp = String::from_utf8(resp).unwrap();
+    let body_idx = resp.find("\r\n\r\n").unwrap();
+    foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
 }
 
 #[testkit::tb_serial]
@@ -101,7 +99,7 @@ fn peer_key_rotate() {
         crypto_suite::hex::encode(sig.to_bytes()),
     );
         let res = rpc(&addr, &body).await;
-        assert_eq!(res["result"]["status"], "ok");
+        assert_eq!(res["result"]["status"].as_str(), Some("ok"));
 
         // old key rejected
         let body_old = format!(

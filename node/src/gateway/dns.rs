@@ -7,7 +7,7 @@ use crypto_suite::signatures::ed25519::{
 };
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::warn;
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map, Number, Value};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{
@@ -35,6 +35,14 @@ static TXT_RESOLVER: Lazy<Mutex<TxtResolver>> =
     Lazy::new(|| Mutex::new(Box::new(default_txt_resolver)));
 static VERIFY_CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn json_map(pairs: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
 
 fn default_txt_resolver(domain: &str) -> Vec<String> {
     let mut delay = Duration::from_millis(100);
@@ -114,7 +122,7 @@ pub fn publish_record(params: &Value) -> Result<Value, DnsError> {
     );
     db.insert(&format!("dns_last/{}", domain), 0u64.to_le_bytes().to_vec());
     mobile_cache::purge_policy(domain);
-    Ok(foundation_serialization::json!({"status":"ok"}))
+    Ok(json_map(vec![("status", Value::String("ok".to_string()))]))
 }
 
 pub fn verify_txt(domain: &str, node_id: &str) -> bool {
@@ -184,11 +192,11 @@ pub fn gateway_policy(params: &Value) -> Value {
                     .as_secs();
                 db.insert(&last_key, ts.to_le_bytes().to_vec());
                 let _ = read_receipt::append(domain, "gateway", txt.len() as u64, false, true);
-                let response = foundation_serialization::json!({
-                    "record": txt,
-                    "reads_total": reads,
-                    "last_access_ts": ts,
-                });
+                let response = json_map(vec![
+                    ("record", Value::String(txt.clone())),
+                    ("reads_total", Value::Number(Number::from(reads))),
+                    ("last_access_ts", Value::Number(Number::from(ts))),
+                ]);
                 mobile_cache::cache_policy(domain, &response);
                 return response;
             }
@@ -197,11 +205,11 @@ pub fn gateway_policy(params: &Value) -> Value {
     if let Some(cached) = mobile_cache::cached_policy(domain) {
         return cached;
     }
-    let miss = foundation_serialization::json!({
-        "record": null,
-        "reads_total": 0,
-        "last_access_ts": 0,
-    });
+    let miss = json_map(vec![
+        ("record", Value::Null),
+        ("reads_total", Value::Number(Number::from(0))),
+        ("last_access_ts", Value::Number(Number::from(0))),
+    ]);
     mobile_cache::cache_policy(domain, &miss);
     miss
 }
@@ -210,7 +218,10 @@ pub fn reads_since(params: &Value) -> Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let epoch = params.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
     let (total, last) = read_receipt::reads_since(epoch, domain);
-    foundation_serialization::json!({"reads_total": total, "last_access_ts": last})
+    json_map(vec![
+        ("reads_total", Value::Number(Number::from(total))),
+        ("last_access_ts", Value::Number(Number::from(last))),
+    ])
 }
 
 pub fn dns_lookup(params: &Value) -> Value {
@@ -227,5 +238,8 @@ pub fn dns_lookup(params: &Value) -> Value {
         .as_ref()
         .map(|_| verify_txt(domain, &pk))
         .unwrap_or(false);
-    foundation_serialization::json!({"record": txt, "verified": verified})
+    json_map(vec![
+        ("record", txt.map(Value::String).unwrap_or(Value::Null)),
+        ("verified", Value::Bool(verified)),
+    ])
 }

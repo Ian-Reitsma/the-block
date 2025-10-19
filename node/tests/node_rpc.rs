@@ -14,31 +14,29 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
-    runtime::block_on(async {
-        let addr: SocketAddr = addr.parse().unwrap();
-        let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
-        let mut req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
-            body.len()
-        );
-        if let Some(t) = token {
-            req.push_str(&format!("Authorization: Bearer {}\r\n", t));
-        }
-        req.push_str("\r\n");
-        req.push_str(body);
-        expect_timeout(stream.write_all(req.as_bytes()))
-            .await
-            .unwrap();
-        let mut resp = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let resp = String::from_utf8(resp).unwrap();
-        let body_idx = resp.find("\r\n\r\n").unwrap();
-        let body = &resp[body_idx + 4..];
-        foundation_serialization::json::from_str::<Value>(body).unwrap()
-    })
+async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
+    let addr: SocketAddr = addr.parse().unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
+    let mut req = format!(
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    if let Some(t) = token {
+        req.push_str(&format!("Authorization: Bearer {}\r\n", t));
+    }
+    req.push_str("\r\n");
+    req.push_str(body);
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
+    let mut resp = Vec::new();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
+    let resp = String::from_utf8(resp).unwrap();
+    let body_idx = resp.find("\r\n\r\n").unwrap();
+    let body = &resp[body_idx + 4..];
+    foundation_serialization::json::from_str::<Value>(body).unwrap()
 }
 
 #[testkit::tb_serial]
@@ -69,46 +67,44 @@ fn rpc_smoke() {
             tx,
         ));
         let addr = expect_timeout(rx).await.unwrap();
-        let addr_socket: SocketAddr = addr.parse().unwrap();
-
         // metrics endpoint
-        let val = expect_timeout(rpc(&addr, r#"{"method":"metrics"}"#, None)).await;
+        let val = rpc(&addr, r#"{"method":"metrics"}"#, None).await;
         #[cfg(feature = "telemetry")]
         assert!(val["result"].as_str().unwrap().contains("mempool_size"));
         #[cfg(not(feature = "telemetry"))]
         assert_eq!(val["result"].as_str().unwrap(), "telemetry disabled");
 
         // balance query
-        let bal = expect_timeout(rpc(
+        let bal = rpc(
             &addr,
             r#"{"method":"balance","params":{"address":"alice"}}"#,
             None,
-        ))
+        )
         .await;
         assert_eq!(bal["result"]["consumer"].as_u64().unwrap(), 42);
 
         // settlement status
-        let status = expect_timeout(rpc(&addr, r#"{"method":"settlement_status"}"#, None)).await;
+        let status = rpc(&addr, r#"{"method":"settlement_status"}"#, None).await;
         let mode = status["result"]["mode"]
             .as_str()
             .or_else(|| status["result"].as_str());
         assert_eq!(mode, Some("dryrun"));
 
         // start and stop mining
-        let start = expect_timeout(rpc(
+        let start = rpc(
             &addr,
             r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
-        assert_eq!(start["result"]["status"], "ok");
-        let stop = expect_timeout(rpc(
+        assert_eq!(start["result"]["status"].as_str(), Some("ok"));
+        let stop = rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":2}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
-        assert_eq!(stop["result"]["status"], "ok");
+        assert_eq!(stop["result"]["status"].as_str(), Some("ok"));
         Settlement::shutdown();
 
         handle.abort();
@@ -140,25 +136,25 @@ fn rpc_nonce_replay_rejected() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let start = expect_timeout(rpc(
+        let start = rpc(
             &addr,
             r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
-        assert_eq!(start["result"]["status"], "ok");
-        let stop = expect_timeout(rpc(
+        assert_eq!(start["result"]["status"].as_str(), Some("ok"));
+        let stop = rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":2}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
-        assert_eq!(stop["result"]["status"], "ok");
-        let replay = expect_timeout(rpc(
+        assert_eq!(stop["result"]["status"].as_str(), Some("ok"));
+        let replay = rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":2}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
         assert_eq!(replay["error"]["message"].as_str(), Some("replayed nonce"));
 
@@ -192,11 +188,11 @@ fn rpc_light_client_rebate_status() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let status = expect_timeout(rpc(
+        let status = rpc(
             &addr,
             r#"{"method":"light_client.rebate_status"}"#,
             None,
-        ))
+        )
         .await;
         let result = status.get("result").expect("result");
         assert_eq!(result["pending_total"].as_u64().unwrap(), 3);
@@ -249,11 +245,11 @@ fn rpc_light_client_rebate_history() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let history = expect_timeout(rpc(
+        let history = rpc(
             &addr,
             r#"{"method":"light_client.rebate_history","params":{"limit":10}}"#,
             None,
-        ))
+        )
         .await;
         let result = history.get("result").expect("result");
         let receipts = result["receipts"].as_array().expect("array");
@@ -270,15 +266,15 @@ fn rpc_light_client_rebate_history() {
         );
         assert_eq!(relayer["amount"].as_u64().unwrap(), 5);
 
-        let filtered = expect_timeout(rpc(
-        &addr,
-        &format!(
-            "{{\"method\":\"light_client.rebate_history\",\"params\":{{\"relayer\":\"{}\",\"limit\":10}}}}",
-            crypto_suite::hex::encode(b"relay")
-        ),
-        None,
-    ))
-    .await;
+        let filtered = rpc(
+            &addr,
+            &format!(
+                "{{\"method\":\"light_client.rebate_history\",\"params\":{{\"relayer\":\"{}\",\"limit\":10}}}}",
+                crypto_suite::hex::encode(b"relay")
+            ),
+            None,
+        )
+        .await;
         let filtered_receipts = filtered["result"]["receipts"].as_array().unwrap();
         assert_eq!(filtered_receipts.len(), 1);
 
@@ -351,17 +347,17 @@ fn rpc_concurrent_controls() {
                     i = i
                 ),
             };
-            let _ = expect_timeout(rpc(&addr, &body, Some("testtoken"))).await;
+            rpc(&addr, &body, Some("testtoken")).await;
         }));
         }
         for h in handles {
             let _ = h.await;
         }
-        let _ = expect_timeout(rpc(
+        rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":999}}"#,
             Some("testtoken"),
-        ))
+        )
         .await;
         assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
 
@@ -418,7 +414,7 @@ fn rpc_error_responses() {
         assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
 
         // unknown method
-        let val = expect_timeout(rpc(&addr, r#"{"method":"unknown"}"#, None)).await;
+        let val = rpc(&addr, r#"{"method":"unknown"}"#, None).await;
         assert_eq!(val["error"]["code"].as_i64().unwrap(), -32601);
 
         handle.abort();
@@ -467,7 +463,7 @@ fn rpc_fragmented_request() {
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
         let val: Value = foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap();
-        assert_eq!(val["result"]["status"], "ok");
+        assert_eq!(val["result"]["status"].as_str(), Some("ok"));
 
         handle.abort();
         let _ = handle.await;

@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
+use rand::SeedableRng as _;
 use std::fs;
 use std::io::Write;
 use the_block::{canonical_payload_bytes, RawTxPayload};
@@ -21,7 +22,7 @@ fn serialize_roundtrip_vectors() {
             amount_consumer: rng.gen(),
             amount_industrial: rng.gen(),
             fee: rng.gen(),
-            pct_ct: rng.gen_range(0..=100),
+            pct_ct: rng.gen_range(0u32..=100) as u8,
             nonce: rng.gen(),
             memo: {
                 let len = rng.gen_range(0..16);

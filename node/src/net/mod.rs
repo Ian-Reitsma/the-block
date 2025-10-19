@@ -68,7 +68,7 @@ use concurrency::{Bytes, Lazy, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
 #[cfg(feature = "telemetry")]
@@ -1394,10 +1394,22 @@ pub fn current_peer_fingerprint_for_provider(
 }
 
 /// Manually verify DNS TXT record for `domain`.
-pub fn dns_verify(domain: &str) -> Value {
-    let v = crate::gateway::dns::dns_lookup(&foundation_serialization::json!({ "domain": domain }));
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DnsVerification<'a> {
+    pub domain: &'a str,
+    pub verified: bool,
+}
+
+pub fn dns_verify(domain: &str) -> DnsVerification<'_> {
+    let mut params = foundation_serialization::json::Map::new();
+    params.insert(
+        "domain".to_string(),
+        foundation_serialization::json::Value::String(domain.to_string()),
+    );
+    let v = crate::gateway::dns::dns_lookup(&foundation_serialization::json::Value::Object(params));
     let verified = v.get("verified").and_then(|b| b.as_bool()).unwrap_or(false);
-    foundation_serialization::json!({ "domain": domain, "verified": verified })
+    DnsVerification { domain, verified }
 }
 
 pub fn record_ip_drop(ip: &std::net::SocketAddr) {
@@ -1439,11 +1451,18 @@ pub fn reputation_sync() {
 }
 
 /// Return current reputation score for `peer`.
-pub fn reputation_show(peer: &str) -> Value {
-    foundation_serialization::json!({
-        "peer": peer,
-        "score": crate::compute_market::scheduler::reputation_get(peer),
-    })
+#[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ReputationScore<'a> {
+    pub peer: &'a str,
+    pub score: i64,
+}
+
+pub fn reputation_show(peer: &str) -> ReputationScore<'_> {
+    ReputationScore {
+        peer,
+        score: crate::compute_market::scheduler::reputation_get(peer),
+    }
 }
 
 /// Current gossip protocol version.

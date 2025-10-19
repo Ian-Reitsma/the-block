@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use foundation_serialization::json::Value;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 
@@ -39,11 +40,10 @@ fn badge_status_endpoint() {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: foundation_serialization::json::Value =
-            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body: Value = foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
         assert!(!body["active"].as_bool().unwrap());
-        assert!(body["last_mint"].is_null());
-        assert!(body["last_burn"].is_null());
+        assert!(matches!(body.get("last_mint"), Some(Value::Null)));
+        assert!(matches!(body.get("last_burn"), Some(Value::Null)));
 
         // Mint a badge and verify the endpoint reflects it.
         {
@@ -68,8 +68,7 @@ fn badge_status_endpoint() {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: foundation_serialization::json::Value =
-            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body: Value = foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
         assert!(body["active"].as_bool().unwrap());
         assert!(body["last_mint"].as_u64().is_some());
 

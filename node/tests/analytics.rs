@@ -1,4 +1,4 @@
-#![cfg(feature = "integration-tests")]
+#![cfg(all(feature = "integration-tests", feature = "telemetry"))]
 use the_block::{
     gateway,
     rpc::analytics::{self, AnalyticsQuery},

@@ -855,34 +855,56 @@ pub fn purge_policy(domain: &str) {
     }
 }
 
-pub fn status_snapshot() -> Value {
-    match lock_cache() {
-        Some(cache) => foundation_serialization::json!({
-            "status": "ok",
-            "cache": cache.status(),
-        }),
-        None => foundation_serialization::json!({
-            "status": "error",
-            "error": "lock",
-        }),
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct MobileCacheStatusResponse {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub cache: Option<CacheStatus>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub error: Option<String>,
+}
+
+impl MobileCacheStatusResponse {
+    fn ok_with_cache(cache: CacheStatus) -> Self {
+        Self {
+            status: "ok",
+            cache: Some(cache),
+            error: None,
+        }
+    }
+
+    fn ok() -> Self {
+        Self {
+            status: "ok",
+            cache: None,
+            error: None,
+        }
+    }
+
+    fn error(message: impl Into<String>) -> Self {
+        Self {
+            status: "error",
+            cache: None,
+            error: Some(message.into()),
+        }
     }
 }
 
-pub fn flush_cache() -> Value {
+pub fn status_snapshot() -> MobileCacheStatusResponse {
+    match lock_cache() {
+        Some(cache) => MobileCacheStatusResponse::ok_with_cache(cache.status()),
+        None => MobileCacheStatusResponse::error("lock"),
+    }
+}
+
+pub fn flush_cache() -> MobileCacheStatusResponse {
     match lock_cache() {
         Some(mut cache) => match cache.flush() {
-            Ok(()) => foundation_serialization::json!({
-                "status": "ok",
-            }),
-            Err(err) => foundation_serialization::json!({
-                "status": "error",
-                "error": err.to_string(),
-            }),
+            Ok(()) => MobileCacheStatusResponse::ok(),
+            Err(err) => MobileCacheStatusResponse::error(err.to_string()),
         },
-        None => foundation_serialization::json!({
-            "status": "error",
-            "error": "lock",
-        }),
+        None => MobileCacheStatusResponse::error("lock"),
     }
 }
 

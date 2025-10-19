@@ -18,6 +18,7 @@ use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use diagnostics::tracing::error;
 use foundation_serialization::binary;
 use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::utxo_account::AccountLedger;
 
@@ -32,6 +33,14 @@ const KEY_AUDIT: &str = "audit_log";
 const KEY_ROOTS: &str = "recent_roots";
 const KEY_NEXT_SEQ: &str = "next_seq";
 const KEY_SLA_QUEUE: &str = "sla_queue";
+
+fn json_map(pairs: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -627,11 +636,11 @@ impl Settlement {
 
     pub fn submit_anchor(anchor: &[u8]) {
         let hash = blake3::hash(anchor).to_hex().to_string();
-        let line =
-            foundation_serialization::json::to_string_value(&foundation_serialization::json!({
-                "kind": "compute_anchor",
-                "hash": hash.clone(),
-            }));
+        let payload = json_map(vec![
+            ("kind", Value::String("compute_anchor".to_string())),
+            ("hash", Value::String(hash.clone())),
+        ]);
+        let line = json::to_string_value(&payload);
         with_state_mut(|state| {
             state.metadata.last_anchor_hex = Some(hash.clone());
             state.push_anchor_record(hash.clone());

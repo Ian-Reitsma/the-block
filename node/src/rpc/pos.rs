@@ -3,13 +3,33 @@ use std::sync::Mutex;
 
 use concurrency::Lazy;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
-use foundation_serialization::json::Value;
+use foundation_serialization::{json::Value, Serialize};
 
 use crate::consensus::pos::PosState;
 
 use super::RpcError;
 
 static POS_STATE: Lazy<Mutex<PosState>> = Lazy::new(|| Mutex::new(PosState::default()));
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct PosStatusResponse {
+    pub status: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct StakeResponse {
+    pub stake: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RoleResponse {
+    pub id: String,
+    pub role: String,
+    pub stake: u64,
+}
 
 struct SignerPayload {
     approvals: Vec<(VerifyingKey, Signature)>,
@@ -132,14 +152,14 @@ fn verify(action: &str, role: &str, amount: u64, payload: &SignerPayload) -> Res
     Err(RpcError::new(-32602, "bad signature"))
 }
 
-pub fn register(params: &Value) -> Result<Value, RpcError> {
+pub fn register(params: &Value) -> Result<PosStatusResponse, RpcError> {
     let id = get_id(params)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.register(id);
-    Ok(foundation_serialization::json!({"status": "ok"}))
+    Ok(PosStatusResponse { status: "ok" })
 }
 
-pub fn bond(params: &Value) -> Result<Value, RpcError> {
+pub fn bond(params: &Value) -> Result<StakeResponse, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let amount = get_amount(params)?;
@@ -148,10 +168,12 @@ pub fn bond(params: &Value) -> Result<Value, RpcError> {
     verify("bond", &role, amount, &payload)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.bond(&id, &role, amount);
-    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(StakeResponse {
+        stake: pos.stake_of(&id, &role),
+    })
 }
 
-pub fn unbond(params: &Value) -> Result<Value, RpcError> {
+pub fn unbond(params: &Value) -> Result<StakeResponse, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let amount = get_amount(params)?;
@@ -160,16 +182,20 @@ pub fn unbond(params: &Value) -> Result<Value, RpcError> {
     verify("unbond", &role, amount, &payload)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.unbond(&id, &role, amount);
-    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(StakeResponse {
+        stake: pos.stake_of(&id, &role),
+    })
 }
 
-pub fn slash(params: &Value) -> Result<Value, RpcError> {
+pub fn slash(params: &Value) -> Result<StakeResponse, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let amount = get_amount(params)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.slash(&id, &role, amount);
-    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(StakeResponse {
+        stake: pos.stake_of(&id, &role),
+    })
 }
 
 /// Expose for tests.
@@ -177,22 +203,19 @@ pub fn state() -> &'static Mutex<PosState> {
     &POS_STATE
 }
 
-pub fn role(params: &Value) -> Result<Value, RpcError> {
+pub fn role(params: &Value) -> Result<RoleResponse, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let stake = pos.stake_of(&id, &role);
-    Ok(foundation_serialization::json!({
-        "id": id.clone(),
-        "role": role.clone(),
-        "stake": stake,
-    }))
+    Ok(RoleResponse { id, role, stake })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::SigningKey;
+    use foundation_serialization::json::{Map, Value};
 
     fn reset_state() {
         let mut state = POS_STATE.lock().unwrap();
@@ -212,14 +235,20 @@ mod tests {
         let amount = 10u64;
         let msg = format!("bond:{role}:{amount}");
         let sig = sk.sign(msg.as_bytes());
-        let params = foundation_serialization::json!({
-            "id": crypto_suite::hex::encode(pk.to_bytes()),
-            "role": role,
-            "amount": amount,
-            "sig": crypto_suite::hex::encode(sig.to_bytes()),
-        });
+        let mut map = Map::new();
+        map.insert(
+            "id".to_string(),
+            Value::String(crypto_suite::hex::encode(pk.to_bytes())),
+        );
+        map.insert("role".to_string(), Value::String(role.to_string()));
+        map.insert("amount".to_string(), Value::Number(amount.into()));
+        map.insert(
+            "sig".to_string(),
+            Value::String(crypto_suite::hex::encode(sig.to_bytes())),
+        );
+        let params = Value::Object(map);
         let res = bond(&params).expect("bond succeeds");
-        assert_eq!(res["stake"].as_u64().unwrap(), amount);
+        assert_eq!(res.stake, amount);
     }
 
     #[test]
@@ -236,32 +265,77 @@ mod tests {
             (&signer_b, signer_b.sign(msg.as_bytes())),
             (&signer_c, signer_c.sign(b"other")),
         ];
-        let params = foundation_serialization::json!({
-            "id": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
-            "role": role,
-            "amount": amount,
-            "threshold": 2,
-            "signers": [
-                {"pk": crypto_suite::hex::encode(approvals[0].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[0].1.to_bytes())},
-                {"pk": crypto_suite::hex::encode(approvals[1].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[1].1.to_bytes())},
-                {"pk": crypto_suite::hex::encode(approvals[2].0.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[2].1.to_bytes())},
-            ],
-        });
+        let mut params_map = Map::new();
+        params_map.insert(
+            "id".to_string(),
+            Value::String(crypto_suite::hex::encode(
+                signer_a.verifying_key().to_bytes(),
+            )),
+        );
+        params_map.insert("role".to_string(), Value::String(role.to_string()));
+        params_map.insert("amount".to_string(), Value::Number(amount.into()));
+        params_map.insert("threshold".to_string(), Value::Number(2.into()));
+        let signers: Vec<Value> = approvals
+            .iter()
+            .map(|(sk, sig)| {
+                let mut signer_map = Map::new();
+                signer_map.insert(
+                    "pk".to_string(),
+                    Value::String(crypto_suite::hex::encode(sk.verifying_key().to_bytes())),
+                );
+                signer_map.insert(
+                    "sig".to_string(),
+                    Value::String(crypto_suite::hex::encode(sig.to_bytes())),
+                );
+                Value::Object(signer_map)
+            })
+            .collect();
+        params_map.insert("signers".to_string(), Value::Array(signers));
+        let params = Value::Object(params_map);
         let res = bond(&params).expect("multisig bond");
-        assert_eq!(res["stake"].as_u64().unwrap(), amount);
+        assert_eq!(res.stake, amount);
 
         // Fails when fewer than threshold signatures are valid.
         reset_state();
-        let bad_params = foundation_serialization::json!({
-            "id": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()),
-            "role": role,
-            "amount": amount,
-            "threshold": 2,
-            "signers": [
-                {"pk": crypto_suite::hex::encode(signer_a.verifying_key().to_bytes()), "sig": crypto_suite::hex::encode(approvals[0].1.to_bytes())},
-                {"pk": crypto_suite::hex::encode(signer_b.verifying_key().to_bytes()), "sig": "00"},
-            ],
-        });
+        let mut bad_map = Map::new();
+        bad_map.insert(
+            "id".to_string(),
+            Value::String(crypto_suite::hex::encode(
+                signer_a.verifying_key().to_bytes(),
+            )),
+        );
+        bad_map.insert("role".to_string(), Value::String(role.to_string()));
+        bad_map.insert("amount".to_string(), Value::Number(amount.into()));
+        bad_map.insert("threshold".to_string(), Value::Number(2.into()));
+        let bad_signers = vec![
+            {
+                let mut signer_map = Map::new();
+                signer_map.insert(
+                    "pk".to_string(),
+                    Value::String(crypto_suite::hex::encode(
+                        signer_a.verifying_key().to_bytes(),
+                    )),
+                );
+                signer_map.insert(
+                    "sig".to_string(),
+                    Value::String(crypto_suite::hex::encode(approvals[0].1.to_bytes())),
+                );
+                Value::Object(signer_map)
+            },
+            {
+                let mut signer_map = Map::new();
+                signer_map.insert(
+                    "pk".to_string(),
+                    Value::String(crypto_suite::hex::encode(
+                        signer_b.verifying_key().to_bytes(),
+                    )),
+                );
+                signer_map.insert("sig".to_string(), Value::String("00".to_string()));
+                Value::Object(signer_map)
+            },
+        ];
+        bad_map.insert("signers".to_string(), Value::Array(bad_signers));
+        let bad_params = Value::Object(bad_map);
         assert!(matches!(bond(&bad_params), Err(_)));
     }
 }

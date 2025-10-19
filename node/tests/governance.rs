@@ -139,28 +139,19 @@ fn gov_params_includes_dependency_policy() {
 
     let response = the_block::rpc::governance::gov_params(&params, 42).unwrap();
 
+    assert_eq!(response.runtime_backend_mask, runtime_mask as i64);
     assert_eq!(
-        response["runtime_backend_mask"],
-        foundation_serialization::json!(runtime_mask)
+        response.runtime_backend_policy,
+        vec!["inhouse".to_string(), "stub".to_string()]
     );
+    assert_eq!(response.transport_provider_mask, transport_mask as i64);
     assert_eq!(
-        response["runtime_backend_policy"],
-        foundation_serialization::json!(["inhouse", "stub"])
+        response.transport_provider_policy,
+        vec!["quinn".to_string()]
     );
+    assert_eq!(response.storage_engine_mask, storage_mask as i64);
     assert_eq!(
-        response["transport_provider_mask"],
-        foundation_serialization::json!(transport_mask)
-    );
-    assert_eq!(
-        response["transport_provider_policy"],
-        foundation_serialization::json!(["quinn"])
-    );
-    assert_eq!(
-        response["storage_engine_mask"],
-        foundation_serialization::json!(storage_mask)
-    );
-    assert_eq!(
-        response["storage_engine_policy"],
-        foundation_serialization::json!(["rocksdb-compat", "inhouse"])
+        response.storage_engine_policy,
+        vec!["rocksdb-compat".to_string(), "inhouse".to_string()]
     );
 }

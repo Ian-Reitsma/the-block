@@ -24,8 +24,11 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryBalanceSnapshot,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation,
     ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
+};
+pub use governance_spec::treasury::{
+    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
 pub use token::{TokenAction, TokenProposal};
 

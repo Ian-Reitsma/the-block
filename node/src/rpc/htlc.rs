@@ -5,7 +5,29 @@ use concurrency::Lazy;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+use foundation_serialization::Serialize;
+
 static STORE: Lazy<Mutex<BTreeMap<u64, Htlc>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde", untagged)]
+pub enum HtlcStatusResponse {
+    Status {
+        hash: String,
+        timeout: u64,
+        redeemed: bool,
+    },
+    Error {
+        error: &'static str,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde", untagged)]
+pub enum HtlcRefundResponse {
+    Status { status: &'static str },
+    Error { error: &'static str },
+}
 
 pub fn insert(id: u64, h: Htlc) {
     let mut store = STORE.lock().unwrap();
@@ -16,20 +38,20 @@ pub fn insert(id: u64, h: Htlc) {
     }
 }
 
-pub fn status(id: u64) -> foundation_serialization::json::Value {
+pub fn status(id: u64) -> HtlcStatusResponse {
     let store = STORE.lock().unwrap();
     if let Some(h) = store.get(&id) {
-        foundation_serialization::json!({
-            "hash": crypto_suite::hex::encode(&h.hash),
-            "timeout": h.timeout,
-            "redeemed": h.redeemed,
-        })
+        HtlcStatusResponse::Status {
+            hash: crypto_suite::hex::encode(&h.hash),
+            timeout: h.timeout,
+            redeemed: h.redeemed,
+        }
     } else {
-        foundation_serialization::json!({"error": "not_found"})
+        HtlcStatusResponse::Error { error: "not_found" }
     }
 }
 
-pub fn refund(id: u64, now: u64) -> foundation_serialization::json::Value {
+pub fn refund(id: u64, now: u64) -> HtlcRefundResponse {
     let mut store = STORE.lock().unwrap();
     if let Some(h) = store.get_mut(&id) {
         if h.refund(now) {
@@ -37,11 +59,13 @@ pub fn refund(id: u64, now: u64) -> foundation_serialization::json::Value {
             {
                 crate::telemetry::HTLC_REFUNDED_TOTAL.inc();
             }
-            foundation_serialization::json!({"status": "refunded"})
+            HtlcRefundResponse::Status { status: "refunded" }
         } else {
-            foundation_serialization::json!({"error": "not_refundable"})
+            HtlcRefundResponse::Error {
+                error: "not_refundable",
+            }
         }
     } else {
-        foundation_serialization::json!({"error": "not_found"})
+        HtlcRefundResponse::Error { error: "not_found" }
     }
 }

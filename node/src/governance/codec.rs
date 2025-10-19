@@ -3,10 +3,10 @@ use super::{
     ApprovedRelease, ParamKey, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot,
     ReleaseVote, Vote, VoteChoice,
 };
-use crate::treasury::{
+use foundation_serialization::json::{self, Map, Value};
+use governance_spec::treasury::{
     DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
-use foundation_serialization::json::{self, Map, Value};
 use std::convert::TryInto;
 
 pub type Result<T> = std::result::Result<T, sled::Error>;

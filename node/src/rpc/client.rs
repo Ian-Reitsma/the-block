@@ -182,7 +182,16 @@ pub struct InflationParams {
 
 impl RpcClient {
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
-        let params = foundation_serialization::json!({ "lane": lane.as_str() });
+        #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct MempoolStatsParams<'a> {
+            lane: &'a str,
+        }
+
+        let params = json::to_value(MempoolStatsParams {
+            lane: lane.as_str(),
+        })
+        .unwrap();
         let request =
             RpcEnvelopeRequest::new("mempool.stats", params).with_id(json::Value::from(1u64));
 
@@ -204,12 +213,22 @@ impl RpcClient {
             status: Option<String>,
         }
 
-        let params = foundation_serialization::json!({
-            "event": event.event,
-            "lane": event.lane,
-            "fee": event.fee,
-            "floor": event.floor,
-        });
+        #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct WalletQosParams<'a> {
+            event: &'a str,
+            lane: &'a str,
+            fee: u64,
+            floor: u64,
+        }
+
+        let params = json::to_value(WalletQosParams {
+            event: event.event,
+            lane: event.lane,
+            fee: event.fee,
+            floor: event.floor,
+        })
+        .unwrap();
         let request =
             RpcEnvelopeRequest::new("mempool.qos_event", params).with_id(json::Value::from(1u64));
         let payload = self
@@ -250,7 +269,14 @@ impl RpcClient {
             stake: Option<u64>,
         }
 
-        let params = foundation_serialization::json!({"id": id, "role": role});
+        #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct StakeRoleParams<'a> {
+            id: &'a str,
+            role: &'a str,
+        }
+
+        let params = json::to_value(StakeRoleParams { id, role }).unwrap();
         let request =
             RpcEnvelopeRequest::new("stake.role", params).with_id(json::Value::from(1u64));
         let payload = self
@@ -606,7 +632,18 @@ mod tests {
             max_retries: 0,
             fault_rate: 1.0,
         };
-        let payload = foundation_serialization::json!({ "jsonrpc": "2.0", "method": "noop" });
+        #[derive(Serialize)]
+        #[serde(crate = "foundation_serialization::serde")]
+        struct NoopPayload<'a> {
+            jsonrpc: &'a str,
+            method: &'a str,
+        }
+
+        let payload = json::to_value(NoopPayload {
+            jsonrpc: "2.0",
+            method: "noop",
+        })
+        .unwrap();
         let err = client
             .call("http://127.0.0.1:0", &payload)
             .expect_err("fault injection should abort the request");

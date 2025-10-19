@@ -1,12 +1,43 @@
 #![forbid(unsafe_code)]
 
 use concurrency::Lazy;
+use foundation_serialization::json::{self, Map, Number, Value};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
 
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::RepairRequest;
+
+fn json_object(pairs: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in pairs {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
+
+fn status_value(status: &'static str) -> Value {
+    json_object(vec![("status", Value::String(status.to_string()))])
+}
+
+fn error_value(message: impl Into<String>) -> Value {
+    json_object(vec![("error", Value::String(message.into()))])
+}
+
+fn number_from_usize(value: usize) -> Value {
+    Value::Number(Number::from(value as u64))
+}
+
+fn number_from_option_i32(value: Option<i32>) -> Value {
+    value
+        .map(|inner| Value::Number(Number::from(inner)))
+        .unwrap_or(Value::Null)
+}
+
+fn string_from_option(value: Option<String>) -> Value {
+    value.map(Value::String).unwrap_or(Value::Null)
+}
 
 fn pipeline_path() -> String {
     std::env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string())
@@ -35,7 +66,13 @@ pub fn upload(
     {
         crate::telemetry::STORAGE_CONTRACT_CREATED_TOTAL.inc();
     }
-    foundation_serialization::json!({"status": "ok", "providers": providers})
+    json_object(vec![
+        ("status", Value::String("ok".to_string())),
+        (
+            "providers",
+            Value::Array(providers.into_iter().map(Value::String).collect()),
+        ),
+    ])
 }
 
 /// Challenge a provider to prove retrievability of an object.
@@ -53,14 +90,14 @@ pub fn challenge(
                 {
                     crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
                 }
-                foundation_serialization::json!({"status": "ok"})
+                status_value("ok")
             }
             Err(ContractError::Expired) => {
                 #[cfg(feature = "telemetry")]
                 {
                     crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
                 }
-                foundation_serialization::json!({"error": "expired"})
+                error_value("expired")
             }
             Err(ContractError::ChallengeFailed) => {
                 #[cfg(feature = "telemetry")]
@@ -73,11 +110,11 @@ pub fn challenge(
                         crate::compute_market::scheduler::merge_reputation(first, rep, u64::MAX);
                     }
                 }
-                foundation_serialization::json!({"error": "challenge_failed"})
+                error_value("challenge_failed")
             }
         }
     } else {
-        foundation_serialization::json!({"error": "not_found"})
+        error_value("not_found")
     }
 }
 
@@ -86,35 +123,59 @@ pub fn provider_profiles() -> foundation_serialization::json::Value {
     let pipeline = StoragePipeline::open(&pipeline_path());
     let engine = pipeline.engine_summary();
     let legacy_mode = crate::simple_db::legacy_mode();
-    let profiles: Vec<foundation_serialization::json::Value> = pipeline
+    let profiles: Vec<Value> = pipeline
         .provider_profile_snapshots()
         .into_iter()
         .map(|snap| {
-            foundation_serialization::json!({
-                "provider": snap.provider,
-                "quota_bytes": snap.quota_bytes,
-                "preferred_chunk": snap.profile.preferred_chunk,
-                "throughput_bps": snap.profile.bw_ewma,
-                "rtt_ms": snap.profile.rtt_ewma,
-                "loss": snap.profile.loss_ewma,
-                "success_rate": snap.profile.success_rate_ewma,
-                "recent_failures": snap.profile.recent_failures,
-                "total_chunks": snap.profile.total_chunks,
-                "total_failures": snap.profile.total_failures,
-                "last_upload_bytes": snap.profile.last_upload_bytes,
-                "last_upload_secs": snap.profile.last_upload_secs,
-                "maintenance": snap.profile.maintenance,
-            })
+            json_object(vec![
+                ("provider", Value::String(snap.provider)),
+                ("quota_bytes", Value::Number(Number::from(snap.quota_bytes))),
+                (
+                    "preferred_chunk",
+                    Value::Number(Number::from(snap.profile.preferred_chunk)),
+                ),
+                ("throughput_bps", Value::from(snap.profile.bw_ewma)),
+                ("rtt_ms", Value::from(snap.profile.rtt_ewma)),
+                ("loss", Value::from(snap.profile.loss_ewma)),
+                ("success_rate", Value::from(snap.profile.success_rate_ewma)),
+                (
+                    "recent_failures",
+                    Value::Number(Number::from(snap.profile.recent_failures)),
+                ),
+                (
+                    "total_chunks",
+                    Value::Number(Number::from(snap.profile.total_chunks)),
+                ),
+                (
+                    "total_failures",
+                    Value::Number(Number::from(snap.profile.total_failures)),
+                ),
+                (
+                    "last_upload_bytes",
+                    Value::Number(Number::from(snap.profile.last_upload_bytes)),
+                ),
+                (
+                    "last_upload_secs",
+                    Value::Number(Number::from(snap.profile.last_upload_secs)),
+                ),
+                ("maintenance", Value::Bool(snap.profile.maintenance)),
+            ])
         })
         .collect();
-    foundation_serialization::json!({
-        "profiles": profiles,
-        "engine": {
-            "pipeline": engine.pipeline,
-            "rent_escrow": engine.rent_escrow,
-            "legacy_mode": legacy_mode,
-        }
-    })
+    let mut engine_map = Map::new();
+    engine_map.insert(
+        "pipeline".to_string(),
+        Value::String(engine.pipeline.clone()),
+    );
+    engine_map.insert(
+        "rent_escrow".to_string(),
+        Value::String(engine.rent_escrow.clone()),
+    );
+    engine_map.insert("legacy_mode".to_string(), Value::Bool(legacy_mode));
+    json_object(vec![
+        ("profiles", Value::Array(profiles)),
+        ("engine", Value::Object(engine_map)),
+    ])
 }
 
 /// Return recent storage repair log entries.
@@ -123,13 +184,14 @@ pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::V
     let log = pipeline.repair_log();
     let limit = limit.unwrap_or(25).min(500);
     match log.recent_entries(limit) {
-        Ok(entries) => foundation_serialization::json!({
-            "status": "ok",
-            "entries": entries,
-        }),
-        Err(err) => foundation_serialization::json!({
-            "error": err.to_string(),
-        }),
+        Ok(entries) => match json::to_value(entries) {
+            Ok(val) => json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                ("entries", val),
+            ]),
+            Err(err) => error_value(err.to_string()),
+        },
+        Err(err) => error_value(err.to_string()),
     }
 }
 
@@ -138,18 +200,19 @@ pub fn repair_run() -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     let log = pipeline.repair_log();
     match crate::storage::repair::run_once(pipeline.db_mut(), &log, RepairRequest::default()) {
-        Ok(summary) => foundation_serialization::json!({
-            "status": "ok",
-            "manifests": summary.manifests,
-            "attempts": summary.attempts,
-            "successes": summary.successes,
-            "failures": summary.failures,
-            "skipped": summary.skipped,
-            "bytes_repaired": summary.bytes_repaired,
-        }),
-        Err(err) => foundation_serialization::json!({
-            "error": err.label(),
-        }),
+        Ok(summary) => json_object(vec![
+            ("status", Value::String("ok".to_string())),
+            ("manifests", number_from_usize(summary.manifests)),
+            ("attempts", number_from_usize(summary.attempts)),
+            ("successes", number_from_usize(summary.successes)),
+            ("failures", number_from_usize(summary.failures)),
+            ("skipped", number_from_usize(summary.skipped)),
+            (
+                "bytes_repaired",
+                Value::Number(Number::from(summary.bytes_repaired)),
+            ),
+        ]),
+        Err(err) => error_value(err.label()),
     }
 }
 
@@ -162,13 +225,11 @@ pub fn repair_chunk(
     let bytes = match crypto_suite::hex::decode(manifest_hex) {
         Ok(bytes) => bytes,
         Err(err) => {
-            return foundation_serialization::json!({
-                "error": format!("invalid manifest hash: {err}"),
-            });
+            return error_value(format!("invalid manifest hash: {err}"));
         }
     };
     if bytes.len() != 32 {
-        return foundation_serialization::json!({"error": "manifest hash must be 32 bytes"});
+        return error_value("manifest hash must be 32 bytes");
     }
     let mut manifest = [0u8; 32];
     manifest.copy_from_slice(&bytes);
@@ -180,17 +241,18 @@ pub fn repair_chunk(
     request.chunk = Some(chunk_idx as usize);
     request.force = force;
     match crate::storage::repair::run_once(pipeline.db_mut(), &log, request) {
-        Ok(summary) => foundation_serialization::json!({
-            "status": "ok",
-            "attempts": summary.attempts,
-            "successes": summary.successes,
-            "failures": summary.failures,
-            "skipped": summary.skipped,
-            "bytes_repaired": summary.bytes_repaired,
-        }),
-        Err(err) => foundation_serialization::json!({
-            "error": err.label(),
-        }),
+        Ok(summary) => json_object(vec![
+            ("status", Value::String("ok".to_string())),
+            ("attempts", number_from_usize(summary.attempts)),
+            ("successes", number_from_usize(summary.successes)),
+            ("failures", number_from_usize(summary.failures)),
+            ("skipped", number_from_usize(summary.skipped)),
+            (
+                "bytes_repaired",
+                Value::Number(Number::from(summary.bytes_repaired)),
+            ),
+        ]),
+        Err(err) => error_value(err.label()),
     }
 }
 
@@ -201,12 +263,12 @@ pub fn set_provider_maintenance(
 ) -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     match pipeline.set_provider_maintenance(provider, maintenance) {
-        Ok(()) => foundation_serialization::json!({
-            "status": "ok",
-            "provider": provider,
-            "maintenance": maintenance,
-        }),
-        Err(err) => foundation_serialization::json!({"error": err}),
+        Ok(()) => json_object(vec![
+            ("status", Value::String("ok".to_string())),
+            ("provider", Value::String(provider.to_string())),
+            ("maintenance", Value::Bool(maintenance)),
+        ]),
+        Err(err) => error_value(err.to_string()),
     }
 }
 
@@ -216,39 +278,79 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
     let max_entries = limit.unwrap_or(100).min(1000);
     let manifests = pipeline.manifest_summaries(max_entries);
     let algorithms = crate::storage::settings::algorithms();
-    let policy = foundation_serialization::json!({
-        "erasure": {
-            "algorithm": algorithms.erasure(),
-            "fallback": algorithms.erasure_fallback(),
-            "emergency": algorithms.erasure_emergency(),
-        },
-        "compression": {
-            "algorithm": algorithms.compression(),
-            "fallback": algorithms.compression_fallback(),
-            "emergency": algorithms.compression_emergency(),
-        },
-    });
+    let policy = json_object(vec![
+        (
+            "erasure",
+            Value::Object({
+                let mut map = Map::new();
+                map.insert(
+                    "algorithm".to_string(),
+                    Value::String(algorithms.erasure().to_string()),
+                );
+                map.insert(
+                    "fallback".to_string(),
+                    Value::Bool(algorithms.erasure_fallback()),
+                );
+                map.insert(
+                    "emergency".to_string(),
+                    Value::Bool(algorithms.erasure_emergency()),
+                );
+                map
+            }),
+        ),
+        (
+            "compression",
+            Value::Object({
+                let mut map = Map::new();
+                map.insert(
+                    "algorithm".to_string(),
+                    Value::String(algorithms.compression().to_string()),
+                );
+                map.insert(
+                    "fallback".to_string(),
+                    Value::Bool(algorithms.compression_fallback()),
+                );
+                map.insert(
+                    "emergency".to_string(),
+                    Value::Bool(algorithms.compression_emergency()),
+                );
+                map
+            }),
+        ),
+    ]);
     let entries: Vec<_> = manifests
         .into_iter()
         .map(|entry| {
-            foundation_serialization::json!({
-                "manifest": entry.manifest,
-                "total_len": entry.total_len,
-                "chunk_count": entry.chunk_count,
-                "erasure": entry.erasure,
-                "compression": entry.compression,
-                "encryption": entry.encryption,
-                "compression_level": entry.compression_level,
-                "erasure_fallback": entry.erasure_fallback,
-                "compression_fallback": entry.compression_fallback,
-            })
+            json_object(vec![
+                ("manifest", Value::String(entry.manifest)),
+                ("total_len", Value::Number(Number::from(entry.total_len))),
+                (
+                    "chunk_count",
+                    Value::Number(Number::from(entry.chunk_count)),
+                ),
+                ("erasure", Value::String(entry.erasure)),
+                ("compression", Value::String(entry.compression)),
+                ("encryption", string_from_option(entry.encryption)),
+                (
+                    "compression_level",
+                    number_from_option_i32(entry.compression_level),
+                ),
+                (
+                    "erasure_fallback",
+                    Value::Bool(entry.erasure_fallback),
+                ),
+                (
+                    "compression_fallback",
+                    Value::Bool(entry.compression_fallback),
+                ),
+            ])
         })
         .collect();
-    foundation_serialization::json!({
-        "status": "ok",
-        "policy": policy,
-        "manifests": entries,
-    })
+    json_object(vec![
+        ("status", Value::String("ok".to_string())),
+        ("policy", policy),
+        ("manifests", Value::Array(entries)),
+    ])
 }
 
 #[cfg(test)]

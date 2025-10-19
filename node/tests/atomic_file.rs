@@ -2,7 +2,7 @@
 use std::fs;
 use std::thread;
 
-use rand::Rng;
+use rand::RngCore;
 use the_block::util::atomic_file::write_atomic;
 
 #[test]
@@ -13,7 +13,8 @@ fn crash_simulated_write_is_atomic() {
     write_atomic(&path, &old).unwrap();
 
     let mut rng = rand::thread_rng();
-    let new: Vec<u8> = (0..128).map(|_| rng.gen()).collect();
+    let mut new = vec![0u8; 128];
+    rng.fill_bytes(&mut new);
     let path_clone = path.clone();
     let new_clone = new.clone();
     let handle = thread::spawn(move || {
@@ -49,8 +50,10 @@ fn concurrent_writers() {
     let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("race.bin");
     let mut rng = rand::thread_rng();
-    let a: Vec<u8> = (0..256).map(|_| rng.gen()).collect();
-    let b: Vec<u8> = (0..256).map(|_| rng.gen()).collect();
+    let mut a = vec![0u8; 256];
+    rng.fill_bytes(&mut a);
+    let mut b = vec![0u8; 256];
+    rng.fill_bytes(&mut b);
 
     let path1 = path.clone();
     let a_clone = a.clone();

@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 use std::collections::HashMap;
-use sys::temp;
+use sys::tempfile::tempdir;
 use the_block::SimpleDb;
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ fn generate_ops(seed: u64) -> Vec<Op> {
 }
 
 fn apply_ops(ops: &[Op], trunc: Option<u64>) -> HashMap<String, Vec<u8>> {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().to_str().unwrap();
     let mut db = SimpleDb::open(path);
     let mut mirror = HashMap::new();

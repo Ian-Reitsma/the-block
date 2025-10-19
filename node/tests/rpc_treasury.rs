@@ -2,8 +2,10 @@
 
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-use foundation_serialization::json::{self, json, Value};
-use runtime::io::AsyncWriteExt;
+use foundation_serialization::{
+    json::{self, Map, Number, Value},
+    Deserialize,
+};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{config::RpcConfig, governance::GovStore, rpc::run_rpc_server, Blockchain};
 
@@ -38,6 +40,17 @@ fn rpc(addr: &str, payload: Value) -> Value {
         let body = &response[body_idx + 4..];
         json::from_str::<Value>(body).expect("decode response")
     })
+}
+
+fn request(method: &str, params: Option<Value>) -> Value {
+    let mut envelope = Map::new();
+    envelope.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    envelope.insert("id".to_string(), Value::Number(Number::from(1)));
+    envelope.insert("method".to_string(), Value::String(method.to_string()));
+    if let Some(p) = params {
+        envelope.insert("params".to_string(), p);
+    }
+    Value::Object(envelope)
 }
 
 #[testkit::tb_serial]
@@ -79,80 +92,148 @@ fn rpc_treasury_endpoints_surface_history() {
         ));
         let addr = expect_timeout(rx).await.expect("rpc address");
 
+        let mut limit_params = Map::new();
+        limit_params.insert("limit".to_string(), Value::Number(Number::from(8)));
         let disbursements = rpc(
             &addr,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "gov.treasury.disbursements",
-                "params": {"limit": 8}
-            }),
-        )
-        .await;
-        let list = disbursements["result"]["disbursements"].as_array().unwrap();
+            request(
+                "gov.treasury.disbursements",
+                Some(Value::Object(limit_params)),
+            ),
+        );
+        let disbursements: RpcSuccess<TreasuryDisbursementsPayload> =
+            json::from_value(disbursements).expect("disbursement payload");
+        let list = disbursements.result.disbursements;
         assert_eq!(list.len(), 2);
-        let statuses: Vec<_> = list
-            .iter()
-            .map(|entry| {
-                entry["status"]
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .next()
-                    .unwrap()
-                    .clone()
-            })
-            .collect();
-        assert!(statuses.contains(&"executed".to_string()));
-        assert!(statuses.contains(&"cancelled".to_string()));
-        assert!(disbursements["result"]["next_cursor"].is_null());
+        let mut executed = false;
+        let mut cancelled = false;
+        for entry in &list {
+            match entry.status {
+                DisbursementStatus::Executed { .. } => executed = true,
+                DisbursementStatus::Cancelled { .. } => cancelled = true,
+                DisbursementStatus::Scheduled => {}
+            }
+        }
+        assert!(executed, "missing executed disbursement");
+        assert!(cancelled, "missing cancelled disbursement");
+        assert!(disbursements.result.next_cursor.is_none());
 
+        let mut paged_params = Map::new();
+        paged_params.insert("limit".to_string(), Value::Number(Number::from(1)));
         let paged = rpc(
             &addr,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "gov.treasury.disbursements",
-                "params": {"limit": 1}
-            }),
-        )
-        .await;
-        assert!(paged["result"]["next_cursor"].is_number());
+            request(
+                "gov.treasury.disbursements",
+                Some(Value::Object(paged_params)),
+            ),
+        );
+        let paged: RpcSuccess<TreasuryDisbursementsPayload> =
+            json::from_value(paged).expect("paged disbursements");
+        assert!(paged.result.next_cursor.is_some());
 
-        let balance = rpc(
-            &addr,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "gov.treasury.balance"
-            }),
-        )
-        .await;
-        let balance_ct = balance["result"]["balance_ct"].as_u64().unwrap();
+        let balance = rpc(&addr, request("gov.treasury.balance", None));
+        let balance: RpcSuccess<TreasuryBalancePayload> =
+            json::from_value(balance).expect("balance payload");
+        let balance_ct = balance.result.balance_ct;
         assert!(balance_ct >= 1_155);
-        let last_snapshot = balance["result"]["last_snapshot"].as_object().unwrap();
-        assert_eq!(last_snapshot["event"].as_str(), Some("accrual"));
+        let last_snapshot = balance
+            .result
+            .last_snapshot
+            .as_ref()
+            .expect("last snapshot present");
+        assert!(matches!(last_snapshot.event, BalanceEventKind::Accrual));
 
+        let mut history_params = Map::new();
+        history_params.insert("limit".to_string(), Value::Number(Number::from(4)));
         let history = rpc(
             &addr,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "gov.treasury.balance_history",
-                "params": {"limit": 4}
-            }),
-        )
-        .await;
-        let snapshots = history["result"]["snapshots"].as_array().unwrap();
-        assert!(!snapshots.is_empty());
-        assert_eq!(
-            history["result"]["current_balance_ct"].as_u64().unwrap(),
-            balance_ct
+            request(
+                "gov.treasury.balance_history",
+                Some(Value::Object(history_params)),
+            ),
         );
+        let history: RpcSuccess<TreasuryBalanceHistoryPayload> =
+            json::from_value(history).expect("history payload");
+        assert!(!history.result.snapshots.is_empty());
+        assert_eq!(history.result.current_balance_ct, balance_ct);
 
         Settlement::shutdown();
         handle.abort();
         let _ = handle.await;
         std::env::remove_var("TB_GOVERNANCE_DB_PATH");
     });
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcSuccess<T> {
+    result: T,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryDisbursementsPayload {
+    disbursements: Vec<TreasuryDisbursementRecord>,
+    #[serde(default)]
+    next_cursor: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryDisbursementRecord {
+    id: u64,
+    destination: String,
+    amount_ct: u64,
+    memo: String,
+    scheduled_epoch: u64,
+    created_at: u64,
+    status: DisbursementStatus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum DisbursementStatus {
+    Scheduled,
+    Executed { tx_hash: String, executed_at: u64 },
+    Cancelled { reason: String, cancelled_at: u64 },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryBalancePayload {
+    balance_ct: u64,
+    #[serde(default)]
+    last_snapshot: Option<TreasuryBalanceSnapshot>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryBalanceSnapshot {
+    id: u64,
+    balance_ct: u64,
+    delta_ct: i64,
+    recorded_at: u64,
+    event: BalanceEventKind,
+    #[serde(default)]
+    disbursement_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
+#[serde(rename_all = "snake_case")]
+enum BalanceEventKind {
+    Accrual,
+    Queued,
+    Executed,
+    Cancelled,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryBalanceHistoryPayload {
+    snapshots: Vec<TreasuryBalanceSnapshot>,
+    #[serde(default)]
+    next_cursor: Option<u64>,
+    current_balance_ct: u64,
 }

@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+use foundation_serialization::json::Value;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use the_block::{
@@ -55,22 +56,37 @@ fn rpc_inflation_reports_industrial() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let val = rpc(&addr, r#"{"method":"inflation.params"}"#).await;
-        assert!(val["result"]["industrial_multiplier"].is_number());
-        assert!(val["result"]["rent_rate_ct_per_byte"].is_number());
+        let val = rpc(&addr, r#"{"method":"inflation.params"}"#);
+        assert!(matches!(
+            val["result"]["industrial_multiplier"],
+            Value::Number(_)
+        ));
+        assert!(matches!(
+            val["result"]["rent_rate_ct_per_byte"],
+            Value::Number(_)
+        ));
 
-        let val2 = rpc(&addr, r#"{"method":"compute_market.stats"}"#).await;
-        assert!(val2["result"]["industrial_backlog"].is_number());
-        assert!(val2["result"]["industrial_units_total"].is_number());
-        assert!(val2["result"]["industrial_price_per_unit"].is_number());
+        let val2 = rpc(&addr, r#"{"method":"compute_market.stats"}"#);
+        assert!(matches!(
+            val2["result"]["industrial_backlog"],
+            Value::Number(_)
+        ));
+        assert!(matches!(
+            val2["result"]["industrial_units_total"],
+            Value::Number(_)
+        ));
+        assert!(matches!(
+            val2["result"]["industrial_price_per_unit"],
+            Value::Number(_)
+        ));
 
-        let balances = rpc(&addr, r#"{"method":"compute_market.provider_balances"}"#).await;
-        assert!(balances["result"].is_array());
+        let balances = rpc(&addr, r#"{"method":"compute_market.provider_balances"}"#);
+        assert!(matches!(balances["result"], Value::Array(_)));
 
-        let audit = rpc(&addr, r#"{"method":"compute_market.audit"}"#).await;
-        assert!(audit["result"].is_object());
+        let audit = rpc(&addr, r#"{"method":"compute_market.audit"}"#);
+        assert!(matches!(audit["result"], Value::Object(_)));
 
-        let scheduler = rpc(&addr, r#"{"method":"compute_market.scheduler_metrics"}"#).await;
-        assert!(scheduler["result"].is_object());
+        let scheduler = rpc(&addr, r#"{"method":"compute_market.scheduler_metrics"}"#);
+        assert!(matches!(scheduler["result"], Value::Object(_)));
     });
 }

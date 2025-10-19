@@ -3,7 +3,6 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex, Once};
 
 use diagnostics::anyhow::Result;
-use runtime::io::{AsyncReadExt, AsyncWriteExt};
 use runtime::net::TcpStream;
 use runtime::sync::oneshot;
 use runtime::ws;
@@ -26,21 +25,21 @@ async fn read_response_headers(stream: &mut TcpStream) -> Result<String> {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 256];
     loop {
-        let read = stream.read(&mut tmp).await?;
+        let read = stream.read(&mut tmp).await.expect("read headers");
         if read == 0 {
             diagnostics::anyhow::bail!("connection closed before headers");
         }
         buf.extend_from_slice(&tmp[..read]);
         if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
             let header = &buf[..pos + 4];
-            return Ok(String::from_utf8(header.to_vec())?);
+            return Ok(String::from_utf8(header.to_vec()).expect("utf8 headers"));
         }
     }
 }
 
 async fn spawn_rpc_server() -> (
     std::net::SocketAddr,
-    runtime::JoinHandle<()>,
+    runtime::JoinHandle<Result<(), std::io::Error>>,
     sys::tempfile::TempDir,
 ) {
     let dir = sys::tempfile::tempdir().expect("tempdir");
@@ -78,13 +77,16 @@ fn state_stream_upgrade_requires_headers() -> Result<()> {
         let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-        client.write_all(request.as_bytes()).await?;
+        client
+            .write_all(request.as_bytes())
+            .await
+            .expect("write handshake");
         let headers = read_response_headers(&mut client).await?;
         assert!(
             headers.starts_with("HTTP/1.1 101"),
             "unexpected response: {headers}"
         );
-        client.shutdown().await?;
+        client.shutdown().await.expect("shutdown");
         server.abort();
         let _ = server.await;
         Ok(())
@@ -102,13 +104,16 @@ fn missing_upgrade_header_is_rejected() -> Result<()> {
         let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-        client.write_all(request.as_bytes()).await?;
+        client
+            .write_all(request.as_bytes())
+            .await
+            .expect("write handshake");
         let headers = read_response_headers(&mut client).await?;
         assert!(
             headers.starts_with("HTTP/1.1 400"),
             "unexpected response: {headers}"
         );
-        client.shutdown().await?;
+        client.shutdown().await.expect("shutdown");
         server.abort();
         let _ = server.await;
         Ok(())

@@ -24,7 +24,7 @@ fn rollback_specific_proposal() {
         1,
     )
     .unwrap_or_else(|_| panic!("propose"));
-    let id = prop["id"].as_u64().unwrap();
+    let id = prop.id;
     gov_vote(&store, "bob".into(), id, "yes", 0).unwrap_or_else(|_| panic!("vote"));
     assert_eq!(
         store.tally_and_queue(id, 1).unwrap(),
