@@ -15,13 +15,12 @@ fn policy_rollout_and_revoke() {
         parent: None,
     };
     let diff = PolicyPack::diff(&base, &rollout);
-    assert!(diff.get("consent_required").is_some());
-    assert!(diff.get("features").is_some());
+    assert!(diff.consent_required.is_some());
+    assert!(diff.features.is_some());
+    let diff_json = diff.to_json_value();
+    assert!(diff_json.get("consent_required").is_some());
+    assert!(diff_json.get("features").is_some());
     let revoke = base.clone();
     let diff_back = PolicyPack::diff(&rollout, &revoke);
-    assert!(diff_back
-        .as_object()
-        .unwrap()
-        .get("consent_required")
-        .is_some());
+    assert!(diff_back.consent_required.is_some());
 }

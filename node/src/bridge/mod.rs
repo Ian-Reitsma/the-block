@@ -116,6 +116,33 @@ pub struct DepositReceipt {
 }
 
 #[derive(Debug, Clone)]
+pub struct PendingWithdrawalInfo {
+    pub asset: String,
+    pub commitment: [u8; 32],
+    pub user: String,
+    pub amount: u64,
+    pub relayers: Vec<String>,
+    pub initiated_at: u64,
+    pub deadline: u64,
+    pub challenged: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RelayerInfo {
+    pub id: String,
+    pub stake: u64,
+    pub slashes: u64,
+    pub bond: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RelayerQuorumInfo {
+    pub asset: String,
+    pub quorum: u64,
+    pub relayers: Vec<RelayerInfo>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ChallengeRecord {
     pub asset: String,
     pub commitment: [u8; 32],
@@ -919,7 +946,7 @@ impl Bridge {
             .and_then(|c| c.bridge.locked.get(user).copied())
     }
 
-    pub fn pending_withdrawals(&self, asset: Option<&str>) -> Vec<Value> {
+    pub fn pending_withdrawals(&self, asset: Option<&str>) -> Vec<PendingWithdrawalInfo> {
         let mut out = Vec::new();
         for (chan_asset, channel) in &self.state.channels {
             if asset.is_some() && asset != Some(chan_asset.as_str()) {
@@ -927,40 +954,28 @@ impl Bridge {
             }
             for (commitment, pending) in &channel.bridge.pending_withdrawals {
                 let deadline = pending.initiated_at + channel.config.challenge_period_secs;
-                let mut map = Map::new();
-                map.insert("asset".to_string(), Value::String(chan_asset.clone()));
-                map.insert(
-                    "commitment".to_string(),
-                    Value::String(crypto_suite::hex::encode(commitment)),
-                );
-                map.insert("user".to_string(), Value::String(pending.user.clone()));
-                map.insert("amount".to_string(), Value::from(pending.amount));
-                map.insert(
-                    "relayers".to_string(),
-                    Value::Array(
-                        pending
-                            .relayers
-                            .iter()
-                            .map(|r| Value::String(r.clone()))
-                            .collect(),
-                    ),
-                );
-                map.insert(
-                    "initiated_at".to_string(),
-                    Value::from(pending.initiated_at),
-                );
-                map.insert("deadline".to_string(), Value::from(deadline));
-                map.insert("challenged".to_string(), Value::Bool(pending.challenged));
-                out.push((pending.initiated_at, Value::Object(map)));
+                out.push((
+                    pending.initiated_at,
+                    PendingWithdrawalInfo {
+                        asset: chan_asset.clone(),
+                        commitment: *commitment,
+                        user: pending.user.clone(),
+                        amount: pending.amount,
+                        relayers: pending.relayers.clone(),
+                        initiated_at: pending.initiated_at,
+                        deadline,
+                        challenged: pending.challenged,
+                    },
+                ));
             }
         }
         out.sort_by_key(|(initiated, _)| *initiated);
         out.into_iter().map(|(_, value)| value).collect()
     }
 
-    pub fn relayer_quorum(&self, asset: &str) -> Option<Value> {
+    pub fn relayer_quorum(&self, asset: &str) -> Option<RelayerQuorumInfo> {
         let channel = self.state.channels.get(asset)?;
-        let mut relayers: Vec<(String, Value)> = channel
+        let mut relayers: Vec<RelayerInfo> = channel
             .relayers
             .snapshot()
             .into_iter()
@@ -971,24 +986,20 @@ impl Bridge {
                     .get(&id)
                     .copied()
                     .unwrap_or_default();
-                let mut map = Map::new();
-                map.insert("id".to_string(), Value::String(id.clone()));
-                map.insert("stake".to_string(), Value::from(rel.stake));
-                map.insert("slashes".to_string(), Value::from(rel.slashes));
-                map.insert("bond".to_string(), Value::from(bond));
-                (id, Value::Object(map))
+                RelayerInfo {
+                    id,
+                    stake: rel.stake,
+                    slashes: rel.slashes,
+                    bond,
+                }
             })
             .collect();
-        relayers.sort_by(|a, b| a.0.cmp(&b.0));
-        let relayer_values = relayers.into_iter().map(|(_, value)| value).collect();
-        let mut map = Map::new();
-        map.insert("asset".to_string(), Value::String(asset.to_string()));
-        map.insert(
-            "quorum".to_string(),
-            Value::from(channel.config.relayer_quorum as u64),
-        );
-        map.insert("relayers".to_string(), Value::Array(relayer_values));
-        Some(Value::Object(map))
+        relayers.sort_by(|a, b| a.id.cmp(&b.id));
+        Some(RelayerQuorumInfo {
+            asset: asset.to_string(),
+            quorum: channel.config.relayer_quorum as u64,
+            relayers,
+        })
     }
 
     pub fn deposit_history(

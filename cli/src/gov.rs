@@ -2,18 +2,22 @@ use crate::parse_utils::{
     parse_optional, parse_positional_u64, parse_u64, parse_u64_required, require_positional,
     take_string,
 };
+use crate::rpc::{RpcClient, RpcClientError};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
 use foundation_serialization::binary;
+use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
-    ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote, Vote,
-    VoteChoice,
+    ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
+    TreasuryBalanceSnapshot, TreasuryDisbursement, Vote, VoteChoice,
 };
+use httpd::ClientError;
+use std::io::{self, Write};
 use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 
 struct CliReleaseVerifier;
@@ -34,6 +38,178 @@ impl ReleaseVerifier for CliReleaseVerifier {
             })
             .is_some()
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoteTreasuryStatus {
+    Scheduled,
+    Executed,
+    Cancelled,
+}
+
+impl RemoteTreasuryStatus {
+    fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "scheduled" => Some(Self::Scheduled),
+            "executed" => Some(Self::Executed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Scheduled => "scheduled",
+            Self::Executed => "executed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct JsonRpcRequest<'a, P> {
+    jsonrpc: &'static str,
+    id: u32,
+    method: &'a str,
+    params: P,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcErrorBody {
+    code: i64,
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcEnvelope<T> {
+    result: Option<T>,
+    error: Option<RpcErrorBody>,
+}
+
+fn report_rpc_failure(rpc: &str, method: &str, err: &RpcClientError) {
+    match err {
+        RpcClientError::Transport(inner) => match inner {
+            ClientError::Timeout => {
+                eprintln!("error: rpc call '{method}' to {rpc} timed out.",);
+                eprintln!(
+                    "hint: ensure the node RPC endpoint is reachable or raise TB_RPC_TIMEOUT_MS."
+                );
+            }
+            ClientError::InvalidUrl(url) => {
+                eprintln!("error: rpc endpoint {rpc} is not a valid URL ({url}).",);
+            }
+            ClientError::UnsupportedScheme(scheme) => {
+                eprintln!("error: rpc endpoint {rpc} uses unsupported scheme '{scheme}'.",);
+            }
+            ClientError::Io(io_err) => {
+                eprintln!("error: rpc call '{method}' to {rpc} failed: {io_err}",);
+                match io_err.kind() {
+                    io::ErrorKind::ConnectionRefused => {
+                        eprintln!(
+                                "hint: the node rejected the connection; verify it is running and TB_RPC_ENDPOINT matches its listen address."
+                            );
+                    }
+                    io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {
+                        eprintln!(
+                                "hint: the connection dropped mid-request; check network stability or TLS configuration."
+                            );
+                    }
+                    _ => {}
+                }
+            }
+            other => {
+                eprintln!("error: rpc call '{method}' to {rpc} failed: {other}",);
+            }
+        },
+        RpcClientError::InjectedFault => {
+            eprintln!(
+                "error: rpc call '{method}' aborted due to TB_RPC_FAULT_RATE fault injection."
+            );
+        }
+    }
+}
+
+fn call_rpc_envelope<T, P>(
+    client: &RpcClient,
+    rpc: &str,
+    method: &'static str,
+    params: P,
+) -> io::Result<RpcEnvelope<T>>
+where
+    T: for<'de> Deserialize<'de>,
+    P: Serialize,
+{
+    let payload = JsonRpcRequest {
+        jsonrpc: "2.0",
+        id: 1,
+        method,
+        params,
+    };
+    let response = client.call(rpc, &payload).map_err(|err| {
+        report_rpc_failure(rpc, method, &err);
+        io::Error::new(io::ErrorKind::Other, err.to_string())
+    })?;
+    response.json().map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to decode {method} response: {err}"),
+        )
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcTreasuryDisbursementsResult {
+    disbursements: Vec<TreasuryDisbursement>,
+    #[serde(default)]
+    next_cursor: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcTreasuryBalanceResult {
+    balance_ct: u64,
+    #[serde(default)]
+    last_snapshot: Option<TreasuryBalanceSnapshot>,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcTreasuryHistoryResult {
+    snapshots: Vec<TreasuryBalanceSnapshot>,
+    #[serde(default)]
+    next_cursor: Option<u64>,
+    current_balance_ct: u64,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryFetchOutput {
+    disbursements: Vec<TreasuryDisbursement>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    next_cursor: Option<u64>,
+    balance_ct: u64,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    last_snapshot: Option<TreasuryBalanceSnapshot>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    balance_history: Option<Vec<TreasuryBalanceSnapshot>>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    balance_next_cursor: Option<u64>,
+}
+
+fn unwrap_rpc_result<T>(envelope: RpcEnvelope<T>) -> io::Result<T> {
+    if let Some(error) = envelope.error {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("rpc error {}: {}", error.code, error.message),
+        ));
+    }
+    envelope
+        .result
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "rpc response missing result"))
 }
 
 pub enum GovCmd {
@@ -106,6 +282,15 @@ pub enum GovTreasuryCmd {
     },
     List {
         state: String,
+    },
+    Fetch {
+        rpc: String,
+        status: Option<RemoteTreasuryStatus>,
+        after_id: Option<u64>,
+        limit: Option<usize>,
+        include_history: bool,
+        history_after_id: Option<u64>,
+        history_limit: Option<usize>,
     },
 }
 
@@ -465,6 +650,48 @@ impl GovTreasuryCmd {
             ))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.treasury.fetch"),
+                "fetch",
+                "Query treasury state via RPC",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "status",
+                "status",
+                "Filter by status (scheduled/executed/cancelled)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "after-id",
+                "after-id",
+                "Only return disbursements with an id greater than this value",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "limit",
+                "limit",
+                "Maximum number of disbursements to return",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "history",
+                "history",
+                "Include treasury balance history snapshots",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "history-after-id",
+                "history-after-id",
+                "Only return balance snapshots with an id greater than this value",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "history-limit",
+                "history-limit",
+                "Maximum number of balance snapshots to return",
+            )))
+            .build(),
+        )
         .build()
     }
 
@@ -508,6 +735,45 @@ impl GovTreasuryCmd {
                     take_string(sub_matches, "state").unwrap_or_else(|| "gov.db".to_string());
                 Ok(GovTreasuryCmd::List { state })
             }
+            "fetch" => {
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                let status = match take_string(sub_matches, "status") {
+                    Some(raw) => Some(
+                        RemoteTreasuryStatus::parse(&raw)
+                            .ok_or_else(|| format!("invalid status filter: {raw}"))?,
+                    ),
+                    None => None,
+                };
+                let after_id = parse_u64(take_string(sub_matches, "after-id"), "after-id")?;
+                let limit = parse_u64(take_string(sub_matches, "limit"), "limit")?
+                    .map(|value| {
+                        usize::try_from(value)
+                            .map_err(|_| format!("limit {value} exceeds usize range"))
+                    })
+                    .transpose()?;
+                let include_history = sub_matches.get_flag("history");
+                let history_after_id = parse_u64(
+                    take_string(sub_matches, "history-after-id"),
+                    "history-after-id",
+                )?;
+                let history_limit =
+                    parse_u64(take_string(sub_matches, "history-limit"), "history-limit")?
+                        .map(|value| {
+                            usize::try_from(value)
+                                .map_err(|_| format!("history-limit {value} exceeds usize range"))
+                        })
+                        .transpose()?;
+                Ok(GovTreasuryCmd::Fetch {
+                    rpc,
+                    status,
+                    after_id,
+                    limit,
+                    include_history,
+                    history_after_id,
+                    history_limit,
+                })
+            }
             other => Err(format!("unknown subcommand '{other}' for 'gov treasury'")),
         }
     }
@@ -520,12 +786,19 @@ fn parse_param_key(name: &str) -> Option<ParamKey> {
         "runtime.backend" | "RuntimeBackend" => Some(ParamKey::RuntimeBackend),
         "transport.provider" | "TransportProvider" => Some(ParamKey::TransportProvider),
         "storage.engine_policy" | "StorageEnginePolicy" => Some(ParamKey::StorageEnginePolicy),
+        "treasury.percent_ct" | "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
         _ => None,
     }
 }
 
 pub fn handle(cmd: GovCmd) {
     match cmd {
+        GovCmd::Treasury { action } => {
+            let mut stdout = io::stdout();
+            if let Err(err) = handle_treasury(action, &mut stdout) {
+                eprintln!("treasury command failed: {err}");
+            }
+        }
         GovCmd::List { state } => {
             let store = GovStore::open(state);
             for item in store.proposals().iter() {
@@ -763,72 +1036,140 @@ pub fn handle(cmd: GovCmd) {
                 }
             }
         },
-        GovCmd::Treasury { action } => match action {
-            GovTreasuryCmd::Schedule {
-                destination,
-                amount,
-                memo,
-                epoch,
-                state,
-            } => {
-                let store = GovStore::open(state);
-                let memo_value = memo.unwrap_or_default();
-                match store.queue_disbursement(&destination, amount, &memo_value, epoch) {
-                    Ok(record) => {
-                        if let Ok(serialized) =
-                            foundation_serialization::json::to_string_pretty(&record)
-                        {
-                            println!("{serialized}");
-                        } else {
-                            println!("queued disbursement {}", record.id);
-                        }
-                    }
-                    Err(err) => eprintln!("queue failed: {err}"),
-                }
-            }
-            GovTreasuryCmd::Execute { id, tx_hash, state } => {
-                let store = GovStore::open(state);
-                match store.execute_disbursement(id, &tx_hash) {
-                    Ok(record) => {
-                        if let Ok(serialized) =
-                            foundation_serialization::json::to_string_pretty(&record)
-                        {
-                            println!("{serialized}");
-                        } else {
-                            println!("executed disbursement {id}");
-                        }
-                    }
-                    Err(err) => eprintln!("execute failed: {err}"),
-                }
-            }
-            GovTreasuryCmd::Cancel { id, reason, state } => {
-                let store = GovStore::open(state);
-                match store.cancel_disbursement(id, &reason) {
-                    Ok(record) => {
-                        if let Ok(serialized) =
-                            foundation_serialization::json::to_string_pretty(&record)
-                        {
-                            println!("{serialized}");
-                        } else {
-                            println!("cancelled disbursement {id}");
-                        }
-                    }
-                    Err(err) => eprintln!("cancel failed: {err}"),
-                }
-            }
-            GovTreasuryCmd::List { state } => {
-                let store = GovStore::open(state);
-                match store.disbursements() {
-                    Ok(records) => {
-                        let payload = foundation_serialization::json!({ "disbursements": records });
-                        match foundation_serialization::json::to_string_pretty(&payload) {
-                            Ok(serialized) => println!("{serialized}"),
-                            Err(err) => eprintln!("format failed: {err}"),
-                        }
-                    }
-                    Err(err) => eprintln!("list failed: {err}"),
-                }
-            }
-        },
     }
+}
+
+pub fn handle_with_writer(cmd: GovCmd, out: &mut dyn Write) -> io::Result<()> {
+    match cmd {
+        GovCmd::Treasury { action } => handle_treasury(action, out),
+        other => {
+            handle(other);
+            Ok(())
+        }
+    }
+}
+
+fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()> {
+    match action {
+        GovTreasuryCmd::Schedule {
+            destination,
+            amount,
+            memo,
+            epoch,
+            state,
+        } => {
+            let store = GovStore::open(state);
+            let memo_value = memo.unwrap_or_default();
+            match store.queue_disbursement(&destination, amount, &memo_value, epoch) {
+                Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
+                    Ok(serialized) => writeln!(out, "{serialized}")?,
+                    Err(_) => writeln!(out, "queued disbursement {}", record.id)?,
+                },
+                Err(err) => eprintln!("queue failed: {err}"),
+            }
+        }
+        GovTreasuryCmd::Execute { id, tx_hash, state } => {
+            let store = GovStore::open(state);
+            match store.execute_disbursement(id, &tx_hash) {
+                Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
+                    Ok(serialized) => writeln!(out, "{serialized}")?,
+                    Err(_) => writeln!(out, "executed disbursement {id}")?,
+                },
+                Err(err) => eprintln!("execute failed: {err}"),
+            }
+        }
+        GovTreasuryCmd::Cancel { id, reason, state } => {
+            let store = GovStore::open(state);
+            match store.cancel_disbursement(id, &reason) {
+                Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
+                    Ok(serialized) => writeln!(out, "{serialized}")?,
+                    Err(_) => writeln!(out, "cancelled disbursement {id}")?,
+                },
+                Err(err) => eprintln!("cancel failed: {err}"),
+            }
+        }
+        GovTreasuryCmd::List { state } => {
+            let store = GovStore::open(state);
+            match store.disbursements() {
+                Ok(records) => {
+                    let payload = foundation_serialization::json!({ "disbursements": records });
+                    match foundation_serialization::json::to_string_pretty(&payload) {
+                        Ok(serialized) => writeln!(out, "{serialized}")?,
+                        Err(err) => eprintln!("format failed: {err}"),
+                    }
+                }
+                Err(err) => eprintln!("list failed: {err}"),
+            }
+        }
+        GovTreasuryCmd::Fetch {
+            rpc,
+            status,
+            after_id,
+            limit,
+            include_history,
+            history_after_id,
+            history_limit,
+        } => {
+            let client = RpcClient::from_env();
+            let mut disb_params = json::Map::new();
+            if let Some(filter) = status {
+                disb_params.insert("status".into(), json::Value::String(filter.as_str().into()));
+            }
+            if let Some(cursor) = after_id {
+                disb_params.insert("after_id".into(), json::Value::from(cursor));
+            }
+            if let Some(max) = limit {
+                disb_params.insert("limit".into(), json::Value::from(max as u64));
+            }
+            let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
+                &client,
+                &rpc,
+                "gov.treasury.disbursements",
+                json::Value::Object(disb_params),
+            )?;
+            let disbursement_result = unwrap_rpc_result(disb_envelope)?;
+
+            let balance_envelope: RpcEnvelope<RpcTreasuryBalanceResult> = call_rpc_envelope(
+                &client,
+                &rpc,
+                "gov.treasury.balance",
+                json::Value::Object(json::Map::new()),
+            )?;
+            let balance_result = unwrap_rpc_result(balance_envelope)?;
+
+            let mut output = TreasuryFetchOutput {
+                disbursements: disbursement_result.disbursements,
+                next_cursor: disbursement_result.next_cursor,
+                balance_ct: balance_result.balance_ct,
+                last_snapshot: balance_result.last_snapshot,
+                balance_history: None,
+                balance_next_cursor: None,
+            };
+
+            if include_history {
+                let mut hist_params = json::Map::new();
+                if let Some(cursor) = history_after_id {
+                    hist_params.insert("after_id".into(), json::Value::from(cursor));
+                }
+                if let Some(max) = history_limit {
+                    hist_params.insert("limit".into(), json::Value::from(max as u64));
+                }
+                let history_envelope: RpcEnvelope<RpcTreasuryHistoryResult> = call_rpc_envelope(
+                    &client,
+                    &rpc,
+                    "gov.treasury.balance_history",
+                    json::Value::Object(hist_params),
+                )?;
+                let history_result = unwrap_rpc_result(history_envelope)?;
+                output.balance_history = Some(history_result.snapshots);
+                output.balance_next_cursor = history_result.next_cursor;
+            }
+
+            match json::to_string_pretty(&output) {
+                Ok(serialized) => writeln!(out, "{serialized}")?,
+                Err(err) => eprintln!("format failed: {err}"),
+            }
+        }
+    }
+    Ok(())
 }

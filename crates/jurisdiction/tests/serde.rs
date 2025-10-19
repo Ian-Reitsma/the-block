@@ -1,5 +1,5 @@
 use foundation_serialization::json;
-use jurisdiction::{PolicyPack, SignedPack};
+use jurisdiction::{PolicyDiff, PolicyPack, SignedPack};
 
 #[test]
 fn templates_roundtrip() {
@@ -89,4 +89,33 @@ fn signed_pack_accepts_base64_signature() {
     let parsed = SignedPack::from_json_value(&value).expect("base64 signature");
     assert_eq!(parsed.signature, vec![1, 2, 3]);
     assert_eq!(parsed.pack.region, "EU");
+}
+
+#[test]
+fn policy_diff_json_roundtrip() {
+    let base = PolicyPack {
+        region: "US".into(),
+        consent_required: true,
+        features: vec!["wallet".into()],
+        parent: None,
+    };
+    let updated = PolicyPack {
+        region: "US".into(),
+        consent_required: false,
+        features: vec!["wallet".into(), "dex".into()],
+        parent: None,
+    };
+
+    let diff = PolicyPack::diff(&base, &updated);
+    assert!(diff.consent_required.is_some());
+    assert!(diff.features.is_some());
+
+    let value = diff.to_json_value();
+    let restored = PolicyDiff::from_json_value(&value).expect("decode diff json");
+    let consent = restored.consent_required.expect("consent change");
+    assert_eq!(consent.old, true);
+    assert_eq!(consent.new, false);
+    let features = restored.features.expect("feature change");
+    assert_eq!(features.old, vec!["wallet".to_string()]);
+    assert_eq!(features.new, vec!["wallet".to_string(), "dex".to_string()]);
 }

@@ -111,6 +111,16 @@ const DEP_VIOLATION_TOTAL_PANEL_TITLE: &str = "Dependency policy violations (tot
 const DEP_VIOLATION_TOTAL_EXPR: &str = "dependency_policy_violation_total";
 const DEP_VIOLATION_PANEL_TITLE: &str = "Dependency policy violations by crate";
 const DEP_VIOLATION_EXPR: &str = "dependency_policy_violation";
+const TREASURY_COUNT_PANEL_TITLE: &str = "Treasury disbursements (count by status)";
+const TREASURY_COUNT_EXPR: &str = "treasury_disbursement_count";
+const TREASURY_AMOUNT_PANEL_TITLE: &str = "Treasury disbursement CT by status";
+const TREASURY_AMOUNT_EXPR: &str = "treasury_disbursement_amount_ct";
+const TREASURY_SNAPSHOT_AGE_PANEL_TITLE: &str = "Treasury snapshot age (seconds)";
+const TREASURY_SNAPSHOT_AGE_EXPR: &str = "treasury_disbursement_snapshot_age_seconds";
+const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str = "Oldest scheduled treasury disbursement age (seconds)";
+const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
+const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
+const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -202,6 +212,7 @@ fn extract_metrics(root: &Value) -> Result<Vec<Metric>, DashboardError> {
 fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, DashboardError> {
     let mut dex = Vec::new();
     let mut compute = Vec::new();
+    let mut treasury = Vec::new();
     let mut gossip = Vec::new();
     let mut tls = Vec::new();
     let mut dependency = Vec::new();
@@ -222,6 +233,46 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         }
         if metric.name == DEP_VIOLATION_EXPR {
             dependency.push(build_dependency_violation_panel(metric));
+            continue;
+        }
+        if metric.name == TREASURY_COUNT_EXPR {
+            treasury.push(build_treasury_status_panel(
+                TREASURY_COUNT_PANEL_TITLE,
+                TREASURY_COUNT_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == TREASURY_AMOUNT_EXPR {
+            treasury.push(build_treasury_status_panel(
+                TREASURY_AMOUNT_PANEL_TITLE,
+                TREASURY_AMOUNT_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == TREASURY_SNAPSHOT_AGE_EXPR {
+            treasury.push(build_treasury_scalar_panel(
+                TREASURY_SNAPSHOT_AGE_PANEL_TITLE,
+                TREASURY_SNAPSHOT_AGE_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == TREASURY_SCHEDULED_OLDEST_EXPR {
+            treasury.push(build_treasury_scalar_panel(
+                TREASURY_SCHEDULED_OLDEST_PANEL_TITLE,
+                TREASURY_SCHEDULED_OLDEST_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == TREASURY_NEXT_EPOCH_EXPR {
+            treasury.push(build_treasury_scalar_panel(
+                TREASURY_NEXT_EPOCH_PANEL_TITLE,
+                TREASURY_NEXT_EPOCH_EXPR,
+                metric,
+            ));
             continue;
         }
         if metric.name == "tls_env_warning_total" {
@@ -318,6 +369,8 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             dex.push(panel_value);
         } else if metric.name.starts_with("compute_") || metric.name.starts_with("scheduler_") {
             compute.push(panel_value);
+        } else if metric.name.starts_with("treasury_") {
+            treasury.push(panel_value);
         } else if metric.name.starts_with("gossip_") {
             gossip.push(panel_value);
         } else {
@@ -331,6 +384,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     for (title, mut entries) in [
         ("DEX", dex),
         ("Compute", compute),
+        ("Treasury", treasury),
         ("Gossip", gossip),
         ("TLS", tls),
         ("Dependencies", dependency),
@@ -502,6 +556,60 @@ fn build_dependency_violation_panel(metric: &Metric) -> Value {
         "legendFormat".into(),
         Value::from("{{crate}} {{version}} · {{kind}}"),
     );
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_treasury_status_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from("{{status}}"));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_treasury_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from("{{__name__}}"));
     panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
 
     let mut legend = Map::new();
@@ -718,6 +826,7 @@ pub fn render_html_snapshot(
     let mut sections = [
         ("DEX", Vec::new()),
         ("Compute", Vec::new()),
+        ("Treasury", Vec::new()),
         ("Gossip", Vec::new()),
         ("Other", Vec::new()),
     ];
@@ -726,8 +835,9 @@ pub fn render_html_snapshot(
         let bucket = match categorize_metric(metric) {
             MetricCategory::Dex => 0,
             MetricCategory::Compute => 1,
-            MetricCategory::Gossip => 2,
-            MetricCategory::Other => 3,
+            MetricCategory::Treasury => 2,
+            MetricCategory::Gossip => 3,
+            MetricCategory::Other => 4,
         };
         sections[bucket].1.push(metric);
     }
@@ -830,6 +940,7 @@ fn format_float(value: f64) -> String {
 enum MetricCategory {
     Dex,
     Compute,
+    Treasury,
     Gossip,
     Other,
 }
@@ -841,6 +952,8 @@ fn categorize_metric(metric: &Metric) -> MetricCategory {
         MetricCategory::Dex
     } else if name.starts_with("compute_") || name.starts_with("scheduler_") {
         MetricCategory::Compute
+    } else if name.starts_with("treasury_") {
+        MetricCategory::Treasury
     } else if name.starts_with("gossip_") {
         MetricCategory::Gossip
     } else {
@@ -1026,6 +1139,77 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or_default();
         assert_eq!(legend_format, "{{prefix}} · {{code}}");
+    }
+
+    #[test]
+    fn treasury_metrics_render_in_dedicated_row() {
+        let metrics = vec![Metric {
+            name: TREASURY_COUNT_EXPR.into(),
+            description: "Treasury disbursements grouped by status".into(),
+            unit: String::new(),
+            deprecated: false,
+        }];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 2);
+
+        let row = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    Some(map)
+                }
+                _ => None,
+            })
+            .expect("treasury row present");
+        assert_eq!(row.get("title"), Some(&Value::from("Treasury")));
+
+        let panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == TREASURY_COUNT_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("treasury panel present");
+
+        let legend_enabled = panel
+            .get("options")
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("legend"),
+                _ => None,
+            })
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("showLegend"),
+                _ => None,
+            });
+        assert_eq!(legend_enabled, Some(&Value::from(true)));
+
+        let legend_format = panel
+            .get("targets")
+            .and_then(|value| match value {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("legendFormat"),
+                _ => None,
+            });
+        assert_eq!(legend_format, Some(&Value::from("{{status}}")));
     }
 
     #[test]

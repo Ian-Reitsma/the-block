@@ -18,9 +18,12 @@ storage_engine = { path = "../crates/storage_engine" }
 foundation_time = { path = "../crates/foundation_time" }
 sys = { path = "../crates/sys" }
 tls_warning = { path = "../crates/tls_warning" }
+governance = { path = "../governance" }
+serde = { workspace = true }
 
 [dev-dependencies]
 rand = { path = "../crates/rand" }
+the_block = { path = "../node" }
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

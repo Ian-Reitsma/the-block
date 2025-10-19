@@ -130,14 +130,18 @@ scheduling windows without relying on the removed dependency metadata.
 Operators can stage
 rollouts by configuring these windows and the global timelock.
 Additionally, a governance treasury collects a configurable percentage of block
-subsidies in a `TreasuryState`, providing funds for future initiatives.
+subsidies in a `TreasuryState`, providing funds for future initiatives. The
+`treasury.percent_ct` runtime parameter controls how much of each block’s CT
+coinbase is diverted from the miner into the treasury before the reward is paid.
 
 ### Treasury Disbursements
 
-Treasury requests are now persisted in
-`governance/treasury_disbursements.json`, with the CLI and explorer consuming
-the same backing store. Operators can manage queued payouts with the new
-first-party commands:
+Treasury requests are now persisted in both a sled tree (`treasury/disbursements`)
+and the legacy JSON file `governance/treasury_disbursements.json`. Balance
+snapshots live alongside them in `treasury/balance_history` and
+`governance/treasury_balance.json`, ensuring explorer/CLI callers can source
+identical history whether they speak directly to sled or consume JSON. Operators
+can manage queued payouts with the first-party commands:
 
 ```bash
 contract gov treasury schedule tb1q... 500000 --memo "grants" --epoch 2048
@@ -151,7 +155,35 @@ amount, memo, scheduled epoch, and status (`Scheduled`, `Executed`, or
 `Cancelled`). Explorer timelines and dashboards should read the same JSON file
 to render pending payouts and historical execution trails. Execution helpers
 record the supplied transaction hash and timestamps so auditors can reconcile
-on-chain movements with governance approval.
+on-chain movements with governance approval. Every queue/execute/cancel event
+also appends a balance snapshot noting the delta, resulting balance, and any
+associated disbursement ID, keeping historical accruals in lockstep with the
+legacy JSON snapshots.
+
+#### RPC surfaces and CLI fetch workflow
+
+The node exposes the treasury state over first-party JSON-RPC endpoints:
+
+- `gov.treasury.disbursements` returns paginated disbursement records with
+  optional status filtering.
+- `gov.treasury.balance` reports the latest balance plus the most recent
+  snapshot.
+- `gov.treasury.balance_history` streams historical balance snapshots with
+  cursor-based pagination.
+
+These methods back the `contract gov treasury fetch` command, which merges the
+three responses into a single JSON document for downstream automation. The CLI
+now wraps transport failures with actionable stderr hints (e.g. connection
+refused, timeout, malformed endpoint) so operators can diagnose connectivity
+issues without diving into logs.
+
+Integration coverage exercises the HTTP dispatcher end-to-end, verifying that
+`run_rpc_server` honours pagination, balance snapshots, and the cached
+`GovStore`. The metrics aggregator consumes the same sled or JSON payloads; it
+falls back to legacy balance schemas that represented numbers as strings and
+emits warnings whenever disbursement history exists without accompanying
+balance snapshots, helping operators spot persistence regressions before they
+affect dashboards.
 
 ## Proposing an Upgrade
 
@@ -171,6 +203,7 @@ Governance can adjust several runtime knobs without code changes:
 | `fairshare.global_max` | caps aggregate industrial usage as parts-per-million of capacity | `industrial_rejected_total{reason="fairshare"}` |
 | `burst.refill_rate_per_s` | rate at which burst buckets replenish | `industrial_rejected_total{reason="burst"}` |
 | `inflation.beta_storage_sub_ct` | µCT per byte of storage subsidy | `subsidy_bytes_total{type="storage"}` |
+| `treasury.percent_ct` | percentage of each CT coinbase routed into the treasury prior to miner payout | `gov_treasury_balance`, Grafana treasury disbursement row |
 | `kill_switch_subsidy_reduction` | emergency % cut across all subsidies (12 h timelock) | `subsidy_multiplier{type}` |
 | `mempool.fee_floor_window` | number of recent fees sampled when computing the floor | `fee_floor_window_changed_total`, `fee_floor_current` |
 | `mempool.fee_floor_percentile` | percentile used for the dynamic fee floor | `fee_floor_window_changed_total`, `fee_floor_current` |

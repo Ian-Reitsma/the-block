@@ -252,6 +252,8 @@ pub struct Params {
     pub gamma_read_sub_ct: i64,
     pub kappa_cpu_sub_ct: i64,
     pub lambda_bytes_out_sub_ct: i64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub treasury_percent_ct: i64,
     #[serde(default = "default_proof_rebate_limit_ct")]
     pub proof_rebate_limit_ct: i64,
     pub rent_rate_ct_per_byte: i64,
@@ -299,6 +301,7 @@ impl Default for Params {
             gamma_read_sub_ct: 20,
             kappa_cpu_sub_ct: 10,
             lambda_bytes_out_sub_ct: 5,
+            treasury_percent_ct: 0,
             proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
             kill_switch_subsidy_reduction: 0,
@@ -327,6 +330,215 @@ impl Default for Params {
             transport_provider_policy: default_transport_provider_policy(),
             storage_engine_policy: default_storage_engine_policy(),
         }
+    }
+}
+
+impl Params {
+    pub fn to_value(&self) -> sled::Result<foundation_serialization::json::Value> {
+        use foundation_serialization::json::Value;
+        let mut map = foundation_serialization::json::Map::new();
+        map.insert(
+            "snapshot_interval_secs".into(),
+            Value::Number(self.snapshot_interval_secs.into()),
+        );
+        map.insert(
+            "consumer_fee_comfort_p90_microunits".into(),
+            Value::Number(self.consumer_fee_comfort_p90_microunits.into()),
+        );
+        map.insert(
+            "fee_floor_window".into(),
+            Value::Number(self.fee_floor_window.into()),
+        );
+        map.insert(
+            "fee_floor_percentile".into(),
+            Value::Number(self.fee_floor_percentile.into()),
+        );
+        map.insert(
+            "industrial_admission_min_capacity".into(),
+            Value::Number(self.industrial_admission_min_capacity.into()),
+        );
+        map.insert(
+            "fairshare_global_max_ppm".into(),
+            Value::Number(self.fairshare_global_max_ppm.into()),
+        );
+        map.insert(
+            "burst_refill_rate_per_s_ppm".into(),
+            Value::Number(self.burst_refill_rate_per_s_ppm.into()),
+        );
+        map.insert(
+            "beta_storage_sub_ct".into(),
+            Value::Number(self.beta_storage_sub_ct.into()),
+        );
+        map.insert(
+            "gamma_read_sub_ct".into(),
+            Value::Number(self.gamma_read_sub_ct.into()),
+        );
+        map.insert(
+            "kappa_cpu_sub_ct".into(),
+            Value::Number(self.kappa_cpu_sub_ct.into()),
+        );
+        map.insert(
+            "lambda_bytes_out_sub_ct".into(),
+            Value::Number(self.lambda_bytes_out_sub_ct.into()),
+        );
+        map.insert(
+            "treasury_percent_ct".into(),
+            Value::Number(self.treasury_percent_ct.into()),
+        );
+        map.insert(
+            "proof_rebate_limit_ct".into(),
+            Value::Number(self.proof_rebate_limit_ct.into()),
+        );
+        map.insert(
+            "rent_rate_ct_per_byte".into(),
+            Value::Number(self.rent_rate_ct_per_byte.into()),
+        );
+        map.insert(
+            "kill_switch_subsidy_reduction".into(),
+            Value::Number(self.kill_switch_subsidy_reduction.into()),
+        );
+        map.insert(
+            "miner_reward_logistic_target".into(),
+            Value::Number(self.miner_reward_logistic_target.into()),
+        );
+        map.insert(
+            "logistic_slope_milli".into(),
+            Value::Number(self.logistic_slope_milli.into()),
+        );
+        map.insert(
+            "miner_hysteresis".into(),
+            Value::Number(self.miner_hysteresis.into()),
+        );
+        map.insert("risk_lambda".into(), Value::Number(self.risk_lambda.into()));
+        map.insert("entropy_phi".into(), Value::Number(self.entropy_phi.into()));
+        map.insert("haar_eta".into(), Value::Number(self.haar_eta.into()));
+        map.insert(
+            "util_var_threshold".into(),
+            Value::Number(self.util_var_threshold.into()),
+        );
+        map.insert(
+            "fib_window_base_secs".into(),
+            Value::Number(self.fib_window_base_secs.into()),
+        );
+        map.insert(
+            "heuristic_mu_milli".into(),
+            Value::Number(self.heuristic_mu_milli.into()),
+        );
+        map.insert(
+            "industrial_multiplier".into(),
+            Value::Number(self.industrial_multiplier.into()),
+        );
+        map.insert(
+            "badge_expiry_secs".into(),
+            Value::Number(self.badge_expiry_secs.into()),
+        );
+        map.insert(
+            "badge_issue_uptime_percent".into(),
+            Value::Number(self.badge_issue_uptime_percent.into()),
+        );
+        map.insert(
+            "badge_revoke_uptime_percent".into(),
+            Value::Number(self.badge_revoke_uptime_percent.into()),
+        );
+        map.insert(
+            "jurisdiction_region".into(),
+            Value::Number(self.jurisdiction_region.into()),
+        );
+        map.insert(
+            "ai_diagnostics_enabled".into(),
+            Value::Number(self.ai_diagnostics_enabled.into()),
+        );
+        map.insert(
+            "kalman_r_short".into(),
+            Value::Number(self.kalman_r_short.into()),
+        );
+        map.insert(
+            "kalman_r_med".into(),
+            Value::Number(self.kalman_r_med.into()),
+        );
+        map.insert(
+            "kalman_r_long".into(),
+            Value::Number(self.kalman_r_long.into()),
+        );
+        map.insert(
+            "scheduler_weight_gossip".into(),
+            Value::Number(self.scheduler_weight_gossip.into()),
+        );
+        map.insert(
+            "scheduler_weight_compute".into(),
+            Value::Number(self.scheduler_weight_compute.into()),
+        );
+        map.insert(
+            "scheduler_weight_storage".into(),
+            Value::Number(self.scheduler_weight_storage.into()),
+        );
+        map.insert(
+            "runtime_backend_policy".into(),
+            Value::Number(self.runtime_backend_policy.into()),
+        );
+        map.insert(
+            "transport_provider_policy".into(),
+            Value::Number(self.transport_provider_policy.into()),
+        );
+        map.insert(
+            "storage_engine_policy".into(),
+            Value::Number(self.storage_engine_policy.into()),
+        );
+        Ok(Value::Object(map))
+    }
+
+    pub fn deserialize(value: &foundation_serialization::json::Value) -> sled::Result<Self> {
+        use foundation_serialization::json::Value;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| sled::Error::Unsupported("params JSON: expected object".into()))?;
+        let take_i64 = |key: &str| -> sled::Result<i64> {
+            obj.get(key).and_then(Value::as_i64).ok_or_else(|| {
+                sled::Error::Unsupported(format!("params JSON: missing {key}").into())
+            })
+        };
+        let params = Self {
+            snapshot_interval_secs: take_i64("snapshot_interval_secs")?,
+            consumer_fee_comfort_p90_microunits: take_i64("consumer_fee_comfort_p90_microunits")?,
+            fee_floor_window: take_i64("fee_floor_window")?,
+            fee_floor_percentile: take_i64("fee_floor_percentile")?,
+            industrial_admission_min_capacity: take_i64("industrial_admission_min_capacity")?,
+            fairshare_global_max_ppm: take_i64("fairshare_global_max_ppm")?,
+            burst_refill_rate_per_s_ppm: take_i64("burst_refill_rate_per_s_ppm")?,
+            beta_storage_sub_ct: take_i64("beta_storage_sub_ct")?,
+            gamma_read_sub_ct: take_i64("gamma_read_sub_ct")?,
+            kappa_cpu_sub_ct: take_i64("kappa_cpu_sub_ct")?,
+            lambda_bytes_out_sub_ct: take_i64("lambda_bytes_out_sub_ct")?,
+            treasury_percent_ct: take_i64("treasury_percent_ct")?,
+            proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
+            rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
+            kill_switch_subsidy_reduction: take_i64("kill_switch_subsidy_reduction")?,
+            miner_reward_logistic_target: take_i64("miner_reward_logistic_target")?,
+            logistic_slope_milli: take_i64("logistic_slope_milli")?,
+            miner_hysteresis: take_i64("miner_hysteresis")?,
+            risk_lambda: take_i64("risk_lambda")?,
+            entropy_phi: take_i64("entropy_phi")?,
+            haar_eta: take_i64("haar_eta")?,
+            util_var_threshold: take_i64("util_var_threshold")?,
+            fib_window_base_secs: take_i64("fib_window_base_secs")?,
+            heuristic_mu_milli: take_i64("heuristic_mu_milli")?,
+            industrial_multiplier: take_i64("industrial_multiplier")?,
+            badge_expiry_secs: take_i64("badge_expiry_secs")?,
+            badge_issue_uptime_percent: take_i64("badge_issue_uptime_percent")?,
+            badge_revoke_uptime_percent: take_i64("badge_revoke_uptime_percent")?,
+            jurisdiction_region: take_i64("jurisdiction_region")?,
+            ai_diagnostics_enabled: take_i64("ai_diagnostics_enabled")?,
+            kalman_r_short: take_i64("kalman_r_short")?,
+            kalman_r_med: take_i64("kalman_r_med")?,
+            kalman_r_long: take_i64("kalman_r_long")?,
+            scheduler_weight_gossip: take_i64("scheduler_weight_gossip")?,
+            scheduler_weight_compute: take_i64("scheduler_weight_compute")?,
+            scheduler_weight_storage: take_i64("scheduler_weight_storage")?,
+            runtime_backend_policy: take_i64("runtime_backend_policy")?,
+            transport_provider_policy: take_i64("transport_provider_policy")?,
+            storage_engine_policy: take_i64("storage_engine_policy")?,
+        };
+        Ok(params)
     }
 }
 
@@ -461,6 +673,14 @@ fn apply_lambda_bytes_out_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_treasury_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.treasury_percent_ct = v;
+    Ok(())
+}
+
 fn apply_proof_rebate_limit(v: i64, p: &mut Params) -> Result<(), ()> {
     if v < 0 {
         return Err(());
@@ -539,7 +759,7 @@ fn apply_storage_engine_policy(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 32] = [
+    static REGS: [ParamSpec; 33] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -679,6 +899,16 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "nCT per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_lambda_bytes_out_sub,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::TreasuryPercentCt,
+            default: 0,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_treasury_percent,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {

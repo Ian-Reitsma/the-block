@@ -392,6 +392,40 @@
     },
     {
       "deprecated": false,
+      "description": "Treasury disbursements grouped by status",
+      "labels": [
+        "status"
+      ],
+      "name": "treasury_disbursement_count"
+    },
+    {
+      "deprecated": false,
+      "description": "Aggregated CT amount for treasury disbursements by status",
+      "labels": [
+        "status"
+      ],
+      "name": "treasury_disbursement_amount_ct"
+    },
+    {
+      "deprecated": false,
+      "description": "Seconds since the most recent treasury disbursement snapshot",
+      "labels": [],
+      "name": "treasury_disbursement_snapshot_age_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Age of the oldest scheduled treasury disbursement in seconds",
+      "labels": [],
+      "name": "treasury_disbursement_scheduled_oldest_age_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Next scheduled treasury disbursement epoch (0 when none queued)",
+      "labels": [],
+      "name": "treasury_disbursement_next_epoch"
+    },
+    {
+      "deprecated": false,
       "description": "Governance quorum",
       "labels": [],
       "name": "gov_quorum_required"

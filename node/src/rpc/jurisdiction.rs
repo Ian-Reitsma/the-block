@@ -79,7 +79,7 @@ pub fn policy_diff(
     }?
     .resolve();
     let diff = jurisdiction::PolicyPack::diff(&current, &new_pack);
-    Ok(foundation_serialization::json::from_any(diff))
+    Ok(diff.to_json_value())
 }
 
 #[cfg(test)]
