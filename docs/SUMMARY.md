@@ -1,4 +1,26 @@
 # Summary
+> **Review (2025-10-20, morning):** Ledger persistence, mempool rebuild, and
+> legacy decode paths now run purely on the `ledger_binary` cursor helpers.
+> `MempoolEntryDisk` stores a cached `serialized_size`, startup rebuild consumes
+> it before re-encoding, and new tests cover the block/account/emission decoders
+> plus the five-field mempool layout so FIRST_PARTY_ONLY runs stay green without
+> `binary_codec` fallbacks.
+> **Review (2025-10-19, midday):** The node RPC client now builds JSON-RPC
+> envelopes through manual `json::Value` maps and parses acknowledgements
+> without relying on `foundation_serde` derives. `mempool.stats`,
+> `mempool.qos_event`, `stake.role`, and `inflation.params` requests reuse the
+> shared builder helpers, so FIRST_PARTY_ONLY builds no longer trigger stub
+> panics when issuing or decoding client calls.
+> **Review (2025-10-19, early morning):** Gossip and ledger surfaces now emit
+> binary payloads exclusively through the in-house cursor helpers. The new
+> `net::message` encoder signs/serializes every payload variant (handshake, peer
+> rotation, transactions, blob chunks, block/chain broadcasts, reputation
+> updates) with comprehensive tests, while `transaction::binary` and
+> `block_binary` replace legacy serde/bincode shims for raw payloads, signed
+> transactions, blob transactions, and blocks. Cursor-backed regression tests
+> cover quantum and non-quantum builds, and DEX/storage manifest fixtures now
+> inspect cursor output directly instead of depending on `binary_codec`, keeping
+> sled snapshots firmly first party.
 > **Review (2025-10-16, evening++)**: `foundation_serialization` now passes its
 > full stub-backed test suite. The refreshed `json!` macro handles nested
 > literals and identifier keys, binary/TOML fixtures ship handwritten

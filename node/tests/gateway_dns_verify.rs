@@ -41,7 +41,10 @@ fn setup(domain: &str) -> (sys::tempfile::TempDir, String, SigningKey) {
 fn block_tld_trusted() {
     let (_dir, _pk_hex, _sk) = setup("good.block");
     let mut domain = Map::new();
-    domain.insert("domain".to_string(), Value::String("good.block".to_string()));
+    domain.insert(
+        "domain".to_string(),
+        Value::String("good.block".to_string()),
+    );
     let lookup_req = Value::Object(domain.clone());
     let l = dns_lookup(&lookup_req);
     assert!(l["verified"].as_bool().unwrap());
@@ -56,7 +59,10 @@ fn external_domain_verified() {
     let pk_clone = pk_hex.clone();
     set_txt_resolver(move |_| vec![pk_clone.clone()]);
     let mut domain = Map::new();
-    domain.insert("domain".to_string(), Value::String("example.com".to_string()));
+    domain.insert(
+        "domain".to_string(),
+        Value::String("example.com".to_string()),
+    );
     let lookup_req = Value::Object(domain.clone());
     let l = dns_lookup(&lookup_req);
     assert!(l["verified"].as_bool().unwrap());

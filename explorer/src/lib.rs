@@ -1782,12 +1782,8 @@ impl Explorer {
                     Some(reason.as_str()),
                 ),
             };
-            let tx_hash_value = tx_hash
-                .map(SqlValue::from)
-                .unwrap_or(SqlValue::Null);
-            let cancel_reason_value = cancel_reason
-                .map(SqlValue::from)
-                .unwrap_or(SqlValue::Null);
+            let tx_hash_value = tx_hash.map(SqlValue::from).unwrap_or(SqlValue::Null);
+            let cancel_reason_value = cancel_reason.map(SqlValue::from).unwrap_or(SqlValue::Null);
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![

@@ -231,16 +231,14 @@ pub struct ProviderProfile {
     pub maintenance: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug)]
 pub struct ProviderProfileSnapshot {
     pub provider: String,
     pub profile: ProviderProfile,
     pub quota_bytes: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PipelineEngineSummary {
     pub pipeline: String,
     pub rent_escrow: String,

@@ -1,6 +1,8 @@
-use the_block::governance::{DisbursementStatus, GovStore, TreasuryBalanceEventKind, NODE_GOV_STORE};
-use the_block::Blockchain;
 use sys::tempfile::tempdir;
+use the_block::governance::{
+    DisbursementStatus, GovStore, TreasuryBalanceEventKind, NODE_GOV_STORE,
+};
+use the_block::Blockchain;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

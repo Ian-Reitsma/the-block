@@ -19,8 +19,33 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-20)
+
+- Ledger persistence and RPC startup checks now stay entirely on the cursor
+  helpers: `MempoolEntryDisk` stores a cached `serialized_size`, the mempool
+  rebuild reads that byte length before re-encoding, and new `ledger_binary`
+  unit tests cover the legacy decode helpers (`decode_block_vec`,
+  `decode_account_map_bytes`, `decode_emission_tuple`, and the older
+  five-field mempool entry layout). This keeps RPC snapshot consumers and
+  ledger exporters on the first-party stack without invoking `binary_codec`.
+
+## Recent progress (2025-10-19)
+
+- Provider-profile RPC/storage tests now compute their reference payloads with
+  the first-party cursor helper instead of `binary_codec::serialize`, keeping
+  the binary regression suite green under `FIRST_PARTY_ONLY`.
+- Gossip peer telemetry tests and the aggregator failover harness reuse the
+  shared `peer_snapshot_to_value` builder, so JSON assertions no longer trigger
+  serde-derived fallbacks during unit or integration runs.
+
 ## Recent progress (2025-10-18)
 
+- The node RPC client now constructs envelopes through manual JSON maps and
+  decodes responses by inspecting `foundation_serialization::json::Value`
+  payloads. This removed the last `foundation_serde` derive invocations from
+  client-side calls (`mempool.stats`, `mempool.qos_event`, `stake.role`,
+  `inflation.params`) so `FIRST_PARTY_ONLY` builds no longer trigger stub
+  panics when issuing RPC requests or parsing acknowledgements.
 - Treasury RPC handlers expose typed `gov.treasury.disbursements`,
   `gov.treasury.balance`, and `gov.treasury.balance_history` endpoints using the
   shared request/response structs, and the new `node/tests/rpc_treasury.rs`

@@ -502,24 +502,104 @@ fn read_fixed_u8_array(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::binary_codec;
+    use foundation_serialization::binary_cursor::Reader as BinaryReader;
     use std::ops::RangeInclusive;
     use testkit::{prop::Rng, tb_prop_test};
 
     #[test]
-    fn manifest_binary_matches_legacy() {
+    fn manifest_binary_encodes_expected_structure() {
         let manifest = sample_manifest();
         let encoded = encode_manifest(&manifest).expect("encode");
-        let legacy = binary_codec::serialize(&manifest).expect("legacy encode");
-        assert_eq!(encoded, legacy);
+        let mut reader = BinaryReader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 15);
+        assert_eq!(reader.read_string().expect("version key"), "version");
+        assert_eq!(reader.read_u16().expect("version"), manifest.version);
+        assert_eq!(reader.read_string().expect("total_len key"), "total_len");
+        assert_eq!(reader.read_u64().expect("total_len"), manifest.total_len);
+        assert_eq!(reader.read_string().expect("chunk_len key"), "chunk_len");
+        assert_eq!(reader.read_u32().expect("chunk_len"), manifest.chunk_len);
+        assert_eq!(reader.read_string().expect("chunks key"), "chunks");
+        let chunk_count = reader.read_u64().expect("chunk len");
+        assert_eq!(chunk_count, manifest.chunks.len() as u64);
+        for chunk in &manifest.chunks {
+            assert_eq!(reader.read_u64().expect("chunk field count"), 3);
+            assert_eq!(reader.read_string().expect("chunk id key"), "id");
+            let id_len = reader.read_u64().expect("chunk id len");
+            assert_eq!(id_len, 32);
+            let id_bytes = reader.read_exact(32).expect("chunk id bytes");
+            assert_eq!(id_bytes, chunk.id.as_slice());
+            assert_eq!(reader.read_string().expect("nodes key"), "nodes");
+            let node_count = reader.read_u64().expect("nodes len");
+            assert_eq!(node_count, chunk.nodes.len() as u64);
+            for node in &chunk.nodes {
+                assert_eq!(reader.read_string().expect("node"), node.as_str());
+            }
+            assert_eq!(
+                reader.read_string().expect("provider_chunks key"),
+                "provider_chunks"
+            );
+            let provider_count = reader.read_u64().expect("provider len");
+            assert_eq!(provider_count, chunk.provider_chunks.len() as u64);
+            for provider in &chunk.provider_chunks {
+                assert_eq!(reader.read_u64().expect("provider field count"), 4);
+                assert_eq!(reader.read_string().expect("provider key"), "provider");
+                assert_eq!(reader.read_string().expect("provider"), provider.provider);
+                assert_eq!(
+                    reader.read_string().expect("chunk_indices key"),
+                    "chunk_indices"
+                );
+                let indices_len = reader.read_u64().expect("indices len");
+                assert_eq!(indices_len, provider.chunk_indices.len() as u64);
+                for idx in &provider.chunk_indices {
+                    assert_eq!(reader.read_u32().expect("index"), *idx);
+                }
+                assert_eq!(reader.read_string().expect("chunk_lens key"), "chunk_lens");
+                let lens_len = reader.read_u64().expect("lens len");
+                assert_eq!(lens_len, provider.chunk_lens.len() as u64);
+                for lens in &provider.chunk_lens {
+                    assert_eq!(reader.read_u32().expect("lens"), *lens);
+                }
+                assert_eq!(
+                    reader.read_string().expect("encryption_key key"),
+                    "encryption_key"
+                );
+                let key_len = reader.read_u64().expect("key len");
+                assert_eq!(key_len, provider.encryption_key.len() as u64);
+                let key_bytes = reader.read_exact(key_len as usize).expect("key bytes");
+                assert_eq!(key_bytes, provider.encryption_key.as_slice());
+            }
+        }
+        assert_eq!(reader.read_string().expect("redundancy key"), "redundancy");
+        let redundancy_variant = reader.read_u32().expect("redundancy variant");
+        match manifest.redundancy {
+            Redundancy::None => assert_eq!(redundancy_variant, 0),
+            Redundancy::ReedSolomon { data, parity } => {
+                assert_eq!(redundancy_variant, 1);
+                assert_eq!(reader.read_u64().expect("redundancy field count"), 2);
+                assert_eq!(reader.read_string().expect("data key"), "data");
+                assert_eq!(reader.read_u8().expect("data"), data);
+                assert_eq!(reader.read_string().expect("parity key"), "parity");
+                assert_eq!(reader.read_u8().expect("parity"), parity);
+            }
+        }
+        assert_eq!(
+            reader.read_string().expect("content_key_enc key"),
+            "content_key_enc"
+        );
+        let content_len = reader.read_u64().expect("content len");
+        assert_eq!(content_len, manifest.content_key_enc.len() as u64);
+        let content_bytes = reader
+            .read_exact(content_len as usize)
+            .expect("content bytes");
+        assert_eq!(content_bytes, manifest.content_key_enc.as_slice());
+        assert_eq!(reader.read_string().expect("blake3 key"), "blake3");
+        let blake_len = reader.read_u64().expect("blake len");
+        assert_eq!(blake_len, 32);
+        let blake_bytes = reader.read_exact(32).expect("blake bytes");
+        assert_eq!(blake_bytes, manifest.blake3.as_slice());
 
         let decoded = decode_manifest(&encoded).expect("decode");
-        assert_eq!(decoded.version, manifest.version);
-        assert_eq!(decoded.total_len, manifest.total_len);
-        assert_eq!(decoded.chunk_len, manifest.chunk_len);
-        assert_eq!(decoded.chunks.len(), manifest.chunks.len());
-        assert_eq!(decoded.content_key_enc, manifest.content_key_enc);
-        assert_eq!(decoded.blake3, manifest.blake3);
+        assert_manifest_eq(&decoded, &manifest);
     }
 
     #[test]
@@ -566,17 +646,13 @@ mod tests {
     fn manifest_binary_round_trips_complex_cases() {
         for manifest in complex_manifest_cases() {
             let encoded = encode_manifest(&manifest).expect("encode");
-            let legacy = binary_codec::serialize(&manifest).expect("legacy encode");
-            assert_eq!(encoded, legacy);
-
             let decoded = decode_manifest(&encoded).expect("decode");
-            let reencoded = binary_codec::serialize(&decoded).expect("legacy reencode");
-            assert_eq!(reencoded, legacy);
+            assert_manifest_eq(&decoded, &manifest);
         }
     }
 
     #[test]
-    fn receipt_binary_matches_legacy() {
+    fn receipt_binary_encodes_expected_structure() {
         let receipt = StoreReceipt {
             manifest_hash: [5u8; 32],
             chunk_count: 3,
@@ -584,20 +660,33 @@ mod tests {
             lane: "lane-a".to_string(),
         };
         let encoded = encode_store_receipt(&receipt).expect("encode");
-        let legacy = binary_codec::serialize(&receipt).expect("legacy encode");
-        assert_eq!(encoded, legacy);
+        let mut reader = BinaryReader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 4);
+        assert_eq!(
+            reader.read_string().expect("manifest_hash key"),
+            "manifest_hash"
+        );
+        let len = reader.read_u64().expect("manifest hash len");
+        assert_eq!(len, 32);
+        let bytes = reader.read_exact(32).expect("manifest hash");
+        assert_eq!(bytes, receipt.manifest_hash);
+        assert_eq!(
+            reader.read_string().expect("chunk_count key"),
+            "chunk_count"
+        );
+        assert_eq!(reader.read_u32().expect("chunk_count"), receipt.chunk_count);
+        assert_eq!(reader.read_string().expect("redundancy key"), "redundancy");
+        assert_eq!(reader.read_u32().expect("redundancy variant"), 1);
+        assert_eq!(reader.read_u64().expect("redundancy fields"), 2);
+        assert_eq!(reader.read_string().expect("data key"), "data");
+        assert_eq!(reader.read_u8().expect("data"), 4);
+        assert_eq!(reader.read_string().expect("parity key"), "parity");
+        assert_eq!(reader.read_u8().expect("parity"), 2);
+        assert_eq!(reader.read_string().expect("lane key"), "lane");
+        assert_eq!(reader.read_string().expect("lane"), receipt.lane);
 
         let decoded = decode_store_receipt(&encoded).expect("decode");
-        assert_eq!(decoded.manifest_hash, receipt.manifest_hash);
-        assert_eq!(decoded.chunk_count, receipt.chunk_count);
-        match decoded.redundancy {
-            Redundancy::ReedSolomon { data, parity } => {
-                assert_eq!(data, 4);
-                assert_eq!(parity, 2);
-            }
-            _ => panic!("unexpected redundancy"),
-        }
-        assert_eq!(decoded.lane, receipt.lane);
+        assert_receipt_eq(&decoded, &receipt);
     }
 
     tb_prop_test!(manifest_binary_roundtrip_randomized, |runner| {
@@ -605,9 +694,6 @@ mod tests {
             .add_random_case("manifest roundtrip", 64, |rng| {
                 let manifest = random_manifest(rng);
                 let encoded = encode_manifest(&manifest).expect("encode");
-                let legacy = binary_codec::serialize(&manifest).expect("legacy encode");
-                assert_eq!(encoded, legacy);
-
                 let decoded = decode_manifest(&encoded).expect("decode");
                 assert_manifest_eq(&decoded, &manifest);
             })
@@ -617,9 +703,6 @@ mod tests {
             .add_random_case("receipt roundtrip", 64, |rng| {
                 let receipt = random_receipt(rng);
                 let encoded = encode_store_receipt(&receipt).expect("encode");
-                let legacy = binary_codec::serialize(&receipt).expect("legacy encode");
-                assert_eq!(encoded, legacy);
-
                 let decoded = decode_store_receipt(&encoded).expect("decode");
                 assert_receipt_eq(&decoded, &receipt);
             })

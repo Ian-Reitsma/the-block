@@ -124,7 +124,6 @@ fn read_record(reader: &mut Reader<'_>) -> binary_struct::Result<HandleRecord> {
 mod tests {
     use super::*;
     use crate::identity::handle_registry::HandleRecord;
-    use crate::util::binary_codec;
     use rand::{rngs::StdRng, RngCore};
 
     fn sample_record() -> HandleRecord {
@@ -158,9 +157,38 @@ mod tests {
     #[test]
     fn record_compatibility_with_legacy() {
         let record = sample_record();
-        let legacy = binary_codec::serialize(&record).expect("legacy encode");
-        let manual = encode_record(&record);
-        assert_eq!(legacy, manual);
+        let encoded = encode_record(&record);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), FIELD_COUNT);
+        assert_eq!(reader.read_string().expect("address key"), "address");
+        assert_eq!(reader.read_string().expect("address"), record.address);
+        assert_eq!(reader.read_string().expect("created key"), "created_at");
+        assert_eq!(reader.read_u64().expect("created_at"), record.created_at);
+        assert_eq!(reader.read_string().expect("attest key"), "attest_sig");
+        assert_eq!(
+            reader.read_u64().expect("attest len"),
+            record.attest_sig.len() as u64
+        );
+        for byte in &record.attest_sig {
+            assert_eq!(reader.read_u8().expect("attest byte"), *byte);
+        }
+        assert_eq!(reader.read_string().expect("nonce key"), "nonce");
+        assert_eq!(reader.read_u64().expect("nonce"), record.nonce);
+        assert_eq!(reader.read_string().expect("version key"), "version");
+        assert_eq!(reader.read_u16().expect("version"), record.version);
+        #[cfg(feature = "pq-crypto")]
+        {
+            assert_eq!(reader.read_string().expect("pq key"), "pq_pubkey");
+            if let Some(pk) = record.pq_pubkey.as_ref() {
+                assert!(reader.read_bool().expect("pq present"));
+                assert_eq!(reader.read_u64().expect("pq len"), pk.len() as u64);
+                for byte in pk {
+                    assert_eq!(reader.read_u8().expect("pq byte"), *byte);
+                }
+            } else {
+                assert!(!reader.read_bool().expect("pq absent"));
+            }
+        }
     }
 
     #[test]
@@ -174,9 +202,13 @@ mod tests {
     #[test]
     fn string_compatibility_with_legacy() {
         let value = "owner";
-        let legacy = binary_codec::serialize(&value.to_string()).expect("legacy encode");
-        let manual = encode_string(value);
-        assert_eq!(legacy, manual);
+        let encoded = encode_string(value);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("len"), value.len() as u64);
+        for byte in value.as_bytes() {
+            assert_eq!(reader.read_u8().expect("byte"), *byte);
+        }
+        assert_eq!(reader.remaining(), 0);
     }
 
     #[test]
@@ -190,9 +222,10 @@ mod tests {
     #[test]
     fn u64_compatibility_with_legacy() {
         let value = 99u64;
-        let legacy = binary_codec::serialize(&value).expect("legacy encode");
-        let manual = encode_u64(value);
-        assert_eq!(legacy, manual);
+        let encoded = encode_u64(value);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("value"), value);
+        assert_eq!(reader.remaining(), 0);
     }
 
     #[test]
@@ -221,9 +254,25 @@ mod tests {
     fn record_without_pq_key_matches_legacy() {
         let mut record = sample_record();
         record.pq_pubkey = None;
-        let legacy = binary_codec::serialize(&record).expect("legacy encode");
-        let manual = encode_record(&record);
-        assert_eq!(legacy, manual);
+        let encoded = encode_record(&record);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), FIELD_COUNT);
+        // Skip first five fields (address, created_at, attest_sig, nonce, version)
+        reader.read_string().expect("address key");
+        reader.read_string().expect("address");
+        reader.read_string().expect("created key");
+        reader.read_u64().expect("created_at");
+        reader.read_string().expect("attest key");
+        let len = reader.read_u64().expect("attest len");
+        for _ in 0..len {
+            reader.read_u8().expect("attest byte");
+        }
+        reader.read_string().expect("nonce key");
+        reader.read_u64().expect("nonce");
+        reader.read_string().expect("version key");
+        reader.read_u16().expect("version");
+        reader.read_string().expect("pq key");
+        assert!(!reader.read_bool().expect("pq absent"));
     }
 
     fn rng() -> StdRng {
@@ -295,20 +344,6 @@ mod tests {
             {
                 assert_eq!(record.pq_pubkey, decoded.pq_pubkey);
             }
-
-            let legacy = binary_codec::serialize(&record).expect("legacy encode");
-            assert_eq!(legacy, encoded);
-
-            let legacy_decoded = decode_record(&legacy).expect("legacy decode");
-            assert_eq!(record.address, legacy_decoded.address);
-            assert_eq!(record.created_at, legacy_decoded.created_at);
-            assert_eq!(record.attest_sig, legacy_decoded.attest_sig);
-            assert_eq!(record.nonce, legacy_decoded.nonce);
-            assert_eq!(record.version, legacy_decoded.version);
-            #[cfg(feature = "pq-crypto")]
-            {
-                assert_eq!(record.pq_pubkey, legacy_decoded.pq_pubkey);
-            }
         }
     }
 
@@ -320,15 +355,11 @@ mod tests {
             let encoded_string = encode_string(&string_value);
             let decoded_string = decode_string(&encoded_string).expect("decode");
             assert_eq!(string_value, decoded_string);
-            let legacy_string = binary_codec::serialize(&string_value).expect("legacy encode");
-            assert_eq!(legacy_string, encoded_string);
 
             let value = rng.next_u64();
             let encoded = encode_u64(value);
             let decoded = decode_u64(&encoded).expect("decode");
             assert_eq!(value, decoded);
-            let legacy = binary_codec::serialize(&value).expect("legacy encode");
-            assert_eq!(legacy, encoded);
         }
     }
 }

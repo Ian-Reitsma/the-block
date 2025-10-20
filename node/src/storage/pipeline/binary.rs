@@ -207,7 +207,6 @@ impl ProviderProfileBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::binary_codec;
     use testkit::{prop::Rng, tb_prop_test};
 
     const PROVIDER_PROFILE_CURSOR_FIXTURE: &[u8] = &[
@@ -331,7 +330,7 @@ mod tests {
         profile.maintenance = true;
 
         let encoded = encode_provider_profile(&profile).expect("encode");
-        let legacy = binary_codec::serialize(&profile).expect("legacy encode");
+        let legacy = legacy_profile_bytes(&profile);
         assert_eq!(encoded, legacy);
 
         let decoded = decode_provider_profile(&encoded).expect("decode");
@@ -377,7 +376,7 @@ mod tests {
             .add_random_case("profile roundtrip", 64, |rng| {
                 let profile = random_profile(rng);
                 let encoded = encode_provider_profile(&profile).expect("encode");
-                let legacy = binary_codec::serialize(&profile).expect("legacy encode");
+                let legacy = legacy_profile_bytes(&profile);
                 assert_eq!(encoded, legacy);
 
                 let decoded = decode_provider_profile(&encoded).expect("decode");
@@ -422,5 +421,37 @@ mod tests {
         let mut normalized = profile.clone();
         normalized.ensure_defaults();
         normalized
+    }
+
+    fn legacy_profile_bytes(profile: &ProviderProfile) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.write_u64(super::PROFILE_FIELD_COUNT as u64);
+        writer.write_string("bw_ewma");
+        writer.write_f64(profile.bw_ewma);
+        writer.write_string("rtt_ewma");
+        writer.write_f64(profile.rtt_ewma);
+        writer.write_string("loss_ewma");
+        writer.write_f64(profile.loss_ewma);
+        writer.write_string("preferred_chunk");
+        writer.write_u32(profile.preferred_chunk);
+        writer.write_string("stable_chunks");
+        writer.write_u32(profile.stable_chunks);
+        writer.write_string("updated_at");
+        writer.write_u64(profile.updated_at);
+        writer.write_string("success_rate_ewma");
+        writer.write_f64(profile.success_rate_ewma);
+        writer.write_string("recent_failures");
+        writer.write_u32(profile.recent_failures);
+        writer.write_string("total_chunks");
+        writer.write_u64(profile.total_chunks);
+        writer.write_string("total_failures");
+        writer.write_u64(profile.total_failures);
+        writer.write_string("last_upload_bytes");
+        writer.write_u64(profile.last_upload_bytes);
+        writer.write_string("last_upload_secs");
+        writer.write_f64(profile.last_upload_secs);
+        writer.write_string("maintenance");
+        writer.write_bool(profile.maintenance);
+        writer.finish()
     }
 }

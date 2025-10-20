@@ -5,12 +5,11 @@ use std::sync::Mutex;
 use concurrency::{Lazy, MutexExt};
 use crypto_suite::hashing::blake3::Hasher;
 
-use crate::net::message::BlobChunk;
+use crate::net::message::{encode_message, BlobChunk};
 use crate::net::peer::is_throttled_addr;
 use crate::net::peer::ReputationUpdate;
 use crate::net::{record_ip_drop, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
-use crate::util::binary_codec;
 use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 
@@ -65,7 +64,7 @@ pub fn broadcast_with<F>(
         Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
     const MAX_SEEN: usize = 1024;
     let hash = {
-        let encoded = binary_codec::serialize(msg).unwrap_or_default();
+        let encoded = encode_message(msg).unwrap_or_default();
         let mut h = Hasher::new();
         h.update(&encoded);
         *h.finalize().as_bytes()

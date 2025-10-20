@@ -1,4 +1,11 @@
 # Status & Roadmap
+> **Review (2025-10-20, morning):** Ledger and mempool persistence now rely on
+> the first-party cursor stack end to end. `MempoolEntryDisk` records
+> `serialized_size`, the startup rebuild path consumes that cache before
+> re-encoding, and new regression tests cover the legacy decode helpers so
+> archived snapshots load without `binary_codec`. This keeps RPC snapshot
+> exporters, CLI tooling, and FIRST_PARTY_ONLY builds on in-house serialization
+> without regressions.
 > **Review (2025-10-14, endgame++):** Net and gateway fuzz harnesses now reuse
 > the shared `foundation_fuzz` modules, removing `libfuzzer-sys`/`arbitrary`
 > while smoke tests exercise the entry points directly. `foundation_serde` and
@@ -186,6 +193,15 @@ same first-party APIs as the core node.
   `escrow_state_matches_legacy`, `pool_matches_legacy`) lock the legacy sled
   bytes. Follow-up: extend CLI/explorer integration tests to exercise the new
   codecs end to end and capture escrow snapshot fuzzers.
+- Gossip message envelopes, raw transactions, blob transactions, and full
+  blocks now serialize via dedicated cursor helpers
+  (`node/src/net/message.rs`, `node/src/transaction/binary.rs`,
+  `node/src/block_binary.rs`) with quantum/non-quantum parity fixtures and a
+  comprehensive payload test suite that exercises handshake, peer set, drop
+  map, blob chunk, block/chain broadcast, and reputation variants. DEX/storage
+  manifest regressions now inspect cursor output directly instead of
+  round-tripping through `binary_codec`, completing the removal of the shim
+  from networking and ledger persistence.
 - Identity DID and handle registries now persist through
   `identity::{did_binary,handle_binary}` with cursor helpers and compatibility
   suites covering remote attestations, pq-key toggles, and truncated payloads,
@@ -287,7 +303,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 | **Consensus & Core Execution** | 93.6 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, release rollback helpers, coinbase rebate integration, and the parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 87.5 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **93.8 %** | Receipt-only logging, hourly batching, L1 anchoring, `gateway.reads_since` analytics, crash-safe `SimpleDb` snapshot rewrites, a unified `storage_engine` crate that abstracts RocksDB/sled/memory providers, the shared `coding` crate with XOR parity and RLE compression fallbacks behind audited rollout policy plus telemetry/bench-harness validation, first-party sled codecs with randomized property suites and sparse-manifest repair integration coverage, and a ChaCha20-Poly1305–encrypted mobile cache with TTL min-heap sweeping, restart replay, entry/queue guardrails, CLI/RPC observability, and invalidation hooks keep reads free yet auditable and durable across restarts. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
-| **Networking & Gossip** | 98.3 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, LRU-backed deduplication with adaptive fanout, shard-affinity persistence, CLI/RPC metrics via `net.peer_stats`/`net gossip-status`, and a selectable `p2p_overlay` backend with libp2p/stub implementations plus telemetry gauges. Gateway REST, metrics-aggregator HTTP, explorer, and CLI tooling now run on the shared `httpd` router, eliminating the `hyper`/`axum` stack from production and test harnesses. Peer metrics sled snapshots persist through `peer_metrics_binary`, keeping persistence entirely on the first-party binary cursor while retaining compatibility coverage, gossip wire payloads now encode/decode via `node/src/p2p/wire_binary.rs` so serde is no longer required on the message enum, and runtime file watching now leans on the first-party `sys::inotify`/`sys::kqueue` wrappers instead of `nix`. | Large-scale WAN chaos tests outstanding; long-lived overlay soak tests and dependency registry crypto/coding wrappers still open. |
+| **Networking & Gossip** | 98.3 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, LRU-backed deduplication with adaptive fanout, shard-affinity persistence, CLI/RPC metrics via `net.peer_stats`/`net gossip-status`, and a selectable `p2p_overlay` backend with libp2p/stub implementations plus telemetry gauges. Gateway REST, metrics-aggregator HTTP, explorer, and CLI tooling now run on the shared `httpd` router, eliminating the `hyper`/`axum` stack from production and test harnesses. Peer metrics sled snapshots persist through `peer_metrics_binary`, keeping persistence entirely on the first-party binary cursor while retaining compatibility coverage; gossip wire payloads now encode/decode via `node/src/p2p/wire_binary.rs` and the new `net::message` helpers so serde/bincode are no longer required on message envelopes; and runtime file watching now leans on the first-party `sys::inotify`/`sys::kqueue` wrappers instead of `nix`. | Large-scale WAN chaos tests outstanding; long-lived overlay soak tests and dependency registry crypto/coding wrappers still open. |
 | **Compute Marketplace & CBM** | 95.8 % | Capability-aware scheduler weights offers by reputation, lane-aware matching enforces per-`FeeLane` batching with fairness windows and deadlines, starvation detection, staged seeding, batch throttling, and persisted lane-tagged receipts, settlement tracks CT balances with activation metadata, and telemetry/CLI/RPC surfaces expose queue depths, wait ages, latency histograms, and fee floors. | Finish wiring SLA telemetry into the foundation dashboard alerts and surface automated resolutions in explorer timelines. |
 | **Trust Lines & DEX** | 87.2 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). Persistence now runs on first-party codecs in `node/src/dex/{storage.rs,storage_binary.rs}`, removing the legacy `binary_codec` shim while regression suites lock legacy bytes and `EscrowSnapshot` documents sled tables. | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 81.9 % | Per-asset channel persistence via `SimpleDb`, multi-signature relayer quorums, challenge windows with slashing, partition-aware deposits, telemetry (`BRIDGE_CHALLENGES_TOTAL`, `BRIDGE_SLASHES_TOTAL`), and expanded CLI/RPC surfaces for pending withdrawals, relayer sets, and dispute logs. | Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain. |

@@ -1129,7 +1129,7 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(100) as usize;
             let stats = net::peer_stats_all(offset, limit);
-            foundation_serialization::json::to_value(stats).unwrap()
+            net::peer::peer_stats_to_json(&stats)
         }
         "net.peer_stats_reset" => {
             let id = req

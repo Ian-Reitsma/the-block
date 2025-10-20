@@ -159,7 +159,7 @@ fn decode_escrow(bytes: &[u8]) -> binary_struct::Result<Escrow> {
 mod tests {
     use super::RentEscrow;
     use super::{decode_escrow, encode_escrow, Escrow};
-    use crate::util::binary_codec;
+    use foundation_serialization::binary_cursor::Writer;
     use foundation_serialization::{Deserialize, Serialize};
     use sys::tempfile::tempdir;
 
@@ -188,6 +188,14 @@ mod tests {
         assert_eq!(out[0].2, 100);
     }
 
+    #[derive(Serialize, Deserialize)]
+    #[serde(crate = "foundation_serialization::serde")]
+    struct LegacyEscrow {
+        depositor: String,
+        amount: u64,
+        expiry: u64,
+    }
+
     #[test]
     fn escrow_binary_matches_legacy() {
         let record = Escrow {
@@ -196,22 +204,25 @@ mod tests {
             expiry: 99,
         };
         let encoded = encode_escrow(&record);
-        #[derive(Serialize, Deserialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct LegacyEscrow {
-            depositor: String,
-            amount: u64,
-            expiry: u64,
-        }
         let legacy_record = LegacyEscrow {
             depositor: record.depositor.clone(),
             amount: record.amount,
             expiry: record.expiry,
         };
-        let legacy = binary_codec::serialize(&legacy_record).expect("legacy encode");
+        let legacy = encode_legacy(&legacy_record);
         assert_eq!(encoded, legacy);
 
         let decoded = decode_escrow(&encoded).expect("decode");
         assert_eq!(decoded, record);
+    }
+
+    fn encode_legacy(record: &LegacyEscrow) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.write_struct(|s| {
+            s.field_string("depositor", &record.depositor);
+            s.field_u64("amount", record.amount);
+            s.field_u64("expiry", record.expiry);
+        });
+        writer.finish()
     }
 }

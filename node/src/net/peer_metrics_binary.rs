@@ -335,7 +335,7 @@ fn to_u64(len: usize, name: &'static str) -> EncodeResult<u64> {
 mod tests {
     use super::*;
     use crate::net::peer::{DropReason, HandshakeError, PeerMetrics};
-    use crate::util::binary_codec;
+    use foundation_serialization::binary_cursor::Reader as BinaryReader;
 
     fn sample_metrics() -> PeerMetrics {
         let mut metrics = PeerMetrics::default();
@@ -365,11 +365,110 @@ mod tests {
     }
 
     #[test]
-    fn encoding_matches_legacy_codec() {
+    fn encoding_matches_expected_layout() {
         let metrics = sample_metrics();
-        let legacy = binary_codec::serialize(&metrics).expect("legacy encode");
         let manual = encode(&metrics).expect("manual encode");
-        assert_eq!(legacy, manual);
+        let mut reader = BinaryReader::new(&manual);
+        assert_eq!(reader.read_u64().expect("field count"), 16);
+        assert_eq!(reader.read_string().expect("requests key"), "requests");
+        assert_eq!(reader.read_u64().expect("requests"), metrics.requests);
+        assert_eq!(reader.read_string().expect("bytes_sent key"), "bytes_sent");
+        assert_eq!(reader.read_u64().expect("bytes_sent"), metrics.bytes_sent);
+        assert_eq!(reader.read_string().expect("sends key"), "sends");
+        assert_eq!(reader.read_u64().expect("sends"), metrics.sends);
+        assert_eq!(reader.read_string().expect("drops key"), "drops");
+        let drop_len = reader.read_u64().expect("drops len");
+        assert_eq!(drop_len, metrics.drops.len() as u64);
+        let mut drop_entries: Vec<_> = metrics.drops.iter().collect();
+        drop_entries.sort_by_key(|(reason, _)| drop_reason_to_index(**reason));
+        for (reason, value) in drop_entries {
+            let idx = reader.read_u32().expect("drop index");
+            assert_eq!(idx, drop_reason_to_index(*reason));
+            assert_eq!(reader.read_u64().expect("drop value"), *value);
+        }
+        assert_eq!(
+            reader.read_string().expect("handshake_fail key"),
+            "handshake_fail"
+        );
+        let fail_len = reader.read_u64().expect("handshake len");
+        assert_eq!(fail_len, metrics.handshake_fail.len() as u64);
+        let mut handshake_entries: Vec<_> = metrics.handshake_fail.iter().collect();
+        handshake_entries.sort_by_key(|(error, _)| handshake_error_to_index(**error));
+        for (error, value) in handshake_entries {
+            let idx = reader.read_u32().expect("handshake index");
+            assert_eq!(idx, handshake_error_to_index(*error));
+            assert_eq!(reader.read_u64().expect("handshake value"), *value);
+        }
+        assert_eq!(
+            reader.read_string().expect("handshake_success key"),
+            "handshake_success"
+        );
+        assert_eq!(
+            reader.read_u64().expect("handshake_success"),
+            metrics.handshake_success
+        );
+        assert_eq!(
+            reader.read_string().expect("last_handshake_ms key"),
+            "last_handshake_ms"
+        );
+        assert_eq!(
+            reader.read_u64().expect("last_handshake_ms"),
+            metrics.last_handshake_ms
+        );
+        assert_eq!(reader.read_string().expect("tls_errors key"), "tls_errors");
+        assert_eq!(reader.read_u64().expect("tls_errors"), metrics.tls_errors);
+        assert_eq!(reader.read_string().expect("reputation key"), "reputation");
+        assert_eq!(reader.read_u64().expect("reputation fields"), 1);
+        assert_eq!(reader.read_string().expect("score key"), "score");
+        let score = reader.read_f64().expect("score");
+        assert!((score - metrics.reputation.score).abs() < f64::EPSILON);
+        assert_eq!(
+            reader.read_string().expect("last_updated key"),
+            "last_updated"
+        );
+        assert_eq!(
+            reader.read_u64().expect("last_updated"),
+            metrics.last_updated
+        );
+        assert_eq!(reader.read_string().expect("req_avg key"), "req_avg");
+        let req_avg = reader.read_f64().expect("req_avg");
+        assert!((req_avg - metrics.req_avg).abs() < f64::EPSILON);
+        assert_eq!(reader.read_string().expect("byte_avg key"), "byte_avg");
+        let byte_avg = reader.read_f64().expect("byte_avg");
+        assert!((byte_avg - metrics.byte_avg).abs() < f64::EPSILON);
+        assert_eq!(
+            reader.read_string().expect("throttled_until key"),
+            "throttled_until"
+        );
+        assert_eq!(
+            reader.read_u64().expect("throttled_until"),
+            metrics.throttled_until
+        );
+        assert_eq!(
+            reader.read_string().expect("throttle_reason key"),
+            "throttle_reason"
+        );
+        let has_reason = reader.read_bool().expect("throttle present");
+        match &metrics.throttle_reason {
+            Some(reason) => {
+                assert!(has_reason);
+                assert_eq!(
+                    reader.read_string().expect("throttle reason"),
+                    reason.as_str()
+                );
+            }
+            None => assert!(!has_reason),
+        }
+        assert_eq!(
+            reader.read_string().expect("backoff_level key"),
+            "backoff_level"
+        );
+        assert_eq!(
+            reader.read_u32().expect("backoff_level"),
+            metrics.backoff_level
+        );
+        assert_eq!(reader.read_string().expect("sec_start key"), "sec_start");
+        assert_eq!(reader.read_u64().expect("sec_start"), metrics.sec_start);
     }
 
     #[test]
@@ -397,30 +496,6 @@ mod tests {
         assert_eq!(decoded.sec_requests, 0);
         assert_eq!(decoded.sec_bytes, 0);
         assert_eq!(decoded.breach_count, 0);
-    }
-
-    #[test]
-    fn decode_legacy_bytes_matches_struct() {
-        let metrics = sample_metrics();
-        let legacy = binary_codec::serialize(&metrics).expect("legacy encode");
-        let decoded = decode(&legacy).expect("legacy decode");
-
-        assert_eq!(decoded.requests, metrics.requests);
-        assert_eq!(decoded.bytes_sent, metrics.bytes_sent);
-        assert_eq!(decoded.sends, metrics.sends);
-        assert_eq!(decoded.drops, metrics.drops);
-        assert_eq!(decoded.handshake_fail, metrics.handshake_fail);
-        assert_eq!(decoded.handshake_success, metrics.handshake_success);
-        assert_eq!(decoded.last_handshake_ms, metrics.last_handshake_ms);
-        assert_eq!(decoded.tls_errors, metrics.tls_errors);
-        assert!((decoded.reputation.score - metrics.reputation.score).abs() < f64::EPSILON);
-        assert_eq!(decoded.last_updated, metrics.last_updated);
-        assert!((decoded.req_avg - metrics.req_avg).abs() < f64::EPSILON);
-        assert!((decoded.byte_avg - metrics.byte_avg).abs() < f64::EPSILON);
-        assert_eq!(decoded.throttled_until, metrics.throttled_until);
-        assert_eq!(decoded.throttle_reason, metrics.throttle_reason);
-        assert_eq!(decoded.backoff_level, metrics.backoff_level);
-        assert_eq!(decoded.sec_start, metrics.sec_start);
     }
 
     #[test]

@@ -188,12 +188,7 @@ fn rpc_light_client_rebate_status() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let status = rpc(
-            &addr,
-            r#"{"method":"light_client.rebate_status"}"#,
-            None,
-        )
-        .await;
+        let status = rpc(&addr, r#"{"method":"light_client.rebate_status"}"#, None).await;
         let result = status.get("result").expect("result");
         assert_eq!(result["pending_total"].as_u64().unwrap(), 3);
         let relayers = result["relayers"].as_array().expect("array");

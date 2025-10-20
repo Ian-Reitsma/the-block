@@ -1,6 +1,6 @@
-use foundation_rpc::{Request as RpcEnvelopeRequest, Response as RpcEnvelopeResponse};
-use foundation_serialization::json;
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_rpc::{Request as RpcEnvelopeRequest, RpcError};
+use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::Serialize;
 use httpd::{ClientError as HttpClientError, ClientResponse, HttpClient, Method};
 use rand::Rng;
 use std::fmt;
@@ -123,11 +123,28 @@ impl RpcClient {
         &self,
         url: &str,
         request: &RpcEnvelopeRequest,
-    ) -> Result<RpcEnvelopeResponse, RpcClientError> {
-        self.call(url, request)?
-            .json::<RpcEnvelopeResponse>()
-            .map_err(RpcClientError::from)
+    ) -> Result<Value, RpcClientError> {
+        let payload = request_to_value(request);
+        let response = self.call(url, &payload)?;
+        let body = response.into_body();
+        json::value_from_slice(&body).map_err(RpcClientError::Decode)
     }
+}
+
+fn request_to_value(request: &RpcEnvelopeRequest) -> Value {
+    let mut map = Map::new();
+    if let Some(version) = &request.version {
+        map.insert("jsonrpc".to_owned(), Value::String(version.clone()));
+    }
+    map.insert("method".to_owned(), Value::String(request.method.clone()));
+    map.insert("params".to_owned(), Value::from(request.params.clone()));
+    if let Some(id) = &request.id {
+        map.insert("id".to_owned(), id.clone());
+    }
+    if let Some(badge) = &request.badge {
+        map.insert("badge".to_owned(), Value::String(badge.clone()));
+    }
+    Value::Object(map)
 }
 
 #[derive(Debug)]
@@ -136,6 +153,7 @@ pub enum RpcClientError {
     InjectedFault,
     Decode(foundation_serialization::Error),
     Rpc(foundation_rpc::RpcError),
+    InvalidResponse(String),
 }
 
 impl fmt::Display for RpcClientError {
@@ -146,6 +164,9 @@ impl fmt::Display for RpcClientError {
             RpcClientError::Decode(err) => write!(f, "decode error: {err}"),
             RpcClientError::Rpc(err) => {
                 write!(f, "rpc error {}: {}", err.code, err.message())
+            }
+            RpcClientError::InvalidResponse(message) => {
+                write!(f, "invalid rpc response: {message}")
             }
         }
     }
@@ -158,6 +179,7 @@ impl std::error::Error for RpcClientError {
             RpcClientError::InjectedFault => None,
             RpcClientError::Decode(err) => Some(err),
             RpcClientError::Rpc(err) => Some(err),
+            RpcClientError::InvalidResponse(_) => None,
         }
     }
 }
@@ -168,7 +190,7 @@ impl From<HttpClientError> for RpcClientError {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct InflationParams {
     pub beta_storage_sub_ct: i64,
     pub gamma_read_sub_ct: i64,
@@ -182,25 +204,17 @@ pub struct InflationParams {
 
 impl RpcClient {
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct MempoolStatsParams<'a> {
-            lane: &'a str,
-        }
-
-        let params = json::to_value(MempoolStatsParams {
-            lane: lane.as_str(),
-        })
-        .unwrap();
+        let mut params = Map::new();
+        params.insert("lane".to_owned(), Value::String(lane.as_str().to_owned()));
+        let params = Value::Object(params);
         let request =
             RpcEnvelopeRequest::new("mempool.stats", params).with_id(json::Value::from(1u64));
 
-        let payload = self
-            .send_request(url, &request)?
-            .into_payload::<MempoolStats>()
-            .map_err(RpcClientError::Decode)?;
-
-        payload.into_result().map_err(RpcClientError::Rpc)
+        let response = self.send_request(url, &request)?;
+        match parse_rpc_response(response)? {
+            RpcPayload::Success(result) => parse_mempool_stats(&result),
+            RpcPayload::Error(err) => Err(RpcClientError::Rpc(err)),
+        }
     }
 
     pub fn record_wallet_qos_event(
@@ -208,99 +222,65 @@ impl RpcClient {
         url: &str,
         event: WalletQosEvent<'_>,
     ) -> Result<(), WalletQosError> {
-        #[derive(Deserialize)]
-        struct WalletQosAck {
-            status: Option<String>,
-        }
-
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct WalletQosParams<'a> {
-            event: &'a str,
-            lane: &'a str,
-            fee: u64,
-            floor: u64,
-        }
-
-        let params = json::to_value(WalletQosParams {
-            event: event.event,
-            lane: event.lane,
-            fee: event.fee,
-            floor: event.floor,
-        })
-        .unwrap();
+        let mut params = Map::new();
+        params.insert("event".to_owned(), Value::String(event.event.to_owned()));
+        params.insert("lane".to_owned(), Value::String(event.lane.to_owned()));
+        params.insert("fee".to_owned(), Value::from(event.fee));
+        params.insert("floor".to_owned(), Value::from(event.floor));
+        let params = Value::Object(params);
         let request =
             RpcEnvelopeRequest::new("mempool.qos_event", params).with_id(json::Value::from(1u64));
-        let payload = self
+        let response = self
             .send_request(url, &request)
-            .map_err(WalletQosError::from)?
-            .into_payload::<WalletQosAck>()
-            .map_err(RpcClientError::Decode)
             .map_err(WalletQosError::from)?;
-
-        let ack = payload.into_result().map_err(|error| WalletQosError::Rpc {
-            code: i64::from(error.code),
-            message: error.message().to_string(),
-        })?;
-
-        let status = ack.status.ok_or(WalletQosError::MissingStatus)?;
-
-        if status != "ok" {
-            return Err(WalletQosError::InvalidStatus(status));
+        match parse_rpc_response(response).map_err(WalletQosError::from)? {
+            RpcPayload::Success(result) => {
+                let status = parse_status(&result).map_err(WalletQosError::from)?;
+                let status = status.ok_or(WalletQosError::MissingStatus)?;
+                if status != "ok" {
+                    return Err(WalletQosError::InvalidStatus(status));
+                }
+                Ok(())
+            }
+            RpcPayload::Error(error) => Err(WalletQosError::Rpc {
+                code: i64::from(error.code),
+                message: error.message().to_string(),
+            }),
         }
-
-        Ok(())
     }
 
     pub fn inflation_params(&self, url: &str) -> Result<InflationParams, RpcClientError> {
         let request = RpcEnvelopeRequest::new("inflation.params", json::Value::Null)
             .with_id(json::Value::from(1u64));
-        let payload = self
-            .send_request(url, &request)?
-            .into_payload::<InflationParams>()
-            .map_err(RpcClientError::Decode)?;
-        payload.into_result().map_err(RpcClientError::Rpc)
+        let response = self.send_request(url, &request)?;
+        match parse_rpc_response(response)? {
+            RpcPayload::Success(result) => parse_inflation_params(&result),
+            RpcPayload::Error(err) => Err(RpcClientError::Rpc(err)),
+        }
     }
 
     pub fn stake_role(&self, url: &str, id: &str, role: &str) -> Result<u64, RpcClientError> {
-        #[derive(Deserialize, Default)]
-        struct StakeRoleResponse {
-            #[serde(default)]
-            stake: Option<u64>,
-        }
-
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct StakeRoleParams<'a> {
-            id: &'a str,
-            role: &'a str,
-        }
-
-        let params = json::to_value(StakeRoleParams { id, role }).unwrap();
+        let mut params = Map::new();
+        params.insert("id".to_owned(), Value::String(id.to_owned()));
+        params.insert("role".to_owned(), Value::String(role.to_owned()));
+        let params = Value::Object(params);
         let request =
             RpcEnvelopeRequest::new("stake.role", params).with_id(json::Value::from(1u64));
-        let payload = self
-            .send_request(url, &request)?
-            .into_payload::<StakeRoleResponse>()
-            .map_err(RpcClientError::Decode)?;
-        let body = payload.into_result().map_err(RpcClientError::Rpc)?;
-        Ok(body.stake.unwrap_or(0))
+        let response = self.send_request(url, &request)?;
+        match parse_rpc_response(response)? {
+            RpcPayload::Success(result) => parse_stake_role(&result),
+            RpcPayload::Error(err) => Err(RpcClientError::Rpc(err)),
+        }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct MempoolStats {
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub size: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p50: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p95: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p50: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p90: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_floor: u64,
 }
 
@@ -347,6 +327,169 @@ impl std::error::Error for WalletQosError {
 impl From<RpcClientError> for WalletQosError {
     fn from(err: RpcClientError) -> Self {
         Self::Transport(err)
+    }
+}
+
+enum RpcPayload {
+    Success(Value),
+    Error(RpcError),
+}
+
+fn parse_rpc_response(value: Value) -> Result<RpcPayload, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("rpc response must be an object"))?;
+    if let Some(error_value) = map.get("error") {
+        let error = parse_rpc_error(error_value)?;
+        return Ok(RpcPayload::Error(error));
+    }
+    let result = map
+        .get("result")
+        .cloned()
+        .ok_or_else(|| invalid_response("rpc response missing result field"))?;
+    Ok(RpcPayload::Success(result))
+}
+
+fn parse_rpc_error(value: &Value) -> Result<RpcError, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("rpc error payload must be an object"))?;
+    let code = map
+        .get("code")
+        .ok_or_else(|| invalid_response("rpc error missing code field"))?
+        .as_i64()
+        .ok_or_else(|| invalid_response("rpc error code must be an integer"))?;
+    let message = map
+        .get("message")
+        .ok_or_else(|| invalid_response("rpc error missing message field"))?
+        .as_str()
+        .ok_or_else(|| invalid_response("rpc error message must be a string"))?;
+    Ok(RpcError::new(code as i32, message.to_owned()))
+}
+
+fn parse_mempool_stats(value: &Value) -> Result<MempoolStats, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("mempool.stats result must be an object"))?;
+    Ok(MempoolStats {
+        size: field_u64_default(map, "size")?,
+        age_p50: field_u64_default(map, "age_p50")?,
+        age_p95: field_u64_default(map, "age_p95")?,
+        fee_p50: field_u64_default(map, "fee_p50")?,
+        fee_p90: field_u64_default(map, "fee_p90")?,
+        fee_floor: field_u64_default(map, "fee_floor")?,
+    })
+}
+
+fn parse_status(value: &Value) -> Result<Option<String>, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("qos response must be an object"))?;
+    match map.get("status") {
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(Value::Null) | None => Ok(None),
+        Some(other) => Err(invalid_response(format!(
+            "field 'status' expected string, found {}",
+            describe_type(other)
+        ))),
+    }
+}
+
+fn parse_inflation_params(value: &Value) -> Result<InflationParams, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("inflation.params result must be an object"))?;
+    Ok(InflationParams {
+        beta_storage_sub_ct: field_i64(map, "beta_storage_sub_ct")?,
+        gamma_read_sub_ct: field_i64(map, "gamma_read_sub_ct")?,
+        kappa_cpu_sub_ct: field_i64(map, "kappa_cpu_sub_ct")?,
+        lambda_bytes_out_sub_ct: field_i64(map, "lambda_bytes_out_sub_ct")?,
+        rent_rate_ct_per_byte: field_i64(map, "rent_rate_ct_per_byte")?,
+        industrial_multiplier: field_i64(map, "industrial_multiplier")?,
+        industrial_backlog: field_u64(map, "industrial_backlog")?,
+        industrial_utilization: field_u64(map, "industrial_utilization")?,
+    })
+}
+
+fn parse_stake_role(value: &Value) -> Result<u64, RpcClientError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid_response("stake.role result must be an object"))?;
+    Ok(optional_field_u64(map, "stake")?.unwrap_or(0))
+}
+
+fn field_u64_default(map: &Map, key: &str) -> Result<u64, RpcClientError> {
+    match map.get(key) {
+        Some(Value::Number(num)) => num
+            .as_u64()
+            .ok_or_else(|| invalid_response(format!("field '{key}' must be an unsigned integer"))),
+        Some(Value::Null) | None => Ok(0),
+        Some(other) => Err(invalid_response(format!(
+            "field '{key}' expected number, found {}",
+            describe_type(other)
+        ))),
+    }
+}
+
+fn field_u64(map: &Map, key: &str) -> Result<u64, RpcClientError> {
+    match map.get(key) {
+        Some(Value::Number(num)) => num
+            .as_u64()
+            .ok_or_else(|| invalid_response(format!("field '{key}' must be an unsigned integer"))),
+        Some(Value::Null) => Err(invalid_response(format!(
+            "field '{key}' must be an unsigned integer"
+        ))),
+        None => Err(invalid_response(format!("missing field '{key}'"))),
+        Some(other) => Err(invalid_response(format!(
+            "field '{key}' expected number, found {}",
+            describe_type(other)
+        ))),
+    }
+}
+
+fn optional_field_u64(map: &Map, key: &str) -> Result<Option<u64>, RpcClientError> {
+    match map.get(key) {
+        Some(Value::Number(num)) => num
+            .as_u64()
+            .ok_or_else(|| invalid_response(format!("field '{key}' must be an unsigned integer")))
+            .map(Some),
+        Some(Value::Null) | None => Ok(None),
+        Some(other) => Err(invalid_response(format!(
+            "field '{key}' expected number, found {}",
+            describe_type(other)
+        ))),
+    }
+}
+
+fn field_i64(map: &Map, key: &str) -> Result<i64, RpcClientError> {
+    match map.get(key) {
+        Some(Value::Number(num)) => num
+            .as_i64()
+            .or_else(|| num.as_u64().map(|v| v as i64))
+            .ok_or_else(|| invalid_response(format!("field '{key}' must be a signed integer"))),
+        Some(Value::Null) => Err(invalid_response(format!(
+            "field '{key}' must be a signed integer"
+        ))),
+        None => Err(invalid_response(format!("missing field '{key}'"))),
+        Some(other) => Err(invalid_response(format!(
+            "field '{key}' expected number, found {}",
+            describe_type(other)
+        ))),
+    }
+}
+
+fn invalid_response(message: impl Into<String>) -> RpcClientError {
+    RpcClientError::InvalidResponse(message.into())
+}
+
+fn describe_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 
@@ -632,18 +775,10 @@ mod tests {
             max_retries: 0,
             fault_rate: 1.0,
         };
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct NoopPayload<'a> {
-            jsonrpc: &'a str,
-            method: &'a str,
-        }
-
-        let payload = json::to_value(NoopPayload {
-            jsonrpc: "2.0",
-            method: "noop",
-        })
-        .unwrap();
+        let mut payload = Map::new();
+        payload.insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
+        payload.insert("method".to_owned(), Value::String("noop".to_owned()));
+        let payload = Value::Object(payload);
         let err = client
             .call("http://127.0.0.1:0", &payload)
             .expect_err("fault injection should abort the request");

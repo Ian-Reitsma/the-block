@@ -147,7 +147,7 @@ fn read_wire_message(reader: &mut Reader<'_>) -> binary_struct::Result<WireMessa
     }
 }
 
-fn write_hello(writer: &mut Writer, hello: &Hello) -> EncodeResult<()> {
+pub(crate) fn write_hello(writer: &mut Writer, hello: &Hello) -> EncodeResult<()> {
     let fingerprint_prev_len = to_u64(
         hello.quic_fingerprint_previous.len(),
         "quic_fingerprint_previous",
@@ -191,7 +191,7 @@ fn write_hello(writer: &mut Writer, hello: &Hello) -> EncodeResult<()> {
     Ok(())
 }
 
-fn read_hello(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
+pub(crate) fn read_hello(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
     read_hello_struct(reader)
 }
 
@@ -383,7 +383,8 @@ fn to_u64(len: usize, field: &'static str) -> EncodeResult<u64> {
 mod tests {
     use super::*;
     use crate::p2p::handshake::{Hello, Transport};
-    use crate::util::binary_codec;
+    use crate::util::binary_struct::ensure_exhausted;
+    use foundation_serialization::binary_cursor::{Reader, Writer};
     use foundation_serialization::{Deserialize, Serialize};
     use std::net::SocketAddr;
 
@@ -425,17 +426,28 @@ mod tests {
     }
 
     fn assert_matches_legacy(message: WireMessage) {
-        let expected =
-            binary_codec::serialize(&LegacyWireMessage::from(&message)).expect("legacy encode");
+        let expected = encode_legacy(&message);
         let encoded = encode(&message).expect("encode");
         assert_eq!(expected, encoded);
 
         let decoded = decode(&encoded).expect("decode");
         assert_eq!(message, decoded);
 
-        let legacy_decoded =
-            binary_codec::deserialize::<LegacyWireMessage>(&encoded).expect("legacy decode");
+        let legacy_decoded = decode_legacy(&encoded);
         assert_eq!(message, WireMessage::from(legacy_decoded));
+    }
+
+    fn encode_legacy(message: &WireMessage) -> Vec<u8> {
+        let mut writer = Writer::new();
+        super::write_wire_message(&mut writer, message).expect("legacy encode");
+        writer.finish()
+    }
+
+    fn decode_legacy(bytes: &[u8]) -> LegacyWireMessage {
+        let mut reader = Reader::new(bytes);
+        let message = super::read_wire_message(&mut reader).expect("legacy decode");
+        ensure_exhausted(&reader).expect("no trailing bytes");
+        LegacyWireMessage::from(&message)
     }
 
     #[test]

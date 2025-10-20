@@ -5,18 +5,17 @@ use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::http_client;
-use crate::net::message::{Message, Payload};
+use crate::net::message::{encode_payload, Message, Payload};
 use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::Transport;
 use crate::simple_db::{names, SimpleDb};
-use crate::util::binary_codec;
 use crate::Blockchain;
 use concurrency::{Lazy, MutexExt, OrderedMap};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{
-    json::{self, Value},
+    json::{self, Map, Value},
     Error as SerializationError,
 };
 use foundation_serialization::{Deserialize, Serialize};
@@ -412,7 +411,7 @@ impl PeerSet {
         addr: Option<SocketAddr>,
         chain: &Arc<StdMutex<Blockchain>>,
     ) {
-        let bytes = match binary_codec::serialize(&msg.body) {
+        let bytes = match encode_payload(&msg.body) {
             Ok(b) => b,
             Err(_) => return,
         };
@@ -1355,22 +1354,18 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
                 .append(true)
                 .open(&path)
                 .unwrap();
-            #[derive(Serialize)]
-            #[serde(crate = "foundation_serialization::serde")]
-            struct RotationHistoryEntry {
-                old: String,
-                new: String,
-                ts: u64,
-            }
-
-            let entry = RotationHistoryEntry {
-                old: crypto_suite::hex::encode(old),
-                new: crypto_suite::hex::encode(new),
-                ts: now_secs(),
-            };
-            if let Ok(entry_value) = json::to_value(entry) {
-                let _ = writeln!(file, "{}", json::to_string_value(&entry_value));
-            }
+            let mut entry = Map::new();
+            entry.insert(
+                "old".to_owned(),
+                Value::String(crypto_suite::hex::encode(old)),
+            );
+            entry.insert(
+                "new".to_owned(),
+                Value::String(crypto_suite::hex::encode(new)),
+            );
+            entry.insert("ts".to_owned(), Value::from(now_secs()));
+            let value = Value::Object(entry);
+            let _ = writeln!(file, "{}", json::to_string_value(&value));
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
         ROTATED_KEYS.guard().insert(*old, (new, revoke));
@@ -1754,10 +1749,21 @@ pub fn export_all_peer_stats(
     res
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct PeerStat {
     pub peer_id: String,
     pub metrics: PeerMetrics,
+}
+
+pub(crate) fn peer_stats_to_json(stats: &[PeerStat]) -> Value {
+    Value::Array(stats.iter().map(peer_stat_to_value).collect())
+}
+
+fn peer_stat_to_value(stat: &PeerStat) -> Value {
+    let mut map = Map::new();
+    map.insert("peer_id".to_owned(), Value::String(stat.peer_id.clone()));
+    map.insert("metrics".to_owned(), peer_metrics_to_value(&stat.metrics));
+    Value::Object(map)
 }
 
 pub fn peer_stats_all(offset: usize, limit: usize) -> Vec<PeerStat> {
@@ -1854,7 +1860,7 @@ struct QuicEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpd::{Method, Response, Router, ServerConfig, StatusCode};
+    use foundation_serialization::json::Value;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use sys::tempfile::tempdir;
@@ -1923,33 +1929,13 @@ mod tests {
         assert!(matches!(next, PeerErrorCode::Banned));
     }
 
-    #[derive(Clone)]
-    struct TestState {
-        flag: Arc<AtomicBool>,
-    }
-
     #[test]
     fn aggregator_failover_selects_next_url() {
         runtime::block_on(async {
             let received = Arc::new(AtomicBool::new(false));
-            let router = Router::new(TestState {
-                flag: received.clone(),
-            })
-            .route(Method::Post, "/ingest", |req| async move {
-                let state = req.state().clone();
-                state.flag.store(true, Ordering::SeqCst);
-                Ok(Response::new(StatusCode::OK))
-            });
-            let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-            let listener = runtime::net::TcpListener::bind(bind_addr).await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            let server = runtime::spawn(async move {
-                httpd::serve(listener, router, ServerConfig::default())
-                    .await
-                    .unwrap();
-            });
-            let bad = "http://127.0.0.1:59999".to_string();
-            let good = format!("http://{}", addr);
+            let _guard = TestIngestGuard::new(received.clone());
+            let bad = "test://fail".to_string();
+            let good = "test://success".to_string();
             let client = AggregatorClient::new(vec![bad, good], "t".into());
             aggregator_guard().replace(client.clone());
             let snap = PeerSnapshot {
@@ -1958,8 +1944,51 @@ mod tests {
             };
             client.ingest(vec![snap]).await;
             assert!(received.load(Ordering::SeqCst));
-            server.abort();
+            let payload = {
+                let guard = super::TEST_PAYLOADS.guard();
+                guard.last().cloned().expect("captured payload")
+            };
+            if let Value::Array(items) = payload {
+                assert_eq!(items.len(), 1);
+                if let Value::Object(obj) = &items[0] {
+                    assert!(obj.contains_key("peer_id"));
+                    assert!(obj.contains_key("metrics"));
+                } else {
+                    panic!("expected metrics object");
+                }
+            } else {
+                panic!("expected array payload");
+            }
+            *aggregator_guard() = None;
         });
+    }
+
+    #[test]
+    fn peer_snapshot_array_matches_legacy_serialization() {
+        let snapshot = PeerSnapshot {
+            peer_id: "peer".into(),
+            metrics: PeerMetrics::default(),
+        };
+        let expected = Value::Array(vec![peer_snapshot_to_value(&snapshot)]);
+        let actual = peer_snapshot_array(std::slice::from_ref(&snapshot));
+        assert_eq!(actual, expected);
+    }
+
+    struct TestIngestGuard;
+
+    impl TestIngestGuard {
+        fn new(flag: Arc<AtomicBool>) -> Self {
+            *super::TEST_INGEST.guard() = Some(flag);
+            super::TEST_PAYLOADS.guard().clear();
+            Self
+        }
+    }
+
+    impl Drop for TestIngestGuard {
+        fn drop(&mut self) {
+            *super::TEST_INGEST.guard() = None;
+            super::TEST_PAYLOADS.guard().clear();
+        }
     }
 }
 
@@ -2168,6 +2197,90 @@ static METRIC_TX: Lazy<broadcast::Sender<PeerSnapshot>> = Lazy::new(|| {
     tx
 });
 
+fn peer_snapshot_array(snaps: &[PeerSnapshot]) -> Value {
+    Value::Array(snaps.iter().map(peer_snapshot_to_value).collect())
+}
+
+fn peer_snapshot_to_value(snapshot: &PeerSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "peer_id".to_owned(),
+        Value::String(snapshot.peer_id.clone()),
+    );
+    map.insert(
+        "metrics".to_owned(),
+        peer_metrics_to_value(&snapshot.metrics),
+    );
+    Value::Object(map)
+}
+
+fn peer_metrics_to_value(metrics: &PeerMetrics) -> Value {
+    let mut map = Map::new();
+    map.insert("requests".to_owned(), Value::from(metrics.requests));
+    map.insert("bytes_sent".to_owned(), Value::from(metrics.bytes_sent));
+    map.insert("sends".to_owned(), Value::from(metrics.sends));
+    map.insert(
+        "drops".to_owned(),
+        counts_to_object(&metrics.drops, |reason| reason.as_ref().to_owned()),
+    );
+    map.insert(
+        "handshake_fail".to_owned(),
+        counts_to_object(&metrics.handshake_fail, |err| err.as_str().to_owned()),
+    );
+    map.insert(
+        "handshake_success".to_owned(),
+        Value::from(metrics.handshake_success),
+    );
+    map.insert(
+        "last_handshake_ms".to_owned(),
+        Value::from(metrics.last_handshake_ms),
+    );
+    map.insert("tls_errors".to_owned(), Value::from(metrics.tls_errors));
+    map.insert(
+        "reputation".to_owned(),
+        peer_reputation_to_value(&metrics.reputation),
+    );
+    map.insert("last_updated".to_owned(), Value::from(metrics.last_updated));
+    map.insert("req_avg".to_owned(), Value::from(metrics.req_avg));
+    map.insert("byte_avg".to_owned(), Value::from(metrics.byte_avg));
+    map.insert(
+        "throttled_until".to_owned(),
+        Value::from(metrics.throttled_until),
+    );
+    map.insert(
+        "throttle_reason".to_owned(),
+        metrics
+            .throttle_reason
+            .as_ref()
+            .map(|s| Value::String(s.clone()))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "backoff_level".to_owned(),
+        Value::from(metrics.backoff_level),
+    );
+    map.insert("sec_start".to_owned(), Value::from(metrics.sec_start));
+    Value::Object(map)
+}
+
+fn peer_reputation_to_value(rep: &PeerReputation) -> Value {
+    let mut map = Map::new();
+    map.insert("score".to_owned(), Value::from(rep.score));
+    Value::Object(map)
+}
+
+fn counts_to_object<K, F>(counts: &HashMap<K, u64>, key_fn: F) -> Value
+where
+    K: std::cmp::Eq + std::hash::Hash,
+    F: Fn(&K) -> String,
+{
+    let mut map = Map::new();
+    for (key, value) in counts {
+        map.insert(key_fn(key), Value::from(*value));
+    }
+    Value::Object(map)
+}
+
 #[derive(Clone)]
 struct AggregatorClient {
     urls: Vec<String>,
@@ -2176,6 +2289,12 @@ struct AggregatorClient {
     idx: Arc<AtomicUsize>,
     handle: runtime::RuntimeHandle,
 }
+
+#[cfg(test)]
+pub(super) static TEST_INGEST: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(None));
+#[cfg(test)]
+pub(super) static TEST_PAYLOADS: Lazy<Mutex<Vec<Value>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 impl AggregatorClient {
     fn new(urls: Vec<String>, token: String) -> Self {
@@ -2196,7 +2315,10 @@ impl AggregatorClient {
     }
 
     async fn ingest(&self, snaps: Vec<PeerSnapshot>) {
-        let body = json::to_value(snaps).unwrap();
+        let body = match json::to_value(&snaps) {
+            Ok(value) => value,
+            Err(_) => peer_snapshot_array(&snaps),
+        };
         self.post("ingest", body).await;
     }
 
@@ -2209,11 +2331,27 @@ impl AggregatorClient {
     async fn post(&self, path: &str, body: Value) {
         for i in 0..self.urls.len() {
             let idx = (self.idx.load(Ordering::Relaxed) + i) % self.urls.len();
-            let url = &self.urls[idx];
-            let request = match self
-                .client
-                .request(httpd::Method::Post, &format!("{}/{}", url, path))
-            {
+            let base = self.urls[idx].trim_end_matches('/');
+            let url = format!("{base}/{path}");
+            let uri = match httpd::Uri::parse(&url) {
+                Ok(uri) => uri,
+                Err(_) => continue,
+            };
+
+            #[cfg(test)]
+            if uri.scheme() == "test" {
+                if test_post(&uri, &body).is_ok() {
+                    self.idx.store(idx, Ordering::Relaxed);
+                    break;
+                }
+                continue;
+            }
+
+            if uri.scheme() != "http" && uri.scheme() != "https" {
+                continue;
+            }
+
+            let request = match self.client.request(httpd::Method::Post, &url) {
                 Ok(builder) => builder.header("x-auth-token", self.token.clone()),
                 Err(_) => continue,
             };
@@ -2221,14 +2359,25 @@ impl AggregatorClient {
                 Ok(builder) => builder,
                 Err(_) => continue,
             };
-            match request.send().await {
-                Ok(_) => {
-                    self.idx.store(idx, Ordering::Relaxed);
-                    break;
-                }
-                Err(_) => continue,
+            if request.send().await.is_ok() {
+                self.idx.store(idx, Ordering::Relaxed);
+                break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+fn test_post(uri: &httpd::Uri, body: &Value) -> Result<(), ()> {
+    match uri.host_str() {
+        Some("success") => {
+            TEST_PAYLOADS.guard().push(body.clone());
+            if let Some(flag) = TEST_INGEST.guard().clone() {
+                flag.store(true, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+        _ => Err(()),
     }
 }
 
@@ -2317,29 +2466,18 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
         let guard = aggregator_guard();
         guard.clone()
     } {
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct RotationMetrics {
-            key_rotation: String,
-        }
-
-        #[derive(Serialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct RotationEvent {
-            peer_id: String,
-            metrics: RotationMetrics,
-        }
-
-        let event = RotationEvent {
-            peer_id: overlay_peer_label(old),
-            metrics: RotationMetrics {
-                key_rotation: crypto_suite::hex::encode(new),
-            },
-        };
+        let mut metrics = Map::new();
+        metrics.insert(
+            "key_rotation".to_owned(),
+            Value::String(crypto_suite::hex::encode(new)),
+        );
+        let mut event = Map::new();
+        event.insert("peer_id".to_owned(), Value::String(overlay_peer_label(old)));
+        event.insert("metrics".to_owned(), Value::Object(metrics));
+        let payload = Value::Array(vec![Value::Object(event)]);
         let fut_client = client.clone();
         client.spawn(async move {
-            let body = json::to_value(vec![event]).unwrap();
-            fut_client.post("ingest", body).await;
+            fut_client.post("ingest", payload).await;
         });
     }
 }
