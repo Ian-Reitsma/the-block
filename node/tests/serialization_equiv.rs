@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
-use rand::{rngs::StdRng, Rng};
 use rand::SeedableRng as _;
+use rand::{rngs::StdRng, Rng};
 use std::fs;
 use std::io::Write;
 use the_block::{canonical_payload_bytes, RawTxPayload};

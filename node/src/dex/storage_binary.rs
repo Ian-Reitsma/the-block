@@ -643,8 +643,6 @@ fn read_pool(reader: &mut Reader<'_>) -> binary_struct::Result<Pool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::binary_codec;
-    use foundation_serialization::Serialize;
     use std::collections::VecDeque;
 
     #[test]
@@ -672,13 +670,59 @@ mod tests {
         book.asks.insert(11, asks);
         book.set_next_identifier(3);
 
-        let legacy = binary_codec::serialize(&book).expect("legacy encode");
-        let manual = encode_order_book(&book).expect("manual encode");
-        assert_eq!(legacy, manual);
+        let encoded = encode_order_book(&book).expect("manual encode");
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 3);
 
-        let decoded = decode_order_book(&legacy).expect("decode");
-        let reencoded = encode_order_book(&decoded).expect("re-encode");
-        assert_eq!(legacy, reencoded);
+        assert_eq!(reader.read_string().expect("bids key"), "bids");
+        assert_eq!(reader.read_u64().expect("bid levels"), 1);
+        assert_eq!(reader.read_u64().expect("bid price"), 10);
+        assert_eq!(reader.read_u64().expect("bid order count"), 1);
+        assert_eq!(reader.read_u64().expect("order fields"), 6);
+        assert_eq!(reader.read_string().expect("id key"), "id");
+        assert_eq!(reader.read_u64().expect("id"), 1);
+        assert_eq!(reader.read_string().expect("account key"), "account");
+        assert_eq!(reader.read_string().expect("account"), "alice");
+        assert_eq!(reader.read_string().expect("side key"), "side");
+        assert_eq!(reader.read_u32().expect("side"), 0);
+        assert_eq!(reader.read_string().expect("amount key"), "amount");
+        assert_eq!(reader.read_u64().expect("amount"), 50);
+        assert_eq!(reader.read_string().expect("price key"), "price");
+        assert_eq!(reader.read_u64().expect("price"), 10);
+        assert_eq!(
+            reader.read_string().expect("slippage key"),
+            "max_slippage_bps"
+        );
+        assert_eq!(reader.read_u64().expect("slippage"), 100);
+
+        assert_eq!(reader.read_string().expect("asks key"), "asks");
+        assert_eq!(reader.read_u64().expect("ask levels"), 1);
+        assert_eq!(reader.read_u64().expect("ask price"), 11);
+        assert_eq!(reader.read_u64().expect("ask order count"), 1);
+        assert_eq!(reader.read_u64().expect("ask order fields"), 6);
+        assert_eq!(reader.read_string().expect("ask id key"), "id");
+        assert_eq!(reader.read_u64().expect("ask id"), 2);
+        assert_eq!(reader.read_string().expect("ask account key"), "account");
+        assert_eq!(reader.read_string().expect("ask account"), "bob");
+        assert_eq!(reader.read_string().expect("ask side key"), "side");
+        assert_eq!(reader.read_u32().expect("ask side"), 1);
+        assert_eq!(reader.read_string().expect("ask amount key"), "amount");
+        assert_eq!(reader.read_u64().expect("ask amount"), 40);
+        assert_eq!(reader.read_string().expect("ask price key"), "price");
+        assert_eq!(reader.read_u64().expect("ask price"), 11);
+        assert_eq!(
+            reader.read_string().expect("ask slippage key"),
+            "max_slippage_bps"
+        );
+        assert_eq!(reader.read_u64().expect("ask slippage"), 50);
+
+        assert_eq!(reader.read_string().expect("next_id key"), "next_id");
+        assert_eq!(reader.read_u64().expect("next_id"), 3);
+
+        let decoded = decode_order_book(&encoded).expect("decode");
+        assert_eq!(decoded.bids.len(), 1);
+        assert_eq!(decoded.asks.len(), 1);
+        assert_eq!(decoded.next_identifier(), 3);
     }
 
     #[test]
@@ -708,22 +752,68 @@ mod tests {
             },
         };
 
-        #[derive(Serialize)]
-        struct LegacyTradeLog<'a>(&'a Order, &'a Order, u64, &'a PaymentProof);
+        let encoded = encode_trade_log(&record).expect("manual encode");
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 4);
 
-        let legacy = binary_codec::serialize(&LegacyTradeLog(
-            &record.buy,
-            &record.sell,
-            record.quantity,
-            &record.proof,
-        ))
-        .expect("legacy encode");
-        let manual = encode_trade_log(&record).expect("manual encode");
-        assert_eq!(legacy, manual);
+        // buy order fields
+        assert_eq!(reader.read_u64().expect("buy fields"), 6);
+        assert_eq!(reader.read_string().expect("buy id key"), "id");
+        assert_eq!(reader.read_u64().expect("buy id"), 1);
+        assert_eq!(reader.read_string().expect("buy account key"), "account");
+        assert_eq!(reader.read_string().expect("buy account"), "alice");
+        assert_eq!(reader.read_string().expect("buy side key"), "side");
+        assert_eq!(reader.read_u32().expect("buy side"), 0);
+        assert_eq!(reader.read_string().expect("buy amount key"), "amount");
+        assert_eq!(reader.read_u64().expect("buy amount"), 25);
+        assert_eq!(reader.read_string().expect("buy price key"), "price");
+        assert_eq!(reader.read_u64().expect("buy price"), 9);
+        assert_eq!(
+            reader.read_string().expect("buy slippage key"),
+            "max_slippage_bps"
+        );
+        assert_eq!(reader.read_u64().expect("buy slippage"), 75);
 
-        let decoded = decode_trade_log(&legacy).expect("decode");
-        let reencoded = encode_trade_log(&decoded).expect("re-encode");
-        assert_eq!(legacy, reencoded);
+        // sell order fields
+        assert_eq!(reader.read_u64().expect("sell fields"), 6);
+        assert_eq!(reader.read_string().expect("sell id key"), "id");
+        assert_eq!(reader.read_u64().expect("sell id"), 2);
+        assert_eq!(reader.read_string().expect("sell account key"), "account");
+        assert_eq!(reader.read_string().expect("sell account"), "bob");
+        assert_eq!(reader.read_string().expect("sell side key"), "side");
+        assert_eq!(reader.read_u32().expect("sell side"), 1);
+        assert_eq!(reader.read_string().expect("sell amount key"), "amount");
+        assert_eq!(reader.read_u64().expect("sell amount"), 25);
+        assert_eq!(reader.read_string().expect("sell price key"), "price");
+        assert_eq!(reader.read_u64().expect("sell price"), 9);
+        assert_eq!(
+            reader.read_string().expect("sell slippage key"),
+            "max_slippage_bps"
+        );
+        assert_eq!(reader.read_u64().expect("sell slippage"), 60);
+
+        assert_eq!(reader.read_u64().expect("quantity"), 25);
+
+        assert_eq!(reader.read_u64().expect("proof fields"), 3);
+        assert_eq!(reader.read_string().expect("leaf key"), "leaf");
+        assert_eq!(reader.read_u64().expect("leaf len"), 32);
+        for _ in 0..32 {
+            assert_eq!(reader.read_u8().expect("leaf byte"), 1u8);
+        }
+        assert_eq!(reader.read_string().expect("path key"), "path");
+        assert_eq!(reader.read_u64().expect("path len"), 2);
+        for expected in [[2u8; 32], [3u8; 32]] {
+            assert_eq!(reader.read_u64().expect("path entry len"), 32);
+            for byte in expected {
+                assert_eq!(reader.read_u8().expect("path byte"), byte);
+            }
+        }
+        assert_eq!(reader.read_string().expect("algo key"), "algo");
+        assert_eq!(reader.read_u32().expect("algo"), 1);
+
+        let decoded = decode_trade_log(&encoded).expect("decode");
+        assert_eq!(decoded.quantity, 25);
+        assert_eq!(decoded.proof.algo, HashAlgo::Sha3);
     }
 
     #[test]
@@ -784,23 +874,100 @@ mod tests {
 
         let state = EscrowState { escrow, locks };
 
-        #[derive(Serialize)]
-        struct LegacyEscrowState<'a> {
-            escrow: &'a Escrow,
-            locks: &'a BTreeMap<EscrowId, (Order, Order, u64, u64)>,
+        let encoded = encode_escrow_state(&state).expect("manual encode");
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 2);
+
+        assert_eq!(reader.read_string().expect("escrow key"), "escrow");
+        assert_eq!(reader.read_u64().expect("escrow fields"), 3);
+        assert_eq!(reader.read_string().expect("entries key"), "entries");
+        let entry_count = reader.read_u64().expect("entry count");
+        assert_eq!(entry_count, state.escrow.snapshot().entries.len() as u64);
+        for (id, entry) in state.escrow.snapshot().entries.iter() {
+            assert_eq!(reader.read_u64().expect("entry id"), *id);
+            assert_eq!(reader.read_u64().expect("entry fields"), 7);
+            assert_eq!(reader.read_string().expect("from key"), "from");
+            assert_eq!(reader.read_string().expect("from"), entry.from);
+            assert_eq!(reader.read_string().expect("to key"), "to");
+            assert_eq!(reader.read_string().expect("to"), entry.to);
+            assert_eq!(reader.read_string().expect("total key"), "total");
+            assert_eq!(reader.read_u64().expect("total"), entry.total);
+            assert_eq!(reader.read_string().expect("released key"), "released");
+            assert_eq!(reader.read_u64().expect("released"), entry.released);
+            assert_eq!(reader.read_string().expect("payments key"), "payments");
+            let payment_len = reader.read_u64().expect("payments len");
+            assert_eq!(payment_len, entry.payments.len() as u64);
+            for payment in &entry.payments {
+                assert_eq!(reader.read_u64().expect("payment"), *payment);
+            }
+            assert_eq!(reader.read_string().expect("root key"), "root");
+            let root_len = reader.read_u64().expect("root len");
+            assert_eq!(root_len, 32);
+            let root_bytes = reader.read_exact(32).expect("root bytes");
+            assert_eq!(root_bytes, entry.root.as_slice());
+            assert_eq!(reader.read_string().expect("algo key"), "algo");
+            assert_eq!(reader.read_u32().expect("algo"), entry.algo as u32);
+        }
+        assert_eq!(reader.read_string().expect("next_id key"), "next_id");
+        assert_eq!(
+            reader.read_u64().expect("next_id"),
+            state.escrow.snapshot().next_id
+        );
+        assert_eq!(
+            reader.read_string().expect("total_locked key"),
+            "total_locked"
+        );
+        assert_eq!(
+            reader.read_u64().expect("total_locked"),
+            state.escrow.snapshot().total_locked
+        );
+
+        assert_eq!(reader.read_string().expect("locks key"), "locks");
+        let lock_count = reader.read_u64().expect("lock count");
+        assert_eq!(lock_count, state.locks.len() as u64);
+        for (id, (buy, sell, qty, locked_at)) in &state.locks {
+            assert_eq!(reader.read_u64().expect("lock id"), *id);
+            assert_eq!(reader.read_u64().expect("lock fields"), 4);
+            assert_eq!(reader.read_u64().expect("buy fields"), 6);
+            assert_eq!(reader.read_string().expect("buy id key"), "id");
+            assert_eq!(reader.read_u64().expect("buy id"), buy.id);
+            assert_eq!(reader.read_string().expect("buy account key"), "account");
+            assert_eq!(reader.read_string().expect("buy account"), buy.account);
+            assert_eq!(reader.read_string().expect("buy side key"), "side");
+            assert_eq!(reader.read_u32().expect("buy side"), buy.side as u32);
+            assert_eq!(reader.read_string().expect("buy amount key"), "amount");
+            assert_eq!(reader.read_u64().expect("buy amount"), buy.amount);
+            assert_eq!(reader.read_string().expect("buy price key"), "price");
+            assert_eq!(reader.read_u64().expect("buy price"), buy.price);
+            assert_eq!(
+                reader.read_string().expect("buy slip key"),
+                "max_slippage_bps"
+            );
+            assert_eq!(reader.read_u64().expect("buy slip"), buy.max_slippage_bps);
+
+            assert_eq!(reader.read_u64().expect("sell fields"), 6);
+            assert_eq!(reader.read_string().expect("sell id key"), "id");
+            assert_eq!(reader.read_u64().expect("sell id"), sell.id);
+            assert_eq!(reader.read_string().expect("sell account key"), "account");
+            assert_eq!(reader.read_string().expect("sell account"), sell.account);
+            assert_eq!(reader.read_string().expect("sell side key"), "side");
+            assert_eq!(reader.read_u32().expect("sell side"), sell.side as u32);
+            assert_eq!(reader.read_string().expect("sell amount key"), "amount");
+            assert_eq!(reader.read_u64().expect("sell amount"), sell.amount);
+            assert_eq!(reader.read_string().expect("sell price key"), "price");
+            assert_eq!(reader.read_u64().expect("sell price"), sell.price);
+            assert_eq!(
+                reader.read_string().expect("sell slip key"),
+                "max_slippage_bps"
+            );
+            assert_eq!(reader.read_u64().expect("sell slip"), sell.max_slippage_bps);
+
+            assert_eq!(reader.read_u64().expect("qty"), *qty);
+            assert_eq!(reader.read_u64().expect("locked_at"), *locked_at);
         }
 
-        let legacy = binary_codec::serialize(&LegacyEscrowState {
-            escrow: &state.escrow,
-            locks: &state.locks,
-        })
-        .expect("legacy encode");
-        let manual = encode_escrow_state(&state).expect("manual encode");
-        assert_eq!(legacy, manual);
-
-        let decoded = decode_escrow_state(&legacy).expect("decode");
-        let reencoded = encode_escrow_state(&decoded).expect("re-encode");
-        assert_eq!(legacy, reencoded);
+        let decoded = decode_escrow_state(&encoded).expect("decode");
+        assert_eq!(decoded.locks.len(), state.locks.len());
 
         // Ensure the proof remains valid after roundtrip
         let decoded_proof = decoded.escrow.proof(second, 0).expect("proof");
@@ -814,12 +981,19 @@ mod tests {
         pool.it_reserve = 2_000;
         pool.total_shares = 500;
 
-        let legacy = binary_codec::serialize(&pool).expect("legacy encode");
-        let manual = encode_pool(&pool).expect("manual encode");
-        assert_eq!(legacy, manual);
+        let encoded = encode_pool(&pool).expect("manual encode");
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 3);
+        assert_eq!(reader.read_string().expect("ct key"), "ct_reserve");
+        assert_eq!(reader.read_u128().expect("ct reserve"), 1_000);
+        assert_eq!(reader.read_string().expect("it key"), "it_reserve");
+        assert_eq!(reader.read_u128().expect("it reserve"), 2_000);
+        assert_eq!(reader.read_string().expect("shares key"), "total_shares");
+        assert_eq!(reader.read_u128().expect("shares"), 500);
 
-        let decoded = decode_pool(&legacy).expect("decode");
-        let reencoded = encode_pool(&decoded).expect("re-encode");
-        assert_eq!(legacy, reencoded);
+        let decoded = decode_pool(&encoded).expect("decode");
+        assert_eq!(decoded.ct_reserve, 1_000);
+        assert_eq!(decoded.it_reserve, 2_000);
+        assert_eq!(decoded.total_shares, 500);
     }
 }

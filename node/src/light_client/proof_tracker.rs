@@ -494,30 +494,8 @@ fn decode_claim_receipt(bytes: &[u8]) -> Result<ClaimReceipt, BinaryDecodeError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::binary_codec;
-    use foundation_serialization::Serialize;
+    use foundation_serialization::binary_cursor::Reader as BinaryReader;
     use sys::tempfile::tempdir;
-
-    #[derive(Serialize)]
-    struct LegacyStoredRelayer {
-        pending: u64,
-        total_proofs: u64,
-        total_claimed: u64,
-        last_claim_height: Option<u64>,
-    }
-
-    #[derive(Serialize)]
-    struct LegacyRelayerClaim {
-        id: Vec<u8>,
-        amount: u64,
-        prev_last_claim_height: Option<u64>,
-    }
-
-    #[derive(Serialize)]
-    struct LegacyClaimReceipt {
-        amount: u64,
-        relayers: Vec<LegacyRelayerClaim>,
-    }
 
     fn tracker_with_tempdir() -> ProofTracker {
         let dir = tempdir().expect("tempdir");
@@ -552,16 +530,37 @@ mod tests {
         };
 
         let manual = encode_stored_relayer(&relayer);
-        let legacy = binary_codec::serialize(&LegacyStoredRelayer {
-            pending: relayer.pending,
-            total_proofs: relayer.total_proofs,
-            total_claimed: relayer.total_claimed,
-            last_claim_height: relayer.last_claim_height,
-        })
-        .expect("legacy encode");
+        let mut reader = BinaryReader::new(&manual);
+        assert_eq!(reader.read_u64().expect("field count"), 4);
+        assert_eq!(reader.read_string().expect("pending key"), "pending");
+        assert_eq!(reader.read_u64().expect("pending"), relayer.pending);
+        assert_eq!(
+            reader.read_string().expect("total_proofs key"),
+            "total_proofs"
+        );
+        assert_eq!(
+            reader.read_u64().expect("total_proofs"),
+            relayer.total_proofs
+        );
+        assert_eq!(
+            reader.read_string().expect("total_claimed key"),
+            "total_claimed"
+        );
+        assert_eq!(
+            reader.read_u64().expect("total_claimed"),
+            relayer.total_claimed
+        );
+        assert_eq!(
+            reader.read_string().expect("last_claim_height key"),
+            "last_claim_height"
+        );
+        assert!(reader.read_bool().expect("last_claim_height present"));
+        assert_eq!(
+            reader.read_u64().expect("last_claim_height"),
+            relayer.last_claim_height.unwrap()
+        );
 
-        assert_eq!(manual, legacy);
-        let decoded = decode_stored_relayer(&legacy).expect("decode relayer");
+        let decoded = decode_stored_relayer(&manual).expect("decode relayer");
         assert_eq!(decoded.pending, relayer.pending);
         assert_eq!(decoded.total_proofs, relayer.total_proofs);
         assert_eq!(decoded.total_claimed, relayer.total_claimed);
@@ -587,22 +586,36 @@ mod tests {
         };
 
         let manual = encode_claim_receipt(&claim);
-        let legacy = binary_codec::serialize(&LegacyClaimReceipt {
-            amount: claim.amount,
-            relayers: claim
-                .relayers
-                .iter()
-                .map(|rel| LegacyRelayerClaim {
-                    id: rel.id.clone(),
-                    amount: rel.amount,
-                    prev_last_claim_height: rel.prev_last_claim_height,
-                })
-                .collect(),
-        })
-        .expect("legacy encode");
+        let mut reader = BinaryReader::new(&manual);
+        assert_eq!(reader.read_u64().expect("field count"), 2);
+        assert_eq!(reader.read_string().expect("amount key"), "amount");
+        assert_eq!(reader.read_u64().expect("amount"), claim.amount);
+        assert_eq!(reader.read_string().expect("relayers key"), "relayers");
+        let relayer_count = reader.read_u64().expect("relayer len");
+        assert_eq!(relayer_count, claim.relayers.len() as u64);
+        for expected in &claim.relayers {
+            assert_eq!(reader.read_u64().expect("relayer field count"), 3);
+            assert_eq!(reader.read_string().expect("id key"), "id");
+            let id_len = reader.read_u64().expect("id len");
+            assert_eq!(id_len, expected.id.len() as u64);
+            let id_bytes = reader.read_exact(id_len as usize).expect("id bytes");
+            assert_eq!(id_bytes, expected.id.as_slice());
+            assert_eq!(reader.read_string().expect("amount key"), "amount");
+            assert_eq!(reader.read_u64().expect("relayer amount"), expected.amount);
+            assert_eq!(
+                reader.read_string().expect("prev key"),
+                "prev_last_claim_height"
+            );
+            let has_prev = reader.read_bool().expect("prev present");
+            if let Some(height) = expected.prev_last_claim_height {
+                assert!(has_prev);
+                assert_eq!(reader.read_u64().expect("prev value"), height);
+            } else {
+                assert!(!has_prev);
+            }
+        }
 
-        assert_eq!(manual, legacy);
-        let decoded = decode_claim_receipt(&legacy).expect("decode receipt");
+        let decoded = decode_claim_receipt(&manual).expect("decode receipt");
         assert_eq!(decoded.amount, claim.amount);
         assert_eq!(decoded.relayers.len(), claim.relayers.len());
         for (lhs, rhs) in decoded.relayers.iter().zip(&claim.relayers) {

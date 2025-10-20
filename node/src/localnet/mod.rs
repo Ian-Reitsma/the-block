@@ -1,4 +1,4 @@
-use crate::util::binary_codec;
+use crate::ledger_binary;
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
@@ -44,7 +44,7 @@ impl AssistReceipt {
     }
 
     pub fn hash(&self) -> String {
-        let bytes = binary_codec::serialize(self).unwrap_or_default();
+        let bytes = ledger_binary::encode_assist_receipt(self).unwrap_or_default();
         crypto_suite::hex::encode(blake3::hash(&bytes).as_bytes())
     }
 }

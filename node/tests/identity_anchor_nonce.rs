@@ -53,11 +53,8 @@ async fn rpc_request(addr: &str, body: &Value) -> Value {
         .await
         .expect("read response");
     let resp = String::from_utf8(resp).expect("response is utf8");
-    let body_idx = resp
-        .find("\r\n\r\n")
-        .expect("headers terminator present");
-    foundation_serialization::json::from_str(&resp[body_idx + 4..])
-        .expect("parse response body")
+    let body_idx = resp.find("\r\n\r\n").expect("headers terminator present");
+    foundation_serialization::json::from_str(&resp[body_idx + 4..]).expect("parse response body")
 }
 
 fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> Value {

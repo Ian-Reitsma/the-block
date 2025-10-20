@@ -1,6 +1,6 @@
 pub mod handshake;
 pub use handshake::*;
-mod wire_binary;
+pub mod wire_binary;
 pub use wire_binary::{decode as decode_wire_message, encode as encode_wire_message};
 
 /// Messages exchanged between peers once a connection is established.

@@ -1,6 +1,6 @@
 #![allow(clippy::module_name_repetitions)]
 
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
@@ -119,29 +119,22 @@ impl RpcClient {
 
     #[allow(dead_code)]
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
-        #[derive(Serialize)]
-        #[allow(dead_code)]
-        struct Payload<'a> {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: Value,
-            #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-            auth: Option<&'a str>,
-        }
         #[derive(Deserialize)]
         #[allow(dead_code)]
         struct Envelope<T> {
             result: T,
         }
-        let params = foundation_serialization::json!({ "lane": lane.as_str() });
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "mempool.stats",
-            params,
-            auth: None,
-        };
+        let mut params = Map::new();
+        params.insert("lane".to_owned(), Value::String(lane.as_str().to_owned()));
+        let mut envelope = Map::new();
+        envelope.insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
+        envelope.insert("id".to_owned(), Value::from(1u32));
+        envelope.insert(
+            "method".to_owned(),
+            Value::String("mempool.stats".to_owned()),
+        );
+        envelope.insert("params".to_owned(), Value::Object(params));
+        let payload = Value::Object(envelope);
         let res = self
             .call(url, &payload)?
             .json::<Envelope<MempoolStats>>()
@@ -155,40 +148,26 @@ impl RpcClient {
         url: &str,
         event: WalletQosEvent<'_>,
     ) -> Result<(), WalletQosError> {
-        #[derive(Serialize)]
-        #[allow(dead_code)]
-        struct Payload<'a> {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: WalletQosParams<'a>,
-        }
-        #[derive(Serialize)]
-        #[allow(dead_code)]
-        struct WalletQosParams<'a> {
-            event: &'a str,
-            lane: &'a str,
-            fee: u64,
-            floor: u64,
-        }
         #[derive(Deserialize)]
         #[allow(dead_code)]
         struct WalletQosAck {
             status: Option<String>,
         }
 
-        let params = WalletQosParams {
-            event: event.event,
-            lane: event.lane,
-            fee: event.fee,
-            floor: event.floor,
-        };
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "mempool.qos_event",
-            params,
-        };
+        let mut params = Map::new();
+        params.insert("event".to_owned(), Value::String(event.event.to_owned()));
+        params.insert("lane".to_owned(), Value::String(event.lane.to_owned()));
+        params.insert("fee".to_owned(), Value::from(event.fee));
+        params.insert("floor".to_owned(), Value::from(event.floor));
+        let mut envelope = Map::new();
+        envelope.insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
+        envelope.insert("id".to_owned(), Value::from(1u32));
+        envelope.insert(
+            "method".to_owned(),
+            Value::String("mempool.qos_event".to_owned()),
+        );
+        envelope.insert("params".to_owned(), Value::Object(params));
+        let payload = Value::Object(envelope);
         let envelope = self
             .call(url, &payload)
             .map_err(WalletQosError::from)?

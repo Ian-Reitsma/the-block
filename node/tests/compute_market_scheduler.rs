@@ -97,7 +97,10 @@ fn scheduler_stats_rpc() {
     let stats = the_block::rpc::compute_market::scheduler_stats();
     assert_eq!(stats["success"].as_u64().unwrap(), 1);
     assert_eq!(stats["preemptions"].as_u64().unwrap(), 0);
-    assert!(matches!(stats["queued_low"], foundation_serialization::json::Value::Number(_)));
+    assert!(matches!(
+        stats["queued_low"],
+        foundation_serialization::json::Value::Number(_)
+    ));
 }
 
 #[test]

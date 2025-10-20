@@ -20,7 +20,6 @@ use crate::governance::NODE_GOV_STORE;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
-use crate::util::binary_codec;
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
@@ -32,7 +31,9 @@ use diagnostics::tracing::info;
 use diagnostics::tracing::warn;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
+pub mod block_binary;
 pub mod http_client;
+pub mod ledger_binary;
 mod legacy_cbor;
 mod py;
 
@@ -836,6 +837,8 @@ pub struct MempoolEntryDisk {
     pub timestamp_millis: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub timestamp_ticks: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub serialized_size: u64,
 }
 
 impl Default for Blockchain {
@@ -1272,12 +1275,11 @@ impl Blockchain {
             const SCHEMA_KEY: &str = "__schema_version";
             let current_version = db
                 .get(SCHEMA_KEY)
-                .and_then(|b| binary_codec::deserialize::<u32>(&b).ok())
+                .and_then(|b| ledger_binary::decode_schema_version(&b))
                 .unwrap_or(0);
             if current_version < state::schema::SCHEMA_VERSION {
-                if let Ok(bytes) = binary_codec::serialize(&state::schema::SCHEMA_VERSION) {
-                    let _ = db.insert(SCHEMA_KEY, bytes);
-                }
+                let bytes = ledger_binary::encode_schema_version(state::schema::SCHEMA_VERSION);
+                let _ = db.insert(SCHEMA_KEY, bytes);
             }
         }
         let (
@@ -1292,7 +1294,7 @@ impl Blockchain {
             base_fee,
             recent_ts,
         ) = if let Some(raw) = db.get(DB_CHAIN) {
-            match binary_codec::deserialize::<ChainDisk>(&raw) {
+            match ledger_binary::decode_chain_disk(&raw) {
                 Ok(mut disk) => {
                     if disk.schema_version > 7 {
                         return Err(py_value_err("DB schema too new"));
@@ -1386,7 +1388,7 @@ impl Blockchain {
                         };
                         db.insert(
                             DB_CHAIN,
-                            binary_codec::serialize(&migrated)
+                            ledger_binary::encode_chain_disk(&migrated)
                                 .unwrap_or_else(|e| panic!("serialize: {e}")),
                         );
                         db.remove(DB_ACCOUNTS);
@@ -1419,7 +1421,7 @@ impl Blockchain {
                             disk.block_height = disk.chain.len() as u64;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1488,7 +1490,7 @@ impl Blockchain {
                             disk.schema_version = 4;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1499,7 +1501,7 @@ impl Blockchain {
                             disk.schema_version = 5;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1507,7 +1509,7 @@ impl Blockchain {
                             disk.schema_version = 6;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1518,7 +1520,7 @@ impl Blockchain {
                             disk.schema_version = 7;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1526,7 +1528,7 @@ impl Blockchain {
                             disk.schema_version = 8;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1534,7 +1536,7 @@ impl Blockchain {
                             disk.schema_version = 9;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1542,7 +1544,7 @@ impl Blockchain {
                             disk.schema_version = 10;
                             db.insert(
                                 DB_CHAIN,
-                                binary_codec::serialize(&disk)
+                                ledger_binary::encode_chain_disk(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1561,20 +1563,20 @@ impl Blockchain {
                     }
                 }
                 Err(_) => {
-                    let chain: Vec<Block> = binary_codec::deserialize(&raw).unwrap_or_default();
+                    let chain = ledger_binary::decode_block_vec(&raw).unwrap_or_default();
                     let accounts: HashMap<String, Account> = db
                         .get(DB_ACCOUNTS)
-                        .and_then(|iv| binary_codec::deserialize(&iv).ok())
+                        .and_then(|iv| ledger_binary::decode_account_map_bytes(&iv).ok())
                         .unwrap_or_default();
-                    let (br_c, br_i): (u64, u64) = db
+                    let (_em_c, _em_i, br_c, br_i, _bh) = db
                         .get(DB_EMISSION)
-                        .and_then(|iv| {
-                            binary_codec::deserialize::<(u64, u64, u64, u64, u64)>(&iv).ok()
-                        })
-                        .map(|(_em_c, _em_i, br_c, br_i, _bh)| (br_c, br_i))
+                        .and_then(|iv| ledger_binary::decode_emission_tuple(&iv).ok())
                         .unwrap_or((
+                            0,
+                            0,
                             INITIAL_BLOCK_REWARD_CONSUMER,
                             INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                            0,
                         ));
                     let mut migrated_chain = chain.clone();
                     for b in &mut migrated_chain {
@@ -1655,7 +1657,7 @@ impl Blockchain {
                     };
                     db.insert(
                         DB_CHAIN,
-                        binary_codec::serialize(&disk_new)
+                        ledger_binary::encode_chain_disk(&disk_new)
                             .unwrap_or_else(|e| panic!("serialize: {e}")),
                     );
                     db.remove(DB_ACCOUNTS);
@@ -1997,9 +1999,13 @@ impl Blockchain {
                 break;
             }
             for e in batch {
-                let size = binary_codec::serialize(&e.tx)
-                    .map(|b| b.len() as u64)
-                    .unwrap_or(0);
+                let size = if e.serialized_size != 0 {
+                    e.serialized_size
+                } else {
+                    crate::transaction::binary::encode_signed_transaction(&e.tx)
+                        .map(|b| b.len() as u64)
+                        .unwrap_or(0)
+                };
                 let fpb = if size == 0 { 0 } else { e.tx.tip / size };
                 #[cfg(feature = "telemetry")]
                 let _span = diagnostics::tracing::span!(
@@ -2015,9 +2021,6 @@ impl Blockchain {
                 #[cfg(not(feature = "telemetry"))]
                 let _ = fpb;
                 if bc.accounts.contains_key(&e.sender) {
-                    let size = binary_codec::serialize(&e.tx)
-                        .map(|b| b.len() as u64)
-                        .unwrap_or(0);
                     let pool = match e.tx.lane {
                         FeeLane::Consumer => &bc.mempool_consumer,
                         FeeLane::Industrial => &bc.mempool_industrial,
@@ -2108,21 +2111,37 @@ impl Blockchain {
     pub fn persist_chain(&mut self) -> PyResult<()> {
         let mut mempool: Vec<MempoolEntryDisk> = Vec::new();
         self.mempool_consumer.for_each(|key, value| {
+            let serialized_size = if value.serialized_size != 0 {
+                value.serialized_size
+            } else {
+                crate::transaction::binary::encode_signed_transaction(&value.tx)
+                    .map(|bytes| bytes.len() as u64)
+                    .unwrap_or(0)
+            };
             mempool.push(MempoolEntryDisk {
                 sender: key.0.clone(),
                 nonce: key.1,
                 tx: value.tx.clone(),
                 timestamp_millis: value.timestamp_millis,
                 timestamp_ticks: value.timestamp_ticks,
+                serialized_size,
             });
         });
         self.mempool_industrial.for_each(|key, value| {
+            let serialized_size = if value.serialized_size != 0 {
+                value.serialized_size
+            } else {
+                crate::transaction::binary::encode_signed_transaction(&value.tx)
+                    .map(|bytes| bytes.len() as u64)
+                    .unwrap_or(0)
+            };
             mempool.push(MempoolEntryDisk {
                 sender: key.0.clone(),
                 nonce: key.1,
                 tx: value.tx.clone(),
                 timestamp_millis: value.timestamp_millis,
                 timestamp_ticks: value.timestamp_ticks,
+                serialized_size,
             });
         });
         let disk = ChainDisk {
@@ -2145,7 +2164,7 @@ impl Blockchain {
             epoch_bytes_out: self.epoch_bytes_out,
             recent_timestamps: self.recent_timestamps.iter().copied().collect(),
         };
-        let bytes = binary_codec::serialize(&disk)
+        let bytes = ledger_binary::encode_chain_disk(&disk)
             .map_err(|e| py_value_err(format!("Serialization error: {e}")))?;
         self.db.insert(DB_CHAIN, bytes);
         // ensure no legacy column families linger on disk
@@ -2197,11 +2216,7 @@ impl Blockchain {
         self.chain.push(g);
         self.recent_timestamps.push_back(0);
         self.block_height = 1;
-        let bytes =
-            binary_codec::serialize(&self.chain).map_err(|e| py_value_err(e.to_string()))?;
-        self.db.insert(DB_CHAIN, bytes);
-        self.db.flush();
-        Ok(())
+        self.persist_chain()
     }
 
     /// Add a new account with starting balances.
@@ -2303,7 +2318,7 @@ impl Blockchain {
         }
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
-        let size = binary_codec::serialize(&tx)
+        let size = crate::transaction::binary::encode_signed_transaction(&tx)
             .map_err(|_| {
                 #[cfg(feature = "telemetry")]
                 self.record_reject("fee_overflow");

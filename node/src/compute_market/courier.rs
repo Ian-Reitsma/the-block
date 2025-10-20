@@ -1,8 +1,8 @@
 use super::scheduler::{self, Capability};
+use crate::util::binary_struct::{assign_once, decode_struct, ensure_exhausted, DecodeError};
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::binary;
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::binary_cursor::{Reader, Writer};
 use rand::RngCore;
 use runtime::{block_on, sleep};
 use sled::Tree;
@@ -10,14 +10,70 @@ use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Receipt stored for carry-to-earn courier mode.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CourierReceipt {
     pub id: u64,
     pub bundle_hash: String,
     pub sender: String,
     pub timestamp: u64,
     pub acknowledged: bool,
+}
+
+impl CourierReceipt {
+    fn encode(&self) -> Vec<u8> {
+        let mut writer = Writer::with_capacity(128);
+        writer.write_struct(|s| {
+            s.field_u64("id", self.id);
+            s.field_string("bundle_hash", &self.bundle_hash);
+            s.field_string("sender", &self.sender);
+            s.field_u64("timestamp", self.timestamp);
+            s.field_bool("acknowledged", self.acknowledged);
+        });
+        writer.finish()
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut reader = Reader::new(bytes);
+        let mut id = None;
+        let mut bundle_hash = None;
+        let mut sender = None;
+        let mut timestamp = None;
+        let mut acknowledged = None;
+
+        decode_struct(&mut reader, Some(5), |key, reader| match key {
+            "id" => {
+                let value = reader.read_u64()?;
+                assign_once(&mut id, value, "id")
+            }
+            "bundle_hash" => {
+                let value = reader.read_string()?;
+                assign_once(&mut bundle_hash, value, "bundle_hash")
+            }
+            "sender" => {
+                let value = reader.read_string()?;
+                assign_once(&mut sender, value, "sender")
+            }
+            "timestamp" => {
+                let value = reader.read_u64()?;
+                assign_once(&mut timestamp, value, "timestamp")
+            }
+            "acknowledged" => {
+                let value = reader.read_bool()?;
+                assign_once(&mut acknowledged, value, "acknowledged")
+            }
+            other => Err(DecodeError::UnknownField(other.to_owned())),
+        })?;
+
+        ensure_exhausted(&reader)?;
+
+        Ok(CourierReceipt {
+            id: id.ok_or(DecodeError::MissingField("id"))?,
+            bundle_hash: bundle_hash.ok_or(DecodeError::MissingField("bundle_hash"))?,
+            sender: sender.ok_or(DecodeError::MissingField("sender"))?,
+            timestamp: timestamp.ok_or(DecodeError::MissingField("timestamp"))?,
+            acknowledged: acknowledged.ok_or(DecodeError::MissingField("acknowledged"))?,
+        })
+    }
 }
 
 pub struct CourierStore {
@@ -50,7 +106,7 @@ impl CourierStore {
             timestamp: ts,
             acknowledged: false,
         };
-        let bytes = binary::encode(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+        let bytes = receipt.encode();
         let _ = self.tree.insert(id.to_be_bytes(), bytes);
         receipt
     }
@@ -75,7 +131,7 @@ impl CourierStore {
             .collect::<Result<Vec<_>, _>>()?;
         for k in keys {
             if let Some(v) = self.tree.get(&k)? {
-                if let Ok(mut rec) = binary::decode::<CourierReceipt>(&v) {
+                if let Ok(mut rec) = CourierReceipt::decode(&v) {
                     if rec.acknowledged {
                         continue;
                     }
@@ -88,8 +144,7 @@ impl CourierStore {
                         diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec) {
                             rec.acknowledged = true;
-                            let bytes = binary::encode(&rec)
-                                .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+                            let bytes = rec.encode();
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                                 diagnostics::tracing::error!("courier update failed: {e}");
@@ -138,7 +193,7 @@ impl CourierStore {
             .collect::<Result<Vec<_>, _>>()?;
         for k in keys {
             if let Some(v) = self.tree.get(&k)? {
-                if let Ok(mut rec) = binary::decode::<CourierReceipt>(&v) {
+                if let Ok(mut rec) = CourierReceipt::decode(&v) {
                     if rec.acknowledged {
                         continue;
                     }
@@ -151,8 +206,7 @@ impl CourierStore {
                         diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec).await {
                             rec.acknowledged = true;
-                            let bytes = binary::encode(&rec)
-                                .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+                            let bytes = rec.encode();
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                                 diagnostics::tracing::error!("courier update failed: {e}");
@@ -193,7 +247,7 @@ impl CourierStore {
             .get(id.to_be_bytes())
             .ok()
             .flatten()
-            .and_then(|v| binary::decode(&v).ok())
+            .and_then(|v| CourierReceipt::decode(&v).ok())
     }
 }
 

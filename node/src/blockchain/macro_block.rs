@@ -1,4 +1,5 @@
-use crate::util::binary_codec;
+use crate::ledger_binary;
+use crate::util::binary_struct;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
 use std::collections::HashMap;
@@ -28,11 +29,11 @@ impl MacroBlock {
 
     /// Serialize to bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        binary_codec::serialize(self).expect("serialize macro block")
+        ledger_binary::encode_macro_block(self).expect("serialize macro block")
     }
 
     /// Deserialize from bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, codec::Error> {
-        binary_codec::deserialize(bytes)
+    pub fn from_bytes(bytes: &[u8]) -> binary_struct::Result<Self> {
+        ledger_binary::decode_macro_block(bytes)
     }
 }

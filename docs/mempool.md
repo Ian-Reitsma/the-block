@@ -19,6 +19,12 @@ under the `Blockchain` struct, which maintains two lane‑separated DashMaps:
 4. **Insertion** – the entry is stored as a `MempoolEntry` with the current
    timestamp, monotonic tick, and cached serialized size.
 
+On-disk snapshots mirror this cached byte length through `MempoolEntryDisk`.
+When the node persists `ChainDisk`, each entry carries `serialized_size`, and
+the startup rebuild path consumes that value before attempting to re-encode the
+transaction. Legacy snapshots that predate the field still decode thanks to the
+cursor-based compatibility helper in `ledger_binary`.
+
 ## Priority Queues and Eviction
 
 The mempool orders entries by fee density and expiry.  Eviction uses

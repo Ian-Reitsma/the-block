@@ -1,7 +1,35 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-19 02:10:00Z_
+_Last updated: 2025-10-20 10:15:00Z_
 
+> **2025-10-20 update (ledger persistence + mempool rebuild):** The new
+> `ledger_binary` helpers now drive every on-disk snapshot—`MempoolEntryDisk`
+> carries a cached `serialized_size`, the rebuild path consumes that byte count
+> before re-encoding, and fresh unit tests cover `decode_block_vec`,
+> `decode_account_map_bytes`, `decode_emission_tuple`, and legacy mempool entries
+> without touching `binary_codec`. This locks ledger persistence and startup
+> replay onto the cursor stack for FIRST_PARTY_ONLY runs.
+> **2025-10-19 update (storage + networking tests):** Provider profile
+> compatibility suites now construct their "legacy" fixtures through a dedicated
+> cursor writer instead of `binary_codec::serialize`, locking the round-trip
+> layout while keeping randomized EWMA/throughput coverage intact. Gossip peer
+> telemetry tests likewise assert against the first-party JSON builders—unit
+> tests and the aggregator failover harness both reuse `peer_snapshot_to_value`
+> so no `foundation_serde` derives run during CI.
+
+> **2025-10-19 update (network + ledger binaries):** Gossip messages, ledger
+> blocks, and transactions now encode exclusively through first-party cursor
+> helpers. `net::message` ships manual `encode_message`/`encode_payload`
+> routines plus a comprehensive payload test suite (handshake, peer sets,
+> transactions, blob chunks, blocks, chains, and reputation updates) so the
+> networking stack no longer depends on the deprecated `binary_codec` shim.
+> Ledger persistence introduces `transaction::binary` and `block_binary`
+> modules that cover raw payloads, signed transactions (including quantum
+> variants), blob transactions, and full blocks with cursor-backed encode/decode
+> helpers and round-trip fixtures. Updated regression tests sort drop and
+> handshake maps before asserting on encoded indices, keeping deterministic
+> layouts aligned with the writers while the DEX/storage manifest suites inspect
+> cursor output directly instead of the legacy codec.
 > **2025-10-19 update (jurisdiction codec):** `crates/jurisdiction` now exposes
 > first-party binary encoders/decoders for policy packs, signed packs, and typed
 > diffs through the shared cursor helpers. CLI/RPC callers consume the new
@@ -550,11 +578,12 @@ Dependency Migration" milestone) to coordinate the rollout.
 
 ### Recent Completions
 
-- ✅ `foundation_rpc` now exposes typed `ResponsePayload<T>` helpers plus
-  `Request::with_id/with_params` builders, and the node RPC client consumes them
-  directly. This removes bespoke JSON-RPC structs, keeps error propagation
-  inside the first-party facade, and unlocks guard-on/off parity for envelope
-  handling.
+- ✅ `foundation_rpc` still exposes typed envelope helpers, but the node RPC
+  client now assembles request maps and parses responses manually through
+  `foundation_serialization::json::Value`. This removes the remaining
+  `foundation_serde` derive invocations from client-side payloads, keeps error
+  reporting inside the first-party facade, and guarantees `FIRST_PARTY_ONLY`
+  builds never touch the stub backend when issuing or decoding JSON-RPC calls.
 - ✅ `foundation_serialization::json::Value` implements `Display`, restoring the
   `.to_string()` ergonomics expected by RPC callers while keeping output locked
   to the compact renderer via a new regression test.

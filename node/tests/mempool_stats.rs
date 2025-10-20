@@ -124,12 +124,18 @@ fn mempool_qos_event_public_rpc() {
             params.insert("event".to_string(), Value::String(event.event.to_string()));
             params.insert("lane".to_string(), Value::String(event.lane.to_string()));
             params.insert("fee".to_string(), Value::Number(Number::from(event.fee)));
-            params.insert("floor".to_string(), Value::Number(Number::from(event.floor)));
+            params.insert(
+                "floor".to_string(),
+                Value::Number(Number::from(event.floor)),
+            );
 
             let mut payload_map = Map::new();
             payload_map.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
-            payload_map.insert("id".to_string(), Value::Number(Number::from(7))); 
-            payload_map.insert("method".to_string(), Value::String("mempool.qos_event".to_string()));
+            payload_map.insert("id".to_string(), Value::Number(Number::from(7)));
+            payload_map.insert(
+                "method".to_string(),
+                Value::String("mempool.qos_event".to_string()),
+            );
             payload_map.insert("params".to_string(), Value::Object(params));
             let payload = Value::Object(payload_map);
 

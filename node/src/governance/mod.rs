@@ -16,6 +16,9 @@ use concurrency::Lazy;
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
+pub use governance_spec::treasury::{
+    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use release::{
@@ -24,11 +27,8 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation,
-    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
-};
-pub use governance_spec::treasury::{
-    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
+    QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 

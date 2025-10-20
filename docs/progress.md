@@ -1,4 +1,42 @@
 # Project Progress Snapshot
+> **Review (2025-10-20, morning):** Ledger snapshots now persist cached
+> transaction sizes and decode helpers cover every legacy cursor entry. The
+> mempool writer stores `serialized_size` for each `MempoolEntryDisk`, the
+> startup rebuild consumes that cached byte length before re-encoding, and new
+> `ledger_binary` tests exercise `decode_block_vec`, `decode_account_map_bytes`,
+> `decode_emission_tuple`, and the legacy mempool entry layout so FIRST_PARTY_ONLY
+> runs catch regressions without falling back to `binary_codec`.
+> **Review (2025-10-19, afternoon):** Storage provider-profile regression tests
+> no longer depend on `binary_codec`—the suite now generates its "legacy"
+> fixtures with the same cursor writer as production code, while randomized
+> EWMA/throughput coverage continues to run under `FIRST_PARTY_ONLY`. Gossip
+> peer telemetry and aggregator failover tests switched to the shared
+> `peer_snapshot_to_value` helper so unit tests assert against the in-house JSON
+> builders instead of serde-derived payloads, keeping the networking pipeline on
+> first-party serialization end to end.
+> **Review (2025-10-19, midday):** The node RPC client now builds JSON-RPC
+> envelopes manually using `foundation_serialization::json::Value` and parses
+> responses without relying on `foundation_serde` derives. QoS/mempool/stake
+> calls reuse shared map builders, invalid envelopes surface through
+> `RpcClientError::InvalidResponse`, and FIRST_PARTY_ONLY builds no longer trip
+> the stub backend when issuing or decoding client requests.
+> **Review (2025-10-19, early morning):** Gossip, ledger, and transaction
+> payloads now encode exclusively through the first-party binary cursor. The
+> networking layer introduces `net::message::encode_message`/`encode_payload`
+> helpers that sign and transport `Message`/`Payload` variants without the
+> deprecated `foundation_serialization::json!` macro or the legacy
+> `binary_codec` shim; a new test suite exercises every payload branch
+> (handshake, peer lists, transactions, blob chunks, block/chain broadcasts, and
+> reputation updates) plus full message round-trips with optional partition and
+> QUIC fingerprint headers. Ledger persistence gained dedicated
+> `transaction::binary` and `block_binary` modules that encode raw payloads,
+> signed transactions, blob transactions, and full blocks via the shared cursor
+> utilities with parity fixtures for quantum and non-quantum builds. Networking
+> regression coverage now sorts drop and handshake maps before asserting on the
+> encoded layout so deterministic ordering mirrors the manual writers, and the
+> DEX/storage manifest tests inspect cursor output directly instead of
+> round-tripping through `binary_codec`, eliminating the remaining serde-backed
+> sled snapshots.
 > **Review (2025-10-18, late night+++):** Jurisdiction policy packs gained typed
 > diff helpers, manual binary codecs, and dual-format persistence. `PolicyDiff`
 > now records consent/feature deltas as structured `Change<T>` records that round-

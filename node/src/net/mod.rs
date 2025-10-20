@@ -57,7 +57,6 @@ pub use message::decode as fuzz_decode_message;
 
 use crate::config::{OverlayBackend, OverlayConfig};
 use crate::net::peer::pk_from_addr;
-use crate::util::binary_codec;
 use crate::{
     gossip::relay::{Relay, RelayStatus},
     BlobTx, Blockchain, ShutdownFlag, SignedTransaction,
@@ -1583,7 +1582,7 @@ impl Node {
                                 diagnostics::tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
                             });
                         }
-                        if let Ok(msg) = binary_codec::deserialize::<Message>(&buf) {
+                        if let Ok(msg) = message::decode(&buf) {
                             peers.handle_message(msg, addr, &chain);
                         }
                     }
@@ -1787,7 +1786,7 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
         }
     }
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
-    let bytes = binary_codec::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    let bytes = message::encode_message(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     #[cfg(feature = "telemetry")]
     if crate::telemetry::should_log("p2p") {
         let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
@@ -1807,7 +1806,7 @@ pub(crate) fn send_quic_msg(
     use crate::net::quic;
     #[cfg(feature = "telemetry")]
     use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
-    let bytes = binary_codec::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    let bytes = message::encode_message(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     let cert = quic::certificate_from_der(cert.clone()).map_err(quic::ConnectError::Other)?;
     let res = runtime::block_on(async {
         let conn = quic::get_connection(addr, &cert).await?;

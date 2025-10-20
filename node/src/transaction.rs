@@ -3,6 +3,8 @@
 //! Exposes Python bindings for constructing, signing, and verifying
 //! transactions using Ed25519 with domain separation.
 
+pub mod binary;
+
 use crate::py::{PyError, PyResult};
 use crate::{to_array_32, to_array_64};
 use codec::{self, profiles};

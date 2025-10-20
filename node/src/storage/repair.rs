@@ -10,10 +10,10 @@ use crate::telemetry::{
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted};
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::binary_cursor::{Reader, Writer};
-use foundation_serialization::json;
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::json::{self, Map, Value};
 use foundation_time::UtcDateTime;
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -128,9 +128,7 @@ pub struct RepairFailure {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RepairLogStatus {
     Success,
     Failure,
@@ -140,18 +138,32 @@ pub enum RepairLogStatus {
 
 impl fmt::Display for RepairLogStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl RepairLogStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
             RepairLogStatus::Success => "success",
             RepairLogStatus::Failure => "failure",
             RepairLogStatus::Skipped => "skipped",
             RepairLogStatus::Fatal => "fatal",
-        };
-        f.write_str(label)
+        }
+    }
+
+    fn from_str(label: &str) -> Option<Self> {
+        match label {
+            "success" => Some(RepairLogStatus::Success),
+            "failure" => Some(RepairLogStatus::Failure),
+            "skipped" => Some(RepairLogStatus::Skipped),
+            "fatal" => Some(RepairLogStatus::Fatal),
+            _ => None,
+        }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, Debug)]
 pub struct RepairLogEntry {
     pub timestamp: i64,
     pub manifest: String,
@@ -160,6 +172,85 @@ pub struct RepairLogEntry {
     pub bytes: u64,
     pub missing_slots: Vec<u32>,
     pub error: Option<String>,
+}
+
+pub(crate) fn repair_log_entry_to_value(entry: &RepairLogEntry) -> Value {
+    let mut map = Map::new();
+    map.insert("timestamp".to_owned(), Value::from(entry.timestamp));
+    map.insert("manifest".to_owned(), Value::String(entry.manifest.clone()));
+    map.insert(
+        "chunk".to_owned(),
+        entry.chunk.map(Value::from).unwrap_or(Value::Null),
+    );
+    map.insert(
+        "status".to_owned(),
+        Value::String(entry.status.as_str().to_owned()),
+    );
+    map.insert("bytes".to_owned(), Value::from(entry.bytes));
+    map.insert(
+        "missing_slots".to_owned(),
+        Value::Array(
+            entry
+                .missing_slots
+                .iter()
+                .map(|slot| Value::from(*slot))
+                .collect(),
+        ),
+    );
+    map.insert(
+        "error".to_owned(),
+        entry
+            .error
+            .as_ref()
+            .map(|msg| Value::String(msg.clone()))
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn repair_log_entry_from_value(value: &Value) -> Option<RepairLogEntry> {
+    let obj = value.as_object()?;
+    let timestamp = obj.get("timestamp")?.as_i64()?;
+    let manifest = obj.get("manifest")?.as_str()?.to_owned();
+    let chunk = match obj.get("chunk") {
+        Some(Value::Null) | None => None,
+        Some(value) => Some(value_to_u32(value)?),
+    };
+    let status = obj
+        .get("status")?
+        .as_str()
+        .and_then(RepairLogStatus::from_str)?;
+    let bytes = obj.get("bytes")?.as_u64()?;
+    let missing_slots = obj
+        .get("missing_slots")
+        .and_then(|value| value.as_array())
+        .map(|array| {
+            let mut slots = Vec::with_capacity(array.len());
+            for item in array {
+                slots.push(value_to_u32(item)?);
+            }
+            Some(slots)
+        })
+        .unwrap_or_else(|| Some(Vec::new()))?;
+    let error = match obj.get("error") {
+        Some(Value::Null) | None => None,
+        Some(value) => Some(value.as_str()?.to_owned()),
+    };
+
+    Some(RepairLogEntry {
+        timestamp,
+        manifest,
+        chunk,
+        status,
+        bytes,
+        missing_slots,
+        error,
+    })
+}
+
+fn value_to_u32(value: &Value) -> Option<u32> {
+    let raw = value.as_u64()?;
+    u32::try_from(raw).ok()
 }
 
 #[derive(Clone, Debug)]
@@ -182,7 +273,8 @@ impl RepairLog {
         fs::create_dir_all(&self.dir)?;
         let path = self.current_file_path();
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let line = json::to_vec(entry).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        let value = repair_log_entry_to_value(entry);
+        let line = json::to_vec(&value).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
         file.write_all(&line)?;
         file.write_all(b"\n")?;
         self.prune_old_files()?;
@@ -202,8 +294,10 @@ impl RepairLog {
             let fh = OpenOptions::new().read(true).open(&file)?;
             let reader = BufReader::new(fh);
             for line in reader.lines().flatten() {
-                if let Ok(entry) = json::from_slice::<RepairLogEntry>(line.as_bytes()) {
-                    entries.push(entry);
+                if let Ok(value) = json::from_slice::<Value>(line.as_bytes()) {
+                    if let Some(entry) = repair_log_entry_from_value(&value) {
+                        entries.push(entry);
+                    }
                     if entries.len() >= limit {
                         break;
                     }
@@ -1036,8 +1130,7 @@ fn should_stop() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::binary_codec;
-    use foundation_serialization::{Deserialize, Serialize};
+    use foundation_serialization::binary_cursor::Reader as BinaryReader;
     use sys::tempfile::tempdir;
 
     #[test]
@@ -1071,18 +1164,18 @@ mod tests {
             next_retry_at: 123_456,
         };
         let encoded = encode_failure_record(&record);
-        #[derive(Serialize, Deserialize)]
-        #[serde(crate = "foundation_serialization::serde")]
-        struct LegacyFailureRecord {
-            attempts: u32,
-            next_retry_at: i64,
-        }
-        let legacy_record = LegacyFailureRecord {
-            attempts: record.attempts,
-            next_retry_at: record.next_retry_at,
-        };
-        let legacy = binary_codec::serialize(&legacy_record).expect("legacy encode");
-        assert_eq!(encoded, legacy);
+        let mut reader = BinaryReader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 2);
+        assert_eq!(reader.read_string().expect("attempts key"), "attempts");
+        assert_eq!(reader.read_u32().expect("attempts"), record.attempts);
+        assert_eq!(
+            reader.read_string().expect("next_retry_at key"),
+            "next_retry_at"
+        );
+        assert_eq!(
+            reader.read_i64().expect("next_retry_at"),
+            record.next_retry_at
+        );
 
         let decoded = decode_failure_record(&encoded).expect("decode");
         assert_eq!(decoded, record);

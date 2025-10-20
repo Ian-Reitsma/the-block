@@ -128,7 +128,10 @@ fn relay_only_rejects_start_mining() {
         )
         .await;
         assert_eq!(val["result"]["error"]["code"].as_i64(), Some(-32075));
-        assert_eq!(val["result"]["error"]["message"].as_str(), Some("relay_only"));
+        assert_eq!(
+            val["result"]["error"]["message"].as_str(),
+            Some("relay_only")
+        );
         assert!(!mining.load(std::sync::atomic::Ordering::SeqCst));
 
         handle.abort();

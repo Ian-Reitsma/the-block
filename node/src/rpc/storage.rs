@@ -1,12 +1,13 @@
 #![forbid(unsafe_code)]
 
 use concurrency::Lazy;
-use foundation_serialization::json::{self, Map, Number, Value};
+use foundation_serialization::json::{Map, Number, Value};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
 
 use crate::storage::pipeline::StoragePipeline;
+use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
@@ -184,13 +185,16 @@ pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::V
     let log = pipeline.repair_log();
     let limit = limit.unwrap_or(25).min(500);
     match log.recent_entries(limit) {
-        Ok(entries) => match json::to_value(entries) {
-            Ok(val) => json_object(vec![
+        Ok(entries) => {
+            let values: Vec<Value> = entries
+                .into_iter()
+                .map(|entry| repair_log_entry_to_value(&entry))
+                .collect();
+            json_object(vec![
                 ("status", Value::String("ok".to_string())),
-                ("entries", val),
-            ]),
-            Err(err) => error_value(err.to_string()),
-        },
+                ("entries", Value::Array(values)),
+            ])
+        }
         Err(err) => error_value(err.to_string()),
     }
 }
@@ -335,10 +339,7 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
                     "compression_level",
                     number_from_option_i32(entry.compression_level),
                 ),
-                (
-                    "erasure_fallback",
-                    Value::Bool(entry.erasure_fallback),
-                ),
+                ("erasure_fallback", Value::Bool(entry.erasure_fallback)),
                 (
                     "compression_fallback",
                     Value::Bool(entry.compression_fallback),

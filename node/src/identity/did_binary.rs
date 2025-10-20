@@ -149,7 +149,6 @@ fn read_fixed_array<const N: usize>(
 mod tests {
     use super::*;
     use crate::identity::did::DidAttestationRecord;
-    use crate::util::binary_codec;
     use foundation_serialization::binary_cursor::Writer;
     use rand::{rngs::StdRng, RngCore};
 
@@ -229,11 +228,48 @@ mod tests {
     #[test]
     fn compatibility_with_legacy_codec() {
         let record = sample_record();
-        let legacy = binary_codec::serialize(&record).expect("legacy encode");
-        let manual = encode_record(&record);
-        assert_eq!(legacy, manual);
+        let encoded = encode_record(&record);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 7);
+        assert_eq!(reader.read_string().expect("address key"), "address");
+        assert_eq!(reader.read_string().expect("address"), record.address);
+        assert_eq!(reader.read_string().expect("document key"), "document");
+        assert_eq!(reader.read_string().expect("document"), record.document);
+        assert_eq!(reader.read_string().expect("hash key"), "hash");
+        assert_eq!(reader.read_u64().expect("hash len"), 32);
+        for byte in record.hash {
+            assert_eq!(reader.read_u8().expect("hash byte"), byte);
+        }
+        assert_eq!(reader.read_string().expect("nonce key"), "nonce");
+        assert_eq!(reader.read_u64().expect("nonce"), record.nonce);
+        assert_eq!(reader.read_string().expect("updated_at key"), "updated_at");
+        assert_eq!(reader.read_u64().expect("updated_at"), record.updated_at);
+        assert_eq!(reader.read_string().expect("public_key key"), "public_key");
+        assert_eq!(
+            reader.read_u64().expect("public key len"),
+            record.public_key.len() as u64
+        );
+        for byte in &record.public_key {
+            assert_eq!(reader.read_u8().expect("public key byte"), *byte);
+        }
+        assert_eq!(
+            reader.read_string().expect("attestation key"),
+            "remote_attestation"
+        );
+        assert!(reader.read_bool().expect("attestation present"));
+        assert_eq!(reader.read_u64().expect("attestation fields"), 2);
+        assert_eq!(reader.read_string().expect("signer key"), "signer");
+        assert_eq!(
+            reader.read_string().expect("signer"),
+            record.remote_attestation.as_ref().unwrap().signer
+        );
+        assert_eq!(reader.read_string().expect("signature key"), "signature");
+        assert_eq!(
+            reader.read_string().expect("signature"),
+            record.remote_attestation.as_ref().unwrap().signature
+        );
 
-        let decoded = decode_record(&legacy).expect("manual decode");
+        let decoded = decode_record(&encoded).expect("manual decode");
         assert_eq!(record, decoded);
     }
 
@@ -242,11 +278,32 @@ mod tests {
         let mut record = sample_record();
         record.remote_attestation = None;
 
-        let legacy = binary_codec::serialize(&record).expect("legacy encode");
-        let manual = encode_record(&record);
-        assert_eq!(legacy, manual);
+        let encoded = encode_record(&record);
+        let mut reader = Reader::new(&encoded);
+        assert_eq!(reader.read_u64().expect("field count"), 6);
+        assert_eq!(reader.read_string().expect("address key"), "address");
+        assert_eq!(reader.read_string().expect("address"), record.address);
+        assert_eq!(reader.read_string().expect("document key"), "document");
+        assert_eq!(reader.read_string().expect("document"), record.document);
+        assert_eq!(reader.read_string().expect("hash key"), "hash");
+        assert_eq!(reader.read_u64().expect("hash len"), 32);
+        for byte in record.hash {
+            assert_eq!(reader.read_u8().expect("hash byte"), byte);
+        }
+        assert_eq!(reader.read_string().expect("nonce key"), "nonce");
+        assert_eq!(reader.read_u64().expect("nonce"), record.nonce);
+        assert_eq!(reader.read_string().expect("updated key"), "updated_at");
+        assert_eq!(reader.read_u64().expect("updated_at"), record.updated_at);
+        assert_eq!(reader.read_string().expect("public key"), "public_key");
+        assert_eq!(
+            reader.read_u64().expect("public key len"),
+            record.public_key.len() as u64
+        );
+        for byte in &record.public_key {
+            assert_eq!(reader.read_u8().expect("public key byte"), *byte);
+        }
 
-        let decoded = decode_record(&legacy).expect("manual decode");
+        let decoded = decode_record(&encoded).expect("manual decode");
         assert_eq!(record, decoded);
     }
 
@@ -351,11 +408,17 @@ mod tests {
             let decoded = decode_record(&encoded).expect("decode");
             assert_eq!(record, decoded);
 
-            let legacy = binary_codec::serialize(&record).expect("legacy encode");
+            let legacy = encode_via_writer(&record);
             assert_eq!(legacy, encoded);
 
             let legacy_decoded = decode_record(&legacy).expect("legacy decode");
             assert_eq!(legacy_decoded, record);
         }
+    }
+
+    fn encode_via_writer(record: &DidRecord) -> Vec<u8> {
+        let mut writer = Writer::new();
+        super::write_record(&mut writer, record);
+        writer.finish()
     }
 }
