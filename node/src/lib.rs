@@ -2316,8 +2316,13 @@ impl Blockchain {
             self.pending_multisig.insert(key.as_bytes().to_vec(), tx);
             return Err(TxAdmissionError::PendingSignatures);
         }
+        let mut tx = tx;
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
+        let base_fee = self.base_fee;
+        if tx.tip == 0 {
+            tx.tip = tx.payload.fee.saturating_sub(base_fee);
+        }
         let size = crate::transaction::binary::encode_signed_transaction(&tx)
             .map_err(|_| {
                 #[cfg(feature = "telemetry")]

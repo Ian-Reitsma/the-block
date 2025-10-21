@@ -3,8 +3,11 @@
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
 use foundation_profiler::ProfilerGuard;
-use foundation_serialization::json::{self, Map as JsonMap};
+use foundation_serialization::json::{
+    self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+};
 use runtime::sync::CancellationToken;
+use std::convert::TryFrom;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -150,41 +153,7 @@ impl CliLogSink {
     }
 
     fn write_json(&self, record: &LogRecord, stderr: &mut io::Stderr) {
-        let mut obj = JsonMap::new();
-        obj.insert(
-            "level".into(),
-            foundation_serialization::json!(record.level.as_str()),
-        );
-        obj.insert(
-            "target".into(),
-            foundation_serialization::json!(record.target.as_ref()),
-        );
-        obj.insert(
-            "module".into(),
-            foundation_serialization::json!(record.module_path.as_ref()),
-        );
-        obj.insert(
-            "file".into(),
-            foundation_serialization::json!(record.file.as_ref()),
-        );
-        obj.insert("line".into(), foundation_serialization::json!(record.line));
-        obj.insert(
-            "message".into(),
-            foundation_serialization::json!(record.message.as_ref()),
-        );
-        if !record.fields.is_empty() {
-            let mut fields = JsonMap::new();
-            for (idx, field) in record.fields.iter().enumerate() {
-                let key = if field.key.is_empty() {
-                    format!("field_{idx}")
-                } else {
-                    field.key.to_string()
-                };
-                fields.insert(key, foundation_serialization::json!(field.value));
-            }
-            obj.insert("fields".into(), foundation_serialization::json!(fields));
-        }
-        match json::to_string(&obj) {
+        match json::to_string(&log_record_to_value(record)) {
             Ok(rendered) => {
                 let _ = stderr.write_all(rendered.as_bytes());
             }
@@ -261,32 +230,7 @@ impl TraceWriter {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros();
-        let mut args = JsonMap::new();
-        args.insert(
-            "message".into(),
-            foundation_serialization::json!(record.message.as_ref()),
-        );
-        args.insert(
-            "level".into(),
-            foundation_serialization::json!(record.level.as_str()),
-        );
-        for (idx, field) in record.fields.iter().enumerate() {
-            let key = if field.key.is_empty() {
-                format!("field_{idx}")
-            } else {
-                field.key.to_string()
-            };
-            args.insert(key, foundation_serialization::json!(field.value));
-        }
-        let event = foundation_serialization::json!({
-            "name": record.target.as_ref(),
-            "cat": record.module_path.as_ref(),
-            "ph": "i",
-            "s": "g",
-            "ts": ts,
-            "args": args,
-        });
-        match json::to_string(&event) {
+        match json::to_string(&trace_event_value(record, ts)) {
             Ok(rendered) => {
                 let _ = guard.file.write_all(rendered.as_bytes());
             }
@@ -312,6 +256,86 @@ impl TraceWriter {
             let _ = guard.file.flush();
         }
     }
+}
+
+fn log_record_to_value(record: &LogRecord) -> JsonValue {
+    let mut obj = JsonMap::new();
+    obj.insert(
+        "level".into(),
+        JsonValue::String(record.level.as_str().to_string()),
+    );
+    obj.insert(
+        "target".into(),
+        JsonValue::String(record.target.to_string()),
+    );
+    obj.insert(
+        "module".into(),
+        JsonValue::String(record.module_path.to_string()),
+    );
+    obj.insert("file".into(), JsonValue::String(record.file.to_string()));
+    obj.insert(
+        "line".into(),
+        JsonValue::Number(JsonNumber::from(record.line)),
+    );
+    obj.insert(
+        "message".into(),
+        JsonValue::String(record.message.to_string()),
+    );
+    if let Some(fields) = record_fields_value(&record.fields) {
+        obj.insert("fields".into(), fields);
+    }
+    JsonValue::Object(obj)
+}
+
+fn record_fields_value(fields: &[diagnostics::FieldValue]) -> Option<JsonValue> {
+    if fields.is_empty() {
+        return None;
+    }
+    let mut map = JsonMap::new();
+    for (idx, field) in fields.iter().enumerate() {
+        let key = if field.key.is_empty() {
+            format!("field_{idx}")
+        } else {
+            field.key.to_string()
+        };
+        map.insert(key, JsonValue::String(field.value.clone()));
+    }
+    Some(JsonValue::Object(map))
+}
+
+fn trace_event_value(record: &LogRecord, ts: u128) -> JsonValue {
+    let mut args = JsonMap::new();
+    args.insert(
+        "message".into(),
+        JsonValue::String(record.message.to_string()),
+    );
+    args.insert(
+        "level".into(),
+        JsonValue::String(record.level.as_str().to_string()),
+    );
+    for (idx, field) in record.fields.iter().enumerate() {
+        let key = if field.key.is_empty() {
+            format!("field_{idx}")
+        } else {
+            field.key.to_string()
+        };
+        args.insert(key, JsonValue::String(field.value.clone()));
+    }
+    let mut event = JsonMap::new();
+    event.insert("name".into(), JsonValue::String(record.target.to_string()));
+    event.insert(
+        "cat".into(),
+        JsonValue::String(record.module_path.to_string()),
+    );
+    event.insert("ph".into(), JsonValue::String("i".to_string()));
+    event.insert("s".into(), JsonValue::String("g".to_string()));
+    let ts_value = match u64::try_from(ts) {
+        Ok(value) => JsonValue::from(value),
+        Err(_) => JsonValue::String(ts.to_string()),
+    };
+    event.insert("ts".into(), ts_value);
+    event.insert("args".into(), JsonValue::Object(args));
+    JsonValue::Object(event)
 }
 
 struct TraceGuard {
@@ -1459,4 +1483,106 @@ async fn async_main() -> std::process::ExitCode {
         },
     };
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{log_record_to_value, record_fields_value, trace_event_value};
+    use diagnostics::{FieldValue, Level, LogRecord};
+    use foundation_serialization::json::{Number as JsonNumber, Value as JsonValue};
+    use std::borrow::Cow;
+
+    #[test]
+    fn log_record_value_includes_fields() {
+        let record = LogRecord {
+            level: Level::INFO,
+            target: Cow::Borrowed("test.target"),
+            message: Cow::Borrowed("hello"),
+            module_path: Cow::Borrowed("module::path"),
+            file: Cow::Borrowed("file.rs"),
+            line: 42,
+            fields: vec![
+                FieldValue {
+                    key: Cow::Borrowed("alpha"),
+                    value: "value".to_string(),
+                },
+                FieldValue {
+                    key: Cow::Borrowed(""),
+                    value: "42".to_string(),
+                },
+            ],
+        };
+
+        let value = log_record_to_value(&record);
+        let obj = match value {
+            JsonValue::Object(map) => map,
+            other => panic!("expected object, got {other:?}"),
+        };
+        assert_eq!(
+            obj.get("level"),
+            Some(&JsonValue::String("info".to_string()))
+        );
+        assert_eq!(
+            obj.get("line"),
+            Some(&JsonValue::Number(JsonNumber::from(42u32)))
+        );
+        let fields = match obj.get("fields") {
+            Some(JsonValue::Object(map)) => map,
+            other => panic!("expected fields object, got {other:?}"),
+        };
+        assert_eq!(
+            fields.get("alpha"),
+            Some(&JsonValue::String("value".to_string()))
+        );
+        assert_eq!(
+            fields.get("field_1"),
+            Some(&JsonValue::String("42".to_string()))
+        );
+    }
+
+    #[test]
+    fn record_fields_value_skips_empty_list() {
+        assert!(record_fields_value(&[]).is_none());
+    }
+
+    #[test]
+    fn trace_event_value_sets_timestamp_and_args() {
+        let record = LogRecord {
+            level: Level::ERROR,
+            target: Cow::Borrowed("trace.target"),
+            message: Cow::Borrowed("oops"),
+            module_path: Cow::Borrowed("trace::module"),
+            file: Cow::Borrowed("trace.rs"),
+            line: 7,
+            fields: vec![FieldValue {
+                key: Cow::Borrowed("detail"),
+                value: "extra".to_string(),
+            }],
+        };
+        let event = trace_event_value(&record, 123);
+        let obj = match event {
+            JsonValue::Object(map) => map,
+            other => panic!("expected object, got {other:?}"),
+        };
+        assert_eq!(
+            obj.get("name"),
+            Some(&JsonValue::String("trace.target".to_string()))
+        );
+        assert_eq!(
+            obj.get("ts"),
+            Some(&JsonValue::Number(JsonNumber::from(123u64)))
+        );
+        let args = match obj.get("args") {
+            Some(JsonValue::Object(map)) => map,
+            other => panic!("expected args object, got {other:?}"),
+        };
+        assert_eq!(
+            args.get("level"),
+            Some(&JsonValue::String("error".to_string()))
+        );
+        assert_eq!(
+            args.get("detail"),
+            Some(&JsonValue::String("extra".to_string()))
+        );
+    }
 }

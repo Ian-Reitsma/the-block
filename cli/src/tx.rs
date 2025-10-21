@@ -2,15 +2,15 @@
 
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::SigningKey;
-use crypto_suite::transactions::{
-    canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
-};
+use crypto_suite::transactions::TransactionSigner;
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::{Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use std::convert::TryInto;
 use std::fmt;
+use the_block::transaction::binary::encode_raw_payload as encode_node_raw_payload;
+use the_block::RawTxPayload as NodeRawTxPayload;
 
 #[allow(dead_code)]
 const CHAIN_ID: u32 = 1;
@@ -221,5 +221,16 @@ fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
 
 #[allow(dead_code)]
 fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
-    suite_canonical_payload_bytes(payload)
+    let node_payload = NodeRawTxPayload {
+        from_: payload.from_.clone(),
+        to: payload.to.clone(),
+        amount_consumer: payload.amount_consumer,
+        amount_industrial: payload.amount_industrial,
+        fee: payload.fee,
+        pct_ct: payload.pct_ct,
+        nonce: payload.nonce,
+        memo: payload.memo.clone(),
+    };
+    encode_node_raw_payload(&node_payload)
+        .unwrap_or_else(|err| panic!("failed to encode raw payload: {err}"))
 }

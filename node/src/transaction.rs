@@ -7,20 +7,19 @@ pub mod binary;
 
 use crate::py::{PyError, PyResult};
 use crate::{to_array_32, to_array_64};
-use codec::{self, profiles};
 use concurrency::{cache::LruCache, Lazy, MutexExt};
 #[cfg(feature = "quantum")]
 use crypto::dilithium;
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use crypto_suite::transactions::{
-    canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
-};
+use crypto_suite::transactions::TransactionSigner;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::{self, ShardId};
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
+
+use self::binary::{decode_raw_payload, encode_raw_payload, encode_signed_transaction};
 
 fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
@@ -444,7 +443,12 @@ impl SignedTransaction {
 
 /// Serialize a [`RawTxPayload`] using the project's canonical binary settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
-    suite_canonical_payload_bytes(payload)
+    encode_raw_payload(payload).unwrap_or_else(|err| panic!("failed to encode raw payload: {err}"))
+}
+
+fn canonical_signed_transaction_bytes(tx: &SignedTransaction) -> Vec<u8> {
+    encode_signed_transaction(tx)
+        .unwrap_or_else(|err| panic!("failed to encode signed transaction: {err}"))
 }
 
 /// Determine the shard for a given encoded account address.
@@ -481,7 +485,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     let key = {
-        let bytes = codec::serialize(profiles::transaction::codec(), tx).unwrap_or_default();
+        let bytes = canonical_signed_transaction_bytes(tx);
         let mut h = Hasher::new();
         h.update(&bytes);
         h.finalize().into()
@@ -653,8 +657,7 @@ pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
 /// Raises:
 ///     ValueError: If ``bytes`` cannot be deserialized.
 pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
-    codec::deserialize(profiles::transaction::codec(), &bytes)
-        .map_err(|e| py_value_err(format!("decode: {e}")))
+    decode_raw_payload(&bytes).map_err(|e| py_value_err(format!("decode: {e}")))
 }
 
 #[cfg(all(test, feature = "python-bindings"))]

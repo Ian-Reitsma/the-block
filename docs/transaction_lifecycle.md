@@ -11,8 +11,11 @@ The transaction subsystem coordinates account debits, signatures, and fee calcul
 
 ## 1. Raw Payload Structure
 
-`node/src/transaction.rs` defines the `RawTxPayload` struct which is serialised with the canonical binary profile exposed by the
-`codec` crate. Fields:
+`node/src/transaction.rs` defines the `RawTxPayload` struct which now serialises
+exclusively through the in-house cursor writer exposed by
+`transaction::binary::encode_raw_payload`. The helper mirrors the legacy layout
+but avoids `codec::serialize` so FIRST_PARTY_ONLY builds no longer touch the
+`foundation_serde` stub. Fields:
 
 - `from_` / `to` – UTF-8 account identifiers. The Python bindings expose a `from` alias for ergonomics.
 - `amount_consumer` – CT to transfer on the consumer lane.
