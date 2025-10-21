@@ -2084,18 +2084,21 @@ mod tests {
 
     #[test]
     fn tls_snapshot_deserializer_ignores_unknown_fields() {
-        let payload = foundation_serialization::json!({
-            "prefix": "TB_GATEWAY_TLS",
-            "code": "expired_certificate",
-            "total": 3,
-            "last_delta": 1,
-            "last_seen": 88,
-            "origin": "diagnostics",
-            "peer_id": null,
-            "detail": "expired",
-            "variables": ["TB_GATEWAY_CERT"],
-            "unexpected": "value"
-        });
+        let mut payload_map = JsonMap::new();
+        payload_map.insert("prefix".into(), Value::String("TB_GATEWAY_TLS".into()));
+        payload_map.insert("code".into(), Value::String("expired_certificate".into()));
+        payload_map.insert("total".into(), Value::Number(3.into()));
+        payload_map.insert("last_delta".into(), Value::Number(1.into()));
+        payload_map.insert("last_seen".into(), Value::Number(88.into()));
+        payload_map.insert("origin".into(), Value::String("diagnostics".into()));
+        payload_map.insert("peer_id".into(), Value::Null);
+        payload_map.insert("detail".into(), Value::String("expired".into()));
+        payload_map.insert(
+            "variables".into(),
+            Value::Array(vec![Value::String("TB_GATEWAY_CERT".into())]),
+        );
+        payload_map.insert("unexpected".into(), Value::String("value".into()));
+        let payload = Value::Object(payload_map);
 
         let encoded = json::to_vec(&payload).expect("encode payload");
         let snapshot: CliTlsWarningSnapshot =

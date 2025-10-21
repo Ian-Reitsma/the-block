@@ -197,10 +197,7 @@ fn status_value(status: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        drop_counts_to_value,
-        handshake_fail_counts_to_value,
-        peer_metrics_to_value,
-        DropReason,
+        drop_counts_to_value, handshake_fail_counts_to_value, peer_metrics_to_value, DropReason,
         HandshakeError,
     };
     use crate::net::peer::{PeerMetrics, PeerReputation};

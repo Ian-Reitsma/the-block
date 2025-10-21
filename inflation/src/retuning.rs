@@ -11,11 +11,10 @@ fn decode_state(bytes: &[u8]) -> Option<KalmanState> {
     match value {
         Value::Object(map) => map.get("x").and_then(|value| match value {
             Value::Number(num) => Some(KalmanState { x: num.as_f64() }),
-            Value::String(s) => s
-                .parse::<f64>()
-                .ok()
-                .map(|x| KalmanState { x }),
-            Value::Bool(b) => Some(KalmanState { x: if *b { 1.0 } else { 0.0 } }),
+            Value::String(s) => s.parse::<f64>().ok().map(|x| KalmanState { x }),
+            Value::Bool(b) => Some(KalmanState {
+                x: if *b { 1.0 } else { 0.0 },
+            }),
             Value::Null => Some(KalmanState { x: 0.0 }),
             _ => None,
         }),

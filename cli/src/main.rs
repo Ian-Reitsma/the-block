@@ -44,6 +44,7 @@ mod htlc;
 mod http_client;
 mod identity;
 mod inhouse;
+mod json_helpers;
 mod light_client;
 mod light_sync;
 mod logs;

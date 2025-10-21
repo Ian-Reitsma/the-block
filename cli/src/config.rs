@@ -1,3 +1,4 @@
+use crate::json_helpers::{empty_object, json_rpc_request};
 use crate::parse_utils::{optional_path, take_string};
 use crate::rpc::RpcClient;
 use cli_core::{
@@ -7,7 +8,6 @@ use cli_core::{
     ConfigReader,
 };
 use diagnostics::{anyhow, Context, Result};
-use foundation_serialization::Serialize;
 use std::{path::PathBuf, process};
 
 pub enum ConfigCmd {
@@ -87,22 +87,7 @@ pub fn handle(cmd: ConfigCmd) {
 
 pub fn reload(url: String) {
     let client = RpcClient::from_env();
-    #[derive(Serialize)]
-    struct Payload<'a> {
-        jsonrpc: &'static str,
-        id: u32,
-        method: &'static str,
-        params: foundation_serialization::json::Value,
-        #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-        auth: Option<&'a str>,
-    }
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "config.reload",
-        params: foundation_serialization::json!({}),
-        auth: None,
-    };
+    let payload = json_rpc_request("config.reload", empty_object());
     if let Ok(resp) = client.call(&url, &payload) {
         if let Ok(text) = resp.text() {
             println!("{}", text);

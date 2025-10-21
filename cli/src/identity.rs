@@ -3,9 +3,10 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::{json, Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use foundation_unicode::{NormalizationAccuracy, Normalizer};
 
+use crate::json_helpers::{json_object_from, json_rpc_request, json_string};
 use crate::rpc::RpcClient;
 
 const DEFAULT_RPC: &str = "http://127.0.0.1:26657";
@@ -327,12 +328,8 @@ fn register_handle_impl(
 
 fn resolve_handle(handle: &str, rpc: &str) -> Result<(), String> {
     let client = RpcClient::from_env();
-    let payload = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "resolve_handle",
-        "params": {"handle": handle},
-    });
+    let params = json_object_from([("handle", json_string(handle))]);
+    let payload = json_rpc_request("resolve_handle", params);
     let response = client
         .call(rpc, &payload)
         .map_err(|err| format!("rpc call failed: {err}"))?

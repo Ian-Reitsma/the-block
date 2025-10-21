@@ -16,11 +16,23 @@ use cli_core::{
 };
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::{anyhow, Context, Result};
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map as JsonMap, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use light_client::{self, SyncOptions};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
+
+fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
+    let mut map = JsonMap::new();
+    for (key, value) in pairs {
+        map.insert(key, value);
+    }
+    map
+}
+
+fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
+    Value::Object(json_map_from(pairs))
+}
 
 #[derive(Debug)]
 pub enum LightClientCmd {
@@ -615,7 +627,7 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
         jsonrpc: "2.0",
         id: 1,
         method: "light_client.rebate_status",
-        params: foundation_serialization::json!({}),
+        params: Value::Object(JsonMap::new()),
         auth: None,
     };
     let response = client
@@ -691,12 +703,14 @@ fn run_device_status(json: bool) -> Result<()> {
         Ok(p) => p,
         Err(err) => {
             if json {
-                let payload = foundation_serialization::json!({
-                    "error": err.to_string(),
-                    "gating": opts
-                        .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
-                        .map(|g| g.as_str()),
-                });
+                let gating = opts
+                    .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
+                    .map(|g| Value::String(g.as_str().to_owned()))
+                    .unwrap_or(Value::Null);
+                let payload = json_object_from(vec![
+                    ("error".to_owned(), Value::String(err.to_string())),
+                    ("gating".to_owned(), gating),
+                ]);
                 println!("{}", json_to_string_pretty(&payload)?);
             } else {
                 println!("device probe unavailable: {}", err);
@@ -708,19 +722,34 @@ fn run_device_status(json: bool) -> Result<()> {
     let snapshot = runtime::block_on(async { watcher.poll().await });
     let gating = opts.gating_reason(&snapshot.status);
     if json {
-        let payload = foundation_serialization::json!({
-            "wifi": snapshot.status.on_wifi,
-            "charging": snapshot.status.is_charging,
-            "battery": snapshot.status.battery_level,
-            "freshness": snapshot.freshness.as_label(),
-            "observed_at_millis": snapshot
-                .observed_at
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-            "stale_for_millis": snapshot.stale_for.as_millis(),
-            "gating": gating.map(|g| g.as_str()),
-        });
+        let observed_ms = snapshot
+            .observed_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let observed_ms = u64::try_from(observed_ms).unwrap_or(u64::MAX);
+        let stale_ms = u64::try_from(snapshot.stale_for.as_millis()).unwrap_or(u64::MAX);
+        let gating_value = gating
+            .map(|g| Value::String(g.as_str().to_owned()))
+            .unwrap_or(Value::Null);
+        let payload = json_object_from(vec![
+            ("wifi".to_owned(), Value::Bool(snapshot.status.on_wifi)),
+            (
+                "charging".to_owned(),
+                Value::Bool(snapshot.status.is_charging),
+            ),
+            (
+                "battery".to_owned(),
+                Value::from(snapshot.status.battery_level),
+            ),
+            (
+                "freshness".to_owned(),
+                Value::String(snapshot.freshness.as_label().to_owned()),
+            ),
+            ("observed_at_millis".to_owned(), Value::from(observed_ms)),
+            ("stale_for_millis".to_owned(), Value::from(stale_ms)),
+            ("gating".to_owned(), gating_value),
+        ]);
         println!("{}", json_to_string_pretty(&payload)?);
     } else {
         println!(
@@ -1025,7 +1054,10 @@ pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
 }
 
 pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Result<ResolvedDid> {
-    let params = foundation_serialization::json!({ "address": address });
+    let params = json_object_from(vec![(
+        "address".to_owned(),
+        Value::String(address.to_string()),
+    )]);
     let payload = Payload {
         jsonrpc: "2.0",
         id: 1,

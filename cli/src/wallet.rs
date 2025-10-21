@@ -12,6 +12,7 @@ use cli_core::{
 use crypto::session::SessionKey;
 use diagnostics::{anyhow, Context, Result};
 use foundation_lazy::sync::Lazy;
+use foundation_serialization::json::{Map as JsonMap, Value};
 use foundation_serialization::{binary, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "quantum")]
@@ -19,6 +20,18 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
+    let mut map = JsonMap::new();
+    for (key, value) in pairs {
+        map.insert(key, value);
+    }
+    map
+}
+
+fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
+    Value::Object(json_map_from(pairs))
+}
 
 const FEE_FLOOR_CACHE_TTL: Duration = Duration::from_secs(10);
 
@@ -306,11 +319,20 @@ pub fn handle(cmd: WalletCmd) {
                 let ed = ed_handle.join().expect("ed25519");
                 let (pq_pk, pq_sk) = pq_handle.join().expect("dilithium");
                 let mut f = File::create(&out).expect("write");
-                let json = foundation_serialization::json!({
-                    "ed25519_pub": crypto_suite::hex::encode(ed.public_key().to_bytes()),
-                    "dilithium_pub": crypto_suite::hex::encode(pq_pk.as_bytes()),
-                    "dilithium_sk": crypto_suite::hex::encode(pq_sk.as_bytes()),
-                });
+                let json = json_object_from(vec![
+                    (
+                        "ed25519_pub".to_owned(),
+                        Value::String(crypto_suite::hex::encode(ed.public_key().to_bytes())),
+                    ),
+                    (
+                        "dilithium_pub".to_owned(),
+                        Value::String(crypto_suite::hex::encode(pq_pk.as_bytes())),
+                    ),
+                    (
+                        "dilithium_sk".to_owned(),
+                        Value::String(crypto_suite::hex::encode(pq_sk.as_bytes())),
+                    ),
+                ]);
                 f.write_all(json.to_string().as_bytes()).expect("write");
                 println!("exported keystore to {}", out);
             }
@@ -363,10 +385,10 @@ pub fn handle(cmd: WalletCmd) {
                 Ok(lane) => lane,
                 Err(err) => {
                     if json {
-                        let payload = foundation_serialization::json!({
-                            "status": "error",
-                            "message": err.to_string(),
-                        });
+                        let payload = json_object_from(vec![
+                            ("status".to_owned(), Value::String("error".to_owned())),
+                            ("message".to_owned(), Value::String(err.to_string())),
+                        ]);
                         match json_to_string_pretty(&payload).or_else(|_| json_to_string(&payload))
                         {
                             Ok(text) => println!("{}", text),
@@ -450,10 +472,10 @@ pub fn handle(cmd: WalletCmd) {
                 }
                 Err(err) => {
                     if json {
-                        let payload = foundation_serialization::json!({
-                            "status": "error",
-                            "message": err.to_string(),
-                        });
+                        let payload = json_object_from(vec![
+                            ("status".to_owned(), Value::String("error".to_owned())),
+                            ("message".to_owned(), Value::String(err.to_string())),
+                        ]);
                         match json_to_string_pretty(&payload).or_else(|_| json_to_string(&payload))
                         {
                             Ok(text) => println!("{}", text),

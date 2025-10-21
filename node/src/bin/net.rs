@@ -1093,10 +1093,16 @@ fn main() {
                         let mut active = 0u64;
                         let mut rows = Vec::new();
                         loop {
-                            let req = foundation_serialization::json!({
-                                "method": "net.peer_stats_all",
-                                "params": {"offset": off, "limit": limit},
-                            });
+                            let req = json_object_from(vec![
+                                ("method".to_owned(), json_string("net.peer_stats_all")),
+                                (
+                                    "params".to_owned(),
+                                    json_object_from(vec![
+                                        ("offset".to_owned(), Value::from(off)),
+                                        ("limit".to_owned(), Value::from(limit)),
+                                    ]),
+                                ),
+                            ]);
                             let val = match post_json(&rpc, req) {
                                 Ok(v) => v,
                                 Err(e) => {
@@ -1146,14 +1152,14 @@ fn main() {
                                 total_req += reqs;
                                 total_bytes += bytes;
                                 total_drop += drops_total;
-                                rows.push(foundation_serialization::json!({
-                                    "peer": id,
-                                    "requests": reqs,
-                                    "bytes_sent": bytes,
-                                    "drops": drops_total,
-                                    "reputation": rep,
-                                    "latency": latency,
-                                }));
+                                rows.push(json_object_from(vec![
+                                    ("peer".to_owned(), Value::String(id)),
+                                    ("requests".to_owned(), Value::from(reqs)),
+                                    ("bytes_sent".to_owned(), Value::from(bytes)),
+                                    ("drops".to_owned(), Value::from(drops_total)),
+                                    ("reputation".to_owned(), Value::from(rep)),
+                                    ("latency".to_owned(), Value::from(latency)),
+                                ]));
                             }
                             off += arr.len();
                             if arr.len() < limit {
@@ -1182,16 +1188,27 @@ fn main() {
                         }
                         match format {
                             OutputFormat::Json => {
-                                let out = foundation_serialization::json!({
-                                    "peers": if summary { Value::Array(vec![]) } else { Value::Array(rows.clone()) },
-                                    "summary": {
-                                        "total_peers": rows.len(),
-                                        "active": active,
-                                        "requests": total_req,
-                                        "bytes_sent": total_bytes,
-                                        "drops": total_drop,
-                                    }
-                                });
+                                let peers_value = if summary {
+                                    Value::Array(vec![])
+                                } else {
+                                    Value::Array(rows.clone())
+                                };
+                                let out = json_object_from(vec![
+                                    ("peers".to_owned(), peers_value),
+                                    (
+                                        "summary".to_owned(),
+                                        json_object_from(vec![
+                                            (
+                                                "total_peers".to_owned(),
+                                                Value::from(rows.len() as u64),
+                                            ),
+                                            ("active".to_owned(), Value::from(active)),
+                                            ("requests".to_owned(), Value::from(total_req)),
+                                            ("bytes_sent".to_owned(), Value::from(total_bytes)),
+                                            ("drops".to_owned(), Value::from(total_drop)),
+                                        ]),
+                                    ),
+                                ]);
                                 println!("{}", json::to_string_pretty(&out).unwrap());
                             }
                             OutputFormat::Table => {
@@ -1246,10 +1263,13 @@ fn main() {
                             }
                         }
                     } else if let Some(id) = peer_id {
-                        let req = foundation_serialization::json!({
-                            "method": "net.peer_stats",
-                            "params": {"peer_id": id},
-                        });
+                        let req = json_object_from(vec![
+                            ("method".to_owned(), json_string("net.peer_stats")),
+                            (
+                                "params".to_owned(),
+                                json_object_from(vec![("peer_id".to_owned(), Value::String(id))]),
+                            ),
+                        ]);
                         match post_json(&rpc, req) {
                             Ok(val) => {
                                 if let Some(err) = val.get("error") {
@@ -1338,10 +1358,13 @@ fn main() {
                 }
             }
             StatsCmd::Reset { peer_id, rpc } => {
-                let req = foundation_serialization::json!({
-                    "method": "net.peer_stats_reset",
-                    "params": {"peer_id": peer_id},
-                });
+                let req = json_object_from(vec![
+                    ("method".to_owned(), json_string("net.peer_stats_reset")),
+                    (
+                        "params".to_owned(),
+                        json_object_from(vec![("peer_id".to_owned(), Value::String(peer_id))]),
+                    ),
+                ]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
@@ -1354,10 +1377,13 @@ fn main() {
                 }
             }
             StatsCmd::Reputation { peer_id, rpc } => {
-                let req = foundation_serialization::json!({
-                    "method": "net.peer_stats",
-                    "params": {"peer_id": peer_id},
-                });
+                let req = json_object_from(vec![
+                    ("method".to_owned(), json_string("net.peer_stats")),
+                    (
+                        "params".to_owned(),
+                        json_object_from(vec![("peer_id".to_owned(), Value::String(peer_id))]),
+                    ),
+                ]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         let rep = val["result"]["reputation"].as_f64().unwrap_or(0.0);
@@ -1413,11 +1439,14 @@ fn main() {
                 } else if peer_id.is_none() {
                     eprintln!("{}", gettext("peer_id required unless --all is specified"));
                 } else {
-                    let params = foundation_serialization::json!({"peer_id": peer_id.unwrap(), "path": path});
-                    let req = foundation_serialization::json!({
-                        "method": "net.peer_stats_export",
-                        "params": params,
-                    });
+                    let params = json_object_from(vec![
+                        ("peer_id".to_owned(), Value::String(peer_id.unwrap())),
+                        ("path".to_owned(), json_string(path.clone())),
+                    ]);
+                    let req = json_object_from(vec![
+                        ("method".to_owned(), json_string("net.peer_stats_export")),
+                        ("params".to_owned(), params),
+                    ]);
                     match post_json(&rpc, req) {
                         Ok(val) => {
                             if let Some(err) = val.get("error") {
@@ -1437,7 +1466,10 @@ fn main() {
                 }
             }
             StatsCmd::Persist { rpc } => {
-                let req = foundation_serialization::json!({ "method": "net.peer_stats_persist" });
+                let req = json_object_from(vec![(
+                    "method".to_owned(),
+                    json_string("net.peer_stats_persist"),
+                )]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
@@ -1454,10 +1486,16 @@ fn main() {
                 clear,
                 rpc,
             } => {
-                let req = foundation_serialization::json!({
-                    "method": "net.peer_throttle",
-                    "params": { "peer_id": peer_id, "clear": clear },
-                });
+                let req = json_object_from(vec![
+                    ("method".to_owned(), json_string("net.peer_throttle")),
+                    (
+                        "params".to_owned(),
+                        json_object_from(vec![
+                            ("peer_id".to_owned(), Value::String(peer_id)),
+                            ("clear".to_owned(), Value::Bool(clear)),
+                        ]),
+                    ),
+                ]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
@@ -1474,10 +1512,13 @@ fn main() {
                 }
             }
             StatsCmd::Failures { peer_id, rpc } => {
-                let req = foundation_serialization::json!({
-                    "method": "net.peer_stats",
-                    "params": {"peer_id": peer_id},
-                });
+                let req = json_object_from(vec![
+                    ("method".to_owned(), json_string("net.peer_stats")),
+                    (
+                        "params".to_owned(),
+                        json_object_from(vec![("peer_id".to_owned(), Value::String(peer_id))]),
+                    ),
+                ]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if let Some(obj) = val["result"]["handshake_fail"].as_object() {
@@ -1521,10 +1562,13 @@ fn main() {
         },
         Command::Backpressure { action } => match action {
             BackpressureCmd::Clear { peer_id, rpc } => {
-                let req = foundation_serialization::json!({
-                    "method": "net.backpressure_clear",
-                    "params": {"peer_id": peer_id},
-                });
+                let req = json_object_from(vec![
+                    ("method".to_owned(), json_string("net.backpressure_clear")),
+                    (
+                        "params".to_owned(),
+                        json_object_from(vec![("peer_id".to_owned(), Value::String(peer_id))]),
+                    ),
+                ]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
@@ -1539,8 +1583,10 @@ fn main() {
         },
         Command::Compute { action } => match action {
             ComputeCmd::Stats { rpc, effective } => {
-                let req =
-                    foundation_serialization::json!({ "method": "compute_market.scheduler_stats" });
+                let req = json_object_from(vec![(
+                    "method".to_owned(),
+                    json_string("compute_market.scheduler_stats"),
+                )]);
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if effective {
@@ -1559,7 +1605,10 @@ fn main() {
         },
         Command::Reputation { action } => match action {
             ReputationCmd::Sync { rpc } => {
-                let req = foundation_serialization::json!({ "method": "net.reputation_sync" });
+                let req = json_object_from(vec![(
+                    "method".to_owned(),
+                    json_string("net.reputation_sync"),
+                )]);
                 match post_json(&rpc, req) {
                     Ok(_) => println!("sync triggered"),
                     Err(e) => eprintln!("{e}"),
@@ -1568,7 +1617,10 @@ fn main() {
         },
         Command::Config { action } => match action {
             ConfigCmd::Reload { rpc } => {
-                let req = foundation_serialization::json!({ "method": "net.config_reload" });
+                let req = json_object_from(vec![(
+                    "method".to_owned(),
+                    json_string("net.config_reload"),
+                )]);
                 match post_json(&rpc, req) {
                     Ok(_) => println!("reload triggered"),
                     Err(e) => eprintln!("{e}"),
@@ -1584,14 +1636,20 @@ fn main() {
                 if let Ok(bytes) = crypto_suite::hex::decode(&new_key) {
                     let sk = load_net_key();
                     let sig = sk.sign(&bytes);
-                    let req = foundation_serialization::json!({
-                        "method": "net.key_rotate",
-                        "params": {
-                            "peer_id": peer_id,
-                            "new_key": new_key,
-                            "signature": crypto_suite::hex::encode(sig.to_bytes()),
-                        }
-                    });
+                    let req = json_object_from(vec![
+                        ("method".to_owned(), json_string("net.key_rotate")),
+                        (
+                            "params".to_owned(),
+                            json_object_from(vec![
+                                ("peer_id".to_owned(), Value::String(peer_id)),
+                                ("new_key".to_owned(), json_string(new_key.clone())),
+                                (
+                                    "signature".to_owned(),
+                                    json_string(crypto_suite::hex::encode(sig.to_bytes())),
+                                ),
+                            ]),
+                        ),
+                    ]);
                     match post_json(&rpc, req) {
                         Ok(_) => println!("rotation complete"),
                         Err(e) => eprintln!("{e}"),
@@ -1602,10 +1660,13 @@ fn main() {
             }
         },
         Command::DnsLookup { domain, rpc } => {
-            let body = foundation_serialization::json!({
-                "method": "gateway.dns_lookup",
-                "params": {"domain": domain},
-            });
+            let body = json_object_from(vec![
+                ("method".to_owned(), json_string("gateway.dns_lookup")),
+                (
+                    "params".to_owned(),
+                    json_object_from(vec![("domain".to_owned(), Value::String(domain))]),
+                ),
+            ]);
             match post_json(&rpc, body) {
                 Ok(v) => println!("{}", v),
                 Err(e) => eprintln!("{e}"),

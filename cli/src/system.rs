@@ -135,6 +135,9 @@ fn render_dependencies(mut summaries: BTreeMap<String, WrapperSummary>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foundation_serialization::json::{
+        to_string_value, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+    };
     use httpd::{Response, Router, ServerConfig, StatusCode};
     use runtime::{self, net::TcpListener};
 
@@ -203,6 +206,47 @@ mod tests {
         summaries
     }
 
+    fn json_string(value: &str) -> JsonValue {
+        JsonValue::String(value.to_owned())
+    }
+
+    fn json_f64(value: f64) -> JsonValue {
+        JsonNumber::from_f64(value)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null)
+    }
+
+    fn json_object(entries: impl IntoIterator<Item = (&'static str, JsonValue)>) -> JsonValue {
+        let mut map = JsonMap::new();
+        for (key, value) in entries {
+            map.insert(key.to_string(), value);
+        }
+        JsonValue::Object(map)
+    }
+
+    fn json_array(elements: impl IntoIterator<Item = JsonValue>) -> JsonValue {
+        JsonValue::Array(elements.into_iter().collect())
+    }
+
+    fn sample_summary_json() -> JsonValue {
+        let mut root = JsonMap::new();
+        for (node, summary) in sample_summary() {
+            let metrics = json_array(summary.metrics.into_iter().map(|metric| {
+                let mut labels_map = JsonMap::new();
+                for (key, value) in metric.labels {
+                    labels_map.insert(key, JsonValue::String(value));
+                }
+                json_object([
+                    ("metric", json_string(&metric.metric)),
+                    ("labels", JsonValue::Object(labels_map)),
+                    ("value", json_f64(metric.value)),
+                ])
+            }));
+            root.insert(node, json_object([("metrics", metrics)]));
+        }
+        JsonValue::Object(root)
+    }
+
     #[test]
     fn render_dependencies_sorts_nodes_and_metrics() {
         let output = render_dependencies(sample_summary());
@@ -219,7 +263,7 @@ node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",ver
 
     #[test]
     fn fetch_dependencies_parses_response() {
-        let body = foundation_serialization::json::to_string(&sample_summary()).unwrap();
+        let body = to_string_value(&sample_summary_json());
         let (url, handle) = start_wrappers_server(body);
         let report = fetch_dependencies(&url).expect("report");
         assert!(report.starts_with("node: node-a"));

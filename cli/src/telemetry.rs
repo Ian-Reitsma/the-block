@@ -1,3 +1,4 @@
+use crate::json_helpers::{json_f64, json_null, json_object_from, json_rpc_request, json_u64};
 use crate::parse_utils::{parse_optional, parse_u64, parse_u64_required, take_string};
 use crate::rpc::RpcClient;
 use cli_core::{
@@ -225,15 +226,19 @@ pub fn handle(cmd: TelemetryCmd) {
                 return;
             }
             let client = RpcClient::from_env();
-            let payload = foundation_serialization::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "telemetry.configure",
-                "params": {
-                    "sample_rate": sample_rate,
-                    "compaction_secs": compaction,
-                },
-            });
+            let params = json_object_from([
+                (
+                    "sample_rate",
+                    sample_rate.map(json_f64).unwrap_or_else(json_null),
+                ),
+                (
+                    "compaction_secs",
+                    compaction
+                        .map(|secs| json_u64(secs))
+                        .unwrap_or_else(json_null),
+                ),
+            ]);
+            let payload = json_rpc_request("telemetry.configure", params);
             let auth = token.as_ref().map(|t| format!("Bearer {}", t));
             match client.call_with_auth(&url, &payload, auth.as_deref()) {
                 Ok(resp) => match resp.text() {
@@ -308,8 +313,10 @@ pub fn handle(cmd: TelemetryCmd) {
                 snapshots.sort_by(|a, b| a.prefix.cmp(&b.prefix).then(a.code.cmp(&b.code)));
 
                 if json {
-                    let payload = json!(snapshots);
-                    println!("{}", payload);
+                    match json::to_value(&snapshots) {
+                        Ok(value) => println!("{}", value),
+                        Err(err) => eprintln!("failed to serialize snapshots: {err}"),
+                    }
                 } else if snapshots.is_empty() {
                     println!("no TLS environment warnings recorded");
                 } else {

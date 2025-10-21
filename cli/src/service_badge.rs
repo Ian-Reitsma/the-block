@@ -1,3 +1,4 @@
+use crate::json_helpers::{empty_object, json_object_from, json_rpc_request, json_string};
 use crate::parse_utils::{require_positional, take_string};
 use crate::rpc::RpcClient;
 use cli_core::{
@@ -5,7 +6,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::Serialize;
 
 pub enum ServiceBadgeCmd {
     /// Verify a badge token via RPC
@@ -94,22 +94,8 @@ pub fn handle(cmd: ServiceBadgeCmd) {
     match cmd {
         ServiceBadgeCmd::Verify { badge, url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "service_badge_verify",
-                params: foundation_serialization::json!({"badge": badge}),
-                auth: None,
-            };
+            let params = json_object_from([("badge", json_string(badge))]);
+            let payload = json_rpc_request("service_badge_verify", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);
@@ -118,22 +104,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
         }
         ServiceBadgeCmd::Issue { url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "service_badge_issue",
-                params: foundation_serialization::json!({}),
-                auth: None,
-            };
+            let payload = json_rpc_request("service_badge_issue", empty_object());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);
@@ -142,22 +113,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
         }
         ServiceBadgeCmd::Revoke { url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "service_badge_revoke",
-                params: foundation_serialization::json!({}),
-                auth: None,
-            };
+            let payload = json_rpc_request("service_badge_revoke", empty_object());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);

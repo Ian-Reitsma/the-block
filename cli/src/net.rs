@@ -8,7 +8,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map as JsonMap, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
 
@@ -35,6 +35,51 @@ pub enum OverlayOutputFormat {
 impl Default for OverlayOutputFormat {
     fn default() -> Self {
         OverlayOutputFormat::Plain
+    }
+}
+
+fn json_string(value: impl Into<String>) -> Value {
+    Value::String(value.into())
+}
+
+fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
+    let mut map = JsonMap::new();
+    for (key, value) in pairs {
+        map.insert(key, value);
+    }
+    map
+}
+
+fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
+    Value::Object(json_map_from(pairs))
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RpcRequest<'a> {
+    jsonrpc: &'static str,
+    id: u32,
+    method: &'a str,
+    params: Value,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    auth: Option<&'a str>,
+}
+
+impl<'a> RpcRequest<'a> {
+    fn new(method: &'a str, params: Value) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params,
+            auth: None,
+        }
+    }
+
+    fn with_auth(method: &'a str, params: Value, auth: Option<&'a str>) -> Self {
+        let mut base = Self::new(method, params);
+        base.auth = auth;
+        base
     }
 }
 
@@ -487,24 +532,8 @@ pub fn handle(cmd: NetCmd) {
         NetCmd::Reputation { action } => match action {
             ReputationCmd::Show { peer, url } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "net.reputation_show",
-                    params: foundation_serialization::json!({"peer": peer}),
-                    auth: None,
-                };
+                let params = json_object_from(vec![("peer".to_owned(), Value::String(peer))]);
+                let payload = RpcRequest::new("net.reputation_show", params);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if let Ok(text) = resp.text() {
                         println!("{}", text);
@@ -515,24 +544,8 @@ pub fn handle(cmd: NetCmd) {
         NetCmd::Dns { action } => match action {
             DnsCmd::Verify { domain, url } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "net.dns_verify",
-                    params: foundation_serialization::json!({"domain": domain}),
-                    auth: None,
-                };
+                let params = json_object_from(vec![("domain".to_owned(), Value::String(domain))]);
+                let payload = RpcRequest::new("net.dns_verify", params);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if let Ok(text) = resp.text() {
                         println!("{}", text);
@@ -549,26 +562,15 @@ pub fn handle(cmd: NetCmd) {
             let new_bytes = crypto_suite::hex::decode(&new_key).expect("invalid new key hex");
             let sig = sk.sign(&new_bytes);
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "net.key_rotate",
-                params: foundation_serialization::json!({
-                    "peer_id": peer_id,
-                    "new_key": new_key,
-                    "signature": crypto_suite::hex::encode(sig.to_bytes()),
-                }),
-                auth: None,
-            };
+            let params = json_object_from(vec![
+                ("peer_id".to_owned(), Value::String(peer_id)),
+                ("new_key".to_owned(), json_string(new_key.clone())),
+                (
+                    "signature".to_owned(),
+                    json_string(crypto_suite::hex::encode(sig.to_bytes())),
+                ),
+            ]);
+            let payload = RpcRequest::new("net.key_rotate", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);
@@ -578,24 +580,7 @@ pub fn handle(cmd: NetCmd) {
         NetCmd::Quic { action } => match action {
             QuicCmd::Failures { url } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "net.handshake_failures",
-                    params: foundation_serialization::json::Value::Null,
-                    auth: None,
-                };
+                let payload = RpcRequest::new("net.handshake_failures", Value::Null);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if let Ok(text) = resp.text() {
                         println!("{}", text);
@@ -604,28 +589,11 @@ pub fn handle(cmd: NetCmd) {
             }
             QuicCmd::History { url, json } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
                 #[derive(Deserialize)]
                 struct Envelope<T> {
                     result: T,
                 }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "net.quic_certs",
-                    params: foundation_serialization::json::Value::Null,
-                    auth: None,
-                };
+                let payload = RpcRequest::new("net.quic_certs", Value::Null);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if json {
                         if let Ok(data) = resp.json::<Envelope<Vec<PeerCertHistoryEntry>>>() {
@@ -640,24 +608,7 @@ pub fn handle(cmd: NetCmd) {
             }
             QuicCmd::Refresh { url } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "net.quic_certs_refresh",
-                    params: foundation_serialization::json::Value::Null,
-                    auth: None,
-                };
+                let payload = RpcRequest::new("net.quic_certs_refresh", Value::Null);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if let Ok(text) = resp.text() {
                         println!("{}", text);
@@ -667,26 +618,11 @@ pub fn handle(cmd: NetCmd) {
         },
         NetCmd::QuicStats { url, token, json } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
             #[derive(Deserialize)]
             struct Envelope<T> {
                 result: T,
             }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "net.quic_stats",
-                params: foundation_serialization::json::Value::Null,
-                auth: token.as_deref(),
-            };
+            let payload = RpcRequest::with_auth("net.quic_stats", Value::Null, token.as_deref());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(data) = resp.json::<Envelope<Vec<QuicStatsEntry>>>() {
                     if json {
@@ -701,19 +637,7 @@ pub fn handle(cmd: NetCmd) {
         }
         NetCmd::GossipStatus { url, json } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "net.gossip_status",
-                params: foundation_serialization::json!({}),
-            };
+            let payload = RpcRequest::new("net.gossip_status", json_object_from(vec![]));
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     if json {
@@ -738,19 +662,7 @@ pub fn handle(cmd: NetCmd) {
         }
         NetCmd::OverlayStatus { url, json, format } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "net.overlay_status",
-                params: foundation_serialization::json::Value::Null,
-            };
+            let payload = RpcRequest::new("net.overlay_status", Value::Null);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     let output = format.unwrap_or_else(|| {
@@ -783,22 +695,7 @@ pub fn handle(cmd: NetCmd) {
         }
         NetCmd::RotateCert { url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "net.rotate_cert",
-                params: foundation_serialization::json::Value::Null,
-                auth: None,
-            };
+            let payload = RpcRequest::new("net.rotate_cert", Value::Null);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);
@@ -814,24 +711,13 @@ pub fn handle(cmd: NetCmd) {
                 url,
             } => {
                 let client = RpcClient::from_env();
-                #[derive(Serialize)]
-                struct Payload<'a> {
-                    jsonrpc: &'static str,
-                    id: u32,
-                    method: &'static str,
-                    params: foundation_serialization::json::Value,
-                    #[serde(
-                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-                    )]
-                    auth: Option<&'a str>,
-                }
-                let payload = Payload {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "peer.rebate_claim",
-                    params: foundation_serialization::json!({"peer": peer, "threshold": threshold, "epoch": epoch, "reward": reward}),
-                    auth: None,
-                };
+                let params = json_object_from(vec![
+                    ("peer".to_owned(), Value::String(peer)),
+                    ("threshold".to_owned(), Value::from(threshold)),
+                    ("epoch".to_owned(), Value::from(epoch)),
+                    ("reward".to_owned(), Value::from(reward)),
+                ]);
+                let payload = RpcRequest::new("peer.rebate_claim", params);
                 if let Ok(resp) = client.call(&url, &payload) {
                     if let Ok(text) = resp.text() {
                         println!("{}", text);
