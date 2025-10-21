@@ -1,4 +1,43 @@
 # Project Progress Snapshot
+> **Review (2025-10-20, near midnight):** Transaction admission now derives a
+> priority tip automatically when callers omit it. `Blockchain::submit_transaction`
+> subtracts the current base fee from `payload.fee` before computing
+> fee-per-byte, so legacy builders that only populate `payload.fee` no longer
+> trip `TxAdmissionError::FeeTooLow` under the lane minimum. The base-fee
+> regression (`tests/base_fee::adjusts_base_fee_and_rejects_underpriced`) runs
+> cleanly with FIRST_PARTY_ONLY enforced. Governance retuning dropped the last
+> `foundation_serde` derive: Kalman state snapshots decode via
+> `foundation_serialization::json::Value` and re-emit through a first-party map
+> builder, unblocking the inflation retune path under the stub backend.
+> **Review (2025-10-20, late evening):** Canonical transaction helpers now
+> bypass the `foundation_serde` stub entirely. `canonical_payload_bytes` routes
+> through `transaction::binary::encode_raw_payload`, `verify_signed_tx` hashes
+> signed transactions with the manual writer, the Python bindings decode via
+> `decode_raw_payload`, and the CLI reuses the node helper when signing. With
+> every RawTxPayload path on the cursor facade, the base-fee regression no
+> longer trips the stub serializer and FIRST_PARTY_ONLY builds stay inside
+> first-party codecs end to end.
+> **Review (2025-10-20, afternoon++):** Peer metric helpers now sort drop and
+> handshake reason maps before emitting JSON, and new unit tests lock the
+> deterministic ordering to stop flakey assertions as we continue the RPC JSON
+> refactor. Compute-market responders (`scheduler_stats`, `job_requirements`,
+> `provider_hardware`, and the settlement audit log) assemble payloads through
+> first-party builders that reuse the shared map helper, ensuring capability,
+> utilization, and audit records render without `json::to_value` fallbacks while
+> keeping optional fields aligned with legacy responses. DEX escrow status and
+> release handlers now encode payment proofs, Merkle paths, and roots via
+> in-house `Value` construction, dropping the last serde-based conversions on
+> that surface and preserving the legacy array layout for proofs and roots.
+> **Review (2025-10-20, midday):** Manual cursor writers for blocks, transactions,
+> and gossip payloads now delegate field emission to `StructWriter::write_struct`,
+> eliminating the hand-maintained field counters that previously triggered
+> `Cursor(UnexpectedEof)` when layouts drifted. The binary cursor exposes
+> `field_u8`/`field_u32` helpers so codecs describe their schema inline without
+> closure boilerplate, and fresh round-trip tests cover block, blob transaction,
+> and gossip message encoders under the in-house cursor. RPC peer statistics
+> handlers dropped the last `json::to_value` usage in favour of deterministic map
+> builders, keeping aggregator exports and `net.peer_stats_export_all` wired
+> through first-party JSON assembly end to end.
 > **Review (2025-10-20, morning):** Ledger snapshots now persist cached
 > transaction sizes and decode helpers cover every legacy cursor entry. The
 > mempool writer stores `serialized_size` for each `MempoolEntryDisk`, the
@@ -288,6 +327,10 @@
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
 Mainnet readiness currently measures **98.3/100** with vision completion **93.3/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share the crypto suite’s first-party Ed25519 backend with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence flow through the trait-based `p2p_overlay` crate with in-house and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, wrapper telemetry exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint, release provenance now hashes the vendored tree while recording dependency snapshots enforced by CI, CLI, and governance overrides, and the runtime-backed HTTP client now covers node/CLI surfaces while the gateway/status servers and explorer run on the in-house httpd router alongside an indexer CLI migrated to `cli_core` + httpd. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: extend bridge/DEX docs with signer-set payloads and release-verifier guidance, integrate compute-market SLA alerts with the aggregator dashboards, continue WAN-scale QUIC chaos drills, polish multisig UX, and retire the remaining clap-derived simulation harness now that node, contract, and tooling CLIs run on `cli_core` plus the JSON codec.
+
+**New (2025-10-20):** Node runtime logging and governance webhooks now serialize via explicit first-party builders, retiring the
+`foundation_serialization::json!` macro from production binaries. The CLI log sink’s stderr/trace emitters and the governance
+webhook client share deterministic `JsonMap` assembly backed by regression tests (`node/src/bin/node.rs`, `node/src/telemetry.rs`).
 
 CLI, node, light-client, and metrics-aggregator binaries now build exclusively on the runtime facade’s in-house backend; Tokio persists only as a dormant compatibility feature inside `crates/runtime` while the remaining tooling CLIs finish migrating off their bespoke HTTP stacks (production HTTP services already run on `httpd`).
 

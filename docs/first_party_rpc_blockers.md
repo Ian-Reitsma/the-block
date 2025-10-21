@@ -21,6 +21,33 @@ RPC client.
 
 ## Recent progress (2025-10-20)
 
+- Canonical transaction helpers now reuse the cursor encoder directly:
+  `canonical_payload_bytes` forwards to `encode_raw_payload`,
+  `verify_signed_tx` hashes signed transactions via the manual writer, the
+  Python bindings decode with `decode_raw_payload`, and the CLI converts its
+  payload struct before signing. RPC admission and fee regression tests no
+  longer hit the `foundation_serde` stub when serializing RawTxPayload.
+- Block, transaction, and gossip RPC-adjacent writers now call
+  `StructWriter::write_struct` with inline `field_u8`/`field_u32` helpers so
+  cursor layouts self-describe their field counts. The refreshed
+  round-trip tests stop `Cursor(UnexpectedEof)` panics when RPC surfaces
+  rehydrate blocks, blob transactions, or gossip payloads during
+  snapshot/bootstrap flows.
+- Peer statistics responders stopped using `foundation_serialization::json::to_value`;
+  the new helper functions assemble drop/handshake maps and metric structs by hand,
+  keeping `net.peer_stats_export_all` fully on the first-party JSON facade and
+  removing the last serde-backed conversion from the networking RPC path.
+- Compute-market RPC endpoints (`scheduler_stats`, `job_requirements`,
+  `provider_hardware`, and settlement audit) now build responses via the shared
+  JSON map helper, so capability snapshots, utilization maps, and audit rows no
+  longer delegate to `json::to_value`. DEX escrow status/release handlers encode
+  payment proofs and Merkle roots manually, eliminating the serde escape hatch
+  while retaining the legacy payload shape, and fresh unit tests lock the sorted
+  drop/handshake maps these responders consume.
+- `peer_metrics_to_value` gained a focused regression that exercises nested drop
+  and handshake maps plus throttle metadata, ensuring peer-stat RPC responses
+  stay deterministic as we continue migrating bespoke builders to the shared
+  helpers.
 - Ledger persistence and RPC startup checks now stay entirely on the cursor
   helpers: `MempoolEntryDisk` stores a cached `serialized_size`, the mempool
   rebuild reads that byte length before re-encoding, and new `ledger_binary`

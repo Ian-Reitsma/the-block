@@ -1,6 +1,6 @@
 use crypto_suite::signatures::Signer;
 use foundation_regex::Regex;
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::{self, Map as JsonMap, Value};
 use foundation_tui::color::Colorize;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
 use runtime::net::TcpStream;
@@ -93,6 +93,26 @@ fn ratio(v: &Value) -> f64 {
     } else {
         0.0
     }
+}
+
+fn json_string(value: impl Into<String>) -> Value {
+    Value::String(value.into())
+}
+
+fn json_array(items: Vec<Value>) -> Value {
+    Value::Array(items)
+}
+
+fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
+    let mut map = JsonMap::new();
+    for (key, value) in pairs {
+        map.insert(key, value);
+    }
+    map
+}
+
+fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
+    Value::Object(json_map_from(pairs))
 }
 
 fn gettext(s: &str) -> String {
@@ -997,10 +1017,14 @@ fn main() {
                         let mut off = offset;
                         let mut rows = Vec::new();
                         loop {
-                            let req = foundation_serialization::json!({
-                                "method": "net.peer_stats_all",
-                                "params": {"offset": off, "limit": limit},
-                            });
+                            let params = json_map_from(vec![
+                                ("offset".into(), Value::from(off as u64)),
+                                ("limit".into(), Value::from(limit as u64)),
+                            ]);
+                            let req = json_object_from(vec![
+                                ("method".into(), json_string("net.peer_stats_all")),
+                                ("params".into(), Value::Object(params)),
+                            ]);
                             let val = match post_json(&rpc, req) {
                                 Ok(v) => v,
                                 Err(e) => {
@@ -1020,11 +1044,24 @@ fn main() {
                                 let m = &entry["metrics"];
                                 let until = m["throttled_until"].as_u64().unwrap_or(0);
                                 if until > now {
-                                    rows.push(foundation_serialization::json!({
-                                        "peer": entry["peer_id"].as_str().unwrap_or(""),
-                                        "reason": m["throttle_reason"].as_str().unwrap_or(""),
-                                        "until": until,
-                                    }));
+                                    rows.push(json_object_from(vec![
+                                        (
+                                            "peer".into(),
+                                            json_string(
+                                                entry["peer_id"].as_str().unwrap_or("").to_owned(),
+                                            ),
+                                        ),
+                                        (
+                                            "reason".into(),
+                                            json_string(
+                                                m["throttle_reason"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_owned(),
+                                            ),
+                                        ),
+                                        ("until".into(), Value::from(until)),
+                                    ]));
                                 }
                             }
                             off += arr.len();

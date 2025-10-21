@@ -1,4 +1,17 @@
 # Status & Roadmap
+> **Review (2025-10-20, late evening):** Canonical transaction helpers now run
+> entirely on the cursor facade. Node `canonical_payload_bytes`, CLI signing,
+> and the Python bindings forward to `encode_raw_payload`, signed-transaction
+> hashing reuses the manual writer, and decode helpers call
+> `decode_raw_payload`, eliminating the `foundation_serde` stub path that
+> previously tripped the base-fee regression under FIRST_PARTY_ONLY.
+> **Review (2025-10-20, afternoon++):** Compute-market RPC responses now use the
+> shared JSON helper to render capability snapshots, utilization maps, and audit
+> history without touching `json::to_value`, while DEX escrow status/release
+> payloads hand-assemble payment proofs and Merkle roots so the entire surface
+> stays on the first-party facade. Peer metrics builders gained deterministic
+> ordering plus unit coverage, tightening the JSON refactor before the remaining
+> responders migrate.
 > **Review (2025-10-20, morning):** Ledger and mempool persistence now rely on
 > the first-party cursor stack end to end. `MempoolEntryDisk` records
 > `serialized_size`, the startup rebuild path consumes that cache before

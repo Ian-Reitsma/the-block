@@ -76,24 +76,24 @@ pub fn decode_blob_tx(bytes: &[u8]) -> binary_struct::Result<BlobTx> {
 }
 
 fn write_raw_payload(writer: &mut Writer, payload: &RawTxPayload) -> EncodeResult<()> {
-    writer.write_u64(8);
-    writer.write_string("from_");
-    writer.write_string(&payload.from_);
-    writer.write_string("to");
-    writer.write_string(&payload.to);
-    writer.write_string("amount_consumer");
-    writer.write_u64(payload.amount_consumer);
-    writer.write_string("amount_industrial");
-    writer.write_u64(payload.amount_industrial);
-    writer.write_string("fee");
-    writer.write_u64(payload.fee);
-    writer.write_string("pct_ct");
-    writer.write_u8(payload.pct_ct);
-    writer.write_string("nonce");
-    writer.write_u64(payload.nonce);
-    writer.write_string("memo");
-    write_bytes(writer, &payload.memo, "memo")?;
-    Ok(())
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_string("from_", &payload.from_);
+        struct_writer.field_string("to", &payload.to);
+        struct_writer.field_u64("amount_consumer", payload.amount_consumer);
+        struct_writer.field_u64("amount_industrial", payload.amount_industrial);
+        struct_writer.field_u64("fee", payload.fee);
+        struct_writer.field_u8("pct_ct", payload.pct_ct);
+        struct_writer.field_u64("nonce", payload.nonce);
+        struct_writer.field_with("memo", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &payload.memo, "memo") {
+                    result = Err(err);
+                }
+            }
+        });
+    });
+    result
 }
 
 pub(crate) fn read_raw_payload(reader: &mut Reader<'_>) -> binary_struct::Result<RawTxPayload> {
@@ -141,41 +141,74 @@ pub(crate) fn write_signed_transaction(
     writer: &mut Writer,
     tx: &SignedTransaction,
 ) -> EncodeResult<()> {
-    #[cfg(feature = "quantum")]
-    const FIELD_COUNT: u64 = 10;
-    #[cfg(not(feature = "quantum"))]
-    const FIELD_COUNT: u64 = 9;
-
-    writer.write_u64(FIELD_COUNT);
-    writer.write_string("payload");
-    write_raw_payload(writer, &tx.payload)?;
-    writer.write_string("public_key");
-    write_bytes(writer, &tx.public_key, "public_key")?;
-    #[cfg(feature = "quantum")]
-    {
-        writer.write_string("dilithium_public_key");
-        write_bytes(writer, &tx.dilithium_public_key, "dilithium_public_key")?;
-    }
-    writer.write_string("signature");
-    write_signature(writer, &tx.signature)?;
-    writer.write_string("tip");
-    writer.write_u64(tx.tip);
-    writer.write_string("signer_pubkeys");
-    write_vec(
-        writer,
-        &tx.signer_pubkeys,
-        "signer_pubkeys",
-        |writer, value| write_bytes(writer, value, "signer_pubkey"),
-    )?;
-    writer.write_string("aggregate_signature");
-    write_bytes(writer, &tx.aggregate_signature, "aggregate_signature")?;
-    writer.write_string("threshold");
-    writer.write_u8(tx.threshold);
-    writer.write_string("lane");
-    write_fee_lane(writer, tx.lane);
-    writer.write_string("version");
-    write_tx_version(writer, tx.version);
-    Ok(())
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_with("payload", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_raw_payload(field_writer, &tx.payload) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("public_key", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &tx.public_key, "public_key") {
+                    result = Err(err);
+                }
+            }
+        });
+        #[cfg(feature = "quantum")]
+        {
+            struct_writer.field_with("dilithium_public_key", |field_writer| {
+                if result.is_ok() {
+                    if let Err(err) = write_bytes(
+                        field_writer,
+                        &tx.dilithium_public_key,
+                        "dilithium_public_key",
+                    ) {
+                        result = Err(err);
+                    }
+                }
+            });
+        }
+        struct_writer.field_with("signature", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_signature(field_writer, &tx.signature) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_u64("tip", tx.tip);
+        struct_writer.field_with("signer_pubkeys", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_vec(
+                    field_writer,
+                    &tx.signer_pubkeys,
+                    "signer_pubkeys",
+                    |writer, value| write_bytes(writer, value, "signer_pubkey"),
+                ) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("aggregate_signature", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) =
+                    write_bytes(field_writer, &tx.aggregate_signature, "aggregate_signature")
+                {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_u8("threshold", tx.threshold);
+        struct_writer.field_with("lane", |field_writer| {
+            write_fee_lane(field_writer, tx.lane);
+        });
+        struct_writer.field_with("version", |field_writer| {
+            write_tx_version(field_writer, tx.version);
+        });
+    });
+    result
 }
 
 pub(crate) fn read_signed_transaction(
@@ -237,20 +270,27 @@ pub(crate) fn read_signed_transaction(
 }
 
 fn write_signature(writer: &mut Writer, signature: &TxSignature) -> EncodeResult<()> {
-    #[cfg(feature = "quantum")]
-    const FIELD_COUNT: u64 = 2;
-    #[cfg(not(feature = "quantum"))]
-    const FIELD_COUNT: u64 = 1;
-
-    writer.write_u64(FIELD_COUNT);
-    writer.write_string("ed25519");
-    write_bytes(writer, &signature.ed25519, "ed25519")?;
-    #[cfg(feature = "quantum")]
-    {
-        writer.write_string("dilithium");
-        write_bytes(writer, &signature.dilithium, "dilithium")?;
-    }
-    Ok(())
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_with("ed25519", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &signature.ed25519, "ed25519") {
+                    result = Err(err);
+                }
+            }
+        });
+        #[cfg(feature = "quantum")]
+        {
+            struct_writer.field_with("dilithium", |field_writer| {
+                if result.is_ok() {
+                    if let Err(err) = write_bytes(field_writer, &signature.dilithium, "dilithium") {
+                        result = Err(err);
+                    }
+                }
+            });
+        }
+    });
+    result
 }
 
 fn read_signature(reader: &mut Reader<'_>) -> binary_struct::Result<TxSignature> {
@@ -313,19 +353,21 @@ fn read_tx_version(reader: &mut Reader<'_>) -> binary_struct::Result<TxVersion> 
 }
 
 pub(crate) fn write_blob_tx(writer: &mut Writer, tx: &BlobTx) -> EncodeResult<()> {
-    writer.write_u64(6);
-    writer.write_string("owner");
-    writer.write_string(&tx.owner);
-    writer.write_string("blob_id");
-    write_fixed_array(writer, &tx.blob_id);
-    writer.write_string("blob_root");
-    write_fixed_array(writer, &tx.blob_root);
-    writer.write_string("blob_size");
-    writer.write_u64(tx.blob_size);
-    writer.write_string("fractal_lvl");
-    writer.write_u8(tx.fractal_lvl);
-    writer.write_string("expiry");
-    writer.write_option_with(tx.expiry.as_ref(), |writer, value| writer.write_u64(*value));
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_string("owner", &tx.owner);
+        struct_writer.field_with("blob_id", |field_writer| {
+            write_fixed_array(field_writer, &tx.blob_id);
+        });
+        struct_writer.field_with("blob_root", |field_writer| {
+            write_fixed_array(field_writer, &tx.blob_root);
+        });
+        struct_writer.field_u64("blob_size", tx.blob_size);
+        struct_writer.field_u8("fractal_lvl", tx.fractal_lvl);
+        struct_writer.field_with("expiry", |field_writer| {
+            field_writer
+                .write_option_with(tx.expiry.as_ref(), |writer, value| writer.write_u64(*value));
+        });
+    });
     Ok(())
 }
 

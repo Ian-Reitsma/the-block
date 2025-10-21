@@ -1,12 +1,13 @@
+use super::json_map;
 use crate::compute_market::{
     matcher, price_board,
     receipt::Receipt,
     scheduler,
-    settlement::{BalanceSnapshot, Settlement, SettlementEngineInfo},
+    settlement::{AuditRecord, BalanceSnapshot, Settlement, SettlementEngineInfo},
     total_units_processed,
 };
 use crate::transaction::FeeLane;
-use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::Serialize;
 use std::collections::BTreeMap;
 use std::time::UNIX_EPOCH;
@@ -102,6 +103,158 @@ impl From<Receipt> for ComputeRecentMatch {
     }
 }
 
+fn optional_u64_value(value: Option<u64>) -> Value {
+    value
+        .map(|v| Value::Number(Number::from(v)))
+        .unwrap_or(Value::Null)
+}
+
+fn optional_string_value(value: Option<&String>) -> Value {
+    value
+        .map(|v| Value::String(v.clone()))
+        .unwrap_or(Value::Null)
+}
+
+fn accelerator_value(accelerator: Option<crate::compute_market::Accelerator>) -> Value {
+    accelerator
+        .map(|acc| {
+            Value::String(
+                match acc {
+                    crate::compute_market::Accelerator::Fpga => "FPGA",
+                    crate::compute_market::Accelerator::Tpu => "TPU",
+                }
+                .to_string(),
+            )
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn frameworks_value(frameworks: &[String]) -> Value {
+    Value::Array(frameworks.iter().cloned().map(Value::String).collect())
+}
+
+fn capability_to_value(capability: &scheduler::Capability) -> Value {
+    json_map(vec![
+        (
+            "cpu_cores",
+            Value::Number(Number::from(capability.cpu_cores)),
+        ),
+        ("gpu", optional_string_value(capability.gpu.as_ref())),
+        (
+            "gpu_memory_mb",
+            Value::Number(Number::from(capability.gpu_memory_mb)),
+        ),
+        (
+            "accelerator",
+            accelerator_value(capability.accelerator.clone()),
+        ),
+        (
+            "accelerator_memory_mb",
+            Value::Number(Number::from(capability.accelerator_memory_mb)),
+        ),
+        ("frameworks", frameworks_value(&capability.frameworks)),
+    ])
+}
+
+fn pending_job_to_value(job: &scheduler::PendingJob) -> Value {
+    let priority = match job.priority {
+        scheduler::Priority::Low => "Low",
+        scheduler::Priority::Normal => "Normal",
+        scheduler::Priority::High => "High",
+    };
+    let effective = Number::from_f64(job.effective_priority)
+        .expect("scheduler effective priority must be finite");
+
+    json_map(vec![
+        ("job_id", Value::String(job.job_id.clone())),
+        ("priority", Value::String(priority.to_string())),
+        ("effective_priority", Value::Number(effective)),
+    ])
+}
+
+fn utilization_to_value(utilization: std::collections::HashMap<String, u64>) -> Value {
+    let mut entries: Vec<_> = utilization.into_iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut map = Map::new();
+    for (lane, value) in entries {
+        map.insert(lane, Value::Number(Number::from(value)));
+    }
+    Value::Object(map)
+}
+
+fn scheduler_stats_to_value(stats: scheduler::SchedulerStats) -> Value {
+    let pending = stats.pending.iter().map(pending_job_to_value).collect();
+    json_map(vec![
+        ("success", Value::Number(Number::from(stats.success))),
+        (
+            "capability_mismatch",
+            Value::Number(Number::from(stats.capability_mismatch)),
+        ),
+        (
+            "reputation_failure",
+            Value::Number(Number::from(stats.reputation_failure)),
+        ),
+        (
+            "preemptions",
+            Value::Number(Number::from(stats.preemptions)),
+        ),
+        (
+            "active_jobs",
+            Value::Number(Number::from(stats.active_jobs)),
+        ),
+        ("utilization", utilization_to_value(stats.utilization)),
+        ("effective_price", optional_u64_value(stats.effective_price)),
+        (
+            "queued_high",
+            Value::Number(Number::from(stats.queued_high)),
+        ),
+        (
+            "queued_normal",
+            Value::Number(Number::from(stats.queued_normal)),
+        ),
+        ("queued_low", Value::Number(Number::from(stats.queued_low))),
+        (
+            "priority_miss",
+            Value::Number(Number::from(stats.priority_miss)),
+        ),
+        ("pending", Value::Array(pending)),
+    ])
+}
+
+fn audit_record_to_value(record: &AuditRecord) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "sequence".to_string(),
+        Value::Number(Number::from(record.sequence)),
+    );
+    map.insert(
+        "timestamp".to_string(),
+        Value::Number(Number::from(record.timestamp)),
+    );
+    map.insert("entity".to_string(), Value::String(record.entity.clone()));
+    map.insert("memo".to_string(), Value::String(record.memo.clone()));
+    map.insert(
+        "delta_ct".to_string(),
+        Value::Number(Number::from(record.delta_ct)),
+    );
+    map.insert(
+        "delta_it".to_string(),
+        Value::Number(Number::from(record.delta_it)),
+    );
+    map.insert(
+        "balance_ct".to_string(),
+        Value::Number(Number::from(record.balance_ct)),
+    );
+    map.insert(
+        "balance_it".to_string(),
+        Value::Number(Number::from(record.balance_it)),
+    );
+    if let Some(anchor) = &record.anchor {
+        map.insert("anchor".to_string(), Value::String(anchor.clone()));
+    }
+    Value::Object(map)
+}
+
 /// Return compute market backlog and utilisation metrics.
 pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> ComputeMarketStatsResponse {
     let (backlog, util) = price_board::backlog_utilization();
@@ -152,7 +305,7 @@ pub fn scheduler_metrics() -> Value {
 
 /// Return aggregated scheduler statistics over recent matches.
 pub fn scheduler_stats() -> Value {
-    json::to_value(scheduler::stats()).unwrap()
+    scheduler_stats_to_value(scheduler::stats())
 }
 
 /// Return current reputation score for a provider.
@@ -173,7 +326,7 @@ pub fn reputation_get(provider: &str) -> ReputationResponse<'_> {
 /// Return capability requirements for an active job.
 pub fn job_requirements(job_id: &str) -> Value {
     if let Some(cap) = scheduler::job_requirements(job_id) {
-        json::to_value(cap).unwrap()
+        capability_to_value(&cap)
     } else {
         Value::Object(Map::new())
     }
@@ -198,7 +351,7 @@ pub fn job_cancel(job_id: &str) -> StatusResponse {
 /// Return advertised hardware capability for a provider.
 pub fn provider_hardware(provider: &str) -> Value {
     if let Some(cap) = scheduler::provider_capability(provider) {
-        json::to_value(cap).unwrap()
+        capability_to_value(&cap)
     } else {
         Value::Object(Map::new())
     }
@@ -206,7 +359,9 @@ pub fn provider_hardware(provider: &str) -> Value {
 
 /// Return the recent settlement audit log.
 pub fn settlement_audit() -> Value {
-    json::to_value(Settlement::audit()).unwrap_or_else(|_| Value::Array(Vec::new()))
+    let records = Settlement::audit();
+    let values = records.iter().map(audit_record_to_value).collect();
+    Value::Array(values)
 }
 
 /// Return split token balances for providers.

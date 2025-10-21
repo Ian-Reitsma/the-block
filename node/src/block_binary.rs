@@ -23,72 +23,87 @@ pub fn decode_block(bytes: &[u8]) -> binary_struct::Result<Block> {
 }
 
 pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()> {
-    #[cfg(feature = "quantum")]
-    const FIELD_COUNT: u64 = 28;
-    #[cfg(not(feature = "quantum"))]
-    const FIELD_COUNT: u64 = 26;
-
-    writer.write_u64(FIELD_COUNT);
-    writer.write_string("index");
-    writer.write_u64(block.index);
-    writer.write_string("previous_hash");
-    writer.write_string(&block.previous_hash);
-    writer.write_string("timestamp_millis");
-    writer.write_u64(block.timestamp_millis);
-    writer.write_string("transactions");
-    write_transactions(writer, &block.transactions)?;
-    writer.write_string("difficulty");
-    writer.write_u64(block.difficulty);
-    writer.write_string("retune_hint");
-    writer.write_i64(i64::from(block.retune_hint));
-    writer.write_string("nonce");
-    writer.write_u64(block.nonce);
-    writer.write_string("hash");
-    writer.write_string(&block.hash);
-    writer.write_string("coinbase_consumer");
-    writer.write_u64(block.coinbase_consumer.get());
-    writer.write_string("coinbase_industrial");
-    writer.write_u64(block.coinbase_industrial.get());
-    writer.write_string("storage_sub_ct");
-    writer.write_u64(block.storage_sub_ct.get());
-    writer.write_string("read_sub_ct");
-    writer.write_u64(block.read_sub_ct.get());
-    writer.write_string("compute_sub_ct");
-    writer.write_u64(block.compute_sub_ct.get());
-    writer.write_string("proof_rebate_ct");
-    writer.write_u64(block.proof_rebate_ct.get());
-    writer.write_string("storage_sub_it");
-    writer.write_u64(block.storage_sub_it.get());
-    writer.write_string("read_sub_it");
-    writer.write_u64(block.read_sub_it.get());
-    writer.write_string("compute_sub_it");
-    writer.write_u64(block.compute_sub_it.get());
-    writer.write_string("read_root");
-    write_fixed(writer, &block.read_root);
-    writer.write_string("fee_checksum");
-    writer.write_string(&block.fee_checksum);
-    writer.write_string("state_root");
-    writer.write_string(&block.state_root);
-    writer.write_string("base_fee");
-    writer.write_u64(block.base_fee);
-    writer.write_string("l2_roots");
-    write_root_vec(writer, &block.l2_roots)?;
-    writer.write_string("l2_sizes");
-    write_u32_vec(writer, &block.l2_sizes)?;
-    writer.write_string("vdf_commit");
-    write_fixed(writer, &block.vdf_commit);
-    writer.write_string("vdf_output");
-    write_fixed(writer, &block.vdf_output);
-    writer.write_string("vdf_proof");
-    write_bytes(writer, &block.vdf_proof, "vdf_proof")?;
-    #[cfg(feature = "quantum")]
-    {
-        writer.write_string("dilithium_pubkey");
-        write_bytes(writer, &block.dilithium_pubkey, "dilithium_pubkey")?;
-        writer.write_string("dilithium_sig");
-        write_bytes(writer, &block.dilithium_sig, "dilithium_sig")?;
-    }
-    Ok(())
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("index", block.index);
+        struct_writer.field_string("previous_hash", &block.previous_hash);
+        struct_writer.field_u64("timestamp_millis", block.timestamp_millis);
+        struct_writer.field_with("transactions", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_transactions(field_writer, &block.transactions) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_u64("difficulty", block.difficulty);
+        struct_writer.field_i64("retune_hint", i64::from(block.retune_hint));
+        struct_writer.field_u64("nonce", block.nonce);
+        struct_writer.field_string("hash", &block.hash);
+        struct_writer.field_u64("coinbase_consumer", block.coinbase_consumer.get());
+        struct_writer.field_u64("coinbase_industrial", block.coinbase_industrial.get());
+        struct_writer.field_u64("storage_sub_ct", block.storage_sub_ct.get());
+        struct_writer.field_u64("read_sub_ct", block.read_sub_ct.get());
+        struct_writer.field_u64("compute_sub_ct", block.compute_sub_ct.get());
+        struct_writer.field_u64("proof_rebate_ct", block.proof_rebate_ct.get());
+        struct_writer.field_u64("storage_sub_it", block.storage_sub_it.get());
+        struct_writer.field_u64("read_sub_it", block.read_sub_it.get());
+        struct_writer.field_u64("compute_sub_it", block.compute_sub_it.get());
+        struct_writer.field_with("read_root", |field_writer| {
+            write_fixed(field_writer, &block.read_root);
+        });
+        struct_writer.field_string("fee_checksum", &block.fee_checksum);
+        struct_writer.field_string("state_root", &block.state_root);
+        struct_writer.field_u64("base_fee", block.base_fee);
+        struct_writer.field_with("l2_roots", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_root_vec(field_writer, &block.l2_roots) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("l2_sizes", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_u32_vec(field_writer, &block.l2_sizes) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("vdf_commit", |field_writer| {
+            write_fixed(field_writer, &block.vdf_commit);
+        });
+        struct_writer.field_with("vdf_output", |field_writer| {
+            write_fixed(field_writer, &block.vdf_output);
+        });
+        struct_writer.field_with("vdf_proof", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &block.vdf_proof, "vdf_proof") {
+                    result = Err(err);
+                }
+            }
+        });
+        #[cfg(feature = "quantum")]
+        {
+            struct_writer.field_with("dilithium_pubkey", |field_writer| {
+                if result.is_ok() {
+                    if let Err(err) =
+                        write_bytes(field_writer, &block.dilithium_pubkey, "dilithium_pubkey")
+                    {
+                        result = Err(err);
+                    }
+                }
+            });
+            struct_writer.field_with("dilithium_sig", |field_writer| {
+                if result.is_ok() {
+                    if let Err(err) =
+                        write_bytes(field_writer, &block.dilithium_sig, "dilithium_sig")
+                    {
+                        result = Err(err);
+                    }
+                }
+            });
+        }
+    });
+    result
 }
 
 pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block> {

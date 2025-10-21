@@ -369,6 +369,11 @@ impl StructWriter {
         self.field_with(key, |writer| writer.write_bytes(value));
     }
 
+    /// Write a `u8` field.
+    pub fn field_u8(&mut self, key: &str, value: u8) {
+        self.field_with(key, |writer| writer.write_u8(value));
+    }
+
     /// Write a boolean field.
     pub fn field_bool(&mut self, key: &str, value: bool) {
         self.field_with(key, |writer| writer.write_bool(value));
@@ -377,6 +382,11 @@ impl StructWriter {
     /// Write a `u64` field.
     pub fn field_u64(&mut self, key: &str, value: u64) {
         self.field_with(key, |writer| writer.write_u64(value));
+    }
+
+    /// Write a `u32` field.
+    pub fn field_u32(&mut self, key: &str, value: u32) {
+        self.field_with(key, |writer| writer.write_u32(value));
     }
 
     /// Write an `i64` field.

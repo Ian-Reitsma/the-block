@@ -9,9 +9,14 @@ under the `Blockchain` struct, which maintains two lane‑separated DashMaps:
 
 ## Admission Pipeline
 
-1. **Precheck** – `canonical_payload_bytes` verifies signatures, nonces, and fee
-   selectors before admission.  Basic fee arithmetic ensures `amount + fee`
-   does not overflow.
+1. **Precheck** – `canonical_payload_bytes` now forwards to the cursor-backed
+   `encode_raw_payload` helper before verifying signatures, nonces, and fee
+   selectors. Basic fee arithmetic ensures `amount + fee` does not overflow,
+   and FIRST_PARTY_ONLY builds avoid the old `foundation_serde` stub path.
+   When a signed transaction arrives without an explicit priority fee,
+   `Blockchain::submit_transaction` derives `tip = payload.fee.saturating_sub(base_fee)`
+   before computing fee-per-byte, keeping legacy builders compatible with the
+   admission floor.
 2. **Capacity check** – each lane enforces `max_mempool_size_{consumer,industrial}`
    and rejects excess transactions with `TxAdmissionError::MempoolFull`.
 3. **Pending-per-account limit** – `max_pending_per_account` caps the number of
@@ -57,8 +62,8 @@ contract‑specific partitioning.
 |--------------------------------|----------------------------------------------|---------|
 | `max_mempool_size_consumer`    | Max consumer entries                         | 1024 |
 | `max_mempool_size_industrial`  | Max industrial entries                       | 1024 |
-| `min_fee_per_byte_consumer`    | Admission floor for consumer lane            | 0 |
-| `min_fee_per_byte_industrial`  | Admission floor for industrial lane          | 0 |
+| `min_fee_per_byte_consumer`    | Admission floor for consumer lane            | 1 |
+| `min_fee_per_byte_industrial`  | Admission floor for industrial lane          | 1 |
 | `tx_ttl`                       | Seconds before a tx expires                   | 300 |
 | `max_pending_per_account`      | Max in-flight nonces per sender              | 32 |
 | `comfort_threshold_p90`        | Fee P90 above which industrial lane defers   | 0 |

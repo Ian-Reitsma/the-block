@@ -7,7 +7,9 @@ use crate::{
     identity::{handle_registry::HandleRegistry, DidRegistry},
     kyc,
     localnet::{validate_proximity, AssistReceipt},
-    net, range_boost,
+    net,
+    net::peer::{DropReason, HandshakeError, PeerMetrics, PeerReputation},
+    range_boost,
     simple_db::{names, SimpleDb},
     storage::fs::RentEscrow,
     transaction::FeeLane,
@@ -86,12 +88,225 @@ fn json_map(pairs: Vec<(&str, Value)>) -> Value {
     Value::Object(map)
 }
 
+fn drop_counts_to_value(counts: &HashMap<DropReason, u64>) -> Value {
+    let mut entries: Vec<(String, u64)> = counts
+        .iter()
+        .map(|(reason, count)| (reason.as_ref().to_owned(), *count))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut map = Map::new();
+    for (reason, count) in entries {
+        map.insert(reason, Value::Number(Number::from(count)));
+    }
+    Value::Object(map)
+}
+
+fn handshake_fail_counts_to_value(counts: &HashMap<HandshakeError, u64>) -> Value {
+    let mut entries: Vec<(String, u64)> = counts
+        .iter()
+        .map(|(error, count)| (error.as_str().to_owned(), *count))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut map = Map::new();
+    for (error, count) in entries {
+        map.insert(error, Value::Number(Number::from(count)));
+    }
+    Value::Object(map)
+}
+
+fn peer_reputation_value(reputation: &PeerReputation) -> Value {
+    let mut map = Map::new();
+    map.insert("score".to_string(), Value::from(reputation.score));
+    Value::Object(map)
+}
+
+fn peer_metrics_to_value(metrics: &PeerMetrics) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "requests".to_string(),
+        Value::Number(Number::from(metrics.requests)),
+    );
+    map.insert(
+        "bytes_sent".to_string(),
+        Value::Number(Number::from(metrics.bytes_sent)),
+    );
+    map.insert(
+        "sends".to_string(),
+        Value::Number(Number::from(metrics.sends)),
+    );
+    map.insert("drops".to_string(), drop_counts_to_value(&metrics.drops));
+    map.insert(
+        "handshake_fail".to_string(),
+        handshake_fail_counts_to_value(&metrics.handshake_fail),
+    );
+    map.insert(
+        "handshake_success".to_string(),
+        Value::Number(Number::from(metrics.handshake_success)),
+    );
+    map.insert(
+        "last_handshake_ms".to_string(),
+        Value::Number(Number::from(metrics.last_handshake_ms)),
+    );
+    map.insert(
+        "tls_errors".to_string(),
+        Value::Number(Number::from(metrics.tls_errors)),
+    );
+    map.insert(
+        "reputation".to_string(),
+        peer_reputation_value(&metrics.reputation),
+    );
+    map.insert(
+        "last_updated".to_string(),
+        Value::Number(Number::from(metrics.last_updated)),
+    );
+    map.insert("req_avg".to_string(), Value::from(metrics.req_avg));
+    map.insert("byte_avg".to_string(), Value::from(metrics.byte_avg));
+    map.insert(
+        "throttled_until".to_string(),
+        Value::Number(Number::from(metrics.throttled_until)),
+    );
+    map.insert(
+        "throttle_reason".to_string(),
+        metrics
+            .throttle_reason
+            .as_ref()
+            .map(|reason| Value::String(reason.clone()))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "backoff_level".to_string(),
+        Value::Number(Number::from(metrics.backoff_level)),
+    );
+    map.insert(
+        "sec_start".to_string(),
+        Value::Number(Number::from(metrics.sec_start)),
+    );
+    Value::Object(map)
+}
+
 fn status_value(status: &str) -> Value {
     Value::Object({
         let mut map = Map::new();
         map.insert("status".to_string(), Value::String(status.to_string()));
         map
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        drop_counts_to_value,
+        handshake_fail_counts_to_value,
+        peer_metrics_to_value,
+        DropReason,
+        HandshakeError,
+    };
+    use crate::net::peer::{PeerMetrics, PeerReputation};
+    use foundation_serialization::json::Value;
+    use std::collections::HashMap;
+
+    #[test]
+    fn drop_counts_are_deterministically_ordered() {
+        let mut counts = HashMap::new();
+        counts.insert(DropReason::TooBusy, 3);
+        counts.insert(DropReason::Blacklist, 1);
+        counts.insert(DropReason::RateLimit, 2);
+
+        let value = drop_counts_to_value(&counts);
+        let Value::Object(map) = value else {
+            panic!("expected object value");
+        };
+
+        let keys: Vec<_> = map.keys().cloned().collect();
+        assert_eq!(keys, vec!["blacklist", "rate_limit", "too_busy"]);
+
+        assert_eq!(map["blacklist"].as_u64(), Some(1));
+        assert_eq!(map["rate_limit"].as_u64(), Some(2));
+        assert_eq!(map["too_busy"].as_u64(), Some(3));
+    }
+
+    #[test]
+    fn handshake_fail_counts_are_deterministically_ordered() {
+        let mut counts = HashMap::new();
+        counts.insert(HandshakeError::Timeout, 5);
+        counts.insert(HandshakeError::Tls, 7);
+        counts.insert(HandshakeError::Certificate, 2);
+
+        let value = handshake_fail_counts_to_value(&counts);
+        let Value::Object(map) = value else {
+            panic!("expected object value");
+        };
+
+        let keys: Vec<_> = map.keys().cloned().collect();
+        assert_eq!(keys, vec!["certificate", "timeout", "tls"]);
+
+        assert_eq!(map["certificate"].as_u64(), Some(2));
+        assert_eq!(map["timeout"].as_u64(), Some(5));
+        assert_eq!(map["tls"].as_u64(), Some(7));
+    }
+
+    #[test]
+    fn peer_metrics_value_includes_sorted_maps() {
+        let mut drops = HashMap::new();
+        drops.insert(DropReason::Blacklist, 4);
+        drops.insert(DropReason::RateLimit, 9);
+        let mut handshake_fail = HashMap::new();
+        handshake_fail.insert(HandshakeError::Tls, 3);
+        handshake_fail.insert(HandshakeError::Timeout, 1);
+
+        let mut reputation = PeerReputation::default();
+        reputation.score = 0.75;
+
+        let metrics = PeerMetrics {
+            requests: 11,
+            bytes_sent: 22,
+            sends: 5,
+            drops,
+            handshake_fail,
+            handshake_success: 6,
+            last_handshake_ms: 1234,
+            tls_errors: 2,
+            reputation,
+            last_updated: 9999,
+            req_avg: 1.5,
+            byte_avg: 2.5,
+            throttled_until: 555,
+            throttle_reason: Some("cooldown".to_string()),
+            backoff_level: 3,
+            sec_start: 777,
+            ..PeerMetrics::default()
+        };
+
+        let value = peer_metrics_to_value(&metrics);
+        let Value::Object(map) = value else {
+            panic!("expected object value");
+        };
+
+        assert_eq!(map["requests"].as_u64(), Some(11));
+        assert_eq!(map["bytes_sent"].as_u64(), Some(22));
+        assert_eq!(map["handshake_success"].as_u64(), Some(6));
+        assert_eq!(map["tls_errors"].as_u64(), Some(2));
+        assert_eq!(map["last_updated"].as_u64(), Some(9999));
+        assert_eq!(map["throttled_until"].as_u64(), Some(555));
+        assert_eq!(map["backoff_level"].as_u64(), Some(3));
+        assert_eq!(map["sec_start"].as_u64(), Some(777));
+
+        let Value::Object(drop_map) = &map["drops"] else {
+            panic!("expected nested drop map");
+        };
+        let drop_keys: Vec<_> = drop_map.keys().cloned().collect();
+        assert_eq!(drop_keys, vec!["blacklist", "rate_limit"]);
+
+        let Value::Object(handshake_map) = &map["handshake_fail"] else {
+            panic!("expected nested handshake map");
+        };
+        let handshake_keys: Vec<_> = handshake_map.keys().cloned().collect();
+        assert_eq!(handshake_keys, vec!["timeout", "tls"]);
+
+        assert_eq!(map["throttle_reason"], Value::String("cooldown".into()));
+    }
 }
 
 fn error_value(message: impl Into<String>) -> Value {
@@ -1101,10 +1316,10 @@ fn dispatch(
             json_map(vec![
                 ("requests", Value::Number(Number::from(m.requests))),
                 ("bytes_sent", Value::Number(Number::from(m.bytes_sent))),
-                ("drops", json::to_value(&m.drops).unwrap_or(Value::Null)),
+                ("drops", drop_counts_to_value(&m.drops)),
                 (
                     "handshake_fail",
-                    json::to_value(&m.handshake_fail).unwrap_or(Value::Null),
+                    handshake_fail_counts_to_value(&m.handshake_fail),
                 ),
                 ("reputation", Value::from(m.reputation.score)),
                 (
@@ -1189,7 +1404,11 @@ fn dispatch(
             let min_rep = req.params.get("min_reputation").and_then(|v| v.as_f64());
             let active = req.params.get("active_within").and_then(|v| v.as_u64());
             let map = net::peer_stats_map(min_rep, active);
-            foundation_serialization::json::to_value(map).unwrap()
+            let mut out = Map::new();
+            for (peer, metrics) in map {
+                out.insert(peer, peer_metrics_to_value(&metrics));
+            }
+            Value::Object(out)
         }
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
             Ok(()) => status_value("ok"),

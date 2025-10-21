@@ -118,23 +118,42 @@ pub fn encode_payload(payload: &Payload) -> EncodeResult<Vec<u8>> {
 }
 
 fn write_message(writer: &mut BinaryWriter, message: &Message) -> EncodeResult<()> {
-    writer.write_u64(5);
-    writer.write_string("pubkey");
-    write_fixed(writer, &message.pubkey);
-    writer.write_string("signature");
-    write_bytes(writer, &message.signature, "signature")?;
-    writer.write_string("body");
-    write_payload(writer, &message.body)?;
-    writer.write_string("partition");
-    writer.write_option_with(message.partition.as_ref(), |writer, value| {
-        writer.write_u64(*value)
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_with("pubkey", |field_writer| {
+            write_fixed(field_writer, &message.pubkey);
+        });
+        struct_writer.field_with("signature", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &message.signature, "signature") {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("body", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_payload(field_writer, &message.body) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("partition", |field_writer| {
+            field_writer.write_option_with(message.partition.as_ref(), |writer, value| {
+                writer.write_u64(*value)
+            });
+        });
+        struct_writer.field_with("cert_fingerprint", |field_writer| {
+            field_writer.write_bool(message.cert_fingerprint.is_some());
+            if let Some(value) = message.cert_fingerprint.as_ref() {
+                if result.is_ok() {
+                    if let Err(err) = write_bytes(field_writer, value, "cert_fingerprint") {
+                        result = Err(err);
+                    }
+                }
+            }
+        });
     });
-    writer.write_string("cert_fingerprint");
-    writer.write_bool(message.cert_fingerprint.is_some());
-    if let Some(value) = message.cert_fingerprint.as_ref() {
-        write_bytes(writer, value, "cert_fingerprint")?;
-    }
-    Ok(())
+    result
 }
 
 fn read_message(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Message> {
@@ -245,16 +264,22 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
 }
 
 fn write_blob_chunk(writer: &mut BinaryWriter, chunk: &BlobChunk) -> EncodeResult<()> {
-    writer.write_u64(4);
-    writer.write_string("root");
-    write_fixed(writer, &chunk.root);
-    writer.write_string("index");
-    writer.write_u32(chunk.index);
-    writer.write_string("total");
-    writer.write_u32(chunk.total);
-    writer.write_string("data");
-    write_bytes(writer, &chunk.data, "data")?;
-    Ok(())
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_with("root", |field_writer| {
+            write_fixed(field_writer, &chunk.root);
+        });
+        struct_writer.field_u32("index", chunk.index);
+        struct_writer.field_u32("total", chunk.total);
+        struct_writer.field_with("data", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_bytes(field_writer, &chunk.data, "data") {
+                    result = Err(err);
+                }
+            }
+        });
+    });
+    result
 }
 
 fn read_blob_chunk(reader: &mut BinaryReader<'_>) -> binary_struct::Result<BlobChunk> {
@@ -283,13 +308,11 @@ fn write_reputation_update(
     writer: &mut BinaryWriter,
     update: &ReputationUpdate,
 ) -> EncodeResult<()> {
-    writer.write_u64(3);
-    writer.write_string("provider_id");
-    writer.write_string(&update.provider_id);
-    writer.write_string("reputation_score");
-    writer.write_i64(update.reputation_score);
-    writer.write_string("epoch");
-    writer.write_u64(update.epoch);
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_string("provider_id", &update.provider_id);
+        struct_writer.field_i64("reputation_score", update.reputation_score);
+        struct_writer.field_u64("epoch", update.epoch);
+    });
     Ok(())
 }
 

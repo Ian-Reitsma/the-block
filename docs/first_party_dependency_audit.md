@@ -1,7 +1,41 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-20 10:15:00Z_
+_Last updated: 2025-10-20 23:55:00Z_
 
+> **2025-10-20 update (admission tip + Kalman retune):** Transaction admission
+> now derives `tx.tip` from `payload.fee` when callers omit a priority fee,
+> keeping legacy builders compatible with the lane minimum and letting the
+> base-fee regression run under FIRST_PARTY_ONLY without touching the
+> `foundation_serde` stub. Inflation retuning replaced its serde-derived
+> `KalmanState` serializer with manual `json::Value` parsing/encoding so the
+> industrial multiplier history persists purely through first-party builders.
+> **2025-10-20 update (transaction canonical bytes):** `canonical_payload_bytes`
+> now forwards to `transaction::binary::encode_raw_payload`,
+> `verify_signed_tx` hashes signed transactions via the manual writer, Python
+> helpers decode through `decode_raw_payload`, and the CLI converts its payload
+> struct into the node type before invoking the same encoder. This removes the
+> last runtime dependency on `codec::serialize` for RawTxPayload/SignedTransaction
+> and eliminates the `foundation_serde` stub panic that previously blocked the
+> base-fee integration test under FIRST_PARTY_ONLY.
+> **2025-10-20 update (RPC compute-market + DEX builders):** Compute-market
+> responders (`scheduler_stats`, `job_requirements`, `provider_hardware`, and the
+> settlement audit log) now emit JSON through deterministic first-party builders
+> instead of `json::to_value`, keeping capability snapshots and audit rows on the
+> in-house facade. DEX escrow status/release handlers convert payment proofs and
+> Merkle roots via manual map assembly, removing the serde-based escape hatch
+> while preserving the legacy array layout. Fresh unit coverage exercises the
+> sorted drop/handshake maps that back the peer metrics RPCs so ordering stays
+> deterministic.
+> **2025-10-20 update (cursor field automation + peer stats JSON):** Block,
+> transaction, and gossip encoders now build structs through
+> `StructWriter::write_struct`, while the cursor exposes `field_u8`/`field_u32`
+> shorthands so codecs enumerate layout metadata without closure plumbing.
+> Round-trip tests cover the refreshed writers to guard against
+> `Cursor(UnexpectedEof)` regressions. RPC peer metrics dropped
+> `foundation_serialization::json::to_value` in favour of deterministic
+> first-party map builders, keeping `net.peer_stats_export_all` on the in-house
+> JSON stack and removing the last serde-based escape hatch from the networking
+> export path.
 > **2025-10-20 update (ledger persistence + mempool rebuild):** The new
 > `ledger_binary` helpers now drive every on-disk snapshot—`MempoolEntryDisk`
 > carries a cached `serialized_size`, the rebuild path consumes that byte count
@@ -690,6 +724,12 @@ facade and extending the crate with richer console abstractions.
   HTTP helpers, and the metrics aggregator now rely on the in-house TLS
   connector with shared environment prefixes, eliminating the lingering
   `native-tls` shim and bringing wallet and tooling HTTPS flows fully in-house.
+- ✅ Manualized the node runtime log sink and governance webhook JSON builders
+  (`node/src/bin/node.rs`, `node/src/telemetry.rs`) so production binaries no
+  longer invoke the `foundation_serialization::json!` macro. Runtime logging,
+  Chrome trace emission, and governance webhooks now serialize through explicit
+  first-party `JsonMap` builders/typed structs, keeping admission and alerting
+  surfaces compliant with the FIRST_PARTY_ONLY audit.
 - ✅ Rebuilt `crates/sys` on direct FFI declarations and `/proc` parsing so the
   workspace no longer depends on the upstream `libc` crate while preserving the
   existing tempfile, signal, randomness, and tty helpers under the first-party

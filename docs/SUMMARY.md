@@ -1,4 +1,35 @@
 # Summary
+> **Review (2025-10-20, near midnight):** Admission now backfills a priority
+> tip when callers omit one by subtracting the live base fee from
+> `payload.fee`, keeping legacy builders compatible with the lane floor and
+> restoring the base-fee regression under FIRST_PARTY_ONLY. Governance
+> retuning no longer touches `foundation_serde`: Kalman state snapshots decode
+> via `json::Value` and write through a first-party map builder, so the
+> inflation pipeline stays entirely on the in-house JSON facade.
+> **Review (2025-10-20, late evening):** Canonical transaction payloads now
+> serialise exclusively through the cursor helpers. Node `canonical_payload_bytes`
+> forwards to `encode_raw_payload`, signed-transaction hashing reuses the manual
+> writer, the Python bindings decode via `decode_raw_payload`, and the CLI signs
+> by converting into the node struct before calling the same encoder. The
+> `foundation_serde` stub is no longer touched during RawTxPayload admission,
+> unblocking the base-fee regression under FIRST_PARTY_ONLY.
+> **Review (2025-10-20, afternoon++):** Peer metric JSON helpers sort drop and
+> handshake maps deterministically, with new unit tests guarding the ordering
+> as we phase out bespoke RPC builders. Compute-market RPC endpoints for
+> scheduler stats, job requirements, provider hardware, and the settlement audit
+> log now construct payloads entirely through first-party `Value` builders, so
+> capability snapshots, utilization maps, and audit records no longer rely on
+> `json::to_value`. DEX escrow status/release responses serialize payment proofs
+> and Merkle roots manually, matching the legacy array layout while keeping the
+> entire surface inside the in-house JSON facade.
+> **Review (2025-10-20, midday):** Block, transaction, and gossip codecs now
+> build their structs through `StructWriter::write_struct` with the new
+> `field_u8`/`field_u32` helpers, eliminating hand-counted field totals that
+> previously surfaced as `Cursor(UnexpectedEof)` during round-trip tests. RPC
+> peer metrics dropped `json::to_value` conversions in favour of deterministic
+> builders, so `net.peer_stats_export_all` stays fully on the first-party JSON
+> stack. Fresh round-trip coverage exercises the updated writers for block,
+> blob-transaction, and gossip payloads under the cursor facade.
 > **Review (2025-10-20, morning):** Ledger persistence, mempool rebuild, and
 > legacy decode paths now run purely on the `ledger_binary` cursor helpers.
 > `MempoolEntryDisk` stores a cached `serialized_size`, startup rebuild consumes
@@ -85,6 +116,7 @@
 > serde-stub`, and the dependency inventory/guard snapshots were refreshed to
 > capture the new facade boundaries.
 > **Review (2025-10-14, midday++):** Dependency registry check mode now emits structured drift diagnostics and telemetry. The new `check` module stages additions, removals, field-level updates, root package churn, and policy deltas before persisting results via `output::write_check_telemetry`, guaranteeing operators can alert on `dependency_registry_check_status`/`dependency_registry_check_counts` even when rotation fails. `cli_end_to_end` gained a check-mode regression that validates the drift narrative and metrics snapshot, and synthetic metadata fixtures now cover target-gated dependencies plus default-member fallbacks so `compute_depths` stays correct across platform-specific graphs.
+> **Update (2025-10-20):** Node runtime logging and governance webhooks now serialize via explicit first-party helpers. The CLI log sink assembles stderr JSON and Chrome trace output through `JsonMap` builders, and governance webhooks post typed payloads through the in-house HTTP client (`node/src/bin/node.rs`, `node/src/telemetry.rs`), removing the final `foundation_serialization::json!` dependency from production binaries.
 > **Review (2025-10-12):** Delivered first-party PQ stubs (`crates/pqcrypto_dilithium`, `crates/pqcrypto_kyber`) so `quantum`/`pq` builds compile without crates.io dependencies while preserving deterministic signatures and encapsulations for commit–reveal, wallet, and governance flows. Replaced the external `serde_bytes` crate with `foundation_serialization::serde_bytes`, keeping `#[serde(with = "serde_bytes")]` annotations on exec/read-receipt payloads fully first party, and refreshed the dependency inventory accordingly. Runtime concurrency now routes `join_all`/`select2`/oneshot handling through the shared `crates/foundation_async` facade with a first-party `AtomicWaker`, eliminating the duplicate runtime channel implementation. New integration tests (`crates/foundation_async/tests/futures.rs`) exercise join ordering, select short-circuiting, panic capture, and oneshot cancellation so FIRST_PARTY_ONLY builds lean on in-house scheduling primitives with coverage.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, diagnostics, TUI, TLS, and the PQ facades are live with governance overrides enforced (2025-10-12). Log ingestion/search now rides the sled-backed `log_index` crate with optional SQLite migration for legacy archives (2025-10-14).
 
