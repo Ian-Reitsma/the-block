@@ -1,10 +1,16 @@
-use crate::{codec_helpers::json_from_str, parse_utils::take_string, rpc::RpcClient};
+use crate::{
+    codec_helpers::json_from_str,
+    json_helpers::{
+        json_null, json_object_from, json_rpc_request, json_rpc_request_with_id, json_string,
+    },
+    parse_utils::take_string,
+    rpc::RpcClient,
+};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::Serialize;
 use std::io::{self, Write};
 use the_block::simple_db::EngineKind;
 
@@ -147,23 +153,8 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
     match cmd {
         ComputeCmd::Cancel { job_id, url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let params = foundation_serialization::json!({"job_id": job_id});
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "compute.job_cancel",
-                params,
-                auth: None,
-            };
+            let params = json_object_from([("job_id", json_string(job_id))]);
+            let payload = json_rpc_request("compute.job_cancel", params);
             match client.call(&url, &payload) {
                 Ok(resp) => {
                     if let Ok(text) = resp.text() {
@@ -188,26 +179,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Stats { url, accelerator } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let params = accelerator
-                .as_ref()
-                .map(|acc| foundation_serialization::json!({"accelerator": acc}))
-                .unwrap_or(foundation_serialization::json::Value::Null);
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "compute_market.stats",
-                params,
-                auth: None,
+            let params = if let Some(acc) = accelerator.as_ref() {
+                json_object_from([("accelerator", json_string(acc))])
+            } else {
+                json_null()
             };
+            let payload = json_rpc_request("compute_market.stats", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
@@ -344,13 +321,8 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 }
             }
 
-            let balance_payload = Payload {
-                jsonrpc: "2.0",
-                id: 2,
-                method: "compute_market.provider_balances",
-                params: foundation_serialization::json::Value::Null,
-                auth: None,
-            };
+            let balance_payload =
+                json_rpc_request_with_id("compute_market.provider_balances", json_null(), 2);
             if let Ok(resp) = client.call(&url, &balance_payload) {
                 if let Ok(text) = resp.text() {
                     if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
@@ -377,22 +349,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Queue { url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "compute_market.stats",
-                params: foundation_serialization::json::Value::Null,
-                auth: None,
-            };
+            let payload = json_rpc_request("compute_market.stats", json_null());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
@@ -417,23 +374,8 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Status { job_id, url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let params = foundation_serialization::json!({"job_id": job_id});
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "compute.job_status",
-                params,
-                auth: None,
-            };
+            let params = json_object_from([("job_id", json_string(job_id))]);
+            let payload = json_rpc_request("compute.job_status", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     writeln!(out, "{}", text)?;

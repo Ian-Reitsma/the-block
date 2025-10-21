@@ -7,8 +7,21 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::json::{Map as JsonMap, Value};
 
 use crate::parse_utils::take_string;
+
+fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
+    let mut map = JsonMap::new();
+    for (key, value) in pairs {
+        map.insert(key, value);
+    }
+    map
+}
+
+fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
+    Value::Object(json_map_from(pairs))
+}
 
 pub enum GatewayCmd {
     /// Inspect or manage the mobile RPC cache
@@ -122,12 +135,15 @@ pub fn handle(cmd: GatewayCmd) {
             let client = RpcClient::from_env();
             match action {
                 MobileCacheAction::Status { url, auth, pretty } => {
-                    let payload = foundation_serialization::json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "gateway.mobile_cache_status",
-                        "params": foundation_serialization::json::Value::Null,
-                    });
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("gateway.mobile_cache_status".to_owned()),
+                        ),
+                        ("params".to_owned(), Value::Null),
+                    ]);
                     match client.call_with_auth(&url, &payload, auth.as_deref()) {
                         Ok(resp) => match resp.text() {
                             Ok(body) => {
@@ -159,12 +175,15 @@ pub fn handle(cmd: GatewayCmd) {
                     }
                 }
                 MobileCacheAction::Flush { url, auth } => {
-                    let payload = foundation_serialization::json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "gateway.mobile_cache_flush",
-                        "params": foundation_serialization::json::Value::Null,
-                    });
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("gateway.mobile_cache_flush".to_owned()),
+                        ),
+                        ("params".to_owned(), Value::Null),
+                    ]);
                     match client.call_with_auth(&url, &payload, auth.as_deref()) {
                         Ok(resp) => {
                             if let Ok(text) = resp.text() {

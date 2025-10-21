@@ -1,4 +1,29 @@
 # Project Progress Snapshot
+> **Review (2025-10-21, mid-morning):** CLI JSON builders are now centralized
+> behind a dedicated `json_helpers` module that exposes string/number/null
+> constructors plus JSON-RPC envelope helpers. The compute, service-badge,
+> scheduler, telemetry, identity, config, bridge, and TLS commands have been
+> rewritten to compose request payloads through those builders, eliminating every
+> remaining `foundation_serialization::json!` literal across the contract CLI
+> surface. Node-side consumers follow suit: the runtime log sink builds its map
+> manually, the wallet binary emits staking and escrow payloads via the same
+> helpers, and governance list output serializes through a tiny typed wrapper
+> instead of an ad-hoc macro. With the shared helpers in place, JSON-RPC traffic
+> from both the CLI and wallet binaries stays entirely inside first-party
+> `JsonMap` assembly while preserving legacy response shapes and deterministic
+> ordering.
+> **Review (2025-10-21, pre-dawn):** Governance webhook delivery now runs in
+> every build: `telemetry::governance_webhook` always posts when
+> `GOV_WEBHOOK_URL` is set instead of silently short-circuiting when the
+> `telemetry` feature is disabled. The CLI’s networking surfaces shed the
+> `foundation_serialization::json!` macro in favour of a shared `RpcRequest`
+> helper plus explicit `JsonMap` builders, covering `net`, `gateway`,
+> `light_client`, and `wallet` commands so JSON-RPC envelopes and error payloads
+> assemble deterministically. The node’s `net` binary mirrors the same manual
+> builders, keeping request batching, export helpers, and throttle operations on
+> the first-party JSON façade. Follow-up unit coverage continues to pass under
+> FIRST_PARTY_ONLY, and the CLI tests compile without macro literals on the hot
+> networking paths.
 > **Review (2025-10-20, near midnight):** Transaction admission now derives a
 > priority tip automatically when callers omit it. `Blockchain::submit_transaction`
 > subtracts the current base fee from `payload.fee` before computing

@@ -1,4 +1,13 @@
 # Status & Roadmap
+> **Review (2025-10-21, mid-morning):** Contract CLI modules now route JSON
+> construction through a shared `json_helpers` module that exposes string/number
+> constructors and JSON-RPC envelope helpers. Compute, service-badge, scheduler,
+> telemetry, identity, config, bridge, and TLS commands compose payloads via
+> explicit `JsonMap` builders, governance listings serialize through a typed
+> wrapper, and the node runtime log sink plus staking/escrow wallet binary reuse
+> the same helpers. This removes the final `foundation_serialization::json!`
+> macros from operator tooling while keeping legacy wire shapes intact and
+> FIRST_PARTY_ONLY runs deterministic.
 > **Review (2025-10-20, late evening):** Canonical transaction helpers now run
 > entirely on the cursor facade. Node `canonical_payload_bytes`, CLI signing,
 > and the Python bindings forward to `encode_raw_payload`, signed-transaction

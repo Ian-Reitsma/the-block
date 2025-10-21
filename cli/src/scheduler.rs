@@ -1,3 +1,4 @@
+use crate::json_helpers::{empty_object, json_rpc_request};
 use crate::parse_utils::take_string;
 use crate::rpc::RpcClient;
 use cli_core::{
@@ -5,7 +6,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::Serialize;
 
 pub enum SchedulerCmd {
     /// Show scheduler queue depths and weights
@@ -50,22 +50,7 @@ pub fn handle(cmd: SchedulerCmd) {
     match cmd {
         SchedulerCmd::Stats { url } => {
             let client = RpcClient::from_env();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "scheduler.stats",
-                params: foundation_serialization::json!({}),
-                auth: None,
-            };
+            let payload = json_rpc_request("scheduler.stats", empty_object());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);

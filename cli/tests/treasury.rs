@@ -1,10 +1,37 @@
 mod support;
 
 use contract_cli::gov::{handle_with_writer, GovCmd, GovTreasuryCmd, RemoteTreasuryStatus};
-use foundation_serialization::json;
+use foundation_serialization::json::to_string_value;
+use foundation_serialization::json::{
+    self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+};
 use governance::{DisbursementStatus, TreasuryDisbursement};
 use support::json_rpc::JsonRpcMock;
 use sys::tempfile;
+
+fn json_string(value: &str) -> JsonValue {
+    JsonValue::String(value.to_owned())
+}
+
+fn json_number_u64(value: u64) -> JsonValue {
+    JsonValue::Number(JsonNumber::from(value))
+}
+
+fn json_number_i64(value: i64) -> JsonValue {
+    JsonValue::Number(JsonNumber::from(value))
+}
+
+fn json_object(entries: impl IntoIterator<Item = (&'static str, JsonValue)>) -> JsonValue {
+    let mut map = JsonMap::new();
+    for (key, value) in entries {
+        map.insert(key.to_string(), value);
+    }
+    JsonValue::Object(map)
+}
+
+fn json_array(elements: impl IntoIterator<Item = JsonValue>) -> JsonValue {
+    JsonValue::Array(elements.into_iter().collect())
+}
 
 #[test]
 fn treasury_lifecycle_outputs_structured_json() {
@@ -130,60 +157,74 @@ fn treasury_lifecycle_outputs_structured_json() {
 
 #[test]
 fn treasury_fetch_remote_combines_responses() {
-    let disbursement_payload = json::json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "disbursements": [
-                {
-                    "id": 7,
-                    "destination": "remote-dest",
-                    "amount_ct": 320,
-                    "memo": "ops",
-                    "scheduled_epoch": 9000,
-                    "created_at": 1700000000,
-                    "status": "Scheduled"
-                }
-            ],
-            "next_cursor": 12
-        },
-        "id": 1
-    });
-    let balance_payload = json::json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "balance_ct": 4400,
-            "last_snapshot": {
-                "id": 5,
-                "balance_ct": 4400,
-                "delta_ct": 200,
-                "recorded_at": 1700000100,
-                "event": "Accrual"
-            }
-        },
-        "id": 1
-    });
-    let history_payload = json::json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "snapshots": [
-                {
-                    "id": 6,
-                    "balance_ct": 4400,
-                    "delta_ct": -120,
-                    "recorded_at": 1700000200,
-                    "event": "Executed",
-                    "disbursement_id": 4
-                }
-            ],
-            "next_cursor": null,
-            "current_balance_ct": 4400
-        },
-        "id": 1
-    });
+    let disbursement_payload = json_object([
+        ("jsonrpc", json_string("2.0")),
+        (
+            "result",
+            json_object([
+                (
+                    "disbursements",
+                    json_array([json_object([
+                        ("id", json_number_u64(7)),
+                        ("destination", json_string("remote-dest")),
+                        ("amount_ct", json_number_u64(320)),
+                        ("memo", json_string("ops")),
+                        ("scheduled_epoch", json_number_u64(9000)),
+                        ("created_at", json_number_u64(1_700_000_000)),
+                        ("status", json_string("Scheduled")),
+                    ])]),
+                ),
+                ("next_cursor", json_number_u64(12)),
+            ]),
+        ),
+        ("id", json_number_u64(1)),
+    ]);
+    let balance_payload = json_object([
+        ("jsonrpc", json_string("2.0")),
+        (
+            "result",
+            json_object([
+                ("balance_ct", json_number_u64(4_400)),
+                (
+                    "last_snapshot",
+                    json_object([
+                        ("id", json_number_u64(5)),
+                        ("balance_ct", json_number_u64(4_400)),
+                        ("delta_ct", json_number_i64(200)),
+                        ("recorded_at", json_number_u64(1_700_000_100)),
+                        ("event", json_string("Accrual")),
+                    ]),
+                ),
+            ]),
+        ),
+        ("id", json_number_u64(1)),
+    ]);
+    let history_payload = json_object([
+        ("jsonrpc", json_string("2.0")),
+        (
+            "result",
+            json_object([
+                (
+                    "snapshots",
+                    json_array([json_object([
+                        ("id", json_number_u64(6)),
+                        ("balance_ct", json_number_u64(4_400)),
+                        ("delta_ct", json_number_i64(-120)),
+                        ("recorded_at", json_number_u64(1_700_000_200)),
+                        ("event", json_string("Executed")),
+                        ("disbursement_id", json_number_u64(4)),
+                    ])]),
+                ),
+                ("next_cursor", JsonValue::Null),
+                ("current_balance_ct", json_number_u64(4_400)),
+            ]),
+        ),
+        ("id", json_number_u64(1)),
+    ]);
     let server = JsonRpcMock::start(vec![
-        json::to_string(&disbursement_payload).expect("disbursements"),
-        json::to_string(&balance_payload).expect("balance"),
-        json::to_string(&history_payload).expect("history"),
+        to_string_value(&disbursement_payload),
+        to_string_value(&balance_payload),
+        to_string_value(&history_payload),
     ]);
 
     let mut out = Vec::new();
@@ -216,10 +257,7 @@ fn treasury_fetch_remote_combines_responses() {
     assert_eq!(captured.len(), 3);
     let first: json::Value = json::from_str(&captured[0]).expect("first request");
     assert_eq!(first["method"].as_str(), Some("gov.treasury.disbursements"));
-    assert_eq!(
-        first["params"]["status"].as_str(),
-        Some(RemoteTreasuryStatus::Scheduled.as_str())
-    );
+    assert_eq!(first["params"]["status"].as_str(), Some("scheduled"));
     assert_eq!(first["params"]["after_id"].as_u64(), Some(3));
     assert_eq!(first["params"]["limit"].as_u64(), Some(4));
 

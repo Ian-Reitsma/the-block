@@ -4,6 +4,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use foundation_serialization::json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
 use std::net::TcpStream;
@@ -12,6 +13,19 @@ use thiserror::Error;
 
 fn http_client() -> BlockingClient {
     env_blocking_client(&["TB_PROBE_TLS", "TB_HTTP_TLS"], "probe")
+}
+
+fn empty_object() -> JsonValue {
+    JsonValue::Object(JsonMap::new())
+}
+
+fn json_rpc_request(id: u64, method: &str, params: JsonValue) -> JsonValue {
+    let mut body = JsonMap::new();
+    body.insert("jsonrpc".into(), JsonValue::String("2.0".into()));
+    body.insert("id".into(), JsonValue::Number(JsonNumber::from(id)));
+    body.insert("method".into(), JsonValue::String(method.to_owned()));
+    body.insert("params".into(), params);
+    JsonValue::Object(body)
 }
 
 #[derive(Error, Debug)]
@@ -269,12 +283,7 @@ fn find_command<'a>(root: &'a CliCommand, path: &[&str]) -> Option<&'a CliComman
 fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, ProbeError> {
     let client = http_client();
     let start = Instant::now();
-    let req = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "metrics",
-        "params": {}
-    });
+    let req = json_rpc_request(0, "metrics", empty_object());
     client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -288,12 +297,7 @@ fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, Pr
 }
 
 fn fetch_height(url: &str, client: &BlockingClient, timeout: Duration) -> Result<u64, ProbeError> {
-    let req = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "metrics",
-        "params": {}
-    });
+    let req = json_rpc_request(0, "metrics", empty_object());
     let text = client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -320,12 +324,9 @@ fn mine_one(
 ) -> Result<Duration, ProbeError> {
     let client = http_client();
     let start_height = fetch_height(url, &client, timeout)?;
-    let req = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "start_mining",
-        "params": {"miner": miner}
-    });
+    let mut params = JsonMap::new();
+    params.insert("miner".into(), JsonValue::String(miner.to_owned()));
+    let req = json_rpc_request(0, "start_mining", JsonValue::Object(params));
     client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -339,14 +340,11 @@ fn mine_one(
             let _ = client
                 .request(Method::Post, url)
                 .and_then(|builder| {
-                    builder
-                        .timeout(timeout)
-                        .json(&foundation_serialization::json!({
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "method": "stop_mining",
-                            "params": {}
-                        }))
+                    builder.timeout(timeout).json(&json_rpc_request(
+                        1,
+                        "stop_mining",
+                        empty_object(),
+                    ))
                 })
                 .and_then(|builder| builder.send());
             return Ok(start.elapsed());
@@ -355,14 +353,11 @@ fn mine_one(
             let _ = client
                 .request(Method::Post, url)
                 .and_then(|builder| {
-                    builder
-                        .timeout(timeout)
-                        .json(&foundation_serialization::json!({
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "method": "stop_mining",
-                            "params": {}
-                        }))
+                    builder.timeout(timeout).json(&json_rpc_request(
+                        1,
+                        "stop_mining",
+                        empty_object(),
+                    ))
                 })
                 .and_then(|builder| builder.send());
             return Err(ProbeError::Timeout);

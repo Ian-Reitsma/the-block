@@ -182,6 +182,7 @@ struct RpcTreasuryHistoryResult {
     snapshots: Vec<TreasuryBalanceSnapshot>,
     #[serde(default)]
     next_cursor: Option<u64>,
+    #[allow(dead_code)]
     current_balance_ct: u64,
 }
 
@@ -198,6 +199,12 @@ struct TreasuryFetchOutput {
     balance_history: Option<Vec<TreasuryBalanceSnapshot>>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     balance_next_cursor: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct DisbursementList<'a> {
+    disbursements: &'a [TreasuryDisbursement],
 }
 
 fn unwrap_rpc_result<T>(envelope: RpcEnvelope<T>) -> io::Result<T> {
@@ -1039,6 +1046,7 @@ pub fn handle(cmd: GovCmd) {
     }
 }
 
+#[allow(dead_code)]
 pub fn handle_with_writer(cmd: GovCmd, out: &mut dyn Write) -> io::Result<()> {
     match cmd {
         GovCmd::Treasury { action } => handle_treasury(action, out),
@@ -1092,8 +1100,9 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let store = GovStore::open(state);
             match store.disbursements() {
                 Ok(records) => {
-                    let payload = foundation_serialization::json!({ "disbursements": records });
-                    match foundation_serialization::json::to_string_pretty(&payload) {
+                    match foundation_serialization::json::to_string_pretty(&DisbursementList {
+                        disbursements: &records,
+                    }) {
                         Ok(serialized) => writeln!(out, "{serialized}")?,
                         Err(err) => eprintln!("format failed: {err}"),
                     }

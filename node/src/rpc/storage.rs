@@ -357,8 +357,27 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foundation_serialization::json::{
+        Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+    };
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
+
+    fn json_string(value: &str) -> JsonValue {
+        JsonValue::String(value.to_owned())
+    }
+
+    fn json_number(value: i64) -> JsonValue {
+        JsonValue::Number(JsonNumber::from(value))
+    }
+
+    fn json_object(entries: &[(&str, JsonValue)]) -> JsonValue {
+        let mut map = JsonMap::new();
+        for (key, value) in entries {
+            map.insert((*key).to_string(), value.clone());
+        }
+        JsonValue::Object(map)
+    }
 
     fn reset_state() {
         CONTRACTS.lock().unwrap().clear();
@@ -392,7 +411,7 @@ mod tests {
         let contract = sample_contract();
         let object_id = contract.object_id.clone();
         let response = upload(contract.clone(), sample_offers());
-        assert_eq!(response["status"], foundation_serialization::json!("ok"));
+        assert_eq!(response["status"], json_string("ok"));
         let providers_json = response["providers"].as_array().expect("providers array");
         assert_eq!(providers_json.len(), 2);
         assert!(providers_json.iter().any(|p| p.as_str() == Some("prov-a")));
@@ -422,7 +441,7 @@ mod tests {
         upload(contract.clone(), sample_offers());
 
         let ok = challenge(&object_id, 0, proof, contract.start_block);
-        assert_eq!(ok, foundation_serialization::json!({"status": "ok"}));
+        assert_eq!(ok, json_object(&[("status", json_string("ok"))]));
 
         let expired = challenge(
             &object_id,
@@ -430,15 +449,12 @@ mod tests {
             proof,
             contract.start_block + contract.retention_blocks + 1,
         );
-        assert_eq!(
-            expired,
-            foundation_serialization::json!({"error": "expired"})
-        );
+        assert_eq!(expired, json_object(&[("error", json_string("expired"))]));
 
         let wrong = challenge(&object_id, 0, [0u8; 32], contract.start_block);
         assert_eq!(
             wrong,
-            foundation_serialization::json!({"error": "challenge_failed"})
+            json_object(&[("error", json_string("challenge_failed"))])
         );
 
         reset_state();
@@ -449,7 +465,7 @@ mod tests {
         let dir = tempdir().expect("dir");
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let resp = repair_history(Some(5));
-        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
+        assert_eq!(resp["status"], json_string("ok"));
         assert!(resp["entries"].as_array().unwrap().is_empty());
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
@@ -459,8 +475,8 @@ mod tests {
         let dir = tempdir().expect("dir");
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let resp = repair_run();
-        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
-        assert_eq!(resp["attempts"], foundation_serialization::json!(0));
+        assert_eq!(resp["status"], json_string("ok"));
+        assert_eq!(resp["attempts"], json_number(0));
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
 
@@ -470,7 +486,7 @@ mod tests {
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let manifest_hex = crypto_suite::hex::encode([0u8; 32]);
         let resp = repair_chunk(&manifest_hex, 0, true);
-        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
+        assert_eq!(resp["status"], json_string("ok"));
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
 }

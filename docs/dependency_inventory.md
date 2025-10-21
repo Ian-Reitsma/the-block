@@ -12,6 +12,19 @@ workspace crates.
 
 ## Highlights
 
+- ✅ Contract CLI JSON surfaces now share a first-party `json_helpers` module.
+  Compute, service-badge, scheduler, telemetry, identity, config, bridge, and
+  TLS commands all emit RPC payloads through explicit `JsonMap` builders, and
+  the node runtime log sink plus the staking/escrow wallet binary reuse the same
+  helpers. This removes every remaining `foundation_serialization::json!`
+  literal from the operator tooling stack while preserving legacy response
+  shapes and deterministic field ordering.
+- ✅ Governance webhooks now post via the first-party HTTP client regardless of
+  the telemetry feature flag, and the CLI/node networking utilities (`contract
+  net`, gateway mobile-cache, light-client device status, wallet send, and
+  `node/src/bin/net.rs`) replaced every `foundation_serialization::json!`
+  literal with explicit `JsonMap` builders and a shared `RpcRequest` envelope,
+  eliminating serde-backed macro usage from the hot RPC tooling paths.
 - ✅ Mempool admission now derives a priority tip from `payload.fee` when the
   caller omits one, keeping legacy tooling compatible with the lane floor while
   staying entirely inside the first-party cursor helpers. Governance retuning

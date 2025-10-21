@@ -1,6 +1,29 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-20 23:55:00Z_
+_Last updated: 2025-10-21 09:52:40Z_
+
+> **2025-10-21 update (CLI JSON helpers + wallet manualization):** A new
+> `json_helpers` module centralizes string/number/null constructors and
+> JSON-RPC envelope helpers for the contract CLI. Compute, service-badge,
+> scheduler, telemetry, identity, config, bridge, and TLS commands now build
+> payloads through explicit `JsonMap` assembly instead of `foundation_serialization::json!`
+> macros, while governance disbursement listings serialize through a typed view
+> rather than an ad-hoc literal. Node-side surfaces follow suit: the runtime log
+> sink constructs its map manually, and the staking/escrow wallet binary emits
+> requests via the shared envelope helper, removing the last macro-based JSON
+> construction from production binaries and keeping FIRST_PARTY_ONLY builds
+> deterministic on operator tooling paths.
+> **2025-10-21 update (webhook + CLI RPC builders):** Governance webhook
+> delivery no longer depends on the `telemetry` feature flag—the node always
+> posts to `GOV_WEBHOOK_URL` through the first-party HTTP client when the
+> environment variable is configured, restoring notifications on minimal builds.
+> The CLI’s networking surfaces (`contract net`, `gateway mobile-cache`,
+> light-client status, and wallet send) replaced every
+> `foundation_serialization::json!` literal with explicit `JsonMap` builders and a
+> reusable `RpcRequest` envelope, keeping JSON-RPC bodies on the in-house facade
+> and eliminating serde-backed macro usage along those paths. The node’s `net`
+> binary mirrors the change for peer stats, exports, and throttle helpers so
+> operator tooling stays FIRST_PARTY_ONLY end to end.
 
 > **2025-10-20 update (admission tip + Kalman retune):** Transaction admission
 > now derives `tx.tip` from `payload.fee` when callers omit a priority fee,

@@ -1,4 +1,21 @@
 # Summary
+> **Review (2025-10-21, mid-morning):** The contract CLI now exposes a shared
+> `json_helpers` module that centralizes first-party JSON builders and RPC
+> envelope helpers. Compute, service-badge, scheduler, telemetry, identity,
+> config, bridge, and TLS commands build payloads through explicit `JsonMap`
+> assembly, governance listings serialize through a typed wrapper, and the node
+> runtime log sink plus the staking/escrow wallet binary reuse the same helpers.
+> This removes the last `foundation_serialization::json!` macros from operator
+> tooling while preserving legacy response shapes and deterministic ordering.
+> **Review (2025-10-21, pre-dawn):** Governance webhooks now honour
+> `GOV_WEBHOOK_URL` regardless of the `telemetry` feature flag, so operators
+> receive activation/rollback notifications even on minimal builds. The CLI
+> networking stack (`net`, `gateway`, `light_client`, `wallet`) introduces a
+> reusable `RpcRequest` helper and explicit `JsonMap` assembly, replacing
+> `foundation_serialization::json!` literals with deterministic first-party
+> builders; the node’s `net` binary mirrors the change for peer stats, exports,
+> and throttle calls. These manual builders keep FIRST_PARTY_ONLY pipelines clean
+> while retaining the existing RPC shapes.
 > **Review (2025-10-20, near midnight):** Admission now backfills a priority
 > tip when callers omit one by subtracting the live base fee from
 > `payload.fee`, keeping legacy builders compatible with the lane floor and

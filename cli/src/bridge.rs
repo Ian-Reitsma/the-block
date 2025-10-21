@@ -1,4 +1,8 @@
 use crate::codec_helpers::json_from_str;
+use crate::json_helpers::{
+    empty_object, json_null, json_object_from, json_option_string, json_rpc_request, json_string,
+    json_u64,
+};
 use crate::parse_utils::{
     parse_positional_u64, parse_usize_required, require_positional, take_string,
 };
@@ -9,7 +13,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::Serialize;
+use foundation_serialization::json;
 use httpd::ClientResponse;
 use std::fs;
 
@@ -407,6 +411,13 @@ fn print_response(resp: ClientResponse) {
     }
 }
 
+fn to_json_value<T>(value: &T) -> json::Value
+where
+    T: foundation_serialization::Serialize,
+{
+    json::to_value(value).expect("serialize bridge payload component")
+}
+
 pub fn handle(action: BridgeCmd) {
     let client = RpcClient::from_env();
     match action {
@@ -426,31 +437,17 @@ pub fn handle(action: BridgeCmd) {
             let header = load_header(&header);
             let proof = load_proof(&proof);
             let proofs = relayer_proofs(&relayers, &user, amount);
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
             let primary = relayers.first().cloned().unwrap_or_default();
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.verify_deposit",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                    "relayer": primary,
-                    "user": user,
-                    "amount": amount,
-                    "header": header,
-                    "proof": proof,
-                    "relayer_proofs": proofs,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([
+                ("asset", json_string(asset)),
+                ("relayer", json_string(primary)),
+                ("user", json_string(user)),
+                ("amount", json_u64(amount)),
+                ("header", to_json_value(&header)),
+                ("proof", to_json_value(&proof)),
+                ("relayer_proofs", to_json_value(&proofs)),
+            ]);
+            let payload = json_rpc_request("bridge.verify_deposit", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
@@ -468,28 +465,14 @@ pub fn handle(action: BridgeCmd) {
             }
             let proofs = relayer_proofs(&relayers, &user, amount);
             let primary = relayers.first().cloned().unwrap_or_default();
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.request_withdrawal",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                    "relayer": primary,
-                    "user": user,
-                    "amount": amount,
-                    "relayer_proofs": proofs,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([
+                ("asset", json_string(asset)),
+                ("relayer", json_string(primary)),
+                ("user", json_string(user)),
+                ("amount", json_u64(amount)),
+                ("relayer_proofs", to_json_value(&proofs)),
+            ]);
+            let payload = json_rpc_request("bridge.request_withdrawal", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
@@ -500,95 +483,33 @@ pub fn handle(action: BridgeCmd) {
             challenger,
             url,
         } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.challenge_withdrawal",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                    "commitment": commitment,
-                    "challenger": challenger,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([
+                ("asset", json_string(asset)),
+                ("commitment", json_string(commitment)),
+                ("challenger", json_string(challenger)),
+            ]);
+            let payload = json_rpc_request("bridge.challenge_withdrawal", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
         }
         BridgeCmd::Pending { asset, url } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.pending_withdrawals",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([("asset", json_option_string(asset))]);
+            let payload = json_rpc_request("bridge.pending_withdrawals", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
         }
         BridgeCmd::Challenges { asset, url } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.active_challenges",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([("asset", json_option_string(asset))]);
+            let payload = json_rpc_request("bridge.active_challenges", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
         }
         BridgeCmd::Relayers { asset, url } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.relayer_quorum",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([("asset", json_string(asset))]);
+            let payload = json_rpc_request("bridge.relayer_quorum", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
@@ -599,47 +520,18 @@ pub fn handle(action: BridgeCmd) {
             limit,
             url,
         } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.deposit_history",
-                params: foundation_serialization::json!({
-                    "asset": asset,
-                    "cursor": cursor,
-                    "limit": limit,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([
+                ("asset", json_string(asset)),
+                ("cursor", cursor.map(json_u64).unwrap_or_else(json_null)),
+                ("limit", json_u64(limit as u64)),
+            ]);
+            let payload = json_rpc_request("bridge.deposit_history", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
         }
         BridgeCmd::SlashLog { url } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.slash_log",
-                params: foundation_serialization::json!({}),
-                auth: None,
-            };
+            let payload = json_rpc_request("bridge.slash_log", empty_object());
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }
@@ -649,25 +541,11 @@ pub fn handle(action: BridgeCmd) {
             amount,
             url,
         } => {
-            #[derive(Serialize)]
-            struct Payload<'a> {
-                jsonrpc: &'static str,
-                id: u32,
-                method: &'static str,
-                params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-                auth: Option<&'a str>,
-            }
-            let payload = Payload {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "bridge.bond_relayer",
-                params: foundation_serialization::json!({
-                    "relayer": relayer,
-                    "amount": amount,
-                }),
-                auth: None,
-            };
+            let params = json_object_from([
+                ("relayer", json_string(relayer)),
+                ("amount", json_u64(amount)),
+            ]);
+            let payload = json_rpc_request("bridge.bond_relayer", params);
             if let Ok(resp) = client.call(&url, &payload) {
                 print_response(resp);
             }

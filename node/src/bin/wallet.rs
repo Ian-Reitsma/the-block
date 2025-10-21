@@ -3,7 +3,7 @@
 use crypto_suite::hex::{decode, encode};
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::{self, Map as JsonMap, Number, Value};
 use httpd::{BlockingClient, Method};
 use node::http_client;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
@@ -22,6 +22,15 @@ use cli_support::{collect_args, parse_matches, print_root_help};
 
 const DEFAULT_RPC_URL: &str = "http://127.0.0.1:8545";
 const DEFAULT_ESCROW_RELEASE_URL: &str = "http://127.0.0.1:26658";
+
+fn json_rpc_envelope(method: &str, params: Value) -> Value {
+    let mut map = JsonMap::new();
+    map.insert("jsonrpc".into(), Value::String("2.0".into()));
+    map.insert("id".into(), Value::Number(Number::from(1)));
+    map.insert("method".into(), Value::String(method.to_owned()));
+    map.insert("params".into(), params);
+    Value::Object(map)
+}
 
 /// Simple CLI for wallet operations.
 #[derive(Debug)]
@@ -528,10 +537,10 @@ fn main() {
                 signers_payload = approvals
                     .iter()
                     .map(|(pk, sig)| {
-                        foundation_serialization::json!({
-                            "pk": encode(pk.to_bytes()),
-                            "sig": encode(sig.to_bytes()),
-                        })
+                        let mut entry = JsonMap::new();
+                        entry.insert("pk".into(), Value::String(encode(pk.to_bytes())));
+                        entry.insert("sig".into(), Value::String(encode(sig.to_bytes())));
+                        Value::Object(entry)
                     })
                     .collect();
                 threshold_value = signer.threshold();
@@ -546,26 +555,29 @@ fn main() {
                     .sign_stake(&role_str, amount, withdraw)
                     .expect("sign");
                 id = wallet.public_key_hex();
-                signers_payload = vec![foundation_serialization::json!({
-                    "pk": id.clone(),
-                    "sig": encode(sig.to_bytes()),
-                })];
+                let mut signer = JsonMap::new();
+                signer.insert("pk".into(), Value::String(id.clone()));
+                signer.insert("sig".into(), Value::String(encode(sig.to_bytes())));
+                signers_payload = vec![Value::Object(signer)];
                 threshold_value = 1;
             }
             let sig_hex = encode(sig.to_bytes());
-            let body = foundation_serialization::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
-                "params": {
-                    "id": id,
-                    "role": role_str,
-                    "amount": amount,
-                    "sig": sig_hex,
-                    "signers": signers_payload,
-                    "threshold": threshold_value,
-                }
-            });
+            let mut params = JsonMap::new();
+            params.insert("id".into(), Value::String(id));
+            params.insert("role".into(), Value::String(role_str));
+            params.insert("amount".into(), Value::Number(Number::from(amount)));
+            params.insert("sig".into(), Value::String(sig_hex));
+            params.insert("signers".into(), Value::Array(signers_payload));
+            params.insert(
+                "threshold".into(),
+                Value::Number(Number::from(threshold_value as u64)),
+            );
+            let method = if withdraw {
+                "consensus.pos.unbond"
+            } else {
+                "consensus.pos.bond"
+            };
+            let body = json_rpc_envelope(method, Value::Object(params));
             let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)
@@ -580,12 +592,9 @@ fn main() {
             }
         }
         Commands::EscrowBalance { account, url } => {
-            let payload = foundation_serialization::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "rent.escrow.balance",
-                "params": {"id": account},
-            });
+            let mut params = JsonMap::new();
+            params.insert("id".into(), Value::String(account));
+            let payload = json_rpc_envelope("rent.escrow.balance", Value::Object(params));
             let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)
@@ -600,12 +609,10 @@ fn main() {
             }
         }
         Commands::EscrowRelease { id, amount, url } => {
-            let payload = foundation_serialization::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "dex.escrow_release",
-                "params": {"id": id, "amount": amount},
-            });
+            let mut params = JsonMap::new();
+            params.insert("id".into(), Value::String(id));
+            params.insert("amount".into(), Value::Number(Number::from(amount)));
+            let payload = json_rpc_envelope("dex.escrow_release", Value::Object(params));
             let client = http_client::blocking_client();
             match client
                 .request(Method::Post, &url)

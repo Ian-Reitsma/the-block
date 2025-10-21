@@ -16,7 +16,6 @@ use diagnostics::internal::{
 use foundation_metrics::{self, Recorder as MetricsRecorder};
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
-#[cfg(feature = "telemetry")]
 use httpd::{BlockingClient, Method};
 use rand::Rng;
 use runtime::telemetry::{
@@ -36,7 +35,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use sys::process;
 
-#[cfg(feature = "telemetry")]
 use foundation_serialization::Serialize;
 use tls_warning::WarningOrigin;
 #[cfg(feature = "telemetry")]
@@ -110,11 +108,9 @@ struct LocalTlsWarning {
 #[cfg(feature = "telemetry")]
 static TLS_ENV_WARNINGS: Lazy<DashMap<(String, String), LocalTlsWarning>> = Lazy::new(DashMap::new);
 
-#[cfg(feature = "telemetry")]
 static GOV_WEBHOOK_CLIENT: Lazy<BlockingClient> =
     Lazy::new(|| crate::http_client::blocking_client());
 
-#[cfg(feature = "telemetry")]
 #[derive(Serialize)]
 struct GovernanceWebhookPayload<'a> {
     event: &'a str,
@@ -3646,19 +3642,13 @@ pub static GOV_DEPENDENCY_POLICY_ALLOWED: Lazy<GaugeVec> = Lazy::new(|| {
 
 /// Send governance events to an external webhook if `GOV_WEBHOOK_URL` is set.
 pub fn governance_webhook(event: &str, proposal_id: u64) {
-    #[cfg(feature = "telemetry")]
-    {
-        if let Ok(url) = std::env::var("GOV_WEBHOOK_URL") {
-            let payload = GovernanceWebhookPayload { event, proposal_id };
-            let _ = GOV_WEBHOOK_CLIENT
-                .request(Method::Post, &url)
-                .and_then(|req| req.json(&payload))
-                .and_then(|req| req.send());
-        }
+    if let Ok(url) = std::env::var("GOV_WEBHOOK_URL") {
+        let payload = GovernanceWebhookPayload { event, proposal_id };
+        let _ = GOV_WEBHOOK_CLIENT
+            .request(Method::Post, &url)
+            .and_then(|req| req.json(&payload))
+            .and_then(|req| req.send());
     }
-
-    #[cfg(not(feature = "telemetry"))]
-    let _ = (event, proposal_id);
 }
 
 pub static GOV_OPEN_PROPOSALS: Lazy<IntGaugeHandle> = Lazy::new(|| {

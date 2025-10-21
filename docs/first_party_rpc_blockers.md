@@ -19,6 +19,27 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-21)
+
+- The contract CLI gained a shared `json_helpers` module; compute, service-badge,
+  scheduler, telemetry, identity, config, bridge, and TLS commands now compose
+  JSON-RPC payloads through explicit `JsonMap` builders and the helper’s
+  envelope constructors. Governance disbursement listings serialize through a
+  tiny typed wrapper, and the node runtime log sink plus staking/escrow wallet
+  binary reuse the same manual builders, erasing the last `foundation_serialization::json!`
+  macros from operator-facing RPC tooling.
+- `telemetry::governance_webhook` no longer hides behind the `telemetry` feature;
+  the node always posts to `GOV_WEBHOOK_URL` through the first-party HTTP
+  client, so governance activation/rollback hooks fire on minimal builds without
+  resorting to stub transports.
+- The CLI networking stack (`contract net`, `gateway mobile-cache`, light-client
+  device status, and wallet send) swapped every `foundation_serialization::json!`
+  literal for explicit `JsonMap` builders and a reusable `RpcRequest` envelope,
+  keeping JSON-RPC calls and error payloads on the first-party facade.
+- `node/src/bin/net.rs` mirrors the same manual builders for peer stats, export,
+  throttle, and backpressure utilities, eliminating macro literals from the
+  operator tooling paths and keeping batch pagination deterministic.
+
 ## Recent progress (2025-10-20)
 
 - Canonical transaction helpers now reuse the cursor encoder directly:
