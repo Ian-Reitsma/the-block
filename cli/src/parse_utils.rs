@@ -67,6 +67,16 @@ pub fn parse_bool(value: Option<String>, default: bool, name: &str) -> Result<bo
     }
 }
 
+pub fn parse_bool_option(value: Option<String>, name: &str) -> Result<Option<bool>, String> {
+    value
+        .map(|raw| match raw.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Err(format!("invalid value '{raw}' for '--{name}'")),
+        })
+        .transpose()
+}
+
 #[cfg_attr(not(feature = "quantum"), allow(dead_code))]
 pub fn parse_required<T: std::str::FromStr>(value: Option<String>, name: &str) -> Result<T, String>
 where

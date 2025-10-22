@@ -1,4 +1,5 @@
 # Project Progress Snapshot
+> **Review (2025-10-23, pre-dawn):** Bridge incentives now cover the full governance lifecycle. Reward claim approvals persist through the sled-backed governance store, `bridge.claim_rewards` consumes allowances, and the CLI surfaces `blockctl bridge claim`/`reward-claims` so operators can reconcile payouts without touching sled snapshots. Settlement proofs gained first-party RPC/CLI (`bridge.submit_settlement`, `bridge.settlement-log`), `bridge.dispute_audit` renders challenge/settlement summaries, and channel configuration allows partial updates with optional proof enforcement. Fresh tests in `node/tests/bridge_incentives.rs`, `governance/src/store.rs`, and `node/src/governance/store.rs` lock the new flows to FIRST_PARTY_ONLY builds.
 > **Review (2025-10-22, mid-morning+):** CLI integration tests now exercise the
 > wallet preview helpers directly: the `fee_floor_warning` suite asserts the
 > `signer_metadata` vector for ready and override branches, and a dedicated
@@ -754,18 +755,20 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 81.9 %
+## 9. Bridges & Cross‑Chain Routing — 89.4 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
-- Multi-signature quorum enforcement and governance authorization hooks in `bridge.verify_deposit` and `governance::ensure_release_authorized`, covered by integration tests `node/tests/bridge.rs` and adversarial suites `bridges/tests/adversarial.rs`.
-- Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`.
+- Governance-controlled incentive parameters (`BridgeIncentiveParameters`) drive minimum bond, reward, and slashing rules, with refreshed integration coverage in `node/tests/bridge.rs` and the new `node/tests/bridge_incentives.rs` exercising honest/faulty relayers end to end.
+- Sled-backed duty ledger and per-relayer accounting snapshots expose rewards, penalties, and duty history via `bridge.relayer_accounting`/`bridge.duty_log` and the matching CLI commands (`blockctl bridge accounting`, `blockctl bridge duties`).
+- Multi-signature quorum enforcement and governance authorization hooks in `bridge.verify_deposit` and `governance::ensure_release_authorized` remain active, with duty outcomes persisted for audit.
+- Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
-- CLI/RPC surfaces for quorum composition, pending withdrawals, history, and slash logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
-- Bridge RPC endpoints continue to rely on the bespoke JSON-RPC loop in `node/src/rpc/mod.rs`; the planned `crates/httpd` server integration has not shipped yet, so quorum tooling still depends on the legacy routing until that swap completes.
+- CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
 
 **Gaps**
 - Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
+- Reward-claim plumbing for accrued `rewards_pending` balances still needs governance-approved settlement wiring.
 
 ## 10. Monitoring, Debugging & Profiling — 95.8 %
 

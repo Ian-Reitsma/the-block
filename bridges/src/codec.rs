@@ -247,6 +247,9 @@ impl Relayer {
         object([
             ("stake", Value::from(self.stake)),
             ("slashes", Value::from(self.slashes)),
+            ("duties_assigned", Value::from(self.duties_assigned)),
+            ("duties_completed", Value::from(self.duties_completed)),
+            ("duties_failed", Value::from(self.duties_failed)),
         ])
     }
 
@@ -254,7 +257,25 @@ impl Relayer {
         let obj = require_object(value, "relayer")?;
         let stake = require_u64(get(obj, "stake")?, "stake")?;
         let slashes = require_u64(get(obj, "slashes")?, "slashes")?;
-        Ok(Self { stake, slashes })
+        let duties_assigned = obj
+            .get("duties_assigned")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let duties_completed = obj
+            .get("duties_completed")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let duties_failed = obj
+            .get("duties_failed")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        Ok(Self {
+            stake,
+            slashes,
+            duties_assigned,
+            duties_completed,
+            duties_failed,
+        })
     }
 }
 

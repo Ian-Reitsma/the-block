@@ -1,6 +1,29 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-22 15:45:00Z_
+_Last updated: 2025-10-23 04:20:00Z_
+
+> **2025-10-23 update (bridge reward claims & settlement proofs):** Governance
+> reward approvals now persist through first-party sled helpers in both the
+> governance crate and node mirror. `bridge.claim_rewards`, `bridge.reward_claims`,
+> `bridge.submit_settlement`, `bridge.settlement_log`, and `bridge.dispute_audit`
+> all assemble payloads via handwritten JSON builders, and the CLI mirrors the
+> same approach for `blockctl bridge claim`, `reward-claims`, `settlement`,
+> `settlement-log`, and `dispute-audit`. Channel configuration updates accept
+> optional fields without overwriting existing settings, and new unit tests in
+> `governance/src/store.rs` plus `node/src/governance/store.rs` confirm reward
+> approvals survive reopen and reject mismatched relayers. The integration suite
+> (`node/tests/bridge_incentives.rs`) now covers reward redemption, settlement
+> proofs, and dispute audits end-to-end under FIRST_PARTY_ONLY.
+
+> **2025-10-22 update (bridge incentive ledger):** Bridge state persistence no
+longer touches the `foundation_serde` stub. Incentive parameters and duty
+records moved into a shared `bridge-types` crate, `node/src/bridge/mod.rs`
+manually encodes/decodes the sled snapshots, and new RPC/CLI surfaces expose
+`bridge.relayer_accounting`/`bridge.duty_log` alongside `blockctl bridge
+accounting` and `blockctl bridge duties`. Integration suites
+(`node/tests/bridge.rs`, `node/tests/bridge_incentives.rs`) now run under
+FIRST_PARTY_ONLY without serialization panics while exercising reward, slash,
+and governance override flows end to end.
 
 > **2025-10-22 update (wallet signer metadata integration coverage):** The CLI
 > wallet tests now assert the `signer_metadata` vector end-to-end. The

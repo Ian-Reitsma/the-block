@@ -118,6 +118,33 @@ integration tests illustrate this flow end-to-end.
   session setup.
 - `dns.publish_record` – publishes a signed DNS TXT record to the on-chain
   gateway store.
+- `bridge.relayer_accounting` – returns `(asset, RelayerInfo)` tuples filtered by
+  optional `asset`/`relayer` arguments so operators can inspect bonds, rewards,
+  penalties, and duty counters without touching sled snapshots.
+- `bridge.duty_log` – paginates recorded duty assignments with optional
+  `asset`/`relayer` filters and a `limit`, exposing status, reward/penalty, and
+  failure reasons for governance and operator audits.
+- `bridge.claim_rewards` – redeems a governance-issued `RewardClaimApproval`
+  for a relayer. The request accepts `{relayer, amount, approval_key}` and
+  returns a `RewardClaimRecord` containing the claim ID, amount, remaining
+  allowance, and updated pending balance.
+- `bridge.reward_claims` – returns the recorded reward claim history filtered by
+  optional relayer, enabling operators to reconcile payouts without manual sled
+  inspection.
+- `bridge.submit_settlement` – records an external settlement proof for a
+  pending withdrawal. The payload contains `{asset, relayer, commitment,
+  settlement_chain, proof_hash, settlement_height}` and produces a settlement
+  duty entry plus a log record for audit.
+- `bridge.settlement_log` – paginates recorded settlement submissions filtered
+  by asset so dashboards can trace which relayers supplied the required proofs.
+- `bridge.dispute_audit` – summarises pending withdrawals, challenge state,
+  settlement expectations, and per-relayer outcomes for governance review.
+- `bridge.assets` – lists the configured bridge channels (asset identifiers)
+  currently persisted on disk.
+- `bridge.configure_asset` – declaratively updates channel configuration. All
+  numeric fields are optional; omitted values leave the existing configuration
+  unchanged, and `clear_settlement_chain` removes any previously configured
+  settlement destination.
 - `gateway.policy` – fetches the JSON policy document for a domain and
   returns `reads_total` and `last_access_ts` counters.
 - `gateway.reads_since?epoch=` – totals reads for the domain since the given

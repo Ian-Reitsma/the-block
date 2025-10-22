@@ -19,8 +19,27 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-23)
+
+- Governance-backed bridge reward claims now emit first-party JSON. `bridge.claim_rewards`
+  and `bridge.reward_claims` share typed request/response structs, while the CLI
+  mirrors the same builders for `blockctl bridge claim` and `reward-claims` so
+  payout reconciliation avoids serde fallbacks. Settlement proofs and dispute
+  audits ride the same stack through `bridge.submit_settlement`,
+  `bridge.settlement_log`, and `bridge.dispute_audit`, with CLI mirrors that reuse
+  the shared JSON helpers. Partial channel reconfiguration (`bridge.configure_asset`)
+  accepts optional fields/clear flags without clobbering existing values, and
+  unit tests in `governance/src/store.rs` and `node/src/governance/store.rs`
+  verify reward approvals persist across reopen.
+
 ## Recent progress (2025-10-22)
 
+- Bridge RPC now surfaces incentive accounting without serde fallbacks: duty and
+  accounting records encode manually in `node/src/bridge/mod.rs`, new
+  `bridge.relayer_accounting`/`bridge.duty_log` endpoints share typed request/
+  response structs, and `blockctl bridge accounting`/`bridge duties` emit JSON
+  through the shared helpers. The `bridge_incentives` integration suite locks
+  the end-to-end flow under FIRST_PARTY_ONLY.
 - CLI wallet tests now snapshot the `signer_metadata` vector end-to-end: the
   `fee_floor_warning` integration suite asserts the metadata array for ready and
   override previews, and the new `wallet_signer_metadata` module covers local,

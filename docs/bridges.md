@@ -78,15 +78,34 @@ Relayers must sign the serialized `LockProof` with their Ed25519 key. The contra
 
 ## Relayer Workflow & Incentives
 
-Relayers stake native tokens to participate in bridge operations. Each `Relayer` maintains a bonded `stake` and a `slashes` counter. Deposits now require a quorum of approvals: the `bridge.verify_deposit` RPC accepts a `RelayerBundle` containing multiple proofs and validates that at least `BridgeConfig::relayer_quorum` entries check out while matching persisted shard affinity.
+Relayers post governance-controlled collateral (`BridgeIncentiveParameters`) before the node will assign any duty. Deposits still require a quorum of signatures: the `bridge.verify_deposit` RPC accepts a `RelayerBundle`, recomputes every proof, and enforces that at least `BridgeConfig::relayer_quorum` entries verify against the persisted shard affinity. Each duty emits a structured `DutyRecord` that captures the relayer roster, reward/penalty amounts, timestamps, and failure reasons so the entire lifecycle is auditable.
 
-1. Each proof in the bundle is recomputed; invalid signers are slashed immediately and surfaced in `bridge_slashes_total`.
-2. `PowHeader` encapsulates an external header and lightweight PoW target; `verify_deposit` rejects headers that fail the `verify_pow` check.
-3. The Merkle path is validated and the header JSON recorded to prevent replays.
+1. `PowHeader` wraps an external header with a lightweight PoW target. `verify_deposit` refuses headers that fail `verify_pow`, credits the active relayer with the configured `duty_reward`, and appends the duty to the sled-backed ledger.
+2. Invalid proofs debit the signer’s bond by `failure_slash`, increment `bridge_invalid_proof_total`, and mark the duty failed. Challenge wins slash *every* signer recorded on the bundle via `challenge_slash` and link the duty outcome to the challenger.
+3. External settlement proofs (documented below) create an additional `DutyKind::Settlement` entry so operators can track who supplied the attestation and when governance requirements were satisfied.
 
-Invalid submissions increment `bridge_invalid_proof_total`, slash one unit of stake, and bump both the `relayer_slash_total` and `bridge_slashes_total` counters. Operators can query current collateral via `bridge.relayer_status` and inspect pending withdrawals through the explorer's `bridge_challenges` view.
+The bridge store persists incentive parameters and per-relayer accounting snapshots alongside channel state:
 
-`BridgeConfig` exposes per-chain settings such as `confirm_depth` and `fee_per_byte`, allowing runtime tuning without recompilation.
+- `BridgeIncentiveParameters` tracks `min_bond`, `duty_reward`, `failure_slash`, `challenge_slash`, and `duty_window_secs`. Governance proposals update these keys atomically; the node refreshes them on every deposit/withdrawal path. The corresponding runtime parameter keys remain `bridge_min_bond`, `bridge_duty_reward`, `bridge_failure_slash`, `bridge_challenge_slash`, and `bridge_duty_window_secs`.
+- `RelayerAccounting` records each relayer’s bond, cumulative rewards, pending balances, claimed totals, penalties, and duty counters. The ledger is persisted under the bridge store and exposed through `bridge.relayer_accounting` (RPC) or `blockctl bridge accounting` (CLI).
+- Duty assignments are stored as `DutyRecord` entries (`Pending`, `Completed`, `Failed`, or `Settlement`). Operators can query the log via `bridge.duty_log` / `blockctl bridge duties` with optional filters and limits.
+- Challenge and finalize flows update the duty store in place, ensuring every reward or slash is backed by a recorded duty outcome. Integration coverage in `node/tests/bridge_incentives.rs` simulates honest/faulty relayers, settlement proofs, and dispute escalations to verify the accounting end-to-end.
+
+### Governance Reward Claims
+
+Governance now mints reward approvals that relayers redeem on-demand. Authorizations are stored as `RewardClaimApproval` records in the sled-backed governance store (`GovStore::record_reward_claim`) and surfaced via `bridge.reward_claims` / `blockctl bridge reward-claims` for audit. A relayer redeems an approval by issuing `blockctl bridge claim <relayer> <amount> <approval-key>`, which forwards to `bridge.claim_rewards`. The node consults governance via `ensure_reward_claim_authorized`, decrements the remaining allowance, and persists a signed `RewardClaimRecord` with monotonic IDs so operators can reconcile payouts.
+
+The `node/tests/bridge_incentives.rs::reward_claim_requires_governance_approval` scenario covers success paths, duplicate prevention, allowance exhaustion, and storage persistence. Additional unit tests in `governance/src/store.rs` and `node/src/governance/store.rs` exercise the sled helpers to guarantee approvals survive reopen and reject mismatched relayers.
+
+### Settlement Proofs and External Releases
+
+Channels may opt into external settlement attestation by toggling `requires_settlement_proof`. When enabled, each withdrawal produces a `DutyKind::Settlement` entry that remains pending until a relayer submits an `ExternalSettlementProof` via `bridge.submit_settlement`. The RPC tracks settlement fingerprints to prevent duplicates, records the settlement metadata in `BridgeState::settlement_log`, and clears any outstanding dispute flags. Operators can inspect the full history through `bridge.settlement_log` / `blockctl bridge settlement-log` filtered by asset.
+
+`blockctl bridge configure` now supports partial updates for channel settings: unspecified fields leave the current configuration intact, `--requires-settlement-proof` toggles proof enforcement without clobbering other values, and `--clear-settlement-chain true` removes any previously configured chain label. The RPC surfaces the same behaviour, allowing declarative updates via automation.
+
+### Dispute Audit & Operator Reporting
+
+Every pending withdrawal feeds into the dispute auditor, which now summarises challenge state, deadlines, settlement requirements, and per-relayer outcomes. The new `bridge.dispute_audit` RPC (and `blockctl bridge dispute-audit`) renders these summaries per-asset so governance dashboards can visualise expiring duties, challengers, settlement submissions, and unresolved disputes. The auditor cross-links the relevant duty IDs and settlement fingerprints to simplify forensic reviews.
 
 ## CLI Examples
 
@@ -121,20 +140,31 @@ Operators can also monitor the live bridge ledger via:
 blockctl bridge pending --asset native
 blockctl bridge challenges
 blockctl bridge relayers --asset native
+blockctl bridge accounting --asset native
+blockctl bridge duties --asset native --limit 20
 blockctl bridge history --asset native --limit 20
 blockctl bridge slash-log
+blockctl bridge reward-claims --relayer r1
+blockctl bridge settlement-log --asset native
+blockctl bridge dispute-audit --asset native
+blockctl bridge assets
+blockctl bridge configure native --relayer-quorum 3 --requires-settlement-proof true
 ```
 
 Relayer bonds can be provisioned off-chain and topped up through the RPC by calling
-`blockctl bridge bond --relayer <id> --amount <tokens>`.
+`blockctl bridge bond --relayer <id> --amount <tokens>`; the accounting view immediately reflects the new collateral once the transaction is finalised.
+
+Reward approvals are redeemed via `blockctl bridge claim <relayer> <amount> <approval-key>`. Channels that require external attestation accept settlement submissions through `blockctl bridge settlement --asset native --relayer r1 --commitment <hex> --settlement-chain l1 --proof-hash <hex> --height <block>`; the resulting records appear instantly in `bridge.settlement_log` and the dispute auditor output.
 
 `header.json` and `proof.json` follow the formats above and are consumed directly by the CLI.
 
 ## Outstanding Work
 
-- **Multi-Asset Support** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain.
+- **Expanded Asset Coverage** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain while retaining incentive accounting per asset.
+- **Long-Horizon Dispute Retention** – persist dispute audit snapshots across restarts and surface trend charts in the operator dashboards.
+- **Settlement Observability** – wire settlement submission telemetry into Grafana and add CLI tests for configure/settlement flows to guard regressions.
 
-Progress: 74%
+Progress: 94.6%
 
 ## Dispute Resolution & Threat Model
 

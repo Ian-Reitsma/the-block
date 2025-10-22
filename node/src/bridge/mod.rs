@@ -3,6 +3,10 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BRIDGE_CHALLENGES_TOTAL;
 use crate::{governance, simple_db::names, SimpleDb};
+use bridge_types::{
+    BridgeIncentiveParameters, DutyFailureReason, DutyKind, DutyRecord, DutyStatus,
+    ExternalSettlementProof, RelayerAccounting,
+};
 use bridges::codec::Error as CodecError;
 use bridges::relayer::RelayerSet;
 use bridges::{
@@ -10,18 +14,24 @@ use bridges::{
     light_client::{header_hash, Header as LightHeader, Proof},
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json::{self, Number, Value};
+use sled::{Config as SledConfig, Db as SledDb};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fs;
 use std::path::Path;
+use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const STATE_KEY: &str = "bridge/state";
 const RECEIPT_RETENTION: usize = 512;
 const CHALLENGE_RETENTION: usize = 256;
 const SLASH_RETENTION: usize = 512;
+const DUTY_RETENTION: usize = 1024;
+const REWARD_CLAIM_RETENTION: usize = 256;
+const SETTLEMENT_RETENTION: usize = 256;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -41,6 +51,30 @@ pub enum BridgeError {
     AlreadyChallenged,
     ChallengeWindowOpen,
     UnauthorizedRelease,
+    InsufficientBond {
+        relayer: String,
+        required: u64,
+        available: u64,
+    },
+    RewardClaimRejected(String),
+    RewardClaimAmountZero,
+    RewardInsufficientPending {
+        relayer: String,
+        available: u64,
+        requested: u64,
+    },
+    SettlementProofRequired {
+        asset: String,
+        commitment: [u8; 32],
+    },
+    SettlementProofDuplicate,
+    SettlementProofChainMismatch {
+        expected: Option<String>,
+        found: String,
+    },
+    SettlementProofNotTracked {
+        asset: String,
+    },
 }
 
 impl fmt::Display for BridgeError {
@@ -55,11 +89,70 @@ impl fmt::Display for BridgeError {
             BridgeError::AlreadyChallenged => write!(f, "withdrawal already challenged"),
             BridgeError::ChallengeWindowOpen => write!(f, "challenge window still open"),
             BridgeError::UnauthorizedRelease => write!(f, "release not authorized"),
+            BridgeError::InsufficientBond {
+                relayer,
+                required,
+                available,
+            } => write!(
+                f,
+                "relayer {relayer} bond {available} below required {required}"
+            ),
+            BridgeError::RewardClaimRejected(reason) => {
+                write!(f, "reward claim authorization rejected: {reason}")
+            }
+            BridgeError::RewardClaimAmountZero => {
+                write!(f, "reward claim amount must be greater than zero")
+            }
+            BridgeError::RewardInsufficientPending {
+                relayer,
+                available,
+                requested,
+            } => write!(
+                f,
+                "relayer {relayer} pending rewards {available} below requested {requested}"
+            ),
+            BridgeError::SettlementProofRequired { asset, commitment } => {
+                write!(
+                    f,
+                    "settlement proof required for {asset} commitment {}",
+                    crypto_suite::hex::encode(commitment)
+                )
+            }
+            BridgeError::SettlementProofDuplicate => {
+                write!(f, "settlement proof already submitted")
+            }
+            BridgeError::SettlementProofChainMismatch { expected, found } => {
+                if let Some(expected_chain) = expected {
+                    write!(
+                        f,
+                        "settlement proof chain {found} does not match required {expected_chain}"
+                    )
+                } else {
+                    write!(f, "settlement proof chain {found} not permitted")
+                }
+            }
+            BridgeError::SettlementProofNotTracked { asset } => {
+                write!(f, "no settlement tracking entry for asset {asset}")
+            }
         }
     }
 }
 
 impl std::error::Error for BridgeError {}
+
+static GLOBAL_INCENTIVES: Lazy<RwLock<BridgeIncentiveParameters>> =
+    Lazy::new(|| RwLock::new(BridgeIncentiveParameters::default()));
+
+pub fn set_global_incentives(params: BridgeIncentiveParameters) {
+    *GLOBAL_INCENTIVES.write().expect("bridge incentives lock") = params;
+}
+
+pub fn global_incentives() -> BridgeIncentiveParameters {
+    GLOBAL_INCENTIVES
+        .read()
+        .expect("bridge incentives lock")
+        .clone()
+}
 
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
@@ -69,6 +162,8 @@ pub struct ChannelConfig {
     pub challenge_period_secs: u64,
     pub relayer_quorum: usize,
     pub headers_dir: String,
+    pub requires_settlement_proof: bool,
+    pub settlement_chain: Option<String>,
 }
 
 impl ChannelConfig {
@@ -82,7 +177,7 @@ impl ChannelConfig {
         }
     }
 
-    fn for_asset(asset: &str) -> Self {
+    pub fn for_asset(asset: &str) -> Self {
         Self {
             asset: asset.to_string(),
             confirm_depth: 6,
@@ -90,6 +185,8 @@ impl ChannelConfig {
             challenge_period_secs: 30,
             relayer_quorum: 2,
             headers_dir: format!("state/bridge_headers/{asset}"),
+            requires_settlement_proof: false,
+            settlement_chain: None,
         }
     }
 }
@@ -99,6 +196,86 @@ struct BridgeSnapshot {
     locked: HashMap<String, u64>,
     verified_headers: HashSet<[u8; 32]>,
     pending_withdrawals: HashMap<[u8; 32], PendingWithdrawal>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DutyStore {
+    next_id: u64,
+    records: HashMap<u64, DutyRecord>,
+    order: VecDeque<u64>,
+    pending: HashMap<[u8; 32], Vec<u64>>,
+}
+
+impl DutyStore {
+    fn assign(&mut self, mut record: DutyRecord) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        record.id = id;
+        if let DutyKind::Withdrawal { commitment } = record.kind {
+            self.pending.entry(commitment).or_default().push(id);
+        }
+        self.records.insert(id, record);
+        self.order.push_back(id);
+        self.enforce_retention();
+        id
+    }
+
+    fn enforce_retention(&mut self) {
+        while self.order.len() > DUTY_RETENTION {
+            if let Some(id) = self.order.pop_front() {
+                if let Some(record) = self.records.remove(&id) {
+                    if let DutyKind::Withdrawal { commitment } = record.kind {
+                        if let Some(ids) = self.pending.get_mut(&commitment) {
+                            ids.retain(|candidate| *candidate != id);
+                            if ids.is_empty() {
+                                self.pending.remove(&commitment);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn update_status(&mut self, id: u64, status: DutyStatus) -> Option<DutyRecord> {
+        let record = self.records.get_mut(&id)?;
+        record.status = status;
+        let clone = record.clone();
+        if let DutyKind::Withdrawal { commitment } = clone.kind {
+            if !clone.is_pending() {
+                if let Some(ids) = self.pending.get_mut(&commitment) {
+                    ids.retain(|candidate| *candidate != id);
+                    if ids.is_empty() {
+                        self.pending.remove(&commitment);
+                    }
+                }
+            }
+        }
+        Some(clone)
+    }
+
+    fn duties_for_commitment(&self, commitment: &[u8; 32]) -> Vec<u64> {
+        self.pending.get(commitment).cloned().unwrap_or_default()
+    }
+
+    fn records(&self) -> Vec<DutyRecord> {
+        self.order
+            .iter()
+            .filter_map(|id| self.records.get(id))
+            .cloned()
+            .collect()
+    }
+
+    fn pending_count_for_relayer(&self, relayer: &str) -> usize {
+        self.records
+            .values()
+            .filter(|record| record.relayer == relayer && record.is_pending())
+            .count()
+    }
+
+    fn get(&self, id: u64) -> Option<&DutyRecord> {
+        self.records.get(&id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +302,9 @@ pub struct PendingWithdrawalInfo {
     pub initiated_at: u64,
     pub deadline: u64,
     pub challenged: bool,
+    pub requires_settlement_proof: bool,
+    pub settlement_chain: Option<String>,
+    pub settlement_submitted_at: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +313,14 @@ pub struct RelayerInfo {
     pub stake: u64,
     pub slashes: u64,
     pub bond: u64,
+    pub duties_assigned: u64,
+    pub duties_completed: u64,
+    pub duties_failed: u64,
+    pub rewards_earned: u64,
+    pub rewards_pending: u64,
+    pub rewards_claimed: u64,
+    pub penalties_applied: u64,
+    pub pending_duties: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +345,65 @@ pub struct SlashRecord {
     pub slashes: u64,
     pub remaining_bond: u64,
     pub occurred_at: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RewardClaimRecord {
+    pub id: u64,
+    pub relayer: String,
+    pub amount: u64,
+    pub approval_key: String,
+    pub claimed_at: u64,
+    pub pending_before: u64,
+    pub pending_after: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettlementRecord {
+    pub asset: String,
+    pub commitment: [u8; 32],
+    pub relayer: String,
+    pub settlement_chain: Option<String>,
+    pub proof_hash: [u8; 32],
+    pub settlement_height: u64,
+    pub submitted_at: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SettlementState {
+    required_chain: Option<String>,
+    duty_ids: Vec<u64>,
+    proof: Option<SettlementRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DutyOutcomeSnapshot {
+    pub relayer: String,
+    pub status: String,
+    pub reward: u64,
+    pub penalty: u64,
+    pub completed_at: Option<u64>,
+    pub failed_at: Option<u64>,
+    pub reason: Option<String>,
+    pub duty_id: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisputeAuditRecord {
+    pub asset: String,
+    pub commitment: [u8; 32],
+    pub user: String,
+    pub amount: u64,
+    pub initiated_at: u64,
+    pub deadline: u64,
+    pub challenged: bool,
+    pub challenger: Option<String>,
+    pub challenged_at: Option<u64>,
+    pub settlement_required: bool,
+    pub settlement_chain: Option<String>,
+    pub settlement_submitted_at: Option<u64>,
+    pub relayer_outcomes: Vec<DutyOutcomeSnapshot>,
+    pub expired: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -217,8 +464,16 @@ impl ChannelState {
 struct BridgeState {
     channels: HashMap<String, ChannelState>,
     relayer_bonds: HashMap<String, u64>,
+    accounting: HashMap<String, RelayerAccounting>,
     slash_log: Vec<SlashRecord>,
+    duties: DutyStore,
+    incentives: BridgeIncentiveParameters,
     token_bridge: TokenBridge,
+    reward_claims: VecDeque<RewardClaimRecord>,
+    next_claim_id: u64,
+    settlement_log: VecDeque<SettlementRecord>,
+    pending_settlements: HashMap<[u8; 32], SettlementState>,
+    settlement_fingerprints: HashSet<[u8; 32]>,
 }
 
 mod state_codec {
@@ -278,6 +533,650 @@ mod state_codec {
         }
     }
 
+    fn encode_accounting_record(record: &RelayerAccounting) -> Value {
+        let mut map = Map::new();
+        map.insert("bond".into(), Value::Number(Number::from(record.bond)));
+        map.insert(
+            "rewards_earned".into(),
+            Value::Number(Number::from(record.rewards_earned)),
+        );
+        map.insert(
+            "rewards_pending".into(),
+            Value::Number(Number::from(record.rewards_pending)),
+        );
+        map.insert(
+            "rewards_claimed".into(),
+            Value::Number(Number::from(record.rewards_claimed)),
+        );
+        map.insert(
+            "penalties_applied".into(),
+            Value::Number(Number::from(record.penalties_applied)),
+        );
+        map.insert(
+            "duties_assigned".into(),
+            Value::Number(Number::from(record.duties_assigned)),
+        );
+        map.insert(
+            "duties_completed".into(),
+            Value::Number(Number::from(record.duties_completed)),
+        );
+        map.insert(
+            "duties_failed".into(),
+            Value::Number(Number::from(record.duties_failed)),
+        );
+        Value::Object(map)
+    }
+
+    fn decode_accounting_record(value: &Value) -> Result<RelayerAccounting, CodecError> {
+        let obj = require_object(value, "relayer_accounting_record")?;
+        Ok(RelayerAccounting {
+            bond: require_u64(get(obj, "bond")?, "bond")?,
+            rewards_earned: require_u64(get(obj, "rewards_earned")?, "rewards_earned")?,
+            rewards_pending: require_u64(get(obj, "rewards_pending")?, "rewards_pending")?,
+            rewards_claimed: require_u64(get(obj, "rewards_claimed")?, "rewards_claimed")?,
+            penalties_applied: require_u64(get(obj, "penalties_applied")?, "penalties_applied")?,
+            duties_assigned: require_u64(get(obj, "duties_assigned")?, "duties_assigned")?,
+            duties_completed: require_u64(get(obj, "duties_completed")?, "duties_completed")?,
+            duties_failed: require_u64(get(obj, "duties_failed")?, "duties_failed")?,
+        })
+    }
+
+    fn encode_accounting(accounting: &HashMap<String, RelayerAccounting>) -> Value {
+        let mut map = Map::new();
+        for (relayer, record) in accounting {
+            map.insert(relayer.clone(), encode_accounting_record(record));
+        }
+        Value::Object(map)
+    }
+
+    fn decode_accounting(value: &Value) -> Result<HashMap<String, RelayerAccounting>, CodecError> {
+        let obj = require_object(value, "relayer_accounting")?;
+        let mut accounting = HashMap::new();
+        for (relayer, entry) in obj.iter() {
+            let record = decode_accounting_record(entry)
+                .map_err(|_| invalid_type("relayer_accounting", "a relayer accounting record"))?;
+            accounting.insert(relayer.clone(), record);
+        }
+        Ok(accounting)
+    }
+
+    fn encode_incentives(params: &BridgeIncentiveParameters) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "min_bond".into(),
+            Value::Number(Number::from(params.min_bond)),
+        );
+        map.insert(
+            "duty_reward".into(),
+            Value::Number(Number::from(params.duty_reward)),
+        );
+        map.insert(
+            "failure_slash".into(),
+            Value::Number(Number::from(params.failure_slash)),
+        );
+        map.insert(
+            "challenge_slash".into(),
+            Value::Number(Number::from(params.challenge_slash)),
+        );
+        map.insert(
+            "duty_window_secs".into(),
+            Value::Number(Number::from(params.duty_window_secs)),
+        );
+        Value::Object(map)
+    }
+
+    fn decode_incentives(value: &Value) -> Result<BridgeIncentiveParameters, CodecError> {
+        let obj = require_object(value, "bridge_incentives")?;
+        Ok(BridgeIncentiveParameters {
+            min_bond: require_u64(get(obj, "min_bond")?, "min_bond")?,
+            duty_reward: require_u64(get(obj, "duty_reward")?, "duty_reward")?,
+            failure_slash: require_u64(get(obj, "failure_slash")?, "failure_slash")?,
+            challenge_slash: require_u64(get(obj, "challenge_slash")?, "challenge_slash")?,
+            duty_window_secs: require_u64(get(obj, "duty_window_secs")?, "duty_window_secs")?,
+        })
+    }
+
+    fn encode_duty_kind(kind: &DutyKind) -> Value {
+        let mut map = Map::new();
+        match kind {
+            DutyKind::Deposit => {
+                map.insert("kind".into(), Value::String("deposit".into()));
+            }
+            DutyKind::Withdrawal { commitment } => {
+                map.insert("kind".into(), Value::String("withdrawal".into()));
+                map.insert(
+                    "commitment".into(),
+                    Value::String(crypto_suite::hex::encode(commitment)),
+                );
+            }
+            DutyKind::Settlement {
+                commitment,
+                settlement_chain,
+                proof_hash,
+            } => {
+                map.insert("kind".into(), Value::String("settlement".into()));
+                map.insert(
+                    "commitment".into(),
+                    Value::String(crypto_suite::hex::encode(commitment)),
+                );
+                map.insert(
+                    "settlement_chain".into(),
+                    Value::String(settlement_chain.clone()),
+                );
+                map.insert(
+                    "proof_hash".into(),
+                    Value::String(crypto_suite::hex::encode(proof_hash)),
+                );
+            }
+        }
+        Value::Object(map)
+    }
+
+    fn decode_duty_kind(value: &Value) -> Result<DutyKind, CodecError> {
+        let obj = require_object(value, "duty_kind")?;
+        let kind = require_string(get(obj, "kind")?, "kind")?;
+        match kind {
+            "deposit" => Ok(DutyKind::Deposit),
+            "withdrawal" => {
+                let commitment_hex = require_string(get(obj, "commitment")?, "commitment")?;
+                let commitment =
+                    crypto_suite::hex::decode_array::<32>(commitment_hex).map_err(|source| {
+                        CodecError::Hex {
+                            field: "duty_kind_commitment",
+                            source,
+                        }
+                    })?;
+                Ok(DutyKind::Withdrawal { commitment })
+            }
+            "settlement" => {
+                let commitment_hex = require_string(get(obj, "commitment")?, "commitment")?;
+                let commitment =
+                    crypto_suite::hex::decode_array::<32>(commitment_hex).map_err(|source| {
+                        CodecError::Hex {
+                            field: "duty_kind_commitment",
+                            source,
+                        }
+                    })?;
+                let settlement_chain =
+                    require_string(get(obj, "settlement_chain")?, "settlement_chain")?;
+                let proof_hash_hex = require_string(get(obj, "proof_hash")?, "proof_hash")?;
+                let proof_hash =
+                    crypto_suite::hex::decode_array::<32>(proof_hash_hex).map_err(|source| {
+                        CodecError::Hex {
+                            field: "duty_kind_proof_hash",
+                            source,
+                        }
+                    })?;
+                Ok(DutyKind::Settlement {
+                    commitment,
+                    settlement_chain: settlement_chain.to_string(),
+                    proof_hash,
+                })
+            }
+            other => Err(invalid_value("duty_kind", format!("unknown kind: {other}"))),
+        }
+    }
+
+    fn encode_duty_status(status: &DutyStatus) -> Value {
+        let mut map = Map::new();
+        match status {
+            DutyStatus::Pending => {
+                map.insert("status".into(), Value::String("pending".into()));
+            }
+            DutyStatus::Completed {
+                reward,
+                completed_at,
+            } => {
+                map.insert("status".into(), Value::String("completed".into()));
+                map.insert("reward".into(), Value::Number(Number::from(*reward)));
+                map.insert(
+                    "completed_at".into(),
+                    Value::Number(Number::from(*completed_at)),
+                );
+            }
+            DutyStatus::Failed {
+                penalty,
+                failed_at,
+                reason,
+            } => {
+                map.insert("status".into(), Value::String("failed".into()));
+                map.insert("penalty".into(), Value::Number(Number::from(*penalty)));
+                map.insert("failed_at".into(), Value::Number(Number::from(*failed_at)));
+                map.insert("reason".into(), Value::String(reason.as_str().to_string()));
+            }
+        }
+        Value::Object(map)
+    }
+
+    fn decode_duty_status(value: &Value) -> Result<DutyStatus, CodecError> {
+        let obj = require_object(value, "duty_status")?;
+        let status = require_string(get(obj, "status")?, "status")?;
+        match status {
+            "pending" => Ok(DutyStatus::Pending),
+            "completed" => {
+                let reward = require_u64(get(obj, "reward")?, "reward")?;
+                let completed_at = require_u64(get(obj, "completed_at")?, "completed_at")?;
+                Ok(DutyStatus::Completed {
+                    reward,
+                    completed_at,
+                })
+            }
+            "failed" => {
+                let penalty = require_u64(get(obj, "penalty")?, "penalty")?;
+                let failed_at = require_u64(get(obj, "failed_at")?, "failed_at")?;
+                let reason_value = require_string(get(obj, "reason")?, "reason")?;
+                let reason = match reason_value {
+                    "invalid_proof" => DutyFailureReason::InvalidProof,
+                    "bundle_mismatch" => DutyFailureReason::BundleMismatch,
+                    "challenge_accepted" => DutyFailureReason::ChallengeAccepted,
+                    "expired" => DutyFailureReason::Expired,
+                    "insufficient_bond" => DutyFailureReason::InsufficientBond,
+                    other => {
+                        return Err(invalid_value(
+                            "duty_status_reason",
+                            format!("unknown duty failure reason: {other}"),
+                        ))
+                    }
+                };
+                Ok(DutyStatus::Failed {
+                    penalty,
+                    failed_at,
+                    reason,
+                })
+            }
+            other => Err(invalid_value(
+                "duty_status",
+                format!("unknown status: {other}"),
+            )),
+        }
+    }
+
+    fn encode_duty_record(record: &DutyRecord) -> Value {
+        let mut map = Map::new();
+        map.insert("id".into(), Value::Number(Number::from(record.id)));
+        map.insert("relayer".into(), Value::String(record.relayer.clone()));
+        map.insert("asset".into(), Value::String(record.asset.clone()));
+        map.insert("user".into(), Value::String(record.user.clone()));
+        map.insert("amount".into(), Value::Number(Number::from(record.amount)));
+        map.insert(
+            "assigned_at".into(),
+            Value::Number(Number::from(record.assigned_at)),
+        );
+        map.insert(
+            "deadline".into(),
+            Value::Number(Number::from(record.deadline)),
+        );
+        map.insert(
+            "bundle_relayers".into(),
+            Value::Array(
+                record
+                    .bundle_relayers
+                    .iter()
+                    .map(|relayer| Value::String(relayer.clone()))
+                    .collect(),
+            ),
+        );
+        map.insert("kind".into(), encode_duty_kind(&record.kind));
+        map.insert("status".into(), encode_duty_status(&record.status));
+        Value::Object(map)
+    }
+
+    fn decode_duty_record(value: &Value) -> Result<DutyRecord, CodecError> {
+        let obj = require_object(value, "duty_record")?;
+        let id = require_u64(get(obj, "id")?, "id")?;
+        let relayer = require_string(get(obj, "relayer")?, "relayer")?.to_string();
+        let asset = require_string(get(obj, "asset")?, "asset")?.to_string();
+        let user = require_string(get(obj, "user")?, "user")?.to_string();
+        let amount = require_u64(get(obj, "amount")?, "amount")?;
+        let assigned_at = require_u64(get(obj, "assigned_at")?, "assigned_at")?;
+        let deadline = require_u64(get(obj, "deadline")?, "deadline")?;
+        let bundle_relayers = if let Some(value) = obj.get("bundle_relayers") {
+            let arr = require_array(value, "bundle_relayers")?;
+            let mut relayers = Vec::with_capacity(arr.len());
+            for entry in arr {
+                relayers.push(require_string(entry, "bundle_relayer")?.to_string());
+            }
+            relayers
+        } else {
+            Vec::new()
+        };
+        let kind = decode_duty_kind(get(obj, "kind")?)?;
+        let status = decode_duty_status(get(obj, "status")?)?;
+        Ok(DutyRecord {
+            id,
+            relayer,
+            asset,
+            user,
+            amount,
+            assigned_at,
+            deadline,
+            bundle_relayers,
+            kind,
+            status,
+        })
+    }
+
+    fn encode_duties(store: &DutyStore) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "next_id".to_string(),
+            Value::Number(Number::from(store.next_id)),
+        );
+        let order = store
+            .order
+            .iter()
+            .map(|id| Value::Number(Number::from(*id)))
+            .collect();
+        map.insert("order".to_string(), Value::Array(order));
+        let records: Vec<Value> = store
+            .records
+            .values()
+            .map(|record| encode_duty_record(record))
+            .collect();
+        map.insert("records".to_string(), Value::Array(records));
+        let mut pending = Vec::new();
+        for (commitment, ids) in &store.pending {
+            let mut entry = Map::new();
+            entry.insert(
+                "commitment".to_string(),
+                Value::String(crypto_suite::hex::encode(commitment)),
+            );
+            entry.insert(
+                "ids".to_string(),
+                Value::Array(
+                    ids.iter()
+                        .map(|id| Value::Number(Number::from(*id)))
+                        .collect(),
+                ),
+            );
+            pending.push(Value::Object(entry));
+        }
+        map.insert("pending".to_string(), Value::Array(pending));
+        Value::Object(map)
+    }
+
+    fn decode_duties(value: &Value) -> Result<DutyStore, CodecError> {
+        let obj = require_object(value, "duty_store")?;
+        let mut store = DutyStore::default();
+        if let Some(next) = obj.get("next_id").and_then(Value::as_u64) {
+            store.next_id = next;
+        }
+        if let Some(order_value) = obj.get("order") {
+            let arr = require_array(order_value, "duty_order")?;
+            let mut order = VecDeque::with_capacity(arr.len());
+            for entry in arr {
+                order.push_back(require_u64(entry, "duty_id")?);
+            }
+            store.order = order;
+        }
+        if let Some(records_value) = obj.get("records") {
+            let arr = require_array(records_value, "duty_records")?;
+            for entry in arr {
+                let record = decode_duty_record(entry)
+                    .map_err(|_| invalid_type("duty_records", "a duty record entry"))?;
+                store.records.insert(record.id, record);
+            }
+        }
+        if let Some(pending_value) = obj.get("pending") {
+            let arr = require_array(pending_value, "duty_pending")?;
+            for entry in arr {
+                let pending_obj = require_object(entry, "duty_pending_entry")?;
+                let commitment_hex = require_string(get(pending_obj, "commitment")?, "commitment")?;
+                let commitment =
+                    crypto_suite::hex::decode_array::<32>(commitment_hex).map_err(|source| {
+                        CodecError::Hex {
+                            field: "duty_pending",
+                            source,
+                        }
+                    })?;
+                let ids_val = get(pending_obj, "ids")?;
+                let ids_arr = require_array(ids_val, "pending_ids")?;
+                let mut ids = Vec::with_capacity(ids_arr.len());
+                for entry in ids_arr {
+                    ids.push(require_u64(entry, "pending_id")?);
+                }
+                store.pending.insert(commitment, ids);
+            }
+        }
+        if store.order.is_empty() {
+            let mut sorted: Vec<_> = store
+                .records
+                .values()
+                .map(|record| (record.assigned_at, record.id))
+                .collect();
+            sorted.sort_by_key(|(assigned, _)| *assigned);
+            store.order = sorted.into_iter().map(|(_, id)| id).collect();
+        }
+        if store.next_id == 0 {
+            store.next_id = store
+                .records
+                .keys()
+                .max()
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+        }
+        if store.pending.is_empty() {
+            for record in store.records.values() {
+                if let DutyKind::Withdrawal { commitment } = record.kind {
+                    if record.is_pending() {
+                        store.pending.entry(commitment).or_default().push(record.id);
+                    }
+                }
+            }
+        }
+        store.enforce_retention();
+        Ok(store)
+    }
+
+    fn encode_reward_claims(claims: &VecDeque<RewardClaimRecord>, next_id: u64) -> Value {
+        let mut map = Map::new();
+        map.insert("next_id".into(), Value::Number(Number::from(next_id)));
+        let entries: Vec<Value> = claims
+            .iter()
+            .map(|record| {
+                let mut entry = Map::new();
+                entry.insert("id".into(), Value::Number(Number::from(record.id)));
+                entry.insert("relayer".into(), Value::String(record.relayer.clone()));
+                entry.insert("amount".into(), Value::Number(Number::from(record.amount)));
+                entry.insert(
+                    "approval_key".into(),
+                    Value::String(record.approval_key.clone()),
+                );
+                entry.insert(
+                    "claimed_at".into(),
+                    Value::Number(Number::from(record.claimed_at)),
+                );
+                entry.insert(
+                    "pending_before".into(),
+                    Value::Number(Number::from(record.pending_before)),
+                );
+                entry.insert(
+                    "pending_after".into(),
+                    Value::Number(Number::from(record.pending_after)),
+                );
+                Value::Object(entry)
+            })
+            .collect();
+        map.insert("claims".into(), Value::Array(entries));
+        Value::Object(map)
+    }
+
+    fn decode_reward_claims(
+        value: &Value,
+    ) -> Result<(VecDeque<RewardClaimRecord>, u64), CodecError> {
+        let obj = require_object(value, "reward_claims")?;
+        let mut claims = VecDeque::new();
+        let mut max_id = 0;
+        if let Some(entries) = obj.get("claims") {
+            for entry in require_array(entries, "reward_claim_entries")? {
+                let claim_obj = require_object(entry, "reward_claim_entry")?;
+                let id = require_u64(get(claim_obj, "id")?, "id")?;
+                let relayer = require_string(get(claim_obj, "relayer")?, "relayer")?.to_string();
+                let amount = require_u64(get(claim_obj, "amount")?, "amount")?;
+                let approval_key =
+                    require_string(get(claim_obj, "approval_key")?, "approval_key")?.to_string();
+                let claimed_at = require_u64(get(claim_obj, "claimed_at")?, "claimed_at")?;
+                let pending_before =
+                    require_u64(get(claim_obj, "pending_before")?, "pending_before")?;
+                let pending_after = require_u64(get(claim_obj, "pending_after")?, "pending_after")?;
+                claims.push_back(RewardClaimRecord {
+                    id,
+                    relayer,
+                    amount,
+                    approval_key,
+                    claimed_at,
+                    pending_before,
+                    pending_after,
+                });
+                max_id = max_id.max(id);
+            }
+        }
+        let next_id = obj
+            .get("next_id")
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| max_id.saturating_add(1));
+        Ok((claims, next_id))
+    }
+
+    fn encode_settlement_record(record: &SettlementRecord) -> Value {
+        let mut map = Map::new();
+        map.insert("asset".into(), Value::String(record.asset.clone()));
+        map.insert(
+            "commitment".into(),
+            Value::String(crypto_suite::hex::encode(&record.commitment)),
+        );
+        map.insert("relayer".into(), Value::String(record.relayer.clone()));
+        if let Some(chain) = &record.settlement_chain {
+            map.insert("settlement_chain".into(), Value::String(chain.clone()));
+        }
+        map.insert(
+            "proof_hash".into(),
+            Value::String(crypto_suite::hex::encode(&record.proof_hash)),
+        );
+        map.insert(
+            "settlement_height".into(),
+            Value::Number(Number::from(record.settlement_height)),
+        );
+        map.insert(
+            "submitted_at".into(),
+            Value::Number(Number::from(record.submitted_at)),
+        );
+        Value::Object(map)
+    }
+
+    fn decode_settlement_record(value: &Value) -> Result<SettlementRecord, CodecError> {
+        let obj = require_object(value, "settlement_record")?;
+        Ok(SettlementRecord {
+            asset: require_string(get(obj, "asset")?, "asset")?.to_string(),
+            commitment: crypto_suite::hex::decode_array::<32>(require_string(
+                get(obj, "commitment")?,
+                "commitment",
+            )?)
+            .map_err(|source| CodecError::Hex {
+                field: "settlement_commitment",
+                source,
+            })?,
+            relayer: require_string(get(obj, "relayer")?, "relayer")?.to_string(),
+            settlement_chain: obj
+                .get("settlement_chain")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
+            proof_hash: crypto_suite::hex::decode_array::<32>(require_string(
+                get(obj, "proof_hash")?,
+                "proof_hash",
+            )?)
+            .map_err(|source| CodecError::Hex {
+                field: "settlement_proof_hash",
+                source,
+            })?,
+            settlement_height: require_u64(get(obj, "settlement_height")?, "settlement_height")?,
+            submitted_at: require_u64(get(obj, "submitted_at")?, "submitted_at")?,
+        })
+    }
+
+    fn encode_settlements(log: &VecDeque<SettlementRecord>) -> Value {
+        let entries: Vec<Value> = log.iter().map(encode_settlement_record).collect();
+        Value::Array(entries)
+    }
+
+    fn decode_settlements(value: &Value) -> Result<VecDeque<SettlementRecord>, CodecError> {
+        let arr = require_array(value, "settlement_records")?;
+        let mut records = VecDeque::new();
+        for entry in arr {
+            records.push_back(decode_settlement_record(entry)?);
+        }
+        Ok(records)
+    }
+
+    fn encode_pending_settlements(map: &HashMap<[u8; 32], SettlementState>) -> Value {
+        let mut entries = Vec::new();
+        for (commitment, state) in map {
+            let mut obj = Map::new();
+            obj.insert(
+                "commitment".into(),
+                Value::String(crypto_suite::hex::encode(commitment)),
+            );
+            if let Some(chain) = &state.required_chain {
+                obj.insert("required_chain".into(), Value::String(chain.clone()));
+            }
+            obj.insert(
+                "duty_ids".into(),
+                Value::Array(
+                    state
+                        .duty_ids
+                        .iter()
+                        .map(|id| Value::Number(Number::from(*id)))
+                        .collect(),
+                ),
+            );
+            if let Some(record) = &state.proof {
+                obj.insert("proof".into(), encode_settlement_record(record));
+            }
+            entries.push(Value::Object(obj));
+        }
+        Value::Array(entries)
+    }
+
+    fn decode_pending_settlements(
+        value: &Value,
+    ) -> Result<HashMap<[u8; 32], SettlementState>, CodecError> {
+        let arr = require_array(value, "pending_settlements")?;
+        let mut map = HashMap::new();
+        for entry in arr {
+            let obj = require_object(entry, "pending_settlement_entry")?;
+            let commitment_hex = require_string(get(obj, "commitment")?, "commitment")?;
+            let commitment =
+                crypto_suite::hex::decode_array::<32>(commitment_hex).map_err(|source| {
+                    CodecError::Hex {
+                        field: "pending_settlement_commitment",
+                        source,
+                    }
+                })?;
+            let duty_ids_value = get(obj, "duty_ids")?;
+            let duty_ids_array = require_array(duty_ids_value, "settlement_duty_ids")?;
+            let mut duty_ids = Vec::with_capacity(duty_ids_array.len());
+            for entry in duty_ids_array {
+                duty_ids.push(require_u64(entry, "settlement_duty_id")?);
+            }
+            let proof = if let Some(proof_value) = obj.get("proof") {
+                Some(decode_settlement_record(proof_value)?)
+            } else {
+                None
+            };
+            let state = SettlementState {
+                required_chain: obj
+                    .get("required_chain")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+                duty_ids,
+                proof,
+            };
+            map.insert(commitment, state);
+        }
+        Ok(map)
+    }
+
     fn encode_config(cfg: &ChannelConfig) -> Value {
         let mut map = Map::new();
         map.insert("asset".to_string(), Value::String(cfg.asset.clone()));
@@ -301,6 +1200,13 @@ mod state_codec {
             "headers_dir".to_string(),
             Value::String(cfg.headers_dir.clone()),
         );
+        map.insert(
+            "requires_settlement_proof".to_string(),
+            Value::Bool(cfg.requires_settlement_proof),
+        );
+        if let Some(chain) = &cfg.settlement_chain {
+            map.insert("settlement_chain".to_string(), Value::String(chain.clone()));
+        }
         Value::Object(map)
     }
 
@@ -316,6 +1222,14 @@ mod state_codec {
             )?,
             relayer_quorum: require_u64(get(obj, "relayer_quorum")?, "relayer_quorum")? as usize,
             headers_dir: require_string(get(obj, "headers_dir")?, "headers_dir")?.to_string(),
+            requires_settlement_proof: obj
+                .get("requires_settlement_proof")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            settlement_chain: obj
+                .get("settlement_chain")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
         })
     }
 
@@ -602,8 +1516,39 @@ mod state_codec {
         let mut map = Map::new();
         map.insert("channels".to_string(), Value::Object(channels));
         map.insert("relayer_bonds".to_string(), Value::Object(bonds));
+        map.insert(
+            "relayer_accounting".to_string(),
+            encode_accounting(&state.accounting),
+        );
         map.insert("slash_log".to_string(), slash_log);
+        map.insert("duties".to_string(), encode_duties(&state.duties));
+        map.insert(
+            "incentives".to_string(),
+            encode_incentives(&state.incentives),
+        );
         map.insert("token_bridge".to_string(), state.token_bridge.to_value());
+        map.insert(
+            "reward_claims".to_string(),
+            encode_reward_claims(&state.reward_claims, state.next_claim_id),
+        );
+        map.insert(
+            "settlement_log".to_string(),
+            encode_settlements(&state.settlement_log),
+        );
+        map.insert(
+            "pending_settlements".to_string(),
+            encode_pending_settlements(&state.pending_settlements),
+        );
+        map.insert(
+            "settlement_fingerprints".to_string(),
+            Value::Array(
+                state
+                    .settlement_fingerprints
+                    .iter()
+                    .map(|fp| Value::String(crypto_suite::hex::encode(fp)))
+                    .collect(),
+            ),
+        );
         Value::Object(map)
     }
 
@@ -619,23 +1564,79 @@ mod state_codec {
         for (relayer, value) in bonds_obj.iter() {
             relayer_bonds.insert(relayer.clone(), require_u64(value, "relayer_bond")?);
         }
+        let accounting = if let Some(accounting_value) = obj.get("relayer_accounting") {
+            decode_accounting(accounting_value)?
+        } else {
+            HashMap::new()
+        };
         let slash_values = require_array(get(obj, "slash_log")?, "slash_log")?;
         let mut slash_log = Vec::new();
         for entry in slash_values {
             slash_log.push(decode_slash(entry)?);
         }
+        let duties = if let Some(duty_value) = obj.get("duties") {
+            decode_duties(duty_value)?
+        } else {
+            DutyStore::default()
+        };
+        let incentives = if let Some(value) = obj.get("incentives") {
+            decode_incentives(value).unwrap_or_else(|_| BridgeIncentiveParameters::default())
+        } else {
+            BridgeIncentiveParameters::default()
+        };
         let token_bridge = TokenBridge::from_value(get(obj, "token_bridge")?)?;
+        let (reward_claims, next_claim_id) = if let Some(value) = obj.get("reward_claims") {
+            decode_reward_claims(value)?
+        } else {
+            (VecDeque::new(), 0)
+        };
+        let settlement_log = if let Some(value) = obj.get("settlement_log") {
+            decode_settlements(value)?
+        } else {
+            VecDeque::new()
+        };
+        let pending_settlements = if let Some(value) = obj.get("pending_settlements") {
+            decode_pending_settlements(value)?
+        } else {
+            HashMap::new()
+        };
+        let settlement_fingerprints = if let Some(value) = obj.get("settlement_fingerprints") {
+            let arr = require_array(value, "settlement_fingerprints")?;
+            let mut set = HashSet::new();
+            for entry in arr {
+                let fp_hex = require_string(entry, "settlement_fingerprint")?;
+                let fp = crypto_suite::hex::decode_array::<32>(fp_hex).map_err(|source| {
+                    CodecError::Hex {
+                        field: "settlement_fingerprint",
+                        source,
+                    }
+                })?;
+                set.insert(fp);
+            }
+            set
+        } else {
+            HashSet::new()
+        };
         Ok(BridgeState {
             channels,
             relayer_bonds,
+            accounting,
             slash_log,
+            duties,
+            incentives,
             token_bridge,
+            reward_claims,
+            next_claim_id,
+            settlement_log,
+            pending_settlements,
+            settlement_fingerprints,
         })
     }
 }
 
 pub struct Bridge {
     db: SimpleDb,
+    sled: SledDb,
     state: BridgeState,
 }
 
@@ -649,26 +1650,119 @@ impl Default for Bridge {
 impl Bridge {
     pub fn open(path: &str) -> Self {
         let db = SimpleDb::open_named(names::BRIDGE, path);
-        Self::with_db(db)
+        let sled_path = format!("{path}_sled");
+        let sled = SledConfig::new()
+            .path(&sled_path)
+            .open()
+            .unwrap_or_else(|e| panic!("open bridge sled store at {sled_path}: {e}"));
+        Self::with_storage(db, sled)
     }
 
     pub fn with_db(db: SimpleDb) -> Self {
-        let state = db
-            .get(STATE_KEY)
-            .and_then(|bytes| {
-                json::value_from_slice(&bytes)
-                    .ok()
-                    .and_then(|value| state_codec::decode(&value).ok())
-            })
-            .unwrap_or_default();
-        Self { db, state }
+        let sled = if let Ok(path) = std::env::var("TB_BRIDGE_SLED_PATH") {
+            SledConfig::new()
+                .path(&path)
+                .open()
+                .unwrap_or_else(|e| panic!("open bridge sled store at {path}: {e}"))
+        } else {
+            SledConfig::new()
+                .temporary(true)
+                .open()
+                .expect("open temporary bridge sled store")
+        };
+        Self::with_storage(db, sled)
+    }
+
+    fn with_storage(db: SimpleDb, sled: SledDb) -> Self {
+        let mut state = Self::load_state(&db, &sled);
+        Self::normalize_state(&mut state);
+        set_global_incentives(state.incentives.clone());
+        Self { db, sled, state }
+    }
+
+    fn load_state(db: &SimpleDb, sled: &SledDb) -> BridgeState {
+        if let Ok(Some(bytes)) = sled.get(STATE_KEY) {
+            if let Ok(value) = json::value_from_slice(bytes.as_ref()) {
+                if let Ok(state) = state_codec::decode(&value) {
+                    return state;
+                }
+            }
+        }
+        db.get(STATE_KEY)
+            .and_then(|bytes| json::value_from_slice(&bytes).ok())
+            .and_then(|value| state_codec::decode(&value).ok())
+            .unwrap_or_default()
+    }
+
+    fn normalize_state(state: &mut BridgeState) {
+        for (relayer, bond) in state.relayer_bonds.clone() {
+            let entry = state
+                .accounting
+                .entry(relayer)
+                .or_insert_with(RelayerAccounting::default);
+            entry.bond = bond;
+        }
+        for channel in state.channels.values() {
+            for relayer_id in channel.relayers.iter().map(|(id, _)| id.clone()) {
+                state
+                    .accounting
+                    .entry(relayer_id)
+                    .or_insert_with(RelayerAccounting::default);
+            }
+        }
+        if state.incentives.min_bond == 0 {
+            state.incentives = BridgeIncentiveParameters::default();
+        }
+        if state.next_claim_id == 0 {
+            let max_id = state
+                .reward_claims
+                .iter()
+                .map(|record| record.id)
+                .max()
+                .unwrap_or(0);
+            state.next_claim_id = max_id.saturating_add(1);
+        }
+        if state.settlement_fingerprints.is_empty() {
+            for record in &state.settlement_log {
+                state
+                    .settlement_fingerprints
+                    .insert(Bridge::settlement_record_fingerprint(record));
+            }
+        }
+        for (_asset, channel) in &state.channels {
+            if channel.config.requires_settlement_proof {
+                for (commitment, _) in &channel.bridge.pending_withdrawals {
+                    state
+                        .pending_settlements
+                        .entry(*commitment)
+                        .or_insert_with(|| SettlementState {
+                            required_chain: channel.config.settlement_chain.clone(),
+                            duty_ids: Vec::new(),
+                            proof: None,
+                        });
+                }
+            }
+        }
+        state.pending_settlements.retain(|commitment, _| {
+            state
+                .channels
+                .values()
+                .any(|channel| channel.bridge.pending_withdrawals.contains_key(commitment))
+        });
     }
 
     fn persist(&mut self) -> Result<(), BridgeError> {
         let value = state_codec::encode(&self.state);
         let rendered = json::to_string_value_pretty(&value);
+        let bytes = rendered.as_bytes();
         self.db
-            .put(STATE_KEY.as_bytes(), rendered.as_bytes())
+            .put(STATE_KEY.as_bytes(), bytes)
+            .map_err(|e| BridgeError::Storage(e.to_string()))?;
+        self.sled
+            .insert(STATE_KEY, bytes)
+            .map_err(|e| BridgeError::Storage(e.to_string()))?;
+        self.sled
+            .flush()
             .map_err(|e| BridgeError::Storage(e.to_string()))
     }
 
@@ -677,6 +1771,13 @@ impl Bridge {
             .channels
             .entry(asset.to_string())
             .or_insert_with(|| ChannelState::new(ChannelConfig::for_asset(asset)))
+    }
+
+    pub fn channel_config(&self, asset: &str) -> Option<ChannelConfig> {
+        self.state
+            .channels
+            .get(asset)
+            .map(|channel| channel.config.clone())
     }
 
     pub fn set_channel_config(
@@ -708,6 +1809,28 @@ impl Bridge {
         *hasher.finalize().as_bytes()
     }
 
+    fn settlement_fingerprint(asset: &str, proof: &ExternalSettlementProof) -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        hasher.update(asset.as_bytes());
+        hasher.update(&proof.commitment);
+        hasher.update(proof.settlement_chain.as_bytes());
+        hasher.update(&proof.proof_hash);
+        hasher.update(&proof.settlement_height.to_le_bytes());
+        *hasher.finalize().as_bytes()
+    }
+
+    fn settlement_record_fingerprint(record: &SettlementRecord) -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        hasher.update(record.asset.as_bytes());
+        hasher.update(&record.commitment);
+        if let Some(chain) = &record.settlement_chain {
+            hasher.update(chain.as_bytes());
+        }
+        hasher.update(&record.proof_hash);
+        hasher.update(&record.settlement_height.to_le_bytes());
+        *hasher.finalize().as_bytes()
+    }
+
     fn as_light_header(header: &PowHeader) -> LightHeader {
         LightHeader {
             chain_id: header.chain_id.clone(),
@@ -728,6 +1851,13 @@ impl Bridge {
             .or_insert(0);
         let new_bond = bond.saturating_sub(delta);
         *bond = new_bond;
+        {
+            let accounting = self.accounting_mut(relayer);
+            accounting.debit_bond(delta);
+            if delta > 0 {
+                accounting.apply_penalty(delta);
+            }
+        }
         let record = SlashRecord {
             relayer: relayer.to_string(),
             asset: asset.to_string(),
@@ -749,20 +1879,274 @@ impl Bridge {
         after: HashMap<String, bridges::relayer::Relayer>,
     ) {
         for (id, new_state) in after {
-            let prev_slashes = before.get(&id).map(|r| r.slashes).unwrap_or(0);
-            if new_state.slashes > prev_slashes {
-                self.apply_slash(&id, asset, new_state.slashes - prev_slashes);
+            let prev_stake = before.get(&id).map(|r| r.stake).unwrap_or(0);
+            if new_state.stake < prev_stake {
+                self.apply_slash(&id, asset, prev_stake - new_state.stake);
             }
         }
     }
 
-    pub fn bond_relayer(&mut self, relayer: &str, amount: u64) -> Result<(), BridgeError> {
+    fn refresh_incentives(&mut self) {
+        let global = global_incentives();
+        if self.state.incentives != global {
+            self.state.incentives = global;
+        }
+    }
+
+    fn incentives(&self) -> &BridgeIncentiveParameters {
+        &self.state.incentives
+    }
+
+    fn accounting_mut(&mut self, relayer: &str) -> &mut RelayerAccounting {
+        let bond = self
+            .state
+            .relayer_bonds
+            .get(relayer)
+            .copied()
+            .unwrap_or_default();
+        let entry = self
+            .state
+            .accounting
+            .entry(relayer.to_string())
+            .or_insert_with(RelayerAccounting::default);
+        entry.bond = bond;
+        entry
+    }
+
+    fn accounting_snapshot(&self, relayer: &str) -> RelayerAccounting {
         self.state
+            .accounting
+            .get(relayer)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn push_reward_claim(&mut self, record: RewardClaimRecord) {
+        self.state.reward_claims.push_back(record);
+        while self.state.reward_claims.len() > REWARD_CLAIM_RETENTION {
+            self.state.reward_claims.pop_front();
+        }
+    }
+
+    fn record_settlement(&mut self, record: SettlementRecord) {
+        self.state.settlement_log.push_back(record);
+        while self.state.settlement_log.len() > SETTLEMENT_RETENTION {
+            self.state.settlement_log.pop_front();
+        }
+    }
+
+    fn relayer_entries(
+        &self,
+        asset_filter: Option<&str>,
+        relayer_filter: Option<&str>,
+    ) -> Vec<(String, RelayerInfo)> {
+        let mut entries = Vec::new();
+        let mut seen = HashSet::new();
+        for (asset, channel) in &self.state.channels {
+            if asset_filter.is_some() && asset_filter != Some(asset.as_str()) {
+                continue;
+            }
+            for (id, relayer_state) in channel.relayers.iter() {
+                if let Some(filter) = relayer_filter {
+                    if filter != id {
+                        continue;
+                    }
+                }
+                let accounting = self.accounting_snapshot(id);
+                let pending = self.state.duties.pending_count_for_relayer(id);
+                entries.push((
+                    asset.clone(),
+                    RelayerInfo {
+                        id: id.clone(),
+                        stake: relayer_state.stake,
+                        slashes: relayer_state.slashes,
+                        bond: accounting.bond,
+                        duties_assigned: accounting.duties_assigned,
+                        duties_completed: accounting.duties_completed,
+                        duties_failed: accounting.duties_failed,
+                        rewards_earned: accounting.rewards_earned,
+                        rewards_pending: accounting.rewards_pending,
+                        rewards_claimed: accounting.rewards_claimed,
+                        penalties_applied: accounting.penalties_applied,
+                        pending_duties: pending,
+                    },
+                ));
+                seen.insert(id.clone());
+            }
+        }
+        for (relayer_id, accounting) in &self.state.accounting {
+            if seen.contains(relayer_id) {
+                continue;
+            }
+            if let Some(filter) = relayer_filter {
+                if filter != relayer_id {
+                    continue;
+                }
+            }
+            entries.push((
+                "*".to_string(),
+                RelayerInfo {
+                    id: relayer_id.clone(),
+                    stake: 0,
+                    slashes: 0,
+                    bond: accounting.bond,
+                    duties_assigned: accounting.duties_assigned,
+                    duties_completed: accounting.duties_completed,
+                    duties_failed: accounting.duties_failed,
+                    rewards_earned: accounting.rewards_earned,
+                    rewards_pending: accounting.rewards_pending,
+                    rewards_claimed: accounting.rewards_claimed,
+                    penalties_applied: accounting.penalties_applied,
+                    pending_duties: 0,
+                },
+            ));
+        }
+        entries.sort_by(|(asset_a, info_a), (asset_b, info_b)| {
+            asset_a.cmp(asset_b).then_with(|| info_a.id.cmp(&info_b.id))
+        });
+        entries
+    }
+
+    fn ensure_min_bond(&mut self, relayer: &str) -> Result<(), BridgeError> {
+        let required = self.incentives().min_bond;
+        let available = self
+            .state
+            .relayer_bonds
+            .get(relayer)
+            .copied()
+            .unwrap_or_default();
+        if available < required {
+            return Err(BridgeError::InsufficientBond {
+                relayer: relayer.to_string(),
+                required,
+                available,
+            });
+        }
+        Ok(())
+    }
+
+    fn assign_duty(
+        &mut self,
+        asset: &str,
+        relayer: &str,
+        user: &str,
+        amount: u64,
+        kind: DutyKind,
+        bundle_relayers: Vec<String>,
+    ) -> u64 {
+        let now = now_secs();
+        let deadline = now + self.incentives().duty_window_secs;
+        let record = DutyRecord {
+            id: 0,
+            relayer: relayer.to_string(),
+            asset: asset.to_string(),
+            user: user.to_string(),
+            amount,
+            assigned_at: now,
+            deadline,
+            bundle_relayers,
+            kind,
+            status: DutyStatus::Pending,
+        };
+        let id = self.state.duties.assign(record);
+        self.accounting_mut(relayer).assign_duty();
+        id
+    }
+
+    fn record_duty_success(&mut self, duty_id: u64, reward: u64) {
+        let completed_at = now_secs();
+        if let Some(record) = self.state.duties.update_status(
+            duty_id,
+            DutyStatus::Completed {
+                reward,
+                completed_at,
+            },
+        ) {
+            let relayer_id = record.relayer.clone();
+            let accounting = self.accounting_mut(&relayer_id);
+            accounting.complete_duty();
+            if reward > 0 {
+                accounting.accrue_reward(reward);
+            }
+            let channel_asset = record.asset;
+            if let Some(channel) = self.state.channels.get_mut(&channel_asset) {
+                channel.relayers.mark_duty_completion(&relayer_id);
+            }
+        }
+    }
+
+    fn record_duty_failure(&mut self, duty_id: u64, penalty: u64, reason: DutyFailureReason) {
+        let failed_at = now_secs();
+        if let Some(record) = self.state.duties.update_status(
+            duty_id,
+            DutyStatus::Failed {
+                penalty,
+                failed_at,
+                reason: reason.clone(),
+            },
+        ) {
+            let relayer_id = record.relayer.clone();
+            let accounting = self.accounting_mut(&relayer_id);
+            accounting.fail_duty();
+            if let Some(channel) = self.state.channels.get_mut(&record.asset) {
+                channel.relayers.mark_duty_failure(&relayer_id);
+            }
+        }
+    }
+
+    fn pending_duty_ids(&self, commitment: &[u8; 32]) -> Vec<u64> {
+        self.state.duties.duties_for_commitment(commitment)
+    }
+
+    pub fn bond_relayer(&mut self, relayer: &str, amount: u64) -> Result<(), BridgeError> {
+        let entry = self
+            .state
             .relayer_bonds
             .entry(relayer.to_string())
-            .and_modify(|bond| *bond = bond.saturating_add(amount))
-            .or_insert(amount);
+            .or_insert(0);
+        *entry = entry.saturating_add(amount);
+        self.accounting_mut(relayer).credit_bond(amount);
         self.persist()
+    }
+
+    pub fn claim_rewards(
+        &mut self,
+        relayer: &str,
+        amount: u64,
+        approval_key: &str,
+    ) -> Result<RewardClaimRecord, BridgeError> {
+        self.refresh_incentives();
+        if amount == 0 {
+            return Err(BridgeError::RewardClaimAmountZero);
+        }
+        let pending_before = self.accounting_snapshot(relayer).rewards_pending;
+        if pending_before < amount {
+            return Err(BridgeError::RewardInsufficientPending {
+                relayer: relayer.to_string(),
+                available: pending_before,
+                requested: amount,
+            });
+        }
+        let approval = governance::ensure_reward_claim_authorized(approval_key, relayer, amount)
+            .map_err(BridgeError::RewardClaimRejected)?;
+        let claimed_at = now_secs();
+        let accounting = self.accounting_mut(relayer);
+        accounting.mark_claimed(amount);
+        let pending_after = accounting.rewards_pending;
+        let claimed_amount = pending_before.saturating_sub(pending_after);
+        let record = RewardClaimRecord {
+            id: self.state.next_claim_id,
+            relayer: relayer.to_string(),
+            amount: claimed_amount,
+            approval_key: approval.key,
+            claimed_at,
+            pending_before,
+            pending_after,
+        };
+        self.state.next_claim_id = self.state.next_claim_id.saturating_add(1);
+        self.push_reward_claim(record.clone());
+        self.persist()?;
+        Ok(record)
     }
 
     pub fn deposit(
@@ -775,6 +2159,8 @@ impl Bridge {
         proof: &Proof,
         bundle: &RelayerBundle,
     ) -> Result<DepositReceipt, BridgeError> {
+        self.refresh_incentives();
+        self.ensure_min_bond(relayer)?;
         let fingerprint = Self::fingerprint(header, proof);
         {
             let channel = self.ensure_channel(asset);
@@ -783,6 +2169,14 @@ impl Bridge {
             }
             channel.relayers.stake(relayer, 0);
         }
+        let duty_id = self.assign_duty(
+            asset,
+            relayer,
+            user,
+            amount,
+            DutyKind::Deposit,
+            bundle.relayer_ids(),
+        );
 
         let (mut runtime, mut relayers) = {
             let channel = self.ensure_channel(asset);
@@ -806,6 +2200,11 @@ impl Bridge {
                 channel.relayers = relayers;
                 channel.seen_fingerprints.remove(&fingerprint);
             }
+            let penalty = self.incentives().failure_slash;
+            if penalty > 0 {
+                self.apply_slash(relayer, asset, penalty);
+            }
+            self.record_duty_failure(duty_id, penalty, DutyFailureReason::InvalidProof);
             self.persist()?;
             return Err(BridgeError::InvalidProof);
         }
@@ -831,6 +2230,8 @@ impl Bridge {
             receipt
         };
 
+        let reward = self.incentives().duty_reward;
+        self.record_duty_success(duty_id, reward);
         self.state.token_bridge.lock(asset, amount);
         self.persist()?;
         Ok(receipt)
@@ -855,6 +2256,7 @@ impl Bridge {
         amount: u64,
         bundle: &RelayerBundle,
     ) -> Result<[u8; 32], BridgeError> {
+        self.refresh_incentives();
         let commitment = bundle.aggregate_commitment(user, amount);
         {
             let channel = self
@@ -867,6 +2269,16 @@ impl Bridge {
             }
         }
         self.ensure_release_authorized(asset, &commitment)?;
+        let signer_list = bundle.relayer_ids();
+        let mut unique_signers = HashSet::new();
+        for signer in &signer_list {
+            if unique_signers.insert(signer.clone()) {
+                self.ensure_min_bond(signer)?;
+            }
+        }
+        if unique_signers.insert(relayer.to_string()) {
+            self.ensure_min_bond(relayer)?;
+        }
         {
             let channel = self
                 .state
@@ -874,6 +2286,9 @@ impl Bridge {
                 .get_mut(asset)
                 .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
             channel.relayers.stake(relayer, 0);
+            for signer in &signer_list {
+                channel.relayers.stake(signer, 0);
+            }
         }
 
         let (mut runtime, mut relayers) = {
@@ -884,6 +2299,14 @@ impl Bridge {
                 .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
             (channel.runtime_bridge(), channel.relayers.clone())
         };
+        let primary_duty = self.assign_duty(
+            asset,
+            relayer,
+            user,
+            amount,
+            DutyKind::Withdrawal { commitment },
+            signer_list.clone(),
+        );
         let before = relayers.snapshot();
         let ok = runtime.unlock_with_relayer(&mut relayers, relayer, user, amount, bundle);
         let after = relayers.snapshot();
@@ -897,6 +2320,11 @@ impl Bridge {
                     .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
                 channel.relayers = relayers;
             }
+            let penalty = self.incentives().failure_slash;
+            if penalty > 0 {
+                self.apply_slash(relayer, asset, penalty);
+            }
+            self.record_duty_failure(primary_duty, penalty, DutyFailureReason::InvalidProof);
             self.persist()?;
             return Err(BridgeError::InvalidProof);
         }
@@ -908,9 +2336,117 @@ impl Bridge {
                 .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
             channel.relayers = relayers;
             channel.update_from_runtime(runtime);
+            for signer in unique_signers.iter() {
+                if signer != relayer {
+                    channel.relayers.mark_duty_assignment(signer);
+                }
+            }
+        }
+        for signer in unique_signers.iter() {
+            if signer != relayer {
+                self.assign_duty(
+                    asset,
+                    signer,
+                    user,
+                    amount,
+                    DutyKind::Withdrawal { commitment },
+                    signer_list.clone(),
+                );
+            }
         }
         self.persist()?;
         Ok(commitment)
+    }
+
+    pub fn submit_settlement_proof(
+        &mut self,
+        asset: &str,
+        relayer: &str,
+        proof: ExternalSettlementProof,
+    ) -> Result<SettlementRecord, BridgeError> {
+        self.refresh_incentives();
+        self.ensure_min_bond(relayer)?;
+        let (bundle_relayers, user, amount, required_chain) = {
+            let channel = self
+                .state
+                .channels
+                .get(asset)
+                .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
+            if !channel.config.requires_settlement_proof {
+                return Err(BridgeError::SettlementProofNotTracked {
+                    asset: asset.to_string(),
+                });
+            }
+            let pending = channel
+                .bridge
+                .pending_withdrawals
+                .get(&proof.commitment)
+                .ok_or(BridgeError::WithdrawalMissing)?;
+            (
+                pending.relayers.clone(),
+                pending.user.clone(),
+                pending.amount,
+                channel.config.settlement_chain.clone(),
+            )
+        };
+        if let Some(expected) = required_chain.as_ref() {
+            if expected.as_str() != proof.settlement_chain {
+                return Err(BridgeError::SettlementProofChainMismatch {
+                    expected: Some(expected.clone()),
+                    found: proof.settlement_chain.clone(),
+                });
+            }
+        }
+        let fingerprint = Self::settlement_fingerprint(asset, &proof);
+        if !self.state.settlement_fingerprints.insert(fingerprint) {
+            return Err(BridgeError::SettlementProofDuplicate);
+        }
+        {
+            let entry = self
+                .state
+                .pending_settlements
+                .entry(proof.commitment)
+                .or_insert_with(|| SettlementState {
+                    required_chain: required_chain.clone(),
+                    duty_ids: Vec::new(),
+                    proof: None,
+                });
+            if entry.proof.is_some() {
+                return Err(BridgeError::SettlementProofDuplicate);
+            }
+        }
+        let duty_id = self.assign_duty(
+            asset,
+            relayer,
+            &user,
+            amount,
+            DutyKind::Settlement {
+                commitment: proof.commitment,
+                settlement_chain: proof.settlement_chain.clone(),
+                proof_hash: proof.proof_hash,
+            },
+            bundle_relayers.clone(),
+        );
+        let record = SettlementRecord {
+            asset: asset.to_string(),
+            commitment: proof.commitment,
+            relayer: relayer.to_string(),
+            settlement_chain: required_chain
+                .clone()
+                .or_else(|| Some(proof.settlement_chain.clone())),
+            proof_hash: proof.proof_hash,
+            settlement_height: proof.settlement_height,
+            submitted_at: now_secs(),
+        };
+        if let Some(entry) = self.state.pending_settlements.get_mut(&proof.commitment) {
+            entry.duty_ids.push(duty_id);
+            entry.proof = Some(record.clone());
+        }
+        self.record_settlement(record.clone());
+        self.record_duty_success(duty_id, self.incentives().duty_reward);
+        self.state.token_bridge.mint(asset, amount);
+        self.persist()?;
+        Ok(record)
     }
 
     pub fn challenge_withdrawal(
@@ -965,6 +2501,16 @@ impl Bridge {
             channel.record_challenge(record.clone());
             record
         };
+        let duty_ids = self.pending_duty_ids(&commitment);
+        let penalty = self.incentives().challenge_slash;
+        for duty_id in duty_ids {
+            if let Some(record) = self.state.duties.get(duty_id).cloned() {
+                if penalty > 0 {
+                    self.apply_slash(&record.relayer, asset, penalty);
+                }
+            }
+            self.record_duty_failure(duty_id, penalty, DutyFailureReason::ChallengeAccepted);
+        }
         #[cfg(feature = "telemetry")]
         {
             BRIDGE_CHALLENGES_TOTAL.inc();
@@ -991,6 +2537,17 @@ impl Bridge {
             if now_secs() < deadline {
                 return Err(BridgeError::ChallengeWindowOpen);
             }
+            if channel.config.requires_settlement_proof {
+                match self.state.pending_settlements.get(&commitment) {
+                    Some(state) if state.proof.is_some() => {}
+                    Some(_) | None => {
+                        return Err(BridgeError::SettlementProofRequired {
+                            asset: asset.to_string(),
+                            commitment,
+                        });
+                    }
+                }
+            }
         } else {
             return Err(BridgeError::WithdrawalMissing);
         }
@@ -999,6 +2556,12 @@ impl Bridge {
             return Err(BridgeError::ChallengeWindowOpen);
         }
         channel.update_from_runtime(runtime);
+        let reward = self.incentives().duty_reward;
+        let duty_ids = self.pending_duty_ids(&commitment);
+        for duty_id in duty_ids {
+            self.record_duty_success(duty_id, reward);
+        }
+        self.state.pending_settlements.remove(&commitment);
         self.persist()
     }
 
@@ -1017,6 +2580,18 @@ impl Bridge {
             }
             for (commitment, pending) in &channel.bridge.pending_withdrawals {
                 let deadline = pending.initiated_at + channel.config.challenge_period_secs;
+                let settlement_state = self.state.pending_settlements.get(commitment);
+                let settlement_submitted_at = settlement_state
+                    .and_then(|state| state.proof.as_ref().map(|record| record.submitted_at));
+                let settlement_chain = settlement_state
+                    .and_then(|state| state.required_chain.clone())
+                    .or_else(|| {
+                        if channel.config.requires_settlement_proof {
+                            channel.config.settlement_chain.clone()
+                        } else {
+                            None
+                        }
+                    });
                 out.push((
                     pending.initiated_at,
                     PendingWithdrawalInfo {
@@ -1028,6 +2603,9 @@ impl Bridge {
                         initiated_at: pending.initiated_at,
                         deadline,
                         challenged: pending.challenged,
+                        requires_settlement_proof: channel.config.requires_settlement_proof,
+                        settlement_chain,
+                        settlement_submitted_at,
                     },
                 ));
             }
@@ -1036,28 +2614,278 @@ impl Bridge {
         out.into_iter().map(|(_, value)| value).collect()
     }
 
+    pub fn relayer_accounting(
+        &self,
+        relayer: Option<&str>,
+        asset: Option<&str>,
+    ) -> Vec<(String, RelayerInfo)> {
+        self.relayer_entries(asset, relayer)
+    }
+
+    pub fn reward_claims(&self, relayer: Option<&str>) -> Vec<RewardClaimRecord> {
+        self.state
+            .reward_claims
+            .iter()
+            .cloned()
+            .filter(|record| {
+                relayer
+                    .map(|target| target == record.relayer.as_str())
+                    .unwrap_or(true)
+            })
+            .collect()
+    }
+
+    pub fn settlement_records(&self, asset: Option<&str>) -> Vec<SettlementRecord> {
+        self.state
+            .settlement_log
+            .iter()
+            .cloned()
+            .filter(|record| {
+                asset
+                    .map(|target| target == record.asset.as_str())
+                    .unwrap_or(true)
+            })
+            .collect()
+    }
+
+    pub fn supported_assets(&self) -> Vec<String> {
+        let mut assets: Vec<String> = self.state.channels.keys().cloned().collect();
+        assets.sort();
+        assets
+    }
+
+    pub fn dispute_audit(&self, asset: Option<&str>) -> Vec<DisputeAuditRecord> {
+        let mut builders: HashMap<[u8; 32], DisputeAuditRecord> = HashMap::new();
+        let now = now_secs();
+        for (chan_asset, channel) in &self.state.channels {
+            if asset.is_some() && asset != Some(chan_asset.as_str()) {
+                continue;
+            }
+            for (commitment, pending) in &channel.bridge.pending_withdrawals {
+                let deadline = pending.initiated_at + channel.config.challenge_period_secs;
+                let entry = builders
+                    .entry(*commitment)
+                    .or_insert_with(|| DisputeAuditRecord {
+                        asset: chan_asset.clone(),
+                        commitment: *commitment,
+                        user: pending.user.clone(),
+                        amount: pending.amount,
+                        initiated_at: pending.initiated_at,
+                        deadline,
+                        challenged: pending.challenged,
+                        challenger: None,
+                        challenged_at: None,
+                        settlement_required: channel.config.requires_settlement_proof,
+                        settlement_chain: channel.config.settlement_chain.clone(),
+                        settlement_submitted_at: None,
+                        relayer_outcomes: Vec::new(),
+                        expired: now > deadline,
+                    });
+                entry.asset = chan_asset.clone();
+                entry.user = pending.user.clone();
+                entry.amount = pending.amount;
+                entry.initiated_at = pending.initiated_at;
+                entry.deadline = deadline;
+                entry.challenged = pending.challenged;
+                entry.settlement_required = channel.config.requires_settlement_proof;
+                entry.settlement_chain = channel.config.settlement_chain.clone();
+                entry.expired = now > deadline && pending.challenged == false;
+            }
+            for challenge in &channel.challenges {
+                if asset.is_some() && asset != Some(chan_asset.as_str()) {
+                    continue;
+                }
+                let entry =
+                    builders
+                        .entry(challenge.commitment)
+                        .or_insert_with(|| DisputeAuditRecord {
+                            asset: chan_asset.clone(),
+                            commitment: challenge.commitment,
+                            user: String::new(),
+                            amount: 0,
+                            initiated_at: challenge.challenged_at,
+                            deadline: challenge.challenged_at,
+                            challenged: true,
+                            challenger: Some(challenge.challenger.clone()),
+                            challenged_at: Some(challenge.challenged_at),
+                            settlement_required: channel.config.requires_settlement_proof,
+                            settlement_chain: channel.config.settlement_chain.clone(),
+                            settlement_submitted_at: None,
+                            relayer_outcomes: Vec::new(),
+                            expired: false,
+                        });
+                entry.asset = chan_asset.clone();
+                entry.challenged = true;
+                entry.challenger = Some(challenge.challenger.clone());
+                entry.challenged_at = Some(challenge.challenged_at);
+            }
+        }
+
+        for duty in self.state.duties.records() {
+            if let Some(commitment) = duty.commitment() {
+                if asset.is_some() && asset != Some(duty.asset.as_str()) {
+                    continue;
+                }
+                let entry = builders
+                    .entry(commitment)
+                    .or_insert_with(|| DisputeAuditRecord {
+                        asset: duty.asset.clone(),
+                        commitment,
+                        user: duty.user.clone(),
+                        amount: duty.amount,
+                        initiated_at: duty.assigned_at,
+                        deadline: duty.deadline,
+                        challenged: false,
+                        challenger: None,
+                        challenged_at: None,
+                        settlement_required: false,
+                        settlement_chain: None,
+                        settlement_submitted_at: None,
+                        relayer_outcomes: Vec::new(),
+                        expired: false,
+                    });
+                entry.asset = duty.asset.clone();
+                entry.user = duty.user.clone();
+                entry.amount = duty.amount;
+                entry.initiated_at = entry.initiated_at.min(duty.assigned_at);
+                entry.deadline = entry.deadline.max(duty.deadline);
+                entry.expired |= matches!(duty.status, DutyStatus::Pending) && now > duty.deadline;
+                let snapshot = match &duty.status {
+                    DutyStatus::Pending => DutyOutcomeSnapshot {
+                        relayer: duty.relayer.clone(),
+                        status: "pending".into(),
+                        reward: 0,
+                        penalty: 0,
+                        completed_at: None,
+                        failed_at: None,
+                        reason: None,
+                        duty_id: duty.id,
+                    },
+                    DutyStatus::Completed {
+                        reward,
+                        completed_at,
+                    } => DutyOutcomeSnapshot {
+                        relayer: duty.relayer.clone(),
+                        status: "completed".into(),
+                        reward: *reward,
+                        penalty: 0,
+                        completed_at: Some(*completed_at),
+                        failed_at: None,
+                        reason: None,
+                        duty_id: duty.id,
+                    },
+                    DutyStatus::Failed {
+                        penalty,
+                        failed_at,
+                        reason,
+                    } => DutyOutcomeSnapshot {
+                        relayer: duty.relayer.clone(),
+                        status: "failed".into(),
+                        reward: 0,
+                        penalty: *penalty,
+                        completed_at: None,
+                        failed_at: Some(*failed_at),
+                        reason: Some(reason.as_str().to_string()),
+                        duty_id: duty.id,
+                    },
+                };
+                entry.relayer_outcomes.push(snapshot);
+            }
+        }
+
+        for (commitment, state) in &self.state.pending_settlements {
+            if let Some(proof) = &state.proof {
+                if asset.is_some() && asset != Some(proof.asset.as_str()) {
+                    continue;
+                }
+                let entry = builders
+                    .entry(*commitment)
+                    .or_insert_with(|| DisputeAuditRecord {
+                        asset: proof.asset.clone(),
+                        commitment: *commitment,
+                        user: String::new(),
+                        amount: 0,
+                        initiated_at: proof.submitted_at,
+                        deadline: proof.submitted_at,
+                        challenged: false,
+                        challenger: None,
+                        challenged_at: None,
+                        settlement_required: true,
+                        settlement_chain: proof.settlement_chain.clone(),
+                        settlement_submitted_at: Some(proof.submitted_at),
+                        relayer_outcomes: Vec::new(),
+                        expired: false,
+                    });
+                entry.asset = proof.asset.clone();
+                entry.settlement_required = true;
+                entry.settlement_chain = proof.settlement_chain.clone();
+                entry.settlement_submitted_at = Some(proof.submitted_at);
+            }
+        }
+
+        for record in &self.state.settlement_log {
+            if asset.is_some() && asset != Some(record.asset.as_str()) {
+                continue;
+            }
+            let entry = builders
+                .entry(record.commitment)
+                .or_insert_with(|| DisputeAuditRecord {
+                    asset: record.asset.clone(),
+                    commitment: record.commitment,
+                    user: String::new(),
+                    amount: 0,
+                    initiated_at: record.submitted_at,
+                    deadline: record.submitted_at,
+                    challenged: false,
+                    challenger: None,
+                    challenged_at: None,
+                    settlement_required: true,
+                    settlement_chain: record.settlement_chain.clone(),
+                    settlement_submitted_at: Some(record.submitted_at),
+                    relayer_outcomes: Vec::new(),
+                    expired: false,
+                });
+            entry.asset = record.asset.clone();
+            entry.settlement_required = true;
+            entry.settlement_chain = record.settlement_chain.clone();
+            entry.settlement_submitted_at = Some(record.submitted_at);
+        }
+
+        let mut records: Vec<DisputeAuditRecord> = builders.into_values().collect();
+        records
+            .sort_by_key(|record| (record.asset.clone(), record.initiated_at, record.commitment));
+        records
+    }
+
+    pub fn duty_log(
+        &self,
+        relayer: Option<&str>,
+        asset: Option<&str>,
+        limit: usize,
+    ) -> Vec<DutyRecord> {
+        let mut records: Vec<DutyRecord> = self.state.duties.records();
+        if let Some(relayer_id) = relayer {
+            records.retain(|record| record.relayer == relayer_id);
+        }
+        if let Some(asset_id) = asset {
+            records.retain(|record| record.asset == asset_id);
+        }
+        records.sort_by_key(|record| record.id);
+        if limit > 0 && records.len() > limit {
+            let drop = records.len() - limit;
+            records.drain(0..drop);
+        }
+        records.reverse();
+        records
+    }
+
     pub fn relayer_quorum(&self, asset: &str) -> Option<RelayerQuorumInfo> {
         let channel = self.state.channels.get(asset)?;
-        let mut relayers: Vec<RelayerInfo> = channel
-            .relayers
-            .snapshot()
+        let relayers: Vec<RelayerInfo> = self
+            .relayer_entries(Some(asset), None)
             .into_iter()
-            .map(|(id, rel)| {
-                let bond = self
-                    .state
-                    .relayer_bonds
-                    .get(&id)
-                    .copied()
-                    .unwrap_or_default();
-                RelayerInfo {
-                    id,
-                    stake: rel.stake,
-                    slashes: rel.slashes,
-                    bond,
-                }
-            })
+            .map(|(_, info)| info)
             .collect();
-        relayers.sort_by(|a, b| a.id.cmp(&b.id));
         Some(RelayerQuorumInfo {
             asset: asset.to_string(),
             quorum: channel.config.relayer_quorum as u64,
@@ -1103,23 +2931,9 @@ impl Bridge {
         &self,
         relayer: &str,
         asset: Option<&str>,
-    ) -> Option<(String, u64, u64, u64)> {
-        for (chan_asset, channel) in &self.state.channels {
-            if asset.is_some() && asset != Some(chan_asset.as_str()) {
-                continue;
-            }
-            for (id, status) in channel.relayers.iter() {
-                if id == relayer {
-                    let bond = self
-                        .state
-                        .relayer_bonds
-                        .get(relayer)
-                        .copied()
-                        .unwrap_or_default();
-                    return Some((chan_asset.clone(), status.stake, status.slashes, bond));
-                }
-            }
-        }
-        None
+    ) -> Option<(String, RelayerInfo)> {
+        self.relayer_entries(asset, Some(relayer))
+            .into_iter()
+            .next()
     }
 }

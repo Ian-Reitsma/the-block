@@ -54,6 +54,7 @@ foundation_math = { path = "../crates/foundation_math" }
 ledger = { path = "../ledger" }
 dex = { path = "../dex" }
 bridges = { path = "../bridges" }
+bridge-types = { path = "../crates/bridge-types" }
 # serialization helpers
 codec = { path = "../crates/codec" }
 # storage market primitives

@@ -45,9 +45,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridge-types"
+version = "0.1.0"
+dependencies = [
+ "foundation_serde",
+ "foundation_serialization",
+ "foundation_time",
+]
+
+[[package]]
 name = "bridges"
 version = "0.1.0"
 dependencies = [
+ "bridge-types",
  "concurrency",
  "crypto_suite",
  "dex",
@@ -363,6 +373,7 @@ dependencies = [
 name = "governance"
 version = "0.1.0"
 dependencies = [
+ "bridge-types",
  "foundation_lazy",
  "foundation_math",
  "foundation_serde",
@@ -783,6 +794,7 @@ name = "the_block"
 version = "0.1.0"
 dependencies = [
  "base64_fp",
+ "bridge-types",
  "bridges",
  "cli_core",
  "codec",
