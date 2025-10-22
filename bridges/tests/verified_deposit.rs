@@ -2,7 +2,6 @@ use bridges::light_client::{header_hash, Header, Proof};
 use bridges::{
     header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
-use foundation_serialization::hex;
 use sys::tempfile;
 
 #[cfg(feature = "telemetry")]

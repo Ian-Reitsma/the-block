@@ -1087,6 +1087,10 @@ fn dispatch(
             let params = parse_params::<bridge::BondRelayerRequest>(&req.params)?;
             serialize_response(bridge::bond_relayer(params)?)?
         }
+        "bridge.claim_rewards" => {
+            let params = parse_params::<bridge::ClaimRewardsRequest>(&req.params)?;
+            serialize_response(bridge::claim_rewards(params)?)?
+        }
         "bridge.verify_deposit" => {
             let params = parse_params::<bridge::VerifyDepositRequest>(&req.params)?;
             serialize_response(bridge::verify_deposit(params)?)?
@@ -1103,6 +1107,10 @@ fn dispatch(
             let params = parse_params::<bridge::FinalizeWithdrawalRequest>(&req.params)?;
             serialize_response(bridge::finalize_withdrawal(params)?)?
         }
+        "bridge.submit_settlement" => {
+            let params = parse_params::<bridge::SubmitSettlementRequest>(&req.params)?;
+            serialize_response(bridge::submit_settlement(params)?)?
+        }
         "bridge.pending_withdrawals" => {
             let params = parse_params::<bridge::PendingWithdrawalsRequest>(&req.params)?;
             serialize_response(bridge::pending_withdrawals(params)?)?
@@ -1115,6 +1123,26 @@ fn dispatch(
             let params = parse_params::<bridge::RelayerQuorumRequest>(&req.params)?;
             serialize_response(bridge::relayer_quorum(params)?)?
         }
+        "bridge.reward_claims" => {
+            let params = parse_params::<bridge::RewardClaimsRequest>(&req.params)?;
+            serialize_response(bridge::reward_claims(params)?)?
+        }
+        "bridge.settlement_log" => {
+            let params = parse_params::<bridge::SettlementLogRequest>(&req.params)?;
+            serialize_response(bridge::settlement_log(params)?)?
+        }
+        "bridge.dispute_audit" => {
+            let params = parse_params::<bridge::DisputeAuditRequest>(&req.params)?;
+            serialize_response(bridge::dispute_audit(params)?)?
+        }
+        "bridge.relayer_accounting" => {
+            let params = parse_params::<bridge::RelayerAccountingRequest>(&req.params)?;
+            serialize_response(bridge::relayer_accounting(params)?)?
+        }
+        "bridge.duty_log" => {
+            let params = parse_params::<bridge::DutyLogRequest>(&req.params)?;
+            serialize_response(bridge::duty_log(params)?)?
+        }
         "bridge.deposit_history" => {
             let params = parse_params::<bridge::DepositHistoryRequest>(&req.params)?;
             serialize_response(bridge::deposit_history(params)?)?
@@ -1122,6 +1150,14 @@ fn dispatch(
         "bridge.slash_log" => {
             let params = parse_params::<bridge::SlashLogRequest>(&req.params)?;
             serialize_response(bridge::slash_log(params)?)?
+        }
+        "bridge.assets" => {
+            let params = parse_params::<bridge::AssetsRequest>(&req.params)?;
+            serialize_response(bridge::assets(params)?)?
+        }
+        "bridge.configure_asset" => {
+            let params = parse_params::<bridge::ConfigureAssetRequest>(&req.params)?;
+            serialize_response(bridge::configure_asset(params)?)?
         }
         "localnet.submit_receipt" => {
             let hex = req
@@ -2627,7 +2663,7 @@ fn dispatch(
                 .unwrap_or(0);
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
-            let mut rt = crate::governance::Runtime { bc: &mut *chain };
+            let mut rt = crate::governance::Runtime::new(&mut *chain);
             serialize_response(governance::gov_rollback_last(
                 &NODE_GOV_STORE,
                 &mut params,
@@ -2644,7 +2680,7 @@ fn dispatch(
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
-            let mut rt = crate::governance::Runtime { bc: &mut *chain };
+            let mut rt = crate::governance::Runtime::new(&mut *chain);
             serialize_response(governance::gov_rollback(
                 &NODE_GOV_STORE,
                 id,

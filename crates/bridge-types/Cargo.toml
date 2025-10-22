@@ -1,0 +1,12 @@
+[package]
+name = "bridge-types"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["The-Block Developers"]
+description = "Shared bridge incentive and relayer accounting types"
+
+[dependencies]
+foundation_serialization = { path = "../foundation_serialization" }
+foundation_time = { path = "../foundation_time" }
+serde = { workspace = true }

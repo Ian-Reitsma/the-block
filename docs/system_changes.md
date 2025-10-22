@@ -1,4 +1,16 @@
 # System-Wide Economic Changes
+> **Review (2025-10-23, pre-dawn):** Governance-backed bridge incentives now span
+the full reward/settlement lifecycle. Reward claim approvals live in the shared
+`bridge-types` crate, `bridge.claim_rewards` debits allowances while recording
+`RewardClaimRecord`s, and the CLI exposes `blockctl bridge claim` / `reward-claims`
+for operators. Settlement proofs ride the first-party stack via
+`bridge.submit_settlement` / `bridge.settlement_log`, dispute audits surface
+challenge and settlement metadata, and channel configuration updates allow
+partial edits with optional proof enforcement. New unit tests in
+`governance/src/store.rs` and `node/src/governance/store.rs` cover reward claim
+serialization, while `node/tests/bridge_incentives.rs` extends integration
+coverage across settlement duties and dispute audits to keep FIRST_PARTY_ONLY
+builds green.
 > **Review (2025-10-22, mid-morning+):** Wallet integration tests now assert the
 `signer_metadata` array across ready, override, ephemeral, and session previews
 while checking the auto-bump telemetry event—using first-party `JsonMap`

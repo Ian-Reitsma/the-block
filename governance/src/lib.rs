@@ -5,6 +5,7 @@ pub mod kalman;
 pub mod params;
 pub mod proposals;
 pub mod release;
+pub mod reward;
 pub mod state;
 pub mod store;
 pub mod treasury;
@@ -27,6 +28,7 @@ pub use release::{
     approved_releases, ensure_release_authorized, ApprovedRelease, ReleaseAttestation,
     ReleaseBallot, ReleaseVerifier, ReleaseVote,
 };
+pub use reward::{approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval};
 pub use state::TreasuryState;
 pub use store::{
     DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
@@ -81,4 +83,9 @@ pub enum ParamKey {
     RuntimeBackend,
     TransportProvider,
     StorageEnginePolicy,
+    BridgeMinBond,
+    BridgeDutyReward,
+    BridgeFailureSlash,
+    BridgeChallengeSlash,
+    BridgeDutyWindowSecs,
 }

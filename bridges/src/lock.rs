@@ -16,19 +16,20 @@ pub fn lock(
     proof: &Proof,
     bundle: &RelayerBundle,
 ) -> bool {
+    relayers.mark_duty_assignment(relayer);
     let (valid, invalid) = bundle.verify(user, amount);
     for rel in invalid {
         relayers.slash(&rel, 1);
     }
-    if valid < bridge.cfg.relayer_quorum
-        || !bundle.relayer_ids().iter().any(|id| id == relayer)
-        || !verify_pow(header)
-    {
+    let has_primary = bundle.relayer_ids().iter().any(|id| id == relayer);
+    let pow_ok = verify_pow(header);
+    if valid < bridge.cfg.relayer_quorum || !has_primary || !pow_ok {
         #[cfg(feature = "telemetry")]
         {
             BRIDGE_INVALID_PROOF_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
+        relayers.mark_duty_failure(relayer);
         return false;
     }
     let h = Header {
@@ -43,6 +44,7 @@ pub fn lock(
             BRIDGE_INVALID_PROOF_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
+        relayers.mark_duty_failure(relayer);
         return false;
     }
     let hh = header_hash(&h);
@@ -52,6 +54,7 @@ pub fn lock(
             BRIDGE_INVALID_PROOF_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
+        relayers.mark_duty_failure(relayer);
         return false;
     }
     // Persist the full header for audit and replay protection.
@@ -62,5 +65,6 @@ pub fn lock(
     let rendered = json::to_string_value_pretty(&header_value);
     let _ = std::fs::write(&path, rendered.as_bytes());
     *bridge.locked.entry(user.to_string()).or_insert(0) += amount;
+    relayers.mark_duty_completion(relayer);
     true
 }

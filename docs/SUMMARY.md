@@ -1,4 +1,5 @@
 # Summary
+> **Review (2025-10-22, late evening):** Bridge incentives now persist through a shared `bridge-types` crate and sled-backed duty/accounting ledgers in `node/src/bridge/mod.rs`. Manual JSON encoders expose the state to RPC/CLI consumers (`bridge.relayer_accounting`, `bridge.duty_log`, `blockctl bridge accounting`, `blockctl bridge duties`), and integration coverage in `node/tests/bridge.rs` plus `node/tests/bridge_incentives.rs` exercises honest/faulty relayers, governance overrides, and challenge penalties under `FIRST_PARTY_ONLY`.
 > **Review (2025-10-22, mid-morning+):** CLI wallet tests now snapshot signer
 > metadata end-to-end: the `fee_floor_warning` integration suite asserts the
 > JSON metadata vector for ready and override previews, and a dedicated

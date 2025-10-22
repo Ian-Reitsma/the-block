@@ -1,6 +1,6 @@
 use super::{
     registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
-    ReleaseVote, Runtime, Vote, VoteChoice,
+    ReleaseVote, RewardClaimApproval, Runtime, Vote, VoteChoice,
 };
 use crate::codec::{
     balance_history_from_json, balance_history_to_json, decode_binary,
@@ -16,7 +16,7 @@ use crate::treasury::{
     TreasuryDisbursement,
 };
 use foundation_lazy::sync::Lazy;
-use foundation_serialization::json::{Map, Value};
+use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use sled::Config;
 use std::collections::HashMap;
@@ -358,6 +358,84 @@ fn dependency_policy_record_to_json(record: &DependencyPolicyRecord) -> Value {
         ),
     );
     Value::Object(map)
+}
+
+fn reward_claim_to_json(approval: &RewardClaimApproval) -> Value {
+    let mut map = Map::new();
+    map.insert("key".into(), Value::String(approval.key.clone()));
+    map.insert("relayer".into(), Value::String(approval.relayer.clone()));
+    map.insert(
+        "total_amount".into(),
+        Value::Number(Number::from(approval.total_amount)),
+    );
+    map.insert(
+        "remaining_amount".into(),
+        Value::Number(Number::from(approval.remaining_amount)),
+    );
+    map.insert(
+        "expires_at".into(),
+        approval
+            .expires_at
+            .map(|value| Value::Number(Number::from(value)))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "memo".into(),
+        approval
+            .memo
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "last_claimed_at".into(),
+        approval
+            .last_claimed_at
+            .map(|value| Value::Number(Number::from(value)))
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn reward_claim_from_json(value: &Value) -> sled::Result<RewardClaimApproval> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| sled::Error::Unsupported("reward claim JSON: expected object".into()))?;
+    let key = obj
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("reward claim JSON: missing key".into()))?;
+    let relayer = obj
+        .get("relayer")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("reward claim JSON: missing relayer".into()))?;
+    let total_amount = obj
+        .get("total_amount")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("reward claim JSON: missing total_amount".into())
+        })?;
+    let remaining_amount = obj
+        .get("remaining_amount")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("reward claim JSON: missing remaining_amount".into())
+        })?;
+    let expires_at = obj.get("expires_at").and_then(Value::as_u64);
+    let memo = obj
+        .get("memo")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+    let last_claimed_at = obj.get("last_claimed_at").and_then(Value::as_u64);
+    Ok(RewardClaimApproval {
+        key: key.to_string(),
+        relayer: relayer.to_string(),
+        total_amount,
+        remaining_amount,
+        expires_at,
+        memo,
+        last_claimed_at,
+    })
 }
 
 fn dependency_policy_record_from_json(value: &Value) -> CodecResult<DependencyPolicyRecord> {
@@ -1056,6 +1134,12 @@ impl GovStore {
             .unwrap_or_else(|e| panic!("open release_installs tree: {e}"))
     }
 
+    fn reward_claims(&self) -> sled::Tree {
+        self.db
+            .open_tree("reward_claim_approvals")
+            .unwrap_or_else(|e| panic!("open reward_claim_approvals tree: {e}"))
+    }
+
     pub fn submit(&self, mut p: Proposal) -> sled::Result<u64> {
         if p.new_value < p.min || p.new_value > p.max {
             return Err(sled::Error::Unsupported("out of bounds".into()));
@@ -1330,6 +1414,104 @@ impl GovStore {
         Ok(())
     }
 
+    pub fn record_reward_claim(&self, approval: &RewardClaimApproval) -> sled::Result<()> {
+        let tree = self.reward_claims();
+        let value = reward_claim_to_json(approval);
+        let bytes = json_to_bytes(&value);
+        tree.insert(approval.key.as_bytes(), bytes)?;
+        tree.flush()?;
+        Ok(())
+    }
+
+    pub fn reward_claim(&self, key: &str) -> sled::Result<Option<RewardClaimApproval>> {
+        let tree = self.reward_claims();
+        if let Some(raw) = tree.get(key.as_bytes())? {
+            let value = json_from_bytes(&raw).map_err(|e| {
+                sled::Error::Unsupported(format!("decode reward claim {key}: {e}").into())
+            })?;
+            let approval = reward_claim_from_json(&value).map_err(|e| {
+                sled::Error::Unsupported(format!("decode reward claim {key}: {e}").into())
+            })?;
+            Ok(Some(approval))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn consume_reward_claim(
+        &self,
+        key: &str,
+        relayer: &str,
+        amount: u64,
+    ) -> sled::Result<RewardClaimApproval> {
+        if amount == 0 {
+            return Err(sled::Error::Unsupported(
+                "reward claim amount must be non-zero".into(),
+            ));
+        }
+        let mut approval = self.reward_claim(key)?.ok_or_else(|| {
+            sled::Error::Unsupported(format!("reward claim {key} is not approved").into())
+        })?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if approval.is_expired(now) {
+            return Err(sled::Error::Unsupported(
+                format!("reward claim {key} has expired").into(),
+            ));
+        }
+        if approval.relayer != relayer {
+            return Err(sled::Error::Unsupported(
+                format!(
+                    "reward claim {key} is bound to relayer {}",
+                    approval.relayer
+                )
+                .into(),
+            ));
+        }
+        if approval.remaining_amount < amount {
+            return Err(sled::Error::Unsupported(
+                format!(
+                    "reward claim {key} insufficient allowance: remaining {}, requested {}",
+                    approval.remaining_amount, amount
+                )
+                .into(),
+            ));
+        }
+        approval.remaining_amount -= amount;
+        approval.last_claimed_at = Some(now);
+        let tree = self.reward_claims();
+        if approval.remaining_amount == 0 {
+            tree.remove(key.as_bytes())?;
+        } else {
+            let value = reward_claim_to_json(&approval);
+            let bytes = json_to_bytes(&value);
+            tree.insert(key.as_bytes(), bytes)?;
+        }
+        tree.flush()?;
+        Ok(approval)
+    }
+
+    pub fn reward_claims_snapshot(&self) -> sled::Result<Vec<RewardClaimApproval>> {
+        let tree = self.reward_claims();
+        let mut approvals = Vec::new();
+        for item in tree.iter() {
+            let (key, raw) = item?;
+            let value = json_from_bytes(&raw).map_err(|e| {
+                let key_str = String::from_utf8_lossy(&key);
+                sled::Error::Unsupported(format!("decode reward claim {key_str}: {e}").into())
+            })?;
+            let approval = reward_claim_from_json(&value).map_err(|e| {
+                let key_str = String::from_utf8_lossy(&key);
+                sled::Error::Unsupported(format!("decode reward claim {key_str}: {e}").into())
+            })?;
+            approvals.push(approval);
+        }
+        approvals.sort_by(|a, b| a.key.cmp(&b.key));
+        Ok(approvals)
+    }
+
     pub fn release_installations(&self) -> sled::Result<Vec<(String, Vec<u64>)>> {
         let mut installs = Vec::new();
         for item in self.release_installs().iter() {
@@ -1412,6 +1594,11 @@ impl GovStore {
                                 ParamKey::TransportProvider => params.transport_provider_policy,
                                 ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
                                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
+                                ParamKey::BridgeMinBond => params.bridge_min_bond,
+                                ParamKey::BridgeDutyReward => params.bridge_duty_reward,
+                                ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
+                                ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
+                                ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -1574,6 +1761,11 @@ impl GovStore {
                 ParamKey::TransportProvider => params.transport_provider_policy,
                 ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
+                ParamKey::BridgeMinBond => params.bridge_min_bond,
+                ParamKey::BridgeDutyReward => params.bridge_duty_reward,
+                ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
+                ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
+                ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -1613,6 +1805,11 @@ impl GovStore {
             ParamKey::TransportProvider => params.transport_provider_policy,
             ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
             ParamKey::StorageEnginePolicy => params.storage_engine_policy,
+            ParamKey::BridgeMinBond => params.bridge_min_bond,
+            ParamKey::BridgeDutyReward => params.bridge_duty_reward,
+            ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
+            ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
+            ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
         };
         self.persist_param_change(
             &hist_dir,
@@ -1739,5 +1936,90 @@ impl GovStore {
                 format!("unknown treasury disbursement id {id}").into(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sys::tempfile::tempdir;
+
+    fn open_store() -> (GovStore, sys::tempfile::TempDir) {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("gov.db");
+        let store = GovStore::open(&path);
+        (store, dir)
+    }
+
+    #[test]
+    fn reward_claim_roundtrip_persists_records() {
+        let (store, dir) = open_store();
+        let db_path = dir.path().join("gov.db");
+        let approval = RewardClaimApproval::new("claim-a", "relayer-a", 150);
+        store
+            .record_reward_claim(&approval)
+            .expect("record approval");
+
+        let fetched = store
+            .reward_claim("claim-a")
+            .expect("read approval")
+            .expect("approval present");
+        assert_eq!(fetched, approval);
+
+        let snapshot = store.reward_claims_snapshot().expect("snapshot approvals");
+        assert_eq!(snapshot, vec![approval.clone()]);
+
+        drop(store);
+        let reopened = GovStore::open(&db_path);
+        let persisted = reopened
+            .reward_claim("claim-a")
+            .expect("read approval")
+            .expect("approval present");
+        assert_eq!(persisted, approval);
+    }
+
+    #[test]
+    fn reward_claim_consumption_updates_allowance_and_removes_entry() {
+        let (store, dir) = open_store();
+        let db_path = dir.path().join("gov.db");
+        let approval = RewardClaimApproval::new("claim-b", "relayer-b", 200);
+        store
+            .record_reward_claim(&approval)
+            .expect("record approval");
+
+        let updated = store
+            .consume_reward_claim("claim-b", "relayer-b", 120)
+            .expect("consume allowance");
+        assert_eq!(updated.remaining_amount, 80);
+
+        let stored = store
+            .reward_claim("claim-b")
+            .expect("read approval")
+            .expect("approval present");
+        assert_eq!(stored.remaining_amount, 80);
+
+        let finalized = store
+            .consume_reward_claim("claim-b", "relayer-b", 80)
+            .expect("consume remaining allowance");
+        assert_eq!(finalized.remaining_amount, 0);
+        assert!(store
+            .reward_claim("claim-b")
+            .expect("read approval")
+            .is_none());
+
+        store
+            .record_reward_claim(&RewardClaimApproval::new("claim-c", "relayer-c", 50))
+            .expect("record second approval");
+        let err = store
+            .consume_reward_claim("claim-c", "relayer-x", 10)
+            .expect_err("relayer mismatch should fail");
+        assert!(err.to_string().contains("bound to relayer"));
+
+        drop(store);
+        let reopened = GovStore::open(&db_path);
+        let err = reopened
+            .consume_reward_claim("claim-c", "relayer-c", 100)
+            .expect_err("insufficient allowance should fail");
+        assert!(err.to_string().contains("insufficient allowance"));
     }
 }

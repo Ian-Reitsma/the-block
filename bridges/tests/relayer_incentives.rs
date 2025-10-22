@@ -2,8 +2,9 @@ use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header, Proof},
     relayer::RelayerSet,
-    Bridge, RelayerBundle, RelayerProof,
+    Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
+use sys::tempfile;
 
 fn header() -> PowHeader {
     let merkle_root: [u8; 32] = [0u8; 32];
@@ -34,7 +35,12 @@ fn proof() -> Proof {
 
 #[test]
 fn slashes_invalid_relayer() {
-    let mut b = Bridge::default();
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = BridgeConfig {
+        headers_dir: dir.path().to_str().unwrap().into(),
+        ..BridgeConfig::default()
+    };
+    let mut b = Bridge::new(cfg);
     let mut relayers = RelayerSet::default();
     relayers.stake("r1", 10);
     relayers.stake("r2", 10);

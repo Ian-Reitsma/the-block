@@ -1050,7 +1050,7 @@ impl Explorer {
     }
 
     pub fn record_bridge_challenge(&self, rec: &BridgeChallengeRecord) -> DbResult<()> {
-        let mut conn = self.conn()?;
+        let conn = self.conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO bridge_challenges (commitment, user, amount, challenged, initiated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![

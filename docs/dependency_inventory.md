@@ -19,6 +19,15 @@ workspace crates.
   first-party `JsonMap` builders—so the CLI remains hermetic without mock RPC
   clients while guaranteeing deterministic JSON output for FIRST_PARTY_ONLY
   runs.
+- ✅ Bridge incentives, duty tracking, and relayer accounting now live entirely on the first-party stack. `BridgeIncentiveParameters` moved into the shared `bridge-types` crate, sled-backed snapshots in `node/src/bridge/mod.rs` encode via handwritten JSON helpers, and the new RPC/CLI surfaces (`bridge.relayer_accounting`, `bridge.duty_log`, `blockctl bridge accounting`, `blockctl bridge duties`) expose rewards/penalties without touching serde fallbacks. Integration suites `node/tests/bridge.rs` and `node/tests/bridge_incentives.rs` cover honest/faulty relayers and governance overrides under `FIRST_PARTY_ONLY`.
+- ✅ Governance-backed bridge reward claims and settlement proofs run entirely on
+  first-party helpers. `bridge.claim_rewards`, `bridge.reward_claims`,
+  `bridge.submit_settlement`, `bridge.settlement_log`, and `bridge.dispute_audit`
+  share typed request/response structs and manual JSON builders mirrored by the
+  CLI (`blockctl bridge claim`, `reward-claims`, `settlement`, `settlement-log`,
+  `dispute-audit`). Channel configuration accepts optional fields/clear flags
+  without serde fallbacks, and new unit tests in `governance/src/store.rs` plus
+  `node/src/governance/store.rs` validate sled persistence end to end.
 - ✅ Treasury CLI tests now exercise the helper builders directly: lifecycle
   coverage funds the sled-backed store, execution/cancel assertions inspect the
   typed records, and remote fetch regressions validate

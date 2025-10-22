@@ -11,9 +11,11 @@ pub fn unlock(
     amount: u64,
     bundle: &RelayerBundle,
 ) -> bool {
+    relayers.mark_duty_assignment(relayer);
     let (valid, invalid) = bundle.verify(user, amount);
     for rel in invalid {
         relayers.slash(&rel, 1);
+        relayers.mark_duty_failure(&rel);
     }
     if valid < bridge.cfg.relayer_quorum || !bundle.relayer_ids().iter().any(|id| id == relayer) {
         #[cfg(feature = "telemetry")]
@@ -21,6 +23,7 @@ pub fn unlock(
             BRIDGE_INVALID_PROOF_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
+        relayers.mark_duty_failure(relayer);
         return false;
     }
     let entry = bridge.locked.entry(user.to_string()).or_insert(0);
@@ -30,6 +33,7 @@ pub fn unlock(
             BRIDGE_INVALID_PROOF_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
+        relayers.mark_duty_failure(relayer);
         return false;
     }
     let commitment = bundle.aggregate_commitment(user, amount);
@@ -51,5 +55,6 @@ pub fn unlock(
             challenged: false,
         },
     );
+    relayers.mark_duty_completion(relayer);
     true
 }

@@ -3546,13 +3546,12 @@ impl Blockchain {
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
         let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
-        let mut treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
+        let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
         if treasury_cut > 0 {
             if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
                 diagnostics::log::warn!(format!(
                     "failed to accrue treasury disbursement share: {err}"
                 ));
-                treasury_cut = 0;
             } else {
                 base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
             }

@@ -234,6 +234,6 @@ fn default_limit() -> u64 {
 }
 
 fn normalize_limit(limit: u64) -> usize {
-    let bounded = limit.clamp(1, MAX_LIMIT);
-    bounded as usize
+    let effective = if limit == 0 { default_limit() } else { limit };
+    effective.clamp(1, MAX_LIMIT) as usize
 }

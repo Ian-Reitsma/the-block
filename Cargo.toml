@@ -40,6 +40,7 @@ members = [
   "tools/release_tests",
   "explorer",
   "bridges",
+  "crates/bridge-types",
   "cli",
   "sled",
   "net/fuzz",

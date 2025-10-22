@@ -278,6 +278,11 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::RuntimeBackend => 30,
         ParamKey::TransportProvider => 31,
         ParamKey::StorageEnginePolicy => 32,
+        ParamKey::BridgeMinBond => 33,
+        ParamKey::BridgeDutyReward => 34,
+        ParamKey::BridgeFailureSlash => 35,
+        ParamKey::BridgeChallengeSlash => 36,
+        ParamKey::BridgeDutyWindowSecs => 37,
     }
 }
 
@@ -316,6 +321,11 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         30 => ParamKey::RuntimeBackend,
         31 => ParamKey::TransportProvider,
         32 => ParamKey::StorageEnginePolicy,
+        33 => ParamKey::BridgeMinBond,
+        34 => ParamKey::BridgeDutyReward,
+        35 => ParamKey::BridgeFailureSlash,
+        36 => ParamKey::BridgeChallengeSlash,
+        37 => ParamKey::BridgeDutyWindowSecs,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -908,22 +918,6 @@ pub fn decode_binary<T: BinaryCodec>(bytes: &[u8]) -> Result<T> {
     Ok(value)
 }
 
-pub fn encode_binary_vec<T: BinaryCodec>(values: &[T]) -> Result<Vec<u8>> {
-    let mut writer = BinaryWriter::new();
-    writer.write_u64(values.len() as u64);
-    for value in values {
-        value.encode(&mut writer);
-    }
-    Ok(writer.into_inner())
-}
-
-pub fn decode_binary_vec<T: BinaryCodec>(bytes: &[u8]) -> Result<Vec<T>> {
-    let mut reader = BinaryReader::new(bytes);
-    let values = Vec::<T>::decode(&mut reader)?;
-    reader.finish()?;
-    Ok(values)
-}
-
 pub fn disbursements_to_json_array(records: &[TreasuryDisbursement]) -> Value {
     Value::Array(records.iter().map(disbursement_to_json).collect())
 }
@@ -981,6 +975,11 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::RuntimeBackend => "RuntimeBackend",
         ParamKey::TransportProvider => "TransportProvider",
         ParamKey::StorageEnginePolicy => "StorageEnginePolicy",
+        ParamKey::BridgeMinBond => "BridgeMinBond",
+        ParamKey::BridgeDutyReward => "BridgeDutyReward",
+        ParamKey::BridgeFailureSlash => "BridgeFailureSlash",
+        ParamKey::BridgeChallengeSlash => "BridgeChallengeSlash",
+        ParamKey::BridgeDutyWindowSecs => "BridgeDutyWindowSecs",
     }
 }
 
@@ -1019,6 +1018,11 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "RuntimeBackend" => Ok(ParamKey::RuntimeBackend),
         "TransportProvider" => Ok(ParamKey::TransportProvider),
         "StorageEnginePolicy" => Ok(ParamKey::StorageEnginePolicy),
+        "BridgeMinBond" => Ok(ParamKey::BridgeMinBond),
+        "BridgeDutyReward" => Ok(ParamKey::BridgeDutyReward),
+        "BridgeFailureSlash" => Ok(ParamKey::BridgeFailureSlash),
+        "BridgeChallengeSlash" => Ok(ParamKey::BridgeChallengeSlash),
+        "BridgeDutyWindowSecs" => Ok(ParamKey::BridgeDutyWindowSecs),
         other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
     }
 }

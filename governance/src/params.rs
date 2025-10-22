@@ -1,4 +1,5 @@
 use super::ParamKey;
+use bridge_types::BridgeIncentiveParameters;
 use foundation_math::linalg::{Matrix, Vector};
 use foundation_serialization::{binary, json, Deserialize, Serialize};
 use std::time::Duration;
@@ -126,6 +127,15 @@ pub trait RuntimeAdapter {
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
     fn set_storage_engine_policy(&mut self, _allowed: &[String]) {}
+    fn set_bridge_incentives(
+        &mut self,
+        _min_bond: u64,
+        _duty_reward: u64,
+        _failure_slash: u64,
+        _challenge_slash: u64,
+        _duty_window_secs: u64,
+    ) {
+    }
     fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
         None
     }
@@ -207,6 +217,23 @@ impl<'a> Runtime<'a> {
         self.adapter.set_storage_engine_policy(allowed);
     }
 
+    pub fn set_bridge_incentives(
+        &mut self,
+        min_bond: u64,
+        duty_reward: u64,
+        failure_slash: u64,
+        challenge_slash: u64,
+        duty_window_secs: u64,
+    ) {
+        self.adapter.set_bridge_incentives(
+            min_bond,
+            duty_reward,
+            failure_slash,
+            challenge_slash,
+            duty_window_secs,
+        );
+    }
+
     pub fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
         self.adapter.fee_floor_policy()
     }
@@ -285,6 +312,11 @@ pub struct Params {
     pub transport_provider_policy: i64,
     #[serde(default = "default_storage_engine_policy")]
     pub storage_engine_policy: i64,
+    pub bridge_min_bond: i64,
+    pub bridge_duty_reward: i64,
+    pub bridge_failure_slash: i64,
+    pub bridge_challenge_slash: i64,
+    pub bridge_duty_window_secs: i64,
 }
 
 impl Default for Params {
@@ -329,6 +361,11 @@ impl Default for Params {
             runtime_backend_policy: default_runtime_backend_policy(),
             transport_provider_policy: default_transport_provider_policy(),
             storage_engine_policy: default_storage_engine_policy(),
+            bridge_min_bond: BridgeIncentiveParameters::DEFAULT_MIN_BOND as i64,
+            bridge_duty_reward: BridgeIncentiveParameters::DEFAULT_DUTY_REWARD as i64,
+            bridge_failure_slash: BridgeIncentiveParameters::DEFAULT_FAILURE_SLASH as i64,
+            bridge_challenge_slash: BridgeIncentiveParameters::DEFAULT_CHALLENGE_SLASH as i64,
+            bridge_duty_window_secs: BridgeIncentiveParameters::DEFAULT_DUTY_WINDOW_SECS as i64,
         }
     }
 }
@@ -484,6 +521,26 @@ impl Params {
             "storage_engine_policy".into(),
             Value::Number(self.storage_engine_policy.into()),
         );
+        map.insert(
+            "bridge_min_bond".into(),
+            Value::Number(self.bridge_min_bond.into()),
+        );
+        map.insert(
+            "bridge_duty_reward".into(),
+            Value::Number(self.bridge_duty_reward.into()),
+        );
+        map.insert(
+            "bridge_failure_slash".into(),
+            Value::Number(self.bridge_failure_slash.into()),
+        );
+        map.insert(
+            "bridge_challenge_slash".into(),
+            Value::Number(self.bridge_challenge_slash.into()),
+        );
+        map.insert(
+            "bridge_duty_window_secs".into(),
+            Value::Number(self.bridge_duty_window_secs.into()),
+        );
         Ok(Value::Object(map))
     }
 
@@ -537,6 +594,11 @@ impl Params {
             runtime_backend_policy: take_i64("runtime_backend_policy")?,
             transport_provider_policy: take_i64("transport_provider_policy")?,
             storage_engine_policy: take_i64("storage_engine_policy")?,
+            bridge_min_bond: take_i64("bridge_min_bond")?,
+            bridge_duty_reward: take_i64("bridge_duty_reward")?,
+            bridge_failure_slash: take_i64("bridge_failure_slash")?,
+            bridge_challenge_slash: take_i64("bridge_challenge_slash")?,
+            bridge_duty_window_secs: take_i64("bridge_duty_window_secs")?,
         };
         Ok(params)
     }
@@ -758,8 +820,93 @@ fn apply_storage_engine_policy(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_bridge_min_bond(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.bridge_min_bond = v;
+    Ok(())
+}
+
+fn apply_bridge_duty_reward(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.bridge_duty_reward = v;
+    Ok(())
+}
+
+fn apply_bridge_failure_slash(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.bridge_failure_slash = v;
+    Ok(())
+}
+
+fn apply_bridge_challenge_slash(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.bridge_challenge_slash = v;
+    Ok(())
+}
+
+fn apply_bridge_duty_window(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 1 {
+        return Err(());
+    }
+    p.bridge_duty_window_secs = v;
+    Ok(())
+}
+
+fn push_bridge_incentives(
+    rt: &mut Runtime,
+    min_bond: Option<u64>,
+    duty_reward: Option<u64>,
+    failure_slash: Option<u64>,
+    challenge_slash: Option<u64>,
+    duty_window_secs: Option<u64>,
+) -> Result<(), ()> {
+    let defaults = BridgeIncentiveParameters::default();
+    let snapshot = rt.params_snapshot();
+    let bridge_min = min_bond.unwrap_or_else(|| {
+        snapshot
+            .map(|p| p.bridge_min_bond as u64)
+            .unwrap_or(defaults.min_bond)
+    });
+    let bridge_reward = duty_reward.unwrap_or_else(|| {
+        snapshot
+            .map(|p| p.bridge_duty_reward as u64)
+            .unwrap_or(defaults.duty_reward)
+    });
+    let bridge_failure = failure_slash.unwrap_or_else(|| {
+        snapshot
+            .map(|p| p.bridge_failure_slash as u64)
+            .unwrap_or(defaults.failure_slash)
+    });
+    let bridge_challenge = challenge_slash.unwrap_or_else(|| {
+        snapshot
+            .map(|p| p.bridge_challenge_slash as u64)
+            .unwrap_or(defaults.challenge_slash)
+    });
+    let bridge_window = duty_window_secs.unwrap_or_else(|| {
+        snapshot
+            .map(|p| p.bridge_duty_window_secs as u64)
+            .unwrap_or(defaults.duty_window_secs)
+    });
+    rt.set_bridge_incentives(
+        bridge_min,
+        bridge_reward,
+        bridge_failure,
+        bridge_challenge,
+        bridge_window,
+    );
+    Ok(())
+}
+
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 33] = [
+    static REGS: [ParamSpec; 38] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1158,6 +1305,66 @@ pub fn registry() -> &'static [ParamSpec] {
                 let allowed = decode_storage_engine_policy(v);
                 rt.set_storage_engine_policy(&allowed);
                 Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BridgeMinBond,
+            default: BridgeIncentiveParameters::DEFAULT_MIN_BOND as i64,
+            min: 0,
+            max: 1_000_000,
+            unit: "tokens",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_bridge_min_bond,
+            apply_runtime: |v, rt| {
+                push_bridge_incentives(rt, Some(v as u64), None, None, None, None)
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BridgeDutyReward,
+            default: BridgeIncentiveParameters::DEFAULT_DUTY_REWARD as i64,
+            min: 0,
+            max: 1_000_000,
+            unit: "tokens",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_bridge_duty_reward,
+            apply_runtime: |v, rt| {
+                push_bridge_incentives(rt, None, Some(v as u64), None, None, None)
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BridgeFailureSlash,
+            default: BridgeIncentiveParameters::DEFAULT_FAILURE_SLASH as i64,
+            min: 0,
+            max: 1_000_000,
+            unit: "tokens",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_bridge_failure_slash,
+            apply_runtime: |v, rt| {
+                push_bridge_incentives(rt, None, None, Some(v as u64), None, None)
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BridgeChallengeSlash,
+            default: BridgeIncentiveParameters::DEFAULT_CHALLENGE_SLASH as i64,
+            min: 0,
+            max: 1_000_000,
+            unit: "tokens",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_bridge_challenge_slash,
+            apply_runtime: |v, rt| {
+                push_bridge_incentives(rt, None, None, None, Some(v as u64), None)
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BridgeDutyWindowSecs,
+            default: BridgeIncentiveParameters::DEFAULT_DUTY_WINDOW_SECS as i64,
+            min: 1,
+            max: 86_400,
+            unit: "seconds",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_bridge_duty_window,
+            apply_runtime: |v, rt| {
+                push_bridge_incentives(rt, None, None, None, None, Some(v as u64))
             },
         },
     ];

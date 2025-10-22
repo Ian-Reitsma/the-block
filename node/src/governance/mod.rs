@@ -19,6 +19,9 @@ pub use bicameral::{
 pub use governance_spec::treasury::{
     DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
+pub use governance_spec::{
+    approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval,
+};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use release::{
@@ -81,4 +84,9 @@ pub enum ParamKey {
     RuntimeBackend,
     TransportProvider,
     StorageEnginePolicy,
+    BridgeMinBond,
+    BridgeDutyReward,
+    BridgeFailureSlash,
+    BridgeChallengeSlash,
+    BridgeDutyWindowSecs,
 }

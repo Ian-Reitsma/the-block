@@ -62,7 +62,10 @@ fn preview_ready_reports_local_signer_metadata() {
             source: SignerSource::Local,
         }])
     );
-    assert_eq!(metadata_snapshot(&report), vec![metadata_entry("alice", "local")]);
+    assert_eq!(
+        metadata_snapshot(&report),
+        vec![metadata_entry("alice", "local")]
+    );
 }
 
 #[test]

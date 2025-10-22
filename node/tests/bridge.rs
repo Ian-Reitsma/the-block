@@ -1,12 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use bridge_types::BridgeIncentiveParameters;
 use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header, Proof},
     RelayerBundle, RelayerProof,
 };
 use concurrency::Lazy;
-use foundation_serialization::binary;
+use governance_spec::{codec::encode_binary, ApprovedRelease};
 use sled::Config;
 use std::path::Path;
 use std::sync::Mutex;
@@ -24,7 +25,7 @@ struct GovEnvGuard {
 
 impl GovEnvGuard {
     fn set(path: &Path) -> Self {
-        let lock = GOV_DB_MUTEX.lock().expect("gov env lock");
+        let lock = GOV_DB_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let previous = std::env::var("TB_GOV_DB_PATH").ok();
         let value = path.to_str().expect("gov path str").to_string();
         std::env::set_var("TB_GOV_DB_PATH", &value);
@@ -53,6 +54,8 @@ fn configure_native_channel(bridge: &mut Bridge, headers_dir: &Path, challenge_p
         challenge_period_secs,
         relayer_quorum: 2,
         headers_dir: headers_dir.to_str().expect("headers dir").to_string(),
+        requires_settlement_proof: false,
+        settlement_chain: None,
     };
     bridge
         .set_channel_config("native", config)
@@ -61,7 +64,7 @@ fn configure_native_channel(bridge: &mut Bridge, headers_dir: &Path, challenge_p
 
 fn approve_release(gov_path: &Path, asset: &str, commitment: &[u8; 32]) -> String {
     let release_key = format!("bridge:{asset}:{}", crypto_suite::hex::encode(commitment));
-    let approved = the_block::governance::ApprovedRelease {
+    let approved = ApprovedRelease {
         build_hash: release_key.clone(),
         activated_epoch: 0,
         proposer: "tester".into(),
@@ -78,7 +81,7 @@ fn approve_release(gov_path: &Path, asset: &str, commitment: &[u8; 32]) -> Strin
     let tree = db.open_tree("approved_releases").expect("tree");
     tree.insert(
         release_key.as_bytes(),
-        binary::encode(&approved).expect("serialize"),
+        encode_binary(&approved).expect("serialize"),
     )
     .expect("insert");
     tree.flush().expect("flush");
@@ -128,7 +131,9 @@ fn bridge_records_receipts_and_slashes() {
     let headers_dir = tmp.path().join("headers_native");
     let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
     configure_native_channel(&mut bridge, &headers_dir, 30);
-    bridge.bond_relayer("r1", 5).unwrap();
+    let min_bond = BridgeIncentiveParameters::DEFAULT_MIN_BOND;
+    bridge.bond_relayer("r1", min_bond).unwrap();
+    bridge.bond_relayer("r2", min_bond).unwrap();
 
     let header = sample_header();
     let proof = sample_proof();
@@ -153,11 +158,12 @@ fn bridge_records_receipts_and_slashes() {
         .expect("challenge");
     assert_eq!(challenge.asset, "native");
 
-    let relayer_status = bridge
+    let (asset_id, info) = bridge
         .relayer_status("r1", Some("native"))
         .expect("relayer status");
-    let (_, _, _, bond_after) = relayer_status;
-    assert!(bond_after < 5);
+    assert_eq!(asset_id, "native");
+    let bond_after = info.bond;
+    assert!(bond_after < min_bond);
     assert!(!bridge.slash_log().is_empty());
     assert!(matches!(
         bridge.finalize_withdrawal("native", commitment),
@@ -175,7 +181,9 @@ fn bridge_slashes_on_invalid_proofs() {
     let headers_dir = tmp.path().join("headers_native");
     let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
     configure_native_channel(&mut bridge, &headers_dir, 30);
-    bridge.bond_relayer("r1", 5).unwrap();
+    let min_bond = BridgeIncentiveParameters::DEFAULT_MIN_BOND;
+    bridge.bond_relayer("r1", min_bond).unwrap();
+    bridge.bond_relayer("r2", min_bond).unwrap();
 
     let header = sample_header();
     let proof = sample_proof();
@@ -184,12 +192,16 @@ fn bridge_slashes_on_invalid_proofs() {
         .deposit("native", "r1", "alice", 5, &header, &proof, &invalid_bundle)
         .unwrap_err();
     assert!(matches!(err, BridgeError::InvalidProof));
-    let (asset, _stake, slashes, bond) = bridge
+    let (asset, info) = bridge
         .relayer_status("r1", Some("native"))
         .expect("relayer status");
     assert_eq!(asset, "native");
-    assert!(slashes >= 1);
-    assert!(bond <= 4);
+    assert!(info.slashes >= 1);
+    assert!(info.bond < min_bond);
+    let deficit = min_bond.saturating_sub(info.bond);
+    if deficit > 0 {
+        bridge.bond_relayer("r1", deficit).unwrap();
+    }
     assert!(!bridge.slash_log().is_empty());
 
     let header = sample_header();
@@ -214,11 +226,12 @@ fn bridge_slashes_on_invalid_proofs() {
         .unwrap_err();
     assert!(matches!(err, BridgeError::InvalidProof));
 
-    let (_, _stake_after, slashes_after, bond_after) = bridge
+    let (_, info_after) = bridge
         .relayer_status("r1", Some("native"))
         .expect("relayer status");
-    assert!(slashes_after >= 2);
-    assert!(bond_after <= 3);
+    assert!(info_after.slashes >= 2);
+    let failure_slash = BridgeIncentiveParameters::DEFAULT_FAILURE_SLASH;
+    assert!(info_after.bond <= min_bond.saturating_sub(failure_slash));
     assert!(bridge.slash_log().len() >= 2);
     assert!(bridge.pending_withdrawals(None).is_empty());
 }
@@ -233,7 +246,9 @@ fn bridge_rejects_replay_and_persists_state() {
     let headers_dir = tmp.path().join("headers_native");
     let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
     configure_native_channel(&mut bridge, &headers_dir, 1);
-    bridge.bond_relayer("r1", 5).unwrap();
+    let min_bond = BridgeIncentiveParameters::DEFAULT_MIN_BOND;
+    bridge.bond_relayer("r1", min_bond).unwrap();
+    bridge.bond_relayer("r2", min_bond).unwrap();
 
     let header = sample_header();
     let proof = sample_proof();
@@ -292,7 +307,9 @@ fn bridge_respects_challenge_window() {
     let headers_dir = tmp.path().join("headers_native");
     let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
     configure_native_channel(&mut bridge, &headers_dir, 2);
-    bridge.bond_relayer("r1", 5).unwrap();
+    let min_bond = BridgeIncentiveParameters::DEFAULT_MIN_BOND;
+    bridge.bond_relayer("r1", min_bond).unwrap();
+    bridge.bond_relayer("r2", min_bond).unwrap();
 
     let header = sample_header();
     let proof = sample_proof();
