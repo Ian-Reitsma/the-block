@@ -27,7 +27,10 @@ _Last updated: 2025-10-23 15:20:00Z_
 > `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` alongside the existing challenge
 > and slash counters. The integration suite (`node/tests/bridge_incentives.rs`)
 > now covers reward redemption, settlement proofs, dispute audits, pagination, and
-> telemetry increments end-to-end under FIRST_PARTY_ONLY.
+> telemetry increments end-to-end under FIRST_PARTY_ONLY. The contract CLI suite
+> adds a `BridgeCmd::DisputeAudit` regression that drives the in-memory
+> `MockTransport`, and the monitoring templates ship dedicated bridge panels so
+> first-party dashboards chart the new counters without third-party widgets.
 
 > **2025-10-22 update (bridge incentive ledger):** Bridge state persistence no
 longer touches the `foundation_serde` stub. Incentive parameters and duty

@@ -1,4 +1,16 @@
 # Project Progress Snapshot
+> **Review (2025-10-22, afternoon):** The bridge CLI integration suite now drives
+> `BridgeCmd::DisputeAudit` through the in-memory `MockTransport`, capturing the
+> JSON-RPC envelopes and paginated responses alongside the existing claim and
+> settlement coverage so FIRST_PARTY_ONLY builds exercise every audit surface. The
+> monitoring templates gained a dedicated Bridge row that charts five-minute
+> `increase()` deltas for `bridge_reward_claims_total`,
+> `bridge_reward_approvals_consumed_total`,
+> `bridge_settlement_results_total{result,reason}`, and
+> `bridge_dispute_outcomes_total{kind,outcome}`, with the dashboard snapshot test
+> updated to expect the new panels. Grafana imports and the HTML snapshot now
+> expose bridge reward consumption, settlement outcomes, and dispute resolutions
+> without third-party widgets.
 > **Review (2025-10-23, afternoon):** Contract CLI bridge commands now route all
 > JSON-RPC traffic through a new `BridgeRpcTransport` trait. Production still
 > wraps the in-house `RpcClient`, but the integration suite swaps in an
