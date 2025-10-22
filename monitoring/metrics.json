@@ -224,6 +224,12 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge anomaly detector activations",
+      "labels": [],
+      "name": "bridge_anomaly_total"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

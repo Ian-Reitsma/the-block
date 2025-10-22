@@ -1,11 +1,9 @@
 use crypto_suite::hashing::blake3;
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map, Value};
 use http_env::server_tls_from_env;
-use httpd::{HttpClient, Method, ServerConfig};
+use httpd::Method;
 use metrics_aggregator::{install_tls_env_warning_forwarder, router, AppState};
-use runtime::net::TcpListener;
-use runtime::{sleep, spawn};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const TLS_WARNING_FINGERPRINT_DELIM: u8 = 0x1f;
 
@@ -20,6 +18,36 @@ fn fingerprint(bytes: &[u8]) -> i64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&blake3::hash(bytes).as_bytes()[..8]);
     i64::from_le_bytes(buf)
+}
+
+fn warning_sample(prefix: &str, code: &str, value: Value) -> Value {
+    let mut labels = Map::new();
+    labels.insert("prefix".to_string(), Value::String(prefix.to_string()));
+    labels.insert("code".to_string(), Value::String(code.to_string()));
+    let mut map = Map::new();
+    map.insert("labels".to_string(), Value::Object(labels));
+    map.insert("value".to_string(), value);
+    Value::Object(map)
+}
+
+fn warning_payload(prefix: &str, code: &str, total: f64, detail: i64, variables: i64) -> Value {
+    let mut metrics = Map::new();
+    metrics.insert(
+        "tls_env_warning_total".to_string(),
+        Value::Array(vec![warning_sample(prefix, code, Value::from(total))]),
+    );
+    metrics.insert(
+        "tls_env_warning_detail_fingerprint".to_string(),
+        Value::Array(vec![warning_sample(prefix, code, Value::from(detail))]),
+    );
+    metrics.insert(
+        "tls_env_warning_variables_fingerprint".to_string(),
+        Value::Array(vec![warning_sample(prefix, code, Value::from(variables))]),
+    );
+    let mut entry = Map::new();
+    entry.insert("peer_id".to_string(), Value::String("node-a".into()));
+    entry.insert("metrics".to_string(), Value::Object(metrics));
+    Value::Array(vec![Value::Object(entry)])
 }
 
 fn fingerprint_hex(value: i64) -> String {
@@ -48,19 +76,6 @@ fn diagnostics_warnings_surface_over_http() {
         let state = AppState::new("token".into(), &db_path, 60);
         let app = router(state.clone());
 
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind test listener");
-        let addr = listener.local_addr().expect("listener addr");
-
-        let server = spawn(async move {
-            httpd::serve(listener, app, ServerConfig::default())
-                .await
-                .expect("serve aggregator");
-        });
-
-        sleep(Duration::from_millis(50)).await;
-
         let diag_prefix = format!("TB_TEST_TLS_{}", unique_suffix());
         let diag_code = "missing_identity_component";
         let diag_cert = format!("{diag_prefix}_CERT");
@@ -79,72 +94,55 @@ fn diagnostics_warnings_surface_over_http() {
         let ingest_variables_fp = variables_fingerprint(&ingest_variables);
         let ingest_detail_fp_metric = ingest_detail_fp;
         let ingest_variables_fp_metric = ingest_variables_fp;
-        let client = HttpClient::default();
-        let ingest_url = format!("http://{addr}/ingest");
-
-        let payload = foundation_serialization::json!([
-            {
-                "peer_id": "node-a",
-                "metrics": {
-                    "tls_env_warning_total": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 1.0}
-                    ],
-                    "tls_env_warning_detail_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp}
-                    ],
-                    "tls_env_warning_variables_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp}
-                    ]
-                }
-            }
-        ]);
-        let response = client
-            .request(Method::Post, &ingest_url)
-            .expect("build ingest request")
-            .header("x-auth-token", "token")
-            .json(&payload)
-            .expect("serialize ingest payload")
-            .send()
+        let payload = warning_payload(
+            ingest_prefix.as_str(),
+            ingest_code.as_str(),
+            1.0,
+            ingest_detail_fp_metric,
+            ingest_variables_fp_metric,
+        );
+        let response = app
+            .handle(
+                app.request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
+                    .header("x-auth-token", "token")
+                    .json(&payload)
+                    .expect("serialize ingest payload")
+                    .build(),
+            )
             .await
             .expect("send ingest payload");
         assert_eq!(response.status(), httpd::StatusCode::OK);
 
-        let payload = foundation_serialization::json!([
-            {
-                "peer_id": "node-a",
-                "metrics": {
-                    "tls_env_warning_total": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": 4.0}
-                    ],
-                    "tls_env_warning_detail_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_detail_fp}
-                    ],
-                    "tls_env_warning_variables_fingerprint": [
-                        {"labels": {"prefix": ingest_prefix.as_str(), "code": ingest_code.as_str()}, "value": ingest_variables_fp}
-                    ]
-                }
-            }
-        ]);
-        let response = client
-            .request(Method::Post, &ingest_url)
-            .expect("build second ingest request")
-            .header("x-auth-token", "token")
-            .json(&payload)
-            .expect("serialize second ingest payload")
-            .send()
+        let payload = warning_payload(
+            ingest_prefix.as_str(),
+            ingest_code.as_str(),
+            4.0,
+            ingest_detail_fp_metric,
+            ingest_variables_fp_metric,
+        );
+        let response = app
+            .handle(
+                app.request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
+                    .header("x-auth-token", "token")
+                    .json(&payload)
+                    .expect("serialize second ingest payload")
+                    .build(),
+            )
             .await
             .expect("send second ingest payload");
         assert_eq!(response.status(), httpd::StatusCode::OK);
 
-        let latest_url = format!("http://{addr}/tls/warnings/latest");
-        let response = client
-            .request(Method::Get, &latest_url)
-            .expect("build latest request")
-            .send()
+        let response = app
+            .handle(app.request_builder().path("/tls/warnings/latest").build())
             .await
             .expect("fetch latest warnings");
         assert_eq!(response.status(), httpd::StatusCode::OK);
-        let snapshots: Vec<Value> = response.json().expect("parse latest warnings");
+        let snapshots: Vec<Value> = foundation_serialization::json::from_slice(response.body())
+            .expect("parse latest warnings");
 
         let diagnostics_entry = snapshots
             .iter()
@@ -256,15 +254,12 @@ fn diagnostics_warnings_surface_over_http() {
             Some(4)
         );
 
-        let metrics_url = format!("http://{addr}/metrics");
-        let response = client
-            .request(Method::Get, &metrics_url)
-            .expect("build metrics request")
-            .send()
+        let response = app
+            .handle(app.request_builder().path("/metrics").build())
             .await
             .expect("fetch metrics snapshot");
         assert_eq!(response.status(), httpd::StatusCode::OK);
-        let body = response.text().expect("metrics text payload");
+        let body = String::from_utf8(response.body().to_vec()).expect("metrics text payload");
         assert!(body.contains(&format!(
             "tls_env_warning_total{{prefix=\"{}\",code=\"{}\"}} 1",
             diag_prefix, diag_code
@@ -342,15 +337,13 @@ fn diagnostics_warnings_surface_over_http() {
             ingest_variables_hex
         )));
 
-        let status_url = format!("http://{addr}/tls/warnings/status");
-        let response = client
-            .request(Method::Get, &status_url)
-            .expect("build status request")
-            .send()
+        let response = app
+            .handle(app.request_builder().path("/tls/warnings/status").build())
             .await
             .expect("fetch status snapshot");
         assert_eq!(response.status(), httpd::StatusCode::OK);
-        let status: Value = response.json().expect("parse status payload");
+        let status: Value = foundation_serialization::json::from_slice(response.body())
+            .expect("parse status payload");
         let retention = status["retention_seconds"]
             .as_u64()
             .expect("retention seconds");
@@ -360,7 +353,6 @@ fn diagnostics_warnings_surface_over_http() {
         assert!(status["most_recent_last_seen"].as_u64().is_some());
         assert!(status["least_recent_last_seen"].as_u64().is_some());
 
-        server.abort();
         std::env::remove_var(diag_cert);
         std::env::remove_var(diag_key);
     });

@@ -816,6 +816,12 @@ facade and extending the crate with richer console abstractions.
   HTTP helpers, and the metrics aggregator now rely on the in-house TLS
   connector with shared environment prefixes, eliminating the lingering
   `native-tls` shim and bringing wallet and tooling HTTPS flows fully in-house.
+- ✅ Metrics aggregator ingestion now manualises telemetry summaries, TLS warning
+  fingerprints, and treasury disbursement/balance snapshots through
+  `foundation_serialization::json::Value` plus the governance codec helpers.
+  The bridge anomaly detector exposes `/anomalies/bridge` JSON alongside the
+  `bridge_anomaly_total` counter so dashboards consume first-party payloads
+  without serde derives or float-rounded fingerprints.
 - ✅ Manualized the node runtime log sink and governance webhook JSON builders
   (`node/src/bin/node.rs`, `node/src/telemetry.rs`) so production binaries no
   longer invoke the `foundation_serialization::json!` macro. Runtime logging,

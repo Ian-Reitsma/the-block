@@ -1,17 +1,48 @@
-use foundation_serialization::{json, Deserialize};
+use foundation_serialization::json::{self, Value};
 use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
 use std::future::Future;
 use sys::tempfile;
 
-#[derive(Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
 struct ApiCorrelation {
     correlation_id: String,
     peer_id: String,
     metric: String,
     value: Option<f64>,
     timestamp: u64,
+}
+
+fn parse_correlation_records(bytes: &[u8]) -> Vec<ApiCorrelation> {
+    let value: Value = json::from_slice(bytes).expect("correlation response json");
+    let array = value.as_array().expect("response array");
+    array
+        .iter()
+        .map(|entry| {
+            let object = entry.as_object().expect("correlation object");
+            ApiCorrelation {
+                correlation_id: object
+                    .get("correlation_id")
+                    .and_then(Value::as_str)
+                    .expect("correlation_id")
+                    .to_string(),
+                peer_id: object
+                    .get("peer_id")
+                    .and_then(Value::as_str)
+                    .expect("peer_id")
+                    .to_string(),
+                metric: object
+                    .get("metric")
+                    .and_then(Value::as_str)
+                    .expect("metric")
+                    .to_string(),
+                value: object.get("value").and_then(Value::as_f64),
+                timestamp: object
+                    .get("timestamp")
+                    .and_then(Value::as_u64)
+                    .expect("timestamp"),
+            }
+        })
+        .collect()
 }
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -61,7 +92,7 @@ fn indexes_correlation_entries() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let entries: Vec<ApiCorrelation> = json::from_slice(resp.body()).unwrap();
+        let entries = parse_correlation_records(resp.body());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].correlation_id, "abc123");
         assert_eq!(entries[0].peer_id, "peer-1");

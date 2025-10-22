@@ -9,9 +9,13 @@ use crate::{
     SimpleDb,
 };
 use bridge_types::{DutyKind, DutyRecord, DutyStatus, ExternalSettlementProof};
-use bridges::{header::PowHeader, light_client::Proof, RelayerBundle, RelayerProof};
+use bridges::{
+    header::PowHeader, light_client::Proof, token_bridge::AssetSnapshot as BridgeAssetSnapshot,
+    RelayerBundle, RelayerProof,
+};
 use concurrency::Lazy;
 use foundation_serialization::{Deserialize, Serialize};
+use ledger::Emission;
 use std::convert::TryFrom;
 use std::sync::{Mutex, MutexGuard};
 
@@ -758,8 +762,59 @@ pub struct DisputeAuditResponse {
 
 #[derive(Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct EmissionEntry {
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initial: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rate: Option<u64>,
+}
+
+impl From<&Emission> for EmissionEntry {
+    fn from(emission: &Emission) -> Self {
+        match emission {
+            Emission::Fixed(amount) => Self {
+                kind: "fixed",
+                amount: Some(*amount),
+                initial: None,
+                rate: None,
+            },
+            Emission::Linear { initial, rate } => Self {
+                kind: "linear",
+                amount: None,
+                initial: Some(*initial),
+                rate: Some(*rate),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AssetEntry {
+    pub symbol: String,
+    pub locked: u64,
+    pub minted: u64,
+    pub emission: EmissionEntry,
+}
+
+impl From<BridgeAssetSnapshot> for AssetEntry {
+    fn from(snapshot: BridgeAssetSnapshot) -> Self {
+        AssetEntry {
+            emission: EmissionEntry::from(&snapshot.emission),
+            locked: snapshot.locked,
+            minted: snapshot.minted,
+            symbol: snapshot.symbol,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct AssetsResponse {
-    pub assets: Vec<String>,
+    pub assets: Vec<AssetEntry>,
 }
 
 #[derive(Serialize)]
@@ -1172,8 +1227,11 @@ pub fn slash_log(_req: SlashLogRequest) -> Result<SlashLogResponse, RpcError> {
 
 pub fn assets(_req: AssetsRequest) -> Result<AssetsResponse, RpcError> {
     let bridge = guard()?;
-    let mut assets = bridge.supported_assets();
-    assets.sort();
+    let assets = bridge
+        .asset_snapshots()
+        .into_iter()
+        .map(AssetEntry::from)
+        .collect();
     Ok(AssetsResponse { assets })
 }
 

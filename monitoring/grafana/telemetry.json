@@ -550,6 +550,26 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "description": "Bridge anomaly detector activations",
+      "id": 228,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(bridge_anomaly_total[5m])"
+        }
+      ],
+      "title": "bridge_anomaly_total (5m delta)",
+      "type": "timeseries"
+    },
+    {
       "id": 32,
       "title": "Gossip",
       "type": "row"

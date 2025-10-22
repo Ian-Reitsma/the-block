@@ -1,4 +1,15 @@
 # Project Progress Snapshot
+> **Review (2025-10-22, evening+):** Multi-asset bridge supply tracking now spans
+> the token bridge, node RPC, and CLI. `TokenBridge` records locked and minted
+> balances per symbol, persistence in `bridges/src/codec.rs` includes the new
+> fields, the node exposes `Bridge::asset_snapshots()` and the
+> `bridge.assets` RPC returns structured entries (symbol, emission, locked,
+> minted) that the CLI and integration tests assert end to end. The metrics
+> aggregator gained a bridge anomaly detector that watches the reward, approval,
+> settlement, and dispute counters, increments `bridge_anomaly_total`, and
+> serves `/anomalies/bridge` so dashboards chart five-minute increases alongside
+> the raw counters. Fresh tests cover anomaly spikes, cooldown enforcement, and
+> CLI asset pagination under FIRST_PARTY_ONLY.
 > **Review (2025-10-22, afternoon):** The bridge CLI integration suite now drives
 > `BridgeCmd::DisputeAudit` through the in-memory `MockTransport`, capturing the
 > JSON-RPC envelopes and paginated responses alongside the existing claim and

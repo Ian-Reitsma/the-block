@@ -385,6 +385,50 @@ fn bridge_dispute_audit_paginates_requests() {
 }
 
 #[test]
+fn bridge_assets_returns_supply_snapshot() {
+    let assets_payload = ok_response(json_object([(
+        "assets",
+        JsonValue::Array(vec![json_object([
+            ("symbol", json_string("btc")),
+            ("locked", json_number(250)),
+            ("minted", json_number(120)),
+            (
+                "emission",
+                json_object([
+                    ("kind", json_string("linear")),
+                    ("initial", json_number(21_000_000)),
+                    ("rate", json_number(0)),
+                ]),
+            ),
+        ])]),
+    )]));
+    let mock = MockTransport::new(vec![assets_payload.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::Assets {
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("assets command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope(
+        "bridge.assets",
+        json_object(Vec::<(&str, JsonValue)>::new()),
+    );
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, assets_payload);
+}
+
+#[test]
 fn bridge_configure_command_includes_optional_fields() {
     let configure_response = ok_response(json_object([("status", json_string("ok"))]));
     let mock = MockTransport::new(vec![configure_response.clone()]);

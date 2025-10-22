@@ -153,6 +153,22 @@ blockctl bridge assets
 blockctl bridge configure native --relayer-quorum 3 --requires-settlement-proof true
 ```
 
+### Asset Supply Snapshots
+
+The bridge now tracks per-asset balances for both native collateral and wrapped
+issuance. The `bridge.assets` RPC (and `blockctl bridge assets`) returns records
+with the following shape:
+
+| Field     | Description |
+|-----------|-------------|
+| `symbol`  | Asset identifier |
+| `locked`  | Total native tokens currently escrowed on The‑Block |
+| `minted`  | Outstanding wrapped supply minted for the external chain |
+| `emission`| Emission configuration (`fixed` or `linear`) |
+
+The response includes every registered or recently active asset so operators can
+compare native collateral against outstanding wrapped issuance at a glance.
+
 Relayer bonds can be provisioned off-chain and topped up through the RPC by calling
 `blockctl bridge bond --relayer <id> --amount <tokens>`; the accounting view immediately reflects the new collateral once the transaction is finalised.
 

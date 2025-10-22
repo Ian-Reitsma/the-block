@@ -16,8 +16,10 @@ use concurrency::Lazy;
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
+pub use governance_spec::treasury;
 pub use governance_spec::treasury::{
-    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    mark_cancelled, mark_executed, DisbursementStatus, TreasuryBalanceEventKind,
+    TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
 pub use governance_spec::{
     approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval,

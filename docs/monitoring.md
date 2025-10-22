@@ -69,6 +69,16 @@ by relayer duty outcome directly from the legend, and the same queries back the
 HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
 instances to monitor bridge health.
 
+The metrics aggregator now watches those counters for anomalous spikes. A
+rolling detector maintains a 24-sample baseline per peer/metric/label set and
+raises events when a new delta exceeds the historical mean by four standard
+deviations (bounded by a minimum delta). Triggered events increment the
+`bridge_anomaly_total` counter and flow to the `/anomalies/bridge` JSON endpoint,
+which returns the offending metric, peer, labels, delta, and baseline stats.
+Dashboards include a companion panel charting `increase(bridge_anomaly_total[5m])`
+so operators can correlate alerts with reward claims, settlement submissions,
+and dispute outcomes without leaving the first-party stack.
+
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the
 age of the latest snapshot so operations can verify registry health without

@@ -1,4 +1,5 @@
 use foundation_serialization::json;
+use governance::codec::{balance_history_to_json, disbursements_to_json_array};
 use metrics_aggregator::{router, AppState};
 use std::env;
 use std::fs;
@@ -17,14 +18,14 @@ fn treasury_metrics_exposed_via_prometheus() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let mut scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo".into(), 75);
+    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo".into(), 75);
     let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 50);
     mark_executed(&mut executed, "0xfeed".into());
     let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 60);
     mark_cancelled(&mut cancelled, "duplicate".into());
 
     let records = vec![scheduled, executed, cancelled];
-    let payload = json::to_vec(&records).expect("serialize records");
+    let payload = json::to_vec_value(&disbursements_to_json_array(&records));
     fs::write(&treasury_file, payload).expect("write treasury file");
 
     let balance_file = dir.path().join("treasury_balance.json");
@@ -36,7 +37,7 @@ fn treasury_metrics_exposed_via_prometheus() {
         event: TreasuryBalanceEventKind::Accrual,
         disbursement_id: None,
     }];
-    let balance_payload = json::to_vec(&snapshots).expect("serialize balance history");
+    let balance_payload = json::to_vec_value(&balance_history_to_json(&snapshots));
     fs::write(&balance_file, balance_payload).expect("write balance file");
 
     let metrics_db = dir.path().join("metrics.db");
@@ -110,10 +111,10 @@ fn treasury_metrics_accept_legacy_string_fields() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let mut scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, String::new(), 10);
+    let scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, String::new(), 10);
     let mut executed = TreasuryDisbursement::new(6, "legacy-dest".into(), 150, String::new(), 11);
     mark_executed(&mut executed, "0xdead".into());
-    let payload = json::to_vec(&[scheduled, executed]).expect("serialize disbursements");
+    let payload = json::to_vec_value(&disbursements_to_json_array(&[scheduled, executed]));
     fs::write(&treasury_file, payload).expect("write treasury file");
 
     let balance_file = dir.path().join("treasury_balance.json");

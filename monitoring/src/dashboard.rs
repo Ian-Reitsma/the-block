@@ -133,6 +133,8 @@ const BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE: &str = "bridge_dispute_outcomes_total
 const BRIDGE_DISPUTE_OUTCOMES_EXPR: &str =
     "sum by (kind, outcome)(increase(bridge_dispute_outcomes_total[5m]))";
 const BRIDGE_DISPUTE_OUTCOMES_LEGEND: &str = "{{kind}} · {{outcome}}";
+const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
+const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -318,6 +320,14 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
                 BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE,
                 BRIDGE_DISPUTE_OUTCOMES_EXPR,
                 BRIDGE_DISPUTE_OUTCOMES_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_anomaly_total" {
+            bridge.push(build_bridge_delta_panel(
+                BRIDGE_ANOMALY_PANEL_TITLE,
+                BRIDGE_ANOMALY_EXPR,
                 metric,
             ));
             continue;
@@ -1345,6 +1355,12 @@ mod tests {
                 unit: String::new(),
                 deprecated: false,
             },
+            Metric {
+                name: "bridge_anomaly_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
         ];
 
         let dashboard = generate(&metrics, None).expect("dashboard generation");
@@ -1356,7 +1372,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 5);
+        assert_eq!(panels.len(), 6);
 
         let row = panels
             .iter()
@@ -1396,6 +1412,32 @@ mod tests {
             .and_then(Value::as_str)
             .expect("claims expression");
         assert_eq!(claims_expr, BRIDGE_REWARD_CLAIMS_EXPR);
+
+        let anomaly_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_ANOMALY_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("anomaly panel present");
+        let anomaly_expr = anomaly_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("anomaly expression");
+        assert_eq!(anomaly_expr, BRIDGE_ANOMALY_EXPR);
 
         let dispute_panel = panels
             .iter()

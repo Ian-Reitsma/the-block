@@ -20,6 +20,12 @@ ready to import once the foundation telemetry stack is running.
   `bridge_dispute_outcomes_total{kind,outcome}` so operators can audit reward
   consumption, settlement results, and dispute resolutions without importing
   third-party widgets.
+- The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
+  bridge row. A rolling detector keeps a per-peer baseline for the reward,
+  approval, settlement, and dispute counters, increments
+  `bridge_anomaly_total` when a spike exceeds the configured threshold, and the
+  dashboards plot five-minute increases so operators can correlate alerts with
+  the underlying counters directly from the first-party panels.
 - Extend dashboards with `did_anchor_total` to monitor identifier churn; the
   explorer exposes `/dids/metrics/anchor_rate` and `/dids` for recent history so
   panels can link directly to the underlying records.
