@@ -1,11 +1,23 @@
 # System-Wide Economic Changes
+> **Review (2025-10-23, afternoon):** Contract CLI bridge flows abstract their
+> networking through a new `BridgeRpcTransport` trait. Production commands wrap
+> the in-house `RpcClient`, while integration tests inject an in-memory
+> `MockTransport` so the suite no longer starts the HTTP `JsonRpcMock` server or
+> spins the async runtime. Reward claims, settlement proofs, and dispute audits
+> remain covered end-to-end through `handle_with_transport`, keeping the CLI
+> hermetic under FIRST_PARTY_ONLY.
 > **Review (2025-10-23, pre-dawn):** Governance-backed bridge incentives now span
 the full reward/settlement lifecycle. Reward claim approvals live in the shared
 `bridge-types` crate, `bridge.claim_rewards` debits allowances while recording
 `RewardClaimRecord`s, and the CLI exposes `blockctl bridge claim` / `reward-claims`
 for operators. Settlement proofs ride the first-party stack via
-`bridge.submit_settlement` / `bridge.settlement_log`, dispute audits surface
-challenge and settlement metadata, and channel configuration updates allow
+`bridge.submit_settlement` / `bridge.settlement_log` with cursor-based pagination,
+dispute audits surface challenge and settlement metadata with the same
+`cursor`/`next_cursor` controls, and telemetry emits
+`BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`,
+`BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and
+`BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` alongside the existing challenge
+and slash counters. Channel configuration updates allow
 partial edits with optional proof enforcement. New unit tests in
 `governance/src/store.rs` and `node/src/governance/store.rs` cover reward claim
 serialization, while `node/tests/bridge_incentives.rs` extends integration

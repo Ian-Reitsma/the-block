@@ -15,8 +15,8 @@ use cli_core::{
     parse::Matches,
 };
 use foundation_serialization::json;
-use httpd::ClientResponse;
 use std::fs;
+use std::io::{self, Write};
 
 pub enum BridgeCmd {
     /// Submit a light-client deposit proof via RPC
@@ -98,12 +98,24 @@ pub enum BridgeCmd {
     /// Inspect reward claim history for relayers
     RewardClaims {
         relayer: Option<String>,
+        cursor: Option<u64>,
+        limit: usize,
         url: String,
     },
     /// Inspect settlement submissions
-    SettlementLog { asset: Option<String>, url: String },
+    SettlementLog {
+        asset: Option<String>,
+        cursor: Option<u64>,
+        limit: usize,
+        url: String,
+    },
     /// Render dispute audit summaries
-    DisputeAudit { asset: Option<String>, url: String },
+    DisputeAudit {
+        asset: Option<String>,
+        cursor: Option<u64>,
+        limit: usize,
+        url: String,
+    },
     /// List configured bridge assets
     Assets { url: String },
     /// Configure a bridge asset channel
@@ -119,6 +131,10 @@ pub enum BridgeCmd {
         clear_settlement_chain: bool,
         url: String,
     },
+}
+
+pub trait BridgeRpcTransport {
+    fn call(&self, url: &str, payload: &json::Value) -> io::Result<String>;
 }
 
 impl BridgeCmd {
@@ -439,6 +455,14 @@ impl BridgeCmd {
                 "relayer",
                 "Optional relayer identifier",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "cursor",
+                "cursor",
+                "Pagination cursor",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Maximum records to return").default("50"),
+            ))
             .arg(ArgSpec::Option(
                 OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
             ))
@@ -455,6 +479,14 @@ impl BridgeCmd {
                 "asset",
                 "Optional asset filter",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "cursor",
+                "cursor",
+                "Pagination cursor",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Maximum records to return").default("50"),
+            ))
             .arg(ArgSpec::Option(
                 OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
             ))
@@ -471,6 +503,14 @@ impl BridgeCmd {
                 "asset",
                 "Optional asset filter",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "cursor",
+                "cursor",
+                "Pagination cursor",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Maximum records to return").default("50"),
+            ))
             .arg(ArgSpec::Option(
                 OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
             ))
@@ -713,21 +753,45 @@ impl BridgeCmd {
             }
             "reward-claims" => {
                 let relayer = take_string(sub_matches, "relayer");
+                let cursor =
+                    crate::parse_utils::parse_u64(take_string(sub_matches, "cursor"), "cursor")?;
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?.unwrap_or(50);
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
-                Ok(BridgeCmd::RewardClaims { relayer, url })
+                Ok(BridgeCmd::RewardClaims {
+                    relayer,
+                    cursor,
+                    limit,
+                    url,
+                })
             }
             "settlement-log" => {
                 let asset = take_string(sub_matches, "asset");
+                let cursor =
+                    crate::parse_utils::parse_u64(take_string(sub_matches, "cursor"), "cursor")?;
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?.unwrap_or(50);
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
-                Ok(BridgeCmd::SettlementLog { asset, url })
+                Ok(BridgeCmd::SettlementLog {
+                    asset,
+                    cursor,
+                    limit,
+                    url,
+                })
             }
             "dispute-audit" => {
                 let asset = take_string(sub_matches, "asset");
+                let cursor =
+                    crate::parse_utils::parse_u64(take_string(sub_matches, "cursor"), "cursor")?;
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?.unwrap_or(50);
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
-                Ok(BridgeCmd::DisputeAudit { asset, url })
+                Ok(BridgeCmd::DisputeAudit {
+                    asset,
+                    cursor,
+                    limit,
+                    url,
+                })
             }
             "assets" => {
                 let url = take_string(sub_matches, "url")
@@ -797,12 +861,6 @@ fn relayer_proofs(relayers: &[String], user: &str, amount: u64) -> Vec<RelayerPr
         .collect()
 }
 
-fn print_response(resp: ClientResponse) {
-    if let Ok(text) = resp.text() {
-        println!("{}", text);
-    }
-}
-
 fn to_json_value<T>(value: &T) -> json::Value
 where
     T: foundation_serialization::Serialize,
@@ -812,6 +870,25 @@ where
 
 pub fn handle(action: BridgeCmd) {
     let client = RpcClient::from_env();
+    let transport = RpcClientTransport { client: &client };
+    let mut stdout = io::stdout();
+    if let Err(err) = handle_with_transport(action, &transport, &mut stdout) {
+        eprintln!("{err}");
+    }
+}
+
+#[allow(dead_code)]
+pub fn handle_with_writer(action: BridgeCmd, out: &mut dyn Write) -> io::Result<()> {
+    let client = RpcClient::from_env();
+    let transport = RpcClientTransport { client: &client };
+    handle_with_transport(action, &transport, out)
+}
+
+pub fn handle_with_transport(
+    action: BridgeCmd,
+    transport: &dyn BridgeRpcTransport,
+    out: &mut dyn Write,
+) -> io::Result<()> {
     match action {
         BridgeCmd::Deposit {
             asset,
@@ -823,8 +900,10 @@ pub fn handle(action: BridgeCmd) {
             url,
         } => {
             if relayers.is_empty() {
-                eprintln!("at least one relayer must be provided");
-                return;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "at least one relayer must be provided",
+                ));
             }
             let header = load_header(&header);
             let proof = load_proof(&proof);
@@ -840,9 +919,7 @@ pub fn handle(action: BridgeCmd) {
                 ("relayer_proofs", to_json_value(&proofs)),
             ]);
             let payload = json_rpc_request("bridge.verify_deposit", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Withdraw {
             asset,
@@ -852,8 +929,10 @@ pub fn handle(action: BridgeCmd) {
             url,
         } => {
             if relayers.is_empty() {
-                eprintln!("at least one relayer must be provided");
-                return;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "at least one relayer must be provided",
+                ));
             }
             let proofs = relayer_proofs(&relayers, &user, amount);
             let primary = relayers.first().cloned().unwrap_or_default();
@@ -865,9 +944,7 @@ pub fn handle(action: BridgeCmd) {
                 ("relayer_proofs", to_json_value(&proofs)),
             ]);
             let payload = json_rpc_request("bridge.request_withdrawal", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Challenge {
             asset,
@@ -881,30 +958,22 @@ pub fn handle(action: BridgeCmd) {
                 ("challenger", json_string(challenger)),
             ]);
             let payload = json_rpc_request("bridge.challenge_withdrawal", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Pending { asset, url } => {
             let params = json_object_from([("asset", json_option_string(asset))]);
             let payload = json_rpc_request("bridge.pending_withdrawals", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Challenges { asset, url } => {
             let params = json_object_from([("asset", json_option_string(asset))]);
             let payload = json_rpc_request("bridge.active_challenges", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Relayers { asset, url } => {
             let params = json_object_from([("asset", json_string(asset))]);
             let payload = json_rpc_request("bridge.relayer_quorum", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Accounting {
             asset,
@@ -916,9 +985,7 @@ pub fn handle(action: BridgeCmd) {
                 ("relayer", json_option_string(relayer)),
             ]);
             let payload = json_rpc_request("bridge.relayer_accounting", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Duties {
             asset,
@@ -932,9 +999,7 @@ pub fn handle(action: BridgeCmd) {
                 ("limit", json_u64(limit as u64)),
             ]);
             let payload = json_rpc_request("bridge.duty_log", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::History {
             asset,
@@ -948,15 +1013,11 @@ pub fn handle(action: BridgeCmd) {
                 ("limit", json_u64(limit as u64)),
             ]);
             let payload = json_rpc_request("bridge.deposit_history", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::SlashLog { url } => {
             let payload = json_rpc_request("bridge.slash_log", empty_object());
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Bond {
             relayer,
@@ -968,9 +1029,7 @@ pub fn handle(action: BridgeCmd) {
                 ("amount", json_u64(amount)),
             ]);
             let payload = json_rpc_request("bridge.bond_relayer", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Claim {
             relayer,
@@ -984,9 +1043,7 @@ pub fn handle(action: BridgeCmd) {
                 ("approval_key", json_string(approval_key)),
             ]);
             let payload = json_rpc_request("bridge.claim_rewards", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Settlement {
             asset,
@@ -1006,36 +1063,53 @@ pub fn handle(action: BridgeCmd) {
                 ("settlement_height", json_u64(settlement_height)),
             ]);
             let payload = json_rpc_request("bridge.submit_settlement", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
-        BridgeCmd::RewardClaims { relayer, url } => {
-            let params = json_object_from([("relayer", json_option_string(relayer))]);
+        BridgeCmd::RewardClaims {
+            relayer,
+            cursor,
+            limit,
+            url,
+        } => {
+            let params = json_object_from([
+                ("relayer", json_option_string(relayer)),
+                ("cursor", cursor.map(json_u64).unwrap_or_else(json_null)),
+                ("limit", json_u64(limit as u64)),
+            ]);
             let payload = json_rpc_request("bridge.reward_claims", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
-        BridgeCmd::SettlementLog { asset, url } => {
-            let params = json_object_from([("asset", json_option_string(asset))]);
+        BridgeCmd::SettlementLog {
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            let params = json_object_from([
+                ("asset", json_option_string(asset)),
+                ("cursor", cursor.map(json_u64).unwrap_or_else(json_null)),
+                ("limit", json_u64(limit as u64)),
+            ]);
             let payload = json_rpc_request("bridge.settlement_log", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
-        BridgeCmd::DisputeAudit { asset, url } => {
-            let params = json_object_from([("asset", json_option_string(asset))]);
+        BridgeCmd::DisputeAudit {
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            let params = json_object_from([
+                ("asset", json_option_string(asset)),
+                ("cursor", cursor.map(json_u64).unwrap_or_else(json_null)),
+                ("limit", json_u64(limit as u64)),
+            ]);
             let payload = json_rpc_request("bridge.dispute_audit", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::Assets { url } => {
             let payload = json_rpc_request("bridge.assets", empty_object());
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::ConfigureAsset {
             asset,
@@ -1075,9 +1149,34 @@ pub fn handle(action: BridgeCmd) {
             }
             let params = json_object_from(entries);
             let payload = json_rpc_request("bridge.configure_asset", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                print_response(resp);
-            }
+            send_rpc(transport, &url, &payload, out)?;
         }
+    }
+    Ok(())
+}
+
+fn send_rpc(
+    transport: &dyn BridgeRpcTransport,
+    url: &str,
+    payload: &json::Value,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    let text = transport.call(url, payload)?;
+    writeln!(out, "{text}")?;
+    Ok(())
+}
+
+struct RpcClientTransport<'a> {
+    client: &'a RpcClient,
+}
+
+impl<'a> BridgeRpcTransport for RpcClientTransport<'a> {
+    fn call(&self, url: &str, payload: &json::Value) -> io::Result<String> {
+        let resp = self
+            .client
+            .call(url, payload)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        resp.text()
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("read response: {err}")))
     }
 }

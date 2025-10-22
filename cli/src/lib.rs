@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod bridge;
 pub mod codec_helpers;
 pub mod compute;
 pub mod gov;

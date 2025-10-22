@@ -128,17 +128,21 @@ integration tests illustrate this flow end-to-end.
   for a relayer. The request accepts `{relayer, amount, approval_key}` and
   returns a `RewardClaimRecord` containing the claim ID, amount, remaining
   allowance, and updated pending balance.
-- `bridge.reward_claims` – returns the recorded reward claim history filtered by
-  optional relayer, enabling operators to reconcile payouts without manual sled
-  inspection.
+- `bridge.reward_claims` – cursor-paginates the recorded reward claim history.
+  Requests accept an optional `relayer`, `cursor`, and `limit` (default 100),
+  returning `{claims, next_cursor}` so operators can page through reconciliations
+  without materialising the entire retention window.
 - `bridge.submit_settlement` – records an external settlement proof for a
   pending withdrawal. The payload contains `{asset, relayer, commitment,
   settlement_chain, proof_hash, settlement_height}` and produces a settlement
   duty entry plus a log record for audit.
-- `bridge.settlement_log` – paginates recorded settlement submissions filtered
-  by asset so dashboards can trace which relayers supplied the required proofs.
-- `bridge.dispute_audit` – summarises pending withdrawals, challenge state,
-  settlement expectations, and per-relayer outcomes for governance review.
+- `bridge.settlement_log` – cursor-paginates settlement submissions filtered by
+  optional asset, exposing `{settlements, next_cursor}` for dashboards that
+  stream relayer proof activity without requesting the whole log.
+- `bridge.dispute_audit` – cursor-paginates dispute summaries (pending
+  withdrawals, challenges, settlement expectations, and per-relayer outcomes)
+  with `{disputes, next_cursor}` so governance tooling can iterate through long
+  histories efficiently.
 - `bridge.assets` – lists the configured bridge channels (asset identifiers)
   currently persisted on disk.
 - `bridge.configure_asset` – declaratively updates channel configuration. All
