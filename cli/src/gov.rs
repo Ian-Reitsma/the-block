@@ -160,45 +160,45 @@ where
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
-struct RpcTreasuryDisbursementsResult {
-    disbursements: Vec<TreasuryDisbursement>,
+pub struct RpcTreasuryDisbursementsResult {
+    pub disbursements: Vec<TreasuryDisbursement>,
     #[serde(default)]
-    next_cursor: Option<u64>,
+    pub next_cursor: Option<u64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
-struct RpcTreasuryBalanceResult {
-    balance_ct: u64,
+pub struct RpcTreasuryBalanceResult {
+    pub balance_ct: u64,
     #[serde(default)]
-    last_snapshot: Option<TreasuryBalanceSnapshot>,
+    pub last_snapshot: Option<TreasuryBalanceSnapshot>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
-struct RpcTreasuryHistoryResult {
-    snapshots: Vec<TreasuryBalanceSnapshot>,
+pub struct RpcTreasuryHistoryResult {
+    pub snapshots: Vec<TreasuryBalanceSnapshot>,
     #[serde(default)]
-    next_cursor: Option<u64>,
+    pub next_cursor: Option<u64>,
     #[allow(dead_code)]
-    current_balance_ct: u64,
+    pub current_balance_ct: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
-struct TreasuryFetchOutput {
-    disbursements: Vec<TreasuryDisbursement>,
+pub struct TreasuryFetchOutput {
+    pub disbursements: Vec<TreasuryDisbursement>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    next_cursor: Option<u64>,
-    balance_ct: u64,
+    pub next_cursor: Option<u64>,
+    pub balance_ct: u64,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    last_snapshot: Option<TreasuryBalanceSnapshot>,
+    pub last_snapshot: Option<TreasuryBalanceSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    balance_history: Option<Vec<TreasuryBalanceSnapshot>>,
+    pub balance_history: Option<Vec<TreasuryBalanceSnapshot>>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    balance_next_cursor: Option<u64>,
+    pub balance_next_cursor: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -207,6 +207,56 @@ struct DisbursementList<'a> {
     disbursements: &'a [TreasuryDisbursement],
 }
 
+pub fn treasury_disbursement_params(
+    status: Option<RemoteTreasuryStatus>,
+    after_id: Option<u64>,
+    limit: Option<usize>,
+) -> json::Value {
+    let mut params = json::Map::new();
+    if let Some(filter) = status {
+        params.insert("status".into(), json::Value::String(filter.as_str().into()));
+    }
+    if let Some(cursor) = after_id {
+        params.insert("after_id".into(), json::Value::from(cursor));
+    }
+    if let Some(max) = limit {
+        params.insert("limit".into(), json::Value::from(max as u64));
+    }
+    json::Value::Object(params)
+}
+
+pub fn treasury_history_params(after_id: Option<u64>, limit: Option<usize>) -> json::Value {
+    let mut params = json::Map::new();
+    if let Some(cursor) = after_id {
+        params.insert("after_id".into(), json::Value::from(cursor));
+    }
+    if let Some(max) = limit {
+        params.insert("limit".into(), json::Value::from(max as u64));
+    }
+    json::Value::Object(params)
+}
+
+pub fn combine_treasury_fetch_results(
+    disbursement: RpcTreasuryDisbursementsResult,
+    balance: RpcTreasuryBalanceResult,
+    history: Option<RpcTreasuryHistoryResult>,
+) -> TreasuryFetchOutput {
+    let mut output = TreasuryFetchOutput {
+        disbursements: disbursement.disbursements,
+        next_cursor: disbursement.next_cursor,
+        balance_ct: balance.balance_ct,
+        last_snapshot: balance.last_snapshot,
+        balance_history: None,
+        balance_next_cursor: None,
+    };
+
+    if let Some(history_result) = history {
+        output.balance_history = Some(history_result.snapshots);
+        output.balance_next_cursor = history_result.next_cursor;
+    }
+
+    output
+}
 fn unwrap_rpc_result<T>(envelope: RpcEnvelope<T>) -> io::Result<T> {
     if let Some(error) = envelope.error {
         return Err(io::Error::new(
@@ -1120,21 +1170,12 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             history_limit,
         } => {
             let client = RpcClient::from_env();
-            let mut disb_params = json::Map::new();
-            if let Some(filter) = status {
-                disb_params.insert("status".into(), json::Value::String(filter.as_str().into()));
-            }
-            if let Some(cursor) = after_id {
-                disb_params.insert("after_id".into(), json::Value::from(cursor));
-            }
-            if let Some(max) = limit {
-                disb_params.insert("limit".into(), json::Value::from(max as u64));
-            }
+            let disb_params = treasury_disbursement_params(status, after_id, limit);
             let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
                 &client,
                 &rpc,
                 "gov.treasury.disbursements",
-                json::Value::Object(disb_params),
+                disb_params.clone(),
             )?;
             let disbursement_result = unwrap_rpc_result(disb_envelope)?;
 
@@ -1146,33 +1187,21 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             )?;
             let balance_result = unwrap_rpc_result(balance_envelope)?;
 
-            let mut output = TreasuryFetchOutput {
-                disbursements: disbursement_result.disbursements,
-                next_cursor: disbursement_result.next_cursor,
-                balance_ct: balance_result.balance_ct,
-                last_snapshot: balance_result.last_snapshot,
-                balance_history: None,
-                balance_next_cursor: None,
-            };
-
-            if include_history {
-                let mut hist_params = json::Map::new();
-                if let Some(cursor) = history_after_id {
-                    hist_params.insert("after_id".into(), json::Value::from(cursor));
-                }
-                if let Some(max) = history_limit {
-                    hist_params.insert("limit".into(), json::Value::from(max as u64));
-                }
+            let history_result = if include_history {
+                let history_params = treasury_history_params(history_after_id, history_limit);
                 let history_envelope: RpcEnvelope<RpcTreasuryHistoryResult> = call_rpc_envelope(
                     &client,
                     &rpc,
                     "gov.treasury.balance_history",
-                    json::Value::Object(hist_params),
+                    history_params,
                 )?;
-                let history_result = unwrap_rpc_result(history_envelope)?;
-                output.balance_history = Some(history_result.snapshots);
-                output.balance_next_cursor = history_result.next_cursor;
-            }
+                Some(unwrap_rpc_result(history_envelope)?)
+            } else {
+                None
+            };
+
+            let output =
+                combine_treasury_fetch_results(disbursement_result, balance_result, history_result);
 
             match json::to_string_pretty(&output) {
                 Ok(serialized) => writeln!(out, "{serialized}")?,

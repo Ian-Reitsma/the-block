@@ -1,4 +1,21 @@
 # Status & Roadmap
+> **Review (2025-10-22, mid-morning+):** The CLI wallet suite now snapshots the
+signer metadata array end-to-end. `fee_floor_warning` asserts the metadata vector
+for ready and override previews, and a dedicated `wallet_signer_metadata` module
+covers local, ephemeral, and session signers while checking the auto-bump
+telemetry event—all via first-party `JsonMap` builders—so FIRST_PARTY_ONLY runs
+no longer rely on mock RPC servers to validate the JSON surface.
+> **Review (2025-10-22, early morning):** Wallet previews now expose signer
+metadata via `BuildTxReport::signer_metadata`, and the CLI suite asserts on the
+JSON emitted for ready, needs-confirmation, ephemeral, and session flows—snapshotting
+the metadata array to keep FIRST_PARTY_ONLY runs hermetic. Service-badge and telemetry commands gained
+helper-backed unit tests that snapshot the JSON-RPC envelopes for
+`service_badge.verify`/`issue`/`revoke` and `telemetry.configure`, eliminating
+mock servers and serde conversions while exercising the shared builders. The
+mobile push notification and node difficulty examples mirror production by
+replacing their last `foundation_serialization::json!` literals with explicit
+`JsonMap` assembly, so documentation tooling stays aligned with the first-party
+JSON pipeline.
 > **Review (2025-10-21, mid-morning):** Contract CLI modules now route JSON
 > construction through a shared `json_helpers` module that exposes string/number
 > constructors and JSON-RPC envelope helpers. Compute, service-badge, scheduler,

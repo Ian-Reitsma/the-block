@@ -1,4 +1,19 @@
 # System-Wide Economic Changes
+> **Review (2025-10-22, mid-morning+):** Wallet integration tests now assert the
+`signer_metadata` array across ready, override, ephemeral, and session previews
+while checking the auto-bump telemetry event—using first-party `JsonMap`
+builders—so JSON consumers and FIRST_PARTY_ONLY runs stay aligned without mock
+RPC servers.
+> **Review (2025-10-22, early morning):** Wallet build previews surface signer
+metadata via a new `BuildTxReport::signer_metadata` field, and the CLI tests now
+assert on the JSON produced across ready, needs-confirmation, ephemeral, and
+session flows while snapshotting the metadata array. Service-badge and telemetry commands gained helper-backed unit tests that
+snapshot the JSON-RPC envelopes for verification/issuance/revocation and
+`telemetry.configure`, keeping RPC tooling on the first-party JSON facade
+without serde conversions. The mobile notification and node difficulty examples
+mirror the change by replacing their remaining `foundation_serialization::json!`
+macros with manual `JsonMap` builders so documentation tooling reflects the
+production JSON pipeline.
 > **Review (2025-10-21, mid-morning):** A shared `json_helpers` module now powers every contract CLI command—compute, service-badge, scheduler, telemetry, identity, config, bridge, and TLS all assemble request payloads through first-party `JsonMap` builders and helper-provided JSON-RPC envelopes. Governance disbursement listings serialize through a typed wrapper, and node consumers (runtime log sink plus the staking/escrow wallet binary) reuse the same helpers, eliminating the last `foundation_serialization::json!` literals from operator tooling while preserving legacy wire shapes and deterministic ordering.
 > **Review (2025-10-16, midday):** QUIC peer-cert persistence writes `quic_peer_certs.json` through a deterministic peer/provider sorter so cache bytes remain stable across restarts and guard fixtures. New unit tests assert the serialized entry helper preserves peer ordering, provider ordering, rotation counters, and history chronology, and `peer_cert_snapshot()` now rides the same sorted view to keep CLI/RPC output stable for auditors.
 > **Review (2025-10-16, dawn+):** Light-client persistence and snapshot delivery now emit deterministic bytes through first-party serializers. `crates/light-client/src/state_stream.rs` sorts `StateChunk`, snapshot, and cache maps before encoding, adds the `SNAPSHOT_FIXTURE` regression lock, and extends FIRST_PARTY_ONLY parity tests across guard-on/off permutations plus compressed snapshot recovery. Integration coverage exercises the in-house `coding::compressor_for("lz77-rle", 4)` path so compressed snapshots replay identically during resume flows.

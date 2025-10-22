@@ -1,4 +1,30 @@
 # Summary
+> **Review (2025-10-22, mid-morning+):** CLI wallet tests now snapshot signer
+> metadata end-to-end: the `fee_floor_warning` integration suite asserts the
+> JSON metadata vector for ready and override previews, and a dedicated
+> `wallet_signer_metadata` module covers local, ephemeral, and session signers
+> while verifying the auto-bump telemetry event. These tests operate on
+> first-party `JsonMap` builders, keeping the suite hermetic without mock RPC
+> servers and ensuring the new metadata stays stable for FIRST_PARTY_ONLY runs.
+> **Review (2025-10-22, early morning):** Wallet build previews now emit and test
+> signer metadata alongside payloads, giving JSON consumers a deterministic view
+> of auto-bump, confirmation, ephemeral, and session sender states while
+> snapshotting the JSON array for future regressions. Service-badge and
+> telemetry commands gained helper-backed unit tests that assert on the
+> JSON-RPC envelopes for `verify`/`issue`/`revoke` and `telemetry.configure`,
+> keeping the CLI suite entirely first-party. The mobile notification and node
+> difficulty examples have been manualized as well, dropping their last
+> `foundation_serialization::json!` calls in favour of shared `JsonMap`
+> builders so docs tooling mirrors production behaviour. `cargo test
+> --manifest-path cli/Cargo.toml` passes with the new metadata assertions.
+> **Review (2025-10-21, evening++):** Treasury CLI helpers now power every test
+> scenario directly. Lifecycle coverage funds the sled-backed store before
+> execution, asserts on typed status transitions, and avoids
+> `foundation_serialization::json::to_value`, while remote fetch regression
+> tests exercise `combine_treasury_fetch_results` with and without balance
+> history to guarantee deterministic JSON assembly. The suite runs to completion
+> without `JsonRpcMock` servers, and the node library tests were rerun to green
+> to confirm the CLI refactor leaves runtime responders untouched.
 > **Review (2025-10-21, mid-morning):** The contract CLI now exposes a shared
 > `json_helpers` module that centralizes first-party JSON builders and RPC
 > envelope helpers. Compute, service-badge, scheduler, telemetry, identity,

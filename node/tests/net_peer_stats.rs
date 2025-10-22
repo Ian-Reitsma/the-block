@@ -920,7 +920,10 @@ fn peer_stats_cli_show_json_snapshot() {
         let mut val: foundation_serialization::json::Value =
             foundation_serialization::json::from_slice(&output.stdout).unwrap();
         if let Some(rep) = val.get_mut("reputation") {
-            *rep = foundation_serialization::json!(1.0);
+            *rep = foundation_serialization::json::Value::Number(
+                foundation_serialization::json::Number::from_f64(1.0)
+                    .expect("finite reputation override"),
+            );
         }
         assert_eq!(
             val.get("peer_id").and_then(|v| v.as_str()),

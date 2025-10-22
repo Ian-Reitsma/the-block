@@ -6,8 +6,16 @@ use cli_core::{
 };
 use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
+use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::Deserialize;
-use foundation_serialization::json;
+
+fn json_object(entries: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in entries {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
 
 #[derive(Deserialize, Debug)]
 struct Summary {
@@ -46,7 +54,9 @@ fn main() {
         .get_string("rpc")
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
-    let body = foundation_serialization::json!({"method":"settlement.audit"});
+    let body = json_object(vec![
+        ("method", Value::String("settlement.audit".to_string())),
+    ]);
     let client = env_blocking_client(TLS_PREFIXES, "examples::audit");
     let res: json::Value = client
         .request(Method::Post, &rpc)

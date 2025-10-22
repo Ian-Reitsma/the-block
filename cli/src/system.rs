@@ -4,8 +4,9 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use diagnostics::anyhow::{self, Result as AnyhowResult};
-use foundation_serialization::{Deserialize, Serialize};
+use diagnostics::anyhow::{self, Context, Result as AnyhowResult};
+use foundation_serialization::json::Value as JsonValue;
+use foundation_serialization::{self, Deserialize, Serialize};
 use httpd::Method;
 use std::collections::BTreeMap;
 
@@ -89,9 +90,76 @@ fn fetch_dependencies(base: &str) -> AnyhowResult<String> {
             response.status().as_u16()
         );
     }
-    let summaries: BTreeMap<String, WrapperSummary> =
-        response.json().map_err(anyhow::Error::from_error)?;
+    let body = response.into_body();
+    parse_dependencies_response(&body)
+}
+
+fn parse_dependencies_response(body: &[u8]) -> AnyhowResult<String> {
+    let value: JsonValue =
+        foundation_serialization::json::from_slice(body).map_err(anyhow::Error::from_error)?;
+    let summaries = parse_summaries(value)?;
     Ok(render_dependencies(summaries))
+}
+
+fn parse_summaries(value: JsonValue) -> AnyhowResult<BTreeMap<String, WrapperSummary>> {
+    let root = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("wrappers payload must be a JSON object"))?;
+    let mut summaries = BTreeMap::new();
+    for (node, summary_value) in root {
+        let summary = parse_summary(summary_value)
+            .with_context(|| format!("invalid summary for node '{node}'"))?;
+        summaries.insert(node.clone(), summary);
+    }
+    Ok(summaries)
+}
+
+fn parse_summary(value: &JsonValue) -> AnyhowResult<WrapperSummary> {
+    let metrics_value = value
+        .as_object()
+        .and_then(|obj| obj.get("metrics"))
+        .ok_or_else(|| anyhow::anyhow!("summary missing metrics array"))?;
+    let metrics_array = metrics_value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("metrics field must be an array"))?;
+    let mut metrics = Vec::with_capacity(metrics_array.len());
+    for metric_value in metrics_array {
+        metrics.push(parse_metric(metric_value)?);
+    }
+    Ok(WrapperSummary { metrics })
+}
+
+fn parse_metric(value: &JsonValue) -> AnyhowResult<WrapperMetric> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("metric entry must be a JSON object"))?;
+    let metric_name = obj
+        .get("metric")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| anyhow::anyhow!("metric entry missing 'metric' string"))?;
+    let labels = match obj.get("labels") {
+        Some(JsonValue::Object(map)) => {
+            let mut labels = BTreeMap::new();
+            for (key, value) in map {
+                let label = value
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("label values must be strings"))?;
+                labels.insert(key.clone(), label.to_owned());
+            }
+            labels
+        }
+        Some(_) => anyhow::bail!("metric 'labels' must be an object"),
+        None => BTreeMap::new(),
+    };
+    let numeric_value = obj
+        .get("value")
+        .and_then(JsonValue::as_f64)
+        .ok_or_else(|| anyhow::anyhow!("metric entry missing numeric 'value'"))?;
+    Ok(WrapperMetric {
+        metric: metric_name.to_owned(),
+        labels,
+        value: numeric_value,
+    })
 }
 
 fn render_dependencies(mut summaries: BTreeMap<String, WrapperSummary>) -> String {
@@ -138,29 +206,6 @@ mod tests {
     use foundation_serialization::json::{
         to_string_value, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
     };
-    use httpd::{Response, Router, ServerConfig, StatusCode};
-    use runtime::{self, net::TcpListener};
-
-    fn start_wrappers_server(body: String) -> (String, runtime::JoinHandle<std::io::Result<()>>) {
-        runtime::block_on(async move {
-            let router = Router::new(body).get("/wrappers", |req| {
-                let state = req.state().clone();
-                async move {
-                    Ok(Response::new(StatusCode::OK)
-                        .with_header("content-type", "application/json")
-                        .with_body(state.as_ref().as_bytes().to_vec()))
-                }
-            });
-            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-                .await
-                .expect("bind test listener");
-            let addr = format!("http://{}", listener.local_addr().expect("listener addr"));
-            let handle = runtime::spawn(async move {
-                httpd::serve(listener, router, ServerConfig::default()).await
-            });
-            (addr, handle)
-        })
-    }
 
     fn sample_summary() -> BTreeMap<String, WrapperSummary> {
         let mut summaries = BTreeMap::new();
@@ -264,11 +309,9 @@ node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",ver
     #[test]
     fn fetch_dependencies_parses_response() {
         let body = to_string_value(&sample_summary_json());
-        let (url, handle) = start_wrappers_server(body);
-        let report = fetch_dependencies(&url).expect("report");
+        let report = parse_dependencies_response(body.as_bytes()).expect("report");
         assert!(report.starts_with("node: node-a"));
         assert!(report.contains("codec_serialize_fail_total"));
         assert!(report.contains("node: node-b"));
-        handle.abort();
     }
 }

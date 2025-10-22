@@ -6,7 +6,7 @@ use cli_core::{
 };
 use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
-use foundation_serialization::json;
+use foundation_serialization::json::{self, Map, Number, Value};
 use wallet::{Wallet, WalletSigner};
 
 #[derive(Copy, Clone)]
@@ -55,6 +55,18 @@ fn run_cli() -> Result<(), String> {
     }
 }
 
+fn json_object(entries: Vec<(&str, Value)>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in entries {
+        map.insert(key.to_string(), value);
+    }
+    Value::Object(map)
+}
+
+fn json_array(items: Vec<Value>) -> Value {
+    Value::Array(items)
+}
+
 fn handle_stake_role(matches: &Matches) -> Result<(), String> {
     let role_str = matches
         .get_positional("role")
@@ -88,19 +100,31 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let sig_hex = crypto_suite::hex::encode(sig.to_bytes());
     let pk_hex = wallet.public_key_hex();
-    let body = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
-        "params": {
-            "id": pk_hex.clone(),
-            "role": role_label,
-            "amount": amount,
-            "sig": sig_hex.clone(),
-            "signers": [{"pk": pk_hex, "sig": sig_hex}],
-            "threshold": 1,
-        }
-    });
+    let method = if withdraw {
+        "consensus.pos.unbond"
+    } else {
+        "consensus.pos.bond"
+    };
+    let params = json_object(vec![
+        ("id", Value::String(pk_hex.clone())),
+        ("role", Value::String(role_label.to_string())),
+        ("amount", Value::Number(Number::from(amount))),
+        ("sig", Value::String(sig_hex.clone())),
+        (
+            "signers",
+            json_array(vec![json_object(vec![
+                ("pk", Value::String(pk_hex)),
+                ("sig", Value::String(sig_hex)),
+            ])]),
+        ),
+        ("threshold", Value::Number(Number::from(1))),
+    ]);
+    let body = json_object(vec![
+        ("jsonrpc", Value::String("2.0".to_string())),
+        ("id", Value::Number(Number::from(1))),
+        ("method", Value::String(method.to_string())),
+        ("params", params),
+    ]);
     let client = env_blocking_client(TLS_PREFIXES, "examples::wallet");
     match client
         .request(Method::Post, &url)
@@ -125,12 +149,15 @@ fn handle_escrow_balance(matches: &Matches) -> Result<(), String> {
         .get_string("url")
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
-    let payload = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "rent.escrow.balance",
-        "params": {"id": account},
-    });
+    let payload = json_object(vec![
+        ("jsonrpc", Value::String("2.0".to_string())),
+        ("id", Value::Number(Number::from(1))),
+        ("method", Value::String("rent.escrow.balance".to_string())),
+        (
+            "params",
+            json_object(vec![("id", Value::String(account))]),
+        ),
+    ]);
     let client = env_blocking_client(TLS_PREFIXES, "examples::wallet");
     match client
         .request(Method::Post, &url)

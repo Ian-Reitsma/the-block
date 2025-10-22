@@ -1,19 +1,13 @@
-mod support;
-
-use contract_cli::rpc::RpcClient;
 use contract_cli::tx::FeeLane;
-use contract_cli::wallet::{build_tx_default_locale, BuildTxStatus};
-use support::json_rpc::JsonRpcMock;
+use contract_cli::wallet::{
+    preview_build_tx_report, BuildTxStatus, FeeFloorPreviewError, Language, Localizer,
+    SignerMetadata, SignerSource,
+};
 
 #[test]
 fn auto_bump_emits_warning_event() {
-    let stats = "{\"jsonrpc\":\"2.0\",\"result\":{\"fee_floor\":10,\"size\":0,\"age_p50\":0,\"age_p95\":0,\"fee_p50\":0,\"fee_p90\":0}}".to_string();
-    let ack = "{\"status\":\"ok\"}".to_string();
-    let server = JsonRpcMock::start(vec![stats.clone(), ack.clone()]);
-    let client = RpcClient::from_env();
-    let report = build_tx_default_locale(
-        &client,
-        server.url(),
+    let localizer = Localizer::new(Language::En);
+    let (report, event) = preview_build_tx_report(
         FeeLane::Consumer,
         "alice",
         "bob",
@@ -25,26 +19,36 @@ fn auto_bump_emits_warning_event() {
         true,
         false,
         false,
+        &localizer,
+        10,
+        SignerSource::Local,
     )
-    .expect("build tx");
+    .expect("preview");
     assert_eq!(report.status, BuildTxStatus::Ready);
     assert!(report.auto_bumped);
+    assert!(!report.forced);
     assert_eq!(report.effective_fee, 10);
-    let bodies = server.captured();
-    assert!(bodies[0].contains("\"method\":\"mempool.stats\""));
-    assert!(bodies[1].contains("\"method\":\"mempool.qos_event\""));
-    assert!(bodies[1].contains("\"event\":\"warning\""));
+    assert_eq!(report.fee_floor, 10);
+    assert!(report.payload.is_some());
+    assert_eq!(report.warnings.len(), 1);
+    assert_eq!(
+        report.signer_metadata,
+        Some(vec![SignerMetadata {
+            signer: "alice".to_string(),
+            source: SignerSource::Local,
+        }])
+    );
+    let event = event.expect("telemetry event");
+    assert_eq!(event.kind, "warning");
+    assert_eq!(event.lane, FeeLane::Consumer);
+    assert_eq!(event.fee, 10);
+    assert_eq!(event.floor, 10);
 }
 
 #[test]
 fn force_records_override_metric() {
-    let stats = "{\"jsonrpc\":\"2.0\",\"result\":{\"fee_floor\":50,\"size\":0,\"age_p50\":0,\"age_p95\":0,\"fee_p50\":0,\"fee_p90\":0}}".to_string();
-    let ack = "{\"status\":\"ok\"}".to_string();
-    let server = JsonRpcMock::start(vec![stats, ack]);
-    let client = RpcClient::from_env();
-    let report = build_tx_default_locale(
-        &client,
-        server.url(),
+    let localizer = Localizer::new(Language::En);
+    let (report, event) = preview_build_tx_report(
         FeeLane::Consumer,
         "carol",
         "dave",
@@ -56,12 +60,49 @@ fn force_records_override_metric() {
         false,
         true,
         false,
+        &localizer,
+        50,
+        SignerSource::Local,
     )
-    .expect("build tx");
+    .expect("preview");
     assert_eq!(report.status, BuildTxStatus::Ready);
+    assert!(!report.auto_bumped);
     assert!(report.forced);
     assert_eq!(report.effective_fee, 5);
-    let bodies = server.captured();
-    assert!(bodies[0].contains("\"method\":\"mempool.stats\""));
-    assert!(bodies[1].contains("\"event\":\"override\""));
+    assert_eq!(report.fee_floor, 50);
+    assert_eq!(report.warnings.len(), 1);
+    assert_eq!(
+        report.signer_metadata,
+        Some(vec![SignerMetadata {
+            signer: "carol".to_string(),
+            source: SignerSource::Local,
+        }])
+    );
+    let event = event.expect("telemetry event");
+    assert_eq!(event.kind, "override");
+    assert_eq!(event.lane, FeeLane::Consumer);
+    assert_eq!(event.fee, 5);
+    assert_eq!(event.floor, 50);
+}
+
+#[test]
+fn preview_requires_prompt_when_no_flags() {
+    let localizer = Localizer::new(Language::En);
+    let result = preview_build_tx_report(
+        FeeLane::Consumer,
+        "erin",
+        "frank",
+        10,
+        1,
+        100,
+        0,
+        &[],
+        false,
+        false,
+        false,
+        &localizer,
+        9,
+        SignerSource::Local,
+    );
+    assert!(matches!(result, Err(FeeFloorPreviewError::PromptRequired)));
 }

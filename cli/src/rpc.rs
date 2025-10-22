@@ -1,6 +1,5 @@
 #![allow(clippy::module_name_repetitions)]
 
-use foundation_serialization::json::{Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
@@ -9,6 +8,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::http_client;
+use crate::json_helpers::{json_object_from, json_rpc_request, json_string, json_u64};
 use crate::tx::FeeLane;
 
 const MAX_BACKOFF_EXPONENT: u32 = 30;
@@ -124,17 +124,8 @@ impl RpcClient {
         struct Envelope<T> {
             result: T,
         }
-        let mut params = Map::new();
-        params.insert("lane".to_owned(), Value::String(lane.as_str().to_owned()));
-        let mut envelope = Map::new();
-        envelope.insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
-        envelope.insert("id".to_owned(), Value::from(1u32));
-        envelope.insert(
-            "method".to_owned(),
-            Value::String("mempool.stats".to_owned()),
-        );
-        envelope.insert("params".to_owned(), Value::Object(params));
-        let payload = Value::Object(envelope);
+        let params = json_object_from([("lane", json_string(lane.as_str()))]);
+        let payload = json_rpc_request("mempool.stats", params);
         let res = self
             .call(url, &payload)?
             .json::<Envelope<MempoolStats>>()
@@ -154,20 +145,13 @@ impl RpcClient {
             status: Option<String>,
         }
 
-        let mut params = Map::new();
-        params.insert("event".to_owned(), Value::String(event.event.to_owned()));
-        params.insert("lane".to_owned(), Value::String(event.lane.to_owned()));
-        params.insert("fee".to_owned(), Value::from(event.fee));
-        params.insert("floor".to_owned(), Value::from(event.floor));
-        let mut envelope = Map::new();
-        envelope.insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
-        envelope.insert("id".to_owned(), Value::from(1u32));
-        envelope.insert(
-            "method".to_owned(),
-            Value::String("mempool.qos_event".to_owned()),
-        );
-        envelope.insert("params".to_owned(), Value::Object(params));
-        let payload = Value::Object(envelope);
+        let params = json_object_from([
+            ("event", json_string(event.event)),
+            ("lane", json_string(event.lane)),
+            ("fee", json_u64(event.fee)),
+            ("floor", json_u64(event.floor)),
+        ]);
+        let payload = json_rpc_request("mempool.qos_event", params);
         let envelope = self
             .call(url, &payload)
             .map_err(WalletQosError::from)?
