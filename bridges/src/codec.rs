@@ -1,4 +1,5 @@
 use foundation_serialization::json::{Map, Value};
+use std::collections::HashMap;
 
 use ledger::{Emission, TokenRegistry};
 
@@ -6,7 +7,7 @@ use crate::{
     header::PowHeader,
     light_client::{Header, Proof},
     relayer::{Relayer, RelayerSet},
-    token_bridge::TokenBridge,
+    token_bridge::{AssetSnapshot, TokenBridge},
     PendingWithdrawal, RelayerBundle, RelayerProof,
 };
 
@@ -370,10 +371,18 @@ impl PowHeader {
 impl TokenBridge {
     pub fn to_value(&self) -> Value {
         let mut tokens = Vec::new();
-        for (symbol, emission) in self.tokens() {
+        for snapshot in self.asset_snapshots() {
+            let AssetSnapshot {
+                symbol,
+                emission,
+                locked,
+                minted,
+            } = snapshot;
             let mut map = Map::new();
             map.insert("symbol".to_string(), Value::String(symbol));
             map.insert("emission".to_string(), emission_to_value(&emission));
+            map.insert("locked".to_string(), Value::from(locked));
+            map.insert("minted".to_string(), Value::from(minted));
             tokens.push(Value::Object(map));
         }
         object([("tokens", Value::Array(tokens))])
@@ -384,12 +393,28 @@ impl TokenBridge {
         let tokens_value = get(obj, "tokens")?;
         let entries = require_array(tokens_value, "tokens")?;
         let mut registry = TokenRegistry::new();
+        let mut locked_supply: HashMap<String, u64> = HashMap::new();
+        let mut minted_supply: HashMap<String, u64> = HashMap::new();
         for entry in entries {
             let token_obj = require_object(entry, "token")?;
             let symbol = require_string(get(token_obj, "symbol")?, "symbol")?.to_string();
             let emission = emission_from_value(get(token_obj, "emission")?)?;
             let _ = registry.register(&symbol, emission);
+            if let Some(value) = token_obj.get("locked").and_then(Value::as_u64) {
+                if value > 0 {
+                    locked_supply.insert(symbol.clone(), value);
+                }
+            }
+            if let Some(value) = token_obj.get("minted").and_then(Value::as_u64) {
+                if value > 0 {
+                    minted_supply.insert(symbol.clone(), value);
+                }
+            }
         }
-        Ok(TokenBridge::with_registry(registry))
+        Ok(TokenBridge::with_state(
+            registry,
+            locked_supply,
+            minted_supply,
+        ))
     }
 }

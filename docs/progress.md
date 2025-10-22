@@ -1,4 +1,27 @@
 # Project Progress Snapshot
+> **Review (2025-10-22, evening+):** Multi-asset bridge supply tracking now spans
+> the token bridge, node RPC, and CLI. `TokenBridge` records locked and minted
+> balances per symbol, persistence in `bridges/src/codec.rs` includes the new
+> fields, the node exposes `Bridge::asset_snapshots()` and the
+> `bridge.assets` RPC returns structured entries (symbol, emission, locked,
+> minted) that the CLI and integration tests assert end to end. The metrics
+> aggregator gained a bridge anomaly detector that watches the reward, approval,
+> settlement, and dispute counters, increments `bridge_anomaly_total`, and
+> serves `/anomalies/bridge` so dashboards chart five-minute increases alongside
+> the raw counters. Fresh tests cover anomaly spikes, cooldown enforcement, and
+> CLI asset pagination under FIRST_PARTY_ONLY.
+> **Review (2025-10-22, afternoon):** The bridge CLI integration suite now drives
+> `BridgeCmd::DisputeAudit` through the in-memory `MockTransport`, capturing the
+> JSON-RPC envelopes and paginated responses alongside the existing claim and
+> settlement coverage so FIRST_PARTY_ONLY builds exercise every audit surface. The
+> monitoring templates gained a dedicated Bridge row that charts five-minute
+> `increase()` deltas for `bridge_reward_claims_total`,
+> `bridge_reward_approvals_consumed_total`,
+> `bridge_settlement_results_total{result,reason}`, and
+> `bridge_dispute_outcomes_total{kind,outcome}`, with the dashboard snapshot test
+> updated to expect the new panels. Grafana imports and the HTML snapshot now
+> expose bridge reward consumption, settlement outcomes, and dispute resolutions
+> without third-party widgets.
 > **Review (2025-10-23, afternoon):** Contract CLI bridge commands now route all
 > JSON-RPC traffic through a new `BridgeRpcTransport` trait. Production still
 > wraps the in-house `RpcClient`, but the integration suite swaps in an

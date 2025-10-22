@@ -318,6 +318,117 @@ fn bridge_settlement_log_paginates_requests() {
 }
 
 #[test]
+fn bridge_dispute_audit_paginates_requests() {
+    let dispute_response = ok_response(json_object([
+        (
+            "disputes",
+            JsonValue::Array(vec![json_object([
+                ("asset", json_string("eth")),
+                ("commitment", json_string("0xdeadbeef")),
+                ("user", json_string("alice")),
+                ("amount", json_number(55)),
+                ("initiated_at", json_number(120)),
+                ("deadline", json_number(220)),
+                ("challenged", json_bool(true)),
+                ("challenger", json_string("bob")),
+                ("challenged_at", json_number(180)),
+                ("settlement_required", json_bool(true)),
+                ("settlement_chain", json_string("bitcoin-mainnet")),
+                ("settlement_submitted_at", json_number(205)),
+                (
+                    "relayer_outcomes",
+                    JsonValue::Array(vec![json_object([
+                        ("relayer", json_string("r1")),
+                        ("status", json_string("succeeded")),
+                        ("reward", json_number(11)),
+                        ("penalty", json_number(0)),
+                        ("completed_at", json_number(190)),
+                        ("duty_id", json_number(9)),
+                    ])]),
+                ),
+                ("expired", json_bool(false)),
+            ])]),
+        ),
+        ("next_cursor", json_number(512)),
+    ]));
+    let mock = MockTransport::new(vec![dispute_response.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::DisputeAudit {
+            asset: Some("eth".into()),
+            cursor: Some(400),
+            limit: 30,
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("dispute audit command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope(
+        "bridge.dispute_audit",
+        json_object([
+            ("asset", json_string("eth")),
+            ("cursor", json_number(400)),
+            ("limit", json_number(30)),
+        ]),
+    );
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, dispute_response);
+}
+
+#[test]
+fn bridge_assets_returns_supply_snapshot() {
+    let assets_payload = ok_response(json_object([(
+        "assets",
+        JsonValue::Array(vec![json_object([
+            ("symbol", json_string("btc")),
+            ("locked", json_number(250)),
+            ("minted", json_number(120)),
+            (
+                "emission",
+                json_object([
+                    ("kind", json_string("linear")),
+                    ("initial", json_number(21_000_000)),
+                    ("rate", json_number(0)),
+                ]),
+            ),
+        ])]),
+    )]));
+    let mock = MockTransport::new(vec![assets_payload.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::Assets {
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("assets command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope(
+        "bridge.assets",
+        json_object(Vec::<(&str, JsonValue)>::new()),
+    );
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, assets_payload);
+}
+
+#[test]
 fn bridge_configure_command_includes_optional_fields() {
     let configure_response = ok_response(json_object([("status", json_string("ok"))]));
     let mock = MockTransport::new(vec![configure_response.clone()]);

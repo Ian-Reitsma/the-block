@@ -13,6 +13,19 @@ ready to import once the foundation telemetry stack is running.
   operators can compare pricing policy with realised demand. Governance changes
   to `mempool.fee_floor_window` and `mempool.fee_floor_percentile` increment
   `fee_floor_window_changed_total` and surface in the same dashboard.
+- The consolidated bridge row now ships in every core dashboard. Panels chart
+  five-minute deltas for `bridge_reward_claims_total`,
+  `bridge_reward_approvals_consumed_total`,
+  `bridge_settlement_results_total{result,reason}`, and
+  `bridge_dispute_outcomes_total{kind,outcome}` so operators can audit reward
+  consumption, settlement results, and dispute resolutions without importing
+  third-party widgets.
+- The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
+  bridge row. A rolling detector keeps a per-peer baseline for the reward,
+  approval, settlement, and dispute counters, increments
+  `bridge_anomaly_total` when a spike exceeds the configured threshold, and the
+  dashboards plot five-minute increases so operators can correlate alerts with
+  the underlying counters directly from the first-party panels.
 - Extend dashboards with `did_anchor_total` to monitor identifier churn; the
   explorer exposes `/dids/metrics/anchor_rate` and `/dids` for recent history so
   panels can link directly to the underlying records.

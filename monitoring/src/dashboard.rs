@@ -121,6 +121,20 @@ const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str = "Oldest scheduled treasury d
 const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
 const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
 const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
+const BRIDGE_REWARD_CLAIMS_PANEL_TITLE: &str = "bridge_reward_claims_total (5m delta)";
+const BRIDGE_REWARD_CLAIMS_EXPR: &str = "increase(bridge_reward_claims_total[5m])";
+const BRIDGE_REWARD_APPROVALS_PANEL_TITLE: &str = "bridge_reward_approvals_consumed_total (5m delta)";
+const BRIDGE_REWARD_APPROVALS_EXPR: &str = "increase(bridge_reward_approvals_consumed_total[5m])";
+const BRIDGE_SETTLEMENT_RESULTS_PANEL_TITLE: &str = "bridge_settlement_results_total (5m delta)";
+const BRIDGE_SETTLEMENT_RESULTS_EXPR: &str =
+    "sum by (result, reason)(increase(bridge_settlement_results_total[5m]))";
+const BRIDGE_SETTLEMENT_RESULTS_LEGEND: &str = "{{result}} · {{reason}}";
+const BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE: &str = "bridge_dispute_outcomes_total (5m delta)";
+const BRIDGE_DISPUTE_OUTCOMES_EXPR: &str =
+    "sum by (kind, outcome)(increase(bridge_dispute_outcomes_total[5m]))";
+const BRIDGE_DISPUTE_OUTCOMES_LEGEND: &str = "{{kind}} · {{outcome}}";
+const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
+const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -213,6 +227,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut dex = Vec::new();
     let mut compute = Vec::new();
     let mut treasury = Vec::new();
+    let mut bridge = Vec::new();
     let mut gossip = Vec::new();
     let mut tls = Vec::new();
     let mut dependency = Vec::new();
@@ -271,6 +286,48 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             treasury.push(build_treasury_scalar_panel(
                 TREASURY_NEXT_EPOCH_PANEL_TITLE,
                 TREASURY_NEXT_EPOCH_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_reward_claims_total" {
+            bridge.push(build_bridge_delta_panel(
+                BRIDGE_REWARD_CLAIMS_PANEL_TITLE,
+                BRIDGE_REWARD_CLAIMS_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_reward_approvals_consumed_total" {
+            bridge.push(build_bridge_delta_panel(
+                BRIDGE_REWARD_APPROVALS_PANEL_TITLE,
+                BRIDGE_REWARD_APPROVALS_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_settlement_results_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_SETTLEMENT_RESULTS_PANEL_TITLE,
+                BRIDGE_SETTLEMENT_RESULTS_EXPR,
+                BRIDGE_SETTLEMENT_RESULTS_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_dispute_outcomes_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE,
+                BRIDGE_DISPUTE_OUTCOMES_EXPR,
+                BRIDGE_DISPUTE_OUTCOMES_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_anomaly_total" {
+            bridge.push(build_bridge_delta_panel(
+                BRIDGE_ANOMALY_PANEL_TITLE,
+                BRIDGE_ANOMALY_EXPR,
                 metric,
             ));
             continue;
@@ -385,6 +442,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("DEX", dex),
         ("Compute", compute),
         ("Treasury", treasury),
+        ("Bridge", bridge),
         ("Gossip", gossip),
         ("TLS", tls),
         ("Dependencies", dependency),
@@ -421,6 +479,64 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     }
 
     Ok(dashboard)
+}
+
+fn build_bridge_delta_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(false));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_bridge_grouped_delta_panel(
+    title: &str,
+    expr: &str,
+    legend_format: &str,
+    metric: &Metric,
+) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from(legend_format));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
 }
 
 fn build_tls_panel(metric: &Metric) -> Value {
@@ -1210,6 +1326,144 @@ mod tests {
                 _ => None,
             });
         assert_eq!(legend_format, Some(&Value::from("{{status}}")));
+    }
+
+    #[test]
+    fn bridge_metrics_render_in_dedicated_row() {
+        let metrics = vec![
+            Metric {
+                name: "bridge_reward_claims_total".into(),
+                description: "Bridge reward claim operations".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_reward_approvals_consumed_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_settlement_results_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_dispute_outcomes_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_anomaly_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+        ];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 6);
+
+        let row = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    Some(map)
+                }
+                _ => None,
+            })
+            .expect("bridge row present");
+        assert_eq!(row.get("title"), Some(&Value::from("Bridge")));
+
+        let claims_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_REWARD_CLAIMS_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("claims panel present");
+        let claims_expr = claims_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("claims expression");
+        assert_eq!(claims_expr, BRIDGE_REWARD_CLAIMS_EXPR);
+
+        let anomaly_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_ANOMALY_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("anomaly panel present");
+        let anomaly_expr = anomaly_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("anomaly expression");
+        assert_eq!(anomaly_expr, BRIDGE_ANOMALY_EXPR);
+
+        let dispute_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("dispute panel present");
+        let dispute_legend = dispute_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("legendFormat"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("dispute legend format");
+        assert_eq!(dispute_legend, BRIDGE_DISPUTE_OUTCOMES_LEGEND);
     }
 
     #[test]

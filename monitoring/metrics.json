@@ -194,6 +194,42 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge reward claim operations processed",
+      "labels": [],
+      "name": "bridge_reward_claims_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total bridge reward allowance consumed by approved claims",
+      "labels": [],
+      "name": "bridge_reward_approvals_consumed_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge settlement submissions grouped by result and reason",
+      "labels": [
+        "result",
+        "reason"
+      ],
+      "name": "bridge_settlement_results_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge dispute outcomes grouped by duty kind and outcome",
+      "labels": [
+        "kind",
+        "outcome"
+      ],
+      "name": "bridge_dispute_outcomes_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge anomaly detector activations",
+      "labels": [],
+      "name": "bridge_anomaly_total"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

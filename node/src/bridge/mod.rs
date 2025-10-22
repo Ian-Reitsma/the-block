@@ -15,6 +15,7 @@ use bridges::relayer::RelayerSet;
 use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header as LightHeader, Proof},
+    token_bridge::AssetSnapshot,
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
 use concurrency::Lazy;
@@ -2418,6 +2419,8 @@ impl Bridge {
                 );
             }
         }
+        self.state.token_bridge.unlock(asset, amount);
+        self.state.token_bridge.mint(asset, amount);
         self.persist()?;
         Ok(commitment)
     }
@@ -2518,7 +2521,7 @@ impl Bridge {
         }
         self.record_settlement(record.clone());
         self.record_duty_success(duty_id, self.incentives().duty_reward);
-        self.state.token_bridge.mint(asset, amount);
+        self.state.token_bridge.burn(asset, amount);
         telemetry_record_settlement_success();
         self.persist()?;
         Ok(record)
@@ -2604,28 +2607,30 @@ impl Bridge {
             .channels
             .get_mut(asset)
             .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
-        if let Some(pending) = channel.bridge.pending_withdrawals.get(&commitment) {
-            if pending.challenged {
-                return Err(BridgeError::AlreadyChallenged);
-            }
-            let deadline = pending.initiated_at + channel.config.challenge_period_secs;
-            if now_secs() < deadline {
-                return Err(BridgeError::ChallengeWindowOpen);
-            }
-            if channel.config.requires_settlement_proof {
-                match self.state.pending_settlements.get(&commitment) {
-                    Some(state) if state.proof.is_some() => {}
-                    Some(_) | None => {
-                        return Err(BridgeError::SettlementProofRequired {
-                            asset: asset.to_string(),
-                            commitment,
-                        });
-                    }
+        let requires_settlement_proof = channel.config.requires_settlement_proof;
+        let pending = match channel.bridge.pending_withdrawals.get(&commitment) {
+            Some(pending) => pending,
+            None => return Err(BridgeError::WithdrawalMissing),
+        };
+        if pending.challenged {
+            return Err(BridgeError::AlreadyChallenged);
+        }
+        let deadline = pending.initiated_at + channel.config.challenge_period_secs;
+        if now_secs() < deadline {
+            return Err(BridgeError::ChallengeWindowOpen);
+        }
+        if requires_settlement_proof {
+            match self.state.pending_settlements.get(&commitment) {
+                Some(state) if state.proof.is_some() => {}
+                Some(_) | None => {
+                    return Err(BridgeError::SettlementProofRequired {
+                        asset: asset.to_string(),
+                        commitment,
+                    });
                 }
             }
-        } else {
-            return Err(BridgeError::WithdrawalMissing);
         }
+        let pending_amount = pending.amount;
         let mut runtime = channel.runtime_bridge();
         if !runtime.finalize_withdrawal(commitment) {
             return Err(BridgeError::ChallengeWindowOpen);
@@ -2637,6 +2642,9 @@ impl Bridge {
             self.record_duty_success(duty_id, reward);
         }
         self.state.pending_settlements.remove(&commitment);
+        if !requires_settlement_proof {
+            self.state.token_bridge.burn(asset, pending_amount);
+        }
         self.persist()
     }
 
@@ -2741,6 +2749,10 @@ impl Bridge {
         let mut assets: Vec<String> = self.state.channels.keys().cloned().collect();
         assets.sort();
         assets
+    }
+
+    pub fn asset_snapshots(&self) -> Vec<AssetSnapshot> {
+        self.state.token_bridge.asset_snapshots()
     }
 
     pub fn dispute_audit(

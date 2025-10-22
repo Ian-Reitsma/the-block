@@ -5,6 +5,7 @@ use diagnostics::{
 };
 use foundation_metrics::{gauge, increment_counter, Recorder, RecorderInstallError};
 use governance::{
+    codec::{balance_history_from_json, disbursements_from_json_array},
     DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
     TreasuryDisbursement,
 };
@@ -46,9 +47,11 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
     }
 }
 
+use foundation_serialization::json;
 use foundation_serialization::json::{Map, Number, Value};
-use foundation_serialization::{json, Deserialize, Serialize};
-use foundation_telemetry::{TelemetrySummary, WrapperSummaryEntry};
+use foundation_telemetry::{
+    MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry, WrapperSummaryEntry,
+};
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
 use std::io::{self, Write};
@@ -112,6 +115,7 @@ const METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_detail_unique_fingerprints";
 const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_variables_unique_fingerprints";
+const METRIC_BRIDGE_ANOMALY_TOTAL: &str = "bridge_anomaly_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -130,28 +134,121 @@ const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
 const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
 const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint"];
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+const BRIDGE_MONITORED_COUNTERS: [&str; 4] = [
+    "bridge_reward_claims_total",
+    "bridge_reward_approvals_consumed_total",
+    "bridge_settlement_results_total",
+    "bridge_dispute_outcomes_total",
+];
+const BRIDGE_ANOMALY_WINDOW: usize = 24;
+const BRIDGE_ANOMALY_BASELINE_MIN: usize = 6;
+const BRIDGE_ANOMALY_STD_MULTIPLIER: f64 = 4.0;
+const BRIDGE_ANOMALY_MIN_STDDEV: f64 = 1.0;
+const BRIDGE_ANOMALY_MIN_DELTA: f64 = 5.0;
+const BRIDGE_ANOMALY_COOLDOWN_SECS: u64 = 15 * 60;
+const BRIDGE_ANOMALY_MAX_EVENTS: usize = 200;
+
+#[derive(Clone)]
 pub struct PeerStat {
     pub peer_id: String,
     pub metrics: Value,
 }
 
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
+impl PeerStat {
+    fn from_value(value: &Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "peer stat entry must be an object".to_string())?;
+        let peer_id = object
+            .get("peer_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "peer stat entry missing peer_id".to_string())?;
+        let metrics = object
+            .get("metrics")
+            .cloned()
+            .ok_or_else(|| "peer stat entry missing metrics".to_string())?;
+        Ok(Self {
+            peer_id: peer_id.to_string(),
+            metrics,
+        })
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
+        map.insert("metrics".to_string(), self.metrics.clone());
+        Value::Object(map)
+    }
+}
+
+fn parse_peer_stats(bytes: &[u8]) -> Result<Vec<PeerStat>, HttpError> {
+    let value = json::value_from_slice(bytes).map_err(HttpError::from)?;
+    let array = value
+        .as_array()
+        .ok_or_else(|| HttpError::Handler("ingest payload must be an array".to_string()))?;
+    let mut out = Vec::with_capacity(array.len());
+    for entry in array {
+        let stat = PeerStat::from_value(entry).map_err(HttpError::Handler)?;
+        out.push(stat);
+    }
+    Ok(out)
+}
+
+fn peer_stats_to_value(stats: &[PeerStat]) -> Value {
+    let entries = stats.iter().map(PeerStat::to_value).collect();
+    Value::Array(entries)
+}
+
+fn json_response(status: StatusCode, value: Value) -> Result<Response, HttpError> {
+    let body = json::to_vec_value(&value);
+    Ok(Response::new(status)
+        .with_header("content-type", "application/json")
+        .with_body(body))
+}
+
+fn json_ok(value: Value) -> Result<Response, HttpError> {
+    json_response(StatusCode::OK, value)
+}
+
 struct TelemetryErrorResponse {
     error: String,
     path: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-#[serde(crate = "foundation_serialization::serde")]
+impl TelemetryErrorResponse {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("error".to_string(), Value::String(self.error.clone()));
+        map.insert("path".to_string(), Value::String(self.path.clone()));
+        Value::Object(map)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct CorrelationRecord {
     pub metric: String,
     pub correlation_id: String,
     pub peer_id: String,
     pub value: Option<f64>,
     pub timestamp: u64,
+}
+
+impl CorrelationRecord {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("metric".to_string(), Value::String(self.metric.clone()));
+        map.insert(
+            "correlation_id".to_string(),
+            Value::String(self.correlation_id.clone()),
+        );
+        map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
+        match self.value {
+            Some(v) => map.insert("value".to_string(), Value::from(v)),
+            None => map.insert("value".to_string(), Value::Null),
+        };
+        map.insert("timestamp".to_string(), Value::from(self.timestamp));
+        Value::Object(map)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +272,7 @@ pub struct AppState {
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
     telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummary>>>>,
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
+    bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -246,6 +344,7 @@ impl AppState {
             last_metric_values: Arc::new(Mutex::new(HashMap::new())),
             telemetry: Arc::new(Mutex::new(HashMap::new())),
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
+            bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
@@ -479,6 +578,44 @@ impl AppState {
         } else {
             "active_peers:0".into()
         }
+    }
+
+    fn record_bridge_anomalies(&self, peer_id: &str, metrics: &Value, timestamp: u64) {
+        let events = self
+            .bridge_anomalies
+            .lock()
+            .map(|mut detector| detector.ingest(peer_id, metrics, timestamp))
+            .unwrap_or_default();
+        if events.is_empty() {
+            return;
+        }
+        for event in &events {
+            increment_counter!(METRIC_BRIDGE_ANOMALY_TOTAL);
+            let labels = event
+                .labels
+                .iter()
+                .map(|label| format!("{}={}", label.key, label.value))
+                .collect::<Vec<_>>()
+                .join(",");
+            warn!(
+                target: "aggregator",
+                metric = %event.metric,
+                peer = %event.peer_id,
+                delta = event.delta,
+                mean = event.mean,
+                stddev = event.stddev,
+                threshold = event.threshold,
+                labels = %labels,
+                "bridge anomaly detected"
+            );
+        }
+    }
+
+    fn bridge_anomaly_events(&self) -> Vec<BridgeAnomalyEvent> {
+        self.bridge_anomalies
+            .lock()
+            .map(|detector| detector.events())
+            .unwrap_or_default()
     }
 
     fn record_correlation(&self, metric: &str, record: CorrelationRecord) {
@@ -786,10 +923,10 @@ struct AggregatorMetrics {
     treasury_balance_last_delta: Gauge,
     treasury_balance_snapshot_count: Gauge,
     treasury_balance_last_event_age: Gauge,
+    _bridge_anomaly_total: Counter,
 }
 
-#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct TlsWarningSnapshot {
     prefix: String,
     code: String,
@@ -837,6 +974,280 @@ impl TlsWarningSnapshot {
             variables_fingerprint_counts: BTreeMap::new(),
         }
     }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("prefix".to_string(), Value::String(self.prefix.clone()));
+        map.insert("code".to_string(), Value::String(self.code.clone()));
+        map.insert("total".to_string(), Value::from(self.total));
+        map.insert("last_delta".to_string(), Value::from(self.last_delta));
+        map.insert("last_seen".to_string(), Value::from(self.last_seen));
+        map.insert(
+            "origin".to_string(),
+            Value::String(self.origin.as_str().into()),
+        );
+        map.insert(
+            "peer_id".to_string(),
+            self.peer_id
+                .as_ref()
+                .map(|value| Value::String(value.clone()))
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "detail".to_string(),
+            self.detail
+                .as_ref()
+                .map(|value| Value::String(value.clone()))
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "variables".to_string(),
+            Value::Array(
+                self.variables
+                    .iter()
+                    .map(|value| Value::String(value.clone()))
+                    .collect(),
+            ),
+        );
+        map.insert(
+            "detail_fingerprint".to_string(),
+            self.detail_fingerprint
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "variables_fingerprint".to_string(),
+            self.variables_fingerprint
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "detail_fingerprint_counts".to_string(),
+            map_from_counts(&self.detail_fingerprint_counts),
+        );
+        map.insert(
+            "variables_fingerprint_counts".to_string(),
+            map_from_counts(&self.variables_fingerprint_counts),
+        );
+        Value::Object(map)
+    }
+}
+
+fn map_from_counts(counts: &BTreeMap<String, u64>) -> Value {
+    let mut map = Map::new();
+    for (key, value) in counts {
+        map.insert(key.clone(), Value::from(*value));
+    }
+    Value::Object(map)
+}
+
+fn memory_snapshot_to_value(entry: &MemorySnapshotEntry) -> Value {
+    let mut map = Map::new();
+    map.insert("latest".to_string(), Value::from(entry.latest));
+    map.insert("p50".to_string(), Value::from(entry.p50));
+    map.insert("p90".to_string(), Value::from(entry.p90));
+    map.insert("p99".to_string(), Value::from(entry.p99));
+    Value::Object(map)
+}
+
+fn wrapper_metric_to_value(entry: &WrapperMetricEntry) -> Value {
+    let mut labels = Map::new();
+    let mut keys: Vec<_> = entry.labels.keys().cloned().collect();
+    keys.sort();
+    for key in keys {
+        if let Some(value) = entry.labels.get(&key) {
+            labels.insert(key, Value::String(value.clone()));
+        }
+    }
+    let mut map = Map::new();
+    map.insert("metric".to_string(), Value::String(entry.metric.clone()));
+    map.insert("labels".to_string(), Value::Object(labels));
+    map.insert("value".to_string(), Value::from(entry.value));
+    Value::Object(map)
+}
+
+fn wrapper_summary_to_value(summary: &WrapperSummaryEntry) -> Value {
+    let metrics = summary
+        .metrics
+        .iter()
+        .map(wrapper_metric_to_value)
+        .collect();
+    let mut map = Map::new();
+    map.insert("metrics".to_string(), Value::Array(metrics));
+    Value::Object(map)
+}
+
+fn wrappers_map_to_value(map: &HashMap<String, WrapperSummaryEntry>) -> Value {
+    let mut object = Map::new();
+    let mut keys: Vec<_> = map.keys().cloned().collect();
+    keys.sort();
+    for key in keys {
+        if let Some(summary) = map.get(&key) {
+            object.insert(key, wrapper_summary_to_value(summary));
+        }
+    }
+    Value::Object(object)
+}
+
+fn telemetry_summary_to_value(summary: &TelemetrySummary) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "node_id".to_string(),
+        Value::String(summary.node_id.clone()),
+    );
+    map.insert("seq".to_string(), Value::from(summary.seq));
+    map.insert("timestamp".to_string(), Value::from(summary.timestamp));
+    map.insert(
+        "sample_rate_ppm".to_string(),
+        Value::from(summary.sample_rate_ppm),
+    );
+    map.insert(
+        "compaction_secs".to_string(),
+        Value::from(summary.compaction_secs),
+    );
+    let mut memory_map = Map::new();
+    let mut buckets: Vec<_> = summary.memory.keys().cloned().collect();
+    buckets.sort();
+    for bucket in buckets {
+        if let Some(entry) = summary.memory.get(&bucket) {
+            memory_map.insert(bucket, memory_snapshot_to_value(entry));
+        }
+    }
+    map.insert("memory".to_string(), Value::Object(memory_map));
+    map.insert(
+        "wrappers".to_string(),
+        wrapper_summary_to_value(&summary.wrappers),
+    );
+    Value::Object(map)
+}
+
+fn telemetry_summary_map_to_value(map: &HashMap<String, TelemetrySummary>) -> Value {
+    let mut object = Map::new();
+    let mut keys: Vec<_> = map.keys().cloned().collect();
+    keys.sort();
+    for key in keys {
+        if let Some(summary) = map.get(&key) {
+            object.insert(key, telemetry_summary_to_value(summary));
+        }
+    }
+    Value::Object(object)
+}
+
+fn telemetry_history_to_value(history: &[TelemetrySummary]) -> Value {
+    let entries = history.iter().map(telemetry_summary_to_value).collect();
+    Value::Array(entries)
+}
+
+fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, ValidationError> {
+    TelemetrySummary::validate_value(value)?;
+    let object = value
+        .as_object()
+        .expect("validated telemetry summary must be an object");
+    let node_id = object
+        .get("node_id")
+        .and_then(Value::as_str)
+        .expect("validated telemetry summary has node_id")
+        .to_string();
+    let seq = object
+        .get("seq")
+        .and_then(Value::as_u64)
+        .expect("validated telemetry summary has seq");
+    let timestamp = object
+        .get("timestamp")
+        .and_then(Value::as_u64)
+        .expect("validated telemetry summary has timestamp");
+    let sample_rate_ppm = object
+        .get("sample_rate_ppm")
+        .and_then(Value::as_u64)
+        .expect("validated telemetry summary has sample_rate_ppm");
+    let compaction_secs = object
+        .get("compaction_secs")
+        .and_then(Value::as_u64)
+        .expect("validated telemetry summary has compaction_secs");
+
+    let memory_value = object
+        .get("memory")
+        .and_then(Value::as_object)
+        .expect("validated telemetry summary has memory");
+    let mut memory = HashMap::new();
+    for (bucket, entry_value) in memory_value {
+        let entry = entry_value
+            .as_object()
+            .expect("validated telemetry memory entry must be object");
+        let latest = entry
+            .get("latest")
+            .and_then(Value::as_u64)
+            .expect("memory entry latest");
+        let p50 = entry
+            .get("p50")
+            .and_then(Value::as_u64)
+            .expect("memory entry p50");
+        let p90 = entry
+            .get("p90")
+            .and_then(Value::as_u64)
+            .expect("memory entry p90");
+        let p99 = entry
+            .get("p99")
+            .and_then(Value::as_u64)
+            .expect("memory entry p99");
+        memory.insert(
+            bucket.clone(),
+            MemorySnapshotEntry {
+                latest,
+                p50,
+                p90,
+                p99,
+            },
+        );
+    }
+
+    let metrics = object
+        .get("wrappers")
+        .and_then(Value::as_object)
+        .and_then(|wrapper| wrapper.get("metrics").and_then(Value::as_array))
+        .cloned()
+        .unwrap_or_else(Vec::new);
+    let mut wrapper_metrics = Vec::with_capacity(metrics.len());
+    for metric_value in metrics {
+        let metric_obj = metric_value
+            .as_object()
+            .expect("validated wrapper metric must be object");
+        let metric_name = metric_obj
+            .get("metric")
+            .and_then(Value::as_str)
+            .expect("wrapper metric name")
+            .to_string();
+        let value = metric_obj
+            .get("value")
+            .and_then(Value::as_f64)
+            .unwrap_or_default();
+        let labels = metric_obj
+            .get("labels")
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|value| (k.clone(), value.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        wrapper_metrics.push(WrapperMetricEntry {
+            metric: metric_name,
+            labels,
+            value,
+        });
+    }
+
+    Ok(TelemetrySummary {
+        node_id,
+        seq,
+        timestamp,
+        sample_rate_ppm,
+        compaction_secs,
+        memory,
+        wrappers: WrapperSummaryEntry {
+            metrics: wrapper_metrics,
+        },
+    })
 }
 
 #[derive(Clone)]
@@ -1486,6 +1897,12 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             tls_env_warning_variables_fingerprint_total.clone(),
         ))
         .expect("register tls_env_warning_variables_fingerprint_total");
+    let _bridge_anomaly_total = registry
+        .register_counter(
+            METRIC_BRIDGE_ANOMALY_TOTAL,
+            "Bridge anomaly alerts emitted by the aggregator",
+        )
+        .expect("register bridge_anomaly_total");
     let treasury_disbursement_count = GaugeVec::new(
         Opts::new(
             METRIC_TREASURY_COUNT,
@@ -1589,6 +2006,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         treasury_balance_last_delta,
         treasury_balance_snapshot_count,
         treasury_balance_last_event_age,
+        _bridge_anomaly_total,
     }
 });
 
@@ -1727,14 +2145,43 @@ fn tls_warning_snapshots() -> Vec<TlsWarningSnapshot> {
         .collect()
 }
 
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
 struct TlsWarningStatusPayload {
     retention_seconds: u64,
     active_snapshots: usize,
     stale_snapshots: usize,
     most_recent_last_seen: Option<u64>,
     least_recent_last_seen: Option<u64>,
+}
+
+impl TlsWarningStatusPayload {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "retention_seconds".to_string(),
+            Value::from(self.retention_seconds),
+        );
+        map.insert(
+            "active_snapshots".to_string(),
+            Value::from(self.active_snapshots as u64),
+        );
+        map.insert(
+            "stale_snapshots".to_string(),
+            Value::from(self.stale_snapshots as u64),
+        );
+        map.insert(
+            "most_recent_last_seen".to_string(),
+            self.most_recent_last_seen
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "least_recent_last_seen".to_string(),
+            self.least_recent_last_seen
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        Value::Object(map)
+    }
 }
 
 fn tls_warning_status_snapshot() -> TlsWarningStatusPayload {
@@ -2042,6 +2489,308 @@ fn ensure_tls_warning_forwarder() {
 
 pub fn install_tls_env_warning_forwarder() {
     ensure_tls_warning_forwarder();
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BridgeAnomalyLabel {
+    key: String,
+    value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct BridgeAnomalyEvent {
+    metric: String,
+    peer_id: String,
+    labels: Vec<BridgeAnomalyLabel>,
+    delta: f64,
+    mean: f64,
+    stddev: f64,
+    threshold: f64,
+    window: usize,
+    timestamp: u64,
+}
+
+impl BridgeAnomalyLabel {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("key".to_string(), Value::String(self.key.clone()));
+        map.insert("value".to_string(), Value::String(self.value.clone()));
+        Value::Object(map)
+    }
+}
+
+impl BridgeAnomalyEvent {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("metric".to_string(), Value::String(self.metric.clone()));
+        map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
+        let labels = self
+            .labels
+            .iter()
+            .map(BridgeAnomalyLabel::to_value)
+            .collect();
+        map.insert("labels".to_string(), Value::Array(labels));
+        map.insert("delta".to_string(), Value::from(self.delta));
+        map.insert("mean".to_string(), Value::from(self.mean));
+        map.insert("stddev".to_string(), Value::from(self.stddev));
+        map.insert("threshold".to_string(), Value::from(self.threshold));
+        map.insert("window".to_string(), Value::from(self.window as u64));
+        map.insert("timestamp".to_string(), Value::from(self.timestamp));
+        Value::Object(map)
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct BridgeMetricKey {
+    peer: String,
+    metric: String,
+    labels: Vec<(String, String)>,
+}
+
+#[derive(Default, Debug)]
+struct BridgeMetricState {
+    last_value: Option<f64>,
+    deltas: VecDeque<f64>,
+    last_alert_ts: Option<u64>,
+}
+
+impl BridgeMetricState {
+    fn reset(&mut self, value: f64) {
+        self.last_value = Some(value);
+        self.deltas.clear();
+        self.last_alert_ts = None;
+    }
+
+    fn record(&mut self, value: f64, delta: f64) {
+        self.last_value = Some(value);
+        self.deltas.push_back(delta);
+        while self.deltas.len() > BRIDGE_ANOMALY_WINDOW {
+            self.deltas.pop_front();
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BridgeMetricSample {
+    metric: String,
+    labels: Vec<(String, String)>,
+    value: f64,
+}
+
+#[derive(Default)]
+struct BridgeAnomalyDetector {
+    metrics: HashMap<BridgeMetricKey, BridgeMetricState>,
+    events: VecDeque<BridgeAnomalyEvent>,
+}
+
+impl BridgeAnomalyDetector {
+    fn ingest(
+        &mut self,
+        peer_id: &str,
+        metrics: &Value,
+        timestamp: u64,
+    ) -> Vec<BridgeAnomalyEvent> {
+        let mut triggered = Vec::new();
+        for sample in collect_bridge_metric_samples(metrics) {
+            if !BRIDGE_MONITORED_COUNTERS.contains(&sample.metric.as_str()) {
+                continue;
+            }
+            let key = BridgeMetricKey {
+                peer: peer_id.to_string(),
+                metric: sample.metric.clone(),
+                labels: sample.labels.clone(),
+            };
+            if let Some(event) = self.observe(key, sample.value, timestamp) {
+                triggered.push(event.clone());
+                self.push_event(event);
+            }
+        }
+        triggered
+    }
+
+    fn observe(
+        &mut self,
+        key: BridgeMetricKey,
+        value: f64,
+        timestamp: u64,
+    ) -> Option<BridgeAnomalyEvent> {
+        if !value.is_finite() {
+            return None;
+        }
+        let state = self.metrics.entry(key.clone()).or_default();
+        match state.last_value {
+            None => {
+                state.last_value = Some(value);
+                None
+            }
+            Some(previous) => {
+                let mut delta = value - previous;
+                if delta < -COUNTER_EPSILON {
+                    state.reset(value);
+                    return None;
+                }
+                if delta < 0.0 {
+                    delta = 0.0;
+                }
+                let window_len = state.deltas.len();
+                let mut anomaly = None;
+                if window_len >= BRIDGE_ANOMALY_BASELINE_MIN {
+                    let sum: f64 = state.deltas.iter().sum();
+                    let mean = sum / window_len as f64;
+                    let variance_sum: f64 = state
+                        .deltas
+                        .iter()
+                        .map(|sample| {
+                            let diff = *sample - mean;
+                            diff * diff
+                        })
+                        .sum();
+                    let variance = variance_sum / window_len as f64;
+                    let stddev = variance.sqrt();
+                    let baseline_std = stddev.max(BRIDGE_ANOMALY_MIN_STDDEV);
+                    let threshold = mean + baseline_std * BRIDGE_ANOMALY_STD_MULTIPLIER;
+                    let cooldown_ok = state
+                        .last_alert_ts
+                        .map(|last| timestamp.saturating_sub(last) >= BRIDGE_ANOMALY_COOLDOWN_SECS)
+                        .unwrap_or(true);
+                    if delta >= BRIDGE_ANOMALY_MIN_DELTA && delta >= threshold && cooldown_ok {
+                        state.last_alert_ts = Some(timestamp);
+                        let labels = key
+                            .labels
+                            .iter()
+                            .map(|(k, v)| BridgeAnomalyLabel {
+                                key: k.clone(),
+                                value: v.clone(),
+                            })
+                            .collect();
+                        anomaly = Some(BridgeAnomalyEvent {
+                            metric: key.metric.clone(),
+                            peer_id: key.peer.clone(),
+                            labels,
+                            delta,
+                            mean,
+                            stddev,
+                            threshold,
+                            window: window_len,
+                            timestamp,
+                        });
+                    }
+                }
+                state.record(value, delta);
+                anomaly
+            }
+        }
+    }
+
+    fn push_event(&mut self, event: BridgeAnomalyEvent) {
+        self.events.push_back(event);
+        while self.events.len() > BRIDGE_ANOMALY_MAX_EVENTS {
+            self.events.pop_front();
+        }
+    }
+
+    fn events(&self) -> Vec<BridgeAnomalyEvent> {
+        self.events.iter().cloned().collect()
+    }
+}
+
+fn collect_bridge_metric_samples(metrics: &Value) -> Vec<BridgeMetricSample> {
+    let mut out = Vec::new();
+    let root = match metrics {
+        Value::Object(map) => map,
+        _ => return out,
+    };
+    for &metric in &BRIDGE_MONITORED_COUNTERS {
+        if let Some(value) = root.get(metric) {
+            collect_metric_samples(metric, value, &mut out);
+        }
+    }
+    let mut dedup: HashMap<(String, Vec<(String, String)>), f64> = HashMap::new();
+    for sample in out {
+        dedup.insert((sample.metric.clone(), sample.labels.clone()), sample.value);
+    }
+    dedup
+        .into_iter()
+        .map(|((metric, labels), value)| BridgeMetricSample {
+            metric,
+            labels,
+            value,
+        })
+        .collect()
+}
+
+fn collect_metric_samples(metric: &str, value: &Value, out: &mut Vec<BridgeMetricSample>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_metric_samples(metric, item, out);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(samples) = map.get("samples") {
+                collect_metric_samples(metric, samples, out);
+            }
+            let counter = map
+                .get("value")
+                .and_then(Value::as_f64)
+                .or_else(|| map.get("counter").and_then(Value::as_f64));
+            if let Some(counter) = counter {
+                let labels = extract_metric_labels(map);
+                out.push(BridgeMetricSample {
+                    metric: metric.to_string(),
+                    labels,
+                    value: counter,
+                });
+            }
+            for (key, child) in map {
+                if matches!(key.as_str(), "labels" | "samples" | "value" | "counter") {
+                    continue;
+                }
+                if matches!(child, Value::Array(_) | Value::Object(_)) {
+                    collect_metric_samples(metric, child, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_metric_labels(map: &Map) -> Vec<(String, String)> {
+    let mut labels = BTreeMap::new();
+    if let Some(label_map) = map.get("labels").and_then(Value::as_object) {
+        for (key, value) in label_map {
+            if let Some(rendered) = label_value(value) {
+                labels.insert(key.clone(), rendered);
+            }
+        }
+    }
+    for key in ["asset", "result", "reason", "kind", "outcome"] {
+        if let Some(value) = map.get(key).and_then(label_value) {
+            labels.entry(key.to_string()).or_insert(value);
+        }
+    }
+    labels.into_iter().collect()
+}
+
+fn label_value(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(v) = value.as_i64() {
+        return Some(v.to_string());
+    }
+    if let Some(v) = value.as_u64() {
+        return Some(v.to_string());
+    }
+    if let Some(v) = value.as_f64() {
+        if v.is_finite() {
+            return Some(v.to_string());
+        }
+    }
+    if let Some(v) = value.as_bool() {
+        return Some(v.to_string());
+    }
+    None
 }
 
 #[cfg(feature = "s3")]
@@ -2502,7 +3251,9 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
         return Ok(Response::new(StatusCode::UNAUTHORIZED));
     }
 
-    let payload: Vec<PeerStat> = request.json()?;
+    warn!(target: "aggregator", "ingest request received");
+
+    let payload = parse_peer_stats(request.body_bytes())?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|err| HttpError::Handler(format!("clock error: {err}")))?
@@ -2536,6 +3287,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                         }
                     }
                     state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
+                    state.record_bridge_anomalies(&stat.peer_id, &stat.metrics, now);
                     continue;
                 }
             }
@@ -2563,6 +3315,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                 }
             }
             state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
+            state.record_bridge_anomalies(&stat.peer_id, &stat.metrics, now);
         }
         gauge!(METRIC_CLUSTER_PEER_ACTIVE_TOTAL, map.len() as f64);
     }
@@ -2570,17 +3323,25 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
     increment_counter!(METRIC_AGGREGATOR_INGEST_TOTAL);
     state.prune();
     state.persist();
+    let payload_value = peer_stats_to_value(&payload);
     if let Some(wal) = &state.wal {
-        match wal.append(&payload) {
+        match wal.append(&payload_value) {
             Ok(_) => gauge!(METRIC_AGGREGATOR_REPLICATION_LAG, 0.0),
             Err(err) => warn!(target: "aggregator", error = %err, "failed to append to wal"),
         }
     }
-    if let Ok(blob) = json::to_string(&payload) {
-        archive_metrics(&blob);
-    }
+    let blob = json::to_string_value(&payload_value);
+    archive_metrics(&blob);
 
-    Ok(Response::new(StatusCode::OK))
+    info!(
+        target: "aggregator",
+        peers = payload.len(),
+        "ingest payload accepted"
+    );
+
+    Ok(Response::new(StatusCode::OK)
+        .with_header("content-length", "0")
+        .close())
 }
 
 async fn peer(request: Request<AppState>) -> Result<Response, HttpError> {
@@ -2614,7 +3375,8 @@ async fn correlations(request: Request<AppState>) -> Result<Response, HttpError>
         return Ok(Response::new(StatusCode::BAD_REQUEST));
     };
     let records = state.correlations_for(metric);
-    Response::new(StatusCode::OK).json(&records)
+    let value = Value::Array(records.iter().map(CorrelationRecord::to_value).collect());
+    json_ok(value)
 }
 
 async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
@@ -2626,7 +3388,8 @@ async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
 async fn tls_warning_latest(_request: Request<AppState>) -> Result<Response, HttpError> {
     let mut snapshots = tls_warning_snapshots();
     snapshots.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
-    Response::new(StatusCode::OK).json(&snapshots)
+    let value = Value::Array(snapshots.iter().map(TlsWarningSnapshot::to_value).collect());
+    json_ok(value)
 }
 
 #[derive(Debug)]
@@ -2697,11 +3460,15 @@ fn build_export_payload(
         builder.add_file(&format!("{peer_id}.json"), &json)?;
     }
 
-    let tls_latest =
-        json::to_vec(&tls_snapshots).map_err(|err| ExportError::Serialization(err.to_string()))?;
+    let tls_latest_value = Value::Array(
+        tls_snapshots
+            .into_iter()
+            .map(|snapshot| snapshot.to_value())
+            .collect(),
+    );
+    let tls_latest = json::to_vec_value(&tls_latest_value);
     builder.add_file("tls_warnings/latest.json", &tls_latest)?;
-    let tls_status_bytes =
-        json::to_vec(&tls_status).map_err(|err| ExportError::Serialization(err.to_string()))?;
+    let tls_status_bytes = json::to_vec_value(&tls_status.to_value());
     builder.add_file("tls_warnings/status.json", &tls_status_bytes)?;
 
     let bytes = builder.finish()?;
@@ -2786,7 +3553,7 @@ async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpErro
     }
 
     let payload: Value = request.json()?;
-    match TelemetrySummary::from_value(payload) {
+    match telemetry_summary_from_value(&payload) {
         Ok(entry) => {
             increment_counter!(METRIC_TELEMETRY_INGEST_TOTAL);
             state.record_telemetry(entry);
@@ -2806,8 +3573,7 @@ async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpErro
                 error: message,
                 path,
             };
-            let response = Response::new(StatusCode::BAD_REQUEST).json(&body)?;
-            Ok(response)
+            json_response(StatusCode::BAD_REQUEST, body.to_value())
         }
     }
 }
@@ -2815,7 +3581,7 @@ async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpErro
 async fn telemetry_index(request: Request<AppState>) -> Result<Response, HttpError> {
     let state = Arc::clone(request.state());
     let payload = state.telemetry_latest();
-    Response::new(StatusCode::OK).json(&payload)
+    json_ok(telemetry_summary_map_to_value(&payload))
 }
 
 async fn telemetry_node(request: Request<AppState>) -> Result<Response, HttpError> {
@@ -2824,13 +3590,13 @@ async fn telemetry_node(request: Request<AppState>) -> Result<Response, HttpErro
         return Ok(Response::new(StatusCode::BAD_REQUEST));
     };
     let history = state.telemetry_history(node);
-    Response::new(StatusCode::OK).json(&history)
+    json_ok(telemetry_history_to_value(&history))
 }
 
 async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
     let state = Arc::clone(request.state());
     let payload = state.wrappers_latest();
-    Response::new(StatusCode::OK).json(&payload)
+    json_ok(wrappers_map_to_value(&payload))
 }
 
 async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
@@ -2841,7 +3607,14 @@ async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
 
 async fn tls_warning_status(_request: Request<AppState>) -> Result<Response, HttpError> {
     let payload = tls_warning_status_snapshot();
-    Response::new(StatusCode::OK).json(&payload)
+    json_ok(payload.to_value())
+}
+
+async fn bridge_anomalies(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let events = state.bridge_anomaly_events();
+    let value = Value::Array(events.iter().map(BridgeAnomalyEvent::to_value).collect());
+    json_ok(value)
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
@@ -2852,6 +3625,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/cluster", cluster)
         .get("/tls/warnings/latest", tls_warning_latest)
         .get("/tls/warnings/status", tls_warning_status)
+        .get("/anomalies/bridge", bridge_anomalies)
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)
@@ -2886,10 +3660,9 @@ impl Wal {
         })
     }
 
-    fn append(&self, stats: &[PeerStat]) -> io::Result<()> {
+    fn append(&self, payload: &Value) -> io::Result<()> {
         let mut guard = self.file.lock().unwrap();
-        let line = json::to_vec(&stats.to_vec())
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        let line = json::to_vec_value(payload);
         guard.write_all(&line)?;
         guard.write_all(b"\n")?;
         guard.flush()
@@ -2902,7 +3675,9 @@ fn load_treasury_records(path: &Path) -> io::Result<Vec<TreasuryDisbursement>> {
             if bytes.is_empty() {
                 Ok(Vec::new())
             } else {
-                json::from_slice(&bytes)
+                let value: Value = json::from_slice(&bytes)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+                disbursements_from_json_array(&value)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
             }
         }
@@ -2925,7 +3700,26 @@ fn load_treasury_balance_history(path: &Path) -> io::Result<Vec<TreasuryBalanceS
                 Ok(Vec::new())
             } else {
                 match json::from_slice(&bytes) {
-                    Ok(history) => Ok(history),
+                    Ok(value) => match balance_history_from_json(&value) {
+                        Ok(history) => Ok(history),
+                        Err(parse_err) => match parse_legacy_balance_history(&bytes) {
+                            Ok(history) => {
+                                warn!(
+                                    target: "aggregator",
+                                    path = %history_path.display(),
+                                    error = %parse_err,
+                                    "parsed treasury balance history via legacy schema"
+                                );
+                                Ok(history)
+                            }
+                            Err(fallback) => Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!(
+                                    "decode treasury balance history: {parse_err}; legacy fallback failed: {fallback}"
+                                ),
+                            )),
+                        },
+                    },
                     Err(err) => match parse_legacy_balance_history(&bytes) {
                         Ok(history) => {
                             warn!(
@@ -4005,15 +4799,27 @@ mod tests {
                 .unwrap();
 
             assert_eq!(resp.status(), StatusCode::OK);
-            let parsed: HashMap<String, WrapperSummaryEntry> =
-                json::from_slice(resp.body()).unwrap();
-            let entry = parsed.get("node-a").expect("wrapper entry");
-            assert_eq!(entry.metrics.len(), 1);
-            assert_eq!(entry.metrics[0].metric, "codec_serialize_fail_total");
+            let parsed: Value = json::from_slice(resp.body()).unwrap();
+            let entry = parsed
+                .as_object()
+                .and_then(|map| map.get("node-a"))
+                .and_then(Value::as_object)
+                .expect("wrapper entry");
+            let metrics = entry
+                .get("metrics")
+                .and_then(Value::as_array)
+                .expect("metrics array");
+            assert_eq!(metrics.len(), 1);
+            let metric = metrics[0].as_object().expect("metric object");
             assert_eq!(
-                entry.metrics[0].labels.get("codec").map(String::as_str),
-                Some("json")
+                metric.get("metric").and_then(Value::as_str),
+                Some("codec_serialize_fail_total")
             );
+            let labels = metric
+                .get("labels")
+                .and_then(Value::as_object)
+                .expect("labels object");
+            assert_eq!(labels.get("codec").and_then(Value::as_str), Some("json"));
         });
     }
 }

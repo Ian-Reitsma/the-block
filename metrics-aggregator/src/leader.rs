@@ -1,6 +1,7 @@
 use crate::{AppState, LeaderSnapshot};
 use diagnostics::tracing::{info, warn};
-use foundation_serialization::{json, Deserialize, Error as SerializationError, Serialize};
+use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::Error as SerializationError;
 use runtime::sleep;
 use std::env;
 use std::error::Error as StdError;
@@ -216,12 +217,38 @@ impl From<std::time::SystemTimeError> for LeaderElectionError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone)]
 struct LeaderRecord {
     holder: String,
     expires_at_ms: u64,
     fencing: u64,
+}
+
+impl LeaderRecord {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("holder".to_string(), Value::String(self.holder.clone()));
+        map.insert("expires_at_ms".to_string(), Value::from(self.expires_at_ms));
+        map.insert("fencing".to_string(), Value::from(self.fencing));
+        Value::Object(map)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let holder = object.get("holder")?.as_str()?.to_string();
+        let expires_at_ms = object.get("expires_at_ms")?.as_u64()?;
+        let fencing = object.get("fencing")?.as_u64()?;
+        Some(Self {
+            holder,
+            expires_at_ms,
+            fencing,
+        })
+    }
+
+    fn parse(bytes: &[u8]) -> Result<Option<Self>, SerializationError> {
+        let value = json::value_from_slice(bytes)?;
+        Ok(Self::from_value(&value))
+    }
 }
 
 pub async fn run_with_options(options: Vec<String>, state: AppState) {
@@ -380,8 +407,17 @@ impl LeaderElection {
         raw: Option<Vec<u8>>,
     ) -> Result<Option<LeaderRecord>, LeaderElectionError> {
         if let Some(bytes) = raw {
-            match json::from_slice::<LeaderRecord>(&bytes) {
-                Ok(record) => Ok(Some(record)),
+            match LeaderRecord::parse(&bytes) {
+                Ok(Some(record)) => Ok(Some(record)),
+                Ok(None) => {
+                    warn!(
+                        target = "aggregator",
+                        "failed to decode leader lease; clearing entry"
+                    );
+                    self.store.delete(LEADER_CF, LEADER_KEY)?;
+                    self.store.flush()?;
+                    Ok(None)
+                }
                 Err(err) => {
                     warn!(
                         target = "aggregator",
@@ -399,7 +435,7 @@ impl LeaderElection {
     }
 
     fn write_record(&self, record: &LeaderRecord) -> Result<(), LeaderElectionError> {
-        let bytes = json::to_vec(record)?;
+        let bytes = json::to_vec_value(&record.to_value());
         self.store.put_bytes(LEADER_CF, LEADER_KEY, &bytes)?;
         self.store.flush()?;
         Ok(())

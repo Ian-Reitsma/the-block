@@ -59,6 +59,26 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
 
+The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
+the newly instrumented counters. Panels plot five-minute deltas for
+`bridge_reward_claims_total`, `bridge_reward_approvals_consumed_total`,
+`bridge_settlement_results_total{result,reason}`, and
+`bridge_dispute_outcomes_total{kind,outcome}`, mirroring the counters defined in
+`bridges/src/lib.rs`. Operators can filter reward approvals and dispute results
+by relayer duty outcome directly from the legend, and the same queries back the
+HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
+instances to monitor bridge health.
+
+The metrics aggregator now watches those counters for anomalous spikes. A
+rolling detector maintains a 24-sample baseline per peer/metric/label set and
+raises events when a new delta exceeds the historical mean by four standard
+deviations (bounded by a minimum delta). Triggered events increment the
+`bridge_anomaly_total` counter and flow to the `/anomalies/bridge` JSON endpoint,
+which returns the offending metric, peer, labels, delta, and baseline stats.
+Dashboards include a companion panel charting `increase(bridge_anomaly_total[5m])`
+so operators can correlate alerts with reward claims, settlement submissions,
+and dispute outcomes without leaving the first-party stack.
+
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the
 age of the latest snapshot so operations can verify registry health without
