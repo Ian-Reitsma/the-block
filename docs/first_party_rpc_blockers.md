@@ -19,8 +19,33 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-22)
+
+- CLI wallet tests now snapshot the `signer_metadata` vector end-to-end: the
+  `fee_floor_warning` integration suite asserts the metadata array for ready and
+  override previews, and the new `wallet_signer_metadata` module covers local,
+  ephemeral, and session signers while checking the auto-bump telemetry event
+  using first-party `JsonMap` builders. The suite no longer relies on mock RPC
+  servers yet guarantees deterministic JSON output for FIRST_PARTY_ONLY runs.
+- Wallet JSON previews now include a typed `signer_metadata` field, and unit
+  tests assert on the JSON emitted for ready, needs-confirmation, ephemeral, and
+  session flows while snapshotting the metadata array so FIRST_PARTY_ONLY runs
+  cover the same payload the CLI prints in JSON mode. Service-badge and telemetry commands gained helper-backed tests that
+  snapshot the JSON-RPC envelopes for `service_badge.verify`/`issue`/`revoke`
+  and `telemetry.configure`, eliminating reliance on serde conversions or mock
+  servers while keeping request construction on the shared builders. The mobile
+  push notification and node difficulty examples have also been manualized,
+  replacing their last `foundation_serialization::json!` literals with explicit
+  `JsonMap` assembly so documentation tooling mirrors production payloads.
+
 ## Recent progress (2025-10-21)
 
+- Treasury CLI tests now rely solely on the manual builders: lifecycle coverage
+  credits the store before executing disbursements, remote fetch tests validate
+  `combine_treasury_fetch_results` with empty and populated history, and the
+  suite no longer shells out to `JsonRpcMock` or calls
+  `foundation_serialization::json::to_value`, keeping FIRST_PARTY_ONLY test
+  runs entirely on the in-house facade.
 - The contract CLI gained a shared `json_helpers` module; compute, service-badge,
   scheduler, telemetry, identity, config, bridge, and TLS commands now compose
   JSON-RPC payloads through explicit `JsonMap` builders and the helper’s

@@ -1,4 +1,38 @@
 # Project Progress Snapshot
+> **Review (2025-10-22, mid-morning+):** CLI integration tests now exercise the
+> wallet preview helpers directly: the `fee_floor_warning` suite asserts the
+> `signer_metadata` vector for ready and override branches, and a dedicated
+> `wallet_signer_metadata` test module snapshots the metadata array for local,
+> ephemeral, and session signers while inspecting the emitted telemetry event
+> on auto-bump flows. The assertions operate on first-party `JsonMap` builders
+> so the JSON surface stays deterministic without relying on serde helpers or
+> mock RPC servers. `cargo test --manifest-path cli/Cargo.toml` passes with the
+> extended coverage, keeping FIRST_PARTY_ONLY runs hermetic.
+> **Review (2025-10-22, early morning):** Wallet preview coverage now asserts
+> on the signer metadata emitted in ready paths, locking the new
+> `BuildTxReport::signer_metadata` field to deterministic JSON across auto-bump,
+> confirmation, ephemeral, and session flows while snapshotting the JSON array
+> so future refactors keep the output stable. Service-badge and telemetry commands gained
+> helper-backed unit tests that snapshot the JSON-RPC envelopes produced by
+> `verify`, `issue`, `revoke`, and `telemetry.configure`, keeping the CLI suite
+> first-party without mock servers or serde conversions. The remaining example
+> binaries shed their last `foundation_serialization::json!` literals—mobile
+> push notifications and the node difficulty probe now assemble payloads through
+> manual `JsonMap` builders—so documentation tooling mirrors the production
+> JSON façade. `cargo test --manifest-path cli/Cargo.toml` passes with the new
+> metadata assertions, matching expectations for FIRST_PARTY_ONLY runs.
+> **Review (2025-10-21, evening++):** Treasury CLI coverage now exercises the
+> new helper surfaces directly: lifecycle tests fund the sled-backed store via
+> `GovStore::record_treasury_accrual`, execution/cancel flows assert on the
+> typed status records, and remote fetch tests validate `combine_treasury_fetch_results`
+> for both populated and empty history responses without calling
+> `foundation_serialization::json::to_value`. The refactor eliminates the last
+> `JsonRpcMock`/serde stub dependency in the CLI suite, keeping FIRST_PARTY_ONLY
+> runs hermetic while documenting the helpers’ behaviour across optional
+> cursors. A full `cargo test --manifest-path cli/Cargo.toml --tests` run now
+> completes without timeouts, and `cargo test --manifest-path node/Cargo.toml --lib`
+> was rerun to green to lock in the node-side regression coverage after the CLI
+> manualization.
 > **Review (2025-10-21, mid-morning):** CLI JSON builders are now centralized
 > behind a dedicated `json_helpers` module that exposes string/number/null
 > constructors plus JSON-RPC envelope helpers. The compute, service-badge,

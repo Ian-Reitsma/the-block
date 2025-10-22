@@ -4,12 +4,12 @@ use httpd::{
 };
 use light_client::{sync_background, upload_compressed_logs, Header, LightClient, SyncOptions};
 use runtime::net::TcpListener;
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::{json, Deserialize, Serialize};
+use foundation_serialization::json::{Map as JsonMap, Value};
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};
-use foundation_serialization::json;
 
 fn main() {
     // simulate syncing headers from a file on disk
@@ -128,7 +128,11 @@ fn notify_tx(id: &str) {
     let client = env_blocking_client(MOBILE_TLS_PREFIXES, "examples::mobile");
     let _ = client
         .request(Method::Post, "http://localhost:8080/push")
-        .and_then(|builder| builder.json(&foundation_serialization::json!({ "tx": id })))
+        .and_then(|builder| {
+            let mut map = JsonMap::new();
+            map.insert("tx".to_string(), Value::String(id.to_string()));
+            builder.json(&Value::Object(map))
+        })
         .and_then(|builder| builder.send());
     println!("push notification: tx {id}");
 }

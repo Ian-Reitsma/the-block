@@ -1,7 +1,36 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-21 09:52:40Z_
+_Last updated: 2025-10-22 15:45:00Z_
 
+> **2025-10-22 update (wallet signer metadata integration coverage):** The CLI
+> wallet tests now assert the `signer_metadata` vector end-to-end. The
+> `fee_floor_warning` suite verifies the struct-level metadata for ready and
+> override previews, and a dedicated `wallet_signer_metadata` module snapshots
+> local, ephemeral, and session entries while checking the auto-bump telemetry
+> event—using only first-party `JsonMap` builders—so FIRST_PARTY_ONLY runs no
+> longer depend on mock RPC clients to validate the new JSON surface.
+> **2025-10-22 update (wallet signer metadata + CLI request tests):** `BuildTxReport`
+> now exposes a `signer_metadata` field, and the wallet preview suite asserts on
+> the JSON emitted across auto-bump, confirmation, ephemeral, and session flows,
+> snapshotting the metadata array so FIRST_PARTY_ONLY runs exercise the same
+> deterministic structure the CLI prints in JSON mode. Service-badge and telemetry modules gained helper-backed unit
+> tests that snapshot the JSON-RPC envelopes for `service_badge.verify`/`issue`/`revoke`
+> and `telemetry.configure`, keeping the CLI regression coverage on the
+> first-party facade without mock servers or serde conversions. The mobile
+> notification and node difficulty examples have been manualized as well,
+> replacing their `foundation_serialization::json!` usage with explicit
+> `JsonMap` builders so documentation tooling mirrors the production JSON
+> pipeline.
+
+> **2025-10-21 update (treasury helpers + CLI regression coverage):** Treasury
+> CLI lifecycle and fetch tests now exercise the manual builders directly.
+> `GovStore::record_treasury_accrual` funds disbursement executions, typed
+> status assertions replace serde-based snapshots, and remote fetch tests cover
+> `combine_treasury_fetch_results` with/without history, removing the last
+> `JsonRpcMock` dependency and `foundation_serialization::json::to_value`
+> conversions from the suite. FIRST_PARTY_ONLY runs no longer touch the serde
+> stub during CLI testing, and green `cargo test` runs were captured for both the
+> CLI and node crates.
 > **2025-10-21 update (CLI JSON helpers + wallet manualization):** A new
 > `json_helpers` module centralizes string/number/null constructors and
 > JSON-RPC envelope helpers for the contract CLI. Compute, service-badge,

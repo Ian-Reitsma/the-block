@@ -11,6 +11,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::json::Value as JsonValue;
 use std::io::{self, Write};
 use the_block::simple_db::EngineKind;
 
@@ -143,6 +144,158 @@ impl ComputeCmd {
     }
 }
 
+pub fn stats_request_payload(accelerator: Option<&str>) -> foundation_serialization::json::Value {
+    let params = accelerator
+        .map(|acc| json_object_from([("accelerator", json_string(acc))]))
+        .unwrap_or_else(json_null);
+    json_rpc_request("compute_market.stats", params)
+}
+
+pub fn provider_balances_payload() -> foundation_serialization::json::Value {
+    json_rpc_request_with_id("compute_market.provider_balances", json_null(), 2)
+}
+
+pub fn write_stats_from_str(text: &str, out: &mut dyn Write) -> io::Result<()> {
+    if let Ok(val) = json_from_str::<JsonValue>(text) {
+        if let Some(res) = val.get("result") {
+            if let Some(engine) = res.get("settlement_engine").and_then(|v| v.as_object()) {
+                let engine_label = engine.get("engine").and_then(|v| v.as_str()).unwrap_or("-");
+                writeln!(out, "settlement engine: {engine_label}")?;
+                let recommended = EngineKind::default_for_build().label();
+                if engine_label != recommended {
+                    writeln!(
+                        out,
+                        "warning: recommended settlement engine is {recommended}"
+                    )?;
+                }
+                if engine
+                    .get("legacy_mode")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    writeln!(out, "warning: settlement engine running in legacy mode")?;
+                }
+            }
+            if let Some(backlog) = res.get("industrial_backlog").and_then(|v| v.as_u64()) {
+                writeln!(out, "industrial backlog: {backlog}")?;
+            }
+            if let Some(utilization) = res.get("industrial_utilization").and_then(|v| v.as_u64()) {
+                writeln!(out, "industrial utilization: {utilization}%")?;
+            }
+            if let Some(total) = res.get("industrial_units_total").and_then(|v| v.as_u64()) {
+                writeln!(out, "industrial units total: {total}")?;
+            }
+            if let Some(price) = res
+                .get("industrial_price_per_unit")
+                .and_then(|v| v.as_u64())
+            {
+                writeln!(out, "industrial price per unit: {price}")?;
+            }
+            if let Some(lanes) = res.get("lanes").and_then(|v| v.as_array()) {
+                for lane in lanes {
+                    let lane_name = lane.get("lane").and_then(|v| v.as_str()).unwrap_or("-");
+                    let pending = lane.get("pending").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let admitted = lane.get("admitted").and_then(|v| v.as_u64()).unwrap_or(0);
+                    writeln!(
+                        out,
+                        "lane {lane_name}: pending {pending} admitted {admitted}"
+                    )?;
+                    if let Some(recent) = lane.get("recent").and_then(|v| v.as_array()) {
+                        for entry in recent {
+                            let job = entry.get("job").and_then(|v| v.as_str()).unwrap_or("");
+                            let provider =
+                                entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                            let price = entry.get("price").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let issued =
+                                entry.get("issued_at").and_then(|v| v.as_u64()).unwrap_or(0);
+                            writeln!(
+                                out,
+                                "recent lane {lane_name} job {job} provider {provider} price {price} issued_at {issued}"
+                            )?;
+                        }
+                    }
+                }
+            }
+            if let Some(recent_matches) = res.get("recent_matches").and_then(|v| v.as_object()) {
+                for (lane_name, entries) in recent_matches {
+                    if let Some(array) = entries.as_array() {
+                        for entry in array {
+                            let job = entry.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let provider =
+                                entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                            let price = entry.get("price").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let issued =
+                                entry.get("issued_at").and_then(|v| v.as_u64()).unwrap_or(0);
+                            writeln!(
+                                out,
+                                "recent lane {lane_name} job {job} provider {provider} price {price} issued_at {issued}"
+                            )?;
+                        }
+                    }
+                }
+            }
+            if let Some(lane_stats) = res.get("lane_stats").and_then(|v| v.as_array()) {
+                for entry in lane_stats {
+                    let name = entry.get("lane").and_then(|v| v.as_str()).unwrap_or("");
+                    let bids = entry.get("bids").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let asks = entry.get("asks").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let oldest_bid = entry
+                        .get("oldest_bid_ms")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let oldest_ask = entry
+                        .get("oldest_ask_ms")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    writeln!(
+                        out,
+                        "lane {name} bids: {bids} asks: {asks} oldest_bid_ms: {oldest_bid} oldest_ask_ms: {oldest_ask}"
+                    )?;
+                }
+            }
+            if let Some(warnings) = res.get("lane_starvation").and_then(|v| v.as_array()) {
+                for warning in warnings {
+                    let name = warning.get("lane").and_then(|v| v.as_str()).unwrap_or("");
+                    let job = warning.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let waited = warning
+                        .get("waited_for_secs")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    writeln!(
+                        out,
+                        "starvation lane {name} job {job} waited_secs: {waited}"
+                    )?;
+                }
+            }
+        } else {
+            writeln!(out, "{}", text)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn write_provider_balances_from_str(text: &str, out: &mut dyn Write) -> io::Result<()> {
+    if let Ok(val) = json_from_str::<JsonValue>(text) {
+        if let Some(providers) = val
+            .get("result")
+            .and_then(|res| res.get("providers"))
+            .and_then(|v| v.as_array())
+        {
+            for entry in providers {
+                let provider = entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                let ct = entry.get("ct").and_then(|v| v.as_u64()).unwrap_or(0);
+                let industrial = entry
+                    .get("industrial")
+                    .or_else(|| entry.get("it"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                writeln!(out, "provider: {provider} ct: {ct} it: {industrial}")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn handle(cmd: ComputeCmd) {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
@@ -179,171 +332,17 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Stats { url, accelerator } => {
             let client = RpcClient::from_env();
-            let params = if let Some(acc) = accelerator.as_ref() {
-                json_object_from([("accelerator", json_string(acc))])
-            } else {
-                json_null()
-            };
-            let payload = json_rpc_request("compute_market.stats", params);
+            let payload = stats_request_payload(accelerator.as_deref());
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
-                        if let Some(res) = val.get("result") {
-                            if let Some(engine) =
-                                res.get("settlement_engine").and_then(|v| v.as_object())
-                            {
-                                let engine_label =
-                                    engine.get("engine").and_then(|v| v.as_str()).unwrap_or("-");
-                                writeln!(out, "settlement engine: {engine_label}")?;
-                                let recommended = EngineKind::default_for_build().label();
-                                if engine_label != recommended {
-                                    writeln!(
-                                        out,
-                                        "warning: recommended settlement engine is {recommended}"
-                                    )?;
-                                }
-                                if engine
-                                    .get("legacy_mode")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false)
-                                {
-                                    writeln!(
-                                        out,
-                                        "warning: storage legacy mode is enabled and will be removed in the next release"
-                                    )?;
-                                }
-                            }
-                            let backlog = res
-                                .get("industrial_backlog")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or_default();
-                            let util = res
-                                .get("industrial_utilization")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or_default();
-                            let units = res
-                                .get("industrial_units_total")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or_default();
-                            let price = res
-                                .get("industrial_price_per_unit")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or_default();
-                            writeln!(
-                                out,
-                                "backlog: {backlog} util: {util}% units: {units} price: {price}"
-                            )?;
-                            if let Some(base) =
-                                res.get("industrial_price_base").and_then(|v| v.as_u64())
-                            {
-                                let weighted = res
-                                    .get("industrial_price_weighted")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(base);
-                                writeln!(out, "median base: {base} weighted: {weighted}")?;
-                            }
-                            if let Some(lanes) = res.get("lanes").and_then(|v| v.as_array()) {
-                                for lane in lanes {
-                                    let name =
-                                        lane.get("lane").and_then(|v| v.as_str()).unwrap_or("");
-                                    let bids =
-                                        lane.get("bids").and_then(|v| v.as_u64()).unwrap_or(0);
-                                    let asks =
-                                        lane.get("asks").and_then(|v| v.as_u64()).unwrap_or(0);
-                                    let oldest_bid = lane
-                                        .get("oldest_bid_wait_ms")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    let oldest_ask = lane
-                                        .get("oldest_ask_wait_ms")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    writeln!(
-                                        out,
-                                        "lane {name} bids: {bids} asks: {asks} oldest_bid_ms: {oldest_bid} oldest_ask_ms: {oldest_ask}"
-                                    )?;
-                                }
-                            }
-                            if let Some(warnings) =
-                                res.get("lane_starvation").and_then(|v| v.as_array())
-                            {
-                                for warning in warnings {
-                                    let name =
-                                        warning.get("lane").and_then(|v| v.as_str()).unwrap_or("");
-                                    let job = warning
-                                        .get("job_id")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let waited = warning
-                                        .get("waited_for_secs")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    writeln!(
-                                        out,
-                                        "starvation lane {name} job {job} waited_secs: {waited}"
-                                    )?;
-                                }
-                            }
-                            if let Some(recent) =
-                                res.get("recent_matches").and_then(|v| v.as_object())
-                            {
-                                for (lane_name, entries) in recent {
-                                    if let Some(array) = entries.as_array() {
-                                        for entry in array {
-                                            let job = entry
-                                                .get("job_id")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            let provider = entry
-                                                .get("provider")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            let price = entry
-                                                .get("price")
-                                                .and_then(|v| v.as_u64())
-                                                .unwrap_or(0);
-                                            let issued = entry
-                                                .get("issued_at")
-                                                .and_then(|v| v.as_u64())
-                                                .unwrap_or(0);
-                                            writeln!(
-                                                out,
-                                                "recent lane {lane_name} job {job} provider {provider} price {price} issued_at {issued}"
-                                            )?;
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            writeln!(out, "{}", text)?;
-                        }
-                    }
+                    write_stats_from_str(&text, out)?;
                 }
             }
 
-            let balance_payload =
-                json_rpc_request_with_id("compute_market.provider_balances", json_null(), 2);
+            let balance_payload = provider_balances_payload();
             if let Ok(resp) = client.call(&url, &balance_payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
-                        if let Some(providers) = val
-                            .get("result")
-                            .and_then(|res| res.get("providers"))
-                            .and_then(|v| v.as_array())
-                        {
-                            for entry in providers {
-                                let provider =
-                                    entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
-                                let ct = entry.get("ct").and_then(|v| v.as_u64()).unwrap_or(0);
-                                let industrial = entry
-                                    .get("industrial")
-                                    .or_else(|| entry.get("it"))
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0);
-                                writeln!(out, "provider: {provider} ct: {ct} it: {industrial}")?;
-                            }
-                        }
-                    }
+                    write_provider_balances_from_str(&text, out)?;
                 }
             }
         }

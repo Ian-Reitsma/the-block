@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::codec_helpers::{json_from_str, json_to_string, json_to_string_pretty};
+use crate::json_helpers::{
+    empty_object, json_array_from, json_bool, json_f64, json_null, json_object_from,
+    json_rpc_request, json_string, json_u64,
+};
 use crate::parse_utils::{
     optional_path, parse_bool, parse_u64, parse_u64_required, parse_usize_required,
     require_positional, take_string,
@@ -21,18 +25,6 @@ use foundation_serialization::{Deserialize, Serialize};
 use light_client::{self, SyncOptions};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
-
-fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
-    let mut map = JsonMap::new();
-    for (key, value) in pairs {
-        map.insert(key, value);
-    }
-    map
-}
-
-fn json_object_from(pairs: Vec<(String, Value)>) -> Value {
-    Value::Object(json_map_from(pairs))
-}
 
 #[derive(Debug)]
 pub enum LightClientCmd {
@@ -461,70 +453,6 @@ pub struct ResolvedDid {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct AnchorRecordWire {
-    address: String,
-    document: String,
-    hash: String,
-    nonce: u64,
-    updated_at: u64,
-    public_key: String,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    remote_attestation: Option<AnchorRemoteAttestation>,
-}
-
-impl AnchorRecordWire {
-    fn into_record(self) -> AnchorRecord {
-        let doc =
-            json_from_str(&self.document).unwrap_or_else(|_| Value::String(self.document.clone()));
-        AnchorRecord {
-            address: self.address,
-            document: doc,
-            hash: self.hash,
-            nonce: self.nonce,
-            updated_at: self.updated_at,
-            public_key: self.public_key,
-            remote_attestation: self.remote_attestation,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ResolvedDidWire {
-    address: String,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    document: Option<String>,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    hash: Option<String>,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    nonce: Option<u64>,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    updated_at: Option<u64>,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    public_key: Option<String>,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    remote_attestation: Option<AnchorRemoteAttestation>,
-}
-
-impl ResolvedDidWire {
-    fn into_record(self) -> ResolvedDid {
-        let document = self.document.and_then(|doc| {
-            json_from_str(&doc)
-                .map(Some)
-                .unwrap_or_else(|_| Some(Value::String(doc)))
-        });
-        ResolvedDid {
-            address: self.address,
-            document,
-            hash: self.hash,
-            nonce: self.nonce,
-            updated_at: self.updated_at,
-            public_key: self.public_key,
-            remote_attestation: self.remote_attestation,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct RpcEnvelope<T> {
     #[serde(default = "foundation_serialization::defaults::default")]
     result: Option<T>,
@@ -564,16 +492,6 @@ pub struct LightHeader {
     pub height: u64,
     pub hash: String,
     pub difficulty: u64,
-}
-
-#[derive(Serialize)]
-struct Payload<'a> {
-    jsonrpc: &'static str,
-    id: u32,
-    method: &'static str,
-    params: Value,
-    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    auth: Option<&'a str>,
 }
 
 pub fn handle(cmd: LightClientCmd) {
@@ -623,13 +541,7 @@ pub fn handle(cmd: LightClientCmd) {
 }
 
 fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "light_client.rebate_status",
-        params: Value::Object(JsonMap::new()),
-        auth: None,
-    };
+    let payload = json_rpc_request("light_client.rebate_status", empty_object());
     let response = client
         .call(url, &payload)
         .context("rebate status RPC call failed")?;
@@ -641,27 +553,16 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
 }
 
 fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<()> {
-    let mut params = foundation_serialization::json::Map::new();
+    let mut params = JsonMap::new();
     if let Some(relayer) = &args.relayer {
-        params.insert("relayer".to_string(), Value::String(relayer.clone()));
+        params.insert("relayer".to_string(), json_string(relayer));
     }
     if let Some(cursor) = args.cursor {
-        params.insert("cursor".to_string(), Value::Number(cursor.into()));
+        params.insert("cursor".to_string(), json_u64(cursor));
     }
-    params.insert(
-        "limit".to_string(),
-        Value::Number(foundation_serialization::json::Number::from(
-            args.limit as u64,
-        )),
-    );
+    params.insert("limit".to_string(), json_u64(args.limit as u64));
 
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "light_client.rebate_history",
-        params: Value::Object(params),
-        auth: None,
-    };
+    let payload = json_rpc_request("light_client.rebate_history", Value::Object(params));
     let response = client
         .call(&args.url, &payload)
         .context("rebate history RPC call failed")?;
@@ -705,12 +606,10 @@ fn run_device_status(json: bool) -> Result<()> {
             if json {
                 let gating = opts
                     .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
-                    .map(|g| Value::String(g.as_str().to_owned()))
-                    .unwrap_or(Value::Null);
-                let payload = json_object_from(vec![
-                    ("error".to_owned(), Value::String(err.to_string())),
-                    ("gating".to_owned(), gating),
-                ]);
+                    .map(|g| json_string(g.as_str()))
+                    .unwrap_or_else(json_null);
+                let payload =
+                    json_object_from([("error", json_string(err.to_string())), ("gating", gating)]);
                 println!("{}", json_to_string_pretty(&payload)?);
             } else {
                 println!("device probe unavailable: {}", err);
@@ -730,25 +629,22 @@ fn run_device_status(json: bool) -> Result<()> {
         let observed_ms = u64::try_from(observed_ms).unwrap_or(u64::MAX);
         let stale_ms = u64::try_from(snapshot.stale_for.as_millis()).unwrap_or(u64::MAX);
         let gating_value = gating
-            .map(|g| Value::String(g.as_str().to_owned()))
-            .unwrap_or(Value::Null);
-        let payload = json_object_from(vec![
-            ("wifi".to_owned(), Value::Bool(snapshot.status.on_wifi)),
+            .map(|g| json_string(g.as_str()))
+            .unwrap_or_else(json_null);
+        let payload = json_object_from([
+            ("wifi", json_bool(snapshot.status.on_wifi)),
+            ("charging", json_bool(snapshot.status.is_charging)),
             (
-                "charging".to_owned(),
-                Value::Bool(snapshot.status.is_charging),
+                "battery",
+                json_f64(f64::from(snapshot.status.battery_level)),
             ),
             (
-                "battery".to_owned(),
-                Value::from(snapshot.status.battery_level),
+                "freshness",
+                json_string(snapshot.freshness.as_label().to_owned()),
             ),
-            (
-                "freshness".to_owned(),
-                Value::String(snapshot.freshness.as_label().to_owned()),
-            ),
-            ("observed_at_millis".to_owned(), Value::from(observed_ms)),
-            ("stale_for_millis".to_owned(), Value::from(stale_ms)),
-            ("gating".to_owned(), gating_value),
+            ("observed_at_millis", json_u64(observed_ms)),
+            ("stale_for_millis", json_u64(stale_ms)),
+            ("gating", gating_value),
         ]);
         println!("{}", json_to_string_pretty(&payload)?);
     } else {
@@ -996,88 +892,94 @@ pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Re
     Ok(tx)
 }
 
-pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<AnchorRecord> {
-    let params =
-        foundation_serialization::json::to_value(tx).context("serialize anchor request")?;
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "identity.anchor",
-        params,
-        auth: None,
-    };
-    let resp = client
-        .call(url, &payload)
-        .context("identity.anchor RPC call failed")?
-        .json::<RpcEnvelope<Value>>()
-        .context("failed to decode identity.anchor response")?;
-    if let Some(err) = resp.error {
+fn json_byte_array(bytes: &[u8]) -> Value {
+    json_array_from(bytes.iter().copied().map(|b| json_u64(u64::from(b))))
+}
+
+fn remote_attestation_value(attestation: &Option<TxDidAnchorAttestation>) -> Value {
+    match attestation {
+        Some(att) => json_object_from([
+            ("signer", json_string(&att.signer)),
+            ("signature", json_string(&att.signature)),
+        ]),
+        None => json_null(),
+    }
+}
+
+pub fn anchor_request_params(tx: &TxDidAnchor) -> Value {
+    let mut map = JsonMap::new();
+    map.insert("address".to_string(), json_string(&tx.address));
+    map.insert("public_key".to_string(), json_byte_array(&tx.public_key));
+    map.insert("document".to_string(), json_string(&tx.document));
+    map.insert("nonce".to_string(), json_u64(tx.nonce));
+    map.insert("signature".to_string(), json_byte_array(&tx.signature));
+    map.insert(
+        "remote_attestation".to_string(),
+        remote_attestation_value(&tx.remote_attestation),
+    );
+    Value::Object(map)
+}
+
+pub fn anchor_record_from_value(result: Value) -> Result<AnchorRecord> {
+    parse_anchor_record(&result).context("unexpected identity.anchor response format")
+}
+
+fn anchor_envelope_to_record(envelope: RpcEnvelope<Value>) -> Result<AnchorRecord> {
+    if let Some(err) = envelope.error {
         return Err(anyhow!(
             "identity.anchor error {} (code {})",
             err.message,
             err.code
         ));
     }
-    let result = resp
+    let result = envelope
         .result
         .ok_or_else(|| anyhow!("missing identity.anchor result"))?;
     if let Some(code) = result.get("error").and_then(|v| v.as_str()) {
         return Err(anyhow!("identity.anchor rejected request: {}", code));
     }
-    let wire: AnchorRecordWire = foundation_serialization::json::from_value(result)
-        .context("unexpected identity.anchor response format")?;
-    Ok(wire.into_record())
+    anchor_record_from_value(result)
 }
 
-pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "light.latest_header",
-        params: Value::Null,
-        auth: None,
-    };
-    let resp = client
-        .call(url, &payload)
-        .context("light.latest_header RPC call failed")?
-        .json::<RpcEnvelope<LightHeader>>()
-        .context("failed to decode light.latest_header response")?;
-    if let Some(err) = resp.error {
+#[allow(dead_code)]
+pub fn anchor_envelope_value_to_record(value: Value) -> Result<AnchorRecord> {
+    let envelope = parse_value_envelope(&value, "identity.anchor")
+        .context("invalid identity.anchor envelope")?;
+    anchor_envelope_to_record(envelope)
+}
+
+fn latest_header_from_envelope(envelope: RpcEnvelope<LightHeader>) -> Result<LightHeader> {
+    if let Some(err) = envelope.error {
         return Err(anyhow!(
             "light.latest_header error {} (code {})",
             err.message,
             err.code
         ));
     }
-    resp.result
+    envelope
+        .result
         .ok_or_else(|| anyhow!("missing light.latest_header result"))
 }
 
-pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Result<ResolvedDid> {
-    let params = json_object_from(vec![(
-        "address".to_owned(),
-        Value::String(address.to_string()),
-    )]);
-    let payload = Payload {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "identity.resolve",
-        params,
-        auth: None,
-    };
-    let resp = client
-        .call(url, &payload)
-        .context("identity.resolve RPC call failed")?
-        .json::<RpcEnvelope<Value>>()
-        .context("failed to decode identity.resolve response")?;
-    if let Some(err) = resp.error {
+#[allow(dead_code)]
+pub fn latest_header_value_to_header(value: Value) -> Result<LightHeader> {
+    let envelope = parse_header_envelope(&value).context("invalid light.latest_header envelope")?;
+    latest_header_from_envelope(envelope)
+}
+
+pub fn resolved_did_from_value(result: Value) -> Result<ResolvedDid> {
+    parse_resolved_did(&result).context("unexpected identity.resolve response format")
+}
+
+fn resolved_did_envelope_to_record(envelope: RpcEnvelope<Value>) -> Result<ResolvedDid> {
+    if let Some(err) = envelope.error {
         return Err(anyhow!(
             "identity.resolve error {} (code {})",
             err.message,
             err.code
         ));
     }
-    let result = resp
+    let result = envelope
         .result
         .ok_or_else(|| anyhow!("missing identity.resolve result"))?;
     if let Some(code) = result.get("error").and_then(|v| v.as_str()) {
@@ -1086,7 +988,253 @@ pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Resul
             code
         ));
     }
-    let wire: ResolvedDidWire = foundation_serialization::json::from_value(result)
-        .context("unexpected identity.resolve response format")?;
-    Ok(wire.into_record())
+    resolved_did_from_value(result)
+}
+
+#[allow(dead_code)]
+pub fn resolved_did_value_to_record(value: Value) -> Result<ResolvedDid> {
+    let envelope = parse_value_envelope(&value, "identity.resolve")
+        .context("invalid identity.resolve envelope")?;
+    resolved_did_envelope_to_record(envelope)
+}
+
+pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<AnchorRecord> {
+    let params = anchor_request_params(tx);
+    let payload = json_rpc_request("identity.anchor", params);
+    let envelope = client
+        .call(url, &payload)
+        .context("identity.anchor RPC call failed")?
+        .json::<RpcEnvelope<Value>>()
+        .context("failed to decode identity.anchor response")?;
+    anchor_envelope_to_record(envelope)
+}
+
+pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
+    let payload = json_rpc_request("light.latest_header", json_null());
+    let envelope = client
+        .call(url, &payload)
+        .context("light.latest_header RPC call failed")?
+        .json::<RpcEnvelope<LightHeader>>()
+        .context("failed to decode light.latest_header response")?;
+    latest_header_from_envelope(envelope)
+}
+
+pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Result<ResolvedDid> {
+    let params = json_object_from([("address", json_string(address))]);
+    let payload = json_rpc_request("identity.resolve", params);
+    let envelope = client
+        .call(url, &payload)
+        .context("identity.resolve RPC call failed")?
+        .json::<RpcEnvelope<Value>>()
+        .context("failed to decode identity.resolve response")?;
+    resolved_did_envelope_to_record(envelope)
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn parse_string_field(map: &JsonMap, field: &str, context: &str) -> Result<String> {
+    map.get(field)
+        .ok_or_else(|| anyhow!("{context} missing field '{field}'"))?
+        .as_str()
+        .map(|value| value.to_owned())
+        .ok_or_else(|| anyhow!("{context} field '{field}' must be a string"))
+}
+
+fn parse_optional_string_field(
+    map: &JsonMap,
+    field: &str,
+    context: &str,
+) -> Result<Option<String>> {
+    match map.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_owned()))
+            .ok_or_else(|| anyhow!("{context} field '{field}' must be a string when present")),
+    }
+}
+
+fn parse_u64_field(map: &JsonMap, field: &str, context: &str) -> Result<u64> {
+    map.get(field)
+        .ok_or_else(|| anyhow!("{context} missing field '{field}'"))?
+        .as_u64()
+        .ok_or_else(|| anyhow!("{context} field '{field}' must be an unsigned integer"))
+}
+
+fn parse_optional_u64_field(map: &JsonMap, field: &str, context: &str) -> Result<Option<u64>> {
+    match map.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value.as_u64().map(Some).ok_or_else(|| {
+            anyhow!("{context} field '{field}' must be an unsigned integer when present")
+        }),
+    }
+}
+
+fn parse_remote_attestation(
+    map: &JsonMap,
+    context: &str,
+) -> Result<Option<AnchorRemoteAttestation>> {
+    match map.get("remote_attestation") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(object)) => {
+            let att_context = format!("{context} remote_attestation");
+            let signer = parse_string_field(object, "signer", &att_context)?;
+            let signature = parse_string_field(object, "signature", &att_context)?;
+            Ok(Some(AnchorRemoteAttestation { signer, signature }))
+        }
+        Some(other) => Err(anyhow!(
+            "{context} field 'remote_attestation' must be an object or null, got {}",
+            value_kind(other)
+        )),
+    }
+}
+
+fn parse_anchor_record(value: &Value) -> Result<AnchorRecord> {
+    let context = "identity.anchor result";
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
+
+    let address = parse_string_field(map, "address", context)?;
+    let document_value = map
+        .get("document")
+        .ok_or_else(|| anyhow!("{context} missing field 'document'"))?;
+    let document = match document_value {
+        Value::String(raw) => json_from_str(raw).unwrap_or_else(|_| Value::String(raw.clone())),
+        other => other.clone(),
+    };
+    let hash = parse_string_field(map, "hash", context)?;
+    let nonce = parse_u64_field(map, "nonce", context)?;
+    let updated_at = parse_u64_field(map, "updated_at", context)?;
+    let public_key = parse_string_field(map, "public_key", context)?;
+    let remote_attestation = parse_remote_attestation(map, context)?;
+
+    Ok(AnchorRecord {
+        address,
+        document,
+        hash,
+        nonce,
+        updated_at,
+        public_key,
+        remote_attestation,
+    })
+}
+
+fn parse_optional_error(value: Option<&Value>) -> Result<Option<RpcErrorBody>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(map)) => {
+            let context = "RPC error";
+            let code_value = map
+                .get("code")
+                .ok_or_else(|| anyhow!("{context} missing field 'code'"))?;
+            let code = if let Some(value) = code_value.as_i64() {
+                value
+            } else if let Some(value) = code_value.as_u64() {
+                if value <= i64::MAX as u64 {
+                    value as i64
+                } else {
+                    return Err(anyhow!(
+                        "{context} field 'code' exceeds supported range for signed integers"
+                    ));
+                }
+            } else {
+                return Err(anyhow!("{context} field 'code' must be a signed integer"));
+            };
+            let message = map
+                .get("message")
+                .ok_or_else(|| anyhow!("{context} missing field 'message'"))?
+                .as_str()
+                .ok_or_else(|| anyhow!("{context} field 'message' must be a string"))?
+                .to_owned();
+            Ok(Some(RpcErrorBody { code, message }))
+        }
+        Some(other) => Err(anyhow!(
+            "RPC error body must be an object or null, got {}",
+            value_kind(other)
+        )),
+    }
+}
+
+fn parse_value_envelope(value: &Value, method: &str) -> Result<RpcEnvelope<Value>> {
+    let context = format!("{method} envelope");
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
+    let error = parse_optional_error(map.get("error"))?;
+    let result = match map.get("result") {
+        None | Some(Value::Null) => None,
+        Some(other) => Some(other.clone()),
+    };
+    Ok(RpcEnvelope { result, error })
+}
+
+fn parse_light_header(value: &Value) -> Result<LightHeader> {
+    let context = "light.latest_header result";
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
+    let height = parse_u64_field(map, "height", context)?;
+    let hash = parse_string_field(map, "hash", context)?;
+    let difficulty = parse_u64_field(map, "difficulty", context)?;
+    Ok(LightHeader {
+        height,
+        hash,
+        difficulty,
+    })
+}
+
+fn parse_header_envelope(value: &Value) -> Result<RpcEnvelope<LightHeader>> {
+    let context = "light.latest_header envelope";
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
+    let error = parse_optional_error(map.get("error"))?;
+    let result = match map.get("result") {
+        None | Some(Value::Null) => None,
+        Some(other) => {
+            Some(parse_light_header(other).context("invalid light.latest_header result payload")?)
+        }
+    };
+    Ok(RpcEnvelope { result, error })
+}
+
+fn parse_resolved_did(value: &Value) -> Result<ResolvedDid> {
+    let context = "identity.resolve result";
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
+
+    let address = parse_string_field(map, "address", context)?;
+    let document = match map.get("document") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(raw)) => {
+            Some(json_from_str(raw).unwrap_or_else(|_| Value::String(raw.clone())))
+        }
+        Some(other) => Some(other.clone()),
+    };
+    let hash = parse_optional_string_field(map, "hash", context)?;
+    let nonce = parse_optional_u64_field(map, "nonce", context)?;
+    let updated_at = parse_optional_u64_field(map, "updated_at", context)?;
+    let public_key = parse_optional_string_field(map, "public_key", context)?;
+    let remote_attestation = parse_remote_attestation(map, context)?;
+
+    Ok(ResolvedDid {
+        address,
+        document,
+        hash,
+        nonce,
+        updated_at,
+        public_key,
+        remote_attestation,
+    })
 }

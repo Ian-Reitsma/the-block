@@ -8,6 +8,7 @@ use cli_core::{
 };
 #[cfg(feature = "telemetry")]
 use foundation_serialization::json;
+use foundation_serialization::json::Value;
 #[cfg(feature = "telemetry")]
 use std::collections::BTreeMap;
 #[cfg(feature = "telemetry")]
@@ -191,6 +192,61 @@ impl TelemetryCmd {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use foundation_serialization::json::{Map as JsonMap, Number, Value};
+
+    fn baseline(method: &str, params: Value) -> Value {
+        let mut map = JsonMap::new();
+        map.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+        map.insert("id".to_string(), Value::Number(Number::from(1)));
+        map.insert("method".to_string(), Value::String(method.to_string()));
+        map.insert("params".to_string(), params);
+        Value::Object(map)
+    }
+
+    #[test]
+    fn configure_request_serializes_values() {
+        let payload = configure_request(Some(0.5), Some(60));
+        let mut params = JsonMap::new();
+        params.insert(
+            "sample_rate".to_string(),
+            Value::Number(Number::from_f64(0.5).unwrap()),
+        );
+        params.insert(
+            "compaction_secs".to_string(),
+            Value::Number(Number::from(60)),
+        );
+        let expected = baseline("telemetry.configure", Value::Object(params));
+        assert_eq!(payload, expected);
+    }
+
+    #[test]
+    fn configure_request_uses_nulls_when_absent() {
+        let payload = configure_request(None, None);
+        let mut params = JsonMap::new();
+        params.insert("sample_rate".to_string(), Value::Null);
+        params.insert("compaction_secs".to_string(), Value::Null);
+        let expected = baseline("telemetry.configure", Value::Object(params));
+        assert_eq!(payload, expected);
+    }
+}
+
+fn configure_request(sample_rate: Option<f64>, compaction: Option<u64>) -> Value {
+    let params = json_object_from([
+        (
+            "sample_rate",
+            sample_rate.map(json_f64).unwrap_or_else(json_null),
+        ),
+        (
+            "compaction_secs",
+            compaction.map(json_u64).unwrap_or_else(json_null),
+        ),
+    ]);
+    json_rpc_request("telemetry.configure", params)
+}
+
 pub fn handle(cmd: TelemetryCmd) {
     match cmd {
         TelemetryCmd::Dump => {
@@ -226,19 +282,7 @@ pub fn handle(cmd: TelemetryCmd) {
                 return;
             }
             let client = RpcClient::from_env();
-            let params = json_object_from([
-                (
-                    "sample_rate",
-                    sample_rate.map(json_f64).unwrap_or_else(json_null),
-                ),
-                (
-                    "compaction_secs",
-                    compaction
-                        .map(|secs| json_u64(secs))
-                        .unwrap_or_else(json_null),
-                ),
-            ]);
-            let payload = json_rpc_request("telemetry.configure", params);
+            let payload = configure_request(sample_rate, compaction);
             let auth = token.as_ref().map(|t| format!("Bearer {}", t));
             match client.call_with_auth(&url, &payload, auth.as_deref()) {
                 Ok(resp) => match resp.text() {

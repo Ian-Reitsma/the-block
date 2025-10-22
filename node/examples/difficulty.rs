@@ -1,4 +1,4 @@
-use foundation_serialization::json::Value;
+use foundation_serialization::json::{Map as JsonMap, Number, Value};
 use the_block::rpc::client::{RpcClient, RpcClientError};
 
 /// Query the node's current difficulty via JSON-RPC.
@@ -11,12 +11,15 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "http://127.0.0.1:3030".to_string());
     let client = RpcClient::from_env();
-    let payload = foundation_serialization::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "consensus.difficulty",
-        "params": {}
-    });
+    let mut payload_map = JsonMap::new();
+    payload_map.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    payload_map.insert("id".to_string(), Value::Number(Number::from(1)));
+    payload_map.insert(
+        "method".to_string(),
+        Value::String("consensus.difficulty".to_string()),
+    );
+    payload_map.insert("params".to_string(), Value::Object(JsonMap::new()));
+    let payload = Value::Object(payload_map);
     match client
         .call(&url, &payload)
         .and_then(|r| r.json::<Value>().map_err(RpcClientError::from))

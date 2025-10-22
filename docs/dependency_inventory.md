@@ -1,6 +1,6 @@
 # Dependency Inventory
 
-_Last refreshed: 2025-10-20._  The workspace `Cargo.lock` no longer references
+_Last refreshed: 2025-10-21._  The workspace `Cargo.lock` no longer references
 any crates from crates.io; every dependency in the graph is now first-party.
 The final external cluster—the optional `legacy-format` sled importer—has been
 replaced with an in-house manifest shim so the lockfile resolves solely to
@@ -12,6 +12,30 @@ workspace crates.
 
 ## Highlights
 
+- ✅ CLI wallet integration tests now snapshot the `signer_metadata` array across
+  ready, override, ephemeral, and session preview flows. The `fee_floor_warning`
+  suite asserts the struct-level metadata vector, and the new
+  `wallet_signer_metadata` module inspects the auto-bump telemetry event—all via
+  first-party `JsonMap` builders—so the CLI remains hermetic without mock RPC
+  clients while guaranteeing deterministic JSON output for FIRST_PARTY_ONLY
+  runs.
+- ✅ Treasury CLI tests now exercise the helper builders directly: lifecycle
+  coverage funds the sled-backed store, execution/cancel assertions inspect the
+  typed records, and remote fetch regressions validate
+  `combine_treasury_fetch_results` with and without history—no
+  `JsonRpcMock` servers or `foundation_serialization::json::to_value`
+  conversions remain in the suite.
+- ✅ Wallet build previews expose signer metadata through a new
+  `BuildTxReport::signer_metadata` field, and the accompanying unit tests assert
+  on the JSON projection for auto-bump, confirmation, ephemeral, and session
+  flows while snapshotting the serialized array. The
+  service-badge and telemetry CLI modules now ship helper-backed tests that
+  snapshot the JSON-RPC envelopes for `verify`/`issue`/`revoke` and
+  `telemetry.configure`, eliminating reliance on mock servers or serde
+  conversions. The mobile push notification and node difficulty examples were
+  manualized as well, replacing their last `foundation_serialization::json!`
+  literals with explicit `JsonMap` builders so documentation tooling stays on
+  the first-party facade.
 - ✅ Contract CLI JSON surfaces now share a first-party `json_helpers` module.
   Compute, service-badge, scheduler, telemetry, identity, config, bridge, and
   TLS commands all emit RPC payloads through explicit `JsonMap` builders, and
