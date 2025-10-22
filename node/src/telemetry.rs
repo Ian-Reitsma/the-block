@@ -120,7 +120,10 @@ struct GovernanceWebhookPayload<'a> {
 pub mod summary;
 
 #[cfg(feature = "telemetry")]
-pub use bridges::{BRIDGE_CHALLENGES_TOTAL, BRIDGE_SLASHES_TOTAL};
+pub use bridges::{
+    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL,
+    BRIDGE_REWARD_CLAIMS_TOTAL, BRIDGE_SETTLEMENT_RESULTS_TOTAL, BRIDGE_SLASHES_TOTAL,
+};
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 

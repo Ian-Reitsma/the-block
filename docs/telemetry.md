@@ -96,7 +96,7 @@ Additional subsystem counters include:
   `mobile_tx_queue_depth` expose the encrypted mobile cache lifecycle (hits/misses,
   evictions, payload size) plus offline queue depth for operators running the gateway.
 - `PROOF_REBATES_PENDING_TOTAL`/`PROOF_REBATES_CLAIMED_TOTAL` track light-client rebate balances and payouts; alert when the pending gauge grows faster than block production.
-- `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, while `bridge_pending_withdrawals` gauges outstanding releases per asset.
+- `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` track governance-backed payout flows, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` records settlement submissions, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` captures duty resolution outcomes alongside the `bridge_pending_withdrawals` gauges of outstanding releases per asset.
 
 The `scheduler_cancel_total{reason}` counter ties into the compute-market
 `compute.job_cancel` RPC, exposing whether cancellations were triggered by the

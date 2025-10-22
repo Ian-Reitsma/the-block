@@ -1,5 +1,13 @@
 # Project Progress Snapshot
-> **Review (2025-10-23, pre-dawn):** Bridge incentives now cover the full governance lifecycle. Reward claim approvals persist through the sled-backed governance store, `bridge.claim_rewards` consumes allowances, and the CLI surfaces `blockctl bridge claim`/`reward-claims` so operators can reconcile payouts without touching sled snapshots. Settlement proofs gained first-party RPC/CLI (`bridge.submit_settlement`, `bridge.settlement-log`), `bridge.dispute_audit` renders challenge/settlement summaries, and channel configuration allows partial updates with optional proof enforcement. Fresh tests in `node/tests/bridge_incentives.rs`, `governance/src/store.rs`, and `node/src/governance/store.rs` lock the new flows to FIRST_PARTY_ONLY builds.
+> **Review (2025-10-23, afternoon):** Contract CLI bridge commands now route all
+> JSON-RPC traffic through a new `BridgeRpcTransport` trait. Production still
+> wraps the in-house `RpcClient`, but the integration suite swaps in an
+> in-memory `MockTransport` that records envelopes and returns scripted
+> responses. The test harness sheds the HTTP `JsonRpcMock` server and async
+> runtime dependency, keeping FIRST_PARTY_ONLY runs hermetic while continuing to
+> exercise the CLI pagination flows (`reward-claims`, `settlement-log`, and
+> `dispute-audit`) and settlement/reward payload builders end to end.
+> **Review (2025-10-23, pre-dawn):** Bridge incentives now cover the full governance lifecycle. Reward claim approvals persist through the sled-backed governance store, `bridge.claim_rewards` consumes allowances, and the CLI surfaces `blockctl bridge claim`/`reward-claims` so operators can reconcile payouts without touching sled snapshots. Cursor/limit pagination plus `next_cursor` responses landed across `bridge.reward_claims`, `bridge.settlement_log`, and `bridge.dispute_audit`, keeping audits streaming without dumping entire deques. Settlement proofs gained first-party RPC/CLI (`bridge.submit_settlement`, `bridge.settlement-log`), `bridge.dispute_audit` renders challenge/settlement summaries, and channel configuration allows partial updates with optional proof enforcement. Telemetry exports now include `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}`, with the refreshed `node/tests/bridge_incentives.rs` suite verifying counter increments under `test-telemetry`. Fresh tests in `governance/src/store.rs` and `node/src/governance/store.rs` lock the new flows to FIRST_PARTY_ONLY builds.
 > **Review (2025-10-22, mid-morning+):** CLI integration tests now exercise the
 > wallet preview helpers directly: the `fee_floor_warning` suite asserts the
 > `signer_metadata` vector for ready and override branches, and a dedicated
@@ -762,7 +770,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Governance-controlled incentive parameters (`BridgeIncentiveParameters`) drive minimum bond, reward, and slashing rules, with refreshed integration coverage in `node/tests/bridge.rs` and the new `node/tests/bridge_incentives.rs` exercising honest/faulty relayers end to end.
 - Sled-backed duty ledger and per-relayer accounting snapshots expose rewards, penalties, and duty history via `bridge.relayer_accounting`/`bridge.duty_log` and the matching CLI commands (`blockctl bridge accounting`, `blockctl bridge duties`).
 - Multi-signature quorum enforcement and governance authorization hooks in `bridge.verify_deposit` and `governance::ensure_release_authorized` remain active, with duty outcomes persisted for audit.
-- Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`.
+- Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`, while reward claims, settlement submissions, and duty outcomes update `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
 

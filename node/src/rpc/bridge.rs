@@ -12,6 +12,7 @@ use bridge_types::{DutyKind, DutyRecord, DutyStatus, ExternalSettlementProof};
 use bridges::{header::PowHeader, light_client::Proof, RelayerBundle, RelayerProof};
 use concurrency::Lazy;
 use foundation_serialization::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::sync::{Mutex, MutexGuard};
 
 static SERVICE: Lazy<Mutex<Bridge>> = Lazy::new(|| {
@@ -82,6 +83,20 @@ fn default_asset() -> String {
 #[allow(dead_code)]
 fn default_limit() -> u64 {
     100
+}
+
+const REWARD_CLAIM_PAGE_MAX: usize = 256;
+const SETTLEMENT_PAGE_MAX: usize = 256;
+const DISPUTE_PAGE_MAX: usize = 256;
+
+fn clamp_page_limit(limit: u64, max: usize) -> usize {
+    let requested = usize::try_from(limit).unwrap_or(max);
+    let clamped = requested.min(max);
+    if clamped == 0 {
+        1
+    } else {
+        clamped
+    }
 }
 
 #[derive(Deserialize)]
@@ -241,6 +256,10 @@ pub struct SlashLogRequest {}
 pub struct RewardClaimsRequest {
     #[serde(default)]
     pub relayer: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
 }
 
 #[derive(Deserialize)]
@@ -248,6 +267,10 @@ pub struct RewardClaimsRequest {
 pub struct SettlementLogRequest {
     #[serde(default)]
     pub asset: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
 }
 
 #[derive(Deserialize)]
@@ -255,6 +278,10 @@ pub struct SettlementLogRequest {
 pub struct DisputeAuditRequest {
     #[serde(default)]
     pub asset: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
 }
 
 #[derive(Deserialize)]
@@ -597,6 +624,8 @@ pub struct RewardClaimResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct RewardClaimsResponse {
     pub claims: Vec<RewardClaimEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -636,6 +665,8 @@ pub struct SettlementResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct SettlementLogResponse {
     pub settlements: Vec<SettlementEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -721,6 +752,8 @@ impl From<DisputeAuditRecord> for DisputeAuditEntry {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct DisputeAuditResponse {
     pub disputes: Vec<DisputeAuditEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1047,32 +1080,35 @@ pub fn relayer_quorum(req: RelayerQuorumRequest) -> Result<RelayerQuorumResponse
 
 pub fn reward_claims(req: RewardClaimsRequest) -> Result<RewardClaimsResponse, RpcError> {
     let bridge = guard()?;
-    let claims = bridge
-        .reward_claims(req.relayer.as_deref())
-        .into_iter()
-        .map(RewardClaimEntry::from)
-        .collect();
-    Ok(RewardClaimsResponse { claims })
+    let limit = clamp_page_limit(req.limit, REWARD_CLAIM_PAGE_MAX);
+    let (records, next_cursor) = bridge.reward_claims(req.relayer.as_deref(), req.cursor, limit);
+    let claims = records.into_iter().map(RewardClaimEntry::from).collect();
+    Ok(RewardClaimsResponse {
+        claims,
+        next_cursor,
+    })
 }
 
 pub fn settlement_log(req: SettlementLogRequest) -> Result<SettlementLogResponse, RpcError> {
     let bridge = guard()?;
-    let settlements = bridge
-        .settlement_records(req.asset.as_deref())
-        .into_iter()
-        .map(SettlementEntry::from)
-        .collect();
-    Ok(SettlementLogResponse { settlements })
+    let limit = clamp_page_limit(req.limit, SETTLEMENT_PAGE_MAX);
+    let (records, next_cursor) = bridge.settlement_records(req.asset.as_deref(), req.cursor, limit);
+    let settlements = records.into_iter().map(SettlementEntry::from).collect();
+    Ok(SettlementLogResponse {
+        settlements,
+        next_cursor,
+    })
 }
 
 pub fn dispute_audit(req: DisputeAuditRequest) -> Result<DisputeAuditResponse, RpcError> {
     let bridge = guard()?;
-    let disputes = bridge
-        .dispute_audit(req.asset.as_deref())
-        .into_iter()
-        .map(DisputeAuditEntry::from)
-        .collect();
-    Ok(DisputeAuditResponse { disputes })
+    let limit = clamp_page_limit(req.limit, DISPUTE_PAGE_MAX);
+    let (records, next_cursor) = bridge.dispute_audit(req.asset.as_deref(), req.cursor, limit);
+    let disputes = records.into_iter().map(DisputeAuditEntry::from).collect();
+    Ok(DisputeAuditResponse {
+        disputes,
+        next_cursor,
+    })
 }
 
 pub fn relayer_accounting(

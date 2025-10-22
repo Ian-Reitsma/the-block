@@ -12,6 +12,11 @@ workspace crates.
 
 ## Highlights
 
+- ✅ Bridge CLI RPC calls now flow through a new `BridgeRpcTransport` trait that
+  wraps the production `RpcClient` while letting tests inject an in-memory
+  `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
+  dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
+  hermetic without background servers.
 - ✅ CLI wallet integration tests now snapshot the `signer_metadata` array across
   ready, override, ephemeral, and session preview flows. The `fee_floor_warning`
   suite asserts the struct-level metadata vector, and the new
@@ -25,9 +30,11 @@ workspace crates.
   `bridge.submit_settlement`, `bridge.settlement_log`, and `bridge.dispute_audit`
   share typed request/response structs and manual JSON builders mirrored by the
   CLI (`blockctl bridge claim`, `reward-claims`, `settlement`, `settlement-log`,
-  `dispute-audit`). Channel configuration accepts optional fields/clear flags
-  without serde fallbacks, and new unit tests in `governance/src/store.rs` plus
-  `node/src/governance/store.rs` validate sled persistence end to end.
+  `dispute-audit`). Cursor/limit pagination with `next_cursor` responses keeps
+  long histories streaming through the same builders. Channel configuration
+  accepts optional fields/clear flags without serde fallbacks, and new unit tests
+  in `governance/src/store.rs` plus `node/src/governance/store.rs` validate sled
+  persistence end to end.
 - ✅ Treasury CLI tests now exercise the helper builders directly: lifecycle
   coverage funds the sled-backed store, execution/cancel assertions inspect the
   typed records, and remote fetch regressions validate

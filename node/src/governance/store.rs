@@ -665,6 +665,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::GammaReadSubCt => "gamma_read_sub_ct",
         ParamKey::KappaCpuSubCt => "kappa_cpu_sub_ct",
         ParamKey::LambdaBytesOutSubCt => "lambda_bytes_out_sub_ct",
+        ParamKey::TreasuryPercentCt => "treasury_percent_ct",
         ParamKey::ProofRebateLimitCt => "proof_rebate_limit_ct",
         ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
         ParamKey::KillSwitchSubsidyReduction => "kill_switch_subsidy_reduction",
@@ -688,6 +689,11 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::RuntimeBackend => "runtime_backend_policy",
         ParamKey::TransportProvider => "transport_provider_policy",
         ParamKey::StorageEnginePolicy => "storage_engine_policy",
+        ParamKey::BridgeMinBond => "bridge_min_bond",
+        ParamKey::BridgeDutyReward => "bridge_duty_reward",
+        ParamKey::BridgeFailureSlash => "bridge_failure_slash",
+        ParamKey::BridgeChallengeSlash => "bridge_challenge_slash",
+        ParamKey::BridgeDutyWindowSecs => "bridge_duty_window_secs",
     }
 }
 

@@ -1,6 +1,14 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-23 04:20:00Z_
+_Last updated: 2025-10-23 15:20:00Z_
+
+> **2025-10-23 update (CLI bridge transport abstraction):** Bridge commands in
+> the contract CLI now route every JSON-RPC call through a new
+> `BridgeRpcTransport` trait. Production flows wrap the existing `RpcClient`,
+> while the integration suite injects an in-memory `MockTransport` that records
+> envelopes and returns pre-seeded responses. This deletes the `JsonRpcMock`
+> HTTP harness, drops the `runtime` executor from the test surface, and keeps
+> FIRST_PARTY_ONLY builds hermetic without background servers.
 
 > **2025-10-23 update (bridge reward claims & settlement proofs):** Governance
 > reward approvals now persist through first-party sled helpers in both the
@@ -8,12 +16,18 @@ _Last updated: 2025-10-23 04:20:00Z_
 > `bridge.submit_settlement`, `bridge.settlement_log`, and `bridge.dispute_audit`
 > all assemble payloads via handwritten JSON builders, and the CLI mirrors the
 > same approach for `blockctl bridge claim`, `reward-claims`, `settlement`,
-> `settlement-log`, and `dispute-audit`. Channel configuration updates accept
-> optional fields without overwriting existing settings, and new unit tests in
-> `governance/src/store.rs` plus `node/src/governance/store.rs` confirm reward
-> approvals survive reopen and reject mismatched relayers. The integration suite
-> (`node/tests/bridge_incentives.rs`) now covers reward redemption, settlement
-> proofs, and dispute audits end-to-end under FIRST_PARTY_ONLY.
+> `settlement-log`, and `dispute-audit`. Cursor/limit pagination now ships across
+> these RPC/CLI surfaces with `next_cursor` propagation so FIRST_PARTY_ONLY flows
+> can stream long histories without serde helpers. Channel configuration updates
+> accept optional fields without overwriting existing settings, and new unit
+> tests in `governance/src/store.rs` plus `node/src/governance/store.rs` confirm
+> reward approvals survive reopen and reject mismatched relayers. Telemetry now
+> exports `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`,
+> `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and
+> `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` alongside the existing challenge
+> and slash counters. The integration suite (`node/tests/bridge_incentives.rs`)
+> now covers reward redemption, settlement proofs, dispute audits, pagination, and
+> telemetry increments end-to-end under FIRST_PARTY_ONLY.
 
 > **2025-10-22 update (bridge incentive ledger):** Bridge state persistence no
 longer touches the `foundation_serde` stub. Incentive parameters and duty

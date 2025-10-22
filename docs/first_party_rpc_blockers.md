@@ -27,10 +27,16 @@ RPC client.
   payout reconciliation avoids serde fallbacks. Settlement proofs and dispute
   audits ride the same stack through `bridge.submit_settlement`,
   `bridge.settlement_log`, and `bridge.dispute_audit`, with CLI mirrors that reuse
-  the shared JSON helpers. Partial channel reconfiguration (`bridge.configure_asset`)
+  the shared JSON helpers. Cursor/limit pagination plus `next_cursor` propagation
+  landed across these endpoints, keeping FIRST_PARTY_ONLY pagination logic inside
+  the handwritten builders. Partial channel reconfiguration (`bridge.configure_asset`)
   accepts optional fields/clear flags without clobbering existing values, and
   unit tests in `governance/src/store.rs` and `node/src/governance/store.rs`
-  verify reward approvals persist across reopen.
+  verify reward approvals persist across reopen. Telemetry counters now include
+  `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`,
+  `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and
+  `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` alongside the existing challenge
+  and slash metrics, with integration coverage in `node/tests/bridge_incentives.rs`.
 
 ## Recent progress (2025-10-22)
 
@@ -56,6 +62,15 @@ RPC client.
   push notification and node difficulty examples have also been manualized,
   replacing their last `foundation_serialization::json!` literals with explicit
   `JsonMap` assembly so documentation tooling mirrors production payloads.
+
+## Recent progress (2025-10-23)
+
+- Contract CLI bridge commands now rely on the new `BridgeRpcTransport` trait.
+  Production still wraps the existing `RpcClient`, but the CLI tests inject an
+  in-memory `MockTransport` that records envelopes and returns canned responses.
+  This removes the `JsonRpcMock` HTTP harness and async runtime dependency from
+  the suite, keeping FIRST_PARTY_ONLY runs hermetic while preserving the
+  end-to-end JSON builders.
 
 ## Recent progress (2025-10-21)
 

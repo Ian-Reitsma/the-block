@@ -25,12 +25,12 @@ pub use token_bridge::TokenBridge;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::Counter;
+use runtime::telemetry::{Counter, CounterVec};
 
 #[cfg(feature = "telemetry")]
 mod telemetry_support {
     use concurrency::Lazy;
-    use runtime::telemetry::{Counter, Registry};
+    use runtime::telemetry::{Counter, CounterVec, Opts, Registry};
 
     pub(super) static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -40,10 +40,24 @@ mod telemetry_support {
             .register_counter(name, help)
             .expect("register bridge telemetry counter")
     }
+
+    pub(super) fn counter_vec(
+        name: &'static str,
+        help: &'static str,
+        labels: &'static [&'static str],
+    ) -> CounterVec {
+        let opts = Opts::new(name, help);
+        let vec = CounterVec::new(opts, labels).expect("create bridge telemetry counter vec");
+        REGISTRY
+            .get()
+            .register(Box::new(vec.clone()))
+            .expect("register bridge telemetry counter vec");
+        vec
+    }
 }
 
 #[cfg(feature = "telemetry")]
-use telemetry_support::counter;
+use telemetry_support::{counter, counter_vec};
 
 #[cfg(feature = "telemetry")]
 fn proof_verify_success_counter() -> Counter {
@@ -86,6 +100,40 @@ fn bridge_slashes_counter() -> Counter {
 }
 
 #[cfg(feature = "telemetry")]
+fn bridge_reward_claims_counter() -> Counter {
+    counter(
+        "bridge_reward_claims_total",
+        "Bridge reward claim operations processed",
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_reward_approvals_consumed_counter() -> Counter {
+    counter(
+        "bridge_reward_approvals_consumed_total",
+        "Total bridge reward allowance consumed by approved claims",
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_settlement_results_counter() -> CounterVec {
+    counter_vec(
+        "bridge_settlement_results_total",
+        "Bridge settlement submissions grouped by result and reason",
+        &["result", "reason"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_dispute_outcomes_counter() -> CounterVec {
+    counter_vec(
+        "bridge_dispute_outcomes_total",
+        "Bridge dispute outcomes grouped by duty kind and outcome",
+        &["kind", "outcome"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
 pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_success_counter);
 
 #[cfg(feature = "telemetry")]
@@ -99,6 +147,21 @@ pub static BRIDGE_CHALLENGES_TOTAL: Lazy<Counter> = Lazy::new(bridge_challenges_
 
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_SLASHES_TOTAL: Lazy<Counter> = Lazy::new(bridge_slashes_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_REWARD_CLAIMS_TOTAL: Lazy<Counter> = Lazy::new(bridge_reward_claims_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL: Lazy<Counter> =
+    Lazy::new(bridge_reward_approvals_consumed_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_SETTLEMENT_RESULTS_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_settlement_results_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_DISPUTE_OUTCOMES_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_dispute_outcomes_counter);
 
 #[cfg(feature = "telemetry")]
 pub(crate) fn telemetry_counter(name: &'static str, help: &'static str) -> Counter {

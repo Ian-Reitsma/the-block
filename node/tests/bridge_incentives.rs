@@ -16,6 +16,11 @@ use the_block::bridge::{
     global_incentives, set_global_incentives, Bridge, BridgeError, ChannelConfig,
 };
 use the_block::governance::{GovStore, RewardClaimApproval};
+#[cfg(feature = "test-telemetry")]
+use the_block::telemetry::{
+    BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL,
+    BRIDGE_REWARD_CLAIMS_TOTAL, BRIDGE_SETTLEMENT_RESULTS_TOTAL, LABEL_REGISTRATION_ERR,
+};
 
 static GOV_DB_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -258,7 +263,7 @@ fn bridge_incentive_accounting_tracks_rewards_and_slashes() {
     assert!(failed_records.iter().any(|record| record.relayer == "r1"));
     assert!(failed_records.iter().any(|record| record.relayer == "r2"));
 
-    let disputes = bridge.dispute_audit(Some("native"));
+    let (disputes, _) = bridge.dispute_audit(Some("native"), None, 256);
     let challenged_entry = disputes
         .iter()
         .find(|entry| entry.commitment == commitment)
@@ -359,10 +364,19 @@ fn reward_claim_requires_governance_approval() {
         .expect("consume remaining approval");
     assert!(claim_two.id > claim_one.id);
 
-    let claims = bridge.reward_claims(Some("r1"));
+    let (claims, next_cursor) = bridge.reward_claims(Some("r1"), None, 256);
     assert_eq!(claims.len(), 2);
     assert_eq!(claims[0].approval_key, "approval-r1");
     assert_eq!(claims[1].approval_key, "approval-r1");
+    assert!(next_cursor.is_none());
+
+    let (page_one, cursor) = bridge.reward_claims(Some("r1"), None, 1);
+    assert_eq!(page_one.len(), 1);
+    assert_eq!(cursor, Some(1));
+    let (page_two, cursor_two) = bridge.reward_claims(Some("r1"), cursor, 1);
+    assert_eq!(page_two.len(), 1);
+    assert!(cursor_two.is_none());
+    assert_ne!(page_one[0].id, page_two[0].id);
 
     {
         let store = GovStore::open(&gov_path);
@@ -489,11 +503,63 @@ fn settlement_proof_flow_records_and_audits() {
     assert_eq!(entry.settlement_chain.as_deref(), Some("solana"));
     assert!(entry.settlement_submitted_at.is_some());
 
-    let settlements = bridge.settlement_records(Some("native"));
+    let (settlements, _) = bridge.settlement_records(Some("native"), None, 256);
     assert_eq!(settlements.len(), 1);
     assert_eq!(settlements[0].proof_hash, correct_proof.proof_hash);
 
-    let disputes = bridge.dispute_audit(Some("native"));
+    let header_two = sample_header_with_height(8);
+    let proof_two = sample_proof();
+    let bundle_two = sample_bundle("frank", 30);
+    bridge
+        .deposit(
+            "native",
+            "r1",
+            "frank",
+            30,
+            &header_two,
+            &proof_two,
+            &bundle_two,
+        )
+        .expect("second settlement deposit");
+    let second_commitment_key = bundle_two.aggregate_commitment("frank", 30);
+    approve_release(&gov_path, "native", &second_commitment_key);
+    let second_commitment = bridge
+        .request_withdrawal("native", "r1", "frank", 30, &bundle_two)
+        .expect("second withdrawal request");
+    let second_proof = ExternalSettlementProof {
+        commitment: second_commitment,
+        settlement_chain: "solana".into(),
+        proof_hash: [3u8; 32],
+        settlement_height: 66,
+    };
+    bridge
+        .submit_settlement_proof("native", "r1", second_proof)
+        .expect("submit second settlement proof");
+
+    let (first_page, cursor) = bridge.settlement_records(Some("native"), None, 1);
+    assert_eq!(first_page.len(), 1);
+    let (second_page, cursor_two) = bridge.settlement_records(Some("native"), cursor, 1);
+    assert_eq!(second_page.len(), 1);
+    assert!(cursor_two.is_none());
+    assert_ne!(first_page[0].commitment, second_page[0].commitment);
+    assert_eq!(second_page[0].commitment, second_commitment);
+
+    let (disputes, _) = bridge.dispute_audit(Some("native"), None, 256);
+    assert_eq!(disputes.len(), 2);
+    let (disputes_page_one, dispute_cursor) = bridge.dispute_audit(Some("native"), None, 1);
+    assert_eq!(disputes_page_one.len(), 1);
+    assert_eq!(dispute_cursor, Some(1));
+    let (disputes_page_two, dispute_cursor_two) =
+        bridge.dispute_audit(Some("native"), dispute_cursor, 1);
+    assert_eq!(disputes_page_two.len(), 1);
+    assert!(dispute_cursor_two.is_none());
+    assert!(disputes_page_two
+        .iter()
+        .any(|record| record.commitment == second_commitment));
+    assert_ne!(
+        disputes_page_one[0].commitment,
+        disputes_page_two[0].commitment
+    );
     let dispute = disputes
         .iter()
         .find(|record| record.commitment == commitment)
@@ -506,16 +572,189 @@ fn settlement_proof_flow_records_and_audits() {
         .finalize_withdrawal("native", commitment)
         .expect("finalize with proof");
 
+    bridge
+        .finalize_withdrawal("native", second_commitment)
+        .expect("finalize second settlement");
+
     let pending_after = bridge.pending_withdrawals(Some("native"));
     assert!(pending_after.is_empty());
 
-    let disputes_after = bridge.dispute_audit(Some("native"));
+    let (disputes_after, _) = bridge.dispute_audit(Some("native"), None, 256);
     let entry_after = disputes_after
-        .into_iter()
+        .iter()
         .find(|record| record.commitment == commitment)
         .expect("dispute entry after finalize");
     assert!(entry_after
         .relayer_outcomes
         .iter()
         .any(|outcome| outcome.status == "completed"));
+
+    let second_entry_after = disputes_after
+        .iter()
+        .find(|record| record.commitment == second_commitment)
+        .expect("second dispute entry after finalize");
+    assert!(second_entry_after
+        .relayer_outcomes
+        .iter()
+        .any(|outcome| outcome.status == "completed"));
+}
+
+#[cfg(feature = "test-telemetry")]
+#[test]
+fn telemetry_tracks_bridge_flows() {
+    BRIDGE_REWARD_CLAIMS_TOTAL.reset();
+    BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL.reset();
+    let settlement_success = BRIDGE_SETTLEMENT_RESULTS_TOTAL
+        .ensure_handle_for_label_values(&["success", "ok"])
+        .expect(LABEL_REGISTRATION_ERR);
+    settlement_success.reset();
+    let settlement_chain_mismatch = BRIDGE_SETTLEMENT_RESULTS_TOTAL
+        .ensure_handle_for_label_values(&["failure", "chain_mismatch"])
+        .expect(LABEL_REGISTRATION_ERR);
+    settlement_chain_mismatch.reset();
+    let dispute_settlement_success = BRIDGE_DISPUTE_OUTCOMES_TOTAL
+        .ensure_handle_for_label_values(&["settlement", "success"])
+        .expect(LABEL_REGISTRATION_ERR);
+    dispute_settlement_success.reset();
+    let dispute_withdrawal_challenge = BRIDGE_DISPUTE_OUTCOMES_TOTAL
+        .ensure_handle_for_label_values(&["withdrawal", "challenge_accepted"])
+        .expect(LABEL_REGISTRATION_ERR);
+    dispute_withdrawal_challenge.reset();
+
+    let tmp = tempdir().expect("tempdir");
+    let gov_path = tmp.path().join("gov");
+    let _guard = GovEnvGuard::set(&gov_path);
+
+    let bridge_path = tmp.path().join("bridge_db");
+    let headers_dir = tmp.path().join("headers_native");
+    let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+
+    let config = ChannelConfig {
+        asset: "native".into(),
+        confirm_depth: 1,
+        fee_per_byte: 0,
+        challenge_period_secs: 0,
+        relayer_quorum: 2,
+        headers_dir: headers_dir.to_str().expect("headers dir").to_string(),
+        requires_settlement_proof: true,
+        settlement_chain: Some("solana".into()),
+    };
+    bridge
+        .set_channel_config("native", config)
+        .expect("configure settlement channel");
+
+    let params = BridgeIncentiveParameters {
+        min_bond: 25,
+        duty_reward: 12,
+        failure_slash: 4,
+        challenge_slash: 11,
+        duty_window_secs: 45,
+    };
+    let _incentive_guard = IncentiveGuard::set(params.clone());
+
+    bridge.bond_relayer("r1", 200).unwrap();
+    bridge.bond_relayer("r2", 200).unwrap();
+
+    let header = sample_header_with_height(10);
+    let proof = sample_proof();
+    let bundle = sample_bundle("erin", 40);
+    bridge
+        .deposit("native", "r1", "erin", 40, &header, &proof, &bundle)
+        .expect("deposit");
+
+    let commitment = bundle.aggregate_commitment("erin", 40);
+    approve_release(&gov_path, "native", &commitment);
+    let commitment = bridge
+        .request_withdrawal("native", "r1", "erin", 40, &bundle)
+        .expect("request withdrawal");
+
+    let failure_before = settlement_chain_mismatch.get();
+    let wrong_proof = ExternalSettlementProof {
+        commitment,
+        settlement_chain: "ethereum".into(),
+        proof_hash: [3u8; 32],
+        settlement_height: 51,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r1", wrong_proof)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        BridgeError::SettlementProofChainMismatch { .. }
+    ));
+    assert_eq!(settlement_chain_mismatch.get(), failure_before + 1);
+
+    let success_before = settlement_success.get();
+    let dispute_settlement_before = dispute_settlement_success.get();
+    let correct_proof = ExternalSettlementProof {
+        commitment,
+        settlement_chain: "solana".into(),
+        proof_hash: [4u8; 32],
+        settlement_height: 52,
+    };
+    let record = bridge
+        .submit_settlement_proof("native", "r1", correct_proof)
+        .expect("submit settlement proof");
+    assert_eq!(record.settlement_chain.as_deref(), Some("solana"));
+    assert_eq!(settlement_success.get(), success_before + 1);
+    assert_eq!(
+        dispute_settlement_success.get(),
+        dispute_settlement_before + 1
+    );
+
+    let approval = RewardClaimApproval::new("approval-r1", "r1", params.duty_reward * 2);
+    {
+        let store = GovStore::open(&gov_path);
+        store
+            .record_reward_claim(&approval)
+            .expect("record approval");
+    }
+
+    let reward_claims_before = BRIDGE_REWARD_CLAIMS_TOTAL.value();
+    let approvals_before = BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL.value();
+    let claim = bridge
+        .claim_rewards("r1", params.duty_reward, "approval-r1")
+        .expect("claim approved rewards");
+    assert_eq!(claim.amount, params.duty_reward);
+    assert_eq!(BRIDGE_REWARD_CLAIMS_TOTAL.value(), reward_claims_before + 1);
+    assert_eq!(
+        BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL.value(),
+        approvals_before + params.duty_reward
+    );
+
+    let header_two = sample_header_with_height(11);
+    let proof_two = sample_proof();
+    let bundle_two = sample_bundle("erin", 10);
+    bridge
+        .deposit(
+            "native",
+            "r2",
+            "erin",
+            10,
+            &header_two,
+            &proof_two,
+            &bundle_two,
+        )
+        .expect("second deposit");
+    let commitment_two = bundle_two.aggregate_commitment("erin", 10);
+    approve_release(&gov_path, "native", &commitment_two);
+    let commitment_two = bridge
+        .request_withdrawal("native", "r2", "erin", 10, &bundle_two)
+        .expect("second withdrawal");
+
+    let dispute_challenge_before = dispute_withdrawal_challenge.get();
+    bridge
+        .challenge_withdrawal("native", commitment_two, "auditor")
+        .expect("challenge withdrawal");
+    let expected_failures = {
+        let mut set = std::collections::HashSet::new();
+        for relayer in bundle_two.relayer_ids() {
+            set.insert(relayer);
+        }
+        set.len() as u64
+    };
+    assert_eq!(
+        dispute_withdrawal_challenge.get(),
+        dispute_challenge_before + expected_failures
+    );
 }

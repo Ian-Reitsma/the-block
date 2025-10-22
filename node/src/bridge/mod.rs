@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry::BRIDGE_CHALLENGES_TOTAL;
+use crate::telemetry::{
+    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL,
+    BRIDGE_REWARD_CLAIMS_TOTAL, BRIDGE_SETTLEMENT_RESULTS_TOTAL,
+};
 use crate::{governance, simple_db::names, SimpleDb};
 use bridge_types::{
     BridgeIncentiveParameters, DutyFailureReason, DutyKind, DutyRecord, DutyStatus,
@@ -19,6 +22,7 @@ use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json::{self, Number, Value};
 use sled::{Config as SledConfig, Db as SledDb};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -38,6 +42,57 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(feature = "telemetry")]
+fn telemetry_record_settlement(result: &'static str, reason: &'static str) {
+    if let Ok(handle) =
+        BRIDGE_SETTLEMENT_RESULTS_TOTAL.ensure_handle_for_label_values(&[result, reason])
+    {
+        handle.inc();
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn telemetry_record_settlement(_: &'static str, _: &'static str) {}
+
+fn telemetry_record_settlement_success() {
+    telemetry_record_settlement("success", "ok");
+}
+
+fn telemetry_record_settlement_failure(reason: &'static str) {
+    telemetry_record_settlement("failure", reason);
+}
+
+#[cfg(feature = "telemetry")]
+fn telemetry_record_reward_claim(amount: u64) {
+    BRIDGE_REWARD_CLAIMS_TOTAL.inc();
+    if amount > 0 {
+        BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL.inc_by(amount);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn telemetry_record_reward_claim(_: u64) {}
+
+#[cfg(feature = "telemetry")]
+fn telemetry_record_dispute(kind: &'static str, outcome: &'static str) {
+    if let Ok(handle) =
+        BRIDGE_DISPUTE_OUTCOMES_TOTAL.ensure_handle_for_label_values(&[kind, outcome])
+    {
+        handle.inc();
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn telemetry_record_dispute(_: &'static str, _: &'static str) {}
+
+fn duty_kind_label(kind: &DutyKind) -> Option<&'static str> {
+    match kind {
+        DutyKind::Withdrawal { .. } => Some("withdrawal"),
+        DutyKind::Settlement { .. } => Some("settlement"),
+        DutyKind::Deposit => None,
+    }
 }
 
 #[derive(Debug)]
@@ -2062,6 +2117,9 @@ impl Bridge {
                 completed_at,
             },
         ) {
+            if let Some(kind_label) = duty_kind_label(&record.kind) {
+                telemetry_record_dispute(kind_label, "success");
+            }
             let relayer_id = record.relayer.clone();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.complete_duty();
@@ -2077,14 +2135,19 @@ impl Bridge {
 
     fn record_duty_failure(&mut self, duty_id: u64, penalty: u64, reason: DutyFailureReason) {
         let failed_at = now_secs();
+        let reason_label = reason.as_str();
+        let status_reason = reason.clone();
         if let Some(record) = self.state.duties.update_status(
             duty_id,
             DutyStatus::Failed {
                 penalty,
                 failed_at,
-                reason: reason.clone(),
+                reason: status_reason,
             },
         ) {
+            if let Some(kind_label) = duty_kind_label(&record.kind) {
+                telemetry_record_dispute(kind_label, reason_label);
+            }
             let relayer_id = record.relayer.clone();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.fail_duty();
@@ -2145,6 +2208,7 @@ impl Bridge {
         };
         self.state.next_claim_id = self.state.next_claim_id.saturating_add(1);
         self.push_reward_claim(record.clone());
+        telemetry_record_reward_claim(claimed_amount);
         self.persist()?;
         Ok(record)
     }
@@ -2365,32 +2429,40 @@ impl Bridge {
         proof: ExternalSettlementProof,
     ) -> Result<SettlementRecord, BridgeError> {
         self.refresh_incentives();
-        self.ensure_min_bond(relayer)?;
-        let (bundle_relayers, user, amount, required_chain) = {
-            let channel = self
-                .state
-                .channels
-                .get(asset)
-                .ok_or_else(|| BridgeError::UnknownChannel(asset.to_string()))?;
-            if !channel.config.requires_settlement_proof {
-                return Err(BridgeError::SettlementProofNotTracked {
-                    asset: asset.to_string(),
-                });
+        if let Err(err) = self.ensure_min_bond(relayer) {
+            telemetry_record_settlement_failure("insufficient_bond");
+            return Err(err);
+        }
+        let (bundle_relayers, user, amount, required_chain) = match self.state.channels.get(asset) {
+            Some(channel) => {
+                if !channel.config.requires_settlement_proof {
+                    telemetry_record_settlement_failure("not_tracked");
+                    return Err(BridgeError::SettlementProofNotTracked {
+                        asset: asset.to_string(),
+                    });
+                }
+                let pending = match channel.bridge.pending_withdrawals.get(&proof.commitment) {
+                    Some(pending) => pending,
+                    None => {
+                        telemetry_record_settlement_failure("withdrawal_missing");
+                        return Err(BridgeError::WithdrawalMissing);
+                    }
+                };
+                (
+                    pending.relayers.clone(),
+                    pending.user.clone(),
+                    pending.amount,
+                    channel.config.settlement_chain.clone(),
+                )
             }
-            let pending = channel
-                .bridge
-                .pending_withdrawals
-                .get(&proof.commitment)
-                .ok_or(BridgeError::WithdrawalMissing)?;
-            (
-                pending.relayers.clone(),
-                pending.user.clone(),
-                pending.amount,
-                channel.config.settlement_chain.clone(),
-            )
+            None => {
+                telemetry_record_settlement_failure("unknown_channel");
+                return Err(BridgeError::UnknownChannel(asset.to_string()));
+            }
         };
         if let Some(expected) = required_chain.as_ref() {
             if expected.as_str() != proof.settlement_chain {
+                telemetry_record_settlement_failure("chain_mismatch");
                 return Err(BridgeError::SettlementProofChainMismatch {
                     expected: Some(expected.clone()),
                     found: proof.settlement_chain.clone(),
@@ -2399,6 +2471,7 @@ impl Bridge {
         }
         let fingerprint = Self::settlement_fingerprint(asset, &proof);
         if !self.state.settlement_fingerprints.insert(fingerprint) {
+            telemetry_record_settlement_failure("duplicate");
             return Err(BridgeError::SettlementProofDuplicate);
         }
         {
@@ -2412,6 +2485,7 @@ impl Bridge {
                     proof: None,
                 });
             if entry.proof.is_some() {
+                telemetry_record_settlement_failure("duplicate");
                 return Err(BridgeError::SettlementProofDuplicate);
             }
         }
@@ -2445,6 +2519,7 @@ impl Bridge {
         self.record_settlement(record.clone());
         self.record_duty_success(duty_id, self.incentives().duty_reward);
         self.state.token_bridge.mint(asset, amount);
+        telemetry_record_settlement_success();
         self.persist()?;
         Ok(record)
     }
@@ -2622,8 +2697,14 @@ impl Bridge {
         self.relayer_entries(asset, relayer)
     }
 
-    pub fn reward_claims(&self, relayer: Option<&str>) -> Vec<RewardClaimRecord> {
-        self.state
+    pub fn reward_claims(
+        &self,
+        relayer: Option<&str>,
+        cursor: Option<u64>,
+        limit: usize,
+    ) -> (Vec<RewardClaimRecord>, Option<u64>) {
+        let claims: Vec<_> = self
+            .state
             .reward_claims
             .iter()
             .cloned()
@@ -2632,11 +2713,18 @@ impl Bridge {
                     .map(|target| target == record.relayer.as_str())
                     .unwrap_or(true)
             })
-            .collect()
+            .collect();
+        paginate(claims, cursor, limit)
     }
 
-    pub fn settlement_records(&self, asset: Option<&str>) -> Vec<SettlementRecord> {
-        self.state
+    pub fn settlement_records(
+        &self,
+        asset: Option<&str>,
+        cursor: Option<u64>,
+        limit: usize,
+    ) -> (Vec<SettlementRecord>, Option<u64>) {
+        let settlements: Vec<_> = self
+            .state
             .settlement_log
             .iter()
             .cloned()
@@ -2645,7 +2733,8 @@ impl Bridge {
                     .map(|target| target == record.asset.as_str())
                     .unwrap_or(true)
             })
-            .collect()
+            .collect();
+        paginate(settlements, cursor, limit)
     }
 
     pub fn supported_assets(&self) -> Vec<String> {
@@ -2654,7 +2743,12 @@ impl Bridge {
         assets
     }
 
-    pub fn dispute_audit(&self, asset: Option<&str>) -> Vec<DisputeAuditRecord> {
+    pub fn dispute_audit(
+        &self,
+        asset: Option<&str>,
+        cursor: Option<u64>,
+        limit: usize,
+    ) -> (Vec<DisputeAuditRecord>, Option<u64>) {
         let mut builders: HashMap<[u8; 32], DisputeAuditRecord> = HashMap::new();
         let now = now_secs();
         for (chan_asset, channel) in &self.state.channels {
@@ -2854,7 +2948,7 @@ impl Bridge {
         let mut records: Vec<DisputeAuditRecord> = builders.into_values().collect();
         records
             .sort_by_key(|record| (record.asset.clone(), record.initiated_at, record.commitment));
-        records
+        paginate(records, cursor, limit)
     }
 
     pub fn duty_log(
@@ -2936,4 +3030,21 @@ impl Bridge {
             .into_iter()
             .next()
     }
+}
+
+fn paginate<T>(items: Vec<T>, cursor: Option<u64>, limit: usize) -> (Vec<T>, Option<u64>) {
+    if items.is_empty() {
+        return (Vec::new(), None);
+    }
+    let start = cursor
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0);
+    if start >= items.len() {
+        return (Vec::new(), None);
+    }
+    let effective_limit = limit.max(1);
+    let end = start.saturating_add(effective_limit).min(items.len());
+    let next_cursor = (end < items.len()).then_some(end as u64);
+    let page = items.into_iter().skip(start).take(end - start).collect();
+    (page, next_cursor)
 }
