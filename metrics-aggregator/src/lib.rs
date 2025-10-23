@@ -70,6 +70,57 @@ fn http_client() -> HttpClient {
     env_http_client(&["TB_AGGREGATOR_TLS", "TB_HTTP_TLS"], "metrics-aggregator")
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct BridgeHttpOverrideResponse {
+    pub status: StatusCode,
+    pub body: Vec<u8>,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub trait BridgeHttpClientOverride: Send + Sync {
+    fn send(
+        &self,
+        url: &str,
+        payload: &Value,
+    ) -> Result<BridgeHttpOverrideResponse, String>;
+}
+
+type BridgeHttpOverrideHandle = Arc<dyn BridgeHttpClientOverride>;
+
+static BRIDGE_HTTP_CLIENT_OVERRIDE: Lazy<Mutex<Option<BridgeHttpOverrideHandle>>> =
+    Lazy::new(|| Mutex::new(None));
+
+fn bridge_http_client_override() -> Option<BridgeHttpOverrideHandle> {
+    BRIDGE_HTTP_CLIENT_OVERRIDE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(Arc::clone))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct BridgeHttpClientOverrideGuard {
+    previous: Option<BridgeHttpOverrideHandle>,
+}
+
+impl Drop for BridgeHttpClientOverrideGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = BRIDGE_HTTP_CLIENT_OVERRIDE.lock() {
+            *guard = self.previous.take();
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn install_bridge_http_client_override(
+    client: BridgeHttpOverrideHandle,
+) -> BridgeHttpClientOverrideGuard {
+    let mut guard = BRIDGE_HTTP_CLIENT_OVERRIDE
+        .lock()
+        .expect("bridge http override lock");
+    let previous = guard.replace(client);
+    BridgeHttpClientOverrideGuard { previous }
+}
+
 fn archive_metrics(blob: &str) {
     if let Ok(path) = std::env::var("TB_METRICS_ARCHIVE") {
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -97,9 +148,11 @@ const BRIDGE_REMEDIATION_MAX_DISPATCH_LOG: usize = 256;
 const BRIDGE_REMEDIATION_RUNBOOK_PATH: &str =
     "docs/operators/incident_playbook.md#bridge-liquidity-remediation";
 const BRIDGE_REMEDIATION_DISPATCH_ENDPOINT: &str = "/remediation/bridge/dispatches";
+const BRIDGE_REMEDIATION_ACK_PANEL: &str = "bridge_remediation_dispatch_ack_total (5m delta)";
 const BRIDGE_REMEDIATION_BASE_PANELS: &[&str] = &[
     "bridge_remediation_action_total (5m delta)",
     "bridge_remediation_dispatch_total (5m delta)",
+    BRIDGE_REMEDIATION_ACK_PANEL,
 ];
 const BRIDGE_LIQUIDITY_PANELS: &[&str] = &[
     "bridge_liquidity_locked_total (5m delta)",
@@ -144,6 +197,7 @@ const METRIC_BRIDGE_COUNTER_DELTA: &str = "bridge_metric_delta";
 const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
 const METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL: &str = "bridge_remediation_action_total";
 const METRIC_BRIDGE_REMEDIATION_DISPATCH_TOTAL: &str = "bridge_remediation_dispatch_total";
+const METRIC_BRIDGE_REMEDIATION_DISPATCH_ACK_TOTAL: &str = "bridge_remediation_dispatch_ack_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -164,6 +218,7 @@ const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint
 const LABEL_BRIDGE_COUNTER: [&str; 3] = ["metric", "peer", "labels"];
 const LABEL_REMEDIATION_ACTION: [&str; 2] = ["action", "playbook"];
 const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "status"];
+const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -876,7 +931,7 @@ impl AppState {
             labels = %labels,
             "bridge remediation action emitted",
         );
-        self.bridge_hooks.dispatch(&action);
+        self.bridge_hooks.dispatch(self.clone(), &action);
     }
 
     fn bridge_remediation_actions(&self) -> Vec<BridgeRemediationAction> {
@@ -891,6 +946,54 @@ impl AppState {
         log.lock()
             .map(|entries| entries.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[doc(hidden)]
+    pub fn bridge_hook_counts(&self) -> (usize, usize, usize, usize) {
+        (
+            self.bridge_hooks.page.len(),
+            self.bridge_hooks.throttle.len(),
+            self.bridge_hooks.quarantine.len(),
+            self.bridge_hooks.escalate.len(),
+        )
+    }
+
+    fn record_bridge_ack(
+        &self,
+        action: &BridgeRemediationAction,
+        ack: &BridgeDispatchAckRecord,
+    ) -> Option<BridgeRemediationAction> {
+        let (updated, snapshot) = match self.bridge_remediation.lock() {
+            Ok(mut engine) => {
+                let updated = engine.acknowledge_action(action, ack);
+                let snapshot = updated.as_ref().map(|_| engine.snapshot());
+                (updated, snapshot)
+            }
+            Err(_) => {
+                warn!(
+                    target: "aggregator",
+                    "bridge remediation engine poisoned while recording acknowledgement",
+                );
+                return None;
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_bridge_remediation_snapshot(&snapshot);
+        }
+        if let Some(ref updated_action) = updated {
+            info!(
+                target: "aggregator",
+                peer = %updated_action.peer_id,
+                metric = %updated_action.metric,
+                action = updated_action.action.as_str(),
+                playbook = updated_action.playbook.as_str(),
+                state = ack.state.as_str(),
+                notes = ack.notes.as_deref().unwrap_or(""),
+                "bridge remediation action acknowledged",
+            );
+        }
+        updated
     }
 
     fn record_correlation(&self, metric: &str, record: CorrelationRecord) {
@@ -1203,6 +1306,7 @@ struct AggregatorMetrics {
     bridge_metric_rate_per_second: GaugeVec,
     bridge_remediation_action_total: CounterVec,
     bridge_remediation_dispatch_total: CounterVec,
+    bridge_remediation_dispatch_ack_total: CounterVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2329,6 +2433,17 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(bridge_remediation_dispatch_total.clone()))
         .expect("register bridge_remediation_dispatch_total");
+    let bridge_remediation_dispatch_ack_total = CounterVec::new(
+        Opts::new(
+            METRIC_BRIDGE_REMEDIATION_DISPATCH_ACK_TOTAL,
+            "Bridge remediation dispatch acknowledgements grouped by target and state",
+        ),
+        &LABEL_REMEDIATION_ACK,
+    )
+    .expect("build bridge_remediation_dispatch_ack_total counter vec");
+    registry
+        .register(Box::new(bridge_remediation_dispatch_ack_total.clone()))
+        .expect("register bridge_remediation_dispatch_ack_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2368,6 +2483,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_metric_rate_per_second,
         bridge_remediation_action_total,
         bridge_remediation_dispatch_total,
+        bridge_remediation_dispatch_ack_total,
     }
 });
 
@@ -2393,26 +2509,104 @@ pub fn reset_bridge_remediation_dispatch_log() {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum BridgeDispatchAckState {
+    Acknowledged,
+    Closed,
+    Pending,
+    Invalid,
+}
+
+impl BridgeDispatchAckState {
+    fn as_str(&self) -> &'static str {
+        match self {
+            BridgeDispatchAckState::Acknowledged => "acknowledged",
+            BridgeDispatchAckState::Closed => "closed",
+            BridgeDispatchAckState::Pending => "pending",
+            BridgeDispatchAckState::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BridgeDispatchAckRecord {
+    state: BridgeDispatchAckState,
+    timestamp: u64,
+    acknowledged: bool,
+    closed: bool,
+    notes: Option<String>,
+}
+
+impl BridgeDispatchAckRecord {
+    fn new(
+        state: BridgeDispatchAckState,
+        timestamp: u64,
+        acknowledged: bool,
+        closed: bool,
+        notes: Option<String>,
+    ) -> Self {
+        Self {
+            state,
+            timestamp,
+            acknowledged,
+            closed,
+            notes,
+        }
+    }
+
+    fn invalid(timestamp: u64, notes: String) -> Self {
+        Self::new(
+            BridgeDispatchAckState::Invalid,
+            timestamp,
+            false,
+            false,
+            Some(notes),
+        )
+    }
+
+    fn is_completion(&self) -> bool {
+        self.acknowledged || self.closed
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "state".to_string(),
+            Value::String(self.state.as_str().to_string()),
+        );
+        map.insert("timestamp".to_string(), Value::from(self.timestamp));
+        map.insert("acknowledged".to_string(), Value::Bool(self.acknowledged));
+        map.insert("closed".to_string(), Value::Bool(self.closed));
+        if let Some(notes) = &self.notes {
+            map.insert("notes".to_string(), Value::String(notes.clone()));
+        }
+        Value::Object(map)
+    }
+}
+
 #[derive(Clone)]
 struct BridgeRemediationDispatchRecord {
     action: BridgeRemediationAction,
     target: String,
     status: String,
     dispatched_at: u64,
+    acknowledgement: Option<BridgeDispatchAckRecord>,
 }
 
 impl BridgeRemediationDispatchRecord {
     fn new(
-        action: &BridgeRemediationAction,
+        action: BridgeRemediationAction,
         target: &str,
         status: &str,
         dispatched_at: u64,
+        acknowledgement: Option<BridgeDispatchAckRecord>,
     ) -> Self {
         Self {
-            action: action.clone(),
+            action,
             target: target.to_string(),
             status: status.to_string(),
             dispatched_at,
+            acknowledgement,
         }
     }
 
@@ -2421,7 +2615,63 @@ impl BridgeRemediationDispatchRecord {
         map.insert("dispatched_at".to_string(), Value::from(self.dispatched_at));
         map.insert("target".to_string(), Value::String(self.target.clone()));
         map.insert("status".to_string(), Value::String(self.status.clone()));
+        if let Some(ack) = &self.acknowledgement {
+            map.insert("acknowledgement".to_string(), ack.to_value());
+        }
         Value::Object(map)
+    }
+}
+
+fn unix_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn parse_dispatch_acknowledgement(body: &[u8]) -> Option<BridgeDispatchAckRecord> {
+    if body.is_empty() {
+        return None;
+    }
+    let timestamp = unix_timestamp_secs();
+    match json::from_slice::<Value>(body) {
+        Ok(Value::Object(map)) => {
+            let has_ack_field = map.get("acknowledged");
+            let has_closed_field = map.get("closed");
+            let has_any = has_ack_field.is_some() || has_closed_field.is_some();
+            if !has_any {
+                return None;
+            }
+            let closed_flag = has_closed_field.and_then(Value::as_bool).unwrap_or(false);
+            let acknowledged_flag = if closed_flag {
+                true
+            } else {
+                has_ack_field.and_then(Value::as_bool).unwrap_or(false)
+            };
+            let state = if closed_flag {
+                BridgeDispatchAckState::Closed
+            } else if acknowledged_flag {
+                BridgeDispatchAckState::Acknowledged
+            } else {
+                BridgeDispatchAckState::Pending
+            };
+            let notes = map
+                .get("notes")
+                .and_then(Value::as_str)
+                .map(|text| text.to_string());
+            Some(BridgeDispatchAckRecord::new(
+                state,
+                timestamp,
+                acknowledged_flag,
+                closed_flag,
+                notes,
+            ))
+        }
+        Ok(_) => Some(BridgeDispatchAckRecord::invalid(
+            timestamp,
+            "acknowledgement response must be a JSON object".to_string(),
+        )),
+        Err(err) => Some(BridgeDispatchAckRecord::invalid(timestamp, err.to_string())),
     }
 }
 
@@ -3066,6 +3316,9 @@ struct BridgeRemediationAction {
     threshold: f64,
     ratio: f64,
     timestamp: u64,
+    acknowledged_at: Option<u64>,
+    closed_out_at: Option<u64>,
+    acknowledgement_notes: Option<String>,
 }
 
 impl BridgeRemediationAction {
@@ -3095,6 +3348,9 @@ impl BridgeRemediationAction {
             threshold: event.threshold,
             ratio,
             timestamp: event.timestamp,
+            acknowledged_at: None,
+            closed_out_at: None,
+            acknowledgement_notes: None,
         }
     }
 
@@ -3247,6 +3503,21 @@ impl BridgeRemediationAction {
         map.insert("ratio".to_string(), Value::from(self.ratio));
         map.insert("timestamp".to_string(), Value::from(self.timestamp));
         map.insert("annotation".to_string(), Value::String(self.annotation()));
+        map.insert(
+            "acknowledged_at".to_string(),
+            self.acknowledged_at.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "closed_out_at".to_string(),
+            self.closed_out_at.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "acknowledgement_notes".to_string(),
+            self.acknowledgement_notes
+                .as_ref()
+                .map(|notes| Value::String(notes.clone()))
+                .unwrap_or(Value::Null),
+        );
         let panels = self.dashboard_panels();
         map.insert(
             "dashboard_panels".to_string(),
@@ -3315,6 +3586,18 @@ impl BridgeRemediationAction {
         let threshold = object.get("threshold").and_then(Value::as_f64)?;
         let ratio = object.get("ratio").and_then(Value::as_f64).unwrap_or(0.0);
         let timestamp = object.get("timestamp").and_then(Value::as_u64)?;
+        let acknowledged_at = match object.get("acknowledged_at") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let closed_out_at = match object.get("closed_out_at") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let acknowledgement_notes = object
+            .get("acknowledgement_notes")
+            .and_then(Value::as_str)
+            .map(|text| text.to_string());
         Some(Self {
             peer_id,
             metric,
@@ -3326,6 +3609,9 @@ impl BridgeRemediationAction {
             threshold,
             ratio,
             timestamp,
+            acknowledged_at,
+            closed_out_at,
+            acknowledgement_notes,
         })
     }
 }
@@ -3351,7 +3637,7 @@ impl BridgeRemediationHooks {
         }
     }
 
-    fn dispatch(&self, action: &BridgeRemediationAction) {
+    fn dispatch(&self, state: AppState, action: &BridgeRemediationAction) {
         let targets = match action.action {
             BridgeRemediationActionType::Page => &self.page,
             BridgeRemediationActionType::Throttle => &self.throttle,
@@ -3359,11 +3645,11 @@ impl BridgeRemediationHooks {
             BridgeRemediationActionType::Escalate => &self.escalate,
         };
         if targets.is_empty() {
-            record_dispatch_outcome(action, "none", "skipped");
+            record_dispatch_outcome(None, action, "none", "skipped", None);
             return;
         }
         for target in targets {
-            target.dispatch(action);
+            target.dispatch(state.clone(), action);
         }
     }
 }
@@ -3375,96 +3661,233 @@ enum BridgeRemediationHook {
 }
 
 impl BridgeRemediationHook {
-    fn dispatch(&self, action: &BridgeRemediationAction) {
+    fn dispatch(&self, state: AppState, action: &BridgeRemediationAction) {
         match self {
             BridgeRemediationHook::Http { url } => {
                 let url = url.clone();
                 let payload = build_dispatch_payload(action);
                 let summary = action.clone();
-                spawn(async move {
-                    let client = http_client();
-                    let request = match client.request(Method::Post, &url) {
-                        Ok(builder) => builder,
-                        Err(err) => {
-                            warn!(
-                                target: "aggregator",
-                                error = %err,
-                                url = %url,
-                                peer = %summary.peer_id,
-                                metric = %summary.metric,
-                                action = summary.action.as_str(),
-                                playbook = summary.playbook.as_str(),
-                                "bridge remediation http dispatch failed to build request",
-                            );
-                            record_dispatch_outcome(&summary, "http", "request_build_failed");
-                            return;
-                        }
-                    };
-                    let request = match request.json(&payload) {
-                        Ok(req) => req,
-                        Err(err) => {
-                            warn!(
-                                target: "aggregator",
-                                error = %err,
-                                url = %url,
-                                peer = %summary.peer_id,
-                                metric = %summary.metric,
-                                action = summary.action.as_str(),
-                                playbook = summary.playbook.as_str(),
-                                "bridge remediation http dispatch failed to encode payload",
-                            );
-                            record_dispatch_outcome(&summary, "http", "payload_encode_failed");
-                            return;
-                        }
-                    };
-                    match request.send().await {
-                        Ok(response) => {
-                            let status = response.status();
-                            if status.is_success() {
-                                info!(
-                                    target: "aggregator",
-                                    url = %url,
-                                    status = status.as_u16(),
-                                    peer = %summary.peer_id,
-                                    metric = %summary.metric,
-                                    action = summary.action.as_str(),
-                                    playbook = summary.playbook.as_str(),
-                                    "bridge remediation hook dispatched via http",
-                                );
-                                record_dispatch_outcome(&summary, "http", "success");
-                            } else {
+                let state = state.clone();
+                if let Some(client) = bridge_http_client_override() {
+                    let payload = payload.clone();
+                    spawn(async move {
+                        match client.send(&url, &payload) {
+                            Ok(response) => {
+                                let status = response.status;
+                                if status.is_success() {
+                                    let ack = parse_dispatch_acknowledgement(&response.body);
+                                    if let Some(ack_record) = ack.as_ref() {
+                                        if matches!(ack_record.state, BridgeDispatchAckState::Invalid)
+                                        {
+                                            warn!(
+                                                target: "aggregator",
+                                                url = %url,
+                                                peer = %summary.peer_id,
+                                                metric = %summary.metric,
+                                                action = summary.action.as_str(),
+                                                playbook = summary.playbook.as_str(),
+                                                notes = ack_record
+                                                    .notes
+                                                    .as_deref()
+                                                    .unwrap_or(""),
+                                                "bridge remediation http acknowledgement parse failed",
+                                            );
+                                        }
+                                    }
+                                    info!(
+                                        target: "aggregator",
+                                        url = %url,
+                                        status = status.as_u16(),
+                                        peer = %summary.peer_id,
+                                        metric = %summary.metric,
+                                        action = summary.action.as_str(),
+                                        playbook = summary.playbook.as_str(),
+                                        "bridge remediation hook dispatched via http",
+                                    );
+                                    record_dispatch_outcome(
+                                        Some(state.clone()),
+                                        &summary,
+                                        "http",
+                                        "success",
+                                        ack,
+                                    );
+                                } else {
+                                    warn!(
+                                        target: "aggregator",
+                                        url = %url,
+                                        status = status.as_u16(),
+                                        peer = %summary.peer_id,
+                                        metric = %summary.metric,
+                                        action = summary.action.as_str(),
+                                        playbook = summary.playbook.as_str(),
+                                        "bridge remediation http dispatch returned non-success status",
+                                    );
+                                    record_dispatch_outcome(
+                                        Some(state.clone()),
+                                        &summary,
+                                        "http",
+                                        "status_failed",
+                                        None,
+                                    );
+                                }
+                            }
+                            Err(err) => {
                                 warn!(
                                     target: "aggregator",
+                                    error = %err,
                                     url = %url,
-                                    status = status.as_u16(),
                                     peer = %summary.peer_id,
                                     metric = %summary.metric,
                                     action = summary.action.as_str(),
                                     playbook = summary.playbook.as_str(),
-                                    "bridge remediation http dispatch returned non-success status",
+                                    "bridge remediation http override dispatch failed",
                                 );
-                                record_dispatch_outcome(&summary, "http", "status_failed");
+                                record_dispatch_outcome(
+                                    Some(state.clone()),
+                                    &summary,
+                                    "http",
+                                    "request_failed",
+                                    None,
+                                );
                             }
                         }
-                        Err(err) => {
-                            warn!(
-                                target: "aggregator",
-                                error = %err,
-                                url = %url,
-                                peer = %summary.peer_id,
-                                metric = %summary.metric,
-                                action = summary.action.as_str(),
-                                playbook = summary.playbook.as_str(),
-                                "bridge remediation http dispatch failed",
-                            );
-                            record_dispatch_outcome(&summary, "http", "request_failed");
+                    });
+                } else {
+                    spawn(async move {
+                        let client = http_client();
+                        let request = match client.request(Method::Post, &url) {
+                            Ok(builder) => builder,
+                            Err(err) => {
+                                warn!(
+                                    target: "aggregator",
+                                    error = %err,
+                                    url = %url,
+                                    peer = %summary.peer_id,
+                                    metric = %summary.metric,
+                                    action = summary.action.as_str(),
+                                    playbook = summary.playbook.as_str(),
+                                    "bridge remediation http dispatch failed to build request",
+                                );
+                                record_dispatch_outcome(
+                                    Some(state.clone()),
+                                    &summary,
+                                    "http",
+                                    "request_build_failed",
+                                    None,
+                                );
+                                return;
+                            }
+                        };
+                        let request = match request.json(&payload) {
+                            Ok(req) => req,
+                            Err(err) => {
+                                warn!(
+                                    target: "aggregator",
+                                    error = %err,
+                                    url = %url,
+                                    peer = %summary.peer_id,
+                                    metric = %summary.metric,
+                                    action = summary.action.as_str(),
+                                    playbook = summary.playbook.as_str(),
+                                    "bridge remediation http dispatch failed to encode payload",
+                                );
+                                record_dispatch_outcome(
+                                    Some(state.clone()),
+                                    &summary,
+                                    "http",
+                                    "payload_encode_failed",
+                                    None,
+                                );
+                                return;
+                            }
+                        };
+                        match request.send().await {
+                            Ok(response) => {
+                                let status = response.status();
+                                if status.is_success() {
+                                    let ack = parse_dispatch_acknowledgement(response.body());
+                                    if let Some(ack_record) = ack.as_ref() {
+                                        if matches!(ack_record.state, BridgeDispatchAckState::Invalid)
+                                        {
+                                            warn!(
+                                                target: "aggregator",
+                                                url = %url,
+                                                peer = %summary.peer_id,
+                                                metric = %summary.metric,
+                                                action = summary.action.as_str(),
+                                                playbook = summary.playbook.as_str(),
+                                                notes = ack_record
+                                                    .notes
+                                                    .as_deref()
+                                                    .unwrap_or(""),
+                                                "bridge remediation http acknowledgement parse failed",
+                                            );
+                                        }
+                                    }
+                                    info!(
+                                        target: "aggregator",
+                                        url = %url,
+                                        status = status.as_u16(),
+                                        peer = %summary.peer_id,
+                                        metric = %summary.metric,
+                                        action = summary.action.as_str(),
+                                        playbook = summary.playbook.as_str(),
+                                        "bridge remediation hook dispatched via http",
+                                    );
+                                    record_dispatch_outcome(
+                                        Some(state.clone()),
+                                        &summary,
+                                        "http",
+                                        "success",
+                                        ack,
+                                    );
+                                } else {
+                                    warn!(
+                                        target: "aggregator",
+                                        url = %url,
+                                        status = status.as_u16(),
+                                        peer = %summary.peer_id,
+                                        metric = %summary.metric,
+                                        action = summary.action.as_str(),
+                                        playbook = summary.playbook.as_str(),
+                                        "bridge remediation http dispatch returned non-success status",
+                                    );
+                                    record_dispatch_outcome(
+                                        Some(state.clone()),
+                                        &summary,
+                                        "http",
+                                        "status_failed",
+                                        None,
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                warn!(
+                                    target: "aggregator",
+                                    error = %err,
+                                    url = %url,
+                                    peer = %summary.peer_id,
+                                    metric = %summary.metric,
+                                    action = summary.action.as_str(),
+                                    playbook = summary.playbook.as_str(),
+                                    "bridge remediation http dispatch failed",
+                                );
+                                record_dispatch_outcome(
+                                    Some(state.clone()),
+                                    &summary,
+                                    "http",
+                                    "request_failed",
+                                    None,
+                                );
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
             BridgeRemediationHook::File { dir } => {
                 let dir = dir.clone();
                 let summary = action.clone();
+                let state = state.clone();
                 spawn(async move {
                     let payload = build_dispatch_payload(&summary);
                     let handle = spawn_blocking(move || persist_action_to_dir(dir, payload));
@@ -3479,7 +3902,13 @@ impl BridgeRemediationHook {
                                 playbook = summary.playbook.as_str(),
                                 "bridge remediation hook persisted to spool",
                             );
-                            record_dispatch_outcome(&summary, "spool", "success");
+                            record_dispatch_outcome(
+                                Some(state.clone()),
+                                &summary,
+                                "spool",
+                                "success",
+                                None,
+                            );
                         }
                         Ok(Err(err)) => {
                             warn!(
@@ -3491,7 +3920,13 @@ impl BridgeRemediationHook {
                                 playbook = summary.playbook.as_str(),
                                 "bridge remediation spool dispatch failed",
                             );
-                            record_dispatch_outcome(&summary, "spool", "persist_failed");
+                            record_dispatch_outcome(
+                                Some(state.clone()),
+                                &summary,
+                                "spool",
+                                "persist_failed",
+                                None,
+                            );
                         }
                         Err(err) => {
                             warn!(
@@ -3503,7 +3938,13 @@ impl BridgeRemediationHook {
                                 playbook = summary.playbook.as_str(),
                                 "bridge remediation spool dispatch join failed",
                             );
-                            record_dispatch_outcome(&summary, "spool", "join_failed");
+                            record_dispatch_outcome(
+                                Some(state.clone()),
+                                &summary,
+                                "spool",
+                                "join_failed",
+                                None,
+                            );
                         }
                     }
                 });
@@ -3512,7 +3953,13 @@ impl BridgeRemediationHook {
     }
 }
 
-fn record_dispatch_outcome(action: &BridgeRemediationAction, target: &str, status: &str) {
+fn record_dispatch_outcome(
+    state: Option<AppState>,
+    action: &BridgeRemediationAction,
+    target: &str,
+    status: &str,
+    acknowledgement: Option<BridgeDispatchAckRecord>,
+) {
     let metrics = aggregator_metrics();
     metrics
         .bridge_remediation_dispatch_total
@@ -3523,11 +3970,30 @@ fn record_dispatch_outcome(action: &BridgeRemediationAction, target: &str, statu
             status,
         ])
         .inc();
-    let dispatched_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let record = BridgeRemediationDispatchRecord::new(action, target, status, dispatched_at);
+    if let Some(ack) = &acknowledgement {
+        metrics
+            .bridge_remediation_dispatch_ack_total
+            .with_label_values(&[
+                action.action.as_str(),
+                action.playbook.as_str(),
+                target,
+                ack.state.as_str(),
+            ])
+            .inc();
+    }
+    let updated_action = match (&state, &acknowledgement) {
+        (Some(state), Some(ack)) if ack.is_completion() => state.record_bridge_ack(action, ack),
+        _ => None,
+    };
+    let dispatched_at = unix_timestamp_secs();
+    let record_action = updated_action.unwrap_or_else(|| action.clone());
+    let record = BridgeRemediationDispatchRecord::new(
+        record_action,
+        target,
+        status,
+        dispatched_at,
+        acknowledgement,
+    );
     if let Ok(mut guard) = bridge_dispatch_log().lock() {
         guard.push_back(record);
         if guard.len() > BRIDGE_REMEDIATION_MAX_DISPATCH_LOG {
@@ -4005,6 +4471,36 @@ impl BridgeRemediationEngine {
 
     fn actions(&self) -> Vec<BridgeRemediationAction> {
         self.actions.iter().cloned().collect()
+    }
+
+    fn acknowledge_action(
+        &mut self,
+        action: &BridgeRemediationAction,
+        ack: &BridgeDispatchAckRecord,
+    ) -> Option<BridgeRemediationAction> {
+        let mut updated = None;
+        for stored in self.actions.iter_mut().rev() {
+            if stored.peer_id == action.peer_id
+                && stored.metric == action.metric
+                && stored.timestamp == action.timestamp
+                && stored.action == action.action
+            {
+                if ack.closed && stored.acknowledged_at.is_none() {
+                    stored.acknowledged_at = Some(ack.timestamp);
+                } else if ack.acknowledged && stored.acknowledged_at.is_none() {
+                    stored.acknowledged_at = Some(ack.timestamp);
+                }
+                if ack.closed && stored.closed_out_at.is_none() {
+                    stored.closed_out_at = Some(ack.timestamp);
+                }
+                if let Some(notes) = ack.notes.as_ref() {
+                    stored.acknowledgement_notes = Some(notes.clone());
+                }
+                updated = Some(stored.clone());
+                break;
+            }
+        }
+        updated
     }
 }
 

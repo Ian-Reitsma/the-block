@@ -1,4 +1,12 @@
 # Summary
+> **Review (2025-10-25, mid-morning):** Governance escalations now report
+> acknowledgement state end to end. The metrics aggregator records
+> `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`, stores
+> acknowledgement/closure timestamps and notes on each remediation action, and a
+> new Grafana panel charts acknowledgement deltas next to dispatch totals so
+> operators can confirm downstream paging/governance hooks closed the loop. The
+> bridge anomaly test suite drives acknowledgement paths through an in-process
+> HTTP override, keeping FIRST_PARTY_ONLY coverage hermetic.
 > **Review (2025-10-25, early morning):** Bridge remediation payloads now ship
 > annotations, dashboard hints, and response sequences, while the aggregator
 > exposes `/remediation/bridge/dispatches` so paging/governance hooks can audit

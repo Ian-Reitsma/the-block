@@ -1,4 +1,15 @@
 # Project Progress Snapshot
+> **Review (2025-10-25, mid-morning):** Governance escalations now surface
+> acknowledgement telemetry end to end. The metrics aggregator records
+> `bridge_remediation_dispatch_ack_total{action,playbook,target,state}` whenever
+> paging/governance hooks respond, persists acknowledgement timestamps and notes
+> on each remediation action, and exposes the fields via
+> `/remediation/bridge`/`/remediation/bridge/dispatches`. A new Grafana panel
+> charts five-minute acknowledgement deltas alongside the existing dispatch and
+> action panels so operators can prove downstream workflows closed the loop.
+> CLI/aggregator integration tests swap in a first-party HTTP override client to
+> script acknowledgement payloads without a server, locking the new counters and
+> fields to FIRST_PARTY_ONLY coverage.
 > **Review (2025-10-24, pre-dawn):** Bridge anomaly handling now drives automated
 > remediation backed by persistent state. The metrics aggregator records per-
 > relayer actions, exposes `/remediation/bridge`, increments
@@ -828,7 +839,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 91.4 %
+## 9. Bridges & Cross‑Chain Routing — 92.0 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -840,10 +851,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
 - Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and the bridge fixtures cover recovery tails, partial windows, dispute outcomes, and quorum-failure approvals. Labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action,playbook}` counter and the liquidity telemetry (`bridge_liquidity_locked_total`, `bridge_liquidity_unlocked_total`, `bridge_liquidity_minted_total`, `bridge_liquidity_burned_total`).
 - Remediation actions now dispatch automatically through the aggregator’s first-party hooks. Environment-configurable `TB_REMEDIATION_*_URLS`/`*_DIRS` deliver JSON payloads to paging/governance services or local spools, the operator playbook documents the liquidity response flow end to end, and `bridge_remediation_dispatch_total{action,playbook,target,status}` plus the `/remediation/bridge/dispatches` endpoint record success, skip, and failure outcomes for every target. Dispatch payloads now embed annotations, dashboard-panel hints, and a response sequence so paging/governance automation can execute the runbook without bespoke glue.
+- Downstream acknowledgement telemetry is first party: the aggregator increments `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`, records acknowledgement/closure timestamps and notes on each remediation action, and the Grafana row charts acknowledgement deltas next to dispatch totals so operators can prove paging/governance hooks closed the loop.
 
 **Gaps**
 - Treasury sweep automation, offline settlement proof sampling, and richer relayer incentive analytics remain.
-- Extend governance automation so escalations confirm when mitigation completes.
+- Automatically re-drive spool/webhook actions when acknowledgements remain pending beyond policy thresholds.
 
 ## 10. Monitoring, Debugging & Profiling — 97.2 %
 

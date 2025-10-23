@@ -1,4 +1,13 @@
 # System-Wide Economic Changes
+> **Review (2025-10-25, mid-morning):** Governance escalations now surface
+> acknowledgement telemetry. The metrics aggregator increments
+> `bridge_remediation_dispatch_ack_total{action,playbook,target,state}` when
+> paging/governance hooks respond, records acknowledgement and closure
+> timestamps plus operator notes on each remediation action, and the Grafana
+> templates render a dedicated acknowledgement panel so responders can confirm
+> downstream workflows closed out the playbook. CLI/aggregator integration tests
+> rely on a first-party HTTP override harness to exercise success, closure, and
+> invalid acknowledgement paths without external servers.
 > **Review (2025-10-25, early morning):** Bridge remediation payloads now ship
 > an `annotation`, curated `dashboard_panels`, a `response_sequence`, and the
 > dispatcher exposes `/remediation/bridge/dispatches` so paging/governance hooks
@@ -1505,6 +1514,42 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
   policies that changed, reducing mean time to remediation.
 - **Future migrations** can rely on the telemetry snapshot to compare drift over
   time, even when check mode exits early.
+
+## Bridge Dispatch Acknowledgement Telemetry (2025-10-25)
+
+### Rationale
+
+- **Close the governance loop:** Paging and escalation hooks must surface when
+  responders acknowledge or resolve the dispatched playbook so operations can
+  prove completion without polling downstream tooling.
+- **First-party monitoring:** Dashboards lacked visibility into acknowledgement
+  state, forcing responders to consult external systems to confirm closure.
+- **Testability:** Prior HTTP dispatch coverage required spin-up servers; the
+  new acknowledgement paths needed hermetic tests to stay FIRST_PARTY_ONLY.
+
+### Implementation Summary
+
+- Introduced `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`
+  in the metrics aggregator alongside the existing dispatch counter and wired
+  HTTP/file hooks to parse acknowledgement payloads (`acknowledged`, `closed`,
+  `pending`, `invalid`).
+- Persisted `acknowledged_at`, `closed_out_at`, and
+  `acknowledgement_notes` fields on each remediation action and exposed them via
+  `/remediation/bridge` and `/remediation/bridge/dispatches`.
+- Added Grafana/HTML panels charting five-minute acknowledgement deltas next to
+  action/dispatch totals and refreshed monitoring snapshots/tests.
+- Swapped the bridge anomaly integration suite to a first-party HTTP override
+  client that scripts acknowledgement responses without spawning servers,
+  covering acknowledgement, closure, pending, and invalid cases.
+
+### Operational Impact
+
+- **Operators** can confirm paging/governance hooks accepted or closed an
+  escalation directly from the first-party dashboards and JSON endpoints.
+- **Automation** gains timestamps/notes for auditing and can trigger retries or
+  escalations when acknowledgements remain `pending`.
+- **Tests/CI** remain hermetic—acknowledgement flows run entirely on
+  in-process overrides without third-party HTTP servers.
 
 ## Default Transport Provider Switch (2025-10-10)
 
