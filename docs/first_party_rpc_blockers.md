@@ -19,6 +19,22 @@ RPC client.
   branches while preserving the first-party `RpcError` struct, allowing
   handlers and clients to decode responses without the legacy envelope.*
 
+## Recent progress (2025-10-25)
+
+- Remediation payloads now ship operator-facing annotations, curated dashboard panel
+  hints, deterministic response sequences, and the canonical
+  `/remediation/bridge/dispatches` endpoint. The metrics aggregator appends every
+  attempt to a first-party dispatch log so paging/governance hooks audit delivery
+  without third-party queues. CLI integration tests capture the richer envelopes via
+  the in-memory transport, locking the contract tooling to the first-party serializers.
+
+## Recent progress (2025-10-24)
+
+- Bridge remediation dispatches now emit `bridge_remediation_dispatch_total{action,playbook,target,status}`.
+  The contract CLI tests drive the in-memory `BridgeRpcTransport` through spool success,
+  spool failure, and unconfigured scenarios while Grafana/HTML dashboards gained a dispatch
+  health panel, keeping first-party operators informed without third-party tooling.
+
 ## Recent progress (2025-10-23)
 
 - Governance-backed bridge reward claims now emit first-party JSON. `bridge.claim_rewards`
@@ -43,6 +59,9 @@ RPC client.
   compute a deterministic digest through `bridge_types::settlement_proof_digest`
   and maintain per-asset height watermarks so hash/height replays return typed
   errors without leaving the JSON/RPC façade.
+- Bridge remediation dispatch uses the in-house HTTP client and filesystem
+  spools. Configure `TB_REMEDIATION_*_URLS` or `TB_REMEDIATION_*_DIRS` to fan out
+  JSON playbooks without introducing third-party paging libraries.
 
 ## Recent progress (2025-10-22)
 

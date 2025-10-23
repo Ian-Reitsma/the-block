@@ -712,10 +712,52 @@ fn build_bridge_dataset() -> Vec<Series> {
             build_recovery_series(0.04, 20, 0.35, &[0.18, 0.07, 0.05, 0.04]),
         ),
         Series::new(
+            "recovery-label-delta",
+            METRIC_DELTA,
+            "asset=sol",
+            build_recovery_series(0.8, 18, 8.0, &[2.6, 1.1, 0.85, 0.8]),
+        ),
+        Series::new(
+            "recovery-label-rate",
+            METRIC_RATE,
+            "asset=sol",
+            build_recovery_series(0.06, 18, 0.45, &[0.21, 0.08, 0.06, 0.05]),
+        ),
+        Series::new(
             "partial-window-delta",
             METRIC_DELTA,
             "asset=ltc",
             vec![1.0, 1.2, 1.15, 1.1],
+        ),
+        Series::new(
+            "partial-window-rate",
+            METRIC_RATE,
+            "asset=ltc",
+            vec![0.08, 0.1, 0.12, 0.11],
+        ),
+        Series::new(
+            "partial-window-dispute-delta",
+            METRIC_DELTA,
+            "kind=challenge,outcome=penalized",
+            vec![0.2, 0.24, 0.23, 0.22],
+        ),
+        Series::new(
+            "partial-window-dispute-rate",
+            METRIC_RATE,
+            "kind=challenge,outcome=penalized",
+            vec![0.015, 0.02, 0.019, 0.018],
+        ),
+        Series::new(
+            "recovery-approvals-delta",
+            METRIC_DELTA,
+            "result=failed,reason=quorum", 
+            build_recovery_series(0.4, 18, 3.8, &[1.4, 0.7, 0.5, 0.4]),
+        ),
+        Series::new(
+            "recovery-approvals-rate",
+            METRIC_RATE,
+            "result=failed,reason=quorum",
+            build_recovery_series(0.03, 18, 0.24, &[0.11, 0.05, 0.04, 0.03]),
         ),
     ]
 }

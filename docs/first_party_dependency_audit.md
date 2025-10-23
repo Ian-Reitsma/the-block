@@ -1,6 +1,27 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-24 03:30:00Z_
+_Last updated: 2025-10-25 06:05:00Z_
+
+> **2025-10-25 update (remediation annotations & dispatch log):** Bridge remediation
+> payloads remain fully hand-built and now embed operator-facing `annotation`
+> strings, curated `dashboard_panels`, a deterministic `response_sequence`, and the
+> canonical dispatch endpoint. Every attempt is captured in the in-memory
+> `/remediation/bridge/dispatches` log with per-target status so paging and
+> governance automation stay on the first-party stack—no third-party job queues
+> or webhook proxies needed. CLI/tests assert these fields via the in-memory
+> transports, locking the richer payloads to first-party serialization.
+> **2025-10-24 update (dispatch health & dashboards):** The metrics aggregator now
+> emits `bridge_remediation_dispatch_total{action,playbook,target,status}` for
+> every HTTP/spool attempt, the CLI integration suite covers success/failure/
+> skipped scenarios with first-party transports, and Grafana/HTML dashboards add
+> a dispatch panel plus updated runbooks for operator triage.
+> **2025-10-24 update (remediation dispatch & validator fixtures):** The metrics
+> aggregator now fans remediation actions out to first-party HTTP endpoints or
+> spool directories via the `TB_REMEDIATION_*_URLS`/`*_DIRS` environment
+> variables, logging every dispatch and persisting JSON payloads without
+> third-party queues. Operator runbooks document the matching liquidity response.
+> The shared alert validator picked up recovery-curve and partial-window
+> datasets so the bridge heuristics stay covered under FIRST_PARTY_ONLY.
 
 > **2025-10-24 update (bridge remediation & multi-group validator):** The
 > metrics aggregator now includes a first-party remediation engine that persists

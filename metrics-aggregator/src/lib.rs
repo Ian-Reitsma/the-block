@@ -54,6 +54,7 @@ use foundation_telemetry::{
 };
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -91,6 +92,25 @@ const BRIDGE_REMEDIATION_STATE_KEY: &[u8] = b"bridge_remediation_snapshot";
 const COUNTER_EPSILON: f64 = 1e-6;
 const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
+static BRIDGE_REMEDIATION_DISPATCH_SEQ: AtomicU64 = AtomicU64::new(1);
+const BRIDGE_REMEDIATION_MAX_DISPATCH_LOG: usize = 256;
+const BRIDGE_REMEDIATION_RUNBOOK_PATH: &str =
+    "docs/operators/incident_playbook.md#bridge-liquidity-remediation";
+const BRIDGE_REMEDIATION_DISPATCH_ENDPOINT: &str = "/remediation/bridge/dispatches";
+const BRIDGE_REMEDIATION_BASE_PANELS: &[&str] = &[
+    "bridge_remediation_action_total (5m delta)",
+    "bridge_remediation_dispatch_total (5m delta)",
+];
+const BRIDGE_LIQUIDITY_PANELS: &[&str] = &[
+    "bridge_liquidity_locked_total (5m delta)",
+    "bridge_liquidity_unlocked_total (5m delta)",
+    "bridge_liquidity_minted_total (5m delta)",
+    "bridge_liquidity_burned_total (5m delta)",
+];
+const BRIDGE_PANEL_REWARD_CLAIMS: &str = "bridge_reward_claims_total (5m delta)";
+const BRIDGE_PANEL_REWARD_APPROVALS: &str = "bridge_reward_approvals_consumed_total (5m delta)";
+const BRIDGE_PANEL_SETTLEMENT_RESULTS: &str = "bridge_settlement_results_total (5m delta)";
+const BRIDGE_PANEL_DISPUTE_OUTCOMES: &str = "bridge_dispute_outcomes_total (5m delta)";
 
 const METRIC_AGGREGATOR_INGEST_TOTAL: &str = "aggregator_ingest_total";
 const METRIC_BULK_EXPORT_TOTAL: &str = "bulk_export_total";
@@ -123,6 +143,7 @@ const METRIC_BRIDGE_ANOMALY_TOTAL: &str = "bridge_anomaly_total";
 const METRIC_BRIDGE_COUNTER_DELTA: &str = "bridge_metric_delta";
 const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
 const METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL: &str = "bridge_remediation_action_total";
+const METRIC_BRIDGE_REMEDIATION_DISPATCH_TOTAL: &str = "bridge_remediation_dispatch_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -142,6 +163,7 @@ const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
 const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint"];
 const LABEL_BRIDGE_COUNTER: [&str; 3] = ["metric", "peer", "labels"];
 const LABEL_REMEDIATION_ACTION: [&str; 2] = ["action", "playbook"];
+const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "status"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -174,6 +196,15 @@ const BRIDGE_REMEDIATION_QUARANTINE_COUNT: usize = 3;
 const BRIDGE_REMEDIATION_ESCALATE_DELTA: f64 = 80.0;
 const BRIDGE_REMEDIATION_ESCALATE_RATIO: f64 = 4.0;
 const BRIDGE_REMEDIATION_ESCALATE_COUNT: usize = 5;
+
+const ENV_REMEDIATION_PAGE_URLS: &str = "TB_REMEDIATION_PAGE_URLS";
+const ENV_REMEDIATION_PAGE_DIRS: &str = "TB_REMEDIATION_PAGE_DIRS";
+const ENV_REMEDIATION_THROTTLE_URLS: &str = "TB_REMEDIATION_THROTTLE_URLS";
+const ENV_REMEDIATION_THROTTLE_DIRS: &str = "TB_REMEDIATION_THROTTLE_DIRS";
+const ENV_REMEDIATION_QUARANTINE_URLS: &str = "TB_REMEDIATION_QUARANTINE_URLS";
+const ENV_REMEDIATION_QUARANTINE_DIRS: &str = "TB_REMEDIATION_QUARANTINE_DIRS";
+const ENV_REMEDIATION_ESCALATE_URLS: &str = "TB_REMEDIATION_ESCALATE_URLS";
+const ENV_REMEDIATION_ESCALATE_DIRS: &str = "TB_REMEDIATION_ESCALATE_DIRS";
 
 #[derive(Clone)]
 pub struct PeerStat {
@@ -301,6 +332,7 @@ pub struct AppState {
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
+    bridge_hooks: BridgeRemediationHooks,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -380,6 +412,7 @@ impl AppState {
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
+            bridge_hooks: BridgeRemediationHooks::from_env(),
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
@@ -843,12 +876,20 @@ impl AppState {
             labels = %labels,
             "bridge remediation action emitted",
         );
+        self.bridge_hooks.dispatch(&action);
     }
 
     fn bridge_remediation_actions(&self) -> Vec<BridgeRemediationAction> {
         self.bridge_remediation
             .lock()
             .map(|engine| engine.actions())
+            .unwrap_or_default()
+    }
+
+    fn bridge_remediation_dispatches(&self) -> Vec<BridgeRemediationDispatchRecord> {
+        let log = bridge_dispatch_log();
+        log.lock()
+            .map(|entries| entries.iter().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -1161,6 +1202,7 @@ struct AggregatorMetrics {
     bridge_metric_delta: GaugeVec,
     bridge_metric_rate_per_second: GaugeVec,
     bridge_remediation_action_total: CounterVec,
+    bridge_remediation_dispatch_total: CounterVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2276,6 +2318,17 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(bridge_remediation_action_total.clone()))
         .expect("register bridge_remediation_action_total");
+    let bridge_remediation_dispatch_total = CounterVec::new(
+        Opts::new(
+            METRIC_BRIDGE_REMEDIATION_DISPATCH_TOTAL,
+            "Bridge remediation dispatch attempts grouped by target and status",
+        ),
+        &LABEL_REMEDIATION_DISPATCH,
+    )
+    .expect("build bridge_remediation_dispatch_total counter vec");
+    registry
+        .register(Box::new(bridge_remediation_dispatch_total.clone()))
+        .expect("register bridge_remediation_dispatch_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2314,6 +2367,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_metric_delta,
         bridge_metric_rate_per_second,
         bridge_remediation_action_total,
+        bridge_remediation_dispatch_total,
     }
 });
 
@@ -2323,6 +2377,53 @@ fn aggregator_metrics() -> &'static AggregatorMetrics {
 
 static TLS_WARNING_SNAPSHOTS: Lazy<Mutex<HashMap<(String, String), TlsWarningSnapshot>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+
+static BRIDGE_DISPATCH_LOG: OnceLock<Arc<Mutex<VecDeque<BridgeRemediationDispatchRecord>>>> =
+    OnceLock::new();
+
+fn bridge_dispatch_log() -> &'static Arc<Mutex<VecDeque<BridgeRemediationDispatchRecord>>> {
+    BRIDGE_DISPATCH_LOG.get_or_init(|| Arc::new(Mutex::new(VecDeque::new())))
+}
+
+pub fn reset_bridge_remediation_dispatch_log() {
+    if let Some(log) = BRIDGE_DISPATCH_LOG.get() {
+        if let Ok(mut guard) = log.lock() {
+            guard.clear();
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BridgeRemediationDispatchRecord {
+    action: BridgeRemediationAction,
+    target: String,
+    status: String,
+    dispatched_at: u64,
+}
+
+impl BridgeRemediationDispatchRecord {
+    fn new(
+        action: &BridgeRemediationAction,
+        target: &str,
+        status: &str,
+        dispatched_at: u64,
+    ) -> Self {
+        Self {
+            action: action.clone(),
+            target: target.to_string(),
+            status: status.to_string(),
+            dispatched_at,
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = self.action.to_map();
+        map.insert("dispatched_at".to_string(), Value::from(self.dispatched_at));
+        map.insert("target".to_string(), Value::String(self.target.clone()));
+        map.insert("status".to_string(), Value::String(self.status.clone()));
+        Value::Object(map)
+    }
+}
 
 fn update_tls_warning_snapshot(
     prefix: &str,
@@ -2881,6 +2982,14 @@ impl BridgeRemediationPlaybook {
         }
     }
 
+    fn display_name(&self) -> &'static str {
+        match self {
+            BridgeRemediationPlaybook::None => "operator paging",
+            BridgeRemediationPlaybook::IncentiveThrottle => "incentive throttle",
+            BridgeRemediationPlaybook::GovernanceEscalation => "governance escalation",
+        }
+    }
+
     fn from_str(value: &str) -> Option<Self> {
         match value {
             "none" => Some(BridgeRemediationPlaybook::None),
@@ -2989,7 +3098,126 @@ impl BridgeRemediationAction {
         }
     }
 
-    fn to_value(&self) -> Value {
+    fn labels_summary(&self) -> Vec<String> {
+        self.labels
+            .iter()
+            .map(|label| format!("{}={}", label.key, label.value))
+            .collect()
+    }
+
+    fn ratio_phrase(&self) -> String {
+        if self.ratio.is_finite() && self.ratio > 0.0 {
+            format!("{:.2}× baseline", self.ratio)
+        } else {
+            "baseline threshold crossed".to_string()
+        }
+    }
+
+    fn annotation(&self) -> String {
+        let labels = self.labels_summary();
+        let label_clause = if labels.is_empty() {
+            "no label qualifiers".to_string()
+        } else {
+            format!("labels [{}]", labels.join(", "))
+        };
+        format!(
+            "Peer {} triggered {} for {} ({}, delta {:.2}) after {} samples – executing the {} playbook with {}.",
+            self.peer_id,
+            self.action.as_str(),
+            self.metric,
+            self.ratio_phrase(),
+            self.delta,
+            self.occurrences,
+            self.playbook.display_name(),
+            label_clause
+        )
+    }
+
+    fn dashboard_panels(&self) -> Vec<String> {
+        let mut panels: Vec<String> = BRIDGE_REMEDIATION_BASE_PANELS
+            .iter()
+            .chain(BRIDGE_LIQUIDITY_PANELS.iter())
+            .map(|panel| (*panel).to_string())
+            .collect();
+        let mut extras: Vec<String> = match self.metric.as_str() {
+            "bridge_reward_claims_total" => vec![
+                BRIDGE_PANEL_REWARD_CLAIMS.to_string(),
+                BRIDGE_PANEL_REWARD_APPROVALS.to_string(),
+            ],
+            "bridge_reward_approvals_consumed_total" => vec![
+                BRIDGE_PANEL_REWARD_APPROVALS.to_string(),
+                BRIDGE_PANEL_REWARD_CLAIMS.to_string(),
+            ],
+            "bridge_settlement_results_total" => {
+                vec![BRIDGE_PANEL_SETTLEMENT_RESULTS.to_string()]
+            }
+            "bridge_dispute_outcomes_total" => {
+                vec![BRIDGE_PANEL_DISPUTE_OUTCOMES.to_string()]
+            }
+            metric => vec![format!("{} (5m delta)", metric)],
+        };
+        panels.append(&mut extras);
+        panels.sort();
+        panels.dedup();
+        panels
+    }
+
+    fn response_sequence_with_panels(&self, panels: &[String]) -> Vec<String> {
+        let panel_clause = if panels.is_empty() {
+            "bridge remediation dashboard row".to_string()
+        } else {
+            panels.join(", ")
+        };
+        let dispatch_step = format!(
+            "Audit remediation persistence at /remediation/bridge and dispatch status via {}.",
+            BRIDGE_REMEDIATION_DISPATCH_ENDPOINT
+        );
+        match self.playbook {
+            BridgeRemediationPlaybook::None => vec![
+                format!(
+                    "Acknowledge the bridge remediation page for peer {} on metric {} (action {}).",
+                    self.peer_id,
+                    self.metric,
+                    self.action.as_str()
+                ),
+                format!("Review Grafana panels: {}.", panel_clause),
+                dispatch_step.clone(),
+                "Coordinate with the relayer and confirm the metric returns to baseline before closing the alert."
+                    .to_string(),
+            ],
+            BridgeRemediationPlaybook::IncentiveThrottle => vec![
+                format!(
+                    "Activate the incentive throttle runbook for peer {} on metric {} (action {}).",
+                    self.peer_id,
+                    self.metric,
+                    self.action.as_str()
+                ),
+                format!("Review Grafana panels: {}.", panel_clause),
+                format!(
+                    "Execute throttle or quarantine steps documented in {}.",
+                    BRIDGE_REMEDIATION_RUNBOOK_PATH
+                ),
+                dispatch_step.clone(),
+                "Schedule a follow-up to unwind throttles once liquidity and approvals stabilize."
+                    .to_string(),
+            ],
+            BridgeRemediationPlaybook::GovernanceEscalation => vec![
+                format!(
+                    "Escalate the bridge remediation to governance for peer {} on metric {}.",
+                    self.peer_id, self.metric
+                ),
+                format!("Review Grafana panels: {}.", panel_clause),
+                format!(
+                    "Open or update the governance incident as outlined in {} and copy the annotation into the record.",
+                    BRIDGE_REMEDIATION_RUNBOOK_PATH
+                ),
+                dispatch_step,
+                "Coordinate cross-chain liquidity fallback and monitor until metrics return to baseline before closing the governance item.".to_string(),
+            ],
+        }
+    }
+
+    fn to_map(&self) -> Map {
         let mut map = Map::new();
         map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
         map.insert("metric".to_string(), Value::String(self.metric.clone()));
@@ -3018,7 +3246,34 @@ impl BridgeRemediationAction {
         map.insert("threshold".to_string(), Value::from(self.threshold));
         map.insert("ratio".to_string(), Value::from(self.ratio));
         map.insert("timestamp".to_string(), Value::from(self.timestamp));
-        Value::Object(map)
+        map.insert("annotation".to_string(), Value::String(self.annotation()));
+        let panels = self.dashboard_panels();
+        map.insert(
+            "dashboard_panels".to_string(),
+            Value::Array(panels.iter().cloned().map(Value::String).collect()),
+        );
+        map.insert(
+            "runbook_path".to_string(),
+            Value::String(BRIDGE_REMEDIATION_RUNBOOK_PATH.to_string()),
+        );
+        map.insert(
+            "dispatch_endpoint".to_string(),
+            Value::String(BRIDGE_REMEDIATION_DISPATCH_ENDPOINT.to_string()),
+        );
+        map.insert(
+            "response_sequence".to_string(),
+            Value::Array(
+                self.response_sequence_with_panels(&panels)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        map
+    }
+
+    fn to_value(&self) -> Value {
+        Value::Object(self.to_map())
     }
 
     fn from_value(value: &Value) -> Option<Self> {
@@ -3073,6 +3328,293 @@ impl BridgeRemediationAction {
             timestamp,
         })
     }
+}
+
+#[derive(Clone, Default)]
+struct BridgeRemediationHooks {
+    page: Vec<BridgeRemediationHook>,
+    throttle: Vec<BridgeRemediationHook>,
+    quarantine: Vec<BridgeRemediationHook>,
+    escalate: Vec<BridgeRemediationHook>,
+}
+
+impl BridgeRemediationHooks {
+    fn from_env() -> Self {
+        Self {
+            page: collect_hooks(ENV_REMEDIATION_PAGE_URLS, ENV_REMEDIATION_PAGE_DIRS),
+            throttle: collect_hooks(ENV_REMEDIATION_THROTTLE_URLS, ENV_REMEDIATION_THROTTLE_DIRS),
+            quarantine: collect_hooks(
+                ENV_REMEDIATION_QUARANTINE_URLS,
+                ENV_REMEDIATION_QUARANTINE_DIRS,
+            ),
+            escalate: collect_hooks(ENV_REMEDIATION_ESCALATE_URLS, ENV_REMEDIATION_ESCALATE_DIRS),
+        }
+    }
+
+    fn dispatch(&self, action: &BridgeRemediationAction) {
+        let targets = match action.action {
+            BridgeRemediationActionType::Page => &self.page,
+            BridgeRemediationActionType::Throttle => &self.throttle,
+            BridgeRemediationActionType::Quarantine => &self.quarantine,
+            BridgeRemediationActionType::Escalate => &self.escalate,
+        };
+        if targets.is_empty() {
+            record_dispatch_outcome(action, "none", "skipped");
+            return;
+        }
+        for target in targets {
+            target.dispatch(action);
+        }
+    }
+}
+
+#[derive(Clone)]
+enum BridgeRemediationHook {
+    Http { url: String },
+    File { dir: PathBuf },
+}
+
+impl BridgeRemediationHook {
+    fn dispatch(&self, action: &BridgeRemediationAction) {
+        match self {
+            BridgeRemediationHook::Http { url } => {
+                let url = url.clone();
+                let payload = build_dispatch_payload(action);
+                let summary = action.clone();
+                spawn(async move {
+                    let client = http_client();
+                    let request = match client.request(Method::Post, &url) {
+                        Ok(builder) => builder,
+                        Err(err) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                url = %url,
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation http dispatch failed to build request",
+                            );
+                            record_dispatch_outcome(&summary, "http", "request_build_failed");
+                            return;
+                        }
+                    };
+                    let request = match request.json(&payload) {
+                        Ok(req) => req,
+                        Err(err) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                url = %url,
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation http dispatch failed to encode payload",
+                            );
+                            record_dispatch_outcome(&summary, "http", "payload_encode_failed");
+                            return;
+                        }
+                    };
+                    match request.send().await {
+                        Ok(response) => {
+                            let status = response.status();
+                            if status.is_success() {
+                                info!(
+                                    target: "aggregator",
+                                    url = %url,
+                                    status = status.as_u16(),
+                                    peer = %summary.peer_id,
+                                    metric = %summary.metric,
+                                    action = summary.action.as_str(),
+                                    playbook = summary.playbook.as_str(),
+                                    "bridge remediation hook dispatched via http",
+                                );
+                                record_dispatch_outcome(&summary, "http", "success");
+                            } else {
+                                warn!(
+                                    target: "aggregator",
+                                    url = %url,
+                                    status = status.as_u16(),
+                                    peer = %summary.peer_id,
+                                    metric = %summary.metric,
+                                    action = summary.action.as_str(),
+                                    playbook = summary.playbook.as_str(),
+                                    "bridge remediation http dispatch returned non-success status",
+                                );
+                                record_dispatch_outcome(&summary, "http", "status_failed");
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                url = %url,
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation http dispatch failed",
+                            );
+                            record_dispatch_outcome(&summary, "http", "request_failed");
+                        }
+                    }
+                });
+            }
+            BridgeRemediationHook::File { dir } => {
+                let dir = dir.clone();
+                let summary = action.clone();
+                spawn(async move {
+                    let payload = build_dispatch_payload(&summary);
+                    let handle = spawn_blocking(move || persist_action_to_dir(dir, payload));
+                    match handle.await {
+                        Ok(Ok(path)) => {
+                            info!(
+                                target: "aggregator",
+                                path = %path.display(),
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation hook persisted to spool",
+                            );
+                            record_dispatch_outcome(&summary, "spool", "success");
+                        }
+                        Ok(Err(err)) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation spool dispatch failed",
+                            );
+                            record_dispatch_outcome(&summary, "spool", "persist_failed");
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "aggregator",
+                                error = %err,
+                                peer = %summary.peer_id,
+                                metric = %summary.metric,
+                                action = summary.action.as_str(),
+                                playbook = summary.playbook.as_str(),
+                                "bridge remediation spool dispatch join failed",
+                            );
+                            record_dispatch_outcome(&summary, "spool", "join_failed");
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+fn record_dispatch_outcome(action: &BridgeRemediationAction, target: &str, status: &str) {
+    let metrics = aggregator_metrics();
+    metrics
+        .bridge_remediation_dispatch_total
+        .with_label_values(&[
+            action.action.as_str(),
+            action.playbook.as_str(),
+            target,
+            status,
+        ])
+        .inc();
+    let dispatched_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let record = BridgeRemediationDispatchRecord::new(action, target, status, dispatched_at);
+    if let Ok(mut guard) = bridge_dispatch_log().lock() {
+        guard.push_back(record);
+        if guard.len() > BRIDGE_REMEDIATION_MAX_DISPATCH_LOG {
+            guard.pop_front();
+        }
+    }
+}
+
+fn collect_hooks(url_key: &str, dir_key: &str) -> Vec<BridgeRemediationHook> {
+    let mut hooks = Vec::new();
+    for url in parse_env_list(url_key) {
+        hooks.push(BridgeRemediationHook::Http { url });
+    }
+    for dir in parse_env_list(dir_key) {
+        hooks.push(BridgeRemediationHook::File {
+            dir: PathBuf::from(dir),
+        });
+    }
+    hooks
+}
+
+fn parse_env_list(key: &str) -> Vec<String> {
+    match env::var(key) {
+        Ok(value) => value
+            .split(|c: char| matches!(c, ',' | ';' | '\n' | '\r'))
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| entry.to_string())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn build_dispatch_payload(action: &BridgeRemediationAction) -> Value {
+    let mut payload = match action.to_value() {
+        Value::Object(map) => map,
+        _ => Map::new(),
+    };
+    let dispatched_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    payload.insert("dispatched_at".to_string(), Value::from(dispatched_at));
+    Value::Object(payload)
+}
+
+fn persist_action_to_dir(dir: PathBuf, payload: Value) -> io::Result<PathBuf> {
+    fs::create_dir_all(&dir)?;
+    let sequence = BRIDGE_REMEDIATION_DISPATCH_SEQ.fetch_add(1, Ordering::Relaxed);
+    let action = payload
+        .as_object()
+        .and_then(|map| map.get("action"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let peer = payload
+        .as_object()
+        .and_then(|map| map.get("peer_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("peer");
+    let metric = payload
+        .as_object()
+        .and_then(|map| map.get("metric"))
+        .and_then(Value::as_str)
+        .unwrap_or("metric");
+    let timestamp = payload
+        .as_object()
+        .and_then(|map| map.get("timestamp"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        });
+    let file_name = format!(
+        "{}_{}_{}_{}_{}.json",
+        timestamp,
+        sequence,
+        sanitize_fragment(peer),
+        sanitize_fragment(metric),
+        sanitize_fragment(action),
+    );
+    let path = dir.join(file_name);
+    let bytes = json::to_vec(&payload)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+    fs::write(&path, &bytes)?;
+    Ok(path)
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -4631,6 +5173,18 @@ async fn bridge_remediation(request: Request<AppState>) -> Result<Response, Http
     json_ok(value)
 }
 
+async fn bridge_remediation_dispatches(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let entries = state.bridge_remediation_dispatches();
+    let value = Value::Array(
+        entries
+            .iter()
+            .map(BridgeRemediationDispatchRecord::to_value)
+            .collect(),
+    );
+    json_ok(value)
+}
+
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new(state)
         .post("/ingest", ingest)
@@ -4641,6 +5195,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/tls/warnings/status", tls_warning_status)
         .get("/anomalies/bridge", bridge_anomalies)
         .get("/remediation/bridge", bridge_remediation)
+        .get(
+            "/remediation/bridge/dispatches",
+            bridge_remediation_dispatches,
+        )
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)

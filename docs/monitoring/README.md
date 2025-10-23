@@ -23,10 +23,14 @@ ready to import once the foundation telemetry stack is running.
   `bridge_liquidity_locked_total{asset}`,
   `bridge_liquidity_unlocked_total{asset}`,
   `bridge_liquidity_minted_total{asset}`, and
-  `bridge_liquidity_burned_total{asset}` to surface cross-chain liquidity flow,
-  plus a remediation panel rendering
-  `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))` so
-  dashboards display the recommended playbook alongside each anomaly.
+  `bridge_liquidity_burned_total{asset}` to surface cross-chain liquidity flow.
+  Remediation coverage now spans two panels: one renders
+  `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))` to
+  display the recommended playbook alongside each anomaly, while the second
+  charts
+  `sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))`
+  so dispatch successes, skips, and failures per target stay visible without
+  leaving the dashboard.
 - The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
   bridge row. A rolling detector keeps a per-peer baseline for the reward,
   approval, settlement, and dispute counters, increments
@@ -47,10 +51,22 @@ ready to import once the foundation telemetry stack is running.
   quarantine, or escalation actions while
   `bridge_remediation_action_total{action,playbook}` exposes both the action and
   the follow-up playbook for dashboards and alert runbooks.
+- The remediation engine dispatches every action to first-party hooks. Configure
+  `TB_REMEDIATION_*_URLS` for HTTPS targets or `TB_REMEDIATION_*_DIRS` for spool
+  directories to receive the structured JSON payload (peer id, metric, labels,
+  playbook, `annotation`, `dashboard_panels`, `response_sequence`, and
+  `dispatched_at`). Each attempt increments
+  `bridge_remediation_dispatch_total{action,playbook,target,status}` **and**
+  appends to `/remediation/bridge/dispatches`, letting dashboards and alerting
+  policy flag skipped hooks or failing endpoints without scraping Prometheus.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression
   changes require first-party coverage instead of promtool fixtures.
+- Bridge fixtures now cover recovery tails and partial windows—including
+  dispute outcomes and quorum-failure approvals—so `BridgeCounter*Skew`
+  heuristics stay quiet while anomalies cool down or when fewer than six samples
+  exist.
 - Extend dashboards with `did_anchor_total` to monitor identifier churn; the
   explorer exposes `/dids/metrics/anchor_rate` and `/dids` for recent history so
   panels can link directly to the underlying records.

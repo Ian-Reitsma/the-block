@@ -1,9 +1,11 @@
 use foundation_serialization::json::{self, Value};
 use httpd::{Method, StatusCode};
-use metrics_aggregator::{router, AppState};
+use metrics_aggregator::{reset_bridge_remediation_dispatch_log, router, AppState};
+use std::env;
+use std::fs;
 use std::future::Future;
 use std::time::Duration;
-use sys::tempfile;
+use sys::tempfile::{self, NamedTempFile};
 
 struct ApiAnomalyLabel {
     key: String,
@@ -70,6 +72,11 @@ struct ApiRemediationAction {
     occurrences: u64,
     labels: Vec<ApiAnomalyLabel>,
     playbook: String,
+    annotation: Option<String>,
+    runbook_path: Option<String>,
+    dispatch_endpoint: Option<String>,
+    response_sequence: Vec<String>,
+    dashboard_panels: Vec<String>,
 }
 
 fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
@@ -103,6 +110,28 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                         .collect()
                 })
                 .unwrap_or_else(Vec::new);
+            let response_sequence = object
+                .get("response_sequence")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(Vec::new);
+            let dashboard_panels = object
+                .get("dashboard_panels")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(Vec::new);
             ApiRemediationAction {
                 action: object
                     .get("action")
@@ -129,9 +158,106 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                     .and_then(Value::as_u64)
                     .unwrap_or(0),
                 labels,
+                annotation: object
+                    .get("annotation")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string()),
+                runbook_path: object
+                    .get("runbook_path")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string()),
+                dispatch_endpoint: object
+                    .get("dispatch_endpoint")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string()),
+                response_sequence,
+                dashboard_panels,
             }
         })
         .collect()
+}
+
+struct ApiDispatchRecord {
+    target: String,
+    status: String,
+    annotation: String,
+    response_sequence: Vec<String>,
+    dashboard_panels: Vec<String>,
+}
+
+fn parse_dispatch_records(bytes: &[u8]) -> Vec<ApiDispatchRecord> {
+    let value: Value = json::from_slice(bytes).expect("dispatch response json");
+    let array = value.as_array().expect("response array");
+    array
+        .iter()
+        .map(|entry| {
+            let object = entry.as_object().expect("dispatch object");
+            let response_sequence = object
+                .get("response_sequence")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(Vec::new);
+            let dashboard_panels = object
+                .get("dashboard_panels")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(Vec::new);
+            ApiDispatchRecord {
+                target: object
+                    .get("target")
+                    .and_then(Value::as_str)
+                    .expect("target field")
+                    .to_string(),
+                status: object
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .expect("status field")
+                    .to_string(),
+                annotation: object
+                    .get("annotation")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                response_sequence,
+                dashboard_panels,
+            }
+        })
+        .collect()
+}
+
+struct EnvGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = env::var(key).ok();
+        env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(prev) = self.previous.take() {
+            env::set_var(self.key, prev);
+        } else {
+            env::remove_var(self.key);
+        }
+    }
 }
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -391,6 +517,7 @@ fn bridge_anomaly_detector_respects_cooldown_and_labels() {
 #[test]
 fn bridge_remediation_exposes_actions() {
     run_async(async {
+        reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -439,6 +566,29 @@ fn bridge_remediation_exposes_actions() {
             .labels
             .iter()
             .any(|label| label.key == "asset" && label.value == "eth"));
+        let annotation = action.annotation.as_ref().expect("annotation field");
+        assert!(annotation.contains("governance escalation"));
+        assert!(annotation.contains("bridge-node"));
+        assert_eq!(
+            action.runbook_path.as_deref(),
+            Some("docs/operators/incident_playbook.md#bridge-liquidity-remediation")
+        );
+        assert_eq!(
+            action.dispatch_endpoint.as_deref(),
+            Some("/remediation/bridge/dispatches")
+        );
+        assert!(
+            !action.response_sequence.is_empty(),
+            "expected response sequence"
+        );
+        assert!(action
+            .response_sequence
+            .iter()
+            .any(|step| step.contains("/remediation/bridge/dispatches")));
+        assert!(action
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_dispatch_total (5m delta)"));
 
         let metrics_resp = app
             .handle(app.request_builder().path("/metrics").build())
@@ -455,6 +605,7 @@ fn bridge_remediation_exposes_actions() {
 #[test]
 fn bridge_remediation_emits_throttle_playbook() {
     run_async(async {
+        reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -496,6 +647,20 @@ fn bridge_remediation_emits_throttle_playbook() {
         let action = actions.last().unwrap();
         assert_eq!(action.action, "throttle");
         assert_eq!(action.playbook, "incentive-throttle");
+        let annotation = action.annotation.as_ref().expect("annotation field");
+        assert!(annotation.contains("incentive throttle"));
+        assert_eq!(
+            action.runbook_path.as_deref(),
+            Some("docs/operators/incident_playbook.md#bridge-liquidity-remediation")
+        );
+        assert!(action
+            .response_sequence
+            .iter()
+            .any(|step| step.contains("incentive throttle")));
+        assert!(action
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_dispatch_total (5m delta)"));
 
         let metrics_resp = app
             .handle(app.request_builder().path("/metrics").build())
@@ -504,6 +669,309 @@ fn bridge_remediation_emits_throttle_playbook() {
         let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
         assert!(metrics_body.contains(
             "bridge_remediation_action_total{action=\"throttle\",playbook=\"incentive-throttle\"}"
+        ));
+    });
+}
+
+#[test]
+fn bridge_remediation_dispatches_to_spool_hooks() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let spool = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set(
+            "TB_REMEDIATION_ESCALATE_DIRS",
+            spool.path().to_str().expect("spool path str"),
+        );
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        runtime::sleep(Duration::from_millis(150)).await;
+
+        let mut entries: Vec<_> = fs::read_dir(spool.path())
+            .expect("read spool directory")
+            .filter_map(|entry| entry.ok())
+            .collect();
+        entries.sort_by_key(|entry| entry.path());
+        assert!(
+            !entries.is_empty(),
+            "expected remediation hook to persist a spool entry",
+        );
+        let path = entries.last().unwrap().path();
+        let bytes = fs::read(&path).expect("read spool payload");
+        let payload: Value = json::from_slice(&bytes).expect("decode spool payload");
+        let object = payload.as_object().expect("payload object");
+        assert_eq!(
+            object
+                .get("action")
+                .and_then(Value::as_str)
+                .expect("action field"),
+            "escalate",
+        );
+        assert_eq!(
+            object
+                .get("playbook")
+                .and_then(Value::as_str)
+                .expect("playbook field"),
+            "governance-escalation",
+        );
+        assert_eq!(
+            object
+                .get("metric")
+                .and_then(Value::as_str)
+                .expect("metric field"),
+            "bridge_settlement_results_total",
+        );
+        assert_eq!(
+            object
+                .get("peer_id")
+                .and_then(Value::as_str)
+                .expect("peer field"),
+            "bridge-node",
+        );
+        assert!(
+            object
+                .get("dispatched_at")
+                .and_then(Value::as_u64)
+                .is_some(),
+            "dispatch timestamp missing",
+        );
+        let annotation = object
+            .get("annotation")
+            .and_then(Value::as_str)
+            .expect("annotation field");
+        assert!(annotation.contains("bridge-node"));
+        assert!(annotation.contains("governance escalation"));
+        assert_eq!(
+            object
+                .get("runbook_path")
+                .and_then(Value::as_str)
+                .expect("runbook path"),
+            "docs/operators/incident_playbook.md#bridge-liquidity-remediation",
+        );
+        assert_eq!(
+            object
+                .get("dispatch_endpoint")
+                .and_then(Value::as_str)
+                .expect("dispatch endpoint"),
+            "/remediation/bridge/dispatches",
+        );
+        let steps = object
+            .get("response_sequence")
+            .and_then(Value::as_array)
+            .expect("response sequence");
+        assert!(!steps.is_empty(), "expected response steps");
+        assert!(steps.iter().any(|entry| {
+            entry
+                .as_str()
+                .map(|text| text.contains("/remediation/bridge/dispatches"))
+                .unwrap_or(false)
+        }));
+        let panels = object
+            .get("dashboard_panels")
+            .and_then(Value::as_array)
+            .expect("dashboard panels");
+        assert!(panels.iter().any(|panel| {
+            panel
+                .as_str()
+                .map(|value| value == "bridge_remediation_dispatch_total (5m delta)")
+                .unwrap_or(false)
+        }));
+
+        let dispatch_resp = app
+            .handle(
+                app.request_builder()
+                    .path("/remediation/bridge/dispatches")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dispatch_resp.status(), StatusCode::OK);
+        let dispatch_records = parse_dispatch_records(dispatch_resp.body());
+        assert!(!dispatch_records.is_empty(), "expected dispatch record");
+        let record = dispatch_records.last().unwrap();
+        assert_eq!(record.target, "spool");
+        assert_eq!(record.status, "success");
+        assert!(record.annotation.contains("bridge-node"));
+        assert!(record
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_dispatch_total (5m delta)"));
+        assert!(record
+            .response_sequence
+            .iter()
+            .any(|step| step.contains("/remediation/bridge/dispatches")));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_dispatch_total{action="escalate",playbook="governance-escalation",target="spool",status="success"}"#
+        ));
+    });
+}
+
+#[test]
+fn bridge_remediation_records_spool_failures() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let spool_file = NamedTempFile::new().unwrap();
+        let spool_path = spool_file.path().to_path_buf();
+        let _guard = EnvGuard::set(
+            "TB_REMEDIATION_ESCALATE_DIRS",
+            spool_path.to_str().expect("spool file path"),
+        );
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        runtime::sleep(Duration::from_millis(150)).await;
+
+        let dispatch_resp = app
+            .handle(
+                app.request_builder()
+                    .path("/remediation/bridge/dispatches")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dispatch_resp.status(), StatusCode::OK);
+        let dispatch_records = parse_dispatch_records(dispatch_resp.body());
+        assert!(!dispatch_records.is_empty(), "expected dispatch record");
+        let record = dispatch_records.last().unwrap();
+        assert_eq!(record.target, "spool");
+        assert_eq!(record.status, "persist_failed");
+        assert!(record.annotation.contains("bridge-node"));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_dispatch_total{action="escalate",playbook="governance-escalation",target="spool",status="persist_failed"}"#
+        ));
+    });
+}
+
+#[test]
+fn bridge_remediation_records_skipped_dispatch_when_unconfigured() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        runtime::sleep(Duration::from_millis(150)).await;
+
+        let dispatch_resp = app
+            .handle(
+                app.request_builder()
+                    .path("/remediation/bridge/dispatches")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dispatch_resp.status(), StatusCode::OK);
+        let dispatch_records = parse_dispatch_records(dispatch_resp.body());
+        assert!(!dispatch_records.is_empty(), "expected dispatch record");
+        let record = dispatch_records.last().unwrap();
+        assert_eq!(record.target, "none");
+        assert_eq!(record.status, "skipped");
+        assert!(record.annotation.contains("bridge-node"));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_dispatch_total{action="escalate",playbook="governance-escalation",target="none",status="skipped"}"#
         ));
     });
 }

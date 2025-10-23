@@ -291,6 +291,17 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge remediation dispatch attempts grouped by target surface and status",
+      "labels": [
+        "action",
+        "playbook",
+        "target",
+        "status"
+      ],
+      "name": "bridge_remediation_dispatch_total"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

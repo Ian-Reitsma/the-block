@@ -1,4 +1,25 @@
 # System-Wide Economic Changes
+> **Review (2025-10-25, early morning):** Bridge remediation payloads now ship
+> an `annotation`, curated `dashboard_panels`, a `response_sequence`, and the
+> dispatcher exposes `/remediation/bridge/dispatches` so paging/governance hooks
+> can audit per-target delivery without scraping metrics. Operator runbooks link
+> directly to the generated steps, and the alert validator picked up
+> dispute/quorum recovery fixtures so the bridge skew heuristics stay quiet while
+> anomalies cool off.
+> **Review (2025-10-24, late evening):** Bridge dispatch hooks now emit
+> `bridge_remediation_dispatch_total{action,playbook,target,status}` alongside the
+> existing action counter, with CLI tests covering spool successes, failures,
+> and skipped hooks. Grafana/GHTML dashboards gained a dispatch health panel so
+> operators can track HTTP/spool outcomes in real time, and the incident playbook
+> points responders at the new legend entries for rapid diagnostics.
+> **Review (2025-10-24, midday):** Bridge remediation actions now dispatch
+> directly to first-party paging/governance hooks via the new
+> `TB_REMEDIATION_*_URLS`/`*_DIRS` environment variables. The aggregator logs
+> HTTP success/failure, persists spool payloads with deterministic filenames, and
+> the operator incident playbook documents the liquidity response sequence that
+> ties dashboard annotations to the dispatched playbook. The shared alert
+> validator picked up recovery-curve and partial-window fixtures so the
+> `BridgeCounter*Skew` heuristics stay stable across edits.
 > **Review (2025-10-24, pre-dawn):** Bridge anomaly remediation now persists
 > per-relayer actions and exposes `/remediation/bridge` plus the
 > `bridge_remediation_action_total{action,playbook}` counter so automated runbooks
