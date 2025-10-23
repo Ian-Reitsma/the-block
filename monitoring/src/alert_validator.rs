@@ -699,6 +699,24 @@ fn build_bridge_dataset() -> Vec<Series> {
             "asset=eth",
             build_uniform(0.05, 31),
         ),
+        Series::new(
+            "recovery-delta",
+            METRIC_DELTA,
+            "asset=dot",
+            build_recovery_series(0.6, 20, 7.5, &[3.0, 1.4, 0.7, 0.6]),
+        ),
+        Series::new(
+            "recovery-rate",
+            METRIC_RATE,
+            "asset=dot",
+            build_recovery_series(0.04, 20, 0.35, &[0.18, 0.07, 0.05, 0.04]),
+        ),
+        Series::new(
+            "partial-window-delta",
+            METRIC_DELTA,
+            "asset=ltc",
+            vec![1.0, 1.2, 1.15, 1.1],
+        ),
     ]
 }
 
@@ -904,6 +922,14 @@ fn build_series(base: f64, base_len: usize, spike: f64, spike_len: usize) -> Vec
 
 fn build_uniform(value: f64, len: usize) -> Vec<f64> {
     std::iter::repeat(value).take(len).collect()
+}
+
+fn build_recovery_series(base: f64, base_len: usize, spike: f64, tail: &[f64]) -> Vec<f64> {
+    let mut values = Vec::with_capacity(base_len + 1 + tail.len());
+    values.extend(std::iter::repeat(base).take(base_len));
+    values.push(spike);
+    values.extend(tail.iter().copied());
+    values
 }
 
 #[derive(Clone)]

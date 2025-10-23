@@ -1,8 +1,8 @@
 # System-Wide Economic Changes
 > **Review (2025-10-24, pre-dawn):** Bridge anomaly remediation now persists
 > per-relayer actions and exposes `/remediation/bridge` plus the
-> `bridge_remediation_action_total{action}` counter so automated runbooks can
-> page or quarantine relayers directly from first-party signals. The shared
+> `bridge_remediation_action_total{action,playbook}` counter so automated runbooks
+> can page, throttle, or escalate directly from first-party signals. The shared
 > validator in `monitoring/src/alert_validator.rs` replaces the bridge-only
 > helper; the existing `bridge-alert-validator` binary now exercises canned
 > datasets for bridge, chain-health, dependency-registry, and treasury alert

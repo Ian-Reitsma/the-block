@@ -2,9 +2,17 @@
 > **Review (2025-10-24, pre-dawn):** Bridge anomaly handling now drives automated
 > remediation backed by persistent state. The metrics aggregator records per-
 > relayer actions, exposes `/remediation/bridge`, increments
-> `bridge_remediation_action_total{action}`, and resumes recommendations after
-> restarts via a dedicated sled column family. Alert validation graduated to the
-> new `monitoring/src/alert_validator.rs` module; the existing
+> `bridge_remediation_action_total{action,playbook}`, and resumes recommendations
+> after restarts via a dedicated sled column family while tagging each action
+> with the follow-up playbook (`incentive-throttle` or `governance-escalation`).
+> Cross-chain liquidity counters
+> (`bridge_liquidity_locked_total{asset}`,
+> `bridge_liquidity_unlocked_total{asset}`,
+> `bridge_liquidity_minted_total{asset}`, and
+> `bridge_liquidity_burned_total{asset}`) now feed the same anomaly baselines and
+> dashboards so reward anomalies can be correlated with asset-specific flows.
+> Alert validation graduated to the new `monitoring/src/alert_validator.rs`
+> module; the existing
 > `bridge-alert-validator` binary invokes the shared helper to replay canned
 > datasets for the bridge, chain-health, dependency-registry, and treasury alert
 > groups so CI keeps every Prometheus expression hermetic without promtool.
@@ -830,11 +838,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`, while reward claims, settlement submissions, and duty outcomes update `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
-- Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action}` counter.
+- Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action,playbook}` counter and the new liquidity telemetry (`bridge_liquidity_locked_total`, `bridge_liquidity_unlocked_total`, `bridge_liquidity_minted_total`, `bridge_liquidity_burned_total`).
 
 **Gaps**
 - Treasury sweep automation, offline settlement proof sampling, and richer relayer incentive analytics remain.
-- Extend remediation to automate incentive throttles/governance escalations beyond the current page/quarantine actions and expand anomaly baselines to cross-chain liquidity metrics.
+- Fold the richer remediation outputs into automated paging/governance tooling and publish liquidity remediation runbooks so operators can coordinate throttles/escalations without manual curation.
 
 ## 10. Monitoring, Debugging & Profiling — 96.8 %
 

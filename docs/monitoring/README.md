@@ -19,7 +19,14 @@ ready to import once the foundation telemetry stack is running.
   `bridge_settlement_results_total{result,reason}`, and
   `bridge_dispute_outcomes_total{kind,outcome}` so operators can audit reward
   consumption, settlement results, and dispute resolutions without importing
-  third-party widgets.
+  third-party widgets. Additional panels plot
+  `bridge_liquidity_locked_total{asset}`,
+  `bridge_liquidity_unlocked_total{asset}`,
+  `bridge_liquidity_minted_total{asset}`, and
+  `bridge_liquidity_burned_total{asset}` to surface cross-chain liquidity flow,
+  plus a remediation panel rendering
+  `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))` so
+  dashboards display the recommended playbook alongside each anomaly.
 - The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
   bridge row. A rolling detector keeps a per-peer baseline for the reward,
   approval, settlement, and dispute counters, increments
@@ -36,9 +43,10 @@ ready to import once the foundation telemetry stack is running.
   `BridgeCounterDeltaLabelSkew`/`BridgeCounterRateLabelSkew` when a relayer’s
   aggregate or per-label growth exceeds three times the 30-minute average.
   Baselines persist across restarts, and labelled anomalies now feed the
-  remediation engine: `/remediation/bridge` lists the persisted page or
-  quarantine recommendations while `bridge_remediation_action_total{action}`
-  exposes the same actions for dashboards and alert runbooks.
+  remediation engine: `/remediation/bridge` lists the persisted page, throttle,
+  quarantine, or escalation actions while
+  `bridge_remediation_action_total{action,playbook}` exposes both the action and
+  the follow-up playbook for dashboards and alert runbooks.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression

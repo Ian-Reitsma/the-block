@@ -133,6 +133,23 @@ const BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE: &str = "bridge_dispute_outcomes_total
 const BRIDGE_DISPUTE_OUTCOMES_EXPR: &str =
     "sum by (kind, outcome)(increase(bridge_dispute_outcomes_total[5m]))";
 const BRIDGE_DISPUTE_OUTCOMES_LEGEND: &str = "{{kind}} · {{outcome}}";
+const BRIDGE_LIQUIDITY_LOCKED_PANEL_TITLE: &str = "bridge_liquidity_locked_total (5m delta)";
+const BRIDGE_LIQUIDITY_LOCKED_EXPR: &str =
+    "sum by (asset)(increase(bridge_liquidity_locked_total[5m]))";
+const BRIDGE_LIQUIDITY_UNLOCKED_PANEL_TITLE: &str = "bridge_liquidity_unlocked_total (5m delta)";
+const BRIDGE_LIQUIDITY_UNLOCKED_EXPR: &str =
+    "sum by (asset)(increase(bridge_liquidity_unlocked_total[5m]))";
+const BRIDGE_LIQUIDITY_MINTED_PANEL_TITLE: &str = "bridge_liquidity_minted_total (5m delta)";
+const BRIDGE_LIQUIDITY_MINTED_EXPR: &str =
+    "sum by (asset)(increase(bridge_liquidity_minted_total[5m]))";
+const BRIDGE_LIQUIDITY_BURNED_PANEL_TITLE: &str = "bridge_liquidity_burned_total (5m delta)";
+const BRIDGE_LIQUIDITY_BURNED_EXPR: &str =
+    "sum by (asset)(increase(bridge_liquidity_burned_total[5m]))";
+const BRIDGE_LIQUIDITY_LEGEND: &str = "{{asset}}";
+const BRIDGE_REMEDIATION_PANEL_TITLE: &str = "bridge_remediation_action_total (5m delta)";
+const BRIDGE_REMEDIATION_EXPR: &str =
+    "sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))";
+const BRIDGE_REMEDIATION_LEGEND: &str = "{{action}} · {{playbook}}";
 const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
 const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
@@ -326,6 +343,51 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
                 BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE,
                 BRIDGE_DISPUTE_OUTCOMES_EXPR,
                 BRIDGE_DISPUTE_OUTCOMES_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_liquidity_locked_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_LIQUIDITY_LOCKED_PANEL_TITLE,
+                BRIDGE_LIQUIDITY_LOCKED_EXPR,
+                BRIDGE_LIQUIDITY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_liquidity_unlocked_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_LIQUIDITY_UNLOCKED_PANEL_TITLE,
+                BRIDGE_LIQUIDITY_UNLOCKED_EXPR,
+                BRIDGE_LIQUIDITY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_liquidity_minted_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_LIQUIDITY_MINTED_PANEL_TITLE,
+                BRIDGE_LIQUIDITY_MINTED_EXPR,
+                BRIDGE_LIQUIDITY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_liquidity_burned_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_LIQUIDITY_BURNED_PANEL_TITLE,
+                BRIDGE_LIQUIDITY_BURNED_EXPR,
+                BRIDGE_LIQUIDITY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_remediation_action_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_REMEDIATION_PANEL_TITLE,
+                BRIDGE_REMEDIATION_EXPR,
+                BRIDGE_REMEDIATION_LEGEND,
                 metric,
             ));
             continue;
@@ -1404,7 +1466,37 @@ mod tests {
                 deprecated: false,
             },
             Metric {
+                name: "bridge_liquidity_locked_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_liquidity_unlocked_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_liquidity_minted_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_liquidity_burned_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
                 name: "bridge_anomaly_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_remediation_action_total".into(),
                 description: String::new(),
                 unit: String::new(),
                 deprecated: false,
@@ -1432,7 +1524,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 8);
+        assert_eq!(panels.len(), 13);
 
         let row = panels
             .iter()
@@ -1516,6 +1608,70 @@ mod tests {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         assert!(delta_legend, "delta legend enabled");
+
+        let locked_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_LIQUIDITY_LOCKED_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("locked liquidity panel present");
+        let locked_target = locked_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .expect("locked target");
+        assert_eq!(
+            locked_target.get("expr"),
+            Some(&Value::from(BRIDGE_LIQUIDITY_LOCKED_EXPR))
+        );
+        assert_eq!(
+            locked_target.get("legendFormat"),
+            Some(&Value::from(BRIDGE_LIQUIDITY_LEGEND))
+        );
+
+        let remediation_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_REMEDIATION_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("remediation panel present");
+        let remediation_target = remediation_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .expect("remediation target");
+        assert_eq!(
+            remediation_target.get("expr"),
+            Some(&Value::from(BRIDGE_REMEDIATION_EXPR))
+        );
+        assert_eq!(
+            remediation_target.get("legendFormat"),
+            Some(&Value::from(BRIDGE_REMEDIATION_LEGEND))
+        );
 
         let anomaly_panel = panels
             .iter()

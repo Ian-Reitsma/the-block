@@ -141,13 +141,17 @@ const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
 const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
 const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint"];
 const LABEL_BRIDGE_COUNTER: [&str; 3] = ["metric", "peer", "labels"];
-const LABEL_REMEDIATION_ACTION: [&str; 1] = ["action"];
+const LABEL_REMEDIATION_ACTION: [&str; 2] = ["action", "playbook"];
 
-const BRIDGE_MONITORED_COUNTERS: [&str; 4] = [
+const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
     "bridge_reward_approvals_consumed_total",
     "bridge_settlement_results_total",
     "bridge_dispute_outcomes_total",
+    "bridge_liquidity_locked_total",
+    "bridge_liquidity_unlocked_total",
+    "bridge_liquidity_minted_total",
+    "bridge_liquidity_burned_total",
 ];
 const BRIDGE_ANOMALY_WINDOW: usize = 24;
 const BRIDGE_ANOMALY_BASELINE_MIN: usize = 6;
@@ -161,9 +165,15 @@ const BRIDGE_REMEDIATION_PAGE_COOLDOWN_SECS: u64 = 15 * 60;
 const BRIDGE_REMEDIATION_MAX_ACTIONS: usize = 200;
 const BRIDGE_REMEDIATION_PAGE_DELTA: f64 = 5.0;
 const BRIDGE_REMEDIATION_PAGE_RATIO: f64 = 1.0;
+const BRIDGE_REMEDIATION_THROTTLE_DELTA: f64 = 15.0;
+const BRIDGE_REMEDIATION_THROTTLE_RATIO: f64 = 1.5;
+const BRIDGE_REMEDIATION_THROTTLE_COUNT: usize = 2;
 const BRIDGE_REMEDIATION_QUARANTINE_DELTA: f64 = 25.0;
 const BRIDGE_REMEDIATION_QUARANTINE_RATIO: f64 = 2.0;
 const BRIDGE_REMEDIATION_QUARANTINE_COUNT: usize = 3;
+const BRIDGE_REMEDIATION_ESCALATE_DELTA: f64 = 80.0;
+const BRIDGE_REMEDIATION_ESCALATE_RATIO: f64 = 4.0;
+const BRIDGE_REMEDIATION_ESCALATE_COUNT: usize = 5;
 
 #[derive(Clone)]
 pub struct PeerStat {
@@ -812,7 +822,7 @@ impl AppState {
         let metrics = aggregator_metrics();
         metrics
             .bridge_remediation_action_total
-            .with_label_values(&[action.action.as_str()])
+            .with_label_values(&[action.action.as_str(), action.playbook.as_str()])
             .inc();
         let labels = action
             .labels
@@ -825,6 +835,7 @@ impl AppState {
             peer = %action.peer_id,
             metric = %action.metric,
             action = action.action.as_str(),
+            playbook = action.playbook.as_str(),
             occurrences = action.occurrences,
             delta = action.delta,
             threshold = action.threshold,
@@ -2828,21 +2839,53 @@ impl BridgeAnomalyLabel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 enum BridgeRemediationActionType {
     Page,
+    Throttle,
     Quarantine,
+    Escalate,
 }
 
 impl BridgeRemediationActionType {
     fn as_str(&self) -> &'static str {
         match self {
             BridgeRemediationActionType::Page => "page",
+            BridgeRemediationActionType::Throttle => "throttle",
             BridgeRemediationActionType::Quarantine => "quarantine",
+            BridgeRemediationActionType::Escalate => "escalate",
         }
     }
 
     fn from_str(value: &str) -> Option<Self> {
         match value {
             "page" => Some(BridgeRemediationActionType::Page),
+            "throttle" => Some(BridgeRemediationActionType::Throttle),
             "quarantine" => Some(BridgeRemediationActionType::Quarantine),
+            "escalate" => Some(BridgeRemediationActionType::Escalate),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BridgeRemediationPlaybook {
+    None,
+    IncentiveThrottle,
+    GovernanceEscalation,
+}
+
+impl BridgeRemediationPlaybook {
+    fn as_str(&self) -> &'static str {
+        match self {
+            BridgeRemediationPlaybook::None => "none",
+            BridgeRemediationPlaybook::IncentiveThrottle => "incentive-throttle",
+            BridgeRemediationPlaybook::GovernanceEscalation => "governance-escalation",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(BridgeRemediationPlaybook::None),
+            "incentive-throttle" => Some(BridgeRemediationPlaybook::IncentiveThrottle),
+            "governance-escalation" => Some(BridgeRemediationPlaybook::GovernanceEscalation),
             _ => None,
         }
     }
@@ -2908,6 +2951,7 @@ struct BridgeRemediationAction {
     metric: String,
     labels: Vec<BridgeAnomalyLabel>,
     action: BridgeRemediationActionType,
+    playbook: BridgeRemediationPlaybook,
     occurrences: usize,
     delta: f64,
     threshold: f64,
@@ -2922,11 +2966,21 @@ impl BridgeRemediationAction {
         occurrences: usize,
         ratio: f64,
     ) -> Self {
+        let playbook = match action {
+            BridgeRemediationActionType::Page => BridgeRemediationPlaybook::None,
+            BridgeRemediationActionType::Throttle | BridgeRemediationActionType::Quarantine => {
+                BridgeRemediationPlaybook::IncentiveThrottle
+            }
+            BridgeRemediationActionType::Escalate => {
+                BridgeRemediationPlaybook::GovernanceEscalation
+            }
+        };
         Self {
             peer_id: event.peer_id.clone(),
             metric: event.metric.clone(),
             labels: event.labels.clone(),
             action,
+            playbook,
             occurrences,
             delta: event.delta,
             threshold: event.threshold,
@@ -2951,6 +3005,10 @@ impl BridgeRemediationAction {
         map.insert(
             "action".to_string(),
             Value::String(self.action.as_str().to_string()),
+        );
+        map.insert(
+            "playbook".to_string(),
+            Value::String(self.playbook.as_str().to_string()),
         );
         map.insert(
             "occurrences".to_string(),
@@ -2981,6 +3039,19 @@ impl BridgeRemediationAction {
             .get("action")
             .and_then(Value::as_str)
             .and_then(BridgeRemediationActionType::from_str)?;
+        let playbook = object
+            .get("playbook")
+            .and_then(Value::as_str)
+            .and_then(BridgeRemediationPlaybook::from_str)
+            .unwrap_or(match action {
+                BridgeRemediationActionType::Page => BridgeRemediationPlaybook::None,
+                BridgeRemediationActionType::Throttle | BridgeRemediationActionType::Quarantine => {
+                    BridgeRemediationPlaybook::IncentiveThrottle
+                }
+                BridgeRemediationActionType::Escalate => {
+                    BridgeRemediationPlaybook::GovernanceEscalation
+                }
+            });
         let occurrences = object
             .get("occurrences")
             .and_then(Value::as_u64)
@@ -2994,6 +3065,7 @@ impl BridgeRemediationAction {
             metric,
             labels,
             action,
+            playbook,
             occurrences,
             delta,
             threshold,
@@ -3280,11 +3352,21 @@ impl BridgeRemediationEngine {
         } else {
             0.0
         };
-        let action = if occurrences >= BRIDGE_REMEDIATION_QUARANTINE_COUNT
+        let action = if occurrences >= BRIDGE_REMEDIATION_ESCALATE_COUNT
+            || event.delta >= BRIDGE_REMEDIATION_ESCALATE_DELTA
+            || ratio >= BRIDGE_REMEDIATION_ESCALATE_RATIO
+        {
+            Some(BridgeRemediationActionType::Escalate)
+        } else if occurrences >= BRIDGE_REMEDIATION_QUARANTINE_COUNT
             || event.delta >= BRIDGE_REMEDIATION_QUARANTINE_DELTA
             || ratio >= BRIDGE_REMEDIATION_QUARANTINE_RATIO
         {
             Some(BridgeRemediationActionType::Quarantine)
+        } else if occurrences >= BRIDGE_REMEDIATION_THROTTLE_COUNT
+            || event.delta >= BRIDGE_REMEDIATION_THROTTLE_DELTA
+            || ratio >= BRIDGE_REMEDIATION_THROTTLE_RATIO
+        {
+            Some(BridgeRemediationActionType::Throttle)
         } else if event.delta >= BRIDGE_REMEDIATION_PAGE_DELTA
             || ratio >= BRIDGE_REMEDIATION_PAGE_RATIO
         {

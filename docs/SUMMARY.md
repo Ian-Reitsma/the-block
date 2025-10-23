@@ -1,9 +1,9 @@
 # Summary
 > **Review (2025-10-24, pre-dawn):** Bridge anomaly remediation now persists
-> page/quarantine decisions, exposes `/remediation/bridge` plus the
-> `bridge_remediation_action_total{action}` counter, and resumes state after
-> restarts so operators can trigger first-party mitigations directly from the
-> metrics aggregator. Alert validation moved into the shared
+> page/throttle/quarantine/escalation decisions, exposes `/remediation/bridge`
+> plus the `bridge_remediation_action_total{action,playbook}` counter, and
+> resumes state after restarts so operators can trigger first-party mitigations
+> directly from the metrics aggregator. Alert validation moved into the shared
 > `monitoring/src/alert_validator.rs` helper, and the existing
 > `bridge-alert-validator` binary now replays canned datasets for bridge,
 > chain-health, dependency-registry, and treasury groups so CI guards every

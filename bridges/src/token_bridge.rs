@@ -2,7 +2,10 @@ use ledger::{Emission, TokenRegistry};
 use std::collections::{BTreeSet, HashMap};
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry_counter;
+use crate::{
+    telemetry_counter, BRIDGE_LIQUIDITY_BURNED_TOTAL, BRIDGE_LIQUIDITY_LOCKED_TOTAL,
+    BRIDGE_LIQUIDITY_MINTED_TOTAL, BRIDGE_LIQUIDITY_UNLOCKED_TOTAL,
+};
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
@@ -65,6 +68,13 @@ impl TokenBridge {
             if created {
                 TOKENS_CREATED_TOTAL.get().inc();
             }
+            if amount > 0 {
+                if let Ok(handle) =
+                    BRIDGE_LIQUIDITY_LOCKED_TOTAL.ensure_handle_for_label_values(&[symbol])
+                {
+                    handle.inc_by(amount as f64);
+                }
+            }
         }
     }
 
@@ -73,6 +83,16 @@ impl TokenBridge {
         self.ensure_token_registered(symbol);
         let entry = self.minted_supply.entry(symbol.to_string()).or_insert(0);
         *entry = entry.saturating_add(amount);
+        #[cfg(feature = "telemetry")]
+        {
+            if amount > 0 {
+                if let Ok(handle) =
+                    BRIDGE_LIQUIDITY_MINTED_TOTAL.ensure_handle_for_label_values(&[symbol])
+                {
+                    handle.inc_by(amount as f64);
+                }
+            }
+        }
         true
     }
 
@@ -87,6 +107,14 @@ impl TokenBridge {
                 self.locked_supply.remove(symbol);
             }
         }
+        #[cfg(feature = "telemetry")]
+        {
+            if let Ok(handle) =
+                BRIDGE_LIQUIDITY_UNLOCKED_TOTAL.ensure_handle_for_label_values(&[symbol])
+            {
+                handle.inc_by(amount as f64);
+            }
+        }
     }
 
     /// Burn wrapped tokens after they return through the bridge.
@@ -98,6 +126,14 @@ impl TokenBridge {
             *entry = entry.saturating_sub(amount);
             if *entry == 0 {
                 self.minted_supply.remove(symbol);
+            }
+        }
+        #[cfg(feature = "telemetry")]
+        {
+            if let Ok(handle) =
+                BRIDGE_LIQUIDITY_BURNED_TOTAL.ensure_handle_for_label_values(&[symbol])
+            {
+                handle.inc_by(amount as f64);
             }
         }
     }
