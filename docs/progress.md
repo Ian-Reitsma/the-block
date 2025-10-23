@@ -828,7 +828,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 90.6 %
+## 9. Bridges & Cross‑Chain Routing — 91.4 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -838,13 +838,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`, while reward claims, settlement submissions, and duty outcomes update `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
-- Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action,playbook}` counter and the new liquidity telemetry (`bridge_liquidity_locked_total`, `bridge_liquidity_unlocked_total`, `bridge_liquidity_minted_total`, `bridge_liquidity_burned_total`).
+- Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and the bridge fixtures cover recovery tails, partial windows, dispute outcomes, and quorum-failure approvals. Labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action,playbook}` counter and the liquidity telemetry (`bridge_liquidity_locked_total`, `bridge_liquidity_unlocked_total`, `bridge_liquidity_minted_total`, `bridge_liquidity_burned_total`).
+- Remediation actions now dispatch automatically through the aggregator’s first-party hooks. Environment-configurable `TB_REMEDIATION_*_URLS`/`*_DIRS` deliver JSON payloads to paging/governance services or local spools, the operator playbook documents the liquidity response flow end to end, and `bridge_remediation_dispatch_total{action,playbook,target,status}` plus the `/remediation/bridge/dispatches` endpoint record success, skip, and failure outcomes for every target. Dispatch payloads now embed annotations, dashboard-panel hints, and a response sequence so paging/governance automation can execute the runbook without bespoke glue.
 
 **Gaps**
 - Treasury sweep automation, offline settlement proof sampling, and richer relayer incentive analytics remain.
-- Fold the richer remediation outputs into automated paging/governance tooling and publish liquidity remediation runbooks so operators can coordinate throttles/escalations without manual curation.
+- Extend governance automation so escalations confirm when mitigation completes.
 
-## 10. Monitoring, Debugging & Profiling — 96.8 %
+## 10. Monitoring, Debugging & Profiling — 97.2 %
 
 **Evidence**
   - Runtime telemetry exporter with extensive counters (`node/src/telemetry.rs`).
@@ -862,9 +863,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bulk peer exports encrypt with the in-house envelope (`crypto_suite::encryption::envelope`) so operators can download archives with either X25519 recipients (`application/tb-envelope`) or shared passwords (`application/tb-password-envelope`) without touching `age` or OpenSSL (`metrics-aggregator/src/lib.rs`, `docs/monitoring.md`, `node/src/bin/net.rs`).
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
 - Bridge alert rules now include label-specific skew detection and the CI-run `bridge-alert-validator` binary verifies expressions against canned datasets, keeping alert coverage first party without promtool (`monitoring/src/alert_validator.rs`, `.github/workflows/ci.yml`). The binary now validates the bridge, chain-health, dependency-registry, and treasury alert groups in a single invocation.
+- The bridge dataset now includes recovery curves and partial-window fixtures so the `BridgeCounter*Skew` heuristics stay quiet during cooldowns. Remediation actions fan out to first-party HTTP or spool hooks (`TB_REMEDIATION_*_URLS`/`*_DIRS`), and the operator incident playbook documents the liquidity response flow alongside dashboard annotations.
 
 **Gaps**
-- Broaden the canned datasets for the shared alert validator (e.g., recovery curves, partial bucket windows) and wire dashboards into runbooks that automate response playbooks using the persisted remediation actions.
 - Continue building VM anomaly heuristics and long-horizon performance soak dashboards.
 
 ## 11. Identity & Explorer — 83.4 %

@@ -150,6 +150,11 @@ const BRIDGE_REMEDIATION_PANEL_TITLE: &str = "bridge_remediation_action_total (5
 const BRIDGE_REMEDIATION_EXPR: &str =
     "sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))";
 const BRIDGE_REMEDIATION_LEGEND: &str = "{{action}} · {{playbook}}";
+const BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE: &str =
+    "bridge_remediation_dispatch_total (5m delta)";
+const BRIDGE_REMEDIATION_DISPATCH_EXPR: &str =
+    "sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))";
+const BRIDGE_REMEDIATION_DISPATCH_LEGEND: &str = "{{action}} · {{target}} · {{status}}";
 const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
 const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
@@ -388,6 +393,15 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
                 BRIDGE_REMEDIATION_PANEL_TITLE,
                 BRIDGE_REMEDIATION_EXPR,
                 BRIDGE_REMEDIATION_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_remediation_dispatch_total" {
+            bridge.push(build_bridge_grouped_delta_panel(
+                BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE,
+                BRIDGE_REMEDIATION_DISPATCH_EXPR,
+                BRIDGE_REMEDIATION_DISPATCH_LEGEND,
                 metric,
             ));
             continue;
@@ -1502,6 +1516,12 @@ mod tests {
                 deprecated: false,
             },
             Metric {
+                name: "bridge_remediation_dispatch_total".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
                 name: "bridge_metric_delta".into(),
                 description: String::new(),
                 unit: String::new(),
@@ -1524,7 +1544,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 13);
+        assert_eq!(panels.len(), 14);
 
         let row = panels
             .iter()
@@ -1564,6 +1584,45 @@ mod tests {
             .and_then(Value::as_str)
             .expect("claims expression");
         assert_eq!(claims_expr, BRIDGE_REWARD_CLAIMS_EXPR);
+
+        let dispatch_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("dispatch panel present");
+        let dispatch_expr = dispatch_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("dispatch expression");
+        assert_eq!(dispatch_expr, BRIDGE_REMEDIATION_DISPATCH_EXPR);
+        let dispatch_legend = dispatch_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("legendFormat"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("dispatch legend format");
+        assert_eq!(dispatch_legend, BRIDGE_REMEDIATION_DISPATCH_LEGEND);
 
         let delta_panel = panels
             .iter()
