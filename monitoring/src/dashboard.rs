@@ -135,6 +135,12 @@ const BRIDGE_DISPUTE_OUTCOMES_EXPR: &str =
 const BRIDGE_DISPUTE_OUTCOMES_LEGEND: &str = "{{kind}} · {{outcome}}";
 const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
 const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
+const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
+const BRIDGE_METRIC_DELTA_EXPR: &str = "sum by (metric)(bridge_metric_delta)";
+const BRIDGE_METRIC_DELTA_DESCRIPTION: &str = "Per-scrape bridge counter deltas grouped by metric";
+const BRIDGE_METRIC_RATE_PANEL_TITLE: &str = "bridge_metric_rate_per_second";
+const BRIDGE_METRIC_RATE_EXPR: &str = "sum by (metric)(bridge_metric_rate_per_second)";
+const BRIDGE_METRIC_RATE_DESCRIPTION: &str = "Per-second bridge counter growth grouped by metric";
 
 impl Metric {
     fn from_value(value: &Value) -> Result<Self, DashboardError> {
@@ -332,6 +338,22 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             ));
             continue;
         }
+        if metric.name == "bridge_metric_delta" {
+            bridge.push(build_bridge_metric_panel(
+                BRIDGE_METRIC_DELTA_PANEL_TITLE,
+                BRIDGE_METRIC_DELTA_EXPR,
+                BRIDGE_METRIC_DELTA_DESCRIPTION,
+            ));
+            continue;
+        }
+        if metric.name == "bridge_metric_rate_per_second" {
+            bridge.push(build_bridge_metric_panel(
+                BRIDGE_METRIC_RATE_PANEL_TITLE,
+                BRIDGE_METRIC_RATE_EXPR,
+                BRIDGE_METRIC_RATE_DESCRIPTION,
+            ));
+            continue;
+        }
         if metric.name == "tls_env_warning_total" {
             tls.push(build_tls_panel(metric));
             continue;
@@ -495,6 +517,32 @@ fn build_bridge_delta_panel(title: &str, expr: &str, metric: &Metric) -> Value {
 
     let mut legend = Map::new();
     legend.insert("showLegend".into(), Value::from(false));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_bridge_metric_panel(title: &str, expr: &str, description: &str) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !description.is_empty() {
+        panel.insert("description".into(), Value::from(description));
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
     let mut options = Map::new();
     options.insert("legend".into(), Value::Object(legend));
     panel.insert("options".into(), Value::Object(options));
@@ -1361,6 +1409,18 @@ mod tests {
                 unit: String::new(),
                 deprecated: false,
             },
+            Metric {
+                name: "bridge_metric_delta".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "bridge_metric_rate_per_second".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
         ];
 
         let dashboard = generate(&metrics, None).expect("dashboard generation");
@@ -1372,7 +1432,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 6);
+        assert_eq!(panels.len(), 8);
 
         let row = panels
             .iter()
@@ -1413,6 +1473,50 @@ mod tests {
             .expect("claims expression");
         assert_eq!(claims_expr, BRIDGE_REWARD_CLAIMS_EXPR);
 
+        let delta_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_METRIC_DELTA_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("delta panel present");
+        let delta_expr = delta_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("delta expression");
+        assert_eq!(delta_expr, BRIDGE_METRIC_DELTA_EXPR);
+        let delta_description = delta_panel
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(delta_description, BRIDGE_METRIC_DELTA_DESCRIPTION);
+        let delta_legend = delta_panel
+            .get("options")
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("legend"),
+                _ => None,
+            })
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("showLegend"),
+                _ => None,
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        assert!(delta_legend, "delta legend enabled");
+
         let anomaly_panel = panels
             .iter()
             .find_map(|panel| match panel {
@@ -1438,6 +1542,50 @@ mod tests {
             .and_then(Value::as_str)
             .expect("anomaly expression");
         assert_eq!(anomaly_expr, BRIDGE_ANOMALY_EXPR);
+
+        let rate_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_METRIC_RATE_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("rate panel present");
+        let rate_expr = rate_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("rate expression");
+        assert_eq!(rate_expr, BRIDGE_METRIC_RATE_EXPR);
+        let rate_description = rate_panel
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(rate_description, BRIDGE_METRIC_RATE_DESCRIPTION);
+        let rate_legend = rate_panel
+            .get("options")
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("legend"),
+                _ => None,
+            })
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("showLegend"),
+                _ => None,
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        assert!(rate_legend, "rate legend enabled");
 
         let dispute_panel = panels
             .iter()

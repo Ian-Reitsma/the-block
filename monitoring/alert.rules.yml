@@ -108,6 +108,48 @@ groups:
           severity: warn
         annotations:
           summary: "Dependency policy violations surfaced during latest check"
+  - name: bridge
+    rules:
+      - alert: BridgeCounterDeltaSkew
+        expr: |
+          (bridge_metric_delta > avg_over_time(bridge_metric_delta[30m]) * 3)
+            and (bridge_metric_delta > 10)
+            and (count_over_time(bridge_metric_delta[30m]) >= 6)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge counter delta skew detected for {{ $labels.metric }} on {{ $labels.peer }} ({{ $labels.labels }})"
+      - alert: BridgeCounterRateSkew
+        expr: |
+          (bridge_metric_rate_per_second > avg_over_time(bridge_metric_rate_per_second[30m]) * 3)
+            and (bridge_metric_rate_per_second > 0.5)
+            and (count_over_time(bridge_metric_rate_per_second[30m]) >= 6)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge counter rate skew detected for {{ $labels.metric }} on {{ $labels.peer }} ({{ $labels.labels }})"
+      - alert: BridgeCounterDeltaLabelSkew
+        expr: |
+          (bridge_metric_delta{labels!=""} > avg_over_time(bridge_metric_delta{labels!=""}[30m]) * 3)
+            and (bridge_metric_delta{labels!=""} > 5)
+            and (count_over_time(bridge_metric_delta{labels!=""}[30m]) >= 6)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge counter delta skew detected for {{ $labels.metric }} on {{ $labels.peer }} ({{ $labels.labels }})"
+      - alert: BridgeCounterRateLabelSkew
+        expr: |
+          (bridge_metric_rate_per_second{labels!=""} > avg_over_time(bridge_metric_rate_per_second{labels!=""}[30m]) * 3)
+            and (bridge_metric_rate_per_second{labels!=""} > 0.25)
+            and (count_over_time(bridge_metric_rate_per_second{labels!=""}[30m]) >= 6)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge counter rate skew detected for {{ $labels.metric }} on {{ $labels.peer }} ({{ $labels.labels }})"
   - name: treasury
     rules:
       - alert: TreasuryDisbursementSnapshotStale

@@ -63,6 +63,71 @@ fn parse_anomaly_events(bytes: &[u8]) -> Vec<ApiAnomalyEvent> {
         .collect()
 }
 
+struct ApiRemediationAction {
+    action: String,
+    peer_id: String,
+    metric: String,
+    occurrences: u64,
+    labels: Vec<ApiAnomalyLabel>,
+}
+
+fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
+    let value: Value = json::from_slice(bytes).expect("remediation response json");
+    let array = value.as_array().expect("response array");
+    array
+        .iter()
+        .map(|entry| {
+            let object = entry.as_object().expect("action object");
+            let labels = object
+                .get("labels")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .map(|label| {
+                            let label_obj = label.as_object().expect("label object");
+                            ApiAnomalyLabel {
+                                key: label_obj
+                                    .get("key")
+                                    .and_then(Value::as_str)
+                                    .expect("label key")
+                                    .to_string(),
+                                value: label_obj
+                                    .get("value")
+                                    .and_then(Value::as_str)
+                                    .expect("label value")
+                                    .to_string(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_else(Vec::new);
+            ApiRemediationAction {
+                action: object
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .expect("action field")
+                    .to_string(),
+                peer_id: object
+                    .get("peer_id")
+                    .and_then(Value::as_str)
+                    .expect("peer_id field")
+                    .to_string(),
+                metric: object
+                    .get("metric")
+                    .and_then(Value::as_str)
+                    .expect("metric field")
+                    .to_string(),
+                occurrences: object
+                    .get("occurrences")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                labels,
+            }
+        })
+        .collect()
+}
+
 fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime::block_on(future)
 }
@@ -104,6 +169,12 @@ fn build_labeled_payload(value: u64, asset: &str) -> Value {
         ]"#
     ))
     .expect("valid json")
+}
+
+fn scrape_metric_value(body: &str, metric: &str, labels: &str) -> Option<f64> {
+    let needle = format!("{metric}{{{labels}}}");
+    body.lines()
+        .find_map(|line| line.strip_prefix(&needle)?.trim().parse::<f64>().ok())
 }
 
 #[test]
@@ -161,6 +232,18 @@ fn bridge_anomaly_detector_flags_spikes() {
         assert!(
             metrics_body.contains("bridge_anomaly_total"),
             "expected metrics payload to include bridge_anomaly_total"
+        );
+        assert!(
+            metrics_body.contains(
+                "bridge_metric_delta{metric=\"bridge_reward_claims_total\",peer=\"bridge-node\",labels=\"\"}"
+            ),
+            "expected unlabeled delta gauge for bridge_reward_claims_total"
+        );
+        assert!(
+            metrics_body.contains(
+                "bridge_metric_rate_per_second{metric=\"bridge_reward_claims_total\",peer=\"bridge-node\",labels=\"\"}"
+            ),
+            "expected unlabeled rate gauge for bridge_reward_claims_total"
         );
     });
 }
@@ -227,6 +310,25 @@ fn bridge_anomaly_detector_respects_cooldown_and_labels() {
         let rapid_resp = app.handle(rapid_req).await.unwrap();
         assert_eq!(rapid_resp.status(), StatusCode::OK);
 
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        assert_eq!(metrics_resp.status(), StatusCode::OK);
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(
+            metrics_body.contains(
+                "bridge_metric_delta{metric=\"bridge_settlement_results_total\",peer=\"bridge-node\",labels=\"asset=eth,reason=ok,result=success\"}"
+            ),
+            "expected labeled delta gauge for bridge_settlement_results_total"
+        );
+        assert!(
+            metrics_body.contains(
+                "bridge_metric_rate_per_second{metric=\"bridge_settlement_results_total\",peer=\"bridge-node\",labels=\"asset=eth,reason=ok,result=success\"}"
+            ),
+            "expected labeled rate gauge for bridge_settlement_results_total"
+        );
+
         let post_resp = app
             .handle(app.request_builder().path("/anomalies/bridge").build())
             .await
@@ -256,5 +358,130 @@ fn bridge_anomaly_detector_respects_cooldown_and_labels() {
             .unwrap();
         let final_events = parse_anomaly_events(final_resp.body());
         assert_eq!(final_events.len(), 1);
+    });
+}
+
+#[test]
+fn bridge_remediation_exposes_actions() {
+    run_async(async {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(50)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        let remediation_resp = app
+            .handle(app.request_builder().path("/remediation/bridge").build())
+            .await
+            .unwrap();
+        assert_eq!(remediation_resp.status(), StatusCode::OK);
+        let actions = parse_remediation_actions(remediation_resp.body());
+        assert!(!actions.is_empty(), "expected remediation action");
+        let action = actions.last().unwrap();
+        assert_eq!(action.action, "quarantine");
+        assert_eq!(action.peer_id, "bridge-node");
+        assert_eq!(action.metric, "bridge_settlement_results_total");
+        assert!(action.occurrences >= 1);
+        assert!(action
+            .labels
+            .iter()
+            .any(|label| label.key == "asset" && label.value == "eth"));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        assert_eq!(metrics_resp.status(), StatusCode::OK);
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains("bridge_remediation_action_total{action=\"quarantine\"}"));
+    });
+}
+
+#[test]
+fn bridge_metric_gauges_persist_across_restart() {
+    run_async(async {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("metrics.db");
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            let app = router(state);
+            let payload = build_ingest_payload(17);
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        runtime::sleep(Duration::from_secs(1)).await;
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            let app = router(state);
+            let payload = build_ingest_payload(53);
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+            let labels = r#"metric="bridge_reward_claims_total",peer="bridge-node",labels="""#;
+            let delta = scrape_metric_value(&body, "bridge_metric_delta", labels)
+                .expect("delta gauge present");
+            let expected_delta = 53.0 - 17.0;
+            assert!(
+                (delta - expected_delta).abs() < 1e-6,
+                "delta {delta} should equal {expected_delta}"
+            );
+            let rate = scrape_metric_value(&body, "bridge_metric_rate_per_second", labels)
+                .expect("rate gauge present");
+            assert!(rate > 0.0, "rate should be positive after restart");
+            assert!(
+                rate <= delta,
+                "rate {rate} should not exceed delta {delta} when computed per second"
+            );
+        }
     });
 }

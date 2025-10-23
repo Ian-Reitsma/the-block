@@ -26,6 +26,23 @@ ready to import once the foundation telemetry stack is running.
   `bridge_anomaly_total` when a spike exceeds the configured threshold, and the
   dashboards plot five-minute increases so operators can correlate alerts with
   the underlying counters directly from the first-party panels.
+- Companion gauges
+  `bridge_metric_delta{metric,peer,labels}` and
+  `bridge_metric_rate_per_second{metric,peer,labels}` stream the detector’s
+  raw deltas and per-second growth so dashboards can overlay anomaly events with
+  the observed counter velocity for each relayer/label tuple. The `bridge`
+  alert group queries these gauges to surface `BridgeCounterDeltaSkew`,
+  `BridgeCounterRateSkew`, and the label-aware companions
+  `BridgeCounterDeltaLabelSkew`/`BridgeCounterRateLabelSkew` when a relayer’s
+  aggregate or per-label growth exceeds three times the 30-minute average.
+  Baselines persist across restarts, and labelled anomalies now feed the
+  remediation engine: `/remediation/bridge` lists the persisted page or
+  quarantine recommendations while `bridge_remediation_action_total{action}`
+  exposes the same actions for dashboards and alert runbooks.
+- The CI-run `bridge-alert-validator` binary now drives the shared
+  `alert_validator` module, replaying canned datasets for the bridge,
+  chain-health, dependency-registry, and treasury alert groups so expression
+  changes require first-party coverage instead of promtool fixtures.
 - Extend dashboards with `did_anchor_total` to monitor identifier churn; the
   explorer exposes `/dids/metrics/anchor_rate` and `/dids` for recent history so
   panels can link directly to the underlying records.

@@ -77,7 +77,41 @@ deviations (bounded by a minimum delta). Triggered events increment the
 which returns the offending metric, peer, labels, delta, and baseline stats.
 Dashboards include a companion panel charting `increase(bridge_anomaly_total[5m])`
 so operators can correlate alerts with reward claims, settlement submissions,
-and dispute outcomes without leaving the first-party stack.
+and dispute outcomes without leaving the first-party stack. The same detector
+now publishes per-peer observations via
+`bridge_metric_delta{metric,peer,labels}` and
+`bridge_metric_rate_per_second{metric,peer,labels}` gauges, exposing the raw
+counter deltas and normalised per-second growth so dashboards and alerting rules
+can visualise bridge load across relayers in real time.
+
+The Prometheus alert catalogue now ships with first-party validation across the
+bridge, chain-health, dependency-registry, and treasury groups. The
+`monitoring/src/bin/bridge-alert-validator` binary delegates to the new
+`alert_validator` module, normalising every expression in
+`monitoring/alert.rules.yml` and replaying canned datasets so bridge, consensus,
+registry, and treasury alerts cannot change without matching first-party
+coverage. CI invokes the validator after `cargo test --manifest-path
+monitoring/Cargo.toml`, keeping the entire rule deck hermetic without relying on
+promtool.
+
+The bridge alert group continues to consume the per-relayer gauges to raise
+early warnings when a relayer’s growth deviates from historical norms.
+`BridgeCounterDeltaSkew` and `BridgeCounterRateSkew` compare the latest sample to
+a 30-minute average, require at least six observations, and trip whenever the
+current delta/rate is three times the rolling mean while clearing a small
+absolute floor (10 events per scrape or 0.5 events/sec). Alerts are emitted with
+the metric/peer/label set in the annotations so operators can pivot straight
+into the dashboards’ legends. Label-aware companions
+`BridgeCounterDeltaLabelSkew` and `BridgeCounterRateLabelSkew` scope the same
+logic to non-empty `labels!=""` selectors so asset- or failure-specific spikes
+page without waiting for the aggregate counter to drift. The metrics aggregator
+now persists each gauge’s last value, timestamp, and baseline window into the
+in-house metrics store, so a restart resumes the prior state instead of treating
+the first post-restart observation as a spike. When labelled anomalies fire, the
+aggregator’s remediation engine evaluates the delta severity and emits
+structured actions (page vs. quarantine) via the `/remediation/bridge` JSON
+endpoint and the `bridge_remediation_action_total{action}` counter, ensuring the
+alert runbook has a first-party quarantine recommendation to follow.
 
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the

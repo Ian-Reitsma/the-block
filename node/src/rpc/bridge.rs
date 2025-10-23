@@ -110,6 +110,19 @@ fn clamp_page_limit(limit: u64, max: usize) -> usize {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::clamp_page_limit;
+
+    #[test]
+    fn clamp_page_limit_enforces_bounds() {
+        assert_eq!(clamp_page_limit(0, 256), 1);
+        assert_eq!(clamp_page_limit(25, 256), 25);
+        assert_eq!(clamp_page_limit(1024, 256), 256);
+        assert_eq!(clamp_page_limit(u64::MAX, 256), 256);
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct RelayerStatusRequest {

@@ -1,4 +1,29 @@
 # Summary
+> **Review (2025-10-24, pre-dawn):** Bridge anomaly remediation now persists
+> page/quarantine decisions, exposes `/remediation/bridge` plus the
+> `bridge_remediation_action_total{action}` counter, and resumes state after
+> restarts so operators can trigger first-party mitigations directly from the
+> metrics aggregator. Alert validation moved into the shared
+> `monitoring/src/alert_validator.rs` helper, and the existing
+> `bridge-alert-validator` binary now replays canned datasets for bridge,
+> chain-health, dependency-registry, and treasury groups so CI guards every
+> Prometheus expression without promtool.
+> **Review (2025-10-23, late evening):** Bridge alerting now includes
+> label-specific coverage and a first-party validator. New Prometheus rules
+> `BridgeCounterDeltaLabelSkew`/`BridgeCounterRateLabelSkew` watch
+> `labels!=""` selectors for 3× deviations above the 30-minute baseline while
+> preserving the aggregate alerts. The validator binary parses
+> `monitoring/alert.rules.yml`, verifies the expressions, and replays canned data;
+> CI runs it alongside `cargo test --manifest-path monitoring/Cargo.toml` so the
+> bridge alert group stays hermetic without promtool.
+> **Review (2025-10-22, late evening):** Bridge monitoring tightened across the
+> stack. The metrics aggregator now persists `bridge_metric_delta`/`bridge_metric_rate_per_second`
+> baselines to the in-house store and the new restart regression confirms the
+> gauges resume from the previous watermark. Prometheus alert rules
+> (`BridgeCounterDeltaSkew`, `BridgeCounterRateSkew`) watch those gauges for
+> 3× deviations above the 30-minute average, and the Grafana templates plus HTML
+> snapshot render dedicated panels so the alerts link directly to first-party
+> timeseries.
 > **Review (2025-10-23, afternoon):** Contract CLI bridge commands now depend on a
 > trait-backed `BridgeRpcTransport`, letting production reuse the in-house
 > `RpcClient` while tests inject an in-memory mock to capture JSON envelopes.

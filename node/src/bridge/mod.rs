@@ -2203,9 +2203,10 @@ impl Bridge {
                     .insert(Bridge::settlement_record_fingerprint(record));
             }
         }
+        state.settlement_height_watermarks.clear();
         for record in &state.settlement_log {
             if let Some(chain) = &record.settlement_chain {
-                let key = format!("{}:{chain}", record.asset);
+                let key = Self::settlement_watermark_key(&record.asset, chain, &record.commitment);
                 let entry = state.settlement_height_watermarks.entry(key).or_insert(0);
                 *entry = (*entry).max(record.settlement_height);
             }
@@ -2227,7 +2228,8 @@ impl Bridge {
         for (_commitment, pending) in &state.pending_settlements {
             if let Some(record) = &pending.proof {
                 if let Some(chain) = &record.settlement_chain {
-                    let key = format!("{}:{chain}", record.asset);
+                    let key =
+                        Self::settlement_watermark_key(&record.asset, chain, &record.commitment);
                     let entry = state.settlement_height_watermarks.entry(key).or_insert(0);
                     *entry = (*entry).max(record.settlement_height);
                 }
@@ -2307,6 +2309,10 @@ impl Bridge {
         hasher.update(&proof.proof_hash);
         hasher.update(&proof.settlement_height.to_le_bytes());
         *hasher.finalize().as_bytes()
+    }
+
+    fn settlement_watermark_key(asset: &str, chain: &str, commitment: &[u8; 32]) -> String {
+        format!("{asset}:{chain}:{}", crypto_suite::hex::encode(commitment))
     }
 
     fn settlement_record_fingerprint(record: &SettlementRecord) -> [u8; 32] {
@@ -2976,7 +2982,8 @@ impl Bridge {
                 found: proof.proof_hash,
             });
         }
-        let watermark_key = format!("{asset}:{}", proof.settlement_chain);
+        let watermark_key =
+            Self::settlement_watermark_key(asset, &proof.settlement_chain, &proof.commitment);
         if let Some(previous) = self.state.settlement_height_watermarks.get(&watermark_key) {
             if proof.settlement_height <= *previous {
                 telemetry_record_settlement_failure("height_replay");
