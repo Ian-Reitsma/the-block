@@ -711,6 +711,21 @@ fn build_bridge_ack_latency_panel(metric: &Metric) -> Value {
         );
         targets.push(Value::Object(target));
     }
+    for phase in ["retry", "escalate"] {
+        let mut target = Map::new();
+        target.insert(
+            "expr".into(),
+            Value::from(format!(
+                "bridge_remediation_ack_target_seconds{{phase=\"{}\"}}",
+                phase
+            )),
+        );
+        target.insert(
+            "legendFormat".into(),
+            Value::from(format!("{{playbook}} · {} target", phase)),
+        );
+        targets.push(Value::Object(target));
+    }
     panel.insert("targets".into(), Value::Array(targets));
 
     let mut legend = Map::new();
@@ -1745,7 +1760,7 @@ mod tests {
                 _ => None,
             })
             .expect("ack latency targets");
-        assert_eq!(latency_targets.len(), 2);
+        assert_eq!(latency_targets.len(), 4);
         let latency_expr_first = latency_targets
             .get(0)
             .and_then(Value::as_object)
@@ -1780,6 +1795,44 @@ mod tests {
             .and_then(Value::as_str)
             .expect("ack latency p95 legend");
         assert_eq!(latency_legend_second, "{playbook} · {state} · p95");
+
+        let retry_target = latency_targets
+            .get(2)
+            .and_then(Value::as_object)
+            .expect("ack latency retry target");
+        assert_eq!(
+            retry_target
+                .get("expr")
+                .and_then(Value::as_str)
+                .expect("retry target expr"),
+            "bridge_remediation_ack_target_seconds{phase=\"retry\"}"
+        );
+        assert_eq!(
+            retry_target
+                .get("legendFormat")
+                .and_then(Value::as_str)
+                .expect("retry target legend"),
+            "{playbook} · retry target"
+        );
+
+        let escalate_target = latency_targets
+            .get(3)
+            .and_then(Value::as_object)
+            .expect("ack latency escalate target");
+        assert_eq!(
+            escalate_target
+                .get("expr")
+                .and_then(Value::as_str)
+                .expect("escalate target expr"),
+            "bridge_remediation_ack_target_seconds{phase=\"escalate\"}"
+        );
+        assert_eq!(
+            escalate_target
+                .get("legendFormat")
+                .and_then(Value::as_str)
+                .expect("escalate target legend"),
+            "{playbook} · escalate target"
+        );
 
         let delta_panel = panels
             .iter()

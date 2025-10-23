@@ -78,9 +78,11 @@ dashboard, the acknowledgement panel tracks
 so downstream paging/governance hooks prove they have acknowledged or closed the
 playbook, and a new histogram overlay renders
 `histogram_quantile(0.50|0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))`
+alongside the policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}`
 so operators can monitor acknowledgement latency per playbook before escalation
-windows expire. Operators can filter every legend to drill into a specific
-asset, playbook, target, status, acknowledgement state, or latency bucket, and
+windows expire and see the configured retry/escalation thresholds directly on
+the chart. Operators can filter every legend to drill into a specific asset,
+playbook, target, status, acknowledgement state, latency bucket, or policy, and
 the same queries back the HTML snapshot so FIRST_PARTY_ONLY deployments never
 rely on external Grafana instances to monitor bridge health.
 
@@ -92,10 +94,11 @@ automatically when the governance threshold trips. The acknowledgement parser
 accepts plain-text hook responses (`"ack pager"`, `"closed: resolved"`, etc.) in
 addition to JSON objects, promoting them to structured
 `BridgeDispatchAckRecord`s that feed the dashboard panels and persisted action
-state. New bridge alerts—`BridgeRemediationAckPending` and
-`BridgeRemediationClosureMissing`—fan out from the same counter to warn when
-acknowledgements stall or closures never arrive, keeping paging/escalation
-coverage entirely first party.
+state. New bridge alerts—`BridgeRemediationAckPending`,
+`BridgeRemediationClosureMissing`, and `BridgeRemediationAckLatencyHigh`—fan out
+from the same persisted metrics to warn when acknowledgements stall, closures
+never arrive, or the observed p95 exceeds the configured policy target, keeping
+paging/escalation coverage entirely first party.
 
 Policy windows now vary per playbook. `TB_REMEDIATION_ACK_RETRY_SECS`,
 `TB_REMEDIATION_ACK_ESCALATE_SECS`, and `TB_REMEDIATION_ACK_MAX_RETRIES` continue
@@ -104,13 +107,16 @@ to seed the defaults, while suffix overrides like
 `_ESCALATE_SECS`/`_MAX_RETRIES`) let operators tighten or relax the retry and
 escalation thresholds for sensitive hooks without recompiling. Completion
 latency feeds the new `bridge_remediation_ack_latency_seconds{playbook,state}`
-histogram so the Grafana row and HTML snapshot plot p50/p95 acknowledgement
-times alongside the dispatch counters, exposing slow hooks before the policy
-window expires. The CLI gained a first-party view as well:
-`contract remediation bridge --aggregator http://agg:9000` prints the most recent
-actions with retry history, follow-up notes, acknowledgement metadata, and the
-matching dispatch log so operators can triage a backlog directly from the
-aggregator without invoking external tooling.
+histogram and persists the latest samples across restarts, so the Grafana row
+and HTML snapshot plot p50/p95 acknowledgement times alongside the dispatch
+counters even after an aggregator reboot. The CLI gained a first-party view as
+well: `contract remediation bridge --aggregator http://agg:9000` prints the most
+recent actions with retry history, follow-up notes, acknowledgement metadata,
+and the matching dispatch log so operators can triage a backlog directly from
+the aggregator without invoking external tooling. Operators can filter the
+output with `--playbook`, `--peer`, and request machine-readable JSON via
+`--json` to script downstream automations without leaving the first-party
+binary.
 
 The metrics aggregator now watches those counters for anomalous spikes. A
 rolling detector maintains a 24-sample baseline per peer/metric/label set and

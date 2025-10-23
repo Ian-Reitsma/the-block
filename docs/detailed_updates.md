@@ -1,6 +1,14 @@
 # CHANGELOG
 > **Review (2025-10-25):** Bridge remediation follow-ups now retry and escalate
 > automatically via first-party scheduling. Text-only acknowledgement payloads are
+- Bridge remediation dashboards now overlay the policy gauge
+  `bridge_remediation_ack_target_seconds{playbook,policy}` on the latency
+  histogram, the metrics aggregator restores histogram samples after restarts,
+  and Prometheus raises `BridgeRemediationAckLatencyHigh` when the observed p95
+  breaches policy. The contract CLI gained `--playbook`, `--peer`, and `--json`
+  options so operators and automation can filter or ingest persisted actions
+  without leaving the first-party tooling.
+
 > promoted into structured records, and monitoring ships new alerts on pending or
 > missing closures alongside the acknowledgement dashboards. The notes below
 > capture the operational and documentation updates tied to the automation.

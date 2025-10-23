@@ -9,6 +9,17 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-27)
+
+- Bridge remediation dashboards now plot `bridge_remediation_ack_latency_seconds`
+  alongside the policy gauge `bridge_remediation_ack_target_seconds`, and the
+  metrics aggregator restores histogram samples after a restart. A new
+  `BridgeRemediationAckLatencyHigh` alert fires when p95 breaches policy so
+  operators are paged before escalations trigger.
+- The `contract remediation bridge` CLI added `--playbook`, `--peer`, and
+  `--json` flags so filtered or machine-readable action streams stay entirely on
+  the first-party transport abstraction.
+
 - Sweep remaining RPC responders for legacy helper usage (hand-written structs,
   bespoke payload builders) and migrate them to the shared request/response
   builders so tests cover the unified surface.

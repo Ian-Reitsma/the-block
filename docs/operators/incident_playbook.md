@@ -33,8 +33,9 @@
   `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
   so you can confirm paging/governance systems closed the loop, while the latency
   histogram overlays p50/p95 values from
-  `bridge_remediation_ack_latency_seconds{playbook,state}` to highlight slow
-  closures before the escalation window expires.
+  `bridge_remediation_ack_latency_seconds{playbook,state}` together with the
+  policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}` to highlight
+  slow closures before the escalation window expires.
 - When an action fires, inspect `/remediation/bridge` for the persisted entry
   and `/remediation/bridge/dispatches` for the per-target delivery log. The
   payload now includes `acknowledged_at`, `closed_out_at`, and
@@ -49,8 +50,10 @@
   follow-up. Pair those statuses with the acknowledgement counter:
   `pending` means the hook has yet to confirm, `acknowledged` indicates the
   pager/governance queue accepted the playbook, and `closed` marks completion.
-  The dispatch log endpoint mirrors both sets of fields so downstream systems can
-  audit delivery without scraping Prometheus.
+  Watch the `BridgeRemediationAckLatencyHigh` alert if p95 latency drifts above the
+  policy target; it fires alongside the pending/closure alerts before escalations
+  trigger. The dispatch log endpoint mirrors both sets of fields so downstream
+  systems can audit delivery without scraping Prometheus.
 - Page the relayer on `playbook="none"` actions, schedule incentive throttles
   when `playbook="incentive-throttle"`, and escalate to governance on
   `playbook="governance-escalation"`. The embedded `response_sequence`
@@ -58,8 +61,11 @@
   anchor for cross-checking.
 - Use `contract remediation bridge --aggregator http://<host>:9000 --limit 10`
   to print the most recent actions, retry counts, follow-up notes, and dispatch
-  history directly from the aggregator. The CLI mirrors the JSON endpoints but
-  keeps everything inside the first-party tooling for incident review.
+  history directly from the aggregator. Filter results with `--playbook` or
+  `--peer` when you only need a subset, and add `--json` for machine-readable
+  output that incident bots can ingest without scraping text. The CLI mirrors the
+  JSON endpoints but keeps everything inside the first-party tooling for incident
+  review.
 - Adjust acknowledgement policy on a per-playbook basis with
   `TB_REMEDIATION_ACK_RETRY_SECS`, `TB_REMEDIATION_ACK_ESCALATE_SECS`, and
   `TB_REMEDIATION_ACK_MAX_RETRIES` for the defaults, or suffix overrides such as

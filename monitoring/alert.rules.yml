@@ -160,6 +160,29 @@ groups:
           severity: warn
         annotations:
           summary: "Bridge remediation acknowledgements stalled ({{ $labels.state }}) for {{ $labels.action }} on target {{ $labels.target }}"
+      - alert: BridgeRemediationAckLatencyHigh
+        expr: |
+          (
+            histogram_quantile(
+              0.95,
+              sum by (le, playbook)(
+                rate(bridge_remediation_ack_latency_seconds_bucket{state=~"acknowledged|closed"}[15m])
+              )
+            )
+            /
+            on (playbook) group_left () bridge_remediation_ack_target_seconds{phase="escalate"}
+          ) > 1.0
+            and on (playbook)
+          (
+            sum by (playbook)(
+              increase(bridge_remediation_ack_latency_seconds_count{state=~"acknowledged|closed"}[15m])
+            ) > 0
+          )
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Bridge remediation acknowledgement latency (p95) exceeds policy for {{ $labels.playbook }} ({{ printf \"%.2fx\" $value }} of target)"
       - alert: BridgeRemediationClosureMissing
         expr: |
           (

@@ -1,4 +1,12 @@
 # Project Progress Snapshot
+> **Review (2025-10-27, morning):** Bridge dashboards now overlay the policy
+> gauge `bridge_remediation_ack_target_seconds{playbook,policy}` on the
+> acknowledgement latency histogram, the metrics aggregator restores the
+> histogram samples after a restart, and a new `BridgeRemediationAckLatencyHigh`
+> alert fires when p95 breaches the configured target. The `contract
+> remediation bridge` CLI gained `--playbook`, `--peer`, and `--json` flags so
+> on-call responders and automation can filter or stream persisted actions
+> without leaving the first-party stack.
 > **Review (2025-10-25, mid-morning):** Governance escalations now surface
 > acknowledgement telemetry end to end. The metrics aggregator records
 > `bridge_remediation_dispatch_ack_total{action,playbook,target,state}` whenever
@@ -876,7 +884,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
 - Bridge alert rules now include label-specific skew detection and the CI-run `bridge-alert-validator` binary verifies expressions against canned datasets, keeping alert coverage first party without promtool (`monitoring/src/alert_validator.rs`, `.github/workflows/ci.yml`). The binary now validates the bridge, chain-health, dependency-registry, and treasury alert groups in a single invocation.
 - The bridge dataset now includes recovery curves and partial-window fixtures so the `BridgeCounter*Skew` heuristics stay quiet during cooldowns. Remediation actions fan out to first-party HTTP or spool hooks (`TB_REMEDIATION_*_URLS`/`*_DIRS`), and the operator incident playbook documents the liquidity response flow alongside dashboard annotations.
-- Bridge dashboards now chart acknowledgement latency directly via the new `bridge_remediation_ack_latency_seconds{playbook,state}` histogram, exposing p50/p95 latency per playbook next to the dispatch counters so policy overrides remain observable without leaving the first-party stack.
+- Bridge dashboards now chart acknowledgement latency directly via the new `bridge_remediation_ack_latency_seconds{playbook,state}` histogram, overlay the policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}`, and persist samples across restarts so p50/p95 latency and policy targets remain visible next to the dispatch counters without leaving the first-party stack.
 
 **Gaps**
 - Continue building VM anomaly heuristics and long-horizon performance soak dashboards.

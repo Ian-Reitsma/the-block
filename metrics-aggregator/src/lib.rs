@@ -200,6 +200,7 @@ const METRIC_BRIDGE_REMEDIATION_DISPATCH_TOTAL: &str = "bridge_remediation_dispa
 const METRIC_BRIDGE_REMEDIATION_DISPATCH_ACK_TOTAL: &str = "bridge_remediation_dispatch_ack_total";
 const METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS: &str =
     "bridge_remediation_ack_latency_seconds";
+const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_ack_target_seconds";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -221,6 +222,7 @@ const LABEL_BRIDGE_COUNTER: [&str; 3] = ["metric", "peer", "labels"];
 const LABEL_REMEDIATION_ACTION: [&str; 2] = ["action", "playbook"];
 const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "status"];
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
+const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -782,12 +784,29 @@ impl AppState {
             }
         };
         if let Some(value) = snapshot {
-            match self.bridge_remediation.lock() {
-                Ok(mut engine) => engine.restore(&value),
-                Err(_) => warn!(
-                    target: "aggregator",
-                    "bridge remediation engine poisoned during snapshot load"
-                ),
+            let observations = match self.bridge_remediation.lock() {
+                Ok(mut engine) => {
+                    engine.restore(&value);
+                    engine.ack_latency_observations()
+                }
+                Err(_) => {
+                    warn!(
+                        target: "aggregator",
+                        "bridge remediation engine poisoned during snapshot load"
+                    );
+                    Vec::new()
+                }
+            };
+            if !observations.is_empty() {
+                let metrics = aggregator_metrics();
+                for sample in observations {
+                    let handle = metrics
+                        .bridge_remediation_ack_latency_seconds
+                        .with_label_values(&[sample.playbook.as_str(), sample.state.as_str()]);
+                    for _ in 0..sample.count {
+                        handle.observe(sample.latency as f64);
+                    }
+                }
             }
         }
     }
@@ -1054,6 +1073,27 @@ impl AppState {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
+    pub fn bridge_ack_latency_observations(&self) -> Vec<(String, String, u64, u64)> {
+        self.bridge_remediation
+            .lock()
+            .map(|engine| {
+                engine
+                    .ack_latency_observations()
+                    .into_iter()
+                    .map(|sample| {
+                        (
+                            sample.playbook.as_str().to_string(),
+                            sample.state.as_str().to_string(),
+                            sample.latency,
+                            sample.count,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
     #[doc(hidden)]
     pub fn bridge_hook_counts(&self) -> (usize, usize, usize, usize) {
         (
@@ -1071,7 +1111,7 @@ impl AppState {
         dispatched_at: u64,
         target: &str,
         status: &str,
-    ) -> Option<BridgeRemediationAction> {
+    ) -> Option<BridgeDispatchUpdate> {
         let (updated, snapshot) = match self.bridge_remediation.lock() {
             Ok(mut engine) => {
                 let updated = engine.record_dispatch_attempt(action, ack, dispatched_at, status);
@@ -1089,7 +1129,8 @@ impl AppState {
         if let Some(snapshot) = snapshot {
             self.persist_bridge_remediation_snapshot(&snapshot);
         }
-        if let Some(updated_action) = updated.as_ref() {
+        if let Some(update) = updated.as_ref() {
+            let updated_action = &update.action;
             if let Some(ack) = ack {
                 match ack.state {
                     BridgeDispatchAckState::Acknowledged => info!(
@@ -1469,6 +1510,7 @@ struct AggregatorMetrics {
     bridge_remediation_action_total: CounterVec,
     bridge_remediation_dispatch_total: CounterVec,
     bridge_remediation_dispatch_ack_total: CounterVec,
+    bridge_remediation_ack_target_seconds: GaugeVec,
     bridge_remediation_ack_latency_seconds: HistogramVec,
 }
 
@@ -2607,6 +2649,16 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(bridge_remediation_dispatch_ack_total.clone()))
         .expect("register bridge_remediation_dispatch_ack_total");
+    let bridge_remediation_ack_target_seconds = GaugeVec::new(
+        Opts::new(
+            METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS,
+            "Bridge remediation acknowledgement policy targets in seconds",
+        ),
+        &LABEL_REMEDIATION_ACK_TARGET,
+    );
+    registry
+        .register(Box::new(bridge_remediation_ack_target_seconds.clone()))
+        .expect("register bridge_remediation_ack_target_seconds");
     let bridge_remediation_ack_latency_seconds = HistogramVec::new(
         HistogramOpts::new(
             METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS,
@@ -2661,6 +2713,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_action_total,
         bridge_remediation_dispatch_total,
         bridge_remediation_dispatch_ack_total,
+        bridge_remediation_ack_target_seconds,
         bridge_remediation_ack_latency_seconds,
     }
 });
@@ -2687,7 +2740,24 @@ pub fn reset_bridge_remediation_dispatch_log() {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn reset_bridge_remediation_ack_metrics() {
+    let metrics = aggregator_metrics();
+    for playbook in BridgeRemediationPlaybook::variants() {
+        for state in BridgeDispatchAckState::variants() {
+            let _ = metrics
+                .bridge_remediation_ack_latency_seconds
+                .remove_label_values(&[playbook.as_str(), state.as_str()]);
+        }
+        for phase in ["retry", "escalate"] {
+            let _ = metrics
+                .bridge_remediation_ack_target_seconds
+                .remove_label_values(&[playbook.as_str(), phase]);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum BridgeDispatchAckState {
     Acknowledged,
     Closed,
@@ -2713,6 +2783,15 @@ impl BridgeDispatchAckState {
             "invalid" => Some(BridgeDispatchAckState::Invalid),
             _ => None,
         }
+    }
+
+    fn variants() -> &'static [Self] {
+        &[
+            BridgeDispatchAckState::Acknowledged,
+            BridgeDispatchAckState::Closed,
+            BridgeDispatchAckState::Pending,
+            BridgeDispatchAckState::Invalid,
+        ]
     }
 }
 
@@ -3488,6 +3567,15 @@ impl BridgeRemediationPlaybook {
             "governance-escalation" => Some(BridgeRemediationPlaybook::GovernanceEscalation),
             _ => None,
         }
+    }
+
+    fn variants() -> &'static [Self] {
+        const VARIANTS: [BridgeRemediationPlaybook; 3] = [
+            BridgeRemediationPlaybook::None,
+            BridgeRemediationPlaybook::IncentiveThrottle,
+            BridgeRemediationPlaybook::GovernanceEscalation,
+        ];
+        &VARIANTS
     }
 }
 
@@ -4364,7 +4452,7 @@ fn record_dispatch_outcome(
             .inc();
     }
     let dispatched_at = unix_timestamp_secs();
-    let updated_action = state.as_ref().and_then(|state| {
+    let dispatch_update = state.as_ref().and_then(|state| {
         state.record_bridge_dispatch(
             action,
             acknowledgement.as_ref(),
@@ -4373,18 +4461,20 @@ fn record_dispatch_outcome(
             status,
         )
     });
-    if let (Some(updated_action), Some(ack)) = (updated_action.as_ref(), acknowledgement.as_ref()) {
-        if ack.is_completion() {
-            if let Some(first_dispatch_at) = updated_action.first_dispatch_at {
-                let latency = ack.timestamp.saturating_sub(first_dispatch_at) as f64;
-                metrics
-                    .bridge_remediation_ack_latency_seconds
-                    .with_label_values(&[updated_action.playbook.as_str(), ack.state.as_str()])
-                    .observe(latency);
+    if let Some(update) = dispatch_update.as_ref() {
+        if let Some(sample) = update.ack_sample.as_ref() {
+            let handle = metrics
+                .bridge_remediation_ack_latency_seconds
+                .with_label_values(&[sample.playbook.as_str(), sample.state.as_str()]);
+            for _ in 0..sample.count {
+                handle.observe(sample.latency as f64);
             }
         }
     }
-    let record_action = updated_action.unwrap_or_else(|| action.clone());
+    let record_action = dispatch_update
+        .as_ref()
+        .map(|update| update.action.clone())
+        .unwrap_or_else(|| action.clone());
     let record = BridgeRemediationDispatchRecord::new(
         record_action,
         target,
@@ -4866,6 +4956,146 @@ impl BridgeRemediationAckPolicy {
     }
 }
 
+#[derive(Clone)]
+struct BridgeAckLatencyObservation {
+    playbook: BridgeRemediationPlaybook,
+    state: BridgeDispatchAckState,
+    latency: u64,
+    count: u64,
+}
+
+#[derive(Default, Clone)]
+struct AckLatencySeries {
+    counts: BTreeMap<u64, u64>,
+}
+
+impl AckLatencySeries {
+    fn observe(&mut self, latency: u64) {
+        *self.counts.entry(latency).or_insert(0) += 1;
+    }
+
+    fn to_value(&self) -> Value {
+        let items: Vec<Value> = self
+            .counts
+            .iter()
+            .map(|(latency, count)| {
+                let mut map = Map::new();
+                map.insert("latency_seconds".to_string(), Value::from(*latency));
+                map.insert("count".to_string(), Value::from(*count));
+                Value::Object(map)
+            })
+            .collect();
+        Value::Array(items)
+    }
+
+    fn restore(&mut self, value: &Value) {
+        self.counts.clear();
+        let Some(array) = value.as_array() else {
+            return;
+        };
+        for entry in array {
+            if let Some(object) = entry.as_object() {
+                if let (Some(latency), Some(count)) = (
+                    object.get("latency_seconds").and_then(Value::as_u64),
+                    object.get("count").and_then(Value::as_u64),
+                ) {
+                    self.counts.insert(latency, count);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct BridgeAckLatencyStore {
+    series: HashMap<(BridgeRemediationPlaybook, BridgeDispatchAckState), AckLatencySeries>,
+}
+
+impl BridgeAckLatencyStore {
+    fn observe(
+        &mut self,
+        playbook: BridgeRemediationPlaybook,
+        state: BridgeDispatchAckState,
+        latency: u64,
+    ) {
+        self.series
+            .entry((playbook, state))
+            .or_insert_with(AckLatencySeries::default)
+            .observe(latency);
+    }
+
+    fn to_value(&self) -> Value {
+        let entries: Vec<Value> = self
+            .series
+            .iter()
+            .map(|((playbook, state), series)| {
+                let mut map = Map::new();
+                map.insert(
+                    "playbook".to_string(),
+                    Value::String(playbook.as_str().to_string()),
+                );
+                map.insert(
+                    "state".to_string(),
+                    Value::String(state.as_str().to_string()),
+                );
+                map.insert("samples".to_string(), series.to_value());
+                Value::Object(map)
+            })
+            .collect();
+        Value::Array(entries)
+    }
+
+    fn restore(&mut self, value: &Value) {
+        self.series.clear();
+        let Some(array) = value.as_array() else {
+            return;
+        };
+        for entry in array {
+            if let Some(object) = entry.as_object() {
+                let Some(playbook_str) = object.get("playbook").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(state_str) = object.get("state").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(series_value) = object.get("samples") else {
+                    continue;
+                };
+                if let (Some(playbook), Some(state)) = (
+                    BridgeRemediationPlaybook::from_str(playbook_str),
+                    BridgeDispatchAckState::from_str(state_str),
+                ) {
+                    let mut series = AckLatencySeries::default();
+                    series.restore(series_value);
+                    if !series.counts.is_empty() {
+                        self.series.insert((playbook, state), series);
+                    }
+                }
+            }
+        }
+    }
+
+    fn observations(&self) -> Vec<BridgeAckLatencyObservation> {
+        let mut out = Vec::new();
+        for ((playbook, state), series) in &self.series {
+            for (latency, count) in &series.counts {
+                out.push(BridgeAckLatencyObservation {
+                    playbook: *playbook,
+                    state: *state,
+                    latency: *latency,
+                    count: *count,
+                });
+            }
+        }
+        out
+    }
+}
+
+struct BridgeDispatchUpdate {
+    action: BridgeRemediationAction,
+    ack_sample: Option<BridgeAckLatencyObservation>,
+}
+
 impl Default for BridgeRemediationAckPolicy {
     fn default() -> Self {
         Self::from_env()
@@ -4876,6 +5106,7 @@ struct BridgeRemediationEngine {
     entries: HashMap<BridgeRemediationKey, BridgeRemediationEntry>,
     actions: VecDeque<BridgeRemediationAction>,
     ack_policy: BridgeRemediationAckPolicy,
+    ack_latency: BridgeAckLatencyStore,
 }
 
 impl Default for BridgeRemediationEngine {
@@ -4886,11 +5117,33 @@ impl Default for BridgeRemediationEngine {
 
 impl BridgeRemediationEngine {
     fn new(policy: BridgeRemediationAckPolicy) -> Self {
-        Self {
+        let engine = Self {
             entries: HashMap::new(),
             actions: VecDeque::new(),
             ack_policy: policy,
+            ack_latency: BridgeAckLatencyStore::default(),
+        };
+        engine.update_ack_targets();
+        engine
+    }
+
+    fn update_ack_targets(&self) {
+        let metrics = aggregator_metrics();
+        for playbook in BridgeRemediationPlaybook::variants() {
+            let timing = self.ack_policy.timing_for(*playbook);
+            metrics
+                .bridge_remediation_ack_target_seconds
+                .with_label_values(&[playbook.as_str(), "retry"])
+                .set(timing.retry_after_secs as f64);
+            metrics
+                .bridge_remediation_ack_target_seconds
+                .with_label_values(&[playbook.as_str(), "escalate"])
+                .set(timing.escalate_after_secs as f64);
         }
+    }
+
+    fn ack_latency_observations(&self) -> Vec<BridgeAckLatencyObservation> {
+        self.ack_latency.observations()
     }
 
     fn ingest(&mut self, event: &BridgeAnomalyEvent) -> Option<BridgeRemediationAction> {
@@ -4965,7 +5218,7 @@ impl BridgeRemediationEngine {
         ack: Option<&BridgeDispatchAckRecord>,
         dispatched_at: u64,
         status: &str,
-    ) -> Option<BridgeRemediationAction> {
+    ) -> Option<BridgeDispatchUpdate> {
         let mut updated = None;
         for stored in self.actions.iter_mut().rev() {
             if stored.peer_id == action.peer_id
@@ -4979,7 +5232,9 @@ impl BridgeRemediationEngine {
                 if ack.is_some() || status == "success" {
                     stored.pending_since.get_or_insert(dispatched_at);
                 }
+                let mut sample = None;
                 if let Some(ack) = ack {
+                    let ack_state = ack.state;
                     stored.last_ack_state = Some(ack.state);
                     if let Some(notes) = ack.notes.as_ref() {
                         stored.last_ack_notes = Some(notes.clone());
@@ -5000,9 +5255,23 @@ impl BridgeRemediationEngine {
                         stored.follow_up_notes = None;
                         stored.auto_retry_count = 0;
                         stored.last_auto_retry_at = None;
+                        if let Some(first_dispatch_at) = stored.first_dispatch_at {
+                            let latency = ack.timestamp.saturating_sub(first_dispatch_at);
+                            self.ack_latency
+                                .observe(stored.playbook, ack_state, latency);
+                            sample = Some(BridgeAckLatencyObservation {
+                                playbook: stored.playbook,
+                                state: ack_state,
+                                latency,
+                                count: 1,
+                            });
+                        }
                     }
                 }
-                updated = Some(stored.clone());
+                updated = Some(BridgeDispatchUpdate {
+                    action: stored.clone(),
+                    ack_sample: sample,
+                });
                 break;
             }
         }
@@ -5141,12 +5410,14 @@ impl BridgeRemediationEngine {
                     .collect(),
             ),
         );
+        map.insert("ack_latency".to_string(), self.ack_latency.to_value());
         Value::Object(map)
     }
 
     fn restore(&mut self, value: &Value) {
         self.entries.clear();
         self.actions.clear();
+        self.ack_latency = BridgeAckLatencyStore::default();
         let Some(object) = value.as_object() else {
             return;
         };
@@ -5176,6 +5447,10 @@ impl BridgeRemediationEngine {
         while self.actions.len() > BRIDGE_REMEDIATION_MAX_ACTIONS {
             self.actions.pop_front();
         }
+        if let Some(latency_value) = object.get("ack_latency") {
+            self.ack_latency.restore(latency_value);
+        }
+        self.update_ack_targets();
     }
 
     fn actions(&self) -> Vec<BridgeRemediationAction> {

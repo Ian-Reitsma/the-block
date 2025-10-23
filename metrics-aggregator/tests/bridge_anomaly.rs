@@ -1,8 +1,9 @@
 use foundation_serialization::json::{self, Value};
 use httpd::{Method, StatusCode};
 use metrics_aggregator::{
-    install_bridge_http_client_override, reset_bridge_remediation_dispatch_log, router, AppState,
-    BridgeHttpClientOverride, BridgeHttpClientOverrideGuard, BridgeHttpOverrideResponse,
+    install_bridge_http_client_override, reset_bridge_remediation_ack_metrics,
+    reset_bridge_remediation_dispatch_log, router, AppState, BridgeHttpClientOverride,
+    BridgeHttpClientOverrideGuard, BridgeHttpOverrideResponse,
 };
 use std::env;
 use std::fs;
@@ -1812,6 +1813,133 @@ fn bridge_metric_gauges_persist_across_restart() {
                 rate <= delta,
                 "rate {rate} should not exceed delta {delta} when computed per second"
             );
+        }
+    });
+}
+
+#[test]
+fn bridge_remediation_ack_latency_persists_across_restart() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        reset_bridge_remediation_ack_metrics();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("metrics.db");
+        let response = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":true,"closed":false,"notes":"persist"}"#)
+                .expect("ack response json"),
+        );
+        let (override_guard, captured) = install_http_override(response);
+        let _override_guard = override_guard;
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+
+        let baseline = [10u64, 12, 13, 15, 17, 20, 21];
+        let mut initial_sample = None;
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            let shared_state = state.clone();
+            let app = router(state);
+            for value in baseline {
+                let payload = build_labeled_payload(value, "eth");
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
+                    .header("x-auth-token", "token")
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let resp = app.handle(req).await.unwrap();
+                assert_eq!(resp.status(), StatusCode::OK);
+                runtime::sleep(Duration::from_millis(20)).await;
+            }
+
+            let spike_payload = build_labeled_payload(200, "eth");
+            let spike_req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&spike_payload)
+                .unwrap()
+                .build();
+            let spike_resp = app.handle(spike_req).await.unwrap();
+            assert_eq!(spike_resp.status(), StatusCode::OK);
+
+            let observed = wait_for_requests(&captured, 1).await;
+            assert!(observed >= 1, "expected acknowledgement dispatch");
+
+            runtime::sleep(Duration::from_millis(150)).await;
+            for _ in 0..60 {
+                let observations = shared_state.bridge_ack_latency_observations();
+                if let Some((_playbook, _state, latency, count)) =
+                    observations.into_iter().find(|(playbook, state, _, _)| {
+                        playbook == "governance-escalation" && state == "acknowledged"
+                    })
+                {
+                    initial_sample = Some((latency, count));
+                    break;
+                }
+                runtime::sleep(Duration::from_millis(100)).await;
+            }
+            assert!(
+                initial_sample.is_some(),
+                "ack latency sample recorded before restart"
+            );
+        }
+
+        reset_bridge_remediation_ack_metrics();
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            let shared_state = state.clone();
+            let app = router(state);
+            let mut restored_sample = None;
+            let mut metrics_snapshot = String::new();
+            for _ in 0..60 {
+                let observations = shared_state.bridge_ack_latency_observations();
+                if let Some((_playbook, _state, latency, count)) =
+                    observations.into_iter().find(|(playbook, state, _, _)| {
+                        playbook == "governance-escalation" && state == "acknowledged"
+                    })
+                {
+                    restored_sample = Some((latency, count));
+                    let metrics_resp = app
+                        .handle(app.request_builder().path("/metrics").build())
+                        .await
+                        .unwrap();
+                    assert_eq!(metrics_resp.status(), StatusCode::OK);
+                    metrics_snapshot = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+                    break;
+                }
+                runtime::sleep(Duration::from_millis(100)).await;
+            }
+            let (initial_latency, initial_count) =
+                initial_sample.expect("ack latency sample captured before restart");
+            let (restored_latency, restored_count) =
+                restored_sample.expect("ack latency sample restored after restart");
+            assert_eq!(restored_latency, initial_latency);
+            assert_eq!(restored_count, initial_count);
+            let labels = "playbook=\"governance-escalation\",state=\"acknowledged\"";
+            let count_metric = scrape_metric_value(
+                &metrics_snapshot,
+                "bridge_remediation_ack_latency_seconds_count",
+                labels,
+            )
+            .expect("ack latency count metric restored after restart");
+            assert!(
+                (count_metric - restored_count as f64).abs() < f64::EPSILON,
+                "restored histogram count should match stored sample"
+            );
+            let bucket_labels =
+                "playbook=\"governance-escalation\",state=\"acknowledged\",le=\"+Inf\"";
+            let bucket = scrape_metric_value(
+                &metrics_snapshot,
+                "bridge_remediation_ack_latency_seconds_bucket",
+                bucket_labels,
+            )
+            .expect("ack latency bucket restored after restart");
+            assert!(bucket >= count_metric, "bucket should include all samples");
         }
     });
 }
