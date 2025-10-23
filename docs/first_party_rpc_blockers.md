@@ -11,6 +11,12 @@ RPC client.
 
 ## Recent progress (2025-10-27)
 
+- Bridge remediation spool artefacts now persist across acknowledgement retries,
+  the restart suite verifies the cleanup path, the contract remediation CLI
+  surfaces per-action `spool_artifacts` in filtered/JSON views, and monitoring
+  now verifies both the latency overlays and the new
+  `bridge_remediation_spool_artifacts` gauge/panel—all first-party plumbing with
+  no third-party helpers.
 - Bridge remediation dashboards now plot `bridge_remediation_ack_latency_seconds`
   alongside the policy gauge `bridge_remediation_ack_target_seconds`, and the
   metrics aggregator restores histogram samples after a restart. A new

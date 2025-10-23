@@ -1,4 +1,13 @@
 # System-Wide Economic Changes
+> **Review (2025-10-27, late afternoon):** Bridge remediation spool artifacts now
+> persist across acknowledgement retries and are drained automatically once
+> hooks acknowledge or close an action. Snapshot restore replays the cleanup so
+> restart suites verify on-disk hygiene, the contract CLI’s JSON mode now emits
+> each action’s `spool_artifacts` array for filtered playbook/peer reports, and
+> the monitoring suite now guards both the policy overlays on the
+> `bridge_remediation_ack_latency_seconds` panel and the new
+> `bridge_remediation_spool_artifacts` gauge/panel that charts outstanding spool
+> payloads.
 > **Review (2025-10-27, morning):** Bridge remediation dashboards now overlay the
 > policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}` on the
 > acknowledgement latency histogram, the metrics aggregator rehydrates the

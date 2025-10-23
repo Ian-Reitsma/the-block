@@ -331,6 +331,12 @@
     },
     {
       "deprecated": false,
+      "description": "Outstanding bridge remediation spool artifacts awaiting acknowledgement",
+      "labels": [],
+      "name": "bridge_remediation_spool_artifacts"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

@@ -1,7 +1,7 @@
 use concurrency::Lazy;
 use diagnostics::{
     internal::{install_tls_env_warning_subscriber, SubscriberGuard as LoggingSubscriberGuard},
-    tracing::{info, warn},
+    tracing::{debug, info, warn},
 };
 use foundation_metrics::{gauge, increment_counter, Recorder, RecorderInstallError};
 use governance::{
@@ -148,11 +148,13 @@ const BRIDGE_REMEDIATION_DISPATCH_ENDPOINT: &str = "/remediation/bridge/dispatch
 const BRIDGE_REMEDIATION_ACK_PANEL: &str = "bridge_remediation_dispatch_ack_total (5m delta)";
 const BRIDGE_REMEDIATION_ACK_LATENCY_PANEL: &str =
     "bridge_remediation_ack_latency_seconds (p50/p95)";
+const BRIDGE_REMEDIATION_SPOOL_PANEL: &str = "bridge_remediation_spool_artifacts";
 const BRIDGE_REMEDIATION_BASE_PANELS: &[&str] = &[
     "bridge_remediation_action_total (5m delta)",
     "bridge_remediation_dispatch_total (5m delta)",
     BRIDGE_REMEDIATION_ACK_PANEL,
     BRIDGE_REMEDIATION_ACK_LATENCY_PANEL,
+    BRIDGE_REMEDIATION_SPOOL_PANEL,
 ];
 const BRIDGE_LIQUIDITY_PANELS: &[&str] = &[
     "bridge_liquidity_locked_total (5m delta)",
@@ -201,6 +203,7 @@ const METRIC_BRIDGE_REMEDIATION_DISPATCH_ACK_TOTAL: &str = "bridge_remediation_d
 const METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS: &str =
     "bridge_remediation_ack_latency_seconds";
 const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_ack_target_seconds";
+const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -784,19 +787,38 @@ impl AppState {
             }
         };
         if let Some(value) = snapshot {
-            let observations = match self.bridge_remediation.lock() {
-                Ok(mut engine) => {
-                    engine.restore(&value);
-                    engine.ack_latency_observations()
-                }
-                Err(_) => {
-                    warn!(
-                        target: "aggregator",
-                        "bridge remediation engine poisoned during snapshot load"
-                    );
-                    Vec::new()
-                }
-            };
+            let (observations, cleared_artifacts, updated_snapshot, spool_count) =
+                match self.bridge_remediation.lock() {
+                    Ok(mut engine) => {
+                        engine.restore(&value);
+                        let (cleared, remaining) = engine.drain_completed_spool_artifacts();
+                        let observations = engine.ack_latency_observations();
+                        let updated = if cleared.is_empty() {
+                            None
+                        } else {
+                            Some(engine.snapshot())
+                        };
+                        (observations, cleared, updated, Some(remaining))
+                    }
+                    Err(_) => {
+                        warn!(
+                            target: "aggregator",
+                            "bridge remediation engine poisoned during snapshot load"
+                        );
+                        (Vec::new(), Vec::new(), None, None)
+                    }
+                };
+            if let Some(count) = spool_count {
+                aggregator_metrics()
+                    .bridge_remediation_spool_artifacts
+                    .set(count as f64);
+            }
+            if !cleared_artifacts.is_empty() {
+                self.cleanup_spool_artifacts(&cleared_artifacts);
+            }
+            if let Some(snapshot) = updated_snapshot {
+                self.persist_bridge_remediation_snapshot(&snapshot);
+            }
             if !observations.is_empty() {
                 let metrics = aggregator_metrics();
                 for sample in observations {
@@ -1111,12 +1133,15 @@ impl AppState {
         dispatched_at: u64,
         target: &str,
         status: &str,
+        artifact: Option<&str>,
     ) -> Option<BridgeDispatchUpdate> {
-        let (updated, snapshot) = match self.bridge_remediation.lock() {
+        let (updated, snapshot, spool_count) = match self.bridge_remediation.lock() {
             Ok(mut engine) => {
-                let updated = engine.record_dispatch_attempt(action, ack, dispatched_at, status);
+                let updated =
+                    engine.record_dispatch_attempt(action, ack, dispatched_at, status, artifact);
+                let spool_count = engine.spool_artifact_count();
                 let snapshot = updated.as_ref().map(|_| engine.snapshot());
-                (updated, snapshot)
+                (updated, snapshot, spool_count)
             }
             Err(_) => {
                 warn!(
@@ -1130,6 +1155,12 @@ impl AppState {
             self.persist_bridge_remediation_snapshot(&snapshot);
         }
         if let Some(update) = updated.as_ref() {
+            if !update.cleared_spool_artifacts.is_empty() {
+                self.cleanup_spool_artifacts(&update.cleared_spool_artifacts);
+            }
+            aggregator_metrics()
+                .bridge_remediation_spool_artifacts
+                .set(spool_count as f64);
             let updated_action = &update.action;
             if let Some(ack) = ack {
                 match ack.state {
@@ -1197,6 +1228,33 @@ impl AppState {
             }
         }
         updated
+    }
+
+    fn cleanup_spool_artifacts(&self, artifacts: &[String]) {
+        for artifact in artifacts {
+            if artifact.is_empty() {
+                continue;
+            }
+            let path = Path::new(artifact);
+            match fs::remove_file(path) {
+                Ok(_) => info!(
+                    target: "aggregator",
+                    path = %path.display(),
+                    "bridge remediation spool artifact removed after acknowledgement",
+                ),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => debug!(
+                    target: "aggregator",
+                    path = %path.display(),
+                    "bridge remediation spool artifact already cleared",
+                ),
+                Err(err) => warn!(
+                    target: "aggregator",
+                    error = %err,
+                    path = %path.display(),
+                    "failed to remove bridge remediation spool artifact",
+                ),
+            }
+        }
     }
 
     fn record_correlation(&self, metric: &str, record: CorrelationRecord) {
@@ -1512,6 +1570,7 @@ struct AggregatorMetrics {
     bridge_remediation_dispatch_ack_total: CounterVec,
     bridge_remediation_ack_target_seconds: GaugeVec,
     bridge_remediation_ack_latency_seconds: HistogramVec,
+    bridge_remediation_spool_artifacts: Gauge,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2673,6 +2732,13 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(bridge_remediation_ack_latency_seconds.clone()))
         .expect("register bridge_remediation_ack_latency_seconds");
+    let bridge_remediation_spool_artifacts = registry
+        .register_gauge(
+            METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS,
+            "Bridge remediation spool artifacts awaiting acknowledgement",
+        )
+        .expect("register bridge_remediation_spool_artifacts");
+    bridge_remediation_spool_artifacts.set(0.0);
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2715,6 +2781,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_dispatch_ack_total,
         bridge_remediation_ack_target_seconds,
         bridge_remediation_ack_latency_seconds,
+        bridge_remediation_spool_artifacts,
     }
 });
 
@@ -3658,6 +3725,7 @@ struct BridgeRemediationAction {
     last_ack_state: Option<BridgeDispatchAckState>,
     last_ack_notes: Option<String>,
     follow_up_notes: Option<String>,
+    spool_artifacts: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -3713,6 +3781,7 @@ impl BridgeRemediationAction {
             last_ack_state: None,
             last_ack_notes: None,
             follow_up_notes: None,
+            spool_artifacts: Vec::new(),
         }
     }
 
@@ -3835,6 +3904,17 @@ impl BridgeRemediationAction {
         }
     }
 
+    fn register_spool_artifact(&mut self, path: &str) {
+        if self.spool_artifacts.iter().any(|existing| existing == path) {
+            return;
+        }
+        self.spool_artifacts.push(path.to_string());
+    }
+
+    fn drain_spool_artifacts(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.spool_artifacts)
+    }
+
     fn to_map(&self) -> Map {
         let mut map = Map::new();
         map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
@@ -3933,6 +4013,16 @@ impl BridgeRemediationAction {
                 .as_ref()
                 .map(|notes| Value::String(notes.clone()))
                 .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "spool_artifacts".to_string(),
+            Value::Array(
+                self.spool_artifacts
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
         );
         let panels = self.dashboard_panels();
         map.insert(
@@ -4054,6 +4144,17 @@ impl BridgeRemediationAction {
             .get("follow_up_notes")
             .and_then(Value::as_str)
             .map(|text| text.to_string());
+        let spool_artifacts = object
+            .get("spool_artifacts")
+            .and_then(Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|text| text.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
         Some(Self {
             peer_id,
             metric,
@@ -4078,6 +4179,7 @@ impl BridgeRemediationAction {
             last_ack_state,
             last_ack_notes,
             follow_up_notes,
+            spool_artifacts,
         })
     }
 }
@@ -4111,7 +4213,7 @@ impl BridgeRemediationHooks {
             BridgeRemediationActionType::Escalate => &self.escalate,
         };
         if targets.is_empty() {
-            record_dispatch_outcome(None, action, "none", "skipped", None);
+            record_dispatch_outcome(None, action, "none", "skipped", None, None);
             return;
         }
         for target in targets {
@@ -4178,6 +4280,7 @@ impl BridgeRemediationHook {
                                         "http",
                                         "success",
                                         ack,
+                                        None,
                                     );
                                 } else {
                                     warn!(
@@ -4195,6 +4298,7 @@ impl BridgeRemediationHook {
                                         &summary,
                                         "http",
                                         "status_failed",
+                                        None,
                                         None,
                                     );
                                 }
@@ -4215,6 +4319,7 @@ impl BridgeRemediationHook {
                                     &summary,
                                     "http",
                                     "request_failed",
+                                    None,
                                     None,
                                 );
                             }
@@ -4242,6 +4347,7 @@ impl BridgeRemediationHook {
                                     "http",
                                     "request_build_failed",
                                     None,
+                                    None,
                                 );
                                 return;
                             }
@@ -4264,6 +4370,7 @@ impl BridgeRemediationHook {
                                     &summary,
                                     "http",
                                     "payload_encode_failed",
+                                    None,
                                     None,
                                 );
                                 return;
@@ -4310,6 +4417,7 @@ impl BridgeRemediationHook {
                                         "http",
                                         "success",
                                         ack,
+                                        None,
                                     );
                                 } else {
                                     warn!(
@@ -4327,6 +4435,7 @@ impl BridgeRemediationHook {
                                         &summary,
                                         "http",
                                         "status_failed",
+                                        None,
                                         None,
                                     );
                                 }
@@ -4347,6 +4456,7 @@ impl BridgeRemediationHook {
                                     &summary,
                                     "http",
                                     "request_failed",
+                                    None,
                                     None,
                                 );
                             }
@@ -4378,6 +4488,7 @@ impl BridgeRemediationHook {
                                 "spool",
                                 "success",
                                 None,
+                                Some(path.as_path()),
                             );
                         }
                         Ok(Err(err)) => {
@@ -4395,6 +4506,7 @@ impl BridgeRemediationHook {
                                 &summary,
                                 "spool",
                                 "persist_failed",
+                                None,
                                 None,
                             );
                         }
@@ -4414,6 +4526,7 @@ impl BridgeRemediationHook {
                                 "spool",
                                 "join_failed",
                                 None,
+                                None,
                             );
                         }
                     }
@@ -4429,6 +4542,7 @@ fn record_dispatch_outcome(
     target: &str,
     status: &str,
     acknowledgement: Option<BridgeDispatchAckRecord>,
+    artifact: Option<&Path>,
 ) {
     let metrics = aggregator_metrics();
     metrics
@@ -4452,6 +4566,7 @@ fn record_dispatch_outcome(
             .inc();
     }
     let dispatched_at = unix_timestamp_secs();
+    let artifact_path = artifact.map(|path| path.to_string_lossy().to_string());
     let dispatch_update = state.as_ref().and_then(|state| {
         state.record_bridge_dispatch(
             action,
@@ -4459,6 +4574,7 @@ fn record_dispatch_outcome(
             dispatched_at,
             target,
             status,
+            artifact_path.as_deref(),
         )
     });
     if let Some(update) = dispatch_update.as_ref() {
@@ -5094,6 +5210,7 @@ impl BridgeAckLatencyStore {
 struct BridgeDispatchUpdate {
     action: BridgeRemediationAction,
     ack_sample: Option<BridgeAckLatencyObservation>,
+    cleared_spool_artifacts: Vec<String>,
 }
 
 impl Default for BridgeRemediationAckPolicy {
@@ -5144,6 +5261,26 @@ impl BridgeRemediationEngine {
 
     fn ack_latency_observations(&self) -> Vec<BridgeAckLatencyObservation> {
         self.ack_latency.observations()
+    }
+
+    fn drain_completed_spool_artifacts(&mut self) -> (Vec<String>, usize) {
+        let mut cleared = Vec::new();
+        for stored in self.actions.iter_mut() {
+            if (stored.acknowledged_at.is_some() || stored.closed_out_at.is_some())
+                && !stored.spool_artifacts.is_empty()
+            {
+                cleared.extend(stored.drain_spool_artifacts());
+            }
+        }
+        let remaining = self.spool_artifact_count();
+        (cleared, remaining)
+    }
+
+    fn spool_artifact_count(&self) -> usize {
+        self.actions
+            .iter()
+            .map(|action| action.spool_artifacts.len())
+            .sum()
     }
 
     fn ingest(&mut self, event: &BridgeAnomalyEvent) -> Option<BridgeRemediationAction> {
@@ -5218,8 +5355,11 @@ impl BridgeRemediationEngine {
         ack: Option<&BridgeDispatchAckRecord>,
         dispatched_at: u64,
         status: &str,
+        artifact: Option<&str>,
     ) -> Option<BridgeDispatchUpdate> {
-        let mut updated = None;
+        let mut cleared_spool_artifacts = Vec::new();
+        let mut ack_sample = None;
+        let mut updated_action = None;
         for stored in self.actions.iter_mut().rev() {
             if stored.peer_id == action.peer_id
                 && stored.metric == action.metric
@@ -5232,7 +5372,13 @@ impl BridgeRemediationEngine {
                 if ack.is_some() || status == "success" {
                     stored.pending_since.get_or_insert(dispatched_at);
                 }
-                let mut sample = None;
+                if let Some(path) = artifact {
+                    if stored.acknowledged_at.is_some() || stored.closed_out_at.is_some() {
+                        cleared_spool_artifacts.push(path.to_string());
+                    } else {
+                        stored.register_spool_artifact(path);
+                    }
+                }
                 if let Some(ack) = ack {
                     let ack_state = ack.state;
                     stored.last_ack_state = Some(ack.state);
@@ -5255,11 +5401,15 @@ impl BridgeRemediationEngine {
                         stored.follow_up_notes = None;
                         stored.auto_retry_count = 0;
                         stored.last_auto_retry_at = None;
+                        let drained = stored.drain_spool_artifacts();
+                        if !drained.is_empty() {
+                            cleared_spool_artifacts.extend(drained);
+                        }
                         if let Some(first_dispatch_at) = stored.first_dispatch_at {
                             let latency = ack.timestamp.saturating_sub(first_dispatch_at);
                             self.ack_latency
                                 .observe(stored.playbook, ack_state, latency);
-                            sample = Some(BridgeAckLatencyObservation {
+                            ack_sample = Some(BridgeAckLatencyObservation {
                                 playbook: stored.playbook,
                                 state: ack_state,
                                 latency,
@@ -5268,14 +5418,15 @@ impl BridgeRemediationEngine {
                         }
                     }
                 }
-                updated = Some(BridgeDispatchUpdate {
-                    action: stored.clone(),
-                    ack_sample: sample,
-                });
+                updated_action = Some(stored.clone());
                 break;
             }
         }
-        updated
+        updated_action.map(|action| BridgeDispatchUpdate {
+            action,
+            ack_sample,
+            cleared_spool_artifacts,
+        })
     }
 
     fn pending_followups(&mut self, now: u64) -> Vec<BridgeRemediationFollowUp> {
@@ -5334,6 +5485,7 @@ impl BridgeRemediationEngine {
                         "Automated escalation after {}s without closure ({} attempts)",
                         elapsed, stored.dispatch_attempts
                     )),
+                    spool_artifacts: Vec::new(),
                 };
                 stored.pending_escalated = true;
                 let previous_notes = stored.follow_up_notes.take();

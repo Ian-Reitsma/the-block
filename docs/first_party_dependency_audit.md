@@ -1,5 +1,14 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-27 update (spool persistence & dashboard guard):** Bridge
+> remediation spool artefacts now persist across acknowledgement retries and are
+> drained automatically once hooks acknowledge or close an action. The restart
+> suite exercises the cleanup path, the contract remediation CLI surfaces each
+> action’s `spool_artifacts` in filtered and JSON views, and monitoring gained
+> regressions that verify both the latency overlays and the new
+> `bridge_remediation_spool_artifacts` gauge/panel remain wired into Grafana—all
+> without introducing third-party tooling.
+
 > **2025-10-27 update (ack targets & CLI filters):** Bridge remediation dashboards
 > now overlay the first-party gauge
 > `bridge_remediation_ack_target_seconds{playbook,policy}` on the latency
