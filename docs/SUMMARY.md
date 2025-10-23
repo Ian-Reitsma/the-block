@@ -1,4 +1,23 @@
 # Summary
+> **Review (2025-10-25, late evening):** Per-playbook acknowledgement windows
+> honour `TB_REMEDIATION_ACK_*` overrides, acknowledgement completion latency is
+> recorded in `bridge_remediation_ack_latency_seconds{playbook,state}` (with
+> p50/p95 panels in Grafana/HTML snapshots), and the first-party `contract
+> remediation bridge` command streams the persisted action/dispatch log for
+> on-call triage.
+
+Bridge remediation highlights:
+- `BridgeRemediationAckPolicy` reads `TB_REMEDIATION_ACK_RETRY_SECS`,
+  `_ESCALATE_SECS`, `_MAX_RETRIES`, and suffix overrides (for example,
+  `_GOVERNANCE_ESCALATION`) so paging, throttling, and escalation playbooks use
+  tailored retry/escalation windows.
+- `bridge_remediation_ack_latency_seconds{playbook,state}` captures acknowledgement
+  completion latency; Grafana and the HTML snapshot chart p50/p95 values beside
+  the existing dispatch/ack counters so slow closures surface ahead of policy
+  triggers.
+- `contract remediation bridge --aggregator <url>` renders the persisted
+  actions, acknowledgement metadata, retry history, follow-up notes, and the
+  dispatch log without leaving the first-party CLI.
 > **Review (2025-10-25, afternoon):** Remediation follow-ups are now automated
 > end-to-end. Pending actions track dispatch attempts, retry counts, and follow-up
 > notes so the aggregator can re-dispatch playbooks before synthesising governance

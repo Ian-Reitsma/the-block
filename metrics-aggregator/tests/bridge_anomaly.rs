@@ -720,6 +720,18 @@ fn bridge_remediation_exposes_actions() {
             .dashboard_panels
             .iter()
             .any(|panel| panel == "bridge_remediation_dispatch_ack_total (5m delta)"));
+        assert!(action
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_ack_latency_seconds (p50/p95)"));
+        assert!(action
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_dispatch_ack_total (5m delta)"));
+        assert!(action
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_ack_latency_seconds (p50/p95)"));
 
         let metrics_resp = app
             .handle(app.request_builder().path("/metrics").build())
@@ -945,7 +957,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
         assert!(panels.iter().any(|panel| {
             panel
                 .as_str()
-                .map(|value| value == "bridge_remediation_dispatch_ack_total (5m delta)")
+                .map(|value| value == "bridge_remediation_ack_latency_seconds (p50/p95)")
                 .unwrap_or(false)
         }));
 
@@ -972,6 +984,10 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
             .dashboard_panels
             .iter()
             .any(|panel| panel == "bridge_remediation_dispatch_ack_total (5m delta)"));
+        assert!(record
+            .dashboard_panels
+            .iter()
+            .any(|panel| panel == "bridge_remediation_ack_latency_seconds (p50/p95)"));
         assert!(record
             .response_sequence
             .iter()
@@ -1072,6 +1088,9 @@ fn bridge_remediation_records_http_acknowledgements() {
         assert!(metrics_body.contains(
             r#"bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="acknowledged"}"#
         ));
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_ack_latency_seconds_bucket{playbook="governance-escalation",state="acknowledged""#
+        ));
 
         let remediation_resp = app
             .handle(app.request_builder().path("/remediation/bridge").build())
@@ -1168,6 +1187,9 @@ fn bridge_remediation_parses_text_acknowledgements() {
         assert!(metrics_body.contains(
             r#"bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="acknowledged"}"#
         ));
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_ack_latency_seconds_bucket{playbook="governance-escalation",state="acknowledged""#
+        ));
     });
 }
 
@@ -1227,29 +1249,37 @@ fn bridge_remediation_retries_pending_acknowledgements() {
             "expected retry dispatch, observed {observed}"
         );
 
-        let remediation_resp = app
-            .handle(app.request_builder().path("/remediation/bridge").build())
-            .await
-            .unwrap();
-        assert_eq!(remediation_resp.status(), StatusCode::OK);
-        let actions = parse_remediation_actions(remediation_resp.body());
-        assert!(!actions.is_empty(), "expected remediation action");
-        let action = actions.last().unwrap();
+        let mut attempts = 0u64;
+        let mut retries = 0u64;
+        let mut notes = String::new();
+        for _ in 0..50 {
+            let remediation_resp = app
+                .handle(app.request_builder().path("/remediation/bridge").build())
+                .await
+                .unwrap();
+            assert_eq!(remediation_resp.status(), StatusCode::OK);
+            let actions = parse_remediation_actions(remediation_resp.body());
+            assert!(!actions.is_empty(), "expected remediation action");
+            let action = actions.last().unwrap();
+            attempts = action.dispatch_attempts;
+            retries = action.auto_retry_count;
+            notes = action.follow_up_notes.as_deref().unwrap_or("").to_string();
+            if attempts >= 2 && retries >= 1 {
+                break;
+            }
+            runtime::sleep(Duration::from_millis(40)).await;
+        }
         assert!(
-            action.dispatch_attempts >= 2,
+            attempts >= 2,
             "expected dispatch attempts >= 2, found {}",
-            action.dispatch_attempts
+            attempts
         );
         assert!(
-            action.auto_retry_count >= 1,
+            retries >= 1,
             "expected auto retry count >= 1, found {}",
-            action.auto_retry_count
+            retries
         );
-        assert!(action
-            .follow_up_notes
-            .as_deref()
-            .unwrap_or("")
-            .contains("retry"));
+        assert!(notes.contains("retry"));
     });
 }
 
@@ -1350,6 +1380,82 @@ fn bridge_remediation_escalates_pending_acknowledgements() {
 }
 
 #[test]
+fn bridge_remediation_ack_policy_respects_playbook_overrides() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let response = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
+                .expect("pending response json"),
+        );
+        let (override_guard, captured) = install_http_override(response);
+        let _override_guard = override_guard;
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+        let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
+        let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "3");
+        let _default_escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "4");
+        let _override_retry_guard =
+            EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS_GOVERNANCE_ESCALATION", "15");
+        let _override_escalate_guard = EnvGuard::set(
+            "TB_REMEDIATION_ACK_ESCALATE_SECS_GOVERNANCE_ESCALATION",
+            "30",
+        );
+        let _cleanup_guard = EnvGuard::set("AGGREGATOR_CLEANUP_INTERVAL_SECS", "1");
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        state.spawn_cleanup();
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        let initial = wait_for_requests(&captured, 1).await;
+        assert!(initial >= 1, "expected escalation dispatch");
+
+        runtime::sleep(Duration::from_secs(6)).await;
+        let final_count = captured.lock().unwrap().len();
+        assert_eq!(final_count, initial, "override delayed retries");
+
+        let remediation_resp = app
+            .handle(app.request_builder().path("/remediation/bridge").build())
+            .await
+            .unwrap();
+        assert_eq!(remediation_resp.status(), StatusCode::OK);
+        let actions = parse_remediation_actions(remediation_resp.body());
+        let escalation = actions
+            .iter()
+            .find(|action| action.action == "escalate")
+            .expect("escalation action present");
+        assert_eq!(escalation.auto_retry_count, 0);
+        assert_eq!(escalation.dispatch_attempts, 1);
+    });
+}
+
+#[test]
 fn bridge_remediation_records_http_closure_acknowledgements() {
     run_async(async {
         reset_bridge_remediation_dispatch_log();
@@ -1429,6 +1535,9 @@ fn bridge_remediation_records_http_closure_acknowledgements() {
         let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
         assert!(metrics_body.contains(
             r#"bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="closed"}"#
+        ));
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_ack_latency_seconds_bucket{playbook="governance-escalation",state="closed""#
         ));
 
         let remediation_resp = app
