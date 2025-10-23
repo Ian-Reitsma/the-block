@@ -163,6 +163,8 @@ const BRIDGE_REMEDIATION_ACK_LEGEND: &str = "{{action}} · {{target}} · {{state
 const BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE: &str =
     "bridge_remediation_ack_latency_seconds (p50/p95)";
 const BRIDGE_REMEDIATION_ACK_LATENCY_METRIC: &str = "bridge_remediation_ack_latency_seconds";
+const BRIDGE_REMEDIATION_SPOOL_PANEL_TITLE: &str = "bridge_remediation_spool_artifacts";
+const BRIDGE_REMEDIATION_SPOOL_EXPR: &str = "bridge_remediation_spool_artifacts";
 const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
 const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
@@ -425,6 +427,14 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         }
         if metric.name == BRIDGE_REMEDIATION_ACK_LATENCY_METRIC {
             bridge.push(build_bridge_ack_latency_panel(metric));
+            continue;
+        }
+        if metric.name == "bridge_remediation_spool_artifacts" {
+            bridge.push(build_bridge_delta_panel(
+                BRIDGE_REMEDIATION_SPOOL_PANEL_TITLE,
+                BRIDGE_REMEDIATION_SPOOL_EXPR,
+                metric,
+            ));
             continue;
         }
         if metric.name == "bridge_anomaly_total" {
@@ -1613,6 +1623,12 @@ mod tests {
                 deprecated: false,
             },
             Metric {
+                name: "bridge_remediation_spool_artifacts".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
                 name: "bridge_metric_delta".into(),
                 description: String::new(),
                 unit: String::new(),
@@ -1635,7 +1651,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 16);
+        assert_eq!(panels.len(), 17);
 
         let row = panels
             .iter()
@@ -1833,6 +1849,40 @@ mod tests {
                 .expect("escalate target legend"),
             "{playbook} · escalate target"
         );
+
+        let spool_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_REMEDIATION_SPOOL_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("spool artifact panel present");
+        let spool_expr = spool_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| match target {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .expect("spool artifact expression");
+        assert_eq!(spool_expr, BRIDGE_REMEDIATION_SPOOL_EXPR);
+        let spool_legend = spool_panel
+            .get("options")
+            .and_then(Value::as_object)
+            .and_then(|options| options.get("legend"))
+            .and_then(Value::as_object)
+            .and_then(|legend| legend.get("showLegend"))
+            .and_then(Value::as_bool);
+        assert_eq!(spool_legend, Some(false));
 
         let delta_panel = panels
             .iter()

@@ -17,6 +17,13 @@ workspace crates.
   `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
   dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
   hermetic without background servers.
+- ✅ Bridge remediation spool artefacts now persist across acknowledgement
+  retries and are drained automatically once hooks acknowledge or close an
+  action. Restart suites assert the cleanup path, the contract remediation CLI
+  exposes per-action `spool_artifacts` in filtered/JSON output, and monitoring
+  now guards both the latency policy overlays and the new
+  `bridge_remediation_spool_artifacts` gauge/panel—all without introducing
+  third-party tooling.
 - ✅ The remediation engine now automates retries and escalations without leaving
   the first-party stack. Actions persist dispatch attempts, retry counts, and
   acknowledgement metadata, the parser tolerates plain-text hook responses, and

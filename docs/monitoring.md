@@ -196,11 +196,23 @@ acknowledgement payload (state, timestamp, notes) so operators can audit
 `acknowledged`, `closed`, `pending`, or `invalid` replies alongside
 `success`, `request_build_failed`, `payload_encode_failed`, `request_failed`,
 `status_failed`, `persist_failed`, `join_failed`, or `skipped` outcomes by target
-(`http`, `spool`, or `none`). The gauges and the dispatch log let operators
-verify that paging hooks, spool directories, and governance escalations are
+(`http`, `spool`, or `none`). A dedicated `bridge_remediation_spool_artifacts`
+gauge tracks how many payloads remain queued on disk, and the bridge dashboard
+row renders a matching panel so responders see outstanding spools without
+scraping the filesystem. The gauges and the dispatch log let operators verify
+that paging hooks, spool directories, and governance escalations are
 acknowledged and closed out without leaving the first-party stack. Both dispatch
 paths are logged at `INFO`, include the peer/metric/action trio, and retry on the
 next anomaly if an endpoint is unavailable.
+
+Spool artefacts persist across acknowledgement retries so failed hooks can be
+replayed after a restart; once an action is acknowledged or closed the
+aggregator drains the artefacts automatically, updates the
+`bridge_remediation_spool_artifacts` gauge, and the restart regression asserts
+the spool directory is clean before proceeding. The contract remediation CLI
+mirrors the behaviour by emitting each action’s `spool_artifacts` array in JSON
+mode (with `--playbook`/`--peer` filters) so on-call responders can audit the
+remaining payloads without touching third-party tooling.
 
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the

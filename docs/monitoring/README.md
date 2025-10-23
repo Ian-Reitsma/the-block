@@ -67,7 +67,9 @@ ready to import once the foundation telemetry stack is running.
   `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`, then
   appends to `/remediation/bridge/dispatches`, letting dashboards and alerting
   policy flag skipped hooks, failing endpoints, or unacknowledged escalations
-  without scraping Prometheus.
+  without scraping Prometheus. The bridge row also charts the
+  `bridge_remediation_spool_artifacts` gauge so responders can see outstanding
+  on-disk payloads without tailing the spool directory.
 - Automated follow-ups now run entirely within the aggregator. Pending actions
   persist `dispatch_attempts`, `auto_retry_count`, retry timestamps, and
   follow-up notes so the engine can queue deterministic retries and governance

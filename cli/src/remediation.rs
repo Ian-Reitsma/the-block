@@ -321,6 +321,17 @@ fn parse_remediation_actions(value: JsonValue) -> AnyhowResult<Vec<RemediationAc
                 .get("dispatch_endpoint")
                 .and_then(JsonValue::as_str)
                 .map(ToOwned::to_owned),
+            spool_artifacts: object
+                .get("spool_artifacts")
+                .and_then(JsonValue::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(JsonValue::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_else(Vec::new),
         };
         actions.push(action);
     }
@@ -930,6 +941,7 @@ struct RemediationAction {
     dashboard_panels: Vec<String>,
     runbook_path: Option<String>,
     dispatch_endpoint: Option<String>,
+    spool_artifacts: Vec<String>,
 }
 
 impl RemediationAction {
@@ -1090,6 +1102,16 @@ impl RemediationAction {
                 .as_ref()
                 .map(|value| JsonValue::String(value.clone()))
                 .unwrap_or(JsonValue::Null),
+        );
+        map.insert(
+            "spool_artifacts".to_string(),
+            JsonValue::Array(
+                self.spool_artifacts
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
         );
         map
     }
@@ -1255,6 +1277,7 @@ mod tests {
             ],
             runbook_path: Some("docs/runbook".to_string()),
             dispatch_endpoint: Some("/remediation/bridge/dispatches".to_string()),
+            spool_artifacts: Vec::new(),
         };
         let dispatch = RemediationDispatch {
             action_timestamp: 2_000,
@@ -1315,6 +1338,7 @@ mod tests {
             dashboard_panels: Vec::new(),
             runbook_path: None,
             dispatch_endpoint: None,
+            spool_artifacts: Vec::new(),
         };
         let other_action = RemediationAction {
             playbook: "incentive-throttle".to_string(),
@@ -1386,6 +1410,7 @@ mod tests {
             dashboard_panels: vec!["panel".to_string()],
             runbook_path: Some("docs/runbook".to_string()),
             dispatch_endpoint: Some("/remediation/bridge/dispatches".to_string()),
+            spool_artifacts: Vec::new(),
         };
         let dispatch = RemediationDispatch {
             action_timestamp: 500,
@@ -1434,5 +1459,120 @@ mod tests {
                 .unwrap_or(true),
             false
         );
+    }
+
+    #[test]
+    fn render_json_filters_include_spool_artifacts() {
+        let matching_action = RemediationAction {
+            action: "escalate".to_string(),
+            playbook: "governance-escalation".to_string(),
+            peer_id: "peer-a".to_string(),
+            metric: "bridge_metric".to_string(),
+            labels: vec![RemediationLabel {
+                key: "asset".to_string(),
+                value: "eth".to_string(),
+            }],
+            occurrences: 3,
+            delta: 64.0,
+            ratio: 2.4,
+            threshold: Some(20.0),
+            timestamp: 2_000,
+            annotation: Some("match".to_string()),
+            acknowledged_at: Some(2_050),
+            closed_out_at: None,
+            acknowledgement_notes: Some("cleared".to_string()),
+            first_dispatch_at: Some(2_005),
+            last_dispatch_at: Some(2_010),
+            pending_since: Some(2_005),
+            pending_escalated: false,
+            dispatch_attempts: 2,
+            auto_retry_count: 1,
+            last_auto_retry_at: Some(2_020),
+            last_ack_state: Some("acknowledged".to_string()),
+            last_ack_notes: Some("ack".to_string()),
+            follow_up_notes: Some("follow".to_string()),
+            response_sequence: vec!["step".to_string()],
+            dashboard_panels: vec!["panel".to_string()],
+            runbook_path: Some("docs/runbook".to_string()),
+            dispatch_endpoint: Some("/remediation/bridge/dispatches".to_string()),
+            spool_artifacts: vec!["/tmp/remediation/spool.json".to_string()],
+        };
+        let non_matching_action = RemediationAction {
+            playbook: "incentive-throttle".to_string(),
+            peer_id: "peer-b".to_string(),
+            timestamp: 1_000,
+            annotation: Some("other".to_string()),
+            spool_artifacts: vec!["/tmp/other.json".to_string()],
+            ..matching_action.clone()
+        };
+        let dispatch = RemediationDispatch {
+            action_timestamp: 2_000,
+            action_kind: "escalate".to_string(),
+            playbook: "governance-escalation".to_string(),
+            peer_id: "peer-a".to_string(),
+            metric: "bridge_metric".to_string(),
+            target: "http".to_string(),
+            status: "success".to_string(),
+            dispatched_at: 2_006,
+            acknowledgement: None,
+            annotation: None,
+        };
+        let playbooks = vec!["governance-escalation".to_string()];
+        let peers = vec!["peer-a".to_string()];
+        let (filtered_actions, filtered_dispatches) = apply_filters(
+            vec![non_matching_action, matching_action],
+            vec![dispatch],
+            &playbooks,
+            &peers,
+        );
+        let context = BridgeReportContext::new(filtered_actions, filtered_dispatches);
+        let filters = BridgeReportFilters {
+            playbooks: &playbooks,
+            peers: &peers,
+        };
+        let rendered =
+            render_bridge_report_json(context, 5, 5, &filters).expect("json report with filters");
+        let value: JsonValue = json::from_str(rendered.trim()).expect("json parse");
+        assert_eq!(
+            value
+                .get("returned_actions")
+                .and_then(JsonValue::as_u64)
+                .unwrap_or(0),
+            1
+        );
+        assert_eq!(
+            value
+                .get("omitted_actions")
+                .and_then(JsonValue::as_u64)
+                .unwrap_or(0),
+            0
+        );
+        let filters_value = value
+            .get("filters")
+            .and_then(JsonValue::as_object)
+            .expect("filters map");
+        assert_eq!(
+            filters_value
+                .get("active")
+                .and_then(JsonValue::as_bool)
+                .unwrap_or(false),
+            true
+        );
+        let actions = value
+            .get("actions")
+            .and_then(JsonValue::as_array)
+            .expect("actions array");
+        assert_eq!(actions.len(), 1);
+        let entry = actions[0].as_object().expect("action map");
+        assert_eq!(
+            entry.get("peer_id").and_then(JsonValue::as_str).unwrap(),
+            "peer-a"
+        );
+        let spool = entry
+            .get("spool_artifacts")
+            .and_then(JsonValue::as_array)
+            .expect("spool array");
+        assert_eq!(spool.len(), 1);
+        assert_eq!(spool[0].as_str(), Some("/tmp/remediation/spool.json"));
     }
 }

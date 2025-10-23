@@ -90,6 +90,7 @@ struct ApiRemediationAction {
     follow_up_notes: Option<String>,
     last_dispatch_at: Option<u64>,
     pending_since: Option<u64>,
+    spool_artifacts: Vec<String>,
 }
 
 fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
@@ -136,6 +137,17 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                 .unwrap_or_else(Vec::new);
             let dashboard_panels = object
                 .get("dashboard_panels")
+                .and_then(Value::as_array)
+                .map(|array| {
+                    array
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(Vec::new);
+            let spool_artifacts = object
+                .get("spool_artifacts")
                 .and_then(Value::as_array)
                 .map(|array| {
                     array
@@ -217,6 +229,7 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                     Some(Value::Null) | None => None,
                     Some(value) => value.as_u64(),
                 },
+                spool_artifacts,
             }
         })
         .collect()
@@ -453,6 +466,22 @@ fn build_liquidity_payload(metric: &str, value: u64, asset: &str) -> Value {
 }
 
 fn scrape_metric_value(body: &str, metric: &str, labels: &str) -> Option<f64> {
+    if labels.is_empty() {
+        let direct_prefix = format!("{metric} ");
+        if let Some(value) = body.lines().find_map(|line| {
+            line.strip_prefix(&direct_prefix)
+                .and_then(|rest| rest.trim().parse::<f64>().ok())
+        }) {
+            return Some(value);
+        }
+        let bracket_prefix = format!("{metric}{{}}");
+        if let Some(value) = body.lines().find_map(|line| {
+            line.strip_prefix(&bracket_prefix)
+                .and_then(|rest| rest.trim().parse::<f64>().ok())
+        }) {
+            return Some(value);
+        }
+    }
     let needle = format!("{metric}{{{labels}}}");
     body.lines()
         .find_map(|line| line.strip_prefix(&needle)?.trim().parse::<f64>().ok())
@@ -1940,6 +1969,301 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
             )
             .expect("ack latency bucket restored after restart");
             assert!(bucket >= count_metric, "bucket should include all samples");
+        }
+    });
+}
+
+#[test]
+fn bridge_remediation_cleans_spool_artifacts_after_restart() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        reset_bridge_remediation_ack_metrics();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("metrics.db");
+        let spool_dir = tempfile::tempdir().unwrap();
+
+        let response_pending = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
+                .expect("pending response json"),
+        );
+        let (override_guard, captured_initial) = install_http_override(response_pending);
+        let override_guard = override_guard;
+        let _throttle_guard = EnvGuard::set("TB_REMEDIATION_THROTTLE_URLS", "http://override/hook");
+        let _escalate_url_guard =
+            EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+        let _escalate_dir_guard = EnvGuard::set(
+            "TB_REMEDIATION_ESCALATE_DIRS",
+            spool_dir.path().to_str().expect("spool path"),
+        );
+        let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "3");
+        let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "1");
+        let _cleanup_guard = EnvGuard::set("AGGREGATOR_CLEANUP_INTERVAL_SECS", "1");
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            state.spawn_cleanup();
+            let app = router(state);
+            for value in [10u64, 11, 12, 13, 14, 15, 16] {
+                let payload = build_labeled_payload(value, "eth");
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
+                    .header("x-auth-token", "token")
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let resp = app.handle(req).await.unwrap();
+                assert_eq!(resp.status(), StatusCode::OK);
+                runtime::sleep(Duration::from_millis(20)).await;
+            }
+
+            let spike_payload = build_labeled_payload(220, "eth");
+            let spike_req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&spike_payload)
+                .unwrap()
+                .build();
+            let spike_resp = app.handle(spike_req).await.unwrap();
+            assert_eq!(spike_resp.status(), StatusCode::OK);
+
+            wait_for_requests(&captured_initial, 1).await;
+            let mut observed = 0usize;
+            for _ in 0..50 {
+                observed = fs::read_dir(spool_dir.path())
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                if observed > 0 {
+                    break;
+                }
+                runtime::sleep(Duration::from_millis(40)).await;
+            }
+            assert!(observed > 0, "expected spool artifact to be persisted");
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+            let gauge =
+                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
+                    .expect("spool gauge present after initial dispatch");
+            assert!(
+                (gauge - observed as f64).abs() < f64::EPSILON,
+                "spool gauge {gauge} should equal observed artifact count {observed}"
+            );
+        }
+
+        drop(override_guard);
+
+        let response_closed = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":true,"closed":true,"notes":"cleared"}"#)
+                .expect("closed response json"),
+        );
+        let (override_guard, captured_followup) = install_http_override(response_closed);
+        let override_guard = override_guard;
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            state.spawn_cleanup();
+            let app = router(state);
+
+            wait_for_requests(&captured_followup, 1).await;
+
+            for _ in 0..100 {
+                let remaining = fs::read_dir(spool_dir.path())
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                if remaining == 0 {
+                    break;
+                }
+                runtime::sleep(Duration::from_millis(50)).await;
+            }
+
+            let remediation_resp = app
+                .handle(app.request_builder().path("/remediation/bridge").build())
+                .await
+                .unwrap();
+            let actions = parse_remediation_actions(remediation_resp.body());
+            for action in actions {
+                if action.acknowledged_at.is_some() || action.closed_out_at.is_some() {
+                    assert!(
+                        action.spool_artifacts.is_empty(),
+                        "expected cleared action {} to drop spool artifacts",
+                        action.metric
+                    );
+                }
+            }
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+            let gauge =
+                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
+                    .expect("spool gauge present after acknowledgement");
+            assert!(
+                (gauge - 0.0).abs() < f64::EPSILON,
+                "spool gauge should reset to zero after acknowledgements"
+            );
+        }
+
+        let final_count = fs::read_dir(spool_dir.path())
+            .map(|iter| iter.count())
+            .unwrap_or(0);
+        assert_eq!(
+            final_count, 0,
+            "spool directory should be empty after restart cleanup"
+        );
+
+        drop(override_guard);
+    });
+}
+
+#[test]
+fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        reset_bridge_remediation_ack_metrics();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("metrics.db");
+        let spool_dir = tempfile::tempdir().unwrap();
+
+        let _escalate_dir_guard = EnvGuard::set(
+            "TB_REMEDIATION_ESCALATE_DIRS",
+            spool_dir.path().to_str().expect("spool path"),
+        );
+        let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "120");
+        let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "2");
+        let _cleanup_guard = EnvGuard::set("AGGREGATOR_CLEANUP_INTERVAL_SECS", "1");
+
+        let expected_artifacts = 3usize;
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            state.spawn_cleanup();
+            let app = router(state);
+            for value in [10u64, 11, 12, 13, 14, 15, 16] {
+                let payload = build_labeled_payload(value, "eth");
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
+                    .header("x-auth-token", "token")
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let resp = app.handle(req).await.unwrap();
+                assert_eq!(resp.status(), StatusCode::OK);
+                runtime::sleep(Duration::from_millis(20)).await;
+            }
+
+            let spike_payload = build_labeled_payload(240, "eth");
+            let spike_req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&spike_payload)
+                .unwrap()
+                .build();
+            let spike_resp = app.handle(spike_req).await.unwrap();
+            assert_eq!(spike_resp.status(), StatusCode::OK);
+
+            let mut observed = 0usize;
+            for _ in 0..100 {
+                observed = fs::read_dir(spool_dir.path())
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                if observed >= expected_artifacts {
+                    break;
+                }
+                runtime::sleep(Duration::from_millis(100)).await;
+            }
+            assert_eq!(
+                observed, expected_artifacts,
+                "expected spool artifacts after retry exhaustion"
+            );
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+            let gauge =
+                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
+                    .expect("spool gauge present during retry exhaustion");
+            assert!(
+                (gauge - expected_artifacts as f64).abs() < f64::EPSILON,
+                "spool gauge {gauge} should equal artifact count {expected_artifacts}"
+            );
+
+            let remediation_resp = app
+                .handle(app.request_builder().path("/remediation/bridge").build())
+                .await
+                .unwrap();
+            let actions = parse_remediation_actions(remediation_resp.body());
+            let pending = actions
+                .into_iter()
+                .find(|action| action.acknowledged_at.is_none() && action.closed_out_at.is_none())
+                .expect("pending remediation action present");
+            assert_eq!(
+                pending.spool_artifacts.len(),
+                expected_artifacts,
+                "pending action should retain all spool artifacts"
+            );
+        }
+
+        {
+            let state = AppState::new("token".into(), db_path.clone(), 60);
+            state.spawn_cleanup();
+            let app = router(state);
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+            let gauge =
+                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
+                    .expect("spool gauge present after restart with pending artifacts");
+            assert!(
+                (gauge - expected_artifacts as f64).abs() < f64::EPSILON,
+                "spool gauge {gauge} should persist across restart"
+            );
+
+            let remaining = fs::read_dir(spool_dir.path())
+                .map(|iter| iter.count())
+                .unwrap_or(0);
+            assert_eq!(
+                remaining, expected_artifacts,
+                "spool directory should still contain pending artifacts"
+            );
+
+            let remediation_resp = app
+                .handle(app.request_builder().path("/remediation/bridge").build())
+                .await
+                .unwrap();
+            let actions = parse_remediation_actions(remediation_resp.body());
+            let pending = actions
+                .into_iter()
+                .find(|action| action.acknowledged_at.is_none() && action.closed_out_at.is_none())
+                .expect("pending remediation action present after restart");
+            assert_eq!(
+                pending.spool_artifacts.len(),
+                expected_artifacts,
+                "pending action should keep spool artifacts after restart"
+            );
         }
     });
 }

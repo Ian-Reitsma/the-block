@@ -1,4 +1,11 @@
 # Summary
+> **Review (2025-10-27, late afternoon):** Bridge remediation spool artefacts now
+> persist across acknowledgement retries, drain automatically once hooks close
+> or acknowledge the action, and restart tests verify the cleanup path. The
+> contract CLI’s JSON output exposes per-action `spool_artifacts` for filtered
+> playbook/peer combinations, and the monitoring suite now guards both the
+> latency policy overlays and the new `bridge_remediation_spool_artifacts`
+> gauge/panel charting outstanding spool payloads.
 > **Review (2025-10-27, morning):** The bridge dashboards now overlay the policy
 > gauge `bridge_remediation_ack_target_seconds{playbook,policy}` on the latency
 > histogram, the metrics aggregator restores acknowledgement samples after
