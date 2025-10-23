@@ -562,7 +562,7 @@ fn settlement_proof_flow_records_and_audits() {
     let second_commitment = bridge
         .request_withdrawal("native", "r1", "frank", 30, &bundle_two)
         .expect("second withdrawal request");
-    let replay_hash = settlement_proof_digest(
+    let earlier_hash = settlement_proof_digest(
         "native",
         &second_commitment,
         "solana",
@@ -571,19 +571,17 @@ fn settlement_proof_flow_records_and_audits() {
         30,
         &bundle_two.relayer_ids(),
     );
-    let replay_proof = ExternalSettlementProof {
+    let earlier_proof = ExternalSettlementProof {
         commitment: second_commitment,
         settlement_chain: "solana".into(),
-        proof_hash: replay_hash,
+        proof_hash: earlier_hash,
         settlement_height: 58,
     };
-    let err = bridge
-        .submit_settlement_proof("native", "r1", replay_proof)
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        BridgeError::SettlementProofHeightReplay { .. }
-    ));
+    let second_record = bridge
+        .submit_settlement_proof("native", "r1", earlier_proof)
+        .expect("accept out-of-order settlement proof");
+    assert_eq!(second_record.commitment, second_commitment);
+    assert_eq!(second_record.settlement_height, 58);
     let second_hash = settlement_proof_digest(
         "native",
         &second_commitment,
@@ -599,9 +597,13 @@ fn settlement_proof_flow_records_and_audits() {
         proof_hash: second_hash,
         settlement_height: 66,
     };
-    bridge
+    let duplicate_err = bridge
         .submit_settlement_proof("native", "r1", second_proof)
-        .expect("submit second settlement proof");
+        .unwrap_err();
+    assert!(matches!(
+        duplicate_err,
+        BridgeError::SettlementProofDuplicate
+    ));
 
     let (first_page, cursor) = bridge.settlement_records(Some("native"), None, 1);
     assert_eq!(first_page.len(), 1);
@@ -720,6 +722,10 @@ fn telemetry_tracks_bridge_flows() {
         .ensure_handle_for_label_values(&["failure", "hash_mismatch"])
         .expect(LABEL_REGISTRATION_ERR);
     settlement_hash_mismatch.reset();
+    let settlement_duplicate = BRIDGE_SETTLEMENT_RESULTS_TOTAL
+        .ensure_handle_for_label_values(&["failure", "duplicate"])
+        .expect(LABEL_REGISTRATION_ERR);
+    settlement_duplicate.reset();
     let settlement_height_replay = BRIDGE_SETTLEMENT_RESULTS_TOTAL
         .ensure_handle_for_label_values(&["failure", "height_replay"])
         .expect(LABEL_REGISTRATION_ERR);
@@ -889,31 +895,8 @@ fn telemetry_tracks_bridge_flows() {
     let commitment_two = bridge
         .request_withdrawal("native", "r2", "erin", 10, &bundle_two)
         .expect("second withdrawal");
+    let duplicate_before = settlement_duplicate.get();
     let replay_before = settlement_height_replay.get();
-    let replay_hash = settlement_proof_digest(
-        "native",
-        &commitment_two,
-        "solana",
-        52,
-        "erin",
-        10,
-        &bundle_two.relayer_ids(),
-    );
-    let replay_proof = ExternalSettlementProof {
-        commitment: commitment_two,
-        settlement_chain: "solana".into(),
-        proof_hash: replay_hash,
-        settlement_height: 52,
-    };
-    let err = bridge
-        .submit_settlement_proof("native", "r2", replay_proof)
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        BridgeError::SettlementProofHeightReplay { .. }
-    ));
-    assert_eq!(settlement_height_replay.get(), replay_before + 1);
-
     let dispute_challenge_before = dispute_withdrawal_challenge.get();
     bridge
         .challenge_withdrawal("native", commitment_two, "auditor")
@@ -929,4 +912,327 @@ fn telemetry_tracks_bridge_flows() {
         dispute_withdrawal_challenge.get(),
         dispute_challenge_before + expected_failures
     );
+
+    let header_three = sample_header_with_height(12);
+    let proof_three = sample_proof();
+    let bundle_three = sample_bundle("erin", 8);
+    bridge
+        .deposit(
+            "native",
+            "r1",
+            "erin",
+            8,
+            &header_three,
+            &proof_three,
+            &bundle_three,
+        )
+        .expect("third deposit for duplicate test");
+    let commitment_three = bundle_three.aggregate_commitment("erin", 8);
+    approve_release(&gov_path, "native", &commitment_three);
+    let commitment_three = bridge
+        .request_withdrawal("native", "r1", "erin", 8, &bundle_three)
+        .expect("third withdrawal");
+    let accepted_hash = settlement_proof_digest(
+        "native",
+        &commitment_three,
+        "solana",
+        58,
+        "erin",
+        8,
+        &bundle_three.relayer_ids(),
+    );
+    let accepted_proof = ExternalSettlementProof {
+        commitment: commitment_three,
+        settlement_chain: "solana".into(),
+        proof_hash: accepted_hash,
+        settlement_height: 58,
+    };
+    bridge
+        .submit_settlement_proof("native", "r1", accepted_proof)
+        .expect("accept settlement proof for third commitment");
+    let duplicate_attempt = ExternalSettlementProof {
+        commitment: commitment_three,
+        settlement_chain: "solana".into(),
+        proof_hash: settlement_proof_digest(
+            "native",
+            &commitment_three,
+            "solana",
+            75,
+            "erin",
+            8,
+            &bundle_three.relayer_ids(),
+        ),
+        settlement_height: 75,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r1", duplicate_attempt)
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::SettlementProofDuplicate));
+    assert_eq!(settlement_duplicate.get(), duplicate_before + 1);
+    assert_eq!(settlement_height_replay.get(), replay_before);
+}
+
+#[test]
+fn bridge_audit_pagination_handles_cursor_edge_cases() {
+    let tmp = tempdir().expect("tempdir");
+    let gov_path = tmp.path().join("gov");
+    let _guard = GovEnvGuard::set(&gov_path);
+
+    let bridge_path = tmp.path().join("bridge_db");
+    let headers_dir = tmp.path().join("headers_native");
+    let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+
+    let config = ChannelConfig {
+        asset: "native".into(),
+        confirm_depth: 1,
+        fee_per_byte: 0,
+        challenge_period_secs: 0,
+        relayer_quorum: 2,
+        headers_dir: headers_dir.to_str().expect("headers dir").to_string(),
+        requires_settlement_proof: true,
+        settlement_chain: Some("solana".into()),
+    };
+    bridge
+        .set_channel_config("native", config)
+        .expect("configure settlement channel");
+
+    let params = BridgeIncentiveParameters {
+        min_bond: 25,
+        duty_reward: 12,
+        failure_slash: 4,
+        challenge_slash: 11,
+        duty_window_secs: 45,
+    };
+    let _incentive_guard = IncentiveGuard::set(params);
+
+    bridge.bond_relayer("r1", 200).unwrap();
+    bridge.bond_relayer("r2", 200).unwrap();
+
+    let scenarios = [("amy", 20u64, 60u64, 14u64), ("beth", 15u64, 58u64, 18u64)];
+    for (user, amount, settlement_height, header_height) in scenarios {
+        let header = sample_header_with_height(header_height);
+        let proof = sample_proof();
+        let bundle = sample_bundle(user, amount);
+        bridge
+            .deposit("native", "r1", user, amount, &header, &proof, &bundle)
+            .expect("deposit");
+        let commitment_key = bundle.aggregate_commitment(user, amount);
+        approve_release(&gov_path, "native", &commitment_key);
+        let commitment = bridge
+            .request_withdrawal("native", "r1", user, amount, &bundle)
+            .expect("request withdrawal");
+        let proof_hash = settlement_proof_digest(
+            "native",
+            &commitment,
+            "solana",
+            settlement_height,
+            user,
+            amount,
+            &bundle.relayer_ids(),
+        );
+        let settlement_proof = ExternalSettlementProof {
+            commitment,
+            settlement_chain: "solana".into(),
+            proof_hash,
+            settlement_height,
+        };
+        bridge
+            .submit_settlement_proof("native", "r1", settlement_proof)
+            .expect("submit settlement proof");
+    }
+
+    let (all_accruals, _) = bridge.reward_accruals(None, Some("native"), None, 256);
+    assert!(all_accruals.len() >= 4);
+    let (accrual_page, accrual_cursor) = bridge.reward_accruals(None, Some("native"), None, 1);
+    assert_eq!(accrual_page.len(), 1);
+    assert!(accrual_cursor.is_some());
+    let (accrual_zero_cursor, accrual_zero_next) =
+        bridge.reward_accruals(None, Some("native"), Some(0), 1);
+    assert_eq!(accrual_zero_cursor.len(), 1);
+    assert_eq!(accrual_zero_cursor[0].id, accrual_page[0].id);
+    assert_eq!(accrual_zero_next, accrual_cursor);
+    let (accrual_zero_limit, accrual_zero_limit_next) =
+        bridge.reward_accruals(None, Some("native"), Some(0), 0);
+    assert_eq!(accrual_zero_limit.len(), 1);
+    assert_eq!(accrual_zero_limit_next, accrual_cursor);
+    let overflow_start = all_accruals.len() as u64 + 5;
+    let (accrual_overflow, accrual_overflow_cursor) =
+        bridge.reward_accruals(None, Some("native"), Some(overflow_start), 1);
+    assert!(accrual_overflow.is_empty());
+    assert!(accrual_overflow_cursor.is_none());
+
+    let (settlement_page, settlement_cursor) = bridge.settlement_records(Some("native"), None, 1);
+    assert_eq!(settlement_page.len(), 1);
+    assert_eq!(settlement_cursor, Some(1));
+    let (settlement_zero_cursor, settlement_zero_next) =
+        bridge.settlement_records(Some("native"), Some(0), 1);
+    assert_eq!(
+        settlement_zero_cursor[0].commitment,
+        settlement_page[0].commitment
+    );
+    assert_eq!(settlement_zero_next, settlement_cursor);
+    let (settlement_zero_limit, settlement_zero_limit_next) =
+        bridge.settlement_records(Some("native"), Some(0), 0);
+    assert_eq!(settlement_zero_limit.len(), 1);
+    assert_eq!(settlement_zero_limit_next, settlement_cursor);
+    let all_settlements = bridge.settlement_records(Some("native"), None, 256).0;
+    assert!(all_settlements.len() >= 2);
+    let settlement_overflow_cursor_value = all_settlements.len() as u64 + 3;
+    let (settlement_overflow, settlement_overflow_cursor) =
+        bridge.settlement_records(Some("native"), Some(settlement_overflow_cursor_value), 1);
+    assert!(settlement_overflow.is_empty());
+    assert!(settlement_overflow_cursor.is_none());
+
+    let (disputes_page, disputes_cursor) = bridge.dispute_audit(Some("native"), None, 1);
+    assert_eq!(disputes_page.len(), 1);
+    assert!(disputes_cursor.is_some());
+    let (disputes_zero_cursor, disputes_zero_next) =
+        bridge.dispute_audit(Some("native"), Some(0), 1);
+    assert_eq!(
+        disputes_zero_cursor[0].commitment,
+        disputes_page[0].commitment
+    );
+    assert_eq!(disputes_zero_next, disputes_cursor);
+    let (disputes_zero_limit, disputes_zero_limit_next) =
+        bridge.dispute_audit(Some("native"), Some(0), 0);
+    assert_eq!(disputes_zero_limit.len(), 1);
+    assert_eq!(disputes_zero_limit_next, disputes_cursor);
+    let all_disputes = bridge.dispute_audit(Some("native"), None, 256).0;
+    assert!(all_disputes.len() >= 2);
+    let dispute_overflow_cursor_value = all_disputes.len() as u64 + 7;
+    let (disputes_overflow, disputes_overflow_cursor) =
+        bridge.dispute_audit(Some("native"), Some(dispute_overflow_cursor_value), 1);
+    assert!(disputes_overflow.is_empty());
+    assert!(disputes_overflow_cursor.is_none());
+}
+
+#[test]
+fn bridge_restart_restores_accrual_and_dispute_history() {
+    let tmp = tempdir().expect("tempdir");
+    let gov_path = tmp.path().join("gov");
+    let _guard = GovEnvGuard::set(&gov_path);
+
+    let bridge_path = tmp.path().join("bridge_db");
+    let headers_dir = tmp.path().join("headers_native");
+
+    let params = BridgeIncentiveParameters {
+        min_bond: 25,
+        duty_reward: 12,
+        failure_slash: 4,
+        challenge_slash: 11,
+        duty_window_secs: 45,
+    };
+    let _incentive_guard = IncentiveGuard::set(params);
+
+    let first_commitment = {
+        let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+        let config = ChannelConfig {
+            asset: "native".into(),
+            confirm_depth: 1,
+            fee_per_byte: 0,
+            challenge_period_secs: 0,
+            relayer_quorum: 2,
+            headers_dir: headers_dir.to_str().expect("headers dir").to_string(),
+            requires_settlement_proof: true,
+            settlement_chain: Some("solana".into()),
+        };
+        bridge
+            .set_channel_config("native", config)
+            .expect("configure settlement channel");
+        bridge.bond_relayer("r1", 200).unwrap();
+        bridge.bond_relayer("r2", 200).unwrap();
+
+        let header = sample_header_with_height(20);
+        let proof = sample_proof();
+        let bundle = sample_bundle("ivy", 30);
+        bridge
+            .deposit("native", "r1", "ivy", 30, &header, &proof, &bundle)
+            .expect("deposit");
+        let commitment_key = bundle.aggregate_commitment("ivy", 30);
+        approve_release(&gov_path, "native", &commitment_key);
+        let commitment = bridge
+            .request_withdrawal("native", "r1", "ivy", 30, &bundle)
+            .expect("request withdrawal");
+        let proof_hash = settlement_proof_digest(
+            "native",
+            &commitment,
+            "solana",
+            60,
+            "ivy",
+            30,
+            &bundle.relayer_ids(),
+        );
+        let settlement_proof = ExternalSettlementProof {
+            commitment,
+            settlement_chain: "solana".into(),
+            proof_hash,
+            settlement_height: 60,
+        };
+        bridge
+            .submit_settlement_proof("native", "r1", settlement_proof)
+            .expect("submit settlement proof before restart");
+        commitment
+    };
+
+    let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+    let (settlements_after_restart, _) = bridge.settlement_records(Some("native"), None, 256);
+    assert_eq!(settlements_after_restart.len(), 1);
+    assert_eq!(settlements_after_restart[0].commitment, first_commitment);
+    let (disputes_after_restart, _) = bridge.dispute_audit(Some("native"), None, 256);
+    assert!(disputes_after_restart
+        .iter()
+        .any(|record| record.commitment == first_commitment));
+    let (accruals_after_restart, _) = bridge.reward_accruals(None, Some("native"), None, 256);
+    assert!(accruals_after_restart
+        .iter()
+        .any(|record| record.commitment == Some(first_commitment)));
+
+    let header_two = sample_header_with_height(24);
+    let proof_two = sample_proof();
+    let bundle_two = sample_bundle("jill", 18);
+    bridge
+        .deposit(
+            "native",
+            "r1",
+            "jill",
+            18,
+            &header_two,
+            &proof_two,
+            &bundle_two,
+        )
+        .expect("second deposit after restart");
+    let commitment_key_two = bundle_two.aggregate_commitment("jill", 18);
+    approve_release(&gov_path, "native", &commitment_key_two);
+    let commitment_two = bridge
+        .request_withdrawal("native", "r1", "jill", 18, &bundle_two)
+        .expect("second withdrawal after restart");
+    let out_of_order_hash = settlement_proof_digest(
+        "native",
+        &commitment_two,
+        "solana",
+        58,
+        "jill",
+        18,
+        &bundle_two.relayer_ids(),
+    );
+    let out_of_order_proof = ExternalSettlementProof {
+        commitment: commitment_two,
+        settlement_chain: "solana".into(),
+        proof_hash: out_of_order_hash,
+        settlement_height: 58,
+    };
+    let record_after_restart = bridge
+        .submit_settlement_proof("native", "r1", out_of_order_proof)
+        .expect("accept settlement proof with lower height after restart");
+    assert_eq!(record_after_restart.settlement_height, 58);
+
+    let (settlement_pages, cursor) = bridge.settlement_records(Some("native"), None, 2);
+    assert_eq!(settlement_pages.len(), 2);
+    assert!(cursor.is_none());
+    assert!(settlement_pages
+        .iter()
+        .any(|record| record.commitment == first_commitment));
+    assert!(settlement_pages
+        .iter()
+        .any(|record| record.commitment == commitment_two));
 }

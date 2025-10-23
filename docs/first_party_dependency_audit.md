@@ -1,7 +1,27 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-23 15:20:00Z_
+_Last updated: 2025-10-24 03:30:00Z_
 
+> **2025-10-24 update (bridge remediation & multi-group validator):** The
+> metrics aggregator now includes a first-party remediation engine that persists
+> per-relayer actions, serves `/remediation/bridge`, and emits
+> `bridge_remediation_action_total{action}` so incident tooling can page or
+> quarantine relayers without relying on external automation. The dedicated
+> sled column family keeps quarantine/page baselines across restarts. The
+> `monitoring` crate’s validator was generalised into
+> `monitoring/src/alert_validator.rs`; the existing
+> `bridge-alert-validator` binary now runs the shared helper to replay canned
+> datasets for the bridge, chain-health, dependency-registry, and treasury alert
+> groups, keeping Prometheus expressions hermetic without promtool.
+
+> **2025-10-23 update (bridge skew alerts & validator):** Bridge alerting now
+> ships per-label Prometheus rules (`BridgeCounterDeltaLabelSkew`,
+> `BridgeCounterRateLabelSkew`) that remain entirely first party. The
+> `monitoring` crate gained a validator binary that parses
+> `monitoring/alert.rules.yml`, normalises the bridge expressions, and exercises
+> canned datasets so label-specific regressions are caught without promtool. CI
+> invokes the validator alongside the existing monitoring tests, keeping the
+> alert group hermetic.
 > **2025-10-23 update (settlement digest & reward accrual ledger):** External
 > settlement proofs now compute a deterministic digest via the first-party
 > `bridge_types::settlement_proof_digest` helper, track per-chain height
@@ -828,8 +848,14 @@ facade and extending the crate with richer console abstractions.
   fingerprints, and treasury disbursement/balance snapshots through
   `foundation_serialization::json::Value` plus the governance codec helpers.
   The bridge anomaly detector exposes `/anomalies/bridge` JSON alongside the
-  `bridge_anomaly_total` counter so dashboards consume first-party payloads
-  without serde derives or float-rounded fingerprints.
+  `bridge_anomaly_total` counter and emits
+  `bridge_metric_delta{metric,peer,labels}`/
+  `bridge_metric_rate_per_second{metric,peer,labels}` gauges so dashboards
+  consume first-party payloads without serde derives or float-rounded
+  fingerprints. Gauge baselines now persist in the in-house store and Prometheus
+  alert rules (`BridgeCounterDeltaSkew`, `BridgeCounterRateSkew`) evaluate the
+  gauges directly, keeping restart recovery and alerting inside the first-party
+  stack.
 - ✅ Manualized the node runtime log sink and governance webhook JSON builders
   (`node/src/bin/node.rs`, `node/src/telemetry.rs`) so production binaries no
   longer invoke the `foundation_serialization::json!` macro. Runtime logging,

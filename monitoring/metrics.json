@@ -224,6 +224,26 @@
     },
     {
       "deprecated": false,
+      "description": "Per-scrape bridge counter delta grouped by metric, peer, and label set",
+      "labels": [
+        "metric",
+        "peer",
+        "labels"
+      ],
+      "name": "bridge_metric_delta"
+    },
+    {
+      "deprecated": false,
+      "description": "Per-second rate of bridge counter growth grouped by metric, peer, and label set",
+      "labels": [
+        "metric",
+        "peer",
+        "labels"
+      ],
+      "name": "bridge_metric_rate_per_second"
+    },
+    {
+      "deprecated": false,
       "description": "Bridge anomaly detector activations",
       "labels": [],
       "name": "bridge_anomaly_total"

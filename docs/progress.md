@@ -1,4 +1,22 @@
 # Project Progress Snapshot
+> **Review (2025-10-24, pre-dawn):** Bridge anomaly handling now drives automated
+> remediation backed by persistent state. The metrics aggregator records per-
+> relayer actions, exposes `/remediation/bridge`, increments
+> `bridge_remediation_action_total{action}`, and resumes recommendations after
+> restarts via a dedicated sled column family. Alert validation graduated to the
+> new `monitoring/src/alert_validator.rs` module; the existing
+> `bridge-alert-validator` binary invokes the shared helper to replay canned
+> datasets for the bridge, chain-health, dependency-registry, and treasury alert
+> groups so CI keeps every Prometheus expression hermetic without promtool.
+> **Review (2025-10-23, late evening):** Bridge alerting now pairs aggregate and
+> per-label skew detection with first-party validation. Prometheus rules
+> `BridgeCounterDeltaLabelSkew`/`BridgeCounterRateLabelSkew` monitor
+> `labels!=""` selectors alongside the existing aggregate gauges, and the
+> validator binary parses `monitoring/alert.rules.yml`, normalises the
+> expressions, and replays canned datasets. CI runs the validator with
+> `cargo test --manifest-path monitoring/Cargo.toml`, keeping alert coverage
+> hermetic without promtool while the Grafana/HTML dashboards already chart the
+> per-label gauges for incident response.
 > **Review (2025-10-23, evening):** External settlement proofs now require the
 > deterministic `settlement_proof_digest` and track per-asset height watermarks,
 > rejecting mismatched hashes and replayed heights before rewarding a duty.
@@ -19,6 +37,13 @@
 > serves `/anomalies/bridge` so dashboards chart five-minute increases alongside
 > the raw counters. Fresh tests cover anomaly spikes, cooldown enforcement, and
 > CLI asset pagination under FIRST_PARTY_ONLY.
+> **Review (2025-10-22, late):** The anomaly detector now exports
+> `bridge_metric_delta{metric,peer,labels}` and
+> `bridge_metric_rate_per_second{metric,peer,labels}` gauges through the
+> Prometheus-compatible recorder so dashboards and alerting rules can graph
+> per-relayer growth without scraping raw JSON. The CLI/HTTP integration suite
+> asserts both unlabeled and asset-scoped gauge lines while dropping the
+> temporary debugging prints used during bring-up.
 > **Review (2025-10-22, afternoon):** The bridge CLI integration suite now drives
 > `BridgeCmd::DisputeAudit` through the in-memory `MockTransport`, capturing the
 > JSON-RPC envelopes and paginated responses alongside the existing claim and
@@ -795,7 +820,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 89.4 %
+## 9. Bridges & Cross‑Chain Routing — 90.6 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -805,12 +830,13 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral according to the configured `failure_slash`/`challenge_slash` and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`, while reward claims, settlement submissions, and duty outcomes update `BRIDGE_REWARD_CLAIMS_TOTAL`, `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL`, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, slash logs, accounting, and duty logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
+- Bridge alerting now includes per-label skew rules (`BridgeCounterDeltaLabelSkew`, `BridgeCounterRateLabelSkew`) with the first-party `bridge-alert-validator` binary exercising `monitoring/alert.rules.yml` in CI so asset-specific anomalies page operations without third-party tooling. The shared `monitoring/src/alert_validator.rs` module now replays canned datasets for bridge, chain-health, dependency-registry, and treasury groups in one pass, and labelled spikes feed the persisted remediation engine that serves `/remediation/bridge` alongside the `bridge_remediation_action_total{action}` counter.
 
 **Gaps**
-- Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
-- Reward-claim plumbing for accrued `rewards_pending` balances still needs governance-approved settlement wiring.
+- Treasury sweep automation, offline settlement proof sampling, and richer relayer incentive analytics remain.
+- Extend remediation to automate incentive throttles/governance escalations beyond the current page/quarantine actions and expand anomaly baselines to cross-chain liquidity metrics.
 
-## 10. Monitoring, Debugging & Profiling — 95.8 %
+## 10. Monitoring, Debugging & Profiling — 96.8 %
 
 **Evidence**
   - Runtime telemetry exporter with extensive counters (`node/src/telemetry.rs`).
@@ -827,10 +853,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Wrapper telemetry exports runtime/transport/overlay/storage/coding/codec/crypto metadata via `runtime_backend_info`, `transport_provider_connect_total{provider}`, `codec_serialize_fail_total{profile}`, and `crypto_suite_signature_fail_total{backend}`. The `metrics-aggregator` exposes a `/wrappers` endpoint for fleet summaries, Grafana dashboards render backend selections/failure rates, and `contract-cli system dependencies` fetches on-demand snapshots for operators (`node/src/telemetry.rs`, `metrics-aggregator/src/lib.rs`, `monitoring/metrics.json`, `monitoring/grafana/*.json`, `cli/src/system.rs`).
 - Bulk peer exports encrypt with the in-house envelope (`crypto_suite::encryption::envelope`) so operators can download archives with either X25519 recipients (`application/tb-envelope`) or shared passwords (`application/tb-password-envelope`) without touching `age` or OpenSSL (`metrics-aggregator/src/lib.rs`, `docs/monitoring.md`, `node/src/bin/net.rs`).
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
+- Bridge alert rules now include label-specific skew detection and the CI-run `bridge-alert-validator` binary verifies expressions against canned datasets, keeping alert coverage first party without promtool (`monitoring/src/alert_validator.rs`, `.github/workflows/ci.yml`). The binary now validates the bridge, chain-health, dependency-registry, and treasury alert groups in a single invocation.
 
 **Gaps**
-- Bridge and VM metrics are sparse.
-- Automated anomaly detection not in place.
+- Broaden the canned datasets for the shared alert validator (e.g., recovery curves, partial bucket windows) and wire dashboards into runbooks that automate response playbooks using the persisted remediation actions.
+- Continue building VM anomaly heuristics and long-horizon performance soak dashboards.
 
 ## 11. Identity & Explorer — 83.4 %
 

@@ -1,6 +1,31 @@
 # System-Wide Economic Changes
+> **Review (2025-10-24, pre-dawn):** Bridge anomaly remediation now persists
+> per-relayer actions and exposes `/remediation/bridge` plus the
+> `bridge_remediation_action_total{action}` counter so automated runbooks can
+> page or quarantine relayers directly from first-party signals. The shared
+> validator in `monitoring/src/alert_validator.rs` replaces the bridge-only
+> helper; the existing `bridge-alert-validator` binary now exercises canned
+> datasets for bridge, chain-health, dependency-registry, and treasury alert
+> groups so Prometheus expressions stay hermetic without promtool.
+> **Review (2025-10-23, late evening):** Bridge alerting now covers
+> per-label spikes while staying fully first party. New Prometheus rules
+> `BridgeCounterDeltaLabelSkew` and `BridgeCounterRateLabelSkew` monitor
+> `labels!=""` selectors for 3× deviations above the 30-minute baseline,
+> complementing the aggregate alerts. The monitoring crate ships a
+> validator binary that parses `monitoring/alert.rules.yml`, normalises the
+> expressions, and replays canned datasets so CI can fail on expression drift
+> without invoking promtool.
+> **Review (2025-10-22, late evening):** Bridge gauge telemetry now survives
+> aggregator restarts. `bridge_metric_delta{metric,peer,labels}` and
+> `bridge_metric_rate_per_second{…}` snapshots persist to the in-house metrics
+> store, and the restart regression verifies the first scrape after a reboot
+> resumes the previous window. Prometheus alert rules (`BridgeCounterDeltaSkew`,
+> `BridgeCounterRateSkew`) watch the gauges for 3× deviations over a 30-minute
+> baseline, emitting first-party alerts with the metric/peer/label tuple so the
+> dashboards’ new panels line up with alert annotations.
 > **Review (2025-10-23, evening):** External settlement proofs now validate a deterministic digest over the asset, commitment, destination chain, height, user, amount, and relayer roster while tracking a per-chain height watermark so stale attestations return `BridgeError::SettlementProofHashMismatch`/`SettlementProofHeightReplay` instead of crediting duties. Every completed duty appends a sled-backed `RewardAccrualRecord` exposed through `bridge.reward_accruals`/`blockctl bridge reward-accruals`, and telemetry/dashboards chart the new accrual counters. Node and CLI tests cover the new validation paths, pagination helpers, and RPC envelopes under FIRST_PARTY_ONLY.
 > **Review (2025-10-22, evening+):** Bridge supply accounting now tracks locked and minted balances per asset, persists them through the codec, exposes snapshots via `Bridge::asset_snapshots()`, and returns structured entries from `bridge.assets` so the CLI and integration tests reconcile supply under FIRST_PARTY_ONLY. Metrics aggregation now hosts a rolling bridge anomaly detector that watches reward, approval, settlement, and dispute counters, increments `bridge_anomaly_total`, and surfaces `/anomalies/bridge` JSON for dashboards and automation.
+> Follow-up exposes the detector’s per-peer observations via the `bridge_metric_delta{metric,peer,labels}` and `bridge_metric_rate_per_second{metric,peer,labels}` gauges so dashboards and alerting rules can visualise raw deltas and normalised growth without ad-hoc parsing.
 > **Review (2025-10-22, afternoon):** Bridge dashboards now mirror the newly instrumented reward claim, approval, settlement, and dispute counters. Grafana templates and the HTML snapshot plot five-minute `increase()` deltas for `bridge_reward_claims_total`, `bridge_reward_approvals_consumed_total`, `bridge_settlement_results_total{result,reason}`, and `bridge_dispute_outcomes_total{kind,outcome}` so operators can audit bridge health without third-party widgets. The contract CLI integration suite added a `BridgeCmd::DisputeAudit` regression that drives the in-memory `MockTransport`, capturing JSON-RPC envelopes and paginated responses alongside the existing claim and settlement tests to keep FIRST_PARTY_ONLY coverage complete.
 > **Review (2025-10-23, afternoon):** Contract CLI bridge flows abstract their
 > networking through a new `BridgeRpcTransport` trait. Production commands wrap

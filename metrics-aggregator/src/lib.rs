@@ -84,6 +84,10 @@ fn archive_metrics(blob: &str) {
 const MAX_CORRELATIONS_PER_METRIC: usize = 64;
 const TELEMETRY_WINDOW: usize = 120;
 const METRICS_CF: &str = "peer_metrics";
+const BRIDGE_ANOMALY_CF: &str = "bridge_anomaly_state";
+const BRIDGE_ANOMALY_STATE_KEY: &[u8] = b"bridge_anomaly_snapshot";
+const BRIDGE_REMEDIATION_CF: &str = "bridge_remediation_state";
+const BRIDGE_REMEDIATION_STATE_KEY: &[u8] = b"bridge_remediation_snapshot";
 const COUNTER_EPSILON: f64 = 1e-6;
 const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
@@ -116,6 +120,9 @@ const METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS: &str =
 const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_variables_unique_fingerprints";
 const METRIC_BRIDGE_ANOMALY_TOTAL: &str = "bridge_anomaly_total";
+const METRIC_BRIDGE_COUNTER_DELTA: &str = "bridge_metric_delta";
+const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
+const METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL: &str = "bridge_remediation_action_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -133,6 +140,8 @@ const TREASURY_STATUS_LABELS: [&str; 3] = ["scheduled", "executed", "cancelled"]
 const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
 const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
 const LABEL_PREFIX_CODE_FINGERPRINT: [&str; 3] = ["prefix", "code", "fingerprint"];
+const LABEL_BRIDGE_COUNTER: [&str; 3] = ["metric", "peer", "labels"];
+const LABEL_REMEDIATION_ACTION: [&str; 1] = ["action"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 4] = [
     "bridge_reward_claims_total",
@@ -147,6 +156,14 @@ const BRIDGE_ANOMALY_MIN_STDDEV: f64 = 1.0;
 const BRIDGE_ANOMALY_MIN_DELTA: f64 = 5.0;
 const BRIDGE_ANOMALY_COOLDOWN_SECS: u64 = 15 * 60;
 const BRIDGE_ANOMALY_MAX_EVENTS: usize = 200;
+const BRIDGE_REMEDIATION_WINDOW_SECS: u64 = 30 * 60;
+const BRIDGE_REMEDIATION_PAGE_COOLDOWN_SECS: u64 = 15 * 60;
+const BRIDGE_REMEDIATION_MAX_ACTIONS: usize = 200;
+const BRIDGE_REMEDIATION_PAGE_DELTA: f64 = 5.0;
+const BRIDGE_REMEDIATION_PAGE_RATIO: f64 = 1.0;
+const BRIDGE_REMEDIATION_QUARANTINE_DELTA: f64 = 25.0;
+const BRIDGE_REMEDIATION_QUARANTINE_RATIO: f64 = 2.0;
+const BRIDGE_REMEDIATION_QUARANTINE_COUNT: usize = 3;
 
 #[derive(Clone)]
 pub struct PeerStat {
@@ -273,6 +290,7 @@ pub struct AppState {
     telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummary>>>>,
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
+    bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -312,6 +330,12 @@ impl AppState {
             InhouseEngine::open(&db_path.to_string_lossy()).expect("open inhouse metrics store"),
         );
         store.ensure_cf(METRICS_CF).expect("ensure cf");
+        store
+            .ensure_cf(BRIDGE_ANOMALY_CF)
+            .expect("ensure bridge anomaly cf");
+        store
+            .ensure_cf(BRIDGE_REMEDIATION_CF)
+            .expect("ensure bridge remediation cf");
         let mut data = HashMap::new();
         let mut iter = store
             .prefix_iterator(METRICS_CF, &[])
@@ -345,11 +369,14 @@ impl AppState {
             telemetry: Arc::new(Mutex::new(HashMap::new())),
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
+            bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
             treasury_source,
         };
+        state.load_bridge_anomaly_state();
+        state.load_bridge_remediation_state();
         state.prune();
         state.refresh_treasury_metrics();
         state
@@ -580,16 +607,164 @@ impl AppState {
         }
     }
 
+    fn load_bridge_anomaly_state(&self) {
+        let snapshot = match self.store.get(BRIDGE_ANOMALY_CF, BRIDGE_ANOMALY_STATE_KEY) {
+            Ok(Some(bytes)) => match json::from_slice(&bytes) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    warn!(
+                        target: "aggregator",
+                        error = %err,
+                        "failed to decode bridge anomaly snapshot",
+                    );
+                    None
+                }
+            },
+            Ok(None) => None,
+            Err(err) => {
+                warn!(
+                    target: "aggregator",
+                    ?err,
+                    "failed to load bridge anomaly snapshot",
+                );
+                None
+            }
+        };
+        if let Some(value) = snapshot {
+            match self.bridge_anomalies.lock() {
+                Ok(mut detector) => detector.restore(&value),
+                Err(_) => warn!(
+                    target: "aggregator",
+                    "bridge anomaly detector poisoned during snapshot load"
+                ),
+            }
+        }
+    }
+
+    fn load_bridge_remediation_state(&self) {
+        let snapshot = match self
+            .store
+            .get(BRIDGE_REMEDIATION_CF, BRIDGE_REMEDIATION_STATE_KEY)
+        {
+            Ok(Some(bytes)) => match json::from_slice(&bytes) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    warn!(
+                        target: "aggregator",
+                        error = %err,
+                        "failed to decode bridge remediation snapshot",
+                    );
+                    None
+                }
+            },
+            Ok(None) => None,
+            Err(err) => {
+                warn!(
+                    target: "aggregator",
+                    ?err,
+                    "failed to load bridge remediation snapshot",
+                );
+                None
+            }
+        };
+        if let Some(value) = snapshot {
+            match self.bridge_remediation.lock() {
+                Ok(mut engine) => engine.restore(&value),
+                Err(_) => warn!(
+                    target: "aggregator",
+                    "bridge remediation engine poisoned during snapshot load"
+                ),
+            }
+        }
+    }
+
+    fn persist_bridge_anomaly_snapshot(&self, snapshot: &Value) {
+        match json::to_vec(snapshot) {
+            Ok(bytes) => {
+                if let Err(err) =
+                    self.store
+                        .put_bytes(BRIDGE_ANOMALY_CF, BRIDGE_ANOMALY_STATE_KEY, &bytes)
+                {
+                    warn!(
+                        target: "aggregator",
+                        ?err,
+                        "failed to persist bridge anomaly snapshot",
+                    );
+                }
+            }
+            Err(err) => warn!(
+                target: "aggregator",
+                error = %err,
+                "failed to encode bridge anomaly snapshot",
+            ),
+        }
+    }
+
+    fn persist_bridge_remediation_snapshot(&self, snapshot: &Value) {
+        match json::to_vec(snapshot) {
+            Ok(bytes) => {
+                if let Err(err) = self.store.put_bytes(
+                    BRIDGE_REMEDIATION_CF,
+                    BRIDGE_REMEDIATION_STATE_KEY,
+                    &bytes,
+                ) {
+                    warn!(
+                        target: "aggregator",
+                        ?err,
+                        "failed to persist bridge remediation snapshot",
+                    );
+                }
+            }
+            Err(err) => warn!(
+                target: "aggregator",
+                error = %err,
+                "failed to encode bridge remediation snapshot",
+            ),
+        }
+    }
+
     fn record_bridge_anomalies(&self, peer_id: &str, metrics: &Value, timestamp: u64) {
-        let events = self
-            .bridge_anomalies
-            .lock()
-            .map(|mut detector| detector.ingest(peer_id, metrics, timestamp))
-            .unwrap_or_default();
-        if events.is_empty() {
+        let (result, snapshot) = match self.bridge_anomalies.lock() {
+            Ok(mut detector) => {
+                let result = detector.ingest(peer_id, metrics, timestamp);
+                let snapshot = detector.snapshot();
+                (result, Some(snapshot))
+            }
+            Err(_) => (BridgeIngestResult::default(), None),
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_bridge_anomaly_snapshot(&snapshot);
+        }
+        for observation in &result.observations {
+            let labels = if observation.labels.is_empty() {
+                String::new()
+            } else {
+                observation
+                    .labels
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            gauge!(
+                METRIC_BRIDGE_COUNTER_DELTA,
+                observation.delta,
+                "metric" => observation.metric.clone(),
+                "peer" => observation.peer.clone(),
+                "labels" => labels.clone(),
+            );
+            gauge!(
+                METRIC_BRIDGE_COUNTER_RATE,
+                observation.rate_per_sec,
+                "metric" => observation.metric.clone(),
+                "peer" => observation.peer.clone(),
+                "labels" => labels,
+            );
+        }
+        if result.events.is_empty() {
             return;
         }
-        for event in &events {
+        for event in &result.events {
             increment_counter!(METRIC_BRIDGE_ANOMALY_TOTAL);
             let labels = event
                 .labels
@@ -608,6 +783,7 @@ impl AppState {
                 labels = %labels,
                 "bridge anomaly detected"
             );
+            self.record_bridge_remediation(event);
         }
     }
 
@@ -615,6 +791,53 @@ impl AppState {
         self.bridge_anomalies
             .lock()
             .map(|detector| detector.events())
+            .unwrap_or_default()
+    }
+
+    fn record_bridge_remediation(&self, event: &BridgeAnomalyEvent) {
+        let (action, snapshot) = match self.bridge_remediation.lock() {
+            Ok(mut engine) => {
+                let action = engine.ingest(event);
+                let snapshot = engine.snapshot();
+                (action, Some(snapshot))
+            }
+            Err(_) => (None, None),
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_bridge_remediation_snapshot(&snapshot);
+        }
+        let Some(action) = action else {
+            return;
+        };
+        let metrics = aggregator_metrics();
+        metrics
+            .bridge_remediation_action_total
+            .with_label_values(&[action.action.as_str()])
+            .inc();
+        let labels = action
+            .labels
+            .iter()
+            .map(|label| format!("{}={}", label.key, label.value))
+            .collect::<Vec<_>>()
+            .join(",");
+        warn!(
+            target: "aggregator",
+            peer = %action.peer_id,
+            metric = %action.metric,
+            action = action.action.as_str(),
+            occurrences = action.occurrences,
+            delta = action.delta,
+            threshold = action.threshold,
+            ratio = action.ratio,
+            labels = %labels,
+            "bridge remediation action emitted",
+        );
+    }
+
+    fn bridge_remediation_actions(&self) -> Vec<BridgeRemediationAction> {
+        self.bridge_remediation
+            .lock()
+            .map(|engine| engine.actions())
             .unwrap_or_default()
     }
 
@@ -924,6 +1147,9 @@ struct AggregatorMetrics {
     treasury_balance_snapshot_count: Gauge,
     treasury_balance_last_event_age: Gauge,
     _bridge_anomaly_total: Counter,
+    bridge_metric_delta: GaugeVec,
+    bridge_metric_rate_per_second: GaugeVec,
+    bridge_remediation_action_total: CounterVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -1690,6 +1916,42 @@ impl Recorder for AggregatorRecorder {
                     }
                 }
             }
+            METRIC_BRIDGE_COUNTER_DELTA => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_BRIDGE_COUNTER) {
+                        match metrics
+                            .bridge_metric_delta
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update bridge_metric_delta"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_BRIDGE_COUNTER_RATE => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_BRIDGE_COUNTER) {
+                        match metrics
+                            .bridge_metric_rate_per_second
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update bridge_metric_rate_per_second"
+                            ),
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -1972,6 +2234,37 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_balance_last_event_age.clone()))
         .expect("register treasury_balance_last_event_age");
+    let bridge_metric_delta = GaugeVec::new(
+        Opts::new(
+            METRIC_BRIDGE_COUNTER_DELTA,
+            "Per-scrape bridge counter delta grouped by metric",
+        ),
+        &["metric", "peer", "labels"],
+    );
+    registry
+        .register(Box::new(bridge_metric_delta.clone()))
+        .expect("register bridge_metric_delta");
+    let bridge_metric_rate_per_second = GaugeVec::new(
+        Opts::new(
+            METRIC_BRIDGE_COUNTER_RATE,
+            "Per-second bridge counter growth grouped by metric",
+        ),
+        &["metric", "peer", "labels"],
+    );
+    registry
+        .register(Box::new(bridge_metric_rate_per_second.clone()))
+        .expect("register bridge_metric_rate_per_second");
+    let bridge_remediation_action_total = CounterVec::new(
+        Opts::new(
+            METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL,
+            "Bridge remediation actions grouped by outcome",
+        ),
+        &LABEL_REMEDIATION_ACTION,
+    )
+    .expect("build bridge_remediation_action_total counter vec");
+    registry
+        .register(Box::new(bridge_remediation_action_total.clone()))
+        .expect("register bridge_remediation_action_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2007,6 +2300,9 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         treasury_balance_snapshot_count,
         treasury_balance_last_event_age,
         _bridge_anomaly_total,
+        bridge_metric_delta,
+        bridge_metric_rate_per_second,
+        bridge_remediation_action_total,
     }
 });
 
@@ -2517,6 +2813,39 @@ impl BridgeAnomalyLabel {
         map.insert("value".to_string(), Value::String(self.value.clone()));
         Value::Object(map)
     }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let key = object.get("key").and_then(Value::as_str)?;
+        let val = object.get("value").and_then(Value::as_str)?;
+        Some(Self {
+            key: key.to_string(),
+            value: val.to_string(),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
+enum BridgeRemediationActionType {
+    Page,
+    Quarantine,
+}
+
+impl BridgeRemediationActionType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            BridgeRemediationActionType::Page => "page",
+            BridgeRemediationActionType::Quarantine => "quarantine",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "page" => Some(BridgeRemediationActionType::Page),
+            "quarantine" => Some(BridgeRemediationActionType::Quarantine),
+            _ => None,
+        }
+    }
 }
 
 impl BridgeAnomalyEvent {
@@ -2538,6 +2867,140 @@ impl BridgeAnomalyEvent {
         map.insert("timestamp".to_string(), Value::from(self.timestamp));
         Value::Object(map)
     }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let metric = object.get("metric").and_then(Value::as_str)?.to_string();
+        let peer_id = object.get("peer_id").and_then(Value::as_str)?.to_string();
+        let labels = object
+            .get("labels")
+            .and_then(Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(BridgeAnomalyLabel::from_value)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let delta = object.get("delta").and_then(Value::as_f64)?;
+        let mean = object.get("mean").and_then(Value::as_f64)?;
+        let stddev = object.get("stddev").and_then(Value::as_f64)?;
+        let threshold = object.get("threshold").and_then(Value::as_f64)?;
+        let window = object.get("window").and_then(Value::as_u64)? as usize;
+        let timestamp = object.get("timestamp").and_then(Value::as_u64)?;
+        Some(Self {
+            metric,
+            peer_id,
+            labels,
+            delta,
+            mean,
+            stddev,
+            threshold,
+            window,
+            timestamp,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct BridgeRemediationAction {
+    peer_id: String,
+    metric: String,
+    labels: Vec<BridgeAnomalyLabel>,
+    action: BridgeRemediationActionType,
+    occurrences: usize,
+    delta: f64,
+    threshold: f64,
+    ratio: f64,
+    timestamp: u64,
+}
+
+impl BridgeRemediationAction {
+    fn new(
+        event: &BridgeAnomalyEvent,
+        action: BridgeRemediationActionType,
+        occurrences: usize,
+        ratio: f64,
+    ) -> Self {
+        Self {
+            peer_id: event.peer_id.clone(),
+            metric: event.metric.clone(),
+            labels: event.labels.clone(),
+            action,
+            occurrences,
+            delta: event.delta,
+            threshold: event.threshold,
+            ratio,
+            timestamp: event.timestamp,
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("peer_id".to_string(), Value::String(self.peer_id.clone()));
+        map.insert("metric".to_string(), Value::String(self.metric.clone()));
+        map.insert(
+            "labels".to_string(),
+            Value::Array(
+                self.labels
+                    .iter()
+                    .map(BridgeAnomalyLabel::to_value)
+                    .collect(),
+            ),
+        );
+        map.insert(
+            "action".to_string(),
+            Value::String(self.action.as_str().to_string()),
+        );
+        map.insert(
+            "occurrences".to_string(),
+            Value::from(self.occurrences as u64),
+        );
+        map.insert("delta".to_string(), Value::from(self.delta));
+        map.insert("threshold".to_string(), Value::from(self.threshold));
+        map.insert("ratio".to_string(), Value::from(self.ratio));
+        map.insert("timestamp".to_string(), Value::from(self.timestamp));
+        Value::Object(map)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let peer_id = object.get("peer_id").and_then(Value::as_str)?.to_string();
+        let metric = object.get("metric").and_then(Value::as_str)?.to_string();
+        let labels = object
+            .get("labels")
+            .and_then(Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(BridgeAnomalyLabel::from_value)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let action = object
+            .get("action")
+            .and_then(Value::as_str)
+            .and_then(BridgeRemediationActionType::from_str)?;
+        let occurrences = object
+            .get("occurrences")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        let delta = object.get("delta").and_then(Value::as_f64)?;
+        let threshold = object.get("threshold").and_then(Value::as_f64)?;
+        let ratio = object.get("ratio").and_then(Value::as_f64).unwrap_or(0.0);
+        let timestamp = object.get("timestamp").and_then(Value::as_u64)?;
+        Some(Self {
+            peer_id,
+            metric,
+            labels,
+            action,
+            occurrences,
+            delta,
+            threshold,
+            ratio,
+            timestamp,
+        })
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -2547,26 +3010,222 @@ struct BridgeMetricKey {
     labels: Vec<(String, String)>,
 }
 
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct BridgeRemediationKey {
+    peer: String,
+    metric: String,
+    labels: Vec<(String, String)>,
+}
+
+impl BridgeRemediationKey {
+    fn from_event(event: &BridgeAnomalyEvent) -> Self {
+        let mut labels: Vec<(String, String)> = event
+            .labels
+            .iter()
+            .map(|label| (label.key.clone(), label.value.clone()))
+            .collect();
+        labels.sort();
+        Self {
+            peer: event.peer_id.clone(),
+            metric: event.metric.clone(),
+            labels,
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("peer".to_string(), Value::String(self.peer.clone()));
+        map.insert("metric".to_string(), Value::String(self.metric.clone()));
+        let labels: Vec<Value> = self
+            .labels
+            .iter()
+            .map(|(key, value)| {
+                let mut label = Map::new();
+                label.insert("key".to_string(), Value::String(key.clone()));
+                label.insert("value".to_string(), Value::String(value.clone()));
+                Value::Object(label)
+            })
+            .collect();
+        map.insert("labels".to_string(), Value::Array(labels));
+        Value::Object(map)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let peer = object.get("peer").and_then(Value::as_str)?.to_string();
+        let metric = object.get("metric").and_then(Value::as_str)?.to_string();
+        let mut labels: Vec<(String, String)> = object
+            .get("labels")
+            .and_then(Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(|entry| {
+                        let label = entry.as_object()?;
+                        let key = label.get("key")?.as_str()?;
+                        let value = label.get("value")?.as_str()?;
+                        Some((key.to_string(), value.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        labels.sort();
+        Some(Self {
+            peer,
+            metric,
+            labels,
+        })
+    }
+}
+
 #[derive(Default, Debug)]
 struct BridgeMetricState {
     last_value: Option<f64>,
+    last_timestamp: Option<u64>,
     deltas: VecDeque<f64>,
     last_alert_ts: Option<u64>,
 }
 
+#[derive(Default, Debug)]
+struct BridgeRemediationEntry {
+    events: VecDeque<u64>,
+    last_action: Option<BridgeRemediationActionType>,
+    last_action_ts: Option<u64>,
+}
+
+impl BridgeRemediationEntry {
+    fn record(&mut self, timestamp: u64) {
+        self.events.push_back(timestamp);
+        while let Some(front) = self.events.front().copied() {
+            if timestamp.saturating_sub(front) > BRIDGE_REMEDIATION_WINDOW_SECS {
+                self.events.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "events".to_string(),
+            Value::Array(self.events.iter().copied().map(Value::from).collect()),
+        );
+        map.insert(
+            "last_action".to_string(),
+            self.last_action
+                .map(|action| Value::String(action.as_str().to_string()))
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "last_action_ts".to_string(),
+            self.last_action_ts.map(Value::from).unwrap_or(Value::Null),
+        );
+        Value::Object(map)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let events = object
+            .get("events")
+            .and_then(Value::as_array)
+            .map(|array| array.iter().filter_map(Value::as_u64).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let last_action = object
+            .get("last_action")
+            .and_then(Value::as_str)
+            .and_then(BridgeRemediationActionType::from_str);
+        let last_action_ts = match object.get("last_action_ts") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let mut entry = Self {
+            events: VecDeque::from(events),
+            last_action,
+            last_action_ts,
+        };
+        if let Some(last_ts) = entry.events.back().copied() {
+            while let Some(front) = entry.events.front().copied() {
+                if last_ts.saturating_sub(front) > BRIDGE_REMEDIATION_WINDOW_SECS {
+                    entry.events.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+        Some(entry)
+    }
+}
+
 impl BridgeMetricState {
-    fn reset(&mut self, value: f64) {
+    fn reset(&mut self, value: f64, timestamp: u64) {
         self.last_value = Some(value);
+        self.last_timestamp = Some(timestamp);
         self.deltas.clear();
         self.last_alert_ts = None;
     }
 
-    fn record(&mut self, value: f64, delta: f64) {
+    fn record(&mut self, value: f64, delta: f64, timestamp: u64) {
         self.last_value = Some(value);
+        self.last_timestamp = Some(timestamp);
         self.deltas.push_back(delta);
         while self.deltas.len() > BRIDGE_ANOMALY_WINDOW {
             self.deltas.pop_front();
         }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "last_value".to_string(),
+            self.last_value.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "last_timestamp".to_string(),
+            self.last_timestamp.map(Value::from).unwrap_or(Value::Null),
+        );
+        let deltas: Vec<_> = self
+            .deltas
+            .iter()
+            .map(|delta| Value::from(*delta))
+            .collect();
+        map.insert("deltas".to_string(), Value::Array(deltas));
+        map.insert(
+            "last_alert_ts".to_string(),
+            self.last_alert_ts.map(Value::from).unwrap_or(Value::Null),
+        );
+        Value::Object(map)
+    }
+
+    fn from_value(value: &Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let last_value = match object.get("last_value") {
+            Some(Value::Null) | None => None,
+            Some(v) => v.as_f64(),
+        };
+        let last_timestamp = match object.get("last_timestamp") {
+            Some(Value::Null) | None => None,
+            Some(v) => v.as_u64(),
+        };
+        let deltas = object
+            .get("deltas")
+            .and_then(Value::as_array)
+            .map(|array| array.iter().filter_map(Value::as_f64).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let last_alert_ts = match object.get("last_alert_ts") {
+            Some(Value::Null) | None => None,
+            Some(v) => v.as_u64(),
+        };
+        let mut deque = VecDeque::from(deltas);
+        while deque.len() > BRIDGE_ANOMALY_WINDOW {
+            deque.pop_front();
+        }
+        Some(Self {
+            last_value,
+            last_timestamp,
+            deltas: deque,
+            last_alert_ts,
+        })
     }
 }
 
@@ -2577,20 +3236,158 @@ struct BridgeMetricSample {
     value: f64,
 }
 
+#[derive(Clone)]
+struct BridgeMetricObservation {
+    peer: String,
+    metric: String,
+    labels: Vec<(String, String)>,
+    delta: f64,
+    rate_per_sec: f64,
+}
+
+#[derive(Default)]
+struct BridgeIngestResult {
+    events: Vec<BridgeAnomalyEvent>,
+    observations: Vec<BridgeMetricObservation>,
+}
+
 #[derive(Default)]
 struct BridgeAnomalyDetector {
     metrics: HashMap<BridgeMetricKey, BridgeMetricState>,
     events: VecDeque<BridgeAnomalyEvent>,
 }
 
+#[derive(Default)]
+struct BridgeRemediationEngine {
+    entries: HashMap<BridgeRemediationKey, BridgeRemediationEntry>,
+    actions: VecDeque<BridgeRemediationAction>,
+}
+
+impl BridgeRemediationEngine {
+    fn ingest(&mut self, event: &BridgeAnomalyEvent) -> Option<BridgeRemediationAction> {
+        if event.labels.is_empty() {
+            return None;
+        }
+        let key = BridgeRemediationKey::from_event(event);
+        let entry = self
+            .entries
+            .entry(key)
+            .or_insert_with(BridgeRemediationEntry::default);
+        entry.record(event.timestamp);
+        let occurrences = entry.events.len();
+        let ratio = if event.threshold > 0.0 {
+            event.delta / event.threshold
+        } else {
+            0.0
+        };
+        let action = if occurrences >= BRIDGE_REMEDIATION_QUARANTINE_COUNT
+            || event.delta >= BRIDGE_REMEDIATION_QUARANTINE_DELTA
+            || ratio >= BRIDGE_REMEDIATION_QUARANTINE_RATIO
+        {
+            Some(BridgeRemediationActionType::Quarantine)
+        } else if event.delta >= BRIDGE_REMEDIATION_PAGE_DELTA
+            || ratio >= BRIDGE_REMEDIATION_PAGE_RATIO
+        {
+            Some(BridgeRemediationActionType::Page)
+        } else {
+            None
+        };
+        let Some(action_type) = action else {
+            return None;
+        };
+
+        let emit = match entry.last_action {
+            Some(prev) if action_type < prev => false,
+            Some(prev) if action_type == prev => {
+                let last_ts = entry.last_action_ts.unwrap_or(0);
+                event.timestamp.saturating_sub(last_ts) >= BRIDGE_REMEDIATION_PAGE_COOLDOWN_SECS
+            }
+            _ => true,
+        };
+
+        if !emit {
+            return None;
+        }
+
+        entry.last_action = Some(action_type);
+        entry.last_action_ts = Some(event.timestamp);
+
+        let action = BridgeRemediationAction::new(event, action_type, occurrences, ratio);
+        self.actions.push_back(action.clone());
+        while self.actions.len() > BRIDGE_REMEDIATION_MAX_ACTIONS {
+            self.actions.pop_front();
+        }
+        Some(action)
+    }
+
+    fn snapshot(&self) -> Value {
+        let mut map = Map::new();
+        let entries = self
+            .entries
+            .iter()
+            .map(|(key, entry)| {
+                let mut item = Map::new();
+                item.insert("key".to_string(), key.to_value());
+                item.insert("entry".to_string(), entry.to_value());
+                Value::Object(item)
+            })
+            .collect();
+        map.insert("entries".to_string(), Value::Array(entries));
+        map.insert(
+            "actions".to_string(),
+            Value::Array(
+                self.actions
+                    .iter()
+                    .map(BridgeRemediationAction::to_value)
+                    .collect(),
+            ),
+        );
+        Value::Object(map)
+    }
+
+    fn restore(&mut self, value: &Value) {
+        self.entries.clear();
+        self.actions.clear();
+        let Some(object) = value.as_object() else {
+            return;
+        };
+        if let Some(entries) = object.get("entries").and_then(Value::as_array) {
+            for entry in entries {
+                if let Some(entry_obj) = entry.as_object() {
+                    if let (Some(key_value), Some(entry_value)) =
+                        (entry_obj.get("key"), entry_obj.get("entry"))
+                    {
+                        if let (Some(key), Some(entry_state)) = (
+                            BridgeRemediationKey::from_value(key_value),
+                            BridgeRemediationEntry::from_value(entry_value),
+                        ) {
+                            self.entries.insert(key, entry_state);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(actions) = object.get("actions").and_then(Value::as_array) {
+            for action_value in actions {
+                if let Some(action) = BridgeRemediationAction::from_value(action_value) {
+                    self.actions.push_back(action);
+                }
+            }
+        }
+        while self.actions.len() > BRIDGE_REMEDIATION_MAX_ACTIONS {
+            self.actions.pop_front();
+        }
+    }
+
+    fn actions(&self) -> Vec<BridgeRemediationAction> {
+        self.actions.iter().cloned().collect()
+    }
+}
+
 impl BridgeAnomalyDetector {
-    fn ingest(
-        &mut self,
-        peer_id: &str,
-        metrics: &Value,
-        timestamp: u64,
-    ) -> Vec<BridgeAnomalyEvent> {
+    fn ingest(&mut self, peer_id: &str, metrics: &Value, timestamp: u64) -> BridgeIngestResult {
         let mut triggered = Vec::new();
+        let mut observations = Vec::new();
         for sample in collect_bridge_metric_samples(metrics) {
             if !BRIDGE_MONITORED_COUNTERS.contains(&sample.metric.as_str()) {
                 continue;
@@ -2600,12 +3397,19 @@ impl BridgeAnomalyDetector {
                 metric: sample.metric.clone(),
                 labels: sample.labels.clone(),
             };
-            if let Some(event) = self.observe(key, sample.value, timestamp) {
+            let (event, observation) = self.observe(key, sample.value, timestamp);
+            if let Some(event) = event {
                 triggered.push(event.clone());
                 self.push_event(event);
             }
+            if let Some(observation) = observation {
+                observations.push(observation);
+            }
         }
-        triggered
+        BridgeIngestResult {
+            events: triggered,
+            observations,
+        }
     }
 
     fn observe(
@@ -2613,25 +3417,27 @@ impl BridgeAnomalyDetector {
         key: BridgeMetricKey,
         value: f64,
         timestamp: u64,
-    ) -> Option<BridgeAnomalyEvent> {
+    ) -> (Option<BridgeAnomalyEvent>, Option<BridgeMetricObservation>) {
         if !value.is_finite() {
-            return None;
+            return (None, None);
         }
         let state = self.metrics.entry(key.clone()).or_default();
-        match state.last_value {
-            None => {
-                state.last_value = Some(value);
-                None
+        match (state.last_value, state.last_timestamp) {
+            (None, _) | (_, None) => {
+                state.reset(value, timestamp);
+                (None, None)
             }
-            Some(previous) => {
+            (Some(previous), Some(previous_timestamp)) => {
                 let mut delta = value - previous;
                 if delta < -COUNTER_EPSILON {
-                    state.reset(value);
-                    return None;
+                    state.reset(value, timestamp);
+                    return (None, None);
                 }
                 if delta < 0.0 {
                     delta = 0.0;
                 }
+                let elapsed = timestamp.saturating_sub(previous_timestamp).max(1);
+                let rate = delta / elapsed as f64;
                 let window_len = state.deltas.len();
                 let mut anomaly = None;
                 if window_len >= BRIDGE_ANOMALY_BASELINE_MIN {
@@ -2676,8 +3482,15 @@ impl BridgeAnomalyDetector {
                         });
                     }
                 }
-                state.record(value, delta);
-                anomaly
+                state.record(value, delta, timestamp);
+                let observation = BridgeMetricObservation {
+                    peer: key.peer.clone(),
+                    metric: key.metric.clone(),
+                    labels: key.labels.clone(),
+                    delta,
+                    rate_per_sec: rate,
+                };
+                (anomaly, Some(observation))
             }
         }
     }
@@ -2692,6 +3505,113 @@ impl BridgeAnomalyDetector {
     fn events(&self) -> Vec<BridgeAnomalyEvent> {
         self.events.iter().cloned().collect()
     }
+
+    fn snapshot(&self) -> Value {
+        let mut metrics = Vec::new();
+        for (key, state) in &self.metrics {
+            let mut entry = Map::new();
+            entry.insert("peer".to_string(), Value::String(key.peer.clone()));
+            entry.insert("metric".to_string(), Value::String(key.metric.clone()));
+            entry.insert(
+                "labels".to_string(),
+                encode_bridge_metric_labels(&key.labels),
+            );
+            entry.insert("state".to_string(), state.to_value());
+            metrics.push(Value::Object(entry));
+        }
+        let events = self
+            .events
+            .iter()
+            .map(BridgeAnomalyEvent::to_value)
+            .collect();
+        let mut map = Map::new();
+        map.insert("metrics".to_string(), Value::Array(metrics));
+        map.insert("events".to_string(), Value::Array(events));
+        Value::Object(map)
+    }
+
+    fn restore(&mut self, snapshot: &Value) {
+        self.metrics.clear();
+        self.events.clear();
+        let Some(object) = snapshot.as_object() else {
+            return;
+        };
+        if let Some(metrics) = object.get("metrics").and_then(Value::as_array) {
+            for entry in metrics {
+                let Some(metric_obj) = entry.as_object() else {
+                    continue;
+                };
+                let Some(peer) = metric_obj.get("peer").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(metric) = metric_obj.get("metric").and_then(Value::as_str) else {
+                    continue;
+                };
+                let labels = metric_obj
+                    .get("labels")
+                    .map(decode_bridge_metric_labels)
+                    .unwrap_or_default();
+                let Some(state_value) = metric_obj.get("state") else {
+                    continue;
+                };
+                let Some(state) = BridgeMetricState::from_value(state_value) else {
+                    continue;
+                };
+                let key = BridgeMetricKey {
+                    peer: peer.to_string(),
+                    metric: metric.to_string(),
+                    labels,
+                };
+                self.metrics.insert(key, state);
+            }
+        }
+        if let Some(events) = object.get("events").and_then(Value::as_array) {
+            let mut deque = VecDeque::new();
+            for entry in events {
+                if let Some(event) = BridgeAnomalyEvent::from_value(entry) {
+                    deque.push_back(event);
+                }
+            }
+            while deque.len() > BRIDGE_ANOMALY_MAX_EVENTS {
+                deque.pop_front();
+            }
+            self.events = deque;
+        }
+    }
+}
+
+fn encode_bridge_metric_labels(labels: &[(String, String)]) -> Value {
+    let mut entries: Vec<_> = labels.iter().cloned().collect();
+    entries.sort();
+    let array = entries
+        .into_iter()
+        .map(|(key, value)| {
+            let mut map = Map::new();
+            map.insert("key".to_string(), Value::String(key));
+            map.insert("value".to_string(), Value::String(value));
+            Value::Object(map)
+        })
+        .collect();
+    Value::Array(array)
+}
+
+fn decode_bridge_metric_labels(value: &Value) -> Vec<(String, String)> {
+    let Some(array) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut labels = Vec::new();
+    for entry in array {
+        if let Some(object) = entry.as_object() {
+            if let (Some(key), Some(val)) = (
+                object.get("key").and_then(Value::as_str),
+                object.get("value").and_then(Value::as_str),
+            ) {
+                labels.push((key.to_string(), val.to_string()));
+            }
+        }
+    }
+    labels.sort();
+    labels
 }
 
 fn collect_bridge_metric_samples(metrics: &Value) -> Vec<BridgeMetricSample> {
@@ -3617,6 +4537,18 @@ async fn bridge_anomalies(request: Request<AppState>) -> Result<Response, HttpEr
     json_ok(value)
 }
 
+async fn bridge_remediation(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let actions = state.bridge_remediation_actions();
+    let value = Value::Array(
+        actions
+            .iter()
+            .map(BridgeRemediationAction::to_value)
+            .collect(),
+    );
+    json_ok(value)
+}
+
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new(state)
         .post("/ingest", ingest)
@@ -3626,6 +4558,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/tls/warnings/latest", tls_warning_latest)
         .get("/tls/warnings/status", tls_warning_status)
         .get("/anomalies/bridge", bridge_anomalies)
+        .get("/remediation/bridge", bridge_remediation)
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)

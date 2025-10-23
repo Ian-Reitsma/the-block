@@ -98,6 +98,12 @@ jobs:
         run: cargo test -p metrics-aggregator --test naming
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: monitoring crate tests
+        run: cargo test --manifest-path monitoring/Cargo.toml
+        env:
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: bridge alert validator
+        run: cargo run --manifest-path monitoring/Cargo.toml --bin bridge-alert-validator
       - name: doc ci
         run: make doc-ci
         env:
