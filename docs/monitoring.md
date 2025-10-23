@@ -81,6 +81,19 @@ playbook, target, status, or acknowledgement state, and the same queries back
 the HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
 instances to monitor bridge health.
 
+Pending follow-ups are now automated by policy instead of manual sweeps. Each
+remediation action records `dispatch_attempts`, `auto_retry_count`, retry
+timestamps, and cumulative follow-up notes so the aggregator can queue
+first-party retry payloads once the acknowledgement window expires and escalate
+automatically when the governance threshold trips. The acknowledgement parser
+accepts plain-text hook responses (`"ack pager"`, `"closed: resolved"`, etc.) in
+addition to JSON objects, promoting them to structured
+`BridgeDispatchAckRecord`s that feed the dashboard panels and persisted action
+state. New bridge alerts—`BridgeRemediationAckPending` and
+`BridgeRemediationClosureMissing`—fan out from the same counter to warn when
+acknowledgements stall or closures never arrive, keeping paging/escalation
+coverage entirely first party.
+
 The metrics aggregator now watches those counters for anomalous spikes. A
 rolling detector maintains a 24-sample baseline per peer/metric/label set and
 raises events when a new delta exceeds the historical mean by four standard

@@ -78,11 +78,7 @@ pub struct BridgeHttpOverrideResponse {
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub trait BridgeHttpClientOverride: Send + Sync {
-    fn send(
-        &self,
-        url: &str,
-        payload: &Value,
-    ) -> Result<BridgeHttpOverrideResponse, String>;
+    fn send(&self, url: &str, payload: &Value) -> Result<BridgeHttpOverrideResponse, String>;
 }
 
 type BridgeHttpOverrideHandle = Arc<dyn BridgeHttpClientOverride>;
@@ -251,6 +247,13 @@ const BRIDGE_REMEDIATION_QUARANTINE_COUNT: usize = 3;
 const BRIDGE_REMEDIATION_ESCALATE_DELTA: f64 = 80.0;
 const BRIDGE_REMEDIATION_ESCALATE_RATIO: f64 = 4.0;
 const BRIDGE_REMEDIATION_ESCALATE_COUNT: usize = 5;
+const BRIDGE_REMEDIATION_ACK_RETRY_SECS: u64 = 5 * 60;
+const BRIDGE_REMEDIATION_ACK_ESCALATE_SECS: u64 = 15 * 60;
+const BRIDGE_REMEDIATION_ACK_MAX_RETRIES: u32 = 3;
+const ENV_REMEDIATION_ACK_RETRY_SECS: &str = "TB_REMEDIATION_ACK_RETRY_SECS";
+const ENV_REMEDIATION_ACK_ESCALATE_SECS: &str = "TB_REMEDIATION_ACK_ESCALATE_SECS";
+const ENV_REMEDIATION_ACK_MAX_RETRIES: &str = "TB_REMEDIATION_ACK_MAX_RETRIES";
+const ENV_AGGREGATOR_CLEANUP_INTERVAL_SECS: &str = "AGGREGATOR_CLEANUP_INTERVAL_SECS";
 
 const ENV_REMEDIATION_PAGE_URLS: &str = "TB_REMEDIATION_PAGE_URLS";
 const ENV_REMEDIATION_PAGE_DIRS: &str = "TB_REMEDIATION_PAGE_DIRS";
@@ -688,11 +691,18 @@ impl AppState {
         let state = self.clone();
         spawn(async move {
             state.refresh_treasury_metrics();
-            let mut ticker = runtime::interval(Duration::from_secs(60));
+            state.poll_bridge_followups();
+            let interval_secs = env::var(ENV_AGGREGATOR_CLEANUP_INTERVAL_SECS)
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(60);
+            let mut ticker = runtime::interval(Duration::from_secs(interval_secs));
             loop {
                 ticker.tick().await;
                 state.prune();
                 state.refresh_treasury_metrics();
+                state.poll_bridge_followups();
             }
         });
     }
@@ -904,34 +914,123 @@ impl AppState {
         if let Some(snapshot) = snapshot {
             self.persist_bridge_remediation_snapshot(&snapshot);
         }
-        let Some(action) = action else {
-            return;
-        };
+        if let Some(action) = action {
+            self.dispatch_bridge_action(&action, BridgeRemediationDispatchOrigin::Anomaly);
+        }
+    }
+
+    fn dispatch_bridge_action(
+        &self,
+        action: &BridgeRemediationAction,
+        origin: BridgeRemediationDispatchOrigin,
+    ) {
         let metrics = aggregator_metrics();
-        metrics
-            .bridge_remediation_action_total
-            .with_label_values(&[action.action.as_str(), action.playbook.as_str()])
-            .inc();
+        if matches!(
+            origin,
+            BridgeRemediationDispatchOrigin::Anomaly
+                | BridgeRemediationDispatchOrigin::AutoEscalation
+        ) {
+            metrics
+                .bridge_remediation_action_total
+                .with_label_values(&[action.action.as_str(), action.playbook.as_str()])
+                .inc();
+        }
         let labels = action
             .labels
             .iter()
             .map(|label| format!("{}={}", label.key, label.value))
             .collect::<Vec<_>>()
             .join(",");
-        warn!(
-            target: "aggregator",
-            peer = %action.peer_id,
-            metric = %action.metric,
-            action = action.action.as_str(),
-            playbook = action.playbook.as_str(),
-            occurrences = action.occurrences,
-            delta = action.delta,
-            threshold = action.threshold,
-            ratio = action.ratio,
-            labels = %labels,
-            "bridge remediation action emitted",
-        );
-        self.bridge_hooks.dispatch(self.clone(), &action);
+        match origin {
+            BridgeRemediationDispatchOrigin::Anomaly => {
+                warn!(
+                    target: "aggregator",
+                    peer = %action.peer_id,
+                    metric = %action.metric,
+                    action = action.action.as_str(),
+                    playbook = action.playbook.as_str(),
+                    occurrences = action.occurrences,
+                    delta = action.delta,
+                    threshold = action.threshold,
+                    ratio = action.ratio,
+                    labels = %labels,
+                    "bridge remediation action emitted",
+                );
+            }
+            BridgeRemediationDispatchOrigin::AutoRetry => {
+                let pending_since = action
+                    .pending_since
+                    .or(action.first_dispatch_at)
+                    .unwrap_or(action.timestamp);
+                warn!(
+                    target: "aggregator",
+                    peer = %action.peer_id,
+                    metric = %action.metric,
+                    action = action.action.as_str(),
+                    playbook = action.playbook.as_str(),
+                    attempts = action.dispatch_attempts,
+                    retry_count = action.auto_retry_count,
+                    pending_since = pending_since,
+                    follow_up = action.follow_up_notes.as_deref().unwrap_or(""),
+                    labels = %labels,
+                    "bridge remediation acknowledgement pending – retrying dispatch",
+                );
+            }
+            BridgeRemediationDispatchOrigin::AutoEscalation => {
+                warn!(
+                    target: "aggregator",
+                    peer = %action.peer_id,
+                    metric = %action.metric,
+                    action = action.action.as_str(),
+                    playbook = action.playbook.as_str(),
+                    follow_up = action.follow_up_notes.as_deref().unwrap_or(""),
+                    labels = %labels,
+                    "bridge remediation acknowledgement escalation emitted",
+                );
+            }
+        }
+        self.bridge_hooks.dispatch(self.clone(), action);
+    }
+
+    fn poll_bridge_followups(&self) {
+        let now = unix_timestamp_secs();
+        let (followups, snapshot) = match self.bridge_remediation.lock() {
+            Ok(mut engine) => {
+                let followups = engine.pending_followups(now);
+                let snapshot = if followups.is_empty() {
+                    None
+                } else {
+                    Some(engine.snapshot())
+                };
+                (followups, snapshot)
+            }
+            Err(_) => {
+                warn!(
+                    target: "aggregator",
+                    "bridge remediation engine poisoned while evaluating follow-ups",
+                );
+                return;
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_bridge_remediation_snapshot(&snapshot);
+        }
+        for followup in followups {
+            match followup {
+                BridgeRemediationFollowUp::Retry { action } => {
+                    self.dispatch_bridge_action(
+                        &action,
+                        BridgeRemediationDispatchOrigin::AutoRetry,
+                    );
+                }
+                BridgeRemediationFollowUp::Escalate { escalation } => {
+                    self.dispatch_bridge_action(
+                        &escalation,
+                        BridgeRemediationDispatchOrigin::AutoEscalation,
+                    );
+                }
+            }
+        }
     }
 
     fn bridge_remediation_actions(&self) -> Vec<BridgeRemediationAction> {
@@ -959,21 +1058,24 @@ impl AppState {
         )
     }
 
-    fn record_bridge_ack(
+    fn record_bridge_dispatch(
         &self,
         action: &BridgeRemediationAction,
-        ack: &BridgeDispatchAckRecord,
+        ack: Option<&BridgeDispatchAckRecord>,
+        dispatched_at: u64,
+        target: &str,
+        status: &str,
     ) -> Option<BridgeRemediationAction> {
         let (updated, snapshot) = match self.bridge_remediation.lock() {
             Ok(mut engine) => {
-                let updated = engine.acknowledge_action(action, ack);
+                let updated = engine.record_dispatch_attempt(action, ack, dispatched_at, status);
                 let snapshot = updated.as_ref().map(|_| engine.snapshot());
                 (updated, snapshot)
             }
             Err(_) => {
                 warn!(
                     target: "aggregator",
-                    "bridge remediation engine poisoned while recording acknowledgement",
+                    "bridge remediation engine poisoned while recording dispatch",
                 );
                 return None;
             }
@@ -981,17 +1083,71 @@ impl AppState {
         if let Some(snapshot) = snapshot {
             self.persist_bridge_remediation_snapshot(&snapshot);
         }
-        if let Some(ref updated_action) = updated {
-            info!(
-                target: "aggregator",
-                peer = %updated_action.peer_id,
-                metric = %updated_action.metric,
-                action = updated_action.action.as_str(),
-                playbook = updated_action.playbook.as_str(),
-                state = ack.state.as_str(),
-                notes = ack.notes.as_deref().unwrap_or(""),
-                "bridge remediation action acknowledged",
-            );
+        if let Some(updated_action) = updated.as_ref() {
+            if let Some(ack) = ack {
+                match ack.state {
+                    BridgeDispatchAckState::Acknowledged => info!(
+                        target: "aggregator",
+                        peer = %updated_action.peer_id,
+                        metric = %updated_action.metric,
+                        action = updated_action.action.as_str(),
+                        playbook = updated_action.playbook.as_str(),
+                        target,
+                        status,
+                        timestamp = ack.timestamp,
+                        notes = ack.notes.as_deref().unwrap_or(""),
+                        "bridge remediation acknowledgement recorded",
+                    ),
+                    BridgeDispatchAckState::Closed => info!(
+                        target: "aggregator",
+                        peer = %updated_action.peer_id,
+                        metric = %updated_action.metric,
+                        action = updated_action.action.as_str(),
+                        playbook = updated_action.playbook.as_str(),
+                        target,
+                        status,
+                        timestamp = ack.timestamp,
+                        notes = ack.notes.as_deref().unwrap_or(""),
+                        "bridge remediation action closed",
+                    ),
+                    BridgeDispatchAckState::Pending => warn!(
+                        target: "aggregator",
+                        peer = %updated_action.peer_id,
+                        metric = %updated_action.metric,
+                        action = updated_action.action.as_str(),
+                        playbook = updated_action.playbook.as_str(),
+                        target,
+                        status,
+                        timestamp = ack.timestamp,
+                        notes = ack.notes.as_deref().unwrap_or(""),
+                        "bridge remediation acknowledgement pending",
+                    ),
+                    BridgeDispatchAckState::Invalid => warn!(
+                        target: "aggregator",
+                        peer = %updated_action.peer_id,
+                        metric = %updated_action.metric,
+                        action = updated_action.action.as_str(),
+                        playbook = updated_action.playbook.as_str(),
+                        target,
+                        status,
+                        timestamp = ack.timestamp,
+                        notes = ack.notes.as_deref().unwrap_or(""),
+                        "bridge remediation acknowledgement invalid",
+                    ),
+                }
+            } else if status == "success" && updated_action.pending_since.is_some() {
+                warn!(
+                    target: "aggregator",
+                    peer = %updated_action.peer_id,
+                    metric = %updated_action.metric,
+                    action = updated_action.action.as_str(),
+                    playbook = updated_action.playbook.as_str(),
+                    target,
+                    status,
+                    attempts = updated_action.dispatch_attempts,
+                    "bridge remediation awaiting acknowledgement",
+                );
+            }
         }
         updated
     }
@@ -2509,7 +2665,7 @@ pub fn reset_bridge_remediation_dispatch_log() {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum BridgeDispatchAckState {
     Acknowledged,
     Closed,
@@ -2524,6 +2680,16 @@ impl BridgeDispatchAckState {
             BridgeDispatchAckState::Closed => "closed",
             BridgeDispatchAckState::Pending => "pending",
             BridgeDispatchAckState::Invalid => "invalid",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "acknowledged" => Some(BridgeDispatchAckState::Acknowledged),
+            "closed" => Some(BridgeDispatchAckState::Closed),
+            "pending" => Some(BridgeDispatchAckState::Pending),
+            "invalid" => Some(BridgeDispatchAckState::Invalid),
+            _ => None,
         }
     }
 }
@@ -2629,6 +2795,55 @@ fn unix_timestamp_secs() -> u64 {
         .as_secs()
 }
 
+fn parse_text_acknowledgement(text: &str, timestamp: u64) -> Option<BridgeDispatchAckRecord> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (status_raw, trailing) = if let Some((head, tail)) = trimmed.split_once(':') {
+        (head, Some(tail.trim().to_string()))
+    } else if let Some((head, tail)) = trimmed.split_once(' ') {
+        (head, Some(tail.trim().to_string()))
+    } else {
+        (trimmed, None)
+    };
+    let status = status_raw.trim().to_ascii_lowercase();
+    let note = trailing.filter(|value| !value.is_empty());
+    let record = match status.as_str() {
+        "acknowledged" | "ack" | "ok" | "accepted" | "success" => BridgeDispatchAckRecord::new(
+            BridgeDispatchAckState::Acknowledged,
+            timestamp,
+            true,
+            false,
+            note,
+        ),
+        "closed" | "resolved" | "done" | "complete" | "closed-out" => BridgeDispatchAckRecord::new(
+            BridgeDispatchAckState::Closed,
+            timestamp,
+            true,
+            true,
+            note,
+        ),
+        "pending" | "waiting" | "open" | "queued" | "processing" | "in-progress" => {
+            BridgeDispatchAckRecord::new(
+                BridgeDispatchAckState::Pending,
+                timestamp,
+                false,
+                false,
+                note,
+            )
+        }
+        "invalid" | "error" | "failed" | "rejected" | "unknown" => {
+            let detail = note
+                .map(|n| format!("{status}: {n}"))
+                .unwrap_or_else(|| trimmed.to_string());
+            BridgeDispatchAckRecord::invalid(timestamp, detail)
+        }
+        _ => BridgeDispatchAckRecord::invalid(timestamp, trimmed.to_string()),
+    };
+    Some(record)
+}
+
 fn parse_dispatch_acknowledgement(body: &[u8]) -> Option<BridgeDispatchAckRecord> {
     if body.is_empty() {
         return None;
@@ -2667,11 +2882,15 @@ fn parse_dispatch_acknowledgement(body: &[u8]) -> Option<BridgeDispatchAckRecord
                 notes,
             ))
         }
+        Ok(Value::String(text)) => parse_text_acknowledgement(&text, timestamp),
         Ok(_) => Some(BridgeDispatchAckRecord::invalid(
             timestamp,
             "acknowledgement response must be a JSON object".to_string(),
         )),
-        Err(err) => Some(BridgeDispatchAckRecord::invalid(timestamp, err.to_string())),
+        Err(_) => {
+            let text = String::from_utf8_lossy(body);
+            parse_text_acknowledgement(&text, timestamp)
+        }
     }
 }
 
@@ -3319,6 +3538,29 @@ struct BridgeRemediationAction {
     acknowledged_at: Option<u64>,
     closed_out_at: Option<u64>,
     acknowledgement_notes: Option<String>,
+    first_dispatch_at: Option<u64>,
+    last_dispatch_at: Option<u64>,
+    dispatch_attempts: u32,
+    auto_retry_count: u32,
+    last_auto_retry_at: Option<u64>,
+    pending_since: Option<u64>,
+    pending_escalated: bool,
+    last_ack_state: Option<BridgeDispatchAckState>,
+    last_ack_notes: Option<String>,
+    follow_up_notes: Option<String>,
+}
+
+#[derive(Clone)]
+enum BridgeRemediationFollowUp {
+    Retry { action: BridgeRemediationAction },
+    Escalate { escalation: BridgeRemediationAction },
+}
+
+#[derive(Clone, Copy)]
+enum BridgeRemediationDispatchOrigin {
+    Anomaly,
+    AutoRetry,
+    AutoEscalation,
 }
 
 impl BridgeRemediationAction {
@@ -3351,6 +3593,16 @@ impl BridgeRemediationAction {
             acknowledged_at: None,
             closed_out_at: None,
             acknowledgement_notes: None,
+            first_dispatch_at: None,
+            last_dispatch_at: None,
+            dispatch_attempts: 0,
+            auto_retry_count: 0,
+            last_auto_retry_at: None,
+            pending_since: None,
+            pending_escalated: false,
+            last_ack_state: None,
+            last_ack_notes: None,
+            follow_up_notes: None,
         }
     }
 
@@ -3518,6 +3770,60 @@ impl BridgeRemediationAction {
                 .map(|notes| Value::String(notes.clone()))
                 .unwrap_or(Value::Null),
         );
+        map.insert(
+            "first_dispatch_at".to_string(),
+            self.first_dispatch_at
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "last_dispatch_at".to_string(),
+            self.last_dispatch_at
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "dispatch_attempts".to_string(),
+            Value::from(self.dispatch_attempts as u64),
+        );
+        map.insert(
+            "auto_retry_count".to_string(),
+            Value::from(self.auto_retry_count as u64),
+        );
+        map.insert(
+            "last_auto_retry_at".to_string(),
+            self.last_auto_retry_at
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "pending_since".to_string(),
+            self.pending_since.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "pending_escalated".to_string(),
+            Value::Bool(self.pending_escalated),
+        );
+        map.insert(
+            "last_ack_state".to_string(),
+            self.last_ack_state
+                .map(|state| Value::String(state.as_str().to_string()))
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "last_ack_notes".to_string(),
+            self.last_ack_notes
+                .as_ref()
+                .map(|notes| Value::String(notes.clone()))
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "follow_up_notes".to_string(),
+            self.follow_up_notes
+                .as_ref()
+                .map(|notes| Value::String(notes.clone()))
+                .unwrap_or(Value::Null),
+        );
         let panels = self.dashboard_panels();
         map.insert(
             "dashboard_panels".to_string(),
@@ -3598,6 +3904,46 @@ impl BridgeRemediationAction {
             .get("acknowledgement_notes")
             .and_then(Value::as_str)
             .map(|text| text.to_string());
+        let first_dispatch_at = match object.get("first_dispatch_at") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let last_dispatch_at = match object.get("last_dispatch_at") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let dispatch_attempts = object
+            .get("dispatch_attempts")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let auto_retry_count = object
+            .get("auto_retry_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let last_auto_retry_at = match object.get("last_auto_retry_at") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let pending_since = match object.get("pending_since") {
+            Some(Value::Null) | None => None,
+            Some(value) => value.as_u64(),
+        };
+        let pending_escalated = object
+            .get("pending_escalated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let last_ack_state = object
+            .get("last_ack_state")
+            .and_then(Value::as_str)
+            .and_then(BridgeDispatchAckState::from_str);
+        let last_ack_notes = object
+            .get("last_ack_notes")
+            .and_then(Value::as_str)
+            .map(|text| text.to_string());
+        let follow_up_notes = object
+            .get("follow_up_notes")
+            .and_then(Value::as_str)
+            .map(|text| text.to_string());
         Some(Self {
             peer_id,
             metric,
@@ -3612,6 +3958,16 @@ impl BridgeRemediationAction {
             acknowledged_at,
             closed_out_at,
             acknowledgement_notes,
+            first_dispatch_at,
+            last_dispatch_at,
+            dispatch_attempts,
+            auto_retry_count,
+            last_auto_retry_at,
+            pending_since,
+            pending_escalated,
+            last_ack_state,
+            last_ack_notes,
+            follow_up_notes,
         })
     }
 }
@@ -3677,8 +4033,10 @@ impl BridgeRemediationHook {
                                 if status.is_success() {
                                     let ack = parse_dispatch_acknowledgement(&response.body);
                                     if let Some(ack_record) = ack.as_ref() {
-                                        if matches!(ack_record.state, BridgeDispatchAckState::Invalid)
-                                        {
+                                        if matches!(
+                                            ack_record.state,
+                                            BridgeDispatchAckState::Invalid
+                                        ) {
                                             warn!(
                                                 target: "aggregator",
                                                 url = %url,
@@ -3807,8 +4165,10 @@ impl BridgeRemediationHook {
                                 if status.is_success() {
                                     let ack = parse_dispatch_acknowledgement(response.body());
                                     if let Some(ack_record) = ack.as_ref() {
-                                        if matches!(ack_record.state, BridgeDispatchAckState::Invalid)
-                                        {
+                                        if matches!(
+                                            ack_record.state,
+                                            BridgeDispatchAckState::Invalid
+                                        ) {
                                             warn!(
                                                 target: "aggregator",
                                                 url = %url,
@@ -3981,11 +4341,16 @@ fn record_dispatch_outcome(
             ])
             .inc();
     }
-    let updated_action = match (&state, &acknowledgement) {
-        (Some(state), Some(ack)) if ack.is_completion() => state.record_bridge_ack(action, ack),
-        _ => None,
-    };
     let dispatched_at = unix_timestamp_secs();
+    let updated_action = state.as_ref().and_then(|state| {
+        state.record_bridge_dispatch(
+            action,
+            acknowledgement.as_ref(),
+            dispatched_at,
+            target,
+            status,
+        )
+    });
     let record_action = updated_action.unwrap_or_else(|| action.clone());
     let record = BridgeRemediationDispatchRecord::new(
         record_action,
@@ -4337,13 +4702,69 @@ struct BridgeAnomalyDetector {
     events: VecDeque<BridgeAnomalyEvent>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug)]
+struct BridgeRemediationAckPolicy {
+    retry_after_secs: u64,
+    escalate_after_secs: u64,
+    max_retries: u32,
+}
+
+impl BridgeRemediationAckPolicy {
+    fn from_env() -> Self {
+        let retry_after_secs = env::var(ENV_REMEDIATION_ACK_RETRY_SECS)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(BRIDGE_REMEDIATION_ACK_RETRY_SECS);
+        let escalate_after_secs = env::var(ENV_REMEDIATION_ACK_ESCALATE_SECS)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(BRIDGE_REMEDIATION_ACK_ESCALATE_SECS);
+        let max_retries = env::var(ENV_REMEDIATION_ACK_MAX_RETRIES)
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(BRIDGE_REMEDIATION_ACK_MAX_RETRIES);
+        let escalate_after_secs = escalate_after_secs.max(retry_after_secs);
+        Self {
+            retry_after_secs,
+            escalate_after_secs,
+            max_retries,
+        }
+    }
+}
+
+impl Default for BridgeRemediationAckPolicy {
+    fn default() -> Self {
+        Self {
+            retry_after_secs: BRIDGE_REMEDIATION_ACK_RETRY_SECS,
+            escalate_after_secs: BRIDGE_REMEDIATION_ACK_ESCALATE_SECS,
+            max_retries: BRIDGE_REMEDIATION_ACK_MAX_RETRIES,
+        }
+    }
+}
+
 struct BridgeRemediationEngine {
     entries: HashMap<BridgeRemediationKey, BridgeRemediationEntry>,
     actions: VecDeque<BridgeRemediationAction>,
+    ack_policy: BridgeRemediationAckPolicy,
+}
+
+impl Default for BridgeRemediationEngine {
+    fn default() -> Self {
+        Self::new(BridgeRemediationAckPolicy::from_env())
+    }
 }
 
 impl BridgeRemediationEngine {
+    fn new(policy: BridgeRemediationAckPolicy) -> Self {
+        Self {
+            entries: HashMap::new(),
+            actions: VecDeque::new(),
+            ack_policy: policy,
+        }
+    }
+
     fn ingest(&mut self, event: &BridgeAnomalyEvent) -> Option<BridgeRemediationAction> {
         if event.labels.is_empty() {
             return None;
@@ -4410,6 +4831,165 @@ impl BridgeRemediationEngine {
         Some(action)
     }
 
+    fn record_dispatch_attempt(
+        &mut self,
+        action: &BridgeRemediationAction,
+        ack: Option<&BridgeDispatchAckRecord>,
+        dispatched_at: u64,
+        status: &str,
+    ) -> Option<BridgeRemediationAction> {
+        let mut updated = None;
+        for stored in self.actions.iter_mut().rev() {
+            if stored.peer_id == action.peer_id
+                && stored.metric == action.metric
+                && stored.timestamp == action.timestamp
+                && stored.action == action.action
+            {
+                stored.dispatch_attempts = stored.dispatch_attempts.saturating_add(1);
+                stored.last_dispatch_at = Some(dispatched_at);
+                stored.first_dispatch_at.get_or_insert(dispatched_at);
+                if ack.is_some() || status == "success" {
+                    stored.pending_since.get_or_insert(dispatched_at);
+                }
+                if let Some(ack) = ack {
+                    stored.last_ack_state = Some(ack.state);
+                    if let Some(notes) = ack.notes.as_ref() {
+                        stored.last_ack_notes = Some(notes.clone());
+                    }
+                    if ack.is_completion() {
+                        if ack.closed && stored.closed_out_at.is_none() {
+                            stored.closed_out_at = Some(ack.timestamp);
+                        }
+                        if ack.acknowledged && stored.acknowledged_at.is_none() {
+                            stored.acknowledged_at = Some(ack.timestamp);
+                        }
+                        if let Some(notes) = ack.notes.as_ref() {
+                            stored.acknowledgement_notes = Some(notes.clone());
+                        }
+                        stored.pending_since = None;
+                        stored.pending_escalated = false;
+                        stored.last_ack_notes = ack.notes.clone();
+                        stored.follow_up_notes = None;
+                        stored.auto_retry_count = 0;
+                        stored.last_auto_retry_at = None;
+                    }
+                }
+                updated = Some(stored.clone());
+                break;
+            }
+        }
+        updated
+    }
+
+    fn pending_followups(&mut self, now: u64) -> Vec<BridgeRemediationFollowUp> {
+        let mut followups = Vec::new();
+        let mut escalations = Vec::new();
+        for stored in self.actions.iter_mut() {
+            if stored.acknowledged_at.is_some() || stored.closed_out_at.is_some() {
+                continue;
+            }
+            if stored.dispatch_attempts == 0 {
+                continue;
+            }
+            let pending_since = stored
+                .pending_since
+                .or(stored.first_dispatch_at)
+                .unwrap_or(stored.timestamp);
+            let elapsed = now.saturating_sub(pending_since);
+            let retry_due = stored
+                .last_dispatch_at
+                .map(|last| now.saturating_sub(last) >= self.ack_policy.retry_after_secs)
+                .unwrap_or(false);
+            let retry_window_ok = stored
+                .last_auto_retry_at
+                .map(|last| now.saturating_sub(last) >= self.ack_policy.retry_after_secs)
+                .unwrap_or(true);
+
+            if elapsed >= self.ack_policy.escalate_after_secs
+                && !stored.pending_escalated
+                && stored.action != BridgeRemediationActionType::Escalate
+            {
+                let escalation = BridgeRemediationAction {
+                    peer_id: stored.peer_id.clone(),
+                    metric: stored.metric.clone(),
+                    labels: stored.labels.clone(),
+                    action: BridgeRemediationActionType::Escalate,
+                    playbook: BridgeRemediationPlaybook::GovernanceEscalation,
+                    occurrences: stored.occurrences,
+                    delta: stored.delta,
+                    threshold: stored.threshold,
+                    ratio: stored.ratio,
+                    timestamp: now,
+                    acknowledged_at: None,
+                    closed_out_at: None,
+                    acknowledgement_notes: None,
+                    first_dispatch_at: None,
+                    last_dispatch_at: None,
+                    dispatch_attempts: 0,
+                    auto_retry_count: 0,
+                    last_auto_retry_at: None,
+                    pending_since: None,
+                    pending_escalated: false,
+                    last_ack_state: None,
+                    last_ack_notes: None,
+                    follow_up_notes: Some(format!(
+                        "Automated escalation after {}s without closure ({} attempts)",
+                        elapsed, stored.dispatch_attempts
+                    )),
+                };
+                stored.pending_escalated = true;
+                let previous_notes = stored.follow_up_notes.take();
+                stored.follow_up_notes = Some(match previous_notes {
+                    Some(existing) if !existing.is_empty() => format!(
+                        "{existing}; escalation queued after {}s without closure",
+                        elapsed
+                    ),
+                    _ => format!(
+                        "Automated escalation queued after {}s without closure",
+                        elapsed
+                    ),
+                });
+                escalations.push(escalation.clone());
+                followups.push(BridgeRemediationFollowUp::Escalate { escalation });
+                continue;
+            }
+
+            if self.ack_policy.max_retries == 0 {
+                continue;
+            }
+
+            if elapsed >= self.ack_policy.retry_after_secs
+                && retry_due
+                && retry_window_ok
+                && stored.auto_retry_count < self.ack_policy.max_retries
+            {
+                stored.auto_retry_count = stored.auto_retry_count.saturating_add(1);
+                stored.last_auto_retry_at = Some(now);
+                let previous_notes = stored.follow_up_notes.take();
+                stored.follow_up_notes = Some(match previous_notes {
+                    Some(existing) if !existing.is_empty() => format!(
+                        "{existing}; retry {} after {}s without acknowledgement",
+                        stored.auto_retry_count, elapsed
+                    ),
+                    _ => format!(
+                        "Automated retry {} after {}s without acknowledgement",
+                        stored.auto_retry_count, elapsed
+                    ),
+                });
+                followups.push(BridgeRemediationFollowUp::Retry {
+                    action: stored.clone(),
+                });
+            }
+        }
+        for escalation in escalations {
+            self.actions.push_back(escalation);
+            while self.actions.len() > BRIDGE_REMEDIATION_MAX_ACTIONS {
+                self.actions.pop_front();
+            }
+        }
+        followups
+    }
+
     fn snapshot(&self) -> Value {
         let mut map = Map::new();
         let entries = self
@@ -4471,36 +5051,6 @@ impl BridgeRemediationEngine {
 
     fn actions(&self) -> Vec<BridgeRemediationAction> {
         self.actions.iter().cloned().collect()
-    }
-
-    fn acknowledge_action(
-        &mut self,
-        action: &BridgeRemediationAction,
-        ack: &BridgeDispatchAckRecord,
-    ) -> Option<BridgeRemediationAction> {
-        let mut updated = None;
-        for stored in self.actions.iter_mut().rev() {
-            if stored.peer_id == action.peer_id
-                && stored.metric == action.metric
-                && stored.timestamp == action.timestamp
-                && stored.action == action.action
-            {
-                if ack.closed && stored.acknowledged_at.is_none() {
-                    stored.acknowledged_at = Some(ack.timestamp);
-                } else if ack.acknowledged && stored.acknowledged_at.is_none() {
-                    stored.acknowledged_at = Some(ack.timestamp);
-                }
-                if ack.closed && stored.closed_out_at.is_none() {
-                    stored.closed_out_at = Some(ack.timestamp);
-                }
-                if let Some(notes) = ack.notes.as_ref() {
-                    stored.acknowledgement_notes = Some(notes.clone());
-                }
-                updated = Some(stored.clone());
-                break;
-            }
-        }
-        updated
     }
 }
 

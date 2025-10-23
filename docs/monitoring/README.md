@@ -64,6 +64,15 @@ ready to import once the foundation telemetry stack is running.
   appends to `/remediation/bridge/dispatches`, letting dashboards and alerting
   policy flag skipped hooks, failing endpoints, or unacknowledged escalations
   without scraping Prometheus.
+- Automated follow-ups now run entirely within the aggregator. Pending actions
+  persist `dispatch_attempts`, `auto_retry_count`, retry timestamps, and
+  follow-up notes so the engine can queue deterministic retries and governance
+  escalations when policy thresholds expire. The acknowledgement parser accepts
+  plain-text hook responses as well as JSON, mapping strings like `"ack pager"`
+  or `"closed: resolved"` into structured records. New alerts—
+  `BridgeRemediationAckPending` and `BridgeRemediationClosureMissing`—read the
+  persisted acknowledgement counter and page when hooks stall or never close,
+  rounding out the first-party paging/escalation loop.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression

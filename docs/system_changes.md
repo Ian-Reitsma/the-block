@@ -1,4 +1,15 @@
 # System-Wide Economic Changes
+> **Review (2025-10-25, afternoon):** Remediation follow-ups are now automated.
+> The aggregator tracks `dispatch_attempts`, `auto_retry_count`, retry timestamps,
+> and follow-up notes per action, queues automatic re-dispatches when the
+> acknowledgement window expires, and synthesises escalation actions once the
+> policy threshold is breached—no external schedulers required. The
+> acknowledgement parser accepts plain-text webhook responses alongside JSON and
+> promotes them to structured records so dashboards, snapshots, and alerts share
+> consistent state. Prometheus gained `BridgeRemediationAckPending` and
+> `BridgeRemediationClosureMissing` rules that read the persisted acknowledgement
+> counter and page when hooks stall or never close, rounding out the first-party
+> paging/escalation loop.
 > **Review (2025-10-25, mid-morning):** Governance escalations now surface
 > acknowledgement telemetry. The metrics aggregator increments
 > `bridge_remediation_dispatch_ack_total{action,playbook,target,state}` when

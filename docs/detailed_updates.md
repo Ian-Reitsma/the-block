@@ -1,4 +1,40 @@
 # CHANGELOG
+> **Review (2025-10-25):** Bridge remediation follow-ups now retry and escalate
+> automatically via first-party scheduling. Text-only acknowledgement payloads are
+> promoted into structured records, and monitoring ships new alerts on pending or
+> missing closures alongside the acknowledgement dashboards. The notes below
+> capture the operational and documentation updates tied to the automation.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
+> crypto_suite, and codec wrappers are live with governance overrides enforced
+> (2025-10-10).
+
+## 2025-10-25 — Remediation Auto-Retry & Acknowledgement Hardening
+
+### Added
+- Automated retry/escalation loop inside `metrics-aggregator` that records
+  `dispatch_attempts`, `auto_retry_count`, retry timestamps, and follow-up notes
+  on each remediation action and enqueues governance escalations when policy
+  thresholds expire.
+- Plain-text acknowledgement parser (`"ack pager"`, `"closed: resolved"`, etc.)
+  that converts hook responses into `BridgeDispatchAckRecord`s without relying on
+  third-party JSON tooling.
+- Prometheus rules `BridgeRemediationAckPending` and
+  `BridgeRemediationClosureMissing` that alert on stalled or missing
+  acknowledgements by querying the persisted
+  `bridge_remediation_dispatch_ack_total` counter.
+
+### Changed
+- Bridge remediation actions persist retry metadata across dispatches and expose
+  the fields through `/remediation/bridge` and the CLI/HTML dashboards so runbooks
+  can surface automated follow-up state.
+- Grafana/HTML bridge panels now annotate acknowledgement follow-up notes and show
+  combined retry/escalation context for each action, mirroring the persisted data.
+
+### Fixed
+- CLI/aggregator tests now cover text acknowledgement parsing, auto-retry, and
+  escalation flows using first-party transports, preventing regressions without
+  external webhook shims.
+
 > **Review (2025-10-10):** Finalised the binary codec migration across node, crypto suite, telemetry, and harness tooling; documentation below captures the telemetry and CLI updates accompanying the removal of the legacy bincode profiles.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-10-10).
 
