@@ -64,10 +64,17 @@ the newly instrumented counters. Panels plot five-minute deltas for
 `bridge_reward_claims_total`, `bridge_reward_approvals_consumed_total`,
 `bridge_settlement_results_total{result,reason}`, and
 `bridge_dispute_outcomes_total{kind,outcome}`, mirroring the counters defined in
-`bridges/src/lib.rs`. Operators can filter reward approvals and dispute results
-by relayer duty outcome directly from the legend, and the same queries back the
-HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
-instances to monitor bridge health.
+`bridges/src/lib.rs`. A second column tracks cross-chain liquidity flow via
+`bridge_liquidity_locked_total{asset}`, `bridge_liquidity_unlocked_total{asset}`,
+`bridge_liquidity_minted_total{asset}`, and
+`bridge_liquidity_burned_total{asset}` so operators can correlate reward spikes
+with asset-specific inflows and outflows. The row closes with a remediation
+panel charting
+`sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))`,
+displaying both the recommended action and follow-up playbook for each anomaly.
+Operators can filter every legend to drill into a specific asset or playbook,
+and the same queries back the HTML snapshot so FIRST_PARTY_ONLY deployments
+never rely on external Grafana instances to monitor bridge health.
 
 The metrics aggregator now watches those counters for anomalous spikes. A
 rolling detector maintains a 24-sample baseline per peer/metric/label set and
@@ -109,9 +116,13 @@ now persists each gauge’s last value, timestamp, and baseline window into the
 in-house metrics store, so a restart resumes the prior state instead of treating
 the first post-restart observation as a spike. When labelled anomalies fire, the
 aggregator’s remediation engine evaluates the delta severity and emits
-structured actions (page vs. quarantine) via the `/remediation/bridge` JSON
-endpoint and the `bridge_remediation_action_total{action}` counter, ensuring the
-alert runbook has a first-party quarantine recommendation to follow.
+structured actions (page, throttle, quarantine, escalate) via the
+`/remediation/bridge` JSON endpoint and the
+`bridge_remediation_action_total{action,playbook}` counter. Each entry now
+records the follow-up playbook (`incentive-throttle` or
+`governance-escalation`) alongside the action so runbooks can automate
+incentive throttles or governance escalations without relying on third-party
+tooling.
 
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the

@@ -5,9 +5,9 @@ _Last updated: 2025-10-24 03:30:00Z_
 > **2025-10-24 update (bridge remediation & multi-group validator):** The
 > metrics aggregator now includes a first-party remediation engine that persists
 > per-relayer actions, serves `/remediation/bridge`, and emits
-> `bridge_remediation_action_total{action}` so incident tooling can page or
-> quarantine relayers without relying on external automation. The dedicated
-> sled column family keeps quarantine/page baselines across restarts. The
+> `bridge_remediation_action_total{action,playbook}` so incident tooling can page,
+> throttle, or escalate without relying on external automation. The dedicated
+> sled column family keeps the remediation baselines across restarts. The
 > `monitoring` crate’s validator was generalised into
 > `monitoring/src/alert_validator.rs`; the existing
 > `bridge-alert-validator` binary now runs the shared helper to replay canned

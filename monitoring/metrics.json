@@ -224,6 +224,38 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge liquidity locked grouped by asset label",
+      "labels": [
+        "asset"
+      ],
+      "name": "bridge_liquidity_locked_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge liquidity unlocked grouped by asset label",
+      "labels": [
+        "asset"
+      ],
+      "name": "bridge_liquidity_unlocked_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge liquidity minted grouped by asset label",
+      "labels": [
+        "asset"
+      ],
+      "name": "bridge_liquidity_minted_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge liquidity burned grouped by asset label",
+      "labels": [
+        "asset"
+      ],
+      "name": "bridge_liquidity_burned_total"
+    },
+    {
+      "deprecated": false,
       "description": "Per-scrape bridge counter delta grouped by metric, peer, and label set",
       "labels": [
         "metric",
@@ -247,6 +279,15 @@
       "description": "Bridge anomaly detector activations",
       "labels": [],
       "name": "bridge_anomaly_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bridge remediation actions grouped by outcome and playbook",
+      "labels": [
+        "action",
+        "playbook"
+      ],
+      "name": "bridge_remediation_action_total"
     },
     {
       "deprecated": false,

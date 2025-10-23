@@ -134,6 +134,42 @@ fn bridge_dispute_outcomes_counter() -> CounterVec {
 }
 
 #[cfg(feature = "telemetry")]
+fn bridge_liquidity_locked_counter() -> CounterVec {
+    counter_vec(
+        "bridge_liquidity_locked_total",
+        "Bridge liquidity locked grouped by asset",
+        &["asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_liquidity_unlocked_counter() -> CounterVec {
+    counter_vec(
+        "bridge_liquidity_unlocked_total",
+        "Bridge liquidity unlocked grouped by asset",
+        &["asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_liquidity_minted_counter() -> CounterVec {
+    counter_vec(
+        "bridge_liquidity_minted_total",
+        "Bridge liquidity minted grouped by asset",
+        &["asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_liquidity_burned_counter() -> CounterVec {
+    counter_vec(
+        "bridge_liquidity_burned_total",
+        "Bridge liquidity burned grouped by asset",
+        &["asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
 pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_success_counter);
 
 #[cfg(feature = "telemetry")]
@@ -162,6 +198,22 @@ pub static BRIDGE_SETTLEMENT_RESULTS_TOTAL: Lazy<CounterVec> =
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_DISPUTE_OUTCOMES_TOTAL: Lazy<CounterVec> =
     Lazy::new(bridge_dispute_outcomes_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_LIQUIDITY_LOCKED_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_liquidity_locked_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_LIQUIDITY_UNLOCKED_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_liquidity_unlocked_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_LIQUIDITY_MINTED_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_liquidity_minted_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_LIQUIDITY_BURNED_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_liquidity_burned_counter);
 
 #[cfg(feature = "telemetry")]
 pub(crate) fn telemetry_counter(name: &'static str, help: &'static str) -> Counter {

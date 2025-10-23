@@ -69,6 +69,7 @@ struct ApiRemediationAction {
     metric: String,
     occurrences: u64,
     labels: Vec<ApiAnomalyLabel>,
+    playbook: String,
 }
 
 fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
@@ -107,6 +108,11 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                     .get("action")
                     .and_then(Value::as_str)
                     .expect("action field")
+                    .to_string(),
+                playbook: object
+                    .get("playbook")
+                    .and_then(Value::as_str)
+                    .unwrap_or("none")
                     .to_string(),
                 peer_id: object
                     .get("peer_id")
@@ -160,6 +166,27 @@ fn build_labeled_payload(value: u64, asset: &str) -> Value {
                                 "asset": "{asset}",
                                 "result": "success",
                                 "reason": "ok"
+                            }},
+                            "value": {value}
+                        }}
+                    ]
+                }}
+            }}
+        ]"#
+    ))
+    .expect("valid json")
+}
+
+fn build_liquidity_payload(metric: &str, value: u64, asset: &str) -> Value {
+    json::value_from_str(&format!(
+        r#"[
+            {{
+                "peer_id": "bridge-node",
+                "metrics": {{
+                    "{metric}": [
+                        {{
+                            "labels": {{
+                                "asset": "{asset}"
                             }},
                             "value": {value}
                         }}
@@ -403,7 +430,8 @@ fn bridge_remediation_exposes_actions() {
         let actions = parse_remediation_actions(remediation_resp.body());
         assert!(!actions.is_empty(), "expected remediation action");
         let action = actions.last().unwrap();
-        assert_eq!(action.action, "quarantine");
+        assert_eq!(action.action, "escalate");
+        assert_eq!(action.playbook, "governance-escalation");
         assert_eq!(action.peer_id, "bridge-node");
         assert_eq!(action.metric, "bridge_settlement_results_total");
         assert!(action.occurrences >= 1);
@@ -418,7 +446,128 @@ fn bridge_remediation_exposes_actions() {
             .unwrap();
         assert_eq!(metrics_resp.status(), StatusCode::OK);
         let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
-        assert!(metrics_body.contains("bridge_remediation_action_total{action=\"quarantine\"}"));
+        assert!(metrics_body.contains(
+            "bridge_remediation_action_total{action=\"escalate\",playbook=\"governance-escalation\"}"
+        ));
+    });
+}
+
+#[test]
+fn bridge_remediation_emits_throttle_playbook() {
+    run_async(async {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 11, 12, 13, 14, 15, 16] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(50)).await;
+        }
+
+        let spike_payload = build_labeled_payload(25, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        let remediation_resp = app
+            .handle(app.request_builder().path("/remediation/bridge").build())
+            .await
+            .unwrap();
+        assert_eq!(remediation_resp.status(), StatusCode::OK);
+        let actions = parse_remediation_actions(remediation_resp.body());
+        assert!(!actions.is_empty(), "expected remediation action");
+        let action = actions.last().unwrap();
+        assert_eq!(action.action, "throttle");
+        assert_eq!(action.playbook, "incentive-throttle");
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            "bridge_remediation_action_total{action=\"throttle\",playbook=\"incentive-throttle\"}"
+        ));
+    });
+}
+
+#[test]
+fn bridge_anomaly_flags_liquidity_spikes() {
+    run_async(async {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [20u64, 22, 23, 25, 27, 29, 31] {
+            let payload = build_liquidity_payload("bridge_liquidity_locked_total", value, "btc");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(50)).await;
+        }
+
+        let spike_payload = build_liquidity_payload("bridge_liquidity_locked_total", 120, "btc");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        let anomalies_resp = app
+            .handle(app.request_builder().path("/anomalies/bridge").build())
+            .await
+            .unwrap();
+        let events = parse_anomaly_events(anomalies_resp.body());
+        let locked_event = events
+            .iter()
+            .find(|event| event.metric == "bridge_liquidity_locked_total")
+            .expect("expected liquidity anomaly");
+        assert_eq!(locked_event.peer_id, "bridge-node");
+        assert!(locked_event
+            .labels
+            .iter()
+            .any(|label| label.key == "asset" && label.value == "btc"));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            "bridge_metric_delta{metric=\"bridge_liquidity_locked_total\",peer=\"bridge-node\",labels=\"asset=btc\"}"
+        ));
+        assert!(metrics_body.contains(
+            "bridge_metric_rate_per_second{metric=\"bridge_liquidity_locked_total\",peer=\"bridge-node\",labels=\"asset=btc\"}"
+        ));
     });
 }
 
