@@ -27,11 +27,14 @@
 
 ## Bridge liquidity remediation
 - Watch the bridge row in Grafana/HTML snapshots: the remediation panels display
-  the action/playbook pair, dispatch outcomes, and acknowledgement state
-  alongside `bridge_liquidity_*` asset deltas and the annotation-aware response
-  text. The acknowledgement panel charts
+  the action/playbook pair, dispatch outcomes, acknowledgement state, and
+  acknowledgement latency alongside `bridge_liquidity_*` asset deltas and the
+  annotation-aware response text. The acknowledgement counters chart
   `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
-  so you can confirm paging/governance systems closed the loop.
+  so you can confirm paging/governance systems closed the loop, while the latency
+  histogram overlays p50/p95 values from
+  `bridge_remediation_ack_latency_seconds{playbook,state}` to highlight slow
+  closures before the escalation window expires.
 - When an action fires, inspect `/remediation/bridge` for the persisted entry
   and `/remediation/bridge/dispatches` for the per-target delivery log. The
   payload now includes `acknowledged_at`, `closed_out_at`, and
@@ -53,6 +56,16 @@
   `playbook="governance-escalation"`. The embedded `response_sequence`
   enumerates these steps explicitly and links back to the liquidity runbook
   anchor for cross-checking.
+- Use `contract remediation bridge --aggregator http://<host>:9000 --limit 10`
+  to print the most recent actions, retry counts, follow-up notes, and dispatch
+  history directly from the aggregator. The CLI mirrors the JSON endpoints but
+  keeps everything inside the first-party tooling for incident review.
+- Adjust acknowledgement policy on a per-playbook basis with
+  `TB_REMEDIATION_ACK_RETRY_SECS`, `TB_REMEDIATION_ACK_ESCALATE_SECS`, and
+  `TB_REMEDIATION_ACK_MAX_RETRIES` for the defaults, or suffix overrides such as
+  `TB_REMEDIATION_ACK_RETRY_SECS_GOVERNANCE_ESCALATION` when governance hooks
+  need longer buffers. The aggregator will respect the overrides immediately and
+  record completion latency against the histogram panel for audit.
 - If the HTTP hook is unreachable the aggregator logs a WARN, the dispatch
   counter increments `request_failed` or `status_failed`, and the failed
   attempt appears in `/remediation/bridge/dispatches`; remediate the endpoint

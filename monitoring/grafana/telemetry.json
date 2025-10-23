@@ -757,7 +757,32 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "description": "Bridge remediation acknowledgement latency grouped by playbook and state",
       "id": 42,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
+          "legendFormat": "{playbook} · {state} · p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
+          "legendFormat": "{playbook} · {state} · p95"
+        }
+      ],
+      "title": "bridge_remediation_ack_latency_seconds (p50/p95)",
+      "type": "timeseries"
+    },
+    {
+      "id": 43,
       "title": "Gossip",
       "type": "row"
     },
@@ -766,7 +791,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 43,
+      "id": 44,
       "options": {
         "legend": {
           "showLegend": false
@@ -785,7 +810,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 44,
+      "id": 45,
       "options": {
         "legend": {
           "showLegend": false
@@ -804,7 +829,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 45,
+      "id": 46,
       "options": {
         "legend": {
           "showLegend": false
@@ -823,7 +848,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 46,
+      "id": 47,
       "options": {
         "legend": {
           "showLegend": false
@@ -838,7 +863,7 @@
       "type": "timeseries"
     },
     {
-      "id": 47,
+      "id": 48,
       "title": "TLS",
       "type": "row"
     },
@@ -848,7 +873,7 @@
         "uid": "foundation"
       },
       "description": "TLS environment configuration warnings grouped by prefix and code",
-      "id": 48,
+      "id": 49,
       "options": {
         "legend": {
           "showLegend": true
@@ -869,7 +894,7 @@
         "uid": "foundation"
       },
       "description": "Unix timestamp of the most recent TLS environment warning",
-      "id": 49,
+      "id": 50,
       "options": {
         "legend": {
           "showLegend": true
@@ -890,7 +915,7 @@
         "uid": "foundation"
       },
       "description": "Unix timestamp of the most recent TLS environment warning",
-      "id": 50,
+      "id": 51,
       "options": {
         "legend": {
           "showLegend": true
@@ -911,7 +936,7 @@
         "uid": "foundation"
       },
       "description": "Fingerprint of the most recent TLS warning detail payload",
-      "id": 51,
+      "id": 52,
       "options": {
         "legend": {
           "showLegend": true
@@ -932,7 +957,7 @@
         "uid": "foundation"
       },
       "description": "Fingerprint of the most recent TLS warning variables payload",
-      "id": 52,
+      "id": 53,
       "options": {
         "legend": {
           "showLegend": true
@@ -953,7 +978,7 @@
         "uid": "foundation"
       },
       "description": "Unique TLS warning detail fingerprints observed",
-      "id": 53,
+      "id": 54,
       "options": {
         "legend": {
           "showLegend": true
@@ -974,7 +999,7 @@
         "uid": "foundation"
       },
       "description": "Unique TLS warning variables fingerprints observed",
-      "id": 54,
+      "id": 55,
       "options": {
         "legend": {
           "showLegend": true
@@ -995,7 +1020,7 @@
         "uid": "foundation"
       },
       "description": "Cumulative TLS warning events grouped by detail fingerprint",
-      "id": 55,
+      "id": 56,
       "options": {
         "legend": {
           "showLegend": true
@@ -1016,7 +1041,7 @@
         "uid": "foundation"
       },
       "description": "Cumulative TLS warning events grouped by variables fingerprint",
-      "id": 56,
+      "id": 57,
       "options": {
         "legend": {
           "showLegend": true
@@ -1037,7 +1062,7 @@
         "uid": "foundation"
       },
       "description": "Number of active TLS warning snapshots after retention pruning",
-      "id": 57,
+      "id": 58,
       "options": {
         "legend": {
           "showLegend": false
@@ -1057,7 +1082,7 @@
         "uid": "foundation"
       },
       "description": "TLS warning snapshots exceeding the retention window",
-      "id": 58,
+      "id": 59,
       "options": {
         "legend": {
           "showLegend": false
@@ -1077,7 +1102,7 @@
         "uid": "foundation"
       },
       "description": "Configured TLS warning retention window in seconds",
-      "id": 59,
+      "id": 60,
       "options": {
         "legend": {
           "showLegend": false
@@ -1092,7 +1117,7 @@
       "type": "timeseries"
     },
     {
-      "id": 60,
+      "id": 61,
       "title": "Dependencies",
       "type": "row"
     },
@@ -1102,7 +1127,7 @@
         "uid": "foundation"
       },
       "description": "Policy violations detected by the dependency registry",
-      "id": 61,
+      "id": 62,
       "options": {
         "legend": {
           "showLegend": true
@@ -1123,7 +1148,7 @@
         "uid": "foundation"
       },
       "description": "Total dependency policy violations emitted by the registry",
-      "id": 62,
+      "id": 63,
       "options": {
         "legend": {
           "showLegend": false
@@ -1143,7 +1168,7 @@
         "uid": "foundation"
       },
       "description": "Outcome of the latest dependency registry check",
-      "id": 63,
+      "id": 64,
       "options": {
         "legend": {
           "showLegend": true
@@ -1164,7 +1189,7 @@
         "uid": "foundation"
       },
       "description": "Counts associated with dependency registry check outcomes",
-      "id": 64,
+      "id": 65,
       "options": {
         "legend": {
           "showLegend": true
@@ -1185,7 +1210,7 @@
         "uid": "foundation"
       },
       "description": "Total dependency policy violations detected during the last run",
-      "id": 65,
+      "id": 66,
       "options": {
         "legend": {
           "showLegend": false
@@ -1205,7 +1230,7 @@
         "uid": "foundation"
       },
       "description": "Dependency policy violations grouped by crate, version, kind, and depth",
-      "id": 66,
+      "id": 67,
       "options": {
         "legend": {
           "showLegend": true
@@ -1221,7 +1246,7 @@
       "type": "timeseries"
     },
     {
-      "id": 67,
+      "id": 68,
       "title": "Other",
       "type": "row"
     },
@@ -1230,7 +1255,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 68,
+      "id": 69,
       "options": {
         "legend": {
           "showLegend": false
@@ -1249,7 +1274,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 69,
+      "id": 70,
       "options": {
         "legend": {
           "showLegend": false
@@ -1268,7 +1293,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 70,
+      "id": 71,
       "options": {
         "legend": {
           "showLegend": false
@@ -1287,7 +1312,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 71,
+      "id": 72,
       "options": {
         "legend": {
           "showLegend": false
@@ -1306,7 +1331,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 72,
+      "id": 73,
       "options": {
         "legend": {
           "showLegend": false
@@ -1325,7 +1350,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 73,
+      "id": 74,
       "options": {
         "legend": {
           "showLegend": false
@@ -1344,7 +1369,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 74,
+      "id": 75,
       "options": {
         "legend": {
           "showLegend": false
@@ -1363,7 +1388,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 75,
+      "id": 76,
       "options": {
         "legend": {
           "showLegend": false
@@ -1382,7 +1407,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 76,
+      "id": 77,
       "options": {
         "legend": {
           "showLegend": false
@@ -1401,7 +1426,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 77,
+      "id": 78,
       "options": {
         "legend": {
           "showLegend": false
@@ -1420,7 +1445,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 78,
+      "id": 79,
       "options": {
         "legend": {
           "showLegend": false
@@ -1439,7 +1464,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 79,
+      "id": 80,
       "options": {
         "legend": {
           "showLegend": false
@@ -1458,7 +1483,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 80,
+      "id": 81,
       "options": {
         "legend": {
           "showLegend": false
@@ -1477,7 +1502,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 81,
+      "id": 82,
       "options": {
         "legend": {
           "showLegend": false
@@ -1496,7 +1521,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 82,
+      "id": 83,
       "options": {
         "legend": {
           "showLegend": false
@@ -1515,7 +1540,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 83,
+      "id": 84,
       "options": {
         "legend": {
           "showLegend": false
@@ -1534,7 +1559,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 84,
+      "id": 85,
       "options": {
         "legend": {
           "showLegend": false
@@ -1553,7 +1578,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 85,
+      "id": 86,
       "options": {
         "legend": {
           "showLegend": false
@@ -1572,7 +1597,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 86,
+      "id": 87,
       "options": {
         "legend": {
           "showLegend": false
@@ -1591,7 +1616,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 87,
+      "id": 88,
       "options": {
         "legend": {
           "showLegend": false
@@ -1610,7 +1635,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 88,
+      "id": 89,
       "options": {
         "legend": {
           "showLegend": false
@@ -1629,7 +1654,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 89,
+      "id": 90,
       "options": {
         "legend": {
           "showLegend": false
@@ -1648,7 +1673,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 90,
+      "id": 91,
       "options": {
         "legend": {
           "showLegend": false
@@ -1667,7 +1692,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 91,
+      "id": 92,
       "options": {
         "legend": {
           "showLegend": false
@@ -1686,7 +1711,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 92,
+      "id": 93,
       "options": {
         "legend": {
           "showLegend": false
@@ -1705,7 +1730,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 93,
+      "id": 94,
       "options": {
         "legend": {
           "showLegend": false
@@ -1724,7 +1749,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 94,
+      "id": 95,
       "options": {
         "legend": {
           "showLegend": false
@@ -1743,7 +1768,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 95,
+      "id": 96,
       "options": {
         "legend": {
           "showLegend": false
@@ -1762,7 +1787,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 96,
+      "id": 97,
       "options": {
         "legend": {
           "showLegend": false
@@ -1781,7 +1806,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 97,
+      "id": 98,
       "options": {
         "legend": {
           "showLegend": false
@@ -1800,7 +1825,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 98,
+      "id": 99,
       "options": {
         "legend": {
           "showLegend": false
@@ -1819,7 +1844,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 99,
+      "id": 100,
       "options": {
         "legend": {
           "showLegend": false
@@ -1838,7 +1863,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 100,
+      "id": 101,
       "options": {
         "legend": {
           "showLegend": false
@@ -1857,7 +1882,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 101,
+      "id": 102,
       "options": {
         "legend": {
           "showLegend": false
@@ -1876,7 +1901,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 102,
+      "id": 103,
       "options": {
         "legend": {
           "showLegend": false
@@ -1895,7 +1920,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 103,
+      "id": 104,
       "options": {
         "legend": {
           "showLegend": false
@@ -1914,7 +1939,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 104,
+      "id": 105,
       "options": {
         "legend": {
           "showLegend": false
@@ -1933,7 +1958,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 105,
+      "id": 106,
       "options": {
         "legend": {
           "showLegend": false
@@ -1952,7 +1977,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 106,
+      "id": 107,
       "options": {
         "legend": {
           "showLegend": false
@@ -1971,7 +1996,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 107,
+      "id": 108,
       "options": {
         "legend": {
           "showLegend": false
@@ -1990,7 +2015,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 108,
+      "id": 109,
       "options": {
         "legend": {
           "showLegend": false
@@ -2009,7 +2034,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 109,
+      "id": 110,
       "options": {
         "legend": {
           "showLegend": false
@@ -2028,7 +2053,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 110,
+      "id": 111,
       "options": {
         "legend": {
           "showLegend": false
@@ -2047,7 +2072,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 111,
+      "id": 112,
       "options": {
         "legend": {
           "showLegend": false
@@ -2066,7 +2091,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 112,
+      "id": 113,
       "options": {
         "legend": {
           "showLegend": false
@@ -2085,7 +2110,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 113,
+      "id": 114,
       "options": {
         "legend": {
           "showLegend": false
@@ -2104,7 +2129,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 114,
+      "id": 115,
       "options": {
         "legend": {
           "showLegend": false
@@ -2123,7 +2148,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 115,
+      "id": 116,
       "options": {
         "legend": {
           "showLegend": false
@@ -2142,7 +2167,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 116,
+      "id": 117,
       "options": {
         "legend": {
           "showLegend": false
@@ -2161,7 +2186,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 117,
+      "id": 118,
       "options": {
         "legend": {
           "showLegend": false
@@ -2180,7 +2205,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 118,
+      "id": 119,
       "options": {
         "legend": {
           "showLegend": false
@@ -2199,7 +2224,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 119,
+      "id": 120,
       "options": {
         "legend": {
           "showLegend": false
@@ -2218,7 +2243,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 120,
+      "id": 121,
       "options": {
         "legend": {
           "showLegend": false
@@ -2237,7 +2262,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 121,
+      "id": 122,
       "options": {
         "legend": {
           "showLegend": false
@@ -2256,7 +2281,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 122,
+      "id": 123,
       "options": {
         "legend": {
           "showLegend": false
@@ -2275,7 +2300,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 123,
+      "id": 124,
       "options": {
         "legend": {
           "showLegend": false
@@ -2294,7 +2319,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 124,
+      "id": 125,
       "options": {
         "legend": {
           "showLegend": false
@@ -2313,7 +2338,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 125,
+      "id": 126,
       "options": {
         "legend": {
           "showLegend": false
@@ -2332,7 +2357,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 126,
+      "id": 127,
       "options": {
         "legend": {
           "showLegend": false
@@ -2351,7 +2376,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 127,
+      "id": 128,
       "options": {
         "legend": {
           "showLegend": false
@@ -2370,7 +2395,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 128,
+      "id": 129,
       "options": {
         "legend": {
           "showLegend": false
@@ -2389,7 +2414,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 129,
+      "id": 130,
       "options": {
         "legend": {
           "showLegend": false
@@ -2408,7 +2433,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 130,
+      "id": 131,
       "options": {
         "legend": {
           "showLegend": false
@@ -2427,7 +2452,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 131,
+      "id": 132,
       "options": {
         "legend": {
           "showLegend": false
@@ -2446,7 +2471,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 132,
+      "id": 133,
       "options": {
         "legend": {
           "showLegend": false
@@ -2465,7 +2490,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 133,
+      "id": 134,
       "options": {
         "legend": {
           "showLegend": false
@@ -2484,7 +2509,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 134,
+      "id": 135,
       "options": {
         "legend": {
           "showLegend": false
@@ -2503,7 +2528,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 135,
+      "id": 136,
       "options": {
         "legend": {
           "showLegend": false
@@ -2522,7 +2547,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 136,
+      "id": 137,
       "options": {
         "legend": {
           "showLegend": false
@@ -2541,7 +2566,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 137,
+      "id": 138,
       "options": {
         "legend": {
           "showLegend": false
@@ -2560,7 +2585,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 138,
+      "id": 139,
       "options": {
         "legend": {
           "showLegend": false
@@ -2579,7 +2604,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 139,
+      "id": 140,
       "options": {
         "legend": {
           "showLegend": false
@@ -2598,7 +2623,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 140,
+      "id": 141,
       "options": {
         "legend": {
           "showLegend": false
@@ -2617,7 +2642,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 141,
+      "id": 142,
       "options": {
         "legend": {
           "showLegend": false
@@ -2636,7 +2661,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 142,
+      "id": 143,
       "options": {
         "legend": {
           "showLegend": false
@@ -2655,7 +2680,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 143,
+      "id": 144,
       "options": {
         "legend": {
           "showLegend": false
@@ -2674,7 +2699,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 144,
+      "id": 145,
       "options": {
         "legend": {
           "showLegend": false
@@ -2693,7 +2718,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 145,
+      "id": 146,
       "options": {
         "legend": {
           "showLegend": false
@@ -2712,7 +2737,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 146,
+      "id": 147,
       "options": {
         "legend": {
           "showLegend": false
@@ -2731,7 +2756,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 147,
+      "id": 148,
       "options": {
         "legend": {
           "showLegend": false
@@ -2750,7 +2775,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 148,
+      "id": 149,
       "options": {
         "legend": {
           "showLegend": false
@@ -2769,7 +2794,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 149,
+      "id": 150,
       "options": {
         "legend": {
           "showLegend": false
@@ -2788,7 +2813,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 150,
+      "id": 151,
       "options": {
         "legend": {
           "showLegend": false
@@ -2807,7 +2832,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 151,
+      "id": 152,
       "options": {
         "legend": {
           "showLegend": false
@@ -2826,7 +2851,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 152,
+      "id": 153,
       "options": {
         "legend": {
           "showLegend": false
@@ -2845,7 +2870,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 153,
+      "id": 154,
       "options": {
         "legend": {
           "showLegend": false
@@ -2864,7 +2889,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 154,
+      "id": 155,
       "options": {
         "legend": {
           "showLegend": false
@@ -2883,7 +2908,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 155,
+      "id": 156,
       "options": {
         "legend": {
           "showLegend": false
@@ -2902,7 +2927,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 156,
+      "id": 157,
       "options": {
         "legend": {
           "showLegend": false
@@ -2921,7 +2946,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 157,
+      "id": 158,
       "options": {
         "legend": {
           "showLegend": false
@@ -2940,7 +2965,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 158,
+      "id": 159,
       "options": {
         "legend": {
           "showLegend": false
@@ -2959,7 +2984,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 159,
+      "id": 160,
       "options": {
         "legend": {
           "showLegend": false
@@ -2978,7 +3003,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 160,
+      "id": 161,
       "options": {
         "legend": {
           "showLegend": false
@@ -2997,7 +3022,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 161,
+      "id": 162,
       "options": {
         "legend": {
           "showLegend": false
@@ -3016,7 +3041,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 162,
+      "id": 163,
       "options": {
         "legend": {
           "showLegend": false
@@ -3035,7 +3060,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 163,
+      "id": 164,
       "options": {
         "legend": {
           "showLegend": false
@@ -3054,7 +3079,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 164,
+      "id": 165,
       "options": {
         "legend": {
           "showLegend": false
@@ -3073,7 +3098,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 165,
+      "id": 166,
       "options": {
         "legend": {
           "showLegend": false
@@ -3092,7 +3117,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 166,
+      "id": 167,
       "options": {
         "legend": {
           "showLegend": false
@@ -3111,7 +3136,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 167,
+      "id": 168,
       "options": {
         "legend": {
           "showLegend": false
@@ -3130,7 +3155,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 168,
+      "id": 169,
       "options": {
         "legend": {
           "showLegend": false
@@ -3149,7 +3174,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 169,
+      "id": 170,
       "options": {
         "legend": {
           "showLegend": false
@@ -3168,7 +3193,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 170,
+      "id": 171,
       "options": {
         "legend": {
           "showLegend": false
@@ -3187,7 +3212,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 171,
+      "id": 172,
       "options": {
         "legend": {
           "showLegend": false
@@ -3206,7 +3231,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 172,
+      "id": 173,
       "options": {
         "legend": {
           "showLegend": false
@@ -3225,7 +3250,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 173,
+      "id": 174,
       "options": {
         "legend": {
           "showLegend": false
@@ -3244,7 +3269,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 174,
+      "id": 175,
       "options": {
         "legend": {
           "showLegend": false
@@ -3263,7 +3288,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 175,
+      "id": 176,
       "options": {
         "legend": {
           "showLegend": false
@@ -3282,7 +3307,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 176,
+      "id": 177,
       "options": {
         "legend": {
           "showLegend": false
@@ -3301,7 +3326,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 177,
+      "id": 178,
       "options": {
         "legend": {
           "showLegend": false
@@ -3320,7 +3345,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 178,
+      "id": 179,
       "options": {
         "legend": {
           "showLegend": false
@@ -3339,7 +3364,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 179,
+      "id": 180,
       "options": {
         "legend": {
           "showLegend": false
@@ -3358,7 +3383,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 180,
+      "id": 181,
       "options": {
         "legend": {
           "showLegend": false
@@ -3377,7 +3402,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 181,
+      "id": 182,
       "options": {
         "legend": {
           "showLegend": false
@@ -3396,7 +3421,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 182,
+      "id": 183,
       "options": {
         "legend": {
           "showLegend": false
@@ -3415,7 +3440,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 183,
+      "id": 184,
       "options": {
         "legend": {
           "showLegend": false
@@ -3434,7 +3459,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 184,
+      "id": 185,
       "options": {
         "legend": {
           "showLegend": false
@@ -3453,7 +3478,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 185,
+      "id": 186,
       "options": {
         "legend": {
           "showLegend": false
@@ -3472,7 +3497,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 186,
+      "id": 187,
       "options": {
         "legend": {
           "showLegend": false
@@ -3491,7 +3516,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 187,
+      "id": 188,
       "options": {
         "legend": {
           "showLegend": false
@@ -3510,7 +3535,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 188,
+      "id": 189,
       "options": {
         "legend": {
           "showLegend": false
@@ -3529,7 +3554,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 189,
+      "id": 190,
       "options": {
         "legend": {
           "showLegend": false
@@ -3548,7 +3573,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 190,
+      "id": 191,
       "options": {
         "legend": {
           "showLegend": false
@@ -3567,7 +3592,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 191,
+      "id": 192,
       "options": {
         "legend": {
           "showLegend": false
@@ -3586,7 +3611,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 192,
+      "id": 193,
       "options": {
         "legend": {
           "showLegend": false
@@ -3605,7 +3630,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 193,
+      "id": 194,
       "options": {
         "legend": {
           "showLegend": false
@@ -3624,7 +3649,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 194,
+      "id": 195,
       "options": {
         "legend": {
           "showLegend": false
@@ -3643,7 +3668,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 195,
+      "id": 196,
       "options": {
         "legend": {
           "showLegend": false
@@ -3662,7 +3687,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 196,
+      "id": 197,
       "options": {
         "legend": {
           "showLegend": false
@@ -3681,7 +3706,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 197,
+      "id": 198,
       "options": {
         "legend": {
           "showLegend": false
@@ -3700,7 +3725,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 198,
+      "id": 199,
       "options": {
         "legend": {
           "showLegend": false
@@ -3719,7 +3744,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 199,
+      "id": 200,
       "options": {
         "legend": {
           "showLegend": false
@@ -3738,7 +3763,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 200,
+      "id": 201,
       "options": {
         "legend": {
           "showLegend": false
@@ -3757,7 +3782,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 201,
+      "id": 202,
       "options": {
         "legend": {
           "showLegend": false
@@ -3776,7 +3801,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 202,
+      "id": 203,
       "options": {
         "legend": {
           "showLegend": false
@@ -3795,7 +3820,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 203,
+      "id": 204,
       "options": {
         "legend": {
           "showLegend": false
@@ -3814,7 +3839,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 204,
+      "id": 205,
       "options": {
         "legend": {
           "showLegend": false
@@ -3833,7 +3858,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 205,
+      "id": 206,
       "options": {
         "legend": {
           "showLegend": false
@@ -3852,7 +3877,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 206,
+      "id": 207,
       "options": {
         "legend": {
           "showLegend": false
@@ -3871,7 +3896,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 207,
+      "id": 208,
       "options": {
         "legend": {
           "showLegend": false
@@ -3890,7 +3915,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 208,
+      "id": 209,
       "options": {
         "legend": {
           "showLegend": false
@@ -3909,7 +3934,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 209,
+      "id": 210,
       "options": {
         "legend": {
           "showLegend": false
@@ -3928,7 +3953,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 210,
+      "id": 211,
       "options": {
         "legend": {
           "showLegend": false
@@ -3947,7 +3972,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 211,
+      "id": 212,
       "options": {
         "legend": {
           "showLegend": false
@@ -3966,7 +3991,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 212,
+      "id": 213,
       "options": {
         "legend": {
           "showLegend": false
@@ -3985,7 +4010,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 213,
+      "id": 214,
       "options": {
         "legend": {
           "showLegend": false
@@ -4004,7 +4029,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 214,
+      "id": 215,
       "options": {
         "legend": {
           "showLegend": false
@@ -4023,7 +4048,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 215,
+      "id": 216,
       "options": {
         "legend": {
           "showLegend": false
@@ -4042,7 +4067,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 216,
+      "id": 217,
       "options": {
         "legend": {
           "showLegend": false
@@ -4061,7 +4086,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 217,
+      "id": 218,
       "options": {
         "legend": {
           "showLegend": false
@@ -4080,7 +4105,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 218,
+      "id": 219,
       "options": {
         "legend": {
           "showLegend": false
@@ -4099,7 +4124,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 219,
+      "id": 220,
       "options": {
         "legend": {
           "showLegend": false
@@ -4118,7 +4143,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 220,
+      "id": 221,
       "options": {
         "legend": {
           "showLegend": false
@@ -4137,7 +4162,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 221,
+      "id": 222,
       "options": {
         "legend": {
           "showLegend": false
@@ -4156,7 +4181,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 222,
+      "id": 223,
       "options": {
         "legend": {
           "showLegend": false
@@ -4175,7 +4200,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 223,
+      "id": 224,
       "options": {
         "legend": {
           "showLegend": false
@@ -4194,7 +4219,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 224,
+      "id": 225,
       "options": {
         "legend": {
           "showLegend": false
@@ -4213,7 +4238,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 225,
+      "id": 226,
       "options": {
         "legend": {
           "showLegend": false
@@ -4232,7 +4257,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 226,
+      "id": 227,
       "options": {
         "legend": {
           "showLegend": false
@@ -4251,7 +4276,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 227,
+      "id": 228,
       "options": {
         "legend": {
           "showLegend": false
@@ -4270,7 +4295,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 228,
+      "id": 229,
       "options": {
         "legend": {
           "showLegend": false
@@ -4289,7 +4314,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 229,
+      "id": 230,
       "options": {
         "legend": {
           "showLegend": false
@@ -4308,7 +4333,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 230,
+      "id": 231,
       "options": {
         "legend": {
           "showLegend": false
@@ -4327,7 +4352,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 231,
+      "id": 232,
       "options": {
         "legend": {
           "showLegend": false
@@ -4346,7 +4371,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 232,
+      "id": 233,
       "options": {
         "legend": {
           "showLegend": false
@@ -4365,7 +4390,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 233,
+      "id": 234,
       "options": {
         "legend": {
           "showLegend": false
@@ -4384,7 +4409,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 234,
+      "id": 235,
       "options": {
         "legend": {
           "showLegend": false
@@ -4403,7 +4428,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 235,
+      "id": 236,
       "options": {
         "legend": {
           "showLegend": false
@@ -4422,7 +4447,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 236,
+      "id": 237,
       "options": {
         "legend": {
           "showLegend": false
@@ -4441,7 +4466,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 237,
+      "id": 238,
       "options": {
         "legend": {
           "showLegend": false

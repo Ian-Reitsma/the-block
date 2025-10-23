@@ -8,6 +8,7 @@ pub mod identity;
 pub mod json_helpers;
 pub mod light_client;
 pub mod parse_utils;
+pub mod remediation;
 pub mod rpc;
 pub mod tls;
 pub mod tx;

@@ -68,18 +68,21 @@ the newly instrumented counters. Panels plot five-minute deltas for
 `bridge_liquidity_locked_total{asset}`, `bridge_liquidity_unlocked_total{asset}`,
 `bridge_liquidity_minted_total{asset}`, and
 `bridge_liquidity_burned_total{asset}` so operators can correlate reward spikes
-with asset-specific inflows and outflows. The row closes with three remediation
-panels: `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))`
+with asset-specific inflows and outflows. The row now closes with four
+remediation panels: `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))`
 continues to display the recommended playbook, a companion panel charts
 `sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))`
 so dispatch successes, skips, and failures by target surface directly on the
-dashboard, and the new acknowledgement panel tracks
+dashboard, the acknowledgement panel tracks
 `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
 so downstream paging/governance hooks prove they have acknowledged or closed the
-playbook. Operators can filter every legend to drill into a specific asset,
-playbook, target, status, or acknowledgement state, and the same queries back
-the HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
-instances to monitor bridge health.
+playbook, and a new histogram overlay renders
+`histogram_quantile(0.50|0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))`
+so operators can monitor acknowledgement latency per playbook before escalation
+windows expire. Operators can filter every legend to drill into a specific
+asset, playbook, target, status, acknowledgement state, or latency bucket, and
+the same queries back the HTML snapshot so FIRST_PARTY_ONLY deployments never
+rely on external Grafana instances to monitor bridge health.
 
 Pending follow-ups are now automated by policy instead of manual sweeps. Each
 remediation action records `dispatch_attempts`, `auto_retry_count`, retry
@@ -93,6 +96,21 @@ state. New bridge alerts—`BridgeRemediationAckPending` and
 `BridgeRemediationClosureMissing`—fan out from the same counter to warn when
 acknowledgements stall or closures never arrive, keeping paging/escalation
 coverage entirely first party.
+
+Policy windows now vary per playbook. `TB_REMEDIATION_ACK_RETRY_SECS`,
+`TB_REMEDIATION_ACK_ESCALATE_SECS`, and `TB_REMEDIATION_ACK_MAX_RETRIES` continue
+to seed the defaults, while suffix overrides like
+`TB_REMEDIATION_ACK_RETRY_SECS_GOVERNANCE_ESCALATION` (and the matching
+`_ESCALATE_SECS`/`_MAX_RETRIES`) let operators tighten or relax the retry and
+escalation thresholds for sensitive hooks without recompiling. Completion
+latency feeds the new `bridge_remediation_ack_latency_seconds{playbook,state}`
+histogram so the Grafana row and HTML snapshot plot p50/p95 acknowledgement
+times alongside the dispatch counters, exposing slow hooks before the policy
+window expires. The CLI gained a first-party view as well:
+`contract remediation bridge --aggregator http://agg:9000` prints the most recent
+actions with retry history, follow-up notes, acknowledgement metadata, and the
+matching dispatch log so operators can triage a backlog directly from the
+aggregator without invoking external tooling.
 
 The metrics aggregator now watches those counters for anomalous spikes. A
 rolling detector maintains a 24-sample baseline per peer/metric/label set and

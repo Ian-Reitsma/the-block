@@ -24,15 +24,17 @@ ready to import once the foundation telemetry stack is running.
   `bridge_liquidity_unlocked_total{asset}`,
   `bridge_liquidity_minted_total{asset}`, and
   `bridge_liquidity_burned_total{asset}` to surface cross-chain liquidity flow.
-  Remediation coverage now spans three panels: one renders
+  Remediation coverage now spans four panels: one renders
   `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))` to
   display the recommended playbook alongside each anomaly, a second charts
   `sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))`
   so dispatch successes, skips, and failures per target stay visible without
-  leaving the dashboard, and the new acknowledgement panel tracks
+  leaving the dashboard, a third acknowledgement counter panel tracks
   `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
   so operators can confirm downstream paging/governance hooks acknowledged or
-  closed out each playbook.
+  closed out each playbook, and a latency histogram overlays p50/p95 curves from
+  `bridge_remediation_ack_latency_seconds{playbook,state}` so slow closures raise
+  flags before escalation windows expire.
 - The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
   bridge row. A rolling detector keeps a per-peer baseline for the reward,
   approval, settlement, and dispute counters, increments
@@ -69,10 +71,21 @@ ready to import once the foundation telemetry stack is running.
   follow-up notes so the engine can queue deterministic retries and governance
   escalations when policy thresholds expire. The acknowledgement parser accepts
   plain-text hook responses as well as JSON, mapping strings like `"ack pager"`
-  or `"closed: resolved"` into structured records. New alerts—
+  or `"closed: resolved"` into structured records. Retry and escalation windows
+  respect `TB_REMEDIATION_ACK_RETRY_SECS`, `_ESCALATE_SECS`, and `_MAX_RETRIES`
+  defaults plus suffix overrides such as
+  `TB_REMEDIATION_ACK_RETRY_SECS_GOVERNANCE_ESCALATION` for playbook-specific
+  tuning. Completion latency feeds the
+  `bridge_remediation_ack_latency_seconds{playbook,state}` histogram that powers
+  the new dashboard panel. New alerts—
   `BridgeRemediationAckPending` and `BridgeRemediationClosureMissing`—read the
   persisted acknowledgement counter and page when hooks stall or never close,
   rounding out the first-party paging/escalation loop.
+- Use `contract remediation bridge --aggregator http://localhost:9000 --limit 5`
+  during incidents to print the persisted actions, retry history, follow-up
+  notes, acknowledgement timestamps, and dispatch log straight from the
+  aggregator without relying on external tooling. The CLI consumes the same
+  JSON endpoints that power the dashboards and keeps everything first party.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression

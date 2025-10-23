@@ -1,4 +1,9 @@
 # System-Wide Economic Changes
+> **Review (2025-10-25, evening):** Per-playbook acknowledgement policy now
+> honours `TB_REMEDIATION_ACK_*` overrides, the aggregator records completion
+> latency in a dedicated histogram, Grafana/HTML snapshots plot p50/p95
+> acknowledgement times, and the first-party `contract remediation bridge`
+> command renders the persisted actions/dispatch log for operators.
 > **Review (2025-10-25, afternoon):** Remediation follow-ups are now automated.
 > The aggregator tracks `dispatch_attempts`, `auto_retry_count`, retry timestamps,
 > and follow-up notes per action, queues automatic re-dispatches when the
@@ -264,6 +269,46 @@ Grafana dashboards sprout hashed TLS fingerprint gauges, unique-fingerprint tall
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, serialization, SQLite, TUI, TLS, and HTTP env facades are live with governance overrides enforced (2025-10-11).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
+
+## Bridge Remediation Latency & CLI Overhaul (2025-10-25)
+
+### Rationale
+
+- **Policy tuning needed per playbook:** Paging hooks and governance
+  escalations require different retry windows; a single global timer caused
+  premature escalations or slow follow-ups.
+- **Latency visibility missing:** Operators could confirm acknowledgements, but
+  not how long each playbook took to close, making it hard to justify policy
+  changes or spot slow hooks before paging loops triggered.
+- **First-party triage tooling gap:** JSON endpoints existed, yet incident
+  review still required ad-hoc curls; a structured CLI workflow keeps bridge
+  remediation inside the first-party toolchain.
+
+### Implementation Summary
+
+- Introduced `BridgeRemediationAckPolicy` so the aggregator reads
+  `TB_REMEDIATION_ACK_RETRY_SECS`, `_ESCALATE_SECS`, `_MAX_RETRIES`, and
+  suffix overrides (e.g., `_GOVERNANCE_ESCALATION`) when computing retry and
+  escalation windows for each playbook.
+- Recorded acknowledgement completion latency in the new
+  `bridge_remediation_ack_latency_seconds{playbook,state}` histogram and wired
+  Grafana/HTML snapshot panels to render p50/p95 curves alongside the existing
+  dispatch/ack counters.
+- Added the `contract remediation bridge` command (with parsing, HTTP fetch,
+  rendering helpers, and tests) so operators can list recent actions,
+  acknowledgements, retries, and dispatch history directly from the CLI using
+  the first-party HTTP client.
+
+### Operational Impact
+
+- **Operations** can dial retry/escalation thresholds per playbook with env
+  overrides and see the effect immediately on dashboards, snapshots, and CLI
+  output.
+- **On-call triage** gains a turnkey CLI view of the persisted remediation
+  state, eliminating custom curl pipelines while preserving FIRST_PARTY_ONLY
+  guarantees.
+- **Metrics & alerts** now surface acknowledgement latency trends, enabling
+  proactive governance review when hooks approach escalation thresholds.
 
 ## Runtime WorkQueue Replacement (2025-10-12)
 

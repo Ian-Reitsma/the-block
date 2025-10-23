@@ -313,6 +313,15 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge remediation acknowledgement latency grouped by playbook and state",
+      "labels": [
+        "playbook",
+        "state"
+      ],
+      "name": "bridge_remediation_ack_latency_seconds"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

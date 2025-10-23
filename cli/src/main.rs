@@ -50,6 +50,7 @@ mod light_sync;
 mod logs;
 mod net;
 mod parse_utils;
+mod remediation;
 mod rpc;
 mod scheduler;
 mod service_badge;
@@ -89,6 +90,8 @@ use logs::handle as handle_logs;
 use logs::LogCmd;
 use net::handle as handle_net;
 use net::NetCmd;
+use remediation::handle as handle_remediation;
+use remediation::RemediationCmd;
 use scheduler::handle as handle_scheduler;
 use scheduler::SchedulerCmd;
 use service_badge::handle as handle_service_badge;
@@ -259,6 +262,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_bridge(cmd);
             Ok(())
         }
+        "remediation" => {
+            let cmd = RemediationCmd::from_matches(sub_matches)?;
+            handle_remediation(cmd);
+            Ok(())
+        }
         "gov" => {
             let cmd = GovCmd::from_matches(sub_matches)?;
             handle_gov(cmd);
@@ -347,6 +355,7 @@ fn build_root_command() -> Command {
         .subcommand(SystemCmd::command())
         .subcommand(TlsCmd::command())
         .subcommand(BridgeCmd::command())
+        .subcommand(RemediationCmd::command())
         .subcommand(GovCmd::command())
         .subcommand(HtlcCmd::command())
         .subcommand(LightSyncCmd::command())

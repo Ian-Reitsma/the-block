@@ -160,6 +160,9 @@ const BRIDGE_REMEDIATION_ACK_PANEL_TITLE: &str =
 const BRIDGE_REMEDIATION_ACK_EXPR: &str =
     "sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))";
 const BRIDGE_REMEDIATION_ACK_LEGEND: &str = "{{action}} · {{target}} · {{state}}";
+const BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE: &str =
+    "bridge_remediation_ack_latency_seconds (p50/p95)";
+const BRIDGE_REMEDIATION_ACK_LATENCY_METRIC: &str = "bridge_remediation_ack_latency_seconds";
 const BRIDGE_ANOMALY_PANEL_TITLE: &str = "bridge_anomaly_total (5m delta)";
 const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
@@ -420,6 +423,10 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             ));
             continue;
         }
+        if metric.name == BRIDGE_REMEDIATION_ACK_LATENCY_METRIC {
+            bridge.push(build_bridge_ack_latency_panel(metric));
+            continue;
+        }
         if metric.name == "bridge_anomaly_total" {
             bridge.push(build_bridge_delta_panel(
                 BRIDGE_ANOMALY_PANEL_TITLE,
@@ -662,6 +669,49 @@ fn build_bridge_grouped_delta_panel(
     target.insert("expr".into(), Value::from(expr));
     target.insert("legendFormat".into(), Value::from(legend_format));
     panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_bridge_ack_latency_panel(metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert(
+        "title".into(),
+        Value::from(BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE),
+    );
+    if !metric.description.is_empty() {
+        panel.insert("description".into(), Value::from(metric.description.clone()));
+    }
+
+    let quantiles = [(0.5, "p50"), (0.95, "p95")];
+    let mut targets = Vec::new();
+    for (quantile, label) in quantiles {
+        let expr = format!(
+            "histogram_quantile({:.2}, sum by (le, playbook, state)(rate({}_bucket[5m])))",
+            quantile,
+            BRIDGE_REMEDIATION_ACK_LATENCY_METRIC
+        );
+        let mut target = Map::new();
+        target.insert("expr".into(), Value::from(expr));
+        target.insert(
+            "legendFormat".into(),
+            Value::from(format!("{{playbook}} · {{state}} · {}", label)),
+        );
+        targets.push(Value::Object(target));
+    }
+    panel.insert("targets".into(), Value::Array(targets));
 
     let mut legend = Map::new();
     legend.insert("showLegend".into(), Value::from(true));
@@ -1542,6 +1592,12 @@ mod tests {
                 deprecated: false,
             },
             Metric {
+                name: "bridge_remediation_ack_latency_seconds".into(),
+                description: String::new(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
                 name: "bridge_metric_delta".into(),
                 description: String::new(),
                 unit: String::new(),
@@ -1564,7 +1620,7 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 15);
+        assert_eq!(panels.len(), 16);
 
         let row = panels
             .iter()
@@ -1669,6 +1725,61 @@ mod tests {
             .and_then(Value::as_str)
             .expect("dispatch legend format");
         assert_eq!(dispatch_legend, BRIDGE_REMEDIATION_DISPATCH_LEGEND);
+
+        let ack_latency_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("ack latency panel present");
+        let latency_targets = ack_latency_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .expect("ack latency targets");
+        assert_eq!(latency_targets.len(), 2);
+        let latency_expr_first = latency_targets
+            .get(0)
+            .and_then(Value::as_object)
+            .and_then(|map| map.get("expr"))
+            .and_then(Value::as_str)
+            .expect("ack latency p50 expr");
+        assert_eq!(
+            latency_expr_first,
+            "histogram_quantile(0.50, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))"
+        );
+        let latency_legend_first = latency_targets
+            .get(0)
+            .and_then(Value::as_object)
+            .and_then(|map| map.get("legendFormat"))
+            .and_then(Value::as_str)
+            .expect("ack latency p50 legend");
+        assert_eq!(latency_legend_first, "{playbook} · {state} · p50");
+        let latency_expr_second = latency_targets
+            .get(1)
+            .and_then(Value::as_object)
+            .and_then(|map| map.get("expr"))
+            .and_then(Value::as_str)
+            .expect("ack latency p95 expr");
+        assert_eq!(
+            latency_expr_second,
+            "histogram_quantile(0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))"
+        );
+        let latency_legend_second = latency_targets
+            .get(1)
+            .and_then(Value::as_object)
+            .and_then(|map| map.get("legendFormat"))
+            .and_then(Value::as_str)
+            .expect("ack latency p95 legend");
+        assert_eq!(latency_legend_second, "{playbook} · {state} · p95");
 
         let delta_panel = panels
             .iter()

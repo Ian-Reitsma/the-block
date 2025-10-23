@@ -14,7 +14,8 @@ use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
 use runtime::telemetry::{
-    Counter, CounterVec, Gauge, GaugeVec, Histogram, HistogramOpts, IntGaugeVec, Opts, Registry,
+    Counter, CounterVec, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntGaugeVec,
+    Opts, Registry,
 };
 use runtime::{spawn, spawn_blocking};
 use std::convert::TryFrom;
@@ -145,10 +146,13 @@ const BRIDGE_REMEDIATION_RUNBOOK_PATH: &str =
     "docs/operators/incident_playbook.md#bridge-liquidity-remediation";
 const BRIDGE_REMEDIATION_DISPATCH_ENDPOINT: &str = "/remediation/bridge/dispatches";
 const BRIDGE_REMEDIATION_ACK_PANEL: &str = "bridge_remediation_dispatch_ack_total (5m delta)";
+const BRIDGE_REMEDIATION_ACK_LATENCY_PANEL: &str =
+    "bridge_remediation_ack_latency_seconds (p50/p95)";
 const BRIDGE_REMEDIATION_BASE_PANELS: &[&str] = &[
     "bridge_remediation_action_total (5m delta)",
     "bridge_remediation_dispatch_total (5m delta)",
     BRIDGE_REMEDIATION_ACK_PANEL,
+    BRIDGE_REMEDIATION_ACK_LATENCY_PANEL,
 ];
 const BRIDGE_LIQUIDITY_PANELS: &[&str] = &[
     "bridge_liquidity_locked_total (5m delta)",
@@ -194,6 +198,8 @@ const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
 const METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL: &str = "bridge_remediation_action_total";
 const METRIC_BRIDGE_REMEDIATION_DISPATCH_TOTAL: &str = "bridge_remediation_dispatch_total";
 const METRIC_BRIDGE_REMEDIATION_DISPATCH_ACK_TOTAL: &str = "bridge_remediation_dispatch_ack_total";
+const METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS: &str =
+    "bridge_remediation_ack_latency_seconds";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -1463,6 +1469,7 @@ struct AggregatorMetrics {
     bridge_remediation_action_total: CounterVec,
     bridge_remediation_dispatch_total: CounterVec,
     bridge_remediation_dispatch_ack_total: CounterVec,
+    bridge_remediation_ack_latency_seconds: HistogramVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2600,6 +2607,20 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(bridge_remediation_dispatch_ack_total.clone()))
         .expect("register bridge_remediation_dispatch_ack_total");
+    let bridge_remediation_ack_latency_seconds = HistogramVec::new(
+        HistogramOpts::new(
+            METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS,
+            "Bridge remediation acknowledgement latency grouped by playbook and state",
+        )
+        .buckets(vec![
+            30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1_800.0, 3_600.0, 7_200.0,
+        ]),
+        &["playbook", "state"],
+    )
+    .expect("build bridge_remediation_ack_latency_seconds histogram vec");
+    registry
+        .register(Box::new(bridge_remediation_ack_latency_seconds.clone()))
+        .expect("register bridge_remediation_ack_latency_seconds");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2640,6 +2661,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_action_total,
         bridge_remediation_dispatch_total,
         bridge_remediation_dispatch_ack_total,
+        bridge_remediation_ack_latency_seconds,
     }
 });
 
@@ -3435,7 +3457,7 @@ impl BridgeRemediationActionType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum BridgeRemediationPlaybook {
     None,
     IncentiveThrottle,
@@ -4351,6 +4373,17 @@ fn record_dispatch_outcome(
             status,
         )
     });
+    if let (Some(updated_action), Some(ack)) = (updated_action.as_ref(), acknowledgement.as_ref()) {
+        if ack.is_completion() {
+            if let Some(first_dispatch_at) = updated_action.first_dispatch_at {
+                let latency = ack.timestamp.saturating_sub(first_dispatch_at) as f64;
+                metrics
+                    .bridge_remediation_ack_latency_seconds
+                    .with_label_values(&[updated_action.playbook.as_str(), ack.state.as_str()])
+                    .observe(latency);
+            }
+        }
+    }
     let record_action = updated_action.unwrap_or_else(|| action.clone());
     let record = BridgeRemediationDispatchRecord::new(
         record_action,
@@ -4703,28 +4736,14 @@ struct BridgeAnomalyDetector {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct BridgeRemediationAckPolicy {
+struct BridgeRemediationAckTiming {
     retry_after_secs: u64,
     escalate_after_secs: u64,
     max_retries: u32,
 }
 
-impl BridgeRemediationAckPolicy {
-    fn from_env() -> Self {
-        let retry_after_secs = env::var(ENV_REMEDIATION_ACK_RETRY_SECS)
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(BRIDGE_REMEDIATION_ACK_RETRY_SECS);
-        let escalate_after_secs = env::var(ENV_REMEDIATION_ACK_ESCALATE_SECS)
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(BRIDGE_REMEDIATION_ACK_ESCALATE_SECS);
-        let max_retries = env::var(ENV_REMEDIATION_ACK_MAX_RETRIES)
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(BRIDGE_REMEDIATION_ACK_MAX_RETRIES);
+impl BridgeRemediationAckTiming {
+    fn new(retry_after_secs: u64, escalate_after_secs: u64, max_retries: u32) -> Self {
         let escalate_after_secs = escalate_after_secs.max(retry_after_secs);
         Self {
             retry_after_secs,
@@ -4732,15 +4751,124 @@ impl BridgeRemediationAckPolicy {
             max_retries,
         }
     }
+
+    fn from_env_keys(
+        retry_key: &str,
+        escalate_key: &str,
+        max_key: &str,
+        fallback: BridgeRemediationAckTiming,
+    ) -> (Self, bool) {
+        let mut seen = false;
+
+        let retry_after_secs = env::var(retry_key)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(|value| {
+                seen = true;
+                value
+            })
+            .unwrap_or(fallback.retry_after_secs);
+
+        let escalate_after_secs = env::var(escalate_key)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(|value| {
+                seen = true;
+                value
+            })
+            .unwrap_or(fallback.escalate_after_secs);
+
+        let max_retries = env::var(max_key)
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .map(|value| {
+                seen = true;
+                value
+            })
+            .unwrap_or(fallback.max_retries);
+
+        (
+            Self::new(retry_after_secs, escalate_after_secs, max_retries),
+            seen,
+        )
+    }
+}
+
+impl Default for BridgeRemediationAckTiming {
+    fn default() -> Self {
+        Self::new(
+            BRIDGE_REMEDIATION_ACK_RETRY_SECS,
+            BRIDGE_REMEDIATION_ACK_ESCALATE_SECS,
+            BRIDGE_REMEDIATION_ACK_MAX_RETRIES,
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BridgeRemediationAckPolicy {
+    default: BridgeRemediationAckTiming,
+    overrides: HashMap<BridgeRemediationPlaybook, BridgeRemediationAckTiming>,
+}
+
+impl BridgeRemediationAckPolicy {
+    fn from_env() -> Self {
+        let default = BridgeRemediationAckTiming::from_env_keys(
+            ENV_REMEDIATION_ACK_RETRY_SECS,
+            ENV_REMEDIATION_ACK_ESCALATE_SECS,
+            ENV_REMEDIATION_ACK_MAX_RETRIES,
+            BridgeRemediationAckTiming::default(),
+        )
+        .0;
+
+        let mut overrides = HashMap::new();
+        let base = default;
+
+        let playbook_suffixes = [
+            (BridgeRemediationPlaybook::None, "NONE"),
+            (
+                BridgeRemediationPlaybook::IncentiveThrottle,
+                "INCENTIVE_THROTTLE",
+            ),
+            (
+                BridgeRemediationPlaybook::GovernanceEscalation,
+                "GOVERNANCE_ESCALATION",
+            ),
+        ];
+
+        for (playbook, suffix) in playbook_suffixes {
+            let retry_key = format!("{}_{}", ENV_REMEDIATION_ACK_RETRY_SECS, suffix);
+            let escalate_key = format!("{}_{}", ENV_REMEDIATION_ACK_ESCALATE_SECS, suffix);
+            let max_key = format!("{}_{}", ENV_REMEDIATION_ACK_MAX_RETRIES, suffix);
+            let (timing, seen) = BridgeRemediationAckTiming::from_env_keys(
+                &retry_key,
+                &escalate_key,
+                &max_key,
+                base,
+            );
+            if seen {
+                overrides.insert(playbook, timing);
+            }
+        }
+
+        Self {
+            default: base,
+            overrides,
+        }
+    }
+
+    fn timing_for(&self, playbook: BridgeRemediationPlaybook) -> BridgeRemediationAckTiming {
+        self.overrides
+            .get(&playbook)
+            .copied()
+            .unwrap_or(self.default)
+    }
 }
 
 impl Default for BridgeRemediationAckPolicy {
     fn default() -> Self {
-        Self {
-            retry_after_secs: BRIDGE_REMEDIATION_ACK_RETRY_SECS,
-            escalate_after_secs: BRIDGE_REMEDIATION_ACK_ESCALATE_SECS,
-            max_retries: BRIDGE_REMEDIATION_ACK_MAX_RETRIES,
-        }
+        Self::from_env()
     }
 }
 
@@ -4891,6 +5019,7 @@ impl BridgeRemediationEngine {
             if stored.dispatch_attempts == 0 {
                 continue;
             }
+            let timing = self.ack_policy.timing_for(stored.playbook);
             let pending_since = stored
                 .pending_since
                 .or(stored.first_dispatch_at)
@@ -4898,14 +5027,14 @@ impl BridgeRemediationEngine {
             let elapsed = now.saturating_sub(pending_since);
             let retry_due = stored
                 .last_dispatch_at
-                .map(|last| now.saturating_sub(last) >= self.ack_policy.retry_after_secs)
+                .map(|last| now.saturating_sub(last) >= timing.retry_after_secs)
                 .unwrap_or(false);
             let retry_window_ok = stored
                 .last_auto_retry_at
-                .map(|last| now.saturating_sub(last) >= self.ack_policy.retry_after_secs)
+                .map(|last| now.saturating_sub(last) >= timing.retry_after_secs)
                 .unwrap_or(true);
 
-            if elapsed >= self.ack_policy.escalate_after_secs
+            if elapsed >= timing.escalate_after_secs
                 && !stored.pending_escalated
                 && stored.action != BridgeRemediationActionType::Escalate
             {
@@ -4954,14 +5083,14 @@ impl BridgeRemediationEngine {
                 continue;
             }
 
-            if self.ack_policy.max_retries == 0 {
+            if timing.max_retries == 0 {
                 continue;
             }
 
-            if elapsed >= self.ack_policy.retry_after_secs
+            if elapsed >= timing.retry_after_secs
                 && retry_due
                 && retry_window_ok
-                && stored.auto_retry_count < self.ack_policy.max_retries
+                && stored.auto_retry_count < timing.max_retries
             {
                 stored.auto_retry_count = stored.auto_retry_count.saturating_add(1);
                 stored.last_auto_retry_at = Some(now);
