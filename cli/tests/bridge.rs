@@ -268,6 +268,66 @@ fn bridge_reward_claims_paginates_requests() {
 }
 
 #[test]
+fn bridge_reward_accruals_paginates_requests() {
+    let accruals_response = ok_response(json_object([
+        (
+            "accruals",
+            JsonValue::Array(vec![json_object([
+                ("id", json_number(3)),
+                ("relayer", json_string("carol")),
+                ("asset", json_string("btc")),
+                ("user", json_string("alice")),
+                ("amount", json_number(25)),
+                ("duty_id", json_number(9)),
+                ("duty_kind", json_string("settlement")),
+                ("commitment", json_string("0xfeed")),
+                ("settlement_chain", json_string("bitcoin-mainnet")),
+                ("proof_hash", json_string("0xdead")),
+                (
+                    "bundle_relayers",
+                    JsonValue::Array(vec![json_string("carol"), json_string("dave")]),
+                ),
+                ("recorded_at", json_number(1200)),
+            ])]),
+        ),
+        ("next_cursor", json_number(40)),
+    ]));
+    let mock = MockTransport::new(vec![accruals_response.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::RewardAccruals {
+            relayer: Some("carol".into()),
+            asset: Some("btc".into()),
+            cursor: Some(30),
+            limit: 15,
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("reward accruals command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope(
+        "bridge.reward_accruals",
+        json_object([
+            ("relayer", json_string("carol")),
+            ("asset", json_string("btc")),
+            ("cursor", json_number(30)),
+            ("limit", json_number(15)),
+        ]),
+    );
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, accruals_response);
+}
+
+#[test]
 fn bridge_settlement_log_paginates_requests() {
     let settlement_log = ok_response(json_object([
         (

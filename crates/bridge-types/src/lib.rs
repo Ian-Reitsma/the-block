@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Governance-controlled incentive parameters shared across the node, CLI, and
@@ -238,6 +239,35 @@ impl RelayerAccounting {
     }
 }
 
+/// Deterministically derives the settlement proof digest that relayers must
+/// submit when finalising a withdrawal on an external chain. The digest ties
+/// together the withdrawal commitment, settlement metadata, and bundle roster so
+/// governance can reproduce the attestation without relying on opaque hashes.
+pub fn settlement_proof_digest(
+    asset: &str,
+    commitment: &[u8; 32],
+    settlement_chain: &str,
+    settlement_height: u64,
+    user: &str,
+    amount: u64,
+    relayers: &[String],
+) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(asset.as_bytes());
+    hasher.update(commitment);
+    hasher.update(settlement_chain.as_bytes());
+    hasher.update(&settlement_height.to_le_bytes());
+    hasher.update(user.as_bytes());
+    hasher.update(&amount.to_le_bytes());
+    let mut roster: Vec<&str> = relayers.iter().map(|id| id.as_str()).collect();
+    roster.sort_unstable();
+    roster.dedup();
+    for relayer in roster {
+        hasher.update(relayer.as_bytes());
+    }
+    *hasher.finalize().as_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +323,17 @@ mod tests {
         let decoded = DutyRecord::deserialize(&value).expect("decode settlement duty");
         assert_eq!(decoded.commitment(), Some([9u8; 32]));
         assert_eq!(decoded.completed_reward(), 12);
+    }
+
+    #[test]
+    fn settlement_proof_digest_orders_relayers() {
+        let commitment = [42u8; 32];
+        let mut relayers = vec!["r2".to_string(), "r1".to_string(), "r2".to_string()];
+        let digest_a =
+            settlement_proof_digest("native", &commitment, "solana", 55, "alice", 40, &relayers);
+        relayers.reverse();
+        let digest_b =
+            settlement_proof_digest("native", &commitment, "solana", 55, "alice", 40, &relayers);
+        assert_eq!(digest_a, digest_b);
     }
 }

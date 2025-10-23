@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use bridge_types::{BridgeIncentiveParameters, DutyStatus, ExternalSettlementProof};
+use bridge_types::{
+    settlement_proof_digest, BridgeIncentiveParameters, DutyStatus, ExternalSettlementProof,
+};
 use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header, Proof},
@@ -463,10 +465,19 @@ fn settlement_proof_flow_records_and_audits() {
         .unwrap_err();
     assert!(matches!(err, BridgeError::SettlementProofRequired { .. }));
 
+    let wrong_hash = settlement_proof_digest(
+        "native",
+        &commitment,
+        "ethereum",
+        55,
+        "erin",
+        40,
+        &bundle.relayer_ids(),
+    );
     let wrong_proof = ExternalSettlementProof {
         commitment,
         settlement_chain: "ethereum".into(),
-        proof_hash: [1u8; 32],
+        proof_hash: wrong_hash,
         settlement_height: 55,
     };
     let err = bridge
@@ -477,10 +488,35 @@ fn settlement_proof_flow_records_and_audits() {
         BridgeError::SettlementProofChainMismatch { .. }
     ));
 
+    let correct_hash = settlement_proof_digest(
+        "native",
+        &commitment,
+        "solana",
+        60,
+        "erin",
+        40,
+        &bundle.relayer_ids(),
+    );
+    let mut tampered_hash = correct_hash;
+    tampered_hash[0] ^= 0xFF;
+    let bad_hash_proof = ExternalSettlementProof {
+        commitment,
+        settlement_chain: "solana".into(),
+        proof_hash: tampered_hash,
+        settlement_height: 60,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r1", bad_hash_proof)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        BridgeError::SettlementProofHashMismatch { .. }
+    ));
+
     let correct_proof = ExternalSettlementProof {
         commitment,
         settlement_chain: "solana".into(),
-        proof_hash: [2u8; 32],
+        proof_hash: correct_hash,
         settlement_height: 60,
     };
     let record = bridge
@@ -493,7 +529,7 @@ fn settlement_proof_flow_records_and_audits() {
         .unwrap_err();
     assert!(matches!(
         duplicate_err,
-        BridgeError::SettlementProofDuplicate
+        BridgeError::SettlementProofHeightReplay { .. }
     ));
 
     let pending = bridge.pending_withdrawals(Some("native"));
@@ -505,7 +541,7 @@ fn settlement_proof_flow_records_and_audits() {
 
     let (settlements, _) = bridge.settlement_records(Some("native"), None, 256);
     assert_eq!(settlements.len(), 1);
-    assert_eq!(settlements[0].proof_hash, correct_proof.proof_hash);
+    assert_eq!(settlements[0].proof_hash, correct_hash);
 
     let header_two = sample_header_with_height(8);
     let proof_two = sample_proof();
@@ -526,10 +562,41 @@ fn settlement_proof_flow_records_and_audits() {
     let second_commitment = bridge
         .request_withdrawal("native", "r1", "frank", 30, &bundle_two)
         .expect("second withdrawal request");
+    let replay_hash = settlement_proof_digest(
+        "native",
+        &second_commitment,
+        "solana",
+        58,
+        "frank",
+        30,
+        &bundle_two.relayer_ids(),
+    );
+    let replay_proof = ExternalSettlementProof {
+        commitment: second_commitment,
+        settlement_chain: "solana".into(),
+        proof_hash: replay_hash,
+        settlement_height: 58,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r1", replay_proof)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        BridgeError::SettlementProofHeightReplay { .. }
+    ));
+    let second_hash = settlement_proof_digest(
+        "native",
+        &second_commitment,
+        "solana",
+        66,
+        "frank",
+        30,
+        &bundle_two.relayer_ids(),
+    );
     let second_proof = ExternalSettlementProof {
         commitment: second_commitment,
         settlement_chain: "solana".into(),
-        proof_hash: [3u8; 32],
+        proof_hash: second_hash,
         settlement_height: 66,
     };
     bridge
@@ -597,6 +664,43 @@ fn settlement_proof_flow_records_and_audits() {
         .relayer_outcomes
         .iter()
         .any(|outcome| outcome.status == "completed"));
+
+    let (accruals, accrual_cursor) = bridge.reward_accruals(None, Some("native"), None, 256);
+    assert!(accruals.len() >= 6);
+    assert!(accruals
+        .iter()
+        .any(|record| record.duty_kind == "deposit" && record.relayer == "r1"));
+    assert!(accruals.iter().any(|record| {
+        record.duty_kind == "settlement"
+            && record.commitment == Some(commitment)
+            && record.proof_hash == Some(correct_hash)
+            && record.bundle_relayers.contains(&"r1".to_string())
+            && record.bundle_relayers.contains(&"r2".to_string())
+    }));
+    assert!(accruals
+        .iter()
+        .filter(|record| record.duty_kind == "withdrawal")
+        .any(|record| record.commitment == Some(commitment)));
+    assert!(accruals
+        .iter()
+        .filter(|record| record.duty_kind == "withdrawal")
+        .any(|record| record.commitment == Some(second_commitment)));
+    assert!(accruals.iter().all(|record| record.asset == "native"));
+    assert!(accruals.iter().all(|record| record.recorded_at > 0));
+    assert!(accrual_cursor.is_none());
+
+    let (page_one, accrual_cursor) = bridge.reward_accruals(None, Some("native"), None, 1);
+    assert_eq!(page_one.len(), 1);
+    assert!(accrual_cursor.is_some());
+    let (page_two, _accrual_cursor_two) =
+        bridge.reward_accruals(None, Some("native"), accrual_cursor, 1);
+    assert_eq!(page_two.len(), 1);
+    assert_ne!(page_one[0].id, page_two[0].id);
+    let (r2_accruals, _) = bridge.reward_accruals(Some("r2"), Some("native"), None, 64);
+    assert!(!r2_accruals.is_empty());
+    assert!(r2_accruals
+        .iter()
+        .all(|record| record.relayer == "r2" && record.duty_kind == "withdrawal"));
 }
 
 #[cfg(feature = "test-telemetry")]
@@ -612,6 +716,14 @@ fn telemetry_tracks_bridge_flows() {
         .ensure_handle_for_label_values(&["failure", "chain_mismatch"])
         .expect(LABEL_REGISTRATION_ERR);
     settlement_chain_mismatch.reset();
+    let settlement_hash_mismatch = BRIDGE_SETTLEMENT_RESULTS_TOTAL
+        .ensure_handle_for_label_values(&["failure", "hash_mismatch"])
+        .expect(LABEL_REGISTRATION_ERR);
+    settlement_hash_mismatch.reset();
+    let settlement_height_replay = BRIDGE_SETTLEMENT_RESULTS_TOTAL
+        .ensure_handle_for_label_values(&["failure", "height_replay"])
+        .expect(LABEL_REGISTRATION_ERR);
+    settlement_height_replay.reset();
     let dispute_settlement_success = BRIDGE_DISPUTE_OUTCOMES_TOTAL
         .ensure_handle_for_label_values(&["settlement", "success"])
         .expect(LABEL_REGISTRATION_ERR);
@@ -669,10 +781,19 @@ fn telemetry_tracks_bridge_flows() {
         .expect("request withdrawal");
 
     let failure_before = settlement_chain_mismatch.get();
+    let wrong_hash = settlement_proof_digest(
+        "native",
+        &commitment,
+        "ethereum",
+        51,
+        "erin",
+        40,
+        &bundle.relayer_ids(),
+    );
     let wrong_proof = ExternalSettlementProof {
         commitment,
         settlement_chain: "ethereum".into(),
-        proof_hash: [3u8; 32],
+        proof_hash: wrong_hash,
         settlement_height: 51,
     };
     let err = bridge
@@ -686,10 +807,37 @@ fn telemetry_tracks_bridge_flows() {
 
     let success_before = settlement_success.get();
     let dispute_settlement_before = dispute_settlement_success.get();
+    let hash_failure_before = settlement_hash_mismatch.get();
+    let correct_hash = settlement_proof_digest(
+        "native",
+        &commitment,
+        "solana",
+        52,
+        "erin",
+        40,
+        &bundle.relayer_ids(),
+    );
+    let mut tampered_hash = correct_hash;
+    tampered_hash[2] ^= 0xAA;
+    let bad_hash_proof = ExternalSettlementProof {
+        commitment,
+        settlement_chain: "solana".into(),
+        proof_hash: tampered_hash,
+        settlement_height: 52,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r1", bad_hash_proof)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        BridgeError::SettlementProofHashMismatch { .. }
+    ));
+    assert_eq!(settlement_hash_mismatch.get(), hash_failure_before + 1);
+
     let correct_proof = ExternalSettlementProof {
         commitment,
         settlement_chain: "solana".into(),
-        proof_hash: [4u8; 32],
+        proof_hash: correct_hash,
         settlement_height: 52,
     };
     let record = bridge
@@ -741,6 +889,30 @@ fn telemetry_tracks_bridge_flows() {
     let commitment_two = bridge
         .request_withdrawal("native", "r2", "erin", 10, &bundle_two)
         .expect("second withdrawal");
+    let replay_before = settlement_height_replay.get();
+    let replay_hash = settlement_proof_digest(
+        "native",
+        &commitment_two,
+        "solana",
+        52,
+        "erin",
+        10,
+        &bundle_two.relayer_ids(),
+    );
+    let replay_proof = ExternalSettlementProof {
+        commitment: commitment_two,
+        settlement_chain: "solana".into(),
+        proof_hash: replay_hash,
+        settlement_height: 52,
+    };
+    let err = bridge
+        .submit_settlement_proof("native", "r2", replay_proof)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        BridgeError::SettlementProofHeightReplay { .. }
+    ));
+    assert_eq!(settlement_height_replay.get(), replay_before + 1);
 
     let dispute_challenge_before = dispute_withdrawal_challenge.get();
     bridge

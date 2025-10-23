@@ -99,9 +99,13 @@ The `node/tests/bridge_incentives.rs::reward_claim_requires_governance_approval`
 
 When telemetry is enabled the node records `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` for each approved payout, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` for every settlement submission, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` whenever a withdrawal or settlement duty resolves. Dashboards can therefore track how many approvals have been consumed, which settlement errors appear, and how disputes resolve across relayer cohorts. The updated `node/tests/bridge_incentives.rs::telemetry_tracks_bridge_flows` case keeps these counters wired up under the `test-telemetry` feature.
 
+### Reward Accrual Ledger
+
+Every completed duty now emits a `RewardAccrualRecord` alongside the existing accounting snapshots. The sled-backed ledger captures the duty kind (deposit, withdrawal, settlement), the asset and user, the bundle roster, the recorded reward amount, and any associated commitment/proof metadata. Operators can paginate the history with `bridge.reward_accruals` / `blockctl bridge reward-accruals`, optionally filtering by relayer or asset while receiving a `next_cursor` token for streaming dashboards. The new CLI integration test (`cli/tests/bridge.rs::bridge_reward_accruals_paginates_requests`) validates the JSON-RPC payloads, and `node/tests/bridge_incentives.rs` asserts that deposits, settlement submissions, and finalised withdrawals append the expected entries with monotonic IDs.
+
 ### Settlement Proofs and External Releases
 
-Channels may opt into external settlement attestation by toggling `requires_settlement_proof`. When enabled, each withdrawal produces a `DutyKind::Settlement` entry that remains pending until a relayer submits an `ExternalSettlementProof` via `bridge.submit_settlement`. The RPC tracks settlement fingerprints to prevent duplicates, records the settlement metadata in `BridgeState::settlement_log`, and clears any outstanding dispute flags. Operators can inspect the full history through `bridge.settlement_log` / `blockctl bridge settlement-log` filtered by asset, with `cursor`/`limit` controls and a `next_cursor` response for streaming dashboards.
+Channels may opt into external settlement attestation by toggling `requires_settlement_proof`. When enabled, each withdrawal produces a `DutyKind::Settlement` entry that remains pending until a relayer submits an `ExternalSettlementProof` via `bridge.submit_settlement`. Proofs must include a digest computed by `bridge_types::settlement_proof_digest(asset, commitment, chain, height, user, amount, relayers)` so governance can re-derive the attestation deterministically; mismatched hashes surface as `BridgeError::SettlementProofHashMismatch`. The node also records a per-asset, per-chain height watermark and rejects stale submissions with `BridgeError::SettlementProofHeightReplay` before updating the settlement log. Fingerprints still guard against replay, the full metadata lands in `BridgeState::settlement_log`, and any outstanding dispute flags are cleared. Operators can inspect the history through `bridge.settlement_log` / `blockctl bridge settlement-log` filtered by asset, with `cursor`/`limit` controls and a `next_cursor` response for streaming dashboards.
 
 `blockctl bridge configure` now supports partial updates for channel settings: unspecified fields leave the current configuration intact, `--requires-settlement-proof` toggles proof enforcement without clobbering other values, and `--clear-settlement-chain true` removes any previously configured chain label. The RPC surfaces the same behaviour, allowing declarative updates via automation.
 
@@ -147,6 +151,7 @@ blockctl bridge duties --asset native --limit 20
 blockctl bridge history --asset native --limit 20
 blockctl bridge slash-log
 blockctl bridge reward-claims --relayer r1
+blockctl bridge reward-accruals --asset native --relayer r1
 blockctl bridge settlement-log --asset native
 blockctl bridge dispute-audit --asset native
 blockctl bridge assets
@@ -178,11 +183,11 @@ Reward approvals are redeemed via `blockctl bridge claim <relayer> <amount> <app
 
 ## Outstanding Work
 
-- **Expanded Asset Coverage** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain while retaining incentive accounting per asset.
-- **Long-Horizon Dispute Retention** – persist dispute audit snapshots across restarts and surface trend charts in the operator dashboards.
-- **Settlement Observability** – wire settlement submission telemetry into Grafana and add CLI tests for configure/settlement flows to guard regressions.
+- **Cross-Domain Treasury Sweeps** – finalise multi-asset treasury flows that stream reward accrual deltas into governance reports and expose cumulative views through the CLI.
+- **Remote Proof Sampling** – add offline verification hooks so operators can recompute settlement digests from archived L1 headers without replaying the entire bridge database.
+- **Relayer Incentive Analytics** – extend the monitoring row with accrual rate histograms and duty completion percentile panels to spotlight lagging relayers before governance intervention.
 
-Progress: 94.6%
+Progress: 97.8%
 
 ## Dispute Resolution & Threat Model
 

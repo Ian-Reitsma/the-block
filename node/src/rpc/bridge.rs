@@ -3,7 +3,7 @@ use crate::{
     bridge::{
         Bridge, BridgeError, ChallengeRecord, ChannelConfig, DepositReceipt, DisputeAuditRecord,
         DutyOutcomeSnapshot, PendingWithdrawalInfo, RelayerInfo, RelayerQuorumInfo,
-        RewardClaimRecord, SettlementRecord, SlashRecord,
+        RewardAccrualRecord, RewardClaimRecord, SettlementRecord, SlashRecord,
     },
     simple_db::names,
     SimpleDb,
@@ -52,6 +52,12 @@ fn convert_err(err: BridgeError) -> RpcError {
             (-32020, "settlement proof chain mismatch")
         }
         BridgeError::SettlementProofNotTracked { .. } => (-32021, "settlement proof not tracked"),
+        BridgeError::SettlementProofHashMismatch { .. } => {
+            (-32022, "settlement proof hash mismatch")
+        }
+        BridgeError::SettlementProofHeightReplay { .. } => {
+            (-32023, "settlement proof height replay")
+        }
     };
     RpcError::new(code, message)
 }
@@ -90,6 +96,7 @@ fn default_limit() -> u64 {
 }
 
 const REWARD_CLAIM_PAGE_MAX: usize = 256;
+const REWARD_ACCRUAL_PAGE_MAX: usize = 256;
 const SETTLEMENT_PAGE_MAX: usize = 256;
 const DISPUTE_PAGE_MAX: usize = 256;
 
@@ -260,6 +267,19 @@ pub struct SlashLogRequest {}
 pub struct RewardClaimsRequest {
     #[serde(default)]
     pub relayer: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RewardAccrualsRequest {
+    #[serde(default)]
+    pub relayer: Option<String>,
+    #[serde(default)]
+    pub asset: Option<String>,
     #[serde(default)]
     pub cursor: Option<u64>,
     #[serde(default = "default_limit")]
@@ -628,6 +648,53 @@ pub struct RewardClaimResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct RewardClaimsResponse {
     pub claims: Vec<RewardClaimEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RewardAccrualEntry {
+    pub id: u64,
+    pub relayer: String,
+    pub asset: String,
+    pub user: String,
+    pub amount: u64,
+    pub duty_id: u64,
+    pub duty_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commitment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settlement_chain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_hash: Option<String>,
+    pub bundle_relayers: Vec<String>,
+    pub recorded_at: u64,
+}
+
+impl From<RewardAccrualRecord> for RewardAccrualEntry {
+    fn from(record: RewardAccrualRecord) -> Self {
+        RewardAccrualEntry {
+            id: record.id,
+            relayer: record.relayer,
+            asset: record.asset,
+            user: record.user,
+            amount: record.amount,
+            duty_id: record.duty_id,
+            duty_kind: record.duty_kind,
+            commitment: record.commitment.map(|value| encode_hex(&value)),
+            settlement_chain: record.settlement_chain,
+            proof_hash: record.proof_hash.map(|value| encode_hex(&value)),
+            bundle_relayers: record.bundle_relayers,
+            recorded_at: record.recorded_at,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RewardAccrualsResponse {
+    pub accruals: Vec<RewardAccrualEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<u64>,
 }
@@ -1140,6 +1207,22 @@ pub fn reward_claims(req: RewardClaimsRequest) -> Result<RewardClaimsResponse, R
     let claims = records.into_iter().map(RewardClaimEntry::from).collect();
     Ok(RewardClaimsResponse {
         claims,
+        next_cursor,
+    })
+}
+
+pub fn reward_accruals(req: RewardAccrualsRequest) -> Result<RewardAccrualsResponse, RpcError> {
+    let bridge = guard()?;
+    let limit = clamp_page_limit(req.limit, REWARD_ACCRUAL_PAGE_MAX);
+    let (records, next_cursor) = bridge.reward_accruals(
+        req.relayer.as_deref(),
+        req.asset.as_deref(),
+        req.cursor,
+        limit,
+    );
+    let accruals = records.into_iter().map(RewardAccrualEntry::from).collect();
+    Ok(RewardAccrualsResponse {
+        accruals,
         next_cursor,
     })
 }

@@ -1,4 +1,13 @@
 # Project Progress Snapshot
+> **Review (2025-10-23, evening):** External settlement proofs now require the
+> deterministic `settlement_proof_digest` and track per-asset height watermarks,
+> rejecting mismatched hashes and replayed heights before rewarding a duty.
+> Successful deposits, settlement submissions, and withdrawal finalisation all
+> append `RewardAccrualRecord` entries that the new `bridge.reward_accruals`
+> RPC/CLI paginates for operators. CLI integration coverage adds a
+> `BridgeCmd::RewardAccruals` regression, node-side tests exercise hash/height
+> failure paths plus accrual pagination, and telemetry snapshots cover the new
+> counters so dashboards chart reward intake end to end.
 > **Review (2025-10-22, evening+):** Multi-asset bridge supply tracking now spans
 > the token bridge, node RPC, and CLI. `TokenBridge` records locked and minted
 > balances per symbol, persistence in `bridges/src/codec.rs` includes the new
