@@ -68,15 +68,18 @@ the newly instrumented counters. Panels plot five-minute deltas for
 `bridge_liquidity_locked_total{asset}`, `bridge_liquidity_unlocked_total{asset}`,
 `bridge_liquidity_minted_total{asset}`, and
 `bridge_liquidity_burned_total{asset}` so operators can correlate reward spikes
-with asset-specific inflows and outflows. The row closes with remediation
-coverage: `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))`
-continues to display the recommended playbook, and a companion panel charts
+with asset-specific inflows and outflows. The row closes with three remediation
+panels: `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))`
+continues to display the recommended playbook, a companion panel charts
 `sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))`
 so dispatch successes, skips, and failures by target surface directly on the
-dashboard. Operators can filter every legend to drill into a specific asset,
-playbook, target, or status, and the same queries back the HTML snapshot so
-FIRST_PARTY_ONLY deployments never rely on external Grafana instances to monitor
-bridge health.
+dashboard, and the new acknowledgement panel tracks
+`sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
+so downstream paging/governance hooks prove they have acknowledged or closed the
+playbook. Operators can filter every legend to drill into a specific asset,
+playbook, target, status, or acknowledgement state, and the same queries back
+the HTML snapshot so FIRST_PARTY_ONLY deployments never rely on external Grafana
+instances to monitor bridge health.
 
 The metrics aggregator now watches those counters for anomalous spikes. A
 rolling detector maintains a 24-sample baseline per peer/metric/label set and
@@ -131,10 +134,12 @@ structured actions (page, throttle, quarantine, escalate) via the
 `/remediation/bridge` JSON endpoint and the
 `bridge_remediation_action_total{action,playbook}` counter. Each entry now
 records the follow-up playbook (`incentive-throttle` or
-`governance-escalation`) alongside the action and annotates the response with a
-human-readable `annotation`, a curated `dashboard_panels` list, and a
-`response_sequence` so runbooks can automate the exact steps without relying on
-third-party tooling.
+`governance-escalation`) alongside the action, tracks
+`acknowledged_at`/`closed_out_at` timestamps when downstream hooks confirm
+receipt, and captures any `acknowledgement_notes` the pager/escalation system
+returns. The response also carries a human-readable `annotation`, a curated
+`dashboard_panels` list, and a `response_sequence` so runbooks can automate the
+exact steps without relying on third-party tooling.
 
 Remediation actions no longer stop at dashboards. The aggregator fans out each
 playbook to first-party paging and governance hooks defined through
@@ -147,14 +152,18 @@ matching `*_DIRS` variables instruct the aggregator to persist the same payload
 under deterministic filenames inside a spool directory—other first-party
 workers tail the directory and execute the playbooks without external tooling.
 Every attempt increments `bridge_remediation_dispatch_total{action,playbook,target,status}`
-and appends a record to `/remediation/bridge/dispatches`, producing `success`,
-`request_build_failed`, `payload_encode_failed`, `request_failed`,
+and, when the hook returns acknowledgement metadata, the companion
+`bridge_remediation_dispatch_ack_total{action,playbook,target,state}` counter. The
+dispatch record appended to `/remediation/bridge/dispatches` includes the
+acknowledgement payload (state, timestamp, notes) so operators can audit
+`acknowledged`, `closed`, `pending`, or `invalid` replies alongside
+`success`, `request_build_failed`, `payload_encode_failed`, `request_failed`,
 `status_failed`, `persist_failed`, `join_failed`, or `skipped` outcomes by target
 (`http`, `spool`, or `none`). The gauges and the dispatch log let operators
 verify that paging hooks, spool directories, and governance escalations are
-acknowledged before escalation. Both dispatch paths are logged at `INFO`,
-include the peer/metric/action trio, and retry on the next anomaly if an
-endpoint is unavailable.
+acknowledged and closed out without leaving the first-party stack. Both dispatch
+paths are logged at `INFO`, include the peer/metric/action trio, and retry on the
+next anomaly if an endpoint is unavailable.
 
 Dependency policy status now lives in the same generated dashboard row. Panels
 plot `dependency_registry_check_status{status}` gauges, drift counters, and the

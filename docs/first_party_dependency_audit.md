@@ -1,7 +1,15 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-25 06:05:00Z_
+_Last updated: 2025-10-25 11:05:00Z_
 
+> **2025-10-25 update (dispatch acknowledgement telemetry):** The metrics
+> aggregator now records `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`
+> alongside the existing dispatch counter, persists `acknowledged_at`/`closed_out_at`
+> timestamps and notes on each remediation action, and the CLI/aggregator tests
+> drive acknowledgement paths through a first-party HTTP override harness—no
+> external servers required. Grafana/HTML dashboards chart acknowledgement
+> deltas next to dispatch totals so the entire governance loop remains first
+> party.
 > **2025-10-25 update (remediation annotations & dispatch log):** Bridge remediation
 > payloads remain fully hand-built and now embed operator-facing `annotation`
 > strings, curated `dashboard_panels`, a deterministic `response_sequence`, and the

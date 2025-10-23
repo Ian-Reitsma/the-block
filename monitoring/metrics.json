@@ -302,6 +302,17 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge remediation dispatch acknowledgements grouped by target and state",
+      "labels": [
+        "action",
+        "playbook",
+        "target",
+        "state"
+      ],
+      "name": "bridge_remediation_dispatch_ack_total"
+    },
+    {
+      "deprecated": false,
       "description": "Unique peers tracked by aggregator",
       "labels": [],
       "name": "cluster_peer_active_total"

@@ -24,13 +24,15 @@ ready to import once the foundation telemetry stack is running.
   `bridge_liquidity_unlocked_total{asset}`,
   `bridge_liquidity_minted_total{asset}`, and
   `bridge_liquidity_burned_total{asset}` to surface cross-chain liquidity flow.
-  Remediation coverage now spans two panels: one renders
+  Remediation coverage now spans three panels: one renders
   `sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))` to
-  display the recommended playbook alongside each anomaly, while the second
-  charts
+  display the recommended playbook alongside each anomaly, a second charts
   `sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))`
   so dispatch successes, skips, and failures per target stay visible without
-  leaving the dashboard.
+  leaving the dashboard, and the new acknowledgement panel tracks
+  `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
+  so operators can confirm downstream paging/governance hooks acknowledged or
+  closed out each playbook.
 - The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
   bridge row. A rolling detector keeps a per-peer baseline for the reward,
   approval, settlement, and dispute counters, increments
@@ -57,8 +59,11 @@ ready to import once the foundation telemetry stack is running.
   playbook, `annotation`, `dashboard_panels`, `response_sequence`, and
   `dispatched_at`). Each attempt increments
   `bridge_remediation_dispatch_total{action,playbook,target,status}` **and**
+  records acknowledgement state via
+  `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`, then
   appends to `/remediation/bridge/dispatches`, letting dashboards and alerting
-  policy flag skipped hooks or failing endpoints without scraping Prometheus.
+  policy flag skipped hooks, failing endpoints, or unacknowledged escalations
+  without scraping Prometheus.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression

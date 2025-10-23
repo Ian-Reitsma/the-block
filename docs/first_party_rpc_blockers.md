@@ -21,6 +21,11 @@ RPC client.
 
 ## Recent progress (2025-10-25)
 
+- Dispatch acknowledgement telemetry now stays first party: the metrics
+  aggregator increments `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`
+  and persists acknowledgement timestamps/notes on remediation actions, while
+  the CLI/integration tests drive HTTP responses through an in-process override
+  client so acknowledgement flows remain hermetic without mock servers.
 - Remediation payloads now ship operator-facing annotations, curated dashboard panel
   hints, deterministic response sequences, and the canonical
   `/remediation/bridge/dispatches` endpoint. The metrics aggregator appends every
