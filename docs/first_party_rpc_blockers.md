@@ -37,6 +37,12 @@ RPC client.
   `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}`, and
   `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` alongside the existing challenge
   and slash metrics, with integration coverage in `node/tests/bridge_incentives.rs`.
+- Reward accrual history shares the same first-party builders. `bridge.reward_accruals`
+  paginates sled-backed `RewardAccrualRecord`s and the CLI forwards the
+  identical envelope via `blockctl bridge reward-accruals`. Settlement proofs now
+  compute a deterministic digest through `bridge_types::settlement_proof_digest`
+  and maintain per-asset height watermarks so hash/height replays return typed
+  errors without leaving the JSON/RPC façade.
 
 ## Recent progress (2025-10-22)
 

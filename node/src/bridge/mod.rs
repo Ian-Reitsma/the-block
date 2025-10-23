@@ -7,8 +7,8 @@ use crate::telemetry::{
 };
 use crate::{governance, simple_db::names, SimpleDb};
 use bridge_types::{
-    BridgeIncentiveParameters, DutyFailureReason, DutyKind, DutyRecord, DutyStatus,
-    ExternalSettlementProof, RelayerAccounting,
+    settlement_proof_digest, BridgeIncentiveParameters, DutyFailureReason, DutyKind, DutyRecord,
+    DutyStatus, ExternalSettlementProof, RelayerAccounting,
 };
 use bridges::codec::Error as CodecError;
 use bridges::relayer::RelayerSet;
@@ -36,7 +36,9 @@ const CHALLENGE_RETENTION: usize = 256;
 const SLASH_RETENTION: usize = 512;
 const DUTY_RETENTION: usize = 1024;
 const REWARD_CLAIM_RETENTION: usize = 256;
+const REWARD_ACCRUAL_RETENTION: usize = 1024;
 const SETTLEMENT_RETENTION: usize = 256;
+const DISPUTE_HISTORY_RETENTION: usize = 2048;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -131,6 +133,15 @@ pub enum BridgeError {
     SettlementProofNotTracked {
         asset: String,
     },
+    SettlementProofHashMismatch {
+        expected: [u8; 32],
+        found: [u8; 32],
+    },
+    SettlementProofHeightReplay {
+        chain: String,
+        previous: u64,
+        submitted: u64,
+    },
 }
 
 impl fmt::Display for BridgeError {
@@ -189,6 +200,24 @@ impl fmt::Display for BridgeError {
             }
             BridgeError::SettlementProofNotTracked { asset } => {
                 write!(f, "no settlement tracking entry for asset {asset}")
+            }
+            BridgeError::SettlementProofHashMismatch { expected, found } => {
+                write!(
+                    f,
+                    "settlement proof hash {} does not match expected {}",
+                    crypto_suite::hex::encode(found),
+                    crypto_suite::hex::encode(expected)
+                )
+            }
+            BridgeError::SettlementProofHeightReplay {
+                chain,
+                previous,
+                submitted,
+            } => {
+                write!(
+                    f,
+                    "settlement proof height {submitted} on {chain} not above watermark {previous}"
+                )
             }
         }
     }
@@ -404,6 +433,22 @@ pub struct SlashRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct RewardAccrualRecord {
+    pub id: u64,
+    pub relayer: String,
+    pub asset: String,
+    pub user: String,
+    pub amount: u64,
+    pub duty_id: u64,
+    pub duty_kind: String,
+    pub commitment: Option<[u8; 32]>,
+    pub settlement_chain: Option<String>,
+    pub proof_hash: Option<[u8; 32]>,
+    pub bundle_relayers: Vec<String>,
+    pub recorded_at: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct RewardClaimRecord {
     pub id: u64,
     pub relayer: String,
@@ -460,6 +505,38 @@ pub struct DisputeAuditRecord {
     pub settlement_submitted_at: Option<u64>,
     pub relayer_outcomes: Vec<DutyOutcomeSnapshot>,
     pub expired: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DisputeHistory {
+    records: VecDeque<DisputeAuditRecord>,
+}
+
+impl DisputeHistory {
+    fn upsert(&mut self, record: DisputeAuditRecord) {
+        if let Some(existing) = self
+            .records
+            .iter_mut()
+            .find(|entry| entry.commitment == record.commitment)
+        {
+            *existing = record;
+        } else {
+            self.records.push_back(record);
+            while self.records.len() > DISPUTE_HISTORY_RETENTION {
+                self.records.pop_front();
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn remove(&mut self, commitment: &[u8; 32]) {
+        self.records
+            .retain(|record| record.commitment != *commitment);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &DisputeAuditRecord> {
+        self.records.iter()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -525,11 +602,15 @@ struct BridgeState {
     duties: DutyStore,
     incentives: BridgeIncentiveParameters,
     token_bridge: TokenBridge,
+    reward_accruals: VecDeque<RewardAccrualRecord>,
     reward_claims: VecDeque<RewardClaimRecord>,
     next_claim_id: u64,
+    next_accrual_id: u64,
     settlement_log: VecDeque<SettlementRecord>,
     pending_settlements: HashMap<[u8; 32], SettlementState>,
     settlement_fingerprints: HashSet<[u8; 32]>,
+    dispute_history: DisputeHistory,
+    settlement_height_watermarks: HashMap<String, u64>,
 }
 
 mod state_codec {
@@ -1095,6 +1176,138 @@ mod state_codec {
         Ok((claims, next_id))
     }
 
+    fn encode_reward_accruals(accruals: &VecDeque<RewardAccrualRecord>, next_id: u64) -> Value {
+        let mut map = Map::new();
+        map.insert("next_id".into(), Value::Number(Number::from(next_id)));
+        let entries: Vec<Value> = accruals
+            .iter()
+            .map(|record| {
+                let mut entry = Map::new();
+                entry.insert("id".into(), Value::Number(Number::from(record.id)));
+                entry.insert("relayer".into(), Value::String(record.relayer.clone()));
+                entry.insert("asset".into(), Value::String(record.asset.clone()));
+                entry.insert("user".into(), Value::String(record.user.clone()));
+                entry.insert("amount".into(), Value::Number(Number::from(record.amount)));
+                entry.insert(
+                    "duty_id".into(),
+                    Value::Number(Number::from(record.duty_id)),
+                );
+                entry.insert("duty_kind".into(), Value::String(record.duty_kind.clone()));
+                if let Some(commitment) = record.commitment {
+                    entry.insert(
+                        "commitment".into(),
+                        Value::String(crypto_suite::hex::encode(commitment)),
+                    );
+                }
+                if let Some(chain) = &record.settlement_chain {
+                    entry.insert("settlement_chain".into(), Value::String(chain.clone()));
+                }
+                if let Some(hash) = record.proof_hash {
+                    entry.insert(
+                        "proof_hash".into(),
+                        Value::String(crypto_suite::hex::encode(hash)),
+                    );
+                }
+                entry.insert(
+                    "bundle_relayers".into(),
+                    Value::Array(
+                        record
+                            .bundle_relayers
+                            .iter()
+                            .map(|relayer| Value::String(relayer.clone()))
+                            .collect(),
+                    ),
+                );
+                entry.insert(
+                    "recorded_at".into(),
+                    Value::Number(Number::from(record.recorded_at)),
+                );
+                Value::Object(entry)
+            })
+            .collect();
+        map.insert("accruals".into(), Value::Array(entries));
+        Value::Object(map)
+    }
+
+    fn decode_reward_accruals(
+        value: &Value,
+    ) -> Result<(VecDeque<RewardAccrualRecord>, u64), CodecError> {
+        let obj = require_object(value, "reward_accruals")?;
+        let mut accruals = VecDeque::new();
+        let mut max_id = 0;
+        if let Some(entries) = obj.get("accruals") {
+            for entry in require_array(entries, "reward_accrual_entries")? {
+                let accrual_obj = require_object(entry, "reward_accrual_entry")?;
+                let id = require_u64(get(accrual_obj, "id")?, "id")?;
+                let relayer = require_string(get(accrual_obj, "relayer")?, "relayer")?.to_string();
+                let asset = require_string(get(accrual_obj, "asset")?, "asset")?.to_string();
+                let user = require_string(get(accrual_obj, "user")?, "user")?.to_string();
+                let amount = require_u64(get(accrual_obj, "amount")?, "amount")?;
+                let duty_id = require_u64(get(accrual_obj, "duty_id")?, "duty_id")?;
+                let duty_kind =
+                    require_string(get(accrual_obj, "duty_kind")?, "duty_kind")?.to_string();
+                let commitment = if let Some(value) = accrual_obj.get("commitment") {
+                    Some(
+                        crypto_suite::hex::decode_array::<32>(require_string(value, "commitment")?)
+                            .map_err(|source| CodecError::Hex {
+                                field: "reward_accrual_commitment",
+                                source,
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                let settlement_chain = accrual_obj
+                    .get("settlement_chain")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+                let proof_hash = if let Some(value) = accrual_obj.get("proof_hash") {
+                    Some(
+                        crypto_suite::hex::decode_array::<32>(require_string(value, "proof_hash")?)
+                            .map_err(|source| CodecError::Hex {
+                                field: "reward_accrual_proof_hash",
+                                source,
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                let bundle_relayers = if let Some(raw_relayers) = accrual_obj.get("bundle_relayers")
+                {
+                    let arr = require_array(raw_relayers, "bundle_relayers")?;
+                    let relayers: Result<Vec<String>, CodecError> = arr
+                        .iter()
+                        .map(|value| require_string(value, "bundle_relayer").map(|s| s.to_string()))
+                        .collect();
+                    relayers?
+                } else {
+                    Vec::new()
+                };
+                let recorded_at = require_u64(get(accrual_obj, "recorded_at")?, "recorded_at")?;
+                accruals.push_back(RewardAccrualRecord {
+                    id,
+                    relayer,
+                    asset,
+                    user,
+                    amount,
+                    duty_id,
+                    duty_kind,
+                    commitment,
+                    settlement_chain,
+                    proof_hash,
+                    bundle_relayers,
+                    recorded_at,
+                });
+                max_id = max_id.max(id);
+            }
+        }
+        let next_id = obj
+            .get("next_id")
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| max_id.saturating_add(1));
+        Ok((accruals, next_id))
+    }
+
     fn encode_settlement_record(record: &SettlementRecord) -> Value {
         let mut map = Map::new();
         map.insert("asset".into(), Value::String(record.asset.clone()));
@@ -1231,6 +1444,161 @@ mod state_codec {
             map.insert(commitment, state);
         }
         Ok(map)
+    }
+
+    fn encode_duty_outcome(outcome: &DutyOutcomeSnapshot) -> Value {
+        let mut map = Map::new();
+        map.insert("relayer".into(), Value::String(outcome.relayer.clone()));
+        map.insert("status".into(), Value::String(outcome.status.clone()));
+        map.insert("reward".into(), Value::Number(Number::from(outcome.reward)));
+        map.insert(
+            "penalty".into(),
+            Value::Number(Number::from(outcome.penalty)),
+        );
+        if let Some(ts) = outcome.completed_at {
+            map.insert("completed_at".into(), Value::Number(Number::from(ts)));
+        }
+        if let Some(ts) = outcome.failed_at {
+            map.insert("failed_at".into(), Value::Number(Number::from(ts)));
+        }
+        if let Some(reason) = &outcome.reason {
+            map.insert("reason".into(), Value::String(reason.clone()));
+        }
+        map.insert(
+            "duty_id".into(),
+            Value::Number(Number::from(outcome.duty_id)),
+        );
+        Value::Object(map)
+    }
+
+    fn decode_duty_outcome(value: &Value) -> Result<DutyOutcomeSnapshot, CodecError> {
+        let obj = require_object(value, "duty_outcome")?;
+        Ok(DutyOutcomeSnapshot {
+            relayer: require_string(get(obj, "relayer")?, "relayer")?.to_string(),
+            status: require_string(get(obj, "status")?, "status")?.to_string(),
+            reward: require_u64(get(obj, "reward")?, "reward")?,
+            penalty: require_u64(get(obj, "penalty")?, "penalty")?,
+            completed_at: obj.get("completed_at").and_then(Value::as_u64),
+            failed_at: obj.get("failed_at").and_then(Value::as_u64),
+            reason: obj
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
+            duty_id: require_u64(get(obj, "duty_id")?, "duty_id")?,
+        })
+    }
+
+    fn encode_dispute_record(record: &DisputeAuditRecord) -> Value {
+        let mut map = Map::new();
+        map.insert("asset".into(), Value::String(record.asset.clone()));
+        map.insert(
+            "commitment".into(),
+            Value::String(crypto_suite::hex::encode(&record.commitment)),
+        );
+        map.insert("user".into(), Value::String(record.user.clone()));
+        map.insert("amount".into(), Value::Number(Number::from(record.amount)));
+        map.insert(
+            "initiated_at".into(),
+            Value::Number(Number::from(record.initiated_at)),
+        );
+        map.insert(
+            "deadline".into(),
+            Value::Number(Number::from(record.deadline)),
+        );
+        map.insert("challenged".into(), Value::Bool(record.challenged));
+        if let Some(challenger) = &record.challenger {
+            map.insert("challenger".into(), Value::String(challenger.clone()));
+        }
+        if let Some(at) = record.challenged_at {
+            map.insert("challenged_at".into(), Value::Number(Number::from(at)));
+        }
+        map.insert(
+            "settlement_required".into(),
+            Value::Bool(record.settlement_required),
+        );
+        if let Some(chain) = &record.settlement_chain {
+            map.insert("settlement_chain".into(), Value::String(chain.clone()));
+        }
+        if let Some(at) = record.settlement_submitted_at {
+            map.insert(
+                "settlement_submitted_at".into(),
+                Value::Number(Number::from(at)),
+            );
+        }
+        map.insert(
+            "relayer_outcomes".into(),
+            Value::Array(
+                record
+                    .relayer_outcomes
+                    .iter()
+                    .map(encode_duty_outcome)
+                    .collect(),
+            ),
+        );
+        map.insert("expired".into(), Value::Bool(record.expired));
+        Value::Object(map)
+    }
+
+    fn decode_dispute_record(value: &Value) -> Result<DisputeAuditRecord, CodecError> {
+        let obj = require_object(value, "dispute_record")?;
+        let outcomes = if let Some(entries) = obj.get("relayer_outcomes") {
+            let arr = require_array(entries, "dispute_relayer_outcomes")?;
+            let mut out = Vec::with_capacity(arr.len());
+            for entry in arr {
+                out.push(decode_duty_outcome(entry)?);
+            }
+            out
+        } else {
+            Vec::new()
+        };
+        Ok(DisputeAuditRecord {
+            asset: require_string(get(obj, "asset")?, "asset")?.to_string(),
+            commitment: crypto_suite::hex::decode_array::<32>(require_string(
+                get(obj, "commitment")?,
+                "commitment",
+            )?)
+            .map_err(|source| CodecError::Hex {
+                field: "dispute_commitment",
+                source,
+            })?,
+            user: require_string(get(obj, "user")?, "user")?.to_string(),
+            amount: require_u64(get(obj, "amount")?, "amount")?,
+            initiated_at: require_u64(get(obj, "initiated_at")?, "initiated_at")?,
+            deadline: require_u64(get(obj, "deadline")?, "deadline")?,
+            challenged: obj
+                .get("challenged")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            challenger: obj
+                .get("challenger")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
+            challenged_at: obj.get("challenged_at").and_then(Value::as_u64),
+            settlement_required: obj
+                .get("settlement_required")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            settlement_chain: obj
+                .get("settlement_chain")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
+            settlement_submitted_at: obj.get("settlement_submitted_at").and_then(Value::as_u64),
+            relayer_outcomes: outcomes,
+            expired: obj.get("expired").and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+
+    fn encode_dispute_history(history: &DisputeHistory) -> Value {
+        Value::Array(history.records.iter().map(encode_dispute_record).collect())
+    }
+
+    fn decode_dispute_history(value: &Value) -> Result<DisputeHistory, CodecError> {
+        let arr = require_array(value, "dispute_history")?;
+        let mut records = VecDeque::new();
+        for entry in arr {
+            records.push_back(decode_dispute_record(entry)?);
+        }
+        Ok(DisputeHistory { records })
     }
 
     fn encode_config(cfg: &ChannelConfig) -> Value {
@@ -1588,6 +1956,10 @@ mod state_codec {
             encode_reward_claims(&state.reward_claims, state.next_claim_id),
         );
         map.insert(
+            "reward_accruals".to_string(),
+            encode_reward_accruals(&state.reward_accruals, state.next_accrual_id),
+        );
+        map.insert(
             "settlement_log".to_string(),
             encode_settlements(&state.settlement_log),
         );
@@ -1604,6 +1976,18 @@ mod state_codec {
                     .map(|fp| Value::String(crypto_suite::hex::encode(fp)))
                     .collect(),
             ),
+        );
+        map.insert(
+            "dispute_history".to_string(),
+            encode_dispute_history(&state.dispute_history),
+        );
+        let mut watermarks = Map::new();
+        for (key, height) in &state.settlement_height_watermarks {
+            watermarks.insert(key.clone(), Value::Number(Number::from(*height)));
+        }
+        map.insert(
+            "settlement_height_watermarks".to_string(),
+            Value::Object(watermarks),
         );
         Value::Object(map)
     }
@@ -1646,6 +2030,11 @@ mod state_codec {
         } else {
             (VecDeque::new(), 0)
         };
+        let (reward_accruals, next_accrual_id) = if let Some(value) = obj.get("reward_accruals") {
+            decode_reward_accruals(value)?
+        } else {
+            (VecDeque::new(), 0)
+        };
         let settlement_log = if let Some(value) = obj.get("settlement_log") {
             decode_settlements(value)?
         } else {
@@ -1673,6 +2062,22 @@ mod state_codec {
         } else {
             HashSet::new()
         };
+        let dispute_history = if let Some(value) = obj.get("dispute_history") {
+            decode_dispute_history(value)?
+        } else {
+            DisputeHistory::default()
+        };
+        let settlement_height_watermarks =
+            if let Some(value) = obj.get("settlement_height_watermarks") {
+                let map = require_object(value, "settlement_height_watermarks")?;
+                let mut out = HashMap::new();
+                for (key, val) in map {
+                    out.insert(key.clone(), require_u64(val, "settlement_height")?);
+                }
+                out
+            } else {
+                HashMap::new()
+            };
         Ok(BridgeState {
             channels,
             relayer_bonds,
@@ -1681,11 +2086,15 @@ mod state_codec {
             duties,
             incentives,
             token_bridge,
+            reward_accruals,
             reward_claims,
             next_claim_id,
+            next_accrual_id,
             settlement_log,
             pending_settlements,
             settlement_fingerprints,
+            dispute_history,
+            settlement_height_watermarks,
         })
     }
 }
@@ -1778,11 +2187,27 @@ impl Bridge {
                 .unwrap_or(0);
             state.next_claim_id = max_id.saturating_add(1);
         }
+        if state.next_accrual_id == 0 {
+            let max_id = state
+                .reward_accruals
+                .iter()
+                .map(|record| record.id)
+                .max()
+                .unwrap_or(0);
+            state.next_accrual_id = max_id.saturating_add(1);
+        }
         if state.settlement_fingerprints.is_empty() {
             for record in &state.settlement_log {
                 state
                     .settlement_fingerprints
                     .insert(Bridge::settlement_record_fingerprint(record));
+            }
+        }
+        for record in &state.settlement_log {
+            if let Some(chain) = &record.settlement_chain {
+                let key = format!("{}:{chain}", record.asset);
+                let entry = state.settlement_height_watermarks.entry(key).or_insert(0);
+                *entry = (*entry).max(record.settlement_height);
             }
         }
         for (_asset, channel) in &state.channels {
@@ -1796,6 +2221,15 @@ impl Bridge {
                             duty_ids: Vec::new(),
                             proof: None,
                         });
+                }
+            }
+        }
+        for (_commitment, pending) in &state.pending_settlements {
+            if let Some(record) = &pending.proof {
+                if let Some(chain) = &record.settlement_chain {
+                    let key = format!("{}:{chain}", record.asset);
+                    let entry = state.settlement_height_watermarks.entry(key).or_insert(0);
+                    *entry = (*entry).max(record.settlement_height);
                 }
             }
         }
@@ -1984,6 +2418,58 @@ impl Bridge {
         }
     }
 
+    fn record_reward_accrual(&mut self, duty: &DutyRecord, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        let mut commitment = None;
+        let mut settlement_chain = None;
+        let mut proof_hash = None;
+        let duty_kind = match &duty.kind {
+            DutyKind::Deposit => "deposit".to_string(),
+            DutyKind::Withdrawal { commitment: value } => {
+                commitment = Some(*value);
+                "withdrawal".to_string()
+            }
+            DutyKind::Settlement {
+                commitment: value,
+                settlement_chain: chain,
+                proof_hash: hash,
+            } => {
+                commitment = Some(*value);
+                settlement_chain = Some(chain.clone());
+                proof_hash = Some(*hash);
+                "settlement".to_string()
+            }
+        };
+        let record = RewardAccrualRecord {
+            id: self.state.next_accrual_id,
+            relayer: duty.relayer.clone(),
+            asset: duty.asset.clone(),
+            user: duty.user.clone(),
+            amount,
+            duty_id: duty.id,
+            duty_kind,
+            commitment,
+            settlement_chain,
+            proof_hash,
+            bundle_relayers: duty.bundle_relayers.clone(),
+            recorded_at: now_secs(),
+        };
+        self.state.next_accrual_id = self.state.next_accrual_id.saturating_add(1);
+        self.state.reward_accruals.push_back(record);
+        while self.state.reward_accruals.len() > REWARD_ACCRUAL_RETENTION {
+            self.state.reward_accruals.pop_front();
+        }
+    }
+
+    fn refresh_dispute_history(&mut self, asset: Option<&str>) {
+        let records = self.live_dispute_records(asset);
+        for record in records.into_values() {
+            self.state.dispute_history.upsert(record);
+        }
+    }
+
     fn record_settlement(&mut self, record: SettlementRecord) {
         self.state.settlement_log.push_back(record);
         while self.state.settlement_log.len() > SETTLEMENT_RETENTION {
@@ -2126,6 +2612,7 @@ impl Bridge {
             accounting.complete_duty();
             if reward > 0 {
                 accounting.accrue_reward(reward);
+                self.record_reward_accrual(&record, reward);
             }
             let channel_asset = record.asset;
             if let Some(channel) = self.state.channels.get_mut(&channel_asset) {
@@ -2421,6 +2908,7 @@ impl Bridge {
         }
         self.state.token_bridge.unlock(asset, amount);
         self.state.token_bridge.mint(asset, amount);
+        self.refresh_dispute_history(Some(asset));
         self.persist()?;
         Ok(commitment)
     }
@@ -2472,6 +2960,33 @@ impl Bridge {
                 });
             }
         }
+        let expected_hash = settlement_proof_digest(
+            asset,
+            &proof.commitment,
+            &proof.settlement_chain,
+            proof.settlement_height,
+            &user,
+            amount,
+            &bundle_relayers,
+        );
+        if proof.proof_hash != expected_hash {
+            telemetry_record_settlement_failure("hash_mismatch");
+            return Err(BridgeError::SettlementProofHashMismatch {
+                expected: expected_hash,
+                found: proof.proof_hash,
+            });
+        }
+        let watermark_key = format!("{asset}:{}", proof.settlement_chain);
+        if let Some(previous) = self.state.settlement_height_watermarks.get(&watermark_key) {
+            if proof.settlement_height <= *previous {
+                telemetry_record_settlement_failure("height_replay");
+                return Err(BridgeError::SettlementProofHeightReplay {
+                    chain: proof.settlement_chain.clone(),
+                    previous: *previous,
+                    submitted: proof.settlement_height,
+                });
+            }
+        }
         let fingerprint = Self::settlement_fingerprint(asset, &proof);
         if !self.state.settlement_fingerprints.insert(fingerprint) {
             telemetry_record_settlement_failure("duplicate");
@@ -2519,10 +3034,14 @@ impl Bridge {
             entry.duty_ids.push(duty_id);
             entry.proof = Some(record.clone());
         }
+        self.state
+            .settlement_height_watermarks
+            .insert(watermark_key, proof.settlement_height);
         self.record_settlement(record.clone());
         self.record_duty_success(duty_id, self.incentives().duty_reward);
         self.state.token_bridge.burn(asset, amount);
         telemetry_record_settlement_success();
+        self.refresh_dispute_history(Some(asset));
         self.persist()?;
         Ok(record)
     }
@@ -2593,6 +3112,7 @@ impl Bridge {
         {
             BRIDGE_CHALLENGES_TOTAL.inc();
         }
+        self.refresh_dispute_history(Some(asset));
         self.persist()?;
         Ok(record)
     }
@@ -2645,6 +3165,7 @@ impl Bridge {
         if !requires_settlement_proof {
             self.state.token_bridge.burn(asset, pending_amount);
         }
+        self.refresh_dispute_history(Some(asset));
         self.persist()
     }
 
@@ -2705,6 +3226,32 @@ impl Bridge {
         self.relayer_entries(asset, relayer)
     }
 
+    pub fn reward_accruals(
+        &self,
+        relayer: Option<&str>,
+        asset: Option<&str>,
+        cursor: Option<u64>,
+        limit: usize,
+    ) -> (Vec<RewardAccrualRecord>, Option<u64>) {
+        let accruals: Vec<_> = self
+            .state
+            .reward_accruals
+            .iter()
+            .cloned()
+            .filter(|record| {
+                relayer
+                    .map(|target| target == record.relayer.as_str())
+                    .unwrap_or(true)
+            })
+            .filter(|record| {
+                asset
+                    .map(|target| target == record.asset.as_str())
+                    .unwrap_or(true)
+            })
+            .collect();
+        paginate(accruals, cursor, limit)
+    }
+
     pub fn reward_claims(
         &self,
         relayer: Option<&str>,
@@ -2755,12 +3302,7 @@ impl Bridge {
         self.state.token_bridge.asset_snapshots()
     }
 
-    pub fn dispute_audit(
-        &self,
-        asset: Option<&str>,
-        cursor: Option<u64>,
-        limit: usize,
-    ) -> (Vec<DisputeAuditRecord>, Option<u64>) {
+    fn live_dispute_records(&self, asset: Option<&str>) -> HashMap<[u8; 32], DisputeAuditRecord> {
         let mut builders: HashMap<[u8; 32], DisputeAuditRecord> = HashMap::new();
         let now = now_secs();
         for (chan_asset, channel) in &self.state.channels {
@@ -2795,7 +3337,7 @@ impl Bridge {
                 entry.challenged = pending.challenged;
                 entry.settlement_required = channel.config.requires_settlement_proof;
                 entry.settlement_chain = channel.config.settlement_chain.clone();
-                entry.expired = now > deadline && pending.challenged == false;
+                entry.expired = now > deadline && !pending.challenged;
             }
             for challenge in &channel.challenges {
                 if asset.is_some() && asset != Some(chan_asset.as_str()) {
@@ -2955,6 +3497,26 @@ impl Bridge {
             entry.settlement_required = true;
             entry.settlement_chain = record.settlement_chain.clone();
             entry.settlement_submitted_at = Some(record.submitted_at);
+        }
+
+        builders
+    }
+
+    pub fn dispute_audit(
+        &self,
+        asset: Option<&str>,
+        cursor: Option<u64>,
+        limit: usize,
+    ) -> (Vec<DisputeAuditRecord>, Option<u64>) {
+        let mut builders = self.live_dispute_records(asset);
+
+        for record in self.state.dispute_history.iter() {
+            if asset.is_some() && asset != Some(record.asset.as_str()) {
+                continue;
+            }
+            builders
+                .entry(record.commitment)
+                .or_insert_with(|| record.clone());
         }
 
         let mut records: Vec<DisputeAuditRecord> = builders.into_values().collect();

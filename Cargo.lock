@@ -48,6 +48,7 @@ dependencies = [
 name = "bridge-types"
 version = "0.1.0"
 dependencies = [
+ "crypto_suite",
  "foundation_serde",
  "foundation_serialization",
  "foundation_time",

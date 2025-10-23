@@ -2,6 +2,14 @@
 
 _Last updated: 2025-10-23 15:20:00Z_
 
+> **2025-10-23 update (settlement digest & reward accrual ledger):** External
+> settlement proofs now compute a deterministic digest via the first-party
+> `bridge_types::settlement_proof_digest` helper, track per-chain height
+> watermarks inside `node/src/bridge/mod.rs`, and expose typed error variants for
+> hash or height replays. Every duty success records a sled-backed
+> `RewardAccrualRecord` retrieved through `bridge.reward_accruals`/
+> `blockctl bridge reward-accruals`, with CLI/Node integration coverage ensuring
+> pagination and JSON-RPC envelopes stay within the in-house helpers.
 > **2025-10-23 update (CLI bridge transport abstraction):** Bridge commands in
 > the contract CLI now route every JSON-RPC call through a new
 > `BridgeRpcTransport` trait. Production flows wrap the existing `RpcClient`,

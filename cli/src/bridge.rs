@@ -109,6 +109,14 @@ pub enum BridgeCmd {
         limit: usize,
         url: String,
     },
+    /// Inspect recorded reward accruals
+    RewardAccruals {
+        relayer: Option<String>,
+        asset: Option<String>,
+        cursor: Option<u64>,
+        limit: usize,
+        url: String,
+    },
     /// Render dispute audit summaries
     DisputeAudit {
         asset: Option<String>,
@@ -470,6 +478,35 @@ impl BridgeCmd {
         )
         .subcommand(
             CommandBuilder::new(
+                CommandId("bridge.reward_accruals"),
+                "reward-accruals",
+                "Inspect recorded reward accruals",
+            )
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "relayer",
+                "relayer",
+                "Optional relayer identifier",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "asset",
+                "asset",
+                "Optional asset filter",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "cursor",
+                "cursor",
+                "Pagination cursor",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Maximum records to return").default("50"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
                 CommandId("bridge.settlement_log"),
                 "settlement-log",
                 "Inspect settlement submissions",
@@ -760,6 +797,22 @@ impl BridgeCmd {
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
                 Ok(BridgeCmd::RewardClaims {
                     relayer,
+                    cursor,
+                    limit,
+                    url,
+                })
+            }
+            "reward-accruals" => {
+                let relayer = take_string(sub_matches, "relayer");
+                let asset = take_string(sub_matches, "asset");
+                let cursor =
+                    crate::parse_utils::parse_u64(take_string(sub_matches, "cursor"), "cursor")?;
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?.unwrap_or(50);
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(BridgeCmd::RewardAccruals {
+                    relayer,
+                    asset,
                     cursor,
                     limit,
                     url,
@@ -1091,6 +1144,22 @@ pub fn handle_with_transport(
                 ("limit", json_u64(limit as u64)),
             ]);
             let payload = json_rpc_request("bridge.settlement_log", params);
+            send_rpc(transport, &url, &payload, out)?;
+        }
+        BridgeCmd::RewardAccruals {
+            relayer,
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            let params = json_object_from([
+                ("relayer", json_option_string(relayer)),
+                ("asset", json_option_string(asset)),
+                ("cursor", cursor.map(json_u64).unwrap_or_else(json_null)),
+                ("limit", json_u64(limit as u64)),
+            ]);
+            let payload = json_rpc_request("bridge.reward_accruals", params);
             send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::DisputeAudit {
