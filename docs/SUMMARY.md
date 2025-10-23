@@ -1,4 +1,12 @@
 # Summary
+> **Review (2025-10-25, afternoon):** Remediation follow-ups are now automated
+> end-to-end. Pending actions track dispatch attempts, retry counts, and follow-up
+> notes so the aggregator can re-dispatch playbooks before synthesising governance
+> escalations when policy thresholds expire. The acknowledgement parser accepts
+> plain-text hook responses alongside JSON, and new alerts
+> (`BridgeRemediationAckPending`, `BridgeRemediationClosureMissing`) page when
+> acknowledgements stall or closures never arrive, keeping the paging/escalation
+> loop entirely first party.
 > **Review (2025-10-25, mid-morning):** Governance escalations now report
 > acknowledgement state end to end. The metrics aggregator records
 > `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`, stores

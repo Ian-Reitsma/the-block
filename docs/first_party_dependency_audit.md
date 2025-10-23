@@ -1,6 +1,18 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-25 11:05:00Z_
+_Last updated: 2025-10-25 14:45:00Z_
+
+> **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
+> remediation engine now escalates and retries pending playbooks using only the
+> in-house scheduler. Pending actions track `dispatch_attempts`,
+> `auto_retry_count`, retry timestamps, and per-action `follow_up_notes` so the
+> aggregator emits deterministic retry/escalation payloads without third-party
+> queues. The acknowledgement parser tolerates plain-text hook responses
+> (`"ack ..."`, `"closed: pager"`, etc.) alongside JSON objects, promoting each to
+> a first-party `BridgeDispatchAckRecord` with persisted acknowledgement/closure
+> metadata. Bridge alerts now query the stored acknowledgement counter to warn on
+> pending or missing closures, keeping paging/escalation coverage entirely first
+> party.
 
 > **2025-10-25 update (dispatch acknowledgement telemetry):** The metrics
 > aggregator now records `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`

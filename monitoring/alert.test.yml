@@ -35,6 +35,12 @@ tests:
         values: '0.5+0x31'
       - series: 'bridge_metric_rate_per_second{metric="bridge_reward_claims_total",peer="bridge-node",labels="asset=eth"}'
         values: '0.05+0x31'
+      - series: 'bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="pending"}'
+        values: '0+1x31'
+      - series: 'bridge_remediation_dispatch_total{action="escalate",playbook="governance-escalation",target="http",status="success"}'
+        values: '0+1x31'
+      - series: 'bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="closed"}'
+        values: '0+0x31'
     alert_rule_test:
       - eval_time: 20m
         alertname: ConvergenceLag
@@ -111,3 +117,24 @@ tests:
               labels: "asset=btc"
             exp_annotations:
               summary: "Bridge counter rate skew detected for bridge_reward_claims_total on bridge-node (asset=btc)"
+      - eval_time: 30m
+        alertname: BridgeRemediationAckPending
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              action: escalate
+              playbook: governance-escalation
+              target: http
+              state: pending
+            exp_annotations:
+              summary: "Bridge remediation acknowledgements stalled (pending) for escalate on target http"
+      - eval_time: 30m
+        alertname: BridgeRemediationClosureMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              action: escalate
+              playbook: governance-escalation
+              target: http
+            exp_annotations:
+              summary: "Bridge remediation closures missing for escalate on target http"

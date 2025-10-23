@@ -150,6 +150,32 @@ groups:
           severity: warn
         annotations:
           summary: "Bridge counter rate skew detected for {{ $labels.metric }} on {{ $labels.peer }} ({{ $labels.labels }})"
+      - alert: BridgeRemediationAckPending
+        expr: |
+          sum by (action, playbook, target, state)(
+            increase(bridge_remediation_dispatch_ack_total{target="http",state=~"pending|invalid"}[15m])
+          ) > 0
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge remediation acknowledgements stalled ({{ $labels.state }}) for {{ $labels.action }} on target {{ $labels.target }}"
+      - alert: BridgeRemediationClosureMissing
+        expr: |
+          (
+            sum by (action, playbook, target)(
+              increase(bridge_remediation_dispatch_total{target="http",status="success"}[30m])
+            )
+            -
+            sum by (action, playbook, target)(
+              increase(bridge_remediation_dispatch_ack_total{target="http",state="closed"}[30m])
+            )
+          ) > 0
+        for: 30m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Bridge remediation closures missing for {{ $labels.action }} on target {{ $labels.target }}"
   - name: treasury
     rules:
       - alert: TreasuryDisbursementSnapshotStale

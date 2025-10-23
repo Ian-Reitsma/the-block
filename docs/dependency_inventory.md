@@ -17,6 +17,11 @@ workspace crates.
   `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
   dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
   hermetic without background servers.
+- ✅ The remediation engine now automates retries and escalations without leaving
+  the first-party stack. Actions persist dispatch attempts, retry counts, and
+  acknowledgement metadata, the parser tolerates plain-text hook responses, and
+  alerting consumes the stored acknowledgement counter to flag pending or missing
+  closures—all without introducing third-party schedulers or JSON tooling.
 - ✅ CLI wallet integration tests now snapshot the `signer_metadata` array across
   ready, override, ephemeral, and session preview flows. The `fee_floor_warning`
   suite asserts the struct-level metadata vector, and the new

@@ -84,6 +84,11 @@ struct ApiRemediationAction {
     acknowledged_at: Option<u64>,
     closed_out_at: Option<u64>,
     acknowledgement_notes: Option<String>,
+    dispatch_attempts: u64,
+    auto_retry_count: u64,
+    follow_up_notes: Option<String>,
+    last_dispatch_at: Option<u64>,
+    pending_since: Option<u64>,
 }
 
 fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
@@ -191,6 +196,26 @@ fn parse_remediation_actions(bytes: &[u8]) -> Vec<ApiRemediationAction> {
                     .get("acknowledgement_notes")
                     .and_then(Value::as_str)
                     .map(|value| value.to_string()),
+                dispatch_attempts: object
+                    .get("dispatch_attempts")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                auto_retry_count: object
+                    .get("auto_retry_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                follow_up_notes: object
+                    .get("follow_up_notes")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string()),
+                last_dispatch_at: match object.get("last_dispatch_at") {
+                    Some(Value::Null) | None => None,
+                    Some(value) => value.as_u64(),
+                },
+                pending_since: match object.get("pending_since") {
+                    Some(Value::Null) | None => None,
+                    Some(value) => value.as_u64(),
+                },
             }
         })
         .collect()
@@ -314,6 +339,7 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
 #[derive(Clone)]
 enum HookResponse {
     Json(Value),
+    Text(String),
 }
 
 struct OverrideHttpClient {
@@ -334,14 +360,17 @@ impl BridgeHttpClientOverride for OverrideHttpClient {
                     body,
                 })
                 .map_err(|err| err.to_string()),
+            HookResponse::Text(body) => Ok(BridgeHttpOverrideResponse {
+                status: StatusCode::OK,
+                body: body.as_bytes().to_vec(),
+            }),
         }
     }
 }
 
-fn install_http_override(response: HookResponse) -> (
-    BridgeHttpClientOverrideGuard,
-    Arc<Mutex<Vec<Value>>>,
-) {
+fn install_http_override(
+    response: HookResponse,
+) -> (BridgeHttpClientOverrideGuard, Arc<Mutex<Vec<Value>>>) {
     let captured = Arc::new(Mutex::new(Vec::new()));
     let client = Arc::new(OverrideHttpClient {
         captured: Arc::clone(&captured),
@@ -1055,7 +1084,268 @@ fn bridge_remediation_records_http_acknowledgements() {
         assert!(action.acknowledged_at.is_some());
         assert!(action.closed_out_at.is_none());
         assert_eq!(action.acknowledgement_notes.as_deref(), Some("pager"));
+    });
+}
 
+#[test]
+fn bridge_remediation_parses_text_acknowledgements() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let response = HookResponse::Text("acknowledged: pager".to_string());
+        let (override_guard, captured) = install_http_override(response);
+        let _override_guard = override_guard;
+        let _guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        runtime::sleep(Duration::from_millis(200)).await;
+        let observed = wait_for_requests(&captured, 1).await;
+
+        let dispatch_resp = app
+            .handle(
+                app.request_builder()
+                    .path("/remediation/bridge/dispatches")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dispatch_resp.status(), StatusCode::OK);
+        let dispatch_records = parse_dispatch_records(dispatch_resp.body());
+        assert!(!dispatch_records.is_empty(), "expected dispatch record");
+        let record = dispatch_records.last().unwrap();
+        assert!(
+            observed >= 1,
+            "expected http acknowledgement dispatch, observed {} events; target={}, status={}",
+            observed,
+            record.target,
+            record.status
+        );
+        assert_eq!(record.target, "http");
+        assert_eq!(record.status, "success");
+        assert_eq!(
+            record.acknowledgement_state.as_deref(),
+            Some("acknowledged")
+        );
+        assert_eq!(record.acknowledgement_acknowledged, Some(true));
+        assert_eq!(record.acknowledgement_closed, Some(false));
+        assert!(record.acknowledgement_timestamp.unwrap_or(0) > 0);
+        assert_eq!(record.acknowledgement_notes.as_deref(), Some("pager"));
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
+        assert!(metrics_body.contains(
+            r#"bridge_remediation_dispatch_ack_total{action="escalate",playbook="governance-escalation",target="http",state="acknowledged"}"#
+        ));
+    });
+}
+
+#[test]
+fn bridge_remediation_retries_pending_acknowledgements() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let response = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
+                .expect("pending response json"),
+        );
+        let (override_guard, captured) = install_http_override(response);
+        let _override_guard = override_guard;
+        let _hook_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+        let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "5");
+        let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "2");
+        let _cleanup_guard = EnvGuard::set("AGGREGATOR_CLEANUP_INTERVAL_SECS", "1");
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        state.spawn_cleanup();
+        let app = router(state);
+
+        for value in [10u64, 12, 13, 15, 17, 20, 21] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(160, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        wait_for_requests(&captured, 1).await;
+        runtime::sleep(Duration::from_millis(1500)).await;
+        let observed = wait_for_requests(&captured, 2).await;
+        assert!(
+            observed >= 2,
+            "expected retry dispatch, observed {observed}"
+        );
+
+        let remediation_resp = app
+            .handle(app.request_builder().path("/remediation/bridge").build())
+            .await
+            .unwrap();
+        assert_eq!(remediation_resp.status(), StatusCode::OK);
+        let actions = parse_remediation_actions(remediation_resp.body());
+        assert!(!actions.is_empty(), "expected remediation action");
+        let action = actions.last().unwrap();
+        assert!(
+            action.dispatch_attempts >= 2,
+            "expected dispatch attempts >= 2, found {}",
+            action.dispatch_attempts
+        );
+        assert!(
+            action.auto_retry_count >= 1,
+            "expected auto retry count >= 1, found {}",
+            action.auto_retry_count
+        );
+        assert!(action
+            .follow_up_notes
+            .as_deref()
+            .unwrap_or("")
+            .contains("retry"));
+    });
+}
+
+#[test]
+fn bridge_remediation_escalates_pending_acknowledgements() {
+    run_async(async {
+        reset_bridge_remediation_dispatch_log();
+        let dir = tempfile::tempdir().unwrap();
+        let spool = tempfile::tempdir().unwrap();
+        let response = HookResponse::Json(
+            json::value_from_str(r#"{"acknowledged":false,"notes":"waiting"}"#)
+                .expect("pending response json"),
+        );
+        let (override_guard, captured) = install_http_override(response);
+        let _override_guard = override_guard;
+        let _throttle_guard = EnvGuard::set("TB_REMEDIATION_THROTTLE_URLS", "http://override/hook");
+        let _escalate_dir_guard = EnvGuard::set(
+            "TB_REMEDIATION_ESCALATE_DIRS",
+            spool.path().to_str().expect("spool path"),
+        );
+        let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
+        let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "3");
+        let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "1");
+        let _cleanup_guard = EnvGuard::set("AGGREGATOR_CLEANUP_INTERVAL_SECS", "1");
+
+        let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
+        state.spawn_cleanup();
+        let app = router(state);
+
+        for value in [10u64, 11, 12, 13, 14, 15, 16] {
+            let payload = build_labeled_payload(value, "eth");
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
+                .header("x-auth-token", "token")
+                .json(&payload)
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            runtime::sleep(Duration::from_millis(20)).await;
+        }
+
+        let spike_payload = build_labeled_payload(25, "eth");
+        let spike_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&spike_payload)
+            .unwrap()
+            .build();
+        let spike_resp = app.handle(spike_req).await.unwrap();
+        assert_eq!(spike_resp.status(), StatusCode::OK);
+
+        wait_for_requests(&captured, 1).await;
+        runtime::sleep(Duration::from_secs(4)).await;
+        let observed = wait_for_requests(&captured, 2).await;
+        assert!(observed >= 2, "expected retry dispatch for throttle action");
+
+        let remediation_resp = app
+            .handle(app.request_builder().path("/remediation/bridge").build())
+            .await
+            .unwrap();
+        assert_eq!(remediation_resp.status(), StatusCode::OK);
+        let actions = parse_remediation_actions(remediation_resp.body());
+        assert!(
+            actions.len() >= 2,
+            "expected throttle and escalation actions"
+        );
+        let throttle = actions
+            .iter()
+            .rev()
+            .find(|action| action.action == "throttle")
+            .expect("throttle action present");
+        assert!(throttle.dispatch_attempts >= 2);
+        assert!(throttle.auto_retry_count >= 1);
+        assert!(throttle.last_dispatch_at.is_some());
+        assert!(throttle.pending_since.is_some());
+        assert!(throttle
+            .follow_up_notes
+            .as_deref()
+            .unwrap_or("")
+            .contains("retry"));
+        let escalate_action = actions
+            .iter()
+            .find(|action| action.action == "escalate")
+            .expect("escalation action present");
+        assert!(escalate_action.last_dispatch_at.is_some());
+        assert!(escalate_action.pending_since.is_some());
+        assert!(escalate_action
+            .follow_up_notes
+            .as_deref()
+            .unwrap_or("")
+            .contains("escalation"));
     });
 }
 
@@ -1152,7 +1442,6 @@ fn bridge_remediation_records_http_closure_acknowledgements() {
         assert!(action.acknowledged_at.is_some());
         assert!(action.closed_out_at.is_some());
         assert_eq!(action.acknowledgement_notes.as_deref(), Some("resolved"));
-
     });
 }
 

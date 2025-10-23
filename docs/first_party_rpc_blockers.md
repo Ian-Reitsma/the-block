@@ -21,6 +21,16 @@ RPC client.
 
 ## Recent progress (2025-10-25)
 
+- Remediation follow-ups now queue automated retries and governance escalations
+  without leaving the first-party engine. Actions persist `dispatch_attempts`,
+  `auto_retry_count`, retry timestamps, and follow-up notes so CLI/tests can
+  assert deterministic envelopes while HTTP hooks see explicit escalation
+  context. The acknowledgement parser accepts plain-text payloads in addition to
+  JSON, mapping strings like `"ack pager"` or `"closed: resolved"` into
+  structured `BridgeDispatchAckRecord`s. Bridge alerts consume the stored
+  acknowledgement counter to raise `BridgeRemediationAckPending` and
+  `BridgeRemediationClosureMissing` without promtool or third-party parsers.
+
 - Dispatch acknowledgement telemetry now stays first party: the metrics
   aggregator increments `bridge_remediation_dispatch_ack_total{action,playbook,target,state}`
   and persists acknowledgement timestamps/notes on remediation actions, while
