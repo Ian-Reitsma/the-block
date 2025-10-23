@@ -33,8 +33,10 @@ ready to import once the foundation telemetry stack is running.
   `sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))`
   so operators can confirm downstream paging/governance hooks acknowledged or
   closed out each playbook, and a latency histogram overlays p50/p95 curves from
-  `bridge_remediation_ack_latency_seconds{playbook,state}` so slow closures raise
-  flags before escalation windows expire.
+  `bridge_remediation_ack_latency_seconds{playbook,state}` plus the policy gauge
+  `bridge_remediation_ack_target_seconds{playbook,policy}` so slow closures stand
+  out against the configured retry/escalation thresholds before policy windows
+  expire.
 - The metrics aggregator now exposes a `/anomalies/bridge` endpoint alongside the
   bridge row. A rolling detector keeps a per-peer baseline for the reward,
   approval, settlement, and dispute counters, increments
@@ -76,16 +78,21 @@ ready to import once the foundation telemetry stack is running.
   defaults plus suffix overrides such as
   `TB_REMEDIATION_ACK_RETRY_SECS_GOVERNANCE_ESCALATION` for playbook-specific
   tuning. Completion latency feeds the
-  `bridge_remediation_ack_latency_seconds{playbook,state}` histogram that powers
-  the new dashboard panel. New alerts—
-  `BridgeRemediationAckPending` and `BridgeRemediationClosureMissing`—read the
-  persisted acknowledgement counter and page when hooks stall or never close,
-  rounding out the first-party paging/escalation loop.
+  `bridge_remediation_ack_latency_seconds{playbook,state}` histogram, which now
+  persists samples across restarts and drives the dashboard panel alongside the
+  policy gauge. New alerts—`BridgeRemediationAckPending`,
+  `BridgeRemediationClosureMissing`, and `BridgeRemediationAckLatencyHigh`—read
+  the persisted metrics to page when hooks stall, never close, or exceed the
+  configured p95 policy target, rounding out the first-party paging/escalation
+  loop.
 - Use `contract remediation bridge --aggregator http://localhost:9000 --limit 5`
   during incidents to print the persisted actions, retry history, follow-up
   notes, acknowledgement timestamps, and dispatch log straight from the
-  aggregator without relying on external tooling. The CLI consumes the same
-  JSON endpoints that power the dashboards and keeps everything first party.
+  aggregator without relying on external tooling. Filter the output with
+  `--playbook` or `--peer` when triaging a specific workflow, and pass `--json`
+  to stream the same data to automation without leaving the first-party binary.
+  The CLI consumes the same JSON endpoints that power the dashboards and keeps
+  everything first party.
 - The CI-run `bridge-alert-validator` binary now drives the shared
   `alert_validator` module, replaying canned datasets for the bridge,
   chain-health, dependency-registry, and treasury alert groups so expression

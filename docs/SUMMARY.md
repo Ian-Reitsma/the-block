@@ -1,4 +1,12 @@
 # Summary
+> **Review (2025-10-27, morning):** The bridge dashboards now overlay the policy
+> gauge `bridge_remediation_ack_target_seconds{playbook,policy}` on the latency
+> histogram, the metrics aggregator restores acknowledgement samples after
+> restarts, and a new `BridgeRemediationAckLatencyHigh` alert flags p95 latency
+> above the configured target before escalations fire. The `contract remediation
+> bridge` CLI added `--playbook`, `--peer`, and `--json` flags so operators and
+> automation can filter or ingest persisted actions without leaving the
+> first-party tooling.
 > **Review (2025-10-25, late evening):** Per-playbook acknowledgement windows
 > honour `TB_REMEDIATION_ACK_*` overrides, acknowledgement completion latency is
 > recorded in `bridge_remediation_ack_latency_seconds{playbook,state}` (with
@@ -12,12 +20,15 @@ Bridge remediation highlights:
   `_GOVERNANCE_ESCALATION`) so paging, throttling, and escalation playbooks use
   tailored retry/escalation windows.
 - `bridge_remediation_ack_latency_seconds{playbook,state}` captures acknowledgement
-  completion latency; Grafana and the HTML snapshot chart p50/p95 values beside
-  the existing dispatch/ack counters so slow closures surface ahead of policy
+  completion latency; Grafana and the HTML snapshot chart p50/p95 values alongside
+  the policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}` and
+  persist samples across restarts so slow closures surface ahead of policy
   triggers.
 - `contract remediation bridge --aggregator <url>` renders the persisted
   actions, acknowledgement metadata, retry history, follow-up notes, and the
-  dispatch log without leaving the first-party CLI.
+  dispatch log without leaving the first-party CLI. Filter output with
+  `--playbook`/`--peer` or stream JSON via `--json` when automation needs the
+  same view.
 > **Review (2025-10-25, afternoon):** Remediation follow-ups are now automated
 > end-to-end. Pending actions track dispatch attempts, retry counts, and follow-up
 > notes so the aggregator can re-dispatch playbooks before synthesising governance

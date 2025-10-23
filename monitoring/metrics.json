@@ -313,6 +313,15 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge remediation acknowledgement policy targets in seconds",
+      "labels": [
+        "playbook",
+        "phase"
+      ],
+      "name": "bridge_remediation_ack_target_seconds"
+    },
+    {
+      "deprecated": false,
       "description": "Bridge remediation acknowledgement latency grouped by playbook and state",
       "labels": [
         "playbook",

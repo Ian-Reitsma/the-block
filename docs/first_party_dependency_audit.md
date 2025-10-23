@@ -1,6 +1,16 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-25 14:45:00Z_
+> **2025-10-27 update (ack targets & CLI filters):** Bridge remediation dashboards
+> now overlay the first-party gauge
+> `bridge_remediation_ack_target_seconds{playbook,policy}` on the latency
+> histogram, the metrics aggregator rehydrates the histogram state after
+> restarts, and Prometheus raises `BridgeRemediationAckLatencyHigh` when p95
+> acknowledgements exceed the configured policy target. The contract CLI’s
+> `contract remediation bridge` command added `--playbook`, `--peer`, and
+> `--json` options so responders and automation filter or stream persisted
+> actions without introducing third-party tooling.
+
+_Last updated: 2025-10-27 14:45:00Z_
 
 > **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
 > remediation engine now escalates and retries pending playbooks using only the

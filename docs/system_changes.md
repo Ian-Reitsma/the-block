@@ -1,4 +1,13 @@
 # System-Wide Economic Changes
+> **Review (2025-10-27, morning):** Bridge remediation dashboards now overlay the
+> policy gauge `bridge_remediation_ack_target_seconds{playbook,policy}` on the
+> acknowledgement latency histogram, the metrics aggregator rehydrates the
+> stored samples after a restart, and a new `BridgeRemediationAckLatencyHigh`
+> alert warns when observed p95 exceeds the configured target before
+> escalations fire. The `contract remediation bridge` command gained
+> `--playbook`, `--peer`, and `--json` options so operators and automation can
+> filter or ingest the persisted actions without leaving the first-party
+> tooling.
 > **Review (2025-10-25, evening):** Per-playbook acknowledgement policy now
 > honours `TB_REMEDIATION_ACK_*` overrides, the aggregator records completion
 > latency in a dedicated histogram, Grafana/HTML snapshots plot p50/p95
