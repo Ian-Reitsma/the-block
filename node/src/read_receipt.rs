@@ -20,6 +20,18 @@ pub struct ReadAck {
     /// Ed25519 signature over the acknowledgement payload.
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub sig: Vec<u8>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Domain that served the content.
+    pub domain: String,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Hosting/provider identifier resolved for the read.
+    pub provider: String,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Optional advertising campaign matched for this impression.
+    pub campaign_id: Option<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Optional creative identifier returned by the ad marketplace.
+    pub creative_id: Option<String>,
 }
 
 impl ReadAck {
@@ -116,5 +128,17 @@ fn hash_ack(ack: &ReadAck) -> [u8; 32] {
     h.update(&ack.client_hash);
     h.update(&ack.pk);
     h.update(&ack.sig);
+    h.update(ack.domain.as_bytes());
+    h.update(ack.provider.as_bytes());
+    if let Some(campaign) = &ack.campaign_id {
+        h.update(campaign.as_bytes());
+    } else {
+        h.update(&[0u8]);
+    }
+    if let Some(creative) = &ack.creative_id {
+        h.update(creative.as_bytes());
+    } else {
+        h.update(&[0u8]);
+    }
     h.finalize().into()
 }

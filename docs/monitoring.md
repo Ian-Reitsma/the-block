@@ -480,6 +480,13 @@ checked into a separate ops repository so upgrades can diff metric coverage.
 
 These subsidy gauges directly reflect the CT-only economic model: `subsidy_bytes_total{type="read"}` increments when gateways serve acknowledged bytes, `subsidy_bytes_total{type="storage"}` tracks newly admitted blob data, and `subsidy_cpu_ms_total` covers deterministic edge compute. Rent escrow health is captured by `rent_escrow_locked_ct_total` (currently held deposits), `rent_escrow_refunded_ct_total`, and `rent_escrow_burned_ct_total`. The `subsidy_auto_reduced_total` counter records automatic multiplier down‑tuning when realised inflation drifts above the target, while `kill_switch_trigger_total` increments whenever governance activates the emergency kill switch. Monitoring these counters alongside `inflation.params` outputs allows operators to verify that multipliers match governance expectations and that no residual legacy-ledger fields remain. For the full rationale behind these metrics and the retirement of the auxiliary reimbursement ledger, see [system_changes.md](system_changes.md#ct-subsidy-unification-2024).
 
+New acknowledgement plumbing introduces `read_ack_processed_total{result}`—watch
+for sustained `error` growth to catch malformed signatures or channel back-pressure
+before receipts starve subsidy splits. Pair the counter with explorer snapshots of
+`read_sub_*_ct` and `ad_*_ct` block fields to confirm governance-configured viewer/
+host/hardware/verifier/liquidity shares and advertising settlements remain in
+sync with observed acknowledgement volume.
+
 Storage ingest and repair telemetry tags every operation with the active coder and compressor so fallback rollouts can be tracked explicitly. Dashboards should watch `storage_put_object_seconds{erasure=...,compression=...}`, `storage_put_chunk_seconds{...}`, and `storage_repair_failures_total{erasure=...,compression=...}` alongside the `storage_coding_operations_total` counters to spot regressions when the XOR/RLE fallbacks are engaged. The repair loop also surfaces `algorithm_limited` log entries that can be scraped into incident timelines.
 
 Settlement persistence adds complementary gauges:

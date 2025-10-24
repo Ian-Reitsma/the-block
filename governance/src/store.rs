@@ -1564,6 +1564,21 @@ impl GovStore {
                                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
                                 ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
                                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+                                ParamKey::ReadSubsidyViewerPercent => {
+                                    params.read_subsidy_viewer_percent
+                                }
+                                ParamKey::ReadSubsidyHostPercent => {
+                                    params.read_subsidy_host_percent
+                                }
+                                ParamKey::ReadSubsidyHardwarePercent => {
+                                    params.read_subsidy_hardware_percent
+                                }
+                                ParamKey::ReadSubsidyVerifierPercent => {
+                                    params.read_subsidy_verifier_percent
+                                }
+                                ParamKey::ReadSubsidyLiquidityPercent => {
+                                    params.read_subsidy_liquidity_percent
+                                }
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -1735,6 +1750,11 @@ impl GovStore {
                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
                 ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+                ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
+                ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
+                ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
+                ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
+                ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -1779,6 +1799,11 @@ impl GovStore {
             ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
             ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
             ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+            ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
+            ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
+            ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
+            ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
+            ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
             ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
             ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
             ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,

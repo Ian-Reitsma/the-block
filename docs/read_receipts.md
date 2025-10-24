@@ -10,7 +10,8 @@ replay batches and confirm on‑chain totals.
 
 ## 1. `ReadAck` structure
 
-`node/src/read_receipt.rs` defines `ReadAck` as a client‑signed tuple:
+`node/src/read_receipt.rs` defines `ReadAck` as a client‑signed tuple with
+explicit hosting and campaign metadata:
 
 - `manifest` – 32‑byte identifier of the published manifest or dynamic
   function. This binds the acknowledgement to the content that was served.
@@ -21,33 +22,62 @@ replay batches and confirm on‑chain totals.
   this value when minting `READ_SUB_CT`.
 - `ts` – millisecond timestamp when the read finished. Anchoring a timestamp
   deters replay attacks and allows time‑bounded analytics.
-- `client_hash` – salted hash of the client IP address. The salt rotates each
-  epoch so observers cannot correlate requests across epochs.
-- `pk`/`sig` – the client’s Ed25519 public key and signature over the above
-  fields. `ReadAck::verify()` recomputes the message hash and rejects malformed
-  signatures or keys.
+- `client_hash` – BLAKE3 hash of the serving domain concatenated with the
+  client IP octets (`hash(domain || client_ip)`). This locks the acknowledgement
+  to the observed caller while keeping the raw IP off-chain.
+- `pk`/`sig` – the client’s Ed25519 public key and signature over the
+  acknowledgement preimage. `ReadAck::verify()` recomputes the message hash and
+  rejects malformed signatures or keys.
+- `domain` – canonical domain that served the request.
+- `provider` – storage/hosting identifier inferred for the response.
+- `campaign_id`/`creative_id` – optional identifiers emitted by the advertising
+  marketplace when an impression reserves budget for a campaign.
 
-All fields serialize through the first-party binary codec exposed by
-`foundation_serialization::binary`, producing fixed-width records that append to
-disk without additional framing. Gateways still accept the historical CBOR
-format when replaying archives, but new batches emit `.bin` payloads only.
+All fields serialize through the first-party binary codec. The Merkle hash for
+each acknowledgement incorporates every field above (including optional
+campaign metadata) so downstream audits observe the exact domain/provider pair
+that earned the read and can link impressions to campaign settlements. Legacy
+gateways may still ingest CBOR archives for replay, but new batches emit the
+first-party `.bin` format exclusively.
 
-## 2. Batching and Merkle roots
+### HTTP signing contract
+
+Gateways no longer synthesize placeholder keys or signatures when logging a
+read. Instead, the caller must supply the acknowledgement pre-image alongside
+the request so the gateway can verify the signature before enqueueing the
+`ReadAck`. Clients attach the following headers to every static asset request:
+
+- `X-TheBlock-Ack-Manifest` – hex-encoded 32-byte manifest identifier.
+- `X-TheBlock-Ack-Pk` – hex-encoded Ed25519 public key.
+- `X-TheBlock-Ack-Sig` – hex-encoded 64-byte Ed25519 signature over the
+  `ReadAck` payload (`manifest || path_hash || bytes || ts || client_hash`).
+- `X-TheBlock-Ack-Bytes` – decimal byte count the client expects to receive.
+- `X-TheBlock-Ack-Ts` – millisecond timestamp chosen by the client when the
+  read completes.
+
+The gateway recomputes `path_hash` from the request path, derives
+`client_hash = blake3(domain || client_ip_octets)`, and rejects the request when
+the signature fails to verify or the declared byte count differs from the
+materialized response. Legacy fixtures that still rely on zeroed signatures are
+only supported by compiling the node with the `legacy-read-acks` feature.
+
+## 2. Gateway ingestion and node worker
 
 Gateways enqueue acknowledgements in memory until an operator‑tunable flush
 interval elapses. `ReadBatcher::finalize()` consumes the queue, hashes each
-acknowledgement with BLAKE3, and reduces the resulting leaves into a single
-Merkle root. The batch header records:
+acknowledgement with BLAKE3 (including domain, provider, and campaign fields),
+and reduces the resulting leaves into a single Merkle root. The batch header
+records the root, byte total, and acknowledgement count before writing the
+payload to `receipts/read/<epoch>/<sequence>.bin`.
 
-- `root` – 32‑byte Merkle root over the acknowledgements.
-- `total_bytes` – sum of `bytes` across the batch.
-- `count` – number of acknowledgements included.
-
-The serialized batch is written to
-`receipts/read/<epoch>/<sequence>.bin` and the root is exposed via the
-`read_batch_root` field in the block header (`node/src/lib.rs`). When the
-containing block finalizes, gateways claim `READ_SUB_CT` proportional to
-`total_bytes`.
+The gateway forwards every signed acknowledgement to the node over an
+`mpsc` channel. `spawn_read_ack_worker()` in `node/src/bin/node.rs` drains this
+channel, calls `Blockchain::submit_read_ack`, and emits the
+`read_ack_processed_total{result="ok|error"}` counter so operators can surface
+invalid receipts in telemetry. Successful acknowledgements populate
+epoch-scoped byte ledgers keyed by viewer, host, hardware provider, verifier,
+and liquidity pool account addresses; ad impressions simultaneously reserve
+campaign budget for settlement.
 
 ## 3. Audit flow
 
@@ -62,23 +92,38 @@ Auditors reconstruct traffic with the following steps:
    `γ × total_bytes` for the epoch’s `γ` multiplier.
 
 `tools/analytics_audit` provides a reference implementation of this workflow.
+The worker clears per-epoch accumulators as soon as a block finalizes, so
+auditors sampling the live ledger should query before the next epoch boundary
+if they wish to compare raw acknowledgement bytes with the pending payout map.
 
 ## 4. Related RPCs and metrics
 
 - `gateway.reads_since(epoch)` – returns per‑domain totals derived from
   finalized batches.
 - `analytics` – aggregates read counts and bytes for dashboards.
-- Runtime telemetry counters `subsidy_bytes_total{type="read"}` and
-  `read_denied_total{reason}` reflect subsidy issuance and rate‑limit drops.
+- Runtime telemetry counters `subsidy_bytes_total{type="read"}`,
+  `read_denied_total{reason}`, and `read_ack_processed_total{result}` reflect
+  subsidy issuance, rate‑limit drops, and acknowledgement validation outcomes.
 
-## 5. Failure handling
+## 5. Subsidy distribution and advertising settlement
+
+`Blockchain::finalize_block` no longer routes `READ_SUB_CT` exclusively to the
+miner. Instead the epoch byte ledger fuels a governance‑controlled split across
+viewer wallets, hosting domains, hardware vendors, verifiers, and the liquidity
+pool. The resulting per‑role CT totals are persisted in the block header via the
+`read_sub_*_ct` fields alongside matching advertising fields
+(`ad_*_ct`) sourced from settled campaign impressions. Pending ad settlements
+are flushed at the same time so explorers and settlement tooling can reconcile
+impressions to campaign payouts.
+
+## 6. Failure handling
 
 Batches with fewer than 10 % signed acknowledgements are discarded to prevent
 unsourced subsidy claims. The gateway always logs unsigned reads with
 `allowed=false` so operators can diagnose abusive traffic without skewing
 reward totals.
 
-## 6. Examples
+## 7. Examples
 
 ```rust
 use the_block::ReadBatcher;

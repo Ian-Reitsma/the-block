@@ -16,6 +16,17 @@ pub struct BlockEncoder<'a> {
     pub coin_i: u64,
     pub storage_sub: u64,
     pub read_sub: u64,
+    pub read_sub_viewer: u64,
+    pub read_sub_host: u64,
+    pub read_sub_hardware: u64,
+    pub read_sub_verifier: u64,
+    pub read_sub_liquidity: u64,
+    pub ad_viewer: u64,
+    pub ad_host: u64,
+    pub ad_hardware: u64,
+    pub ad_verifier: u64,
+    pub ad_liquidity: u64,
+    pub ad_miner: u64,
     pub compute_sub: u64,
     pub proof_rebate: u64,
     pub storage_sub_it: u64,
@@ -45,6 +56,17 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.coin_i.to_le_bytes());
         h.update(&self.storage_sub.to_le_bytes());
         h.update(&self.read_sub.to_le_bytes());
+        h.update(&self.read_sub_viewer.to_le_bytes());
+        h.update(&self.read_sub_host.to_le_bytes());
+        h.update(&self.read_sub_hardware.to_le_bytes());
+        h.update(&self.read_sub_verifier.to_le_bytes());
+        h.update(&self.read_sub_liquidity.to_le_bytes());
+        h.update(&self.ad_viewer.to_le_bytes());
+        h.update(&self.ad_host.to_le_bytes());
+        h.update(&self.ad_hardware.to_le_bytes());
+        h.update(&self.ad_verifier.to_le_bytes());
+        h.update(&self.ad_liquidity.to_le_bytes());
+        h.update(&self.ad_miner.to_le_bytes());
         h.update(&self.compute_sub.to_le_bytes());
         h.update(&self.proof_rebate.to_le_bytes());
         h.update(&self.storage_sub_it.to_le_bytes());

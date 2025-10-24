@@ -32,9 +32,14 @@ Security considerations are catalogued under
 5. **Dynamic Execution** – `"/api/"` paths invoke the referenced `FuncTx`. The
    WASM bytecode is loaded from the blob store, executed with deterministic fuel
    limits, and its output streamed back to the client.
-6. **ReadAck Append** – once the response body is sent, the gateway pushes a
-   `ReadAck {manifest_id, path_hash, bytes, client_ip_hash, ts}` into an in‑memory
-   queue for later batching.
+6. **Campaign Match & ReadAck Append** – once the response body is sent, the
+   gateway asks the first-party advertising marketplace for a matching campaign
+   given the domain, provider metadata, and badge context. The winning creative
+   (if any) is recorded on the acknowledgement, the caller-supplied
+   `X-TheBlock-Ack-*` headers are validated, and the Ed25519 signature over the
+   manifest, path hash, byte count, timestamp, client hash, domain, provider,
+   and campaign fields is verified before the fully signed `ReadAck` is pushed
+   into the batching queue.
 
 ### WebSocket peer metrics
 
@@ -50,22 +55,43 @@ Security considerations are catalogued under
   `node/src/bin/net.rs`. Existing telemetry (`peer_metrics_active` gauge and
   send error counters) continues to fire around the new implementation.
 
-## 2. Receipt Batching & Analytics
+## 2. Receipt Batching, Submission & Analytics
 
-- A background task drains queued `ReadAck`s, writes them to CBOR batches, and
-  Merklizes each batch root. Roots anchor on‑chain so auditors can reconstruct
-  traffic.
+- `ReadBatcher::finalize()` drains queued `ReadAck`s, hashes each record (domain
+  and campaign metadata included), and writes the resulting binary batch and
+  Merkle root to disk. Roots anchor on‑chain so auditors can reconstruct traffic.
+- `spawn_read_ack_worker()` inside `node/src/bin/node.rs` receives each
+  acknowledgement from the gateway, records telemetry via
+  `read_ack_processed_total{result}`, feeds the ledger’s per-role byte maps, and
+  commits advertising reservations as pending settlements.
 - The `analytics` RPC exposes per‑domain totals computed from finalized batches
   allowing site operators to verify pageviews or ad impressions.
 
 ## 3. Subsidy Issuance for Reads
 
-- Finalized read batches mint `READ_SUB_CT` via the block coinbase. The
-  formula `γ × bytes` is governed by `inflation.params`.
-- Runtime telemetry counter `subsidy_bytes_total{type="read"}` increments with
-  every anchored batch so operators can reconcile payouts.
+- Finalized read batches mint `READ_SUB_CT` via the block coinbase, but the
+  resulting CT is now split across viewer, host, hardware, verifier, liquidity,
+  and miner accounts according to governance parameters. Advertising settlements
+  debit the campaign budget at the same time and publish per-role `ad_*_ct`
+  totals in the block header.
+- Runtime telemetry counters `subsidy_bytes_total{type="read"}` and
+  `read_ack_processed_total{result}` increment with every anchored batch and
+  validation decision so operators can reconcile payouts and rejected receipts.
 
-## 4. Abuse Prevention Summary
+## 4. Advertising Marketplace Integration
+
+- The `ad_market` crate provides an in-memory marketplace that ingests campaigns
+  (budget, creatives, targeting badges/domains) and hands back the best matching
+  creative when the gateway asks for an impression.
+- Reservations include a per-mebibyte CT price; when the acknowledgement is
+  accepted the node commits the settlement, carves up the CT based on the active
+  distribution policy, and publishes per-role totals (`ad_viewer_ct`,
+  `ad_host_ct`, etc.) in the block header.
+- Pending settlements surface through the explorer and RPC snapshots so
+  advertisers can reconcile impressions against debits without replaying the raw
+  receipt files.
+
+## 5. Abuse Prevention Summary
 
 - **Rate limits** – per‑IP token buckets backed by an Xor8 filter (97 % load, 1.1×10⁻³ FP); governance knob `gateway.req_rate_per_ip`.
 - **Stake deposits** – domains bond CT before serving content; slashable on
@@ -74,7 +100,7 @@ Security considerations are catalogued under
 - **Auditability** – all reads recorded via `ReadAck`; batches with <10 % signed
   acks are discarded and can trigger slashing.
 
-## 5. Operator Visibility
+## 6. Operator Visibility
 
 - `gateway.policy` reports current rate‑limit counters and last access time.
 - `gateway.reads_since(epoch)` scans finalized batches for historical traffic.

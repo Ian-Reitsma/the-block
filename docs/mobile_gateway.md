@@ -15,7 +15,8 @@ connected replicas of the RPC state.
 - Cache contents, together with the offline transaction queue, are encrypted with ChaCha20-Poly1305 using the node key
   (`TB_MOBILE_CACHE_KEY_HEX` or `TB_NODE_KEY_HEX`). Encrypted blobs are stored in `mobile_cache.db` so restarts retain state.
   Each record stores its own random nonce alongside the ciphertext so multiple services on the same device can safely share a
-  key without reuse.
+  key without reuse. Persistence relies on the first-party binary cursor codec—no serde stubs remain in the encode/decode path,
+  so tests now exercise the exact on-disk layout that production uses.
 - Operators can tune behaviour with environment variables:
   - `TB_MOBILE_CACHE_TTL_SECS` – entry TTL window (default 300 seconds).
   - `TB_MOBILE_CACHE_SWEEP_SECS` – sweep cadence (default 30 seconds).

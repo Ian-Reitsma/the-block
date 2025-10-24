@@ -2669,6 +2669,21 @@ pub static READ_DENIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static READ_ACK_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "read_ack_processed_total",
+            "Gateway read acknowledgements processed by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter read ack processed: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry read ack processed: {e}"));
+    c
+});
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",

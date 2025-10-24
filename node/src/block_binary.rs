@@ -43,6 +43,17 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         struct_writer.field_u64("coinbase_industrial", block.coinbase_industrial.get());
         struct_writer.field_u64("storage_sub_ct", block.storage_sub_ct.get());
         struct_writer.field_u64("read_sub_ct", block.read_sub_ct.get());
+        struct_writer.field_u64("read_sub_viewer_ct", block.read_sub_viewer_ct.get());
+        struct_writer.field_u64("read_sub_host_ct", block.read_sub_host_ct.get());
+        struct_writer.field_u64("read_sub_hardware_ct", block.read_sub_hardware_ct.get());
+        struct_writer.field_u64("read_sub_verifier_ct", block.read_sub_verifier_ct.get());
+        struct_writer.field_u64("read_sub_liquidity_ct", block.read_sub_liquidity_ct.get());
+        struct_writer.field_u64("ad_viewer_ct", block.ad_viewer_ct.get());
+        struct_writer.field_u64("ad_host_ct", block.ad_host_ct.get());
+        struct_writer.field_u64("ad_hardware_ct", block.ad_hardware_ct.get());
+        struct_writer.field_u64("ad_verifier_ct", block.ad_verifier_ct.get());
+        struct_writer.field_u64("ad_liquidity_ct", block.ad_liquidity_ct.get());
+        struct_writer.field_u64("ad_miner_ct", block.ad_miner_ct.get());
         struct_writer.field_u64("compute_sub_ct", block.compute_sub_ct.get());
         struct_writer.field_u64("proof_rebate_ct", block.proof_rebate_ct.get());
         struct_writer.field_u64("storage_sub_it", block.storage_sub_it.get());
@@ -119,6 +130,17 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut coinbase_industrial = None;
     let mut storage_sub_ct = None;
     let mut read_sub_ct = None;
+    let mut read_sub_viewer_ct = None;
+    let mut read_sub_host_ct = None;
+    let mut read_sub_hardware_ct = None;
+    let mut read_sub_verifier_ct = None;
+    let mut read_sub_liquidity_ct = None;
+    let mut ad_viewer_ct = None;
+    let mut ad_host_ct = None;
+    let mut ad_hardware_ct = None;
+    let mut ad_verifier_ct = None;
+    let mut ad_liquidity_ct = None;
+    let mut ad_miner_ct = None;
     let mut compute_sub_ct = None;
     let mut proof_rebate_ct = None;
     let mut storage_sub_it = None;
@@ -167,6 +189,39 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         ),
         "storage_sub_ct" => assign_once(&mut storage_sub_ct, reader.read_u64()?, "storage_sub_ct"),
         "read_sub_ct" => assign_once(&mut read_sub_ct, reader.read_u64()?, "read_sub_ct"),
+        "read_sub_viewer_ct" => assign_once(
+            &mut read_sub_viewer_ct,
+            reader.read_u64()?,
+            "read_sub_viewer_ct",
+        ),
+        "read_sub_host_ct" => assign_once(
+            &mut read_sub_host_ct,
+            reader.read_u64()?,
+            "read_sub_host_ct",
+        ),
+        "read_sub_hardware_ct" => assign_once(
+            &mut read_sub_hardware_ct,
+            reader.read_u64()?,
+            "read_sub_hardware_ct",
+        ),
+        "read_sub_verifier_ct" => assign_once(
+            &mut read_sub_verifier_ct,
+            reader.read_u64()?,
+            "read_sub_verifier_ct",
+        ),
+        "read_sub_liquidity_ct" => assign_once(
+            &mut read_sub_liquidity_ct,
+            reader.read_u64()?,
+            "read_sub_liquidity_ct",
+        ),
+        "ad_viewer_ct" => assign_once(&mut ad_viewer_ct, reader.read_u64()?, "ad_viewer_ct"),
+        "ad_host_ct" => assign_once(&mut ad_host_ct, reader.read_u64()?, "ad_host_ct"),
+        "ad_hardware_ct" => assign_once(&mut ad_hardware_ct, reader.read_u64()?, "ad_hardware_ct"),
+        "ad_verifier_ct" => assign_once(&mut ad_verifier_ct, reader.read_u64()?, "ad_verifier_ct"),
+        "ad_liquidity_ct" => {
+            assign_once(&mut ad_liquidity_ct, reader.read_u64()?, "ad_liquidity_ct")
+        }
+        "ad_miner_ct" => assign_once(&mut ad_miner_ct, reader.read_u64()?, "ad_miner_ct"),
         "compute_sub_ct" => assign_once(&mut compute_sub_ct, reader.read_u64()?, "compute_sub_ct"),
         "proof_rebate_ct" => {
             assign_once(&mut proof_rebate_ct, reader.read_u64()?, "proof_rebate_ct")
@@ -207,6 +262,17 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         coinbase_industrial: TokenAmount::new(coinbase_industrial.unwrap_or_default()),
         storage_sub_ct: TokenAmount::new(storage_sub_ct.unwrap_or_default()),
         read_sub_ct: TokenAmount::new(read_sub_ct.unwrap_or_default()),
+        read_sub_viewer_ct: TokenAmount::new(read_sub_viewer_ct.unwrap_or_default()),
+        read_sub_host_ct: TokenAmount::new(read_sub_host_ct.unwrap_or_default()),
+        read_sub_hardware_ct: TokenAmount::new(read_sub_hardware_ct.unwrap_or_default()),
+        read_sub_verifier_ct: TokenAmount::new(read_sub_verifier_ct.unwrap_or_default()),
+        read_sub_liquidity_ct: TokenAmount::new(read_sub_liquidity_ct.unwrap_or_default()),
+        ad_viewer_ct: TokenAmount::new(ad_viewer_ct.unwrap_or_default()),
+        ad_host_ct: TokenAmount::new(ad_host_ct.unwrap_or_default()),
+        ad_hardware_ct: TokenAmount::new(ad_hardware_ct.unwrap_or_default()),
+        ad_verifier_ct: TokenAmount::new(ad_verifier_ct.unwrap_or_default()),
+        ad_liquidity_ct: TokenAmount::new(ad_liquidity_ct.unwrap_or_default()),
+        ad_miner_ct: TokenAmount::new(ad_miner_ct.unwrap_or_default()),
         compute_sub_ct: TokenAmount::new(compute_sub_ct.unwrap_or_default()),
         proof_rebate_ct: TokenAmount::new(proof_rebate_ct.unwrap_or_default()),
         storage_sub_it: TokenAmount::new(storage_sub_it.unwrap_or_default()),
@@ -376,6 +442,17 @@ mod tests {
             coinbase_industrial: TokenAmount::new(11),
             storage_sub_ct: TokenAmount::new(12),
             read_sub_ct: TokenAmount::new(13),
+            read_sub_viewer_ct: TokenAmount::new(2),
+            read_sub_host_ct: TokenAmount::new(3),
+            read_sub_hardware_ct: TokenAmount::new(4),
+            read_sub_verifier_ct: TokenAmount::new(1),
+            read_sub_liquidity_ct: TokenAmount::new(3),
+            ad_viewer_ct: TokenAmount::new(6),
+            ad_host_ct: TokenAmount::new(7),
+            ad_hardware_ct: TokenAmount::new(8),
+            ad_verifier_ct: TokenAmount::new(9),
+            ad_liquidity_ct: TokenAmount::new(10),
+            ad_miner_ct: TokenAmount::new(11),
             compute_sub_ct: TokenAmount::new(14),
             proof_rebate_ct: TokenAmount::new(15),
             storage_sub_it: TokenAmount::new(16),
