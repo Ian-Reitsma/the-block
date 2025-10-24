@@ -15,7 +15,7 @@ fn treasury_index_and_filters() {
     let db_path = dir.path().join("explorer.db");
     let explorer = Arc::new(Explorer::open(&db_path).expect("open explorer"));
 
-    let mut scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo-1".into(), 5);
+    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo-1".into(), 5);
     let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 10);
     mark_executed(&mut executed, "0xabc".into());
     let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 2);
@@ -60,7 +60,9 @@ fn treasury_index_and_filters() {
             .handle(
                 app.request_builder()
                     .path("/governance/treasury/disbursements")
-                    .query("status=executed&page=0&page_size=5")
+                    .query_param("status", "executed")
+                    .query_param("page", "0")
+                    .query_param("page_size", "5")
                     .build(),
             )
             .await

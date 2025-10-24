@@ -1,4 +1,5 @@
 # System-Wide Economic Changes
+> **Review (2025-10-30, morning):** Explorer payout introspection now defends the legacy JSON path and the CLI enforces mutually exclusive hash/height selectors, keeping reconciliation hermetic even when historical blocks predate the role fields. The monitoring suite adds a first-party “Block Payouts” row so Prometheus surfaces read-subsidy and advertising role counters without downstream tooling.
 > **Review (2025-10-29, early morning):** Read acknowledgements now flow through a
 background worker that validates signatures (`read_ack_processed_total{result}`),
 crediting governance-configured viewer/host/hardware/verifier/liquidity splits

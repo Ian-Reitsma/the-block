@@ -1,4 +1,5 @@
 # Project Progress Snapshot
+> **Review (2025-10-30, morning):** Explorer payout queries now guard the JSON fallback so legacy snapshots lacking `read_sub_*` or `ad_*` fields still render per-role totals, and new unit tests pin that behaviour to FIRST_PARTY_ONLY runs. The CLI suite exercises the failure paths for unknown hashes/heights and the mutual-exclusion flag checks, while the Grafana generator adds a “Block Payouts” row that charts read-subsidy and advertising role counters. Operators can now move from database snapshots, through automation, to dashboards without leaving first-party surfaces.
 > **Review (2025-10-29, early morning):** Read acknowledgements now propagate through
 > the node’s background worker, which increments `read_ack_processed_total{result}`
 > and populates per-role epoch ledgers. `Blockchain::finalize_block` uses the new

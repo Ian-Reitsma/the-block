@@ -194,6 +194,22 @@
     },
     {
       "deprecated": false,
+      "description": "Read subsidy CT routed to each role from finalized blocks",
+      "labels": [
+        "role"
+      ],
+      "name": "explorer_block_payout_read_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Advertising CT routed to each role from finalized blocks",
+      "labels": [
+        "role"
+      ],
+      "name": "explorer_block_payout_ad_total"
+    },
+    {
+      "deprecated": false,
       "description": "Bridge reward claim operations processed",
       "labels": [],
       "name": "bridge_reward_claims_total"

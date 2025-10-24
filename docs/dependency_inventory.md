@@ -17,6 +17,16 @@ workspace crates.
   `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
   dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
   hermetic without background servers.
+- ✅ Explorer `/blocks/:hash/payouts` and the matching CLI command reuse the
+  first-party SQLite/JSON codecs to emit per-role read/ad totals. Tests insert
+  JSON directly, avoiding serde stubs while staying in-tree, and the new
+  `ad_read_distribution` node integration mines blocks through the native
+  ledger—no external analytics or database dependencies introduced.
+- ✅ Legacy payout snapshots now ride the same in-house codecs: explorer unit
+  tests cover the JSON fallback without serde_json, CLI error paths stay inside
+  the first-party transport stack, and the Grafana generator renders the new
+  “Block Payouts” row via the existing dashboard builder—no third-party charting
+  or parsing libraries added.
 - ✅ Bridge remediation spool artefacts now persist across acknowledgement
   retries and are drained automatically once hooks acknowledge or close an
   action. Restart suites assert the cleanup path, the contract remediation CLI

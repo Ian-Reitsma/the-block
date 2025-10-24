@@ -9,6 +9,7 @@ wallet = { path = "../crates/wallet", optional = true, features = ["dilithium"] 
 the_block = { path = "../node" }
 governance = { path = "../governance" }
 bridges = { path = "../bridges" }
+explorer = { path = "../explorer" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
 serde = { workspace = true }
@@ -48,6 +49,7 @@ full = ["sqlite-storage"]
 [dev-dependencies]
 foundation_tui = { path = "../crates/foundation_tui", features = ["test-support"] }
 testkit = { path = "../crates/testkit" }
+foundation_sqlite = { path = "../crates/foundation_sqlite" }
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

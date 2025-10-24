@@ -1,4 +1,5 @@
 # Summary
+> **Review (2025-10-30, morning):** Explorer payout lookups now cover legacy snapshots that omit the per-role headers, with unit tests exercising the JSON fallback so FIRST_PARTY_ONLY runs never lose visibility. The CLI’s `explorer block-payouts` command surfaces clear errors when hashes or heights are missing/mismatched, and the monitoring stack picked up a dedicated “Block Payouts” row charting the read-subsidy and advertising role splits from Prometheus. These additions keep the payout trail hermetic—from historic blocks through the CLI to Grafana—without leaning on third-party codecs or dashboards.
 > **Review (2025-10-27, late afternoon):** Bridge remediation spool artefacts now
 > persist across acknowledgement retries, drain automatically once hooks close
 > or acknowledge the action, and restart tests verify the cleanup path. The
