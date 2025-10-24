@@ -1,16 +1,19 @@
 use foundation_serialization::json::{self, Value};
-use httpd::{Method, StatusCode};
+use httpd::{Method, Router, StatusCode};
 use metrics_aggregator::{
     install_bridge_http_client_override, reset_bridge_remediation_ack_metrics,
     reset_bridge_remediation_dispatch_log, router, AppState, BridgeHttpClientOverride,
     BridgeHttpClientOverrideGuard, BridgeHttpOverrideResponse,
 };
-use std::env;
-use std::fs;
-use std::future::Future;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use sys::tempfile::{self, NamedTempFile};
+use std::{
+    collections::HashMap,
+    env, fs,
+    future::Future,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use sys::tempfile::{self, NamedTempFile, TempDir};
 
 struct ApiAnomalyLabel {
     key: String,
@@ -346,6 +349,132 @@ impl Drop for EnvGuard {
     }
 }
 
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+enum RemediationSpoolTarget {
+    Page,
+    Throttle,
+    Quarantine,
+    Escalate,
+}
+
+impl RemediationSpoolTarget {
+    const ALL: [Self; 4] = [
+        RemediationSpoolTarget::Page,
+        RemediationSpoolTarget::Throttle,
+        RemediationSpoolTarget::Quarantine,
+        RemediationSpoolTarget::Escalate,
+    ];
+
+    fn env_key(self) -> &'static str {
+        match self {
+            RemediationSpoolTarget::Page => "TB_REMEDIATION_PAGE_DIRS",
+            RemediationSpoolTarget::Throttle => "TB_REMEDIATION_THROTTLE_DIRS",
+            RemediationSpoolTarget::Quarantine => "TB_REMEDIATION_QUARANTINE_DIRS",
+            RemediationSpoolTarget::Escalate => "TB_REMEDIATION_ESCALATE_DIRS",
+        }
+    }
+
+    fn dir_name(self) -> &'static str {
+        match self {
+            RemediationSpoolTarget::Page => "page",
+            RemediationSpoolTarget::Throttle => "throttle",
+            RemediationSpoolTarget::Quarantine => "quarantine",
+            RemediationSpoolTarget::Escalate => "escalate",
+        }
+    }
+}
+
+struct RemediationSpoolSandbox {
+    root: TempDir,
+    paths: HashMap<RemediationSpoolTarget, PathBuf>,
+    guards: Vec<EnvGuard>,
+}
+
+impl RemediationSpoolSandbox {
+    fn new() -> Self {
+        Self {
+            root: tempfile::tempdir().expect("spool sandbox root"),
+            paths: HashMap::new(),
+            guards: Vec::new(),
+        }
+    }
+
+    fn enable(&mut self, target: RemediationSpoolTarget) -> &Path {
+        if !self.paths.contains_key(&target) {
+            let path = self.root.path().join(target.dir_name());
+            fs::create_dir_all(&path).expect("create spool sandbox directory");
+            let guard = EnvGuard::set(target.env_key(), path.to_str().expect("spool sandbox path"));
+            self.guards.push(guard);
+            self.paths.insert(target, path);
+        }
+        self.paths
+            .get(&target)
+            .map(PathBuf::as_path)
+            .expect("spool sandbox directory configured")
+    }
+
+    fn enable_all(&mut self) {
+        for target in RemediationSpoolTarget::ALL.iter().copied() {
+            self.enable(target);
+        }
+    }
+}
+
+#[test]
+fn remediation_spool_sandbox_restores_environment() {
+    let sentinels = [
+        (RemediationSpoolTarget::Page, "preserve-page"),
+        (RemediationSpoolTarget::Throttle, "preserve-throttle"),
+        (RemediationSpoolTarget::Quarantine, "preserve-quarantine"),
+        (RemediationSpoolTarget::Escalate, "preserve-escalate"),
+    ];
+
+    let mut guards = Vec::new();
+    for &(target, value) in &sentinels {
+        guards.push(EnvGuard::set(target.env_key(), value));
+    }
+
+    let mut sandbox_paths = Vec::new();
+    {
+        let mut sandbox = RemediationSpoolSandbox::new();
+        sandbox.enable_all();
+        for &(target, _) in &sentinels {
+            let path = sandbox.enable(target).to_path_buf();
+            assert!(path.exists(), "sandbox path should exist for {:?}", target);
+            let env_value = env::var(target.env_key()).expect("sandbox env value");
+            assert_eq!(env_value, path.to_str().expect("path string"));
+            sandbox_paths.push((target, path));
+        }
+    }
+
+    for &(target, value) in &sentinels {
+        assert_eq!(
+            env::var(target.env_key()).expect("restored sentinel"),
+            value,
+            "sandbox should restore previous env value for {:?}",
+            target,
+        );
+    }
+
+    for (target, path) in sandbox_paths {
+        assert!(
+            !path.exists(),
+            "sandbox path for {:?} should be removed after drop",
+            target,
+        );
+    }
+
+    drop(guards);
+
+    for &(target, _) in &sentinels {
+        assert!(
+            env::var(target.env_key()).is_err(),
+            "env for {:?} should be cleared after guard drop",
+            target,
+        );
+    }
+}
+
 fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime::block_on(future)
 }
@@ -485,6 +614,25 @@ fn scrape_metric_value(body: &str, metric: &str, labels: &str) -> Option<f64> {
     let needle = format!("{metric}{{{labels}}}");
     body.lines()
         .find_map(|line| line.strip_prefix(&needle)?.trim().parse::<f64>().ok())
+}
+
+async fn wait_for_spool_gauge(app: &Router<AppState>, expected: f64, attempts: usize) -> f64 {
+    let mut last_observed = None;
+    for _ in 0..attempts {
+        let response = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .expect("spool gauge metrics scrape");
+        let body = String::from_utf8(response.body().to_vec()).expect("spool gauge metrics body");
+        if let Some(value) = scrape_metric_value(&body, "bridge_remediation_spool_artifacts", "") {
+            last_observed = Some(value);
+            if (value - expected).abs() < f64::EPSILON {
+                return value;
+            }
+        }
+        runtime::sleep(Duration::from_millis(50)).await;
+    }
+    last_observed.expect("spool gauge observed during polling")
 }
 
 #[test]
@@ -851,11 +999,8 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
     run_async(async {
         reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
-        let spool = tempfile::tempdir().unwrap();
-        let _guard = EnvGuard::set(
-            "TB_REMEDIATION_ESCALATE_DIRS",
-            spool.path().to_str().expect("spool path str"),
-        );
+        let mut spool = RemediationSpoolSandbox::new();
+        let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
         let _url_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "");
 
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
@@ -890,7 +1035,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
 
         runtime::sleep(Duration::from_millis(150)).await;
 
-        let mut entries: Vec<_> = fs::read_dir(spool.path())
+        let mut entries: Vec<_> = fs::read_dir(&spool_dir)
             .expect("read spool directory")
             .filter_map(|entry| entry.ok())
             .collect();
@@ -1003,23 +1148,26 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
         assert_eq!(dispatch_resp.status(), StatusCode::OK);
         let dispatch_records = parse_dispatch_records(dispatch_resp.body());
         assert!(!dispatch_records.is_empty(), "expected dispatch record");
-        let record = dispatch_records.last().unwrap();
-        assert_eq!(record.target, "spool");
-        assert_eq!(record.status, "success");
-        assert!(record.annotation.contains("bridge-node"));
-        assert!(record
+        let spool_record = dispatch_records
+            .iter()
+            .rev()
+            .find(|record| record.target == "spool")
+            .expect("spool dispatch record");
+        assert_eq!(spool_record.status, "success");
+        assert!(spool_record.annotation.contains("bridge-node"));
+        assert!(spool_record
             .dashboard_panels
             .iter()
             .any(|panel| panel == "bridge_remediation_dispatch_total (5m delta)"));
-        assert!(record
+        assert!(spool_record
             .dashboard_panels
             .iter()
             .any(|panel| panel == "bridge_remediation_dispatch_ack_total (5m delta)"));
-        assert!(record
+        assert!(spool_record
             .dashboard_panels
             .iter()
             .any(|panel| panel == "bridge_remediation_ack_latency_seconds (p50/p95)"));
-        assert!(record
+        assert!(spool_record
             .response_sequence
             .iter()
             .any(|step| step.contains("/remediation/bridge/dispatches")));
@@ -1146,6 +1294,7 @@ fn bridge_remediation_parses_text_acknowledgements() {
         let (override_guard, captured) = install_http_override(response);
         let _override_guard = override_guard;
         let _guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
+        let _dir_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_DIRS", "");
 
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -1319,7 +1468,8 @@ fn bridge_remediation_escalates_pending_acknowledgements() {
     run_async(async {
         reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
-        let spool = tempfile::tempdir().unwrap();
+        let mut spool = RemediationSpoolSandbox::new();
+        let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
         let response = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":false,"notes":"waiting"}"#)
                 .expect("pending response json"),
@@ -1329,7 +1479,7 @@ fn bridge_remediation_escalates_pending_acknowledgements() {
         let _throttle_guard = EnvGuard::set("TB_REMEDIATION_THROTTLE_URLS", "http://override/hook");
         let _escalate_dir_guard = EnvGuard::set(
             "TB_REMEDIATION_ESCALATE_DIRS",
-            spool.path().to_str().expect("spool path"),
+            spool_dir.to_str().expect("spool path"),
         );
         let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
         let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "3");
@@ -1983,7 +2133,8 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
         reset_bridge_remediation_ack_metrics();
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");
-        let spool_dir = tempfile::tempdir().unwrap();
+        let mut spool = RemediationSpoolSandbox::new();
+        let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
 
         let response_pending = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
@@ -1994,10 +2145,6 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
         let _throttle_guard = EnvGuard::set("TB_REMEDIATION_THROTTLE_URLS", "http://override/hook");
         let _escalate_url_guard =
             EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "http://override/hook");
-        let _escalate_dir_guard = EnvGuard::set(
-            "TB_REMEDIATION_ESCALATE_DIRS",
-            spool_dir.path().to_str().expect("spool path"),
-        );
         let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
         let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "3");
         let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "1");
@@ -2037,7 +2184,7 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
             wait_for_requests(&captured_initial, 1).await;
             let mut observed = 0usize;
             for _ in 0..50 {
-                observed = fs::read_dir(spool_dir.path())
+                observed = fs::read_dir(&spool_dir)
                     .map(|iter| iter.count())
                     .unwrap_or(0);
                 if observed > 0 {
@@ -2047,15 +2194,7 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
             }
             assert!(observed > 0, "expected spool artifact to be persisted");
 
-            let metrics_resp = app
-                .handle(app.request_builder().path("/metrics").build())
-                .await
-                .unwrap();
-            assert_eq!(metrics_resp.status(), StatusCode::OK);
-            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
-            let gauge =
-                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
-                    .expect("spool gauge present after initial dispatch");
+            let gauge = wait_for_spool_gauge(&app, observed as f64, 60).await;
             assert!(
                 (gauge - observed as f64).abs() < f64::EPSILON,
                 "spool gauge {gauge} should equal observed artifact count {observed}"
@@ -2079,7 +2218,7 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
             wait_for_requests(&captured_followup, 1).await;
 
             for _ in 0..100 {
-                let remaining = fs::read_dir(spool_dir.path())
+                let remaining = fs::read_dir(&spool_dir)
                     .map(|iter| iter.count())
                     .unwrap_or(0);
                 if remaining == 0 {
@@ -2103,22 +2242,14 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
                 }
             }
 
-            let metrics_resp = app
-                .handle(app.request_builder().path("/metrics").build())
-                .await
-                .unwrap();
-            assert_eq!(metrics_resp.status(), StatusCode::OK);
-            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
-            let gauge =
-                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
-                    .expect("spool gauge present after acknowledgement");
+            let gauge = wait_for_spool_gauge(&app, 0.0, 60).await;
             assert!(
                 (gauge - 0.0).abs() < f64::EPSILON,
                 "spool gauge should reset to zero after acknowledgements"
             );
         }
 
-        let final_count = fs::read_dir(spool_dir.path())
+        let final_count = fs::read_dir(&spool_dir)
             .map(|iter| iter.count())
             .unwrap_or(0);
         assert_eq!(
@@ -2137,12 +2268,9 @@ fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
         reset_bridge_remediation_ack_metrics();
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");
-        let spool_dir = tempfile::tempdir().unwrap();
+        let mut spool = RemediationSpoolSandbox::new();
+        let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
 
-        let _escalate_dir_guard = EnvGuard::set(
-            "TB_REMEDIATION_ESCALATE_DIRS",
-            spool_dir.path().to_str().expect("spool path"),
-        );
         let _retry_guard = EnvGuard::set("TB_REMEDIATION_ACK_RETRY_SECS", "1");
         let _escalate_guard = EnvGuard::set("TB_REMEDIATION_ACK_ESCALATE_SECS", "120");
         let _max_guard = EnvGuard::set("TB_REMEDIATION_ACK_MAX_RETRIES", "2");
@@ -2183,7 +2311,7 @@ fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
 
             let mut observed = 0usize;
             for _ in 0..100 {
-                observed = fs::read_dir(spool_dir.path())
+                observed = fs::read_dir(&spool_dir)
                     .map(|iter| iter.count())
                     .unwrap_or(0);
                 if observed >= expected_artifacts {
@@ -2196,15 +2324,7 @@ fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
                 "expected spool artifacts after retry exhaustion"
             );
 
-            let metrics_resp = app
-                .handle(app.request_builder().path("/metrics").build())
-                .await
-                .unwrap();
-            assert_eq!(metrics_resp.status(), StatusCode::OK);
-            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
-            let gauge =
-                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
-                    .expect("spool gauge present during retry exhaustion");
+            let gauge = wait_for_spool_gauge(&app, expected_artifacts as f64, 80).await;
             assert!(
                 (gauge - expected_artifacts as f64).abs() < f64::EPSILON,
                 "spool gauge {gauge} should equal artifact count {expected_artifacts}"
@@ -2231,21 +2351,13 @@ fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
             state.spawn_cleanup();
             let app = router(state);
 
-            let metrics_resp = app
-                .handle(app.request_builder().path("/metrics").build())
-                .await
-                .unwrap();
-            assert_eq!(metrics_resp.status(), StatusCode::OK);
-            let metrics_body = String::from_utf8(metrics_resp.body().to_vec()).unwrap();
-            let gauge =
-                scrape_metric_value(&metrics_body, "bridge_remediation_spool_artifacts", "")
-                    .expect("spool gauge present after restart with pending artifacts");
+            let gauge = wait_for_spool_gauge(&app, expected_artifacts as f64, 80).await;
             assert!(
                 (gauge - expected_artifacts as f64).abs() < f64::EPSILON,
                 "spool gauge {gauge} should persist across restart"
             );
 
-            let remaining = fs::read_dir(spool_dir.path())
+            let remaining = fs::read_dir(&spool_dir)
                 .map(|iter| iter.count())
                 .unwrap_or(0);
             assert_eq!(

@@ -9,6 +9,18 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-31)
+
+- Bridge remediation integration tests now allocate a per-case `RemediationSpoolSandbox`, wiring `TB_REMEDIATION_*_DIRS` env
+  guards for page/throttle/quarantine/escalate targets through the in-house `sys::tempfile` helpers and verifying via
+  `remediation_spool_sandbox_restores_environment` that each guard unwinds cleanly—retry-heavy suites stop writing to shared
+  `/tmp` paths without external harnesses.
+- Explorer payout ingestion now clamps regressions inside
+  `metrics_aggregator::record_explorer_payout_metric`, emitting trace-only diagnostics while the
+  `explorer_payout_counters_remain_monotonic_with_role_churn` and
+  `explorer_payout_counters_are_peer_scoped` regressions alternate read/advertising role sets and peer IDs through the
+  first-party HTTPd test harness to prove caches remain monotonic without third-party metrics tooling.
+
 ## Recent progress (2025-10-30)
 
 - Explorer payout lookups now cover the legacy JSON path entirely inside the

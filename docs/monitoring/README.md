@@ -77,7 +77,11 @@ ready to import once the foundation telemetry stack is running.
   policy flag skipped hooks, failing endpoints, or unacknowledged escalations
   without scraping Prometheus. The bridge row also charts the
   `bridge_remediation_spool_artifacts` gauge so responders can see outstanding
-  on-disk payloads without tailing the spool directory.
+  on-disk payloads without tailing the spool directory. Regression tests now use
+  a `RemediationSpoolSandbox` helper to fabricate and clean up temp directories
+  per scenario, enabling page/throttle/quarantine/escalate directories and
+  exercising `remediation_spool_sandbox_restores_environment` so `/tmp` hygiene
+  and env guards (`TB_REMEDIATION_*_DIRS`) stay entirely first party.
 - Automated follow-ups now run entirely within the aggregator. Pending actions
   persist `dispatch_attempts`, `auto_retry_count`, retry timestamps, and
   follow-up notes so the engine can queue deterministic retries and governance

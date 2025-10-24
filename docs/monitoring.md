@@ -75,7 +75,9 @@ new total exceeds the previously seen sample. The integration suite ingests two
 payloads and asserts that `explorer_block_payout_read_total` and
 `explorer_block_payout_ad_total` report the latest totals on the second `/metrics`
 scrape, guaranteeing the Grafana row and Prometheus assertions continue to plot
-live data end-to-end.
+live data end-to-end. A churn-focused regression alternates viewer/host/hardware
+and viewer/miner/liquidity samples so the cache proves it ignores regressions even
+when peers rotate advertised roles between scrapes.
 
 The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
 the newly instrumented counters. Panels plot five-minute deltas for
@@ -227,8 +229,14 @@ Spool artefacts persist across acknowledgement retries so failed hooks can be
 replayed after a restart; once an action is acknowledged or closed the
 aggregator drains the artefacts automatically, updates the
 `bridge_remediation_spool_artifacts` gauge, and the restart regression asserts
-the spool directory is clean before proceeding. The contract remediation CLI
-mirrors the behaviour by emitting each action’s `spool_artifacts` array in JSON
+the spool directory is clean before proceeding. Regression tests now seed a
+per-case `RemediationSpoolSandbox` that fabricates isolated directories via
+`sys::tempfile`, enables page/throttle/quarantine/escalate directories, and uses
+`remediation_spool_sandbox_restores_environment` to confirm `TB_REMEDIATION_*_DIRS`
+guards unwind after teardown—retry-heavy suites stop polluting `/tmp` while
+staying entirely first party.
+The contract remediation CLI mirrors the behaviour by emitting each action’s
+`spool_artifacts` array in JSON
 mode (with `--playbook`/`--peer` filters) so on-call responders can audit the
 remaining payloads without touching third-party tooling.
 
