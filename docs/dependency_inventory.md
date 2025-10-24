@@ -17,6 +17,7 @@ workspace crates.
   `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
   dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
   hermetic without background servers.
+- ✅ Bridge remediation regressions now allocate a per-test `RemediationSpoolSandbox` using `sys::tempfile`, seeding isolated spool directories for page/throttle/quarantine/escalate targets and exercising `remediation_spool_sandbox_restores_environment` so scoped `TB_REMEDIATION_*_DIRS` guards tear down automatically. Retry-heavy suites stay hermetic with zero `/tmp` residue and no third-party harnesses.
 - ✅ Explorer `/blocks/:hash/payouts` and the matching CLI command reuse the
   first-party SQLite/JSON codecs to emit per-role read/ad totals. Tests insert
   JSON directly, avoiding serde stubs while staying in-tree, and the new
@@ -27,6 +28,7 @@ workspace crates.
   the first-party transport stack, and the Grafana generator renders the new
   “Block Payouts” row via the existing dashboard builder—no third-party charting
   or parsing libraries added.
+- ✅ Explorer payout caches now clamp regressions inside `metrics_aggregator::record_explorer_payout_metric`, logging trace-only diagnostics, and the churn plus peer-isolation regressions (`explorer_payout_counters_remain_monotonic_with_role_churn`, `explorer_payout_counters_are_peer_scoped`) drive alternating read/advertising role sets and disjoint peers entirely through the first-party HTTPd test harness—no external metrics helpers required.
 - ✅ Bridge remediation spool artefacts now persist across acknowledgement
   retries and are drained automatically once hooks acknowledge or close an
   action. Restart suites assert the cleanup path, the contract remediation CLI

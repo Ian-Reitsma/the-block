@@ -1,5 +1,6 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-31 update (spool sandbox & payout monotonicity):** Bridge remediation regressions now allocate a per-test `RemediationSpoolSandbox` that fabricates temporary directories via `sys::tempfile`, injects scoped `TB_REMEDIATION_*_DIRS` guards for page/throttle/quarantine/escalate, and includes a dedicated regression verifying the guards restore prior environment values—no manual `/tmp` cleanup, no external harnesses. Explorer payout ingestion clamps counter regressions inside `metrics_aggregator::record_explorer_payout_metric`, logging trace-only diagnostics, and the new churn-focused plus peer-isolation regressions keep coverage entirely on the first-party HTTPd router while alternating read/advertising role labels; no third-party metrics helpers or JSON tooling were introduced.
 > **2025-10-24 update (explorer payout ingestion & Prometheus counter caching):** Explorer integration coverage now drives the mixed binary/JSON payout path entirely through the in-house codecs, and the metrics aggregator rewrites its recorder to cache role totals per peer while updating the existing `CounterVec` handles directly. Prometheus assertions in the integration suite validate the counters without leaning on external exporters, and documentation captures the CLI automation examples using only first-party tooling.
 > **2025-10-30 update (payout fallback coverage & dashboard row):** Explorer payout queries now exercise the JSON fallback with legacy snapshots entirely inside the existing SQLite/`foundation_serialization` stack, the CLI’s error-path tests ride the mock transport without HTTP shims, and the Grafana generator renders the new “Block Payouts” row through the in-house dashboard builder. No third-party codecs, JSON libraries, or charting packages were introduced—the updates expand test coverage and templates while staying within the workspace crates.
 
@@ -38,7 +39,7 @@
 > `--json` options so responders and automation filter or stream persisted
 > actions without introducing third-party tooling.
 
-_Last updated: 2025-10-24 17:08:00Z_
+_Last updated: 2025-10-31 23:40:00Z_
 
 > **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
 > remediation engine now escalates and retries pending playbooks using only the

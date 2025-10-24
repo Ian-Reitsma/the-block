@@ -1,7 +1,7 @@
 use concurrency::Lazy;
 use diagnostics::{
     internal::{install_tls_env_warning_subscriber, SubscriberGuard as LoggingSubscriberGuard},
-    tracing::{debug, info, warn},
+    tracing::{debug, info, trace, warn},
 };
 use foundation_metrics::{gauge, increment_counter, Recorder, RecorderInstallError};
 use governance::{
@@ -53,7 +53,9 @@ use foundation_serialization::json::{Map, Number, Value};
 use foundation_telemetry::{
     MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry, WrapperSummaryEntry,
 };
-use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{
+    btree_map::Entry, hash_map::Entry as HashMapEntry, BTreeMap, HashMap, HashSet, VecDeque,
+};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -1580,28 +1582,55 @@ impl AppState {
             }
 
             let key = (peer_id.to_string(), role.clone());
-            let previous = guard.get(&key).copied();
-            let delta_value = match previous {
-                Some(prev) if value > prev + COUNTER_EPSILON => value - prev,
-                Some(_) => {
-                    guard.insert(key, value);
-                    continue;
+            match guard.entry(key) {
+                HashMapEntry::Occupied(mut entry) => {
+                    let previous = entry.get_mut();
+                    if value > *previous + COUNTER_EPSILON {
+                        let delta_value = value - *previous;
+                        *previous = value;
+                        if let Some(delta) = quantize_counter(delta_value) {
+                            increment_role_counter(counter, metric_name, &role, delta);
+                        } else {
+                            warn!(
+                                target: "aggregator",
+                                %peer_id,
+                                metric = metric_name,
+                                %role,
+                                delta_value,
+                                "unable to quantize explorer payout counter delta",
+                            );
+                        }
+                    } else if value + COUNTER_EPSILON >= *previous {
+                        if value > *previous {
+                            *previous = value;
+                        }
+                    } else {
+                        trace!(
+                            target: "aggregator",
+                            %peer_id,
+                            metric = metric_name,
+                            %role,
+                            observed = value,
+                            cached = *previous,
+                            "ignored regressed explorer payout counter sample",
+                        );
+                    }
                 }
-                None => value,
-            };
-            guard.insert(key, value);
-
-            if let Some(delta) = quantize_counter(delta_value) {
-                increment_role_counter(counter, metric_name, &role, delta);
-            } else {
-                warn!(
-                    target: "aggregator",
-                    %peer_id,
-                    metric = metric_name,
-                    %role,
-                    delta_value,
-                    "unable to quantize explorer payout counter delta",
-                );
+                HashMapEntry::Vacant(entry) => {
+                    entry.insert(value);
+                    if let Some(delta) = quantize_counter(value) {
+                        increment_role_counter(counter, metric_name, &role, delta);
+                    } else {
+                        warn!(
+                            target: "aggregator",
+                            %peer_id,
+                            metric = metric_name,
+                            %role,
+                            value,
+                            "unable to quantize explorer payout counter delta",
+                        );
+                    }
+                }
             }
         }
     }

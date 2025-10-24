@@ -1,4 +1,12 @@
 # CHANGELOG
+> **Review (2025-10-31):** Bridge remediation regressions now rely on a
+> `RemediationSpoolSandbox` helper that allocates isolated directories, restores
+> every `TB_REMEDIATION_*_DIRS` target (page/throttle/quarantine/escalate), and
+> ships an explicit environment-restoration test so retry suites confirm the guards
+> unwind without residue. Explorer payout ingestion clamps regressions to the cached
+> high-water mark with trace diagnostics, the churn regression alternates read/advertising
+> roles under peer churn, and a new peer-isolation scenario asserts per-peer caches stay
+> monotonic even when explorers report disjoint totals.
 > **Review (2025-10-25):** Bridge remediation follow-ups now retry and escalate
 > automatically via first-party scheduling. Text-only acknowledgement payloads are
 - Bridge remediation dashboards now overlay the policy gauge
@@ -15,6 +23,29 @@
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding,
 > crypto_suite, and codec wrappers are live with governance overrides enforced
 > (2025-10-10).
+
+## 2025-10-31 — Spool Sandbox & Explorer Payout Monotonicity
+
+### Added
+- `RemediationSpoolSandbox` test helper that provisions isolated spool directories via
+  `sys::tempfile`, wires scoped `TB_REMEDIATION_*_DIRS` env guards for page/throttle/
+  quarantine/escalate targets, and cleans up on drop so retry-heavy remediation suites
+  never leak artefacts into `/tmp`.
+- `remediation_spool_sandbox_restores_environment` regression that exercises the helper’s
+  multi-target enablement and asserts `TB_REMEDIATION_*_DIRS` variables revert to their
+  prior values once the sandbox drops.
+- `explorer_payout_counters_remain_monotonic_with_role_churn` integration test exercising
+  alternating viewer/host/hardware and viewer/miner/liquidity samples through the first-party
+  HTTPd harness to prove cached counters stay monotonic when peer labels rotate.
+- `explorer_payout_counters_are_peer_scoped` integration test that feeds disjoint peer totals,
+  confirming per-peer caches prevent cross-talk while still ignoring regressions.
+
+### Changed
+- `metrics_aggregator::record_explorer_payout_metric` now ignores regressions, retaining the
+  previous maximum while logging a trace diagnostic instead of emitting negative deltas.
+- Bridge remediation docs and monitoring notes reflect the sandboxed spool harness, enumerate
+  every supported target, and describe the environment guard regression so operators rely solely
+  on first-party helpers for test hygiene and incident rehearsals.
 
 ## 2025-10-25 — Remediation Auto-Retry & Acknowledgement Hardening
 
