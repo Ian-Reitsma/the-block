@@ -204,6 +204,8 @@ const METRIC_BRIDGE_REMEDIATION_ACK_LATENCY_SECONDS: &str =
     "bridge_remediation_ack_latency_seconds";
 const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_ack_target_seconds";
 const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
+const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -226,6 +228,7 @@ const LABEL_REMEDIATION_ACTION: [&str; 2] = ["action", "playbook"];
 const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "status"];
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
+const LABEL_ROLE: [&str; 1] = ["role"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -399,6 +402,8 @@ pub struct AppState {
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
     telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummary>>>>,
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
+    explorer_read_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
+    explorer_ad_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     bridge_hooks: BridgeRemediationHooks,
@@ -479,6 +484,8 @@ impl AppState {
             last_metric_values: Arc::new(Mutex::new(HashMap::new())),
             telemetry: Arc::new(Mutex::new(HashMap::new())),
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
+            explorer_read_payout_counters: Arc::new(Mutex::new(HashMap::new())),
+            explorer_ad_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             bridge_hooks: BridgeRemediationHooks::from_env(),
@@ -1526,6 +1533,78 @@ impl AppState {
             fencing_token: self.leader_fencing.load(Ordering::SeqCst),
         }
     }
+
+    fn record_explorer_payout_samples(&self, peer_id: &str, metrics: &Value) {
+        let registry = aggregator_metrics();
+        self.record_explorer_payout_metric(
+            peer_id,
+            metrics,
+            METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
+            &self.explorer_read_payout_counters,
+            &registry.explorer_block_payout_read_total,
+        );
+        self.record_explorer_payout_metric(
+            peer_id,
+            metrics,
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
+            &self.explorer_ad_payout_counters,
+            &registry.explorer_block_payout_ad_total,
+        );
+    }
+
+    fn record_explorer_payout_metric(
+        &self,
+        peer_id: &str,
+        metrics: &Value,
+        metric_name: &str,
+        cache: &Mutex<HashMap<(String, String), f64>>,
+        counter: &CounterVec,
+    ) {
+        let samples = extract_role_counter_metrics(metrics, metric_name);
+        if samples.is_empty() {
+            return;
+        }
+
+        let mut guard = cache.lock().unwrap();
+        for (role, value) in samples {
+            if !value.is_finite() || value < 0.0 {
+                warn!(
+                    target: "aggregator",
+                    %peer_id,
+                    metric = metric_name,
+                    %role,
+                    value,
+                    "ignored invalid explorer payout counter sample",
+                );
+                continue;
+            }
+
+            let key = (peer_id.to_string(), role.clone());
+            let previous = guard.get(&key).copied();
+            let delta_value = match previous {
+                Some(prev) if value > prev + COUNTER_EPSILON => value - prev,
+                Some(_) => {
+                    guard.insert(key, value);
+                    continue;
+                }
+                None => value,
+            };
+            guard.insert(key, value);
+
+            if let Some(delta) = quantize_counter(delta_value) {
+                increment_role_counter(counter, metric_name, &role, delta);
+            } else {
+                warn!(
+                    target: "aggregator",
+                    %peer_id,
+                    metric = metric_name,
+                    %role,
+                    delta_value,
+                    "unable to quantize explorer payout counter delta",
+                );
+            }
+        }
+    }
 }
 
 struct AggregatorMetrics {
@@ -1571,6 +1650,8 @@ struct AggregatorMetrics {
     bridge_remediation_ack_target_seconds: GaugeVec,
     bridge_remediation_ack_latency_seconds: HistogramVec,
     bridge_remediation_spool_artifacts: Gauge,
+    explorer_block_payout_read_total: CounterVec,
+    explorer_block_payout_ad_total: CounterVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2739,6 +2820,28 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         )
         .expect("register bridge_remediation_spool_artifacts");
     bridge_remediation_spool_artifacts.set(0.0);
+    let explorer_block_payout_read_total = CounterVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
+            "Read subsidy CT routed to each role from finalized blocks",
+        ),
+        &LABEL_ROLE,
+    )
+    .expect("build explorer_block_payout_read_total counter vec");
+    registry
+        .register(Box::new(explorer_block_payout_read_total.clone()))
+        .expect("register explorer_block_payout_read_total");
+    let explorer_block_payout_ad_total = CounterVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
+            "Advertising CT routed to each role from finalized blocks",
+        ),
+        &LABEL_ROLE,
+    )
+    .expect("build explorer_block_payout_ad_total counter vec");
+    registry
+        .register(Box::new(explorer_block_payout_ad_total.clone()))
+        .expect("register explorer_block_payout_ad_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2782,6 +2885,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_ack_target_seconds,
         bridge_remediation_ack_latency_seconds,
         bridge_remediation_spool_artifacts,
+        explorer_block_payout_read_total,
+        explorer_block_payout_ad_total,
     }
 });
 
@@ -6035,6 +6140,29 @@ fn quantize_counter(value: f64) -> Option<u64> {
     }
 }
 
+fn increment_role_counter(counter: &CounterVec, metric: &str, role: &str, delta: u64) {
+    let values = [role];
+    match counter.ensure_handle_for_label_values(&values) {
+        Ok(handle) => match handle.into_result() {
+            Ok(inner) => inner.inc_by(delta),
+            Err(err) => warn!(
+                target: "aggregator",
+                metric,
+                %role,
+                ?err,
+                "failed to acquire explorer payout counter handle"
+            ),
+        },
+        Err(err) => warn!(
+            target: "aggregator",
+            metric,
+            %role,
+            ?err,
+            "failed to update explorer payout counter"
+        ),
+    }
+}
+
 fn extract_tls_warning_counters(metrics: &Value) -> Vec<(String, String, f64)> {
     extract_tls_warning_metric(metrics, "tls_env_warning_total")
 }
@@ -6177,6 +6305,58 @@ fn collect_tls_warning_fingerprint_samples(value: &Value, out: &mut Vec<TlsFinge
                 }
                 if matches!(child, Value::Array(_) | Value::Object(_)) {
                     collect_tls_warning_fingerprint_samples(child, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_role_counter_metrics(metrics: &Value, key: &str) -> Vec<(String, f64)> {
+    let mut samples = Vec::new();
+    let root = match metrics {
+        Value::Object(map) => map.get(key),
+        _ => None,
+    };
+    if let Some(value) = root {
+        collect_role_counter_samples(value, &mut samples);
+    }
+
+    let mut dedup = HashMap::new();
+    for (role, value) in samples {
+        dedup.insert(role, value);
+    }
+    dedup.into_iter().collect()
+}
+
+fn collect_role_counter_samples(value: &Value, out: &mut Vec<(String, f64)>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_role_counter_samples(item, out);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(samples) = map.get("samples") {
+                collect_role_counter_samples(samples, out);
+            }
+
+            let labels = map.get("labels").and_then(|labels| labels.as_object());
+            let role = labels
+                .and_then(|obj| obj.get("role"))
+                .and_then(|v| v.as_str())
+                .or_else(|| map.get("role").and_then(|v| v.as_str()));
+            let value_field = map
+                .get("value")
+                .and_then(|v| v.as_f64())
+                .or_else(|| map.get("counter").and_then(|v| v.as_f64()));
+            if let (Some(role), Some(counter)) = (role, value_field) {
+                out.push((role.to_string(), counter));
+            }
+
+            for child in map.values() {
+                if matches!(child, Value::Array(_) | Value::Object(_)) {
+                    collect_role_counter_samples(child, out);
                 }
             }
         }
@@ -6433,6 +6613,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                         }
                     }
                     state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
+                    state.record_explorer_payout_samples(&stat.peer_id, &stat.metrics);
                     state.record_bridge_anomalies(&stat.peer_id, &stat.metrics, now);
                     continue;
                 }
@@ -6461,6 +6642,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                 }
             }
             state.record_tls_warning_samples(&stat.peer_id, &stat.metrics);
+            state.record_explorer_payout_samples(&stat.peer_id, &stat.metrics);
             state.record_bridge_anomalies(&stat.peer_id, &stat.metrics, now);
         }
         gauge!(METRIC_CLUSTER_PEER_ACTIVE_TOTAL, map.len() as f64);

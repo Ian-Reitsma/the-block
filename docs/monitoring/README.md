@@ -13,6 +13,14 @@ ready to import once the foundation telemetry stack is running.
   operators can compare pricing policy with realised demand. Governance changes
   to `mempool.fee_floor_window` and `mempool.fee_floor_percentile` increment
   `fee_floor_window_changed_total` and surface in the same dashboard.
+- The explorer block-payout row pulls straight from
+  `explorer_block_payout_read_total{role}` and
+  `explorer_block_payout_ad_total{role}`. The metrics aggregator now caches the
+  most recent role totals per explorer peer and only increments the counter
+  handles when a higher value arrives, so the Prometheus/Grafana panels chart
+  live deltas without double counting. Integration tests ingest successive
+  payloads and verify the counters advance on the second scrape, matching the
+  `increase()` queries baked into the dashboard.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,

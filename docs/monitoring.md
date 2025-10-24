@@ -68,6 +68,15 @@ without scraping SQLite directly. Legends remain enabled by default, letting
 operators focus on specific roles or compare read versus advertising flows in
 the same pane.
 
+The metrics aggregator now persists the explorer payout counters per peer and
+role so deltas remain monotonic across scrapes. `AppState::record_explorer_payout_metric`
+tracks a `(peer_id, role)` cache and only updates the `CounterVec` handles when a
+new total exceeds the previously seen sample. The integration suite ingests two
+payloads and asserts that `explorer_block_payout_read_total` and
+`explorer_block_payout_ad_total` report the latest totals on the second `/metrics`
+scrape, guaranteeing the Grafana row and Prometheus assertions continue to plot
+live data end-to-end.
+
 The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
 the newly instrumented counters. Panels plot five-minute deltas for
 `bridge_reward_claims_total`, `bridge_reward_approvals_consumed_total`,

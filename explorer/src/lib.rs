@@ -1241,7 +1241,15 @@ impl Explorer {
         if let Ok(block) = decode_json(bytes) {
             return Ok(block);
         }
-        binary::decode(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
+        match binary::decode(bytes) {
+            Ok(block) => Ok(block),
+            Err(primary_err) => match the_block::block_binary::decode_block(bytes) {
+                Ok(block) => Ok(block),
+                Err(fallback_err) => Err(anyhow::anyhow!(
+                    "decode block: {primary_err}; block_binary fallback: {fallback_err}"
+                )),
+            },
+        }
     }
 
     fn decode_tx(bytes: &[u8]) -> AnyhowResult<SignedTransaction> {

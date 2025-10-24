@@ -52,6 +52,9 @@ The exporter currently tracks:
 - `settle_failed_total{reason}` – settlement failures by reason
 - `settle_mode_change_total{to}` – settlement mode transitions
 - `settle_audit_mismatch_total` – settlement audit discrepancies detected
+- `explorer_block_payout_read_total{role}` / `explorer_block_payout_ad_total{role}` – explorer-reported per-role read subsidy and
+  advertising payouts cached by the metrics aggregator, updated whenever ingest
+  observes a higher total for a given role
 - `ttl_drop_total` / `startup_ttl_drop_total` – messages dropped due to TTL expiry during runtime and startup
 - `orphan_sweep_total` – orphan blocks removed during periodic sweeps
 - `snapshot_duration_seconds` / `snapshot_fail_total` – snapshot round-trip time and failure counts

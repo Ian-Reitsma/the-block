@@ -138,6 +138,7 @@ cluster-wide gauges when compiled with `--features telemetry`:
 - `cluster_peer_active_total{node_id}` – number of active peers per reporting node (cardinality ≈ node count).
 - `aggregator_ingest_total{node_id,result}` – ingestion attempts by node and result (`ok` or `error`), cardinality ≤ node count × 2.
 - `log_correlation_fail_total{metric}` – correlation lookups that returned no rows; paired automation triggers `metrics-aggregator` log dumps into `$TB_LOG_DUMP_DIR` when counts spike.
+- `explorer_block_payout_read_total{role}` / `explorer_block_payout_ad_total{role}` – explorer-reported per-role read subsidy and advertising payouts cached per peer; the aggregator only advances the counters when a role’s total increases, keeping Prometheus deltas monotonic for Grafana’s block-payout panels.
 - Wrapper metrics exported by the runtime, transport, coding, codec, and crypto wrappers:
   - `runtime_backend_info{backend,compiled}` toggles to `1` for the active runtime backend and keeps `compiled=true` on backends linked into the binary.
   - `transport_provider_info{provider,compiled}` gauges the selected QUIC transport implementation, while `transport_provider_connect_total{provider}` accumulates successful dial attempts per provider.
