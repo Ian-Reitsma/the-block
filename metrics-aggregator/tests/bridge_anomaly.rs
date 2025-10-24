@@ -856,6 +856,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
             "TB_REMEDIATION_ESCALATE_DIRS",
             spool.path().to_str().expect("spool path str"),
         );
+        let _url_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "");
 
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -1659,6 +1660,8 @@ fn bridge_remediation_records_spool_failures() {
 fn bridge_remediation_records_skipped_dispatch_when_unconfigured() {
     run_async(async {
         reset_bridge_remediation_dispatch_log();
+        let _url_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "");
+        let _dir_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_DIRS", "");
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);

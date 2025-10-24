@@ -90,6 +90,11 @@ RPC client.
   The contract CLI tests drive the in-memory `BridgeRpcTransport` through spool success,
   spool failure, and unconfigured scenarios while Grafana/HTML dashboards gained a dispatch
   health panel, keeping first-party operators informed without third-party tooling.
+- Explorer payout ingestion now updates `explorer_block_payout_read_total{role}` and
+  `_ad_total{role}` counters directly through cached `CounterVec` handles in the metrics
+  aggregator. The new Prometheus integration test proves both metrics advance on a
+  second scrape, matching the Grafana queries without relying on external exporters,
+  and documentation adds CLI automation snippets that stay on the first-party JSON stack.
 
 ## Recent progress (2025-10-23)
 
