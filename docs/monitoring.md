@@ -59,6 +59,15 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
 
+The dashboard generator now inserts a “Block Payouts” row ahead of the bridge
+section. Panels chart `sum by (role)(increase(explorer_block_payout_read_total[5m]))`
+and `sum by (role)(increase(explorer_block_payout_ad_total[5m]))`, rendering the
+per-role read-subsidy and advertising totals mined from block headers so
+operations can compare viewer/host/hardware/verifier/liquidity/miner splits
+without scraping SQLite directly. Legends remain enabled by default, letting
+operators focus on specific roles or compare read versus advertising flows in
+the same pane.
+
 The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
 the newly instrumented counters. Panels plot five-minute deltas for
 `bridge_reward_claims_total`, `bridge_reward_approvals_consumed_total`,
@@ -486,6 +495,12 @@ before receipts starve subsidy splits. Pair the counter with explorer snapshots 
 `read_sub_*_ct` and `ad_*_ct` block fields to confirm governance-configured viewer/
 host/hardware/verifier/liquidity shares and advertising settlements remain in
 sync with observed acknowledgement volume.
+
+When `read_ack_processed_total{result="invalid_signature"}` accelerates, pivot into the response loop documented in [governance.md](governance.md#read-acknowledgement-anomaly-response):
+
+- Validate that the node’s acknowledgement worker is draining (`read_ack_worker=drain` logs) and the `result="ok"` series continues to advance.
+- Correlate the spike with gateway domains via the explorer `/receipts/domain/:id` endpoint or the CLI payout breakdown to see which providers continue to earn CT despite invalid signatures.
+- If the ratio stays elevated after gateway remediations, coordinate with governance to invoke the emergency subsidy reduction until `invalid_signature` trends back toward background noise.
 
 Storage ingest and repair telemetry tags every operation with the active coder and compressor so fallback rollouts can be tracked explicitly. Dashboards should watch `storage_put_object_seconds{erasure=...,compression=...}`, `storage_put_chunk_seconds{...}`, and `storage_repair_failures_total{erasure=...,compression=...}` alongside the `storage_coding_operations_total` counters to spot regressions when the XOR/RLE fallbacks are engaged. The repair loop also surfaces `algorithm_limited` log entries that can be scraped into incident timelines.
 

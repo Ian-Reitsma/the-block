@@ -3,7 +3,10 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use explorer::Explorer as ExplorerStore;
+use foundation_serialization::json;
 use std::cmp::Reverse;
+use std::io::{self, Write};
 use the_block::governance::{controller, GovStore};
 
 pub enum ExplorerCmd {
@@ -15,6 +18,12 @@ pub enum ExplorerCmd {
         end_epoch: Option<u64>,
         page: usize,
         page_size: usize,
+    },
+    /// Display per-role subsidy and advertising totals for a block
+    BlockPayouts {
+        db: String,
+        hash: Option<String>,
+        height: Option<u64>,
     },
 }
 
@@ -52,6 +61,27 @@ impl ExplorerCmd {
                 .arg(ArgSpec::Option(
                     OptionSpec::new("page_size", "page-size", "Page size").default("20"),
                 ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("explorer.block_payouts"),
+                    "block-payouts",
+                    "Show per-role subsidy and advertising totals for a block",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("db", "db", "Explorer database path").default("explorer.db"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "hash",
+                    "hash",
+                    "Block hash to inspect",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "height",
+                    "height",
+                    "Block height to inspect",
+                )))
                 .build(),
             )
             .build()
@@ -102,12 +132,40 @@ impl ExplorerCmd {
                     page_size,
                 })
             }
+            "block-payouts" => {
+                let db = sub_matches
+                    .get_string("db")
+                    .unwrap_or_else(|| "explorer.db".to_string());
+                let hash = sub_matches.get_string("hash");
+                let height = match sub_matches.get_string("height") {
+                    Some(value) => Some(
+                        value
+                            .parse::<u64>()
+                            .map_err(|err| format!("invalid value for '--height': {err}"))?,
+                    ),
+                    None => None,
+                };
+                if hash.is_some() && height.is_some() {
+                    return Err("cannot supply both '--hash' and '--height'".into());
+                }
+                if hash.is_none() && height.is_none() {
+                    return Err("must supply '--hash' or '--height'".into());
+                }
+                Ok(ExplorerCmd::BlockPayouts { db, hash, height })
+            }
             other => Err(format!("unknown subcommand '{other}'")),
         }
     }
 }
 
 pub fn handle(cmd: ExplorerCmd) {
+    let mut stdout = io::stdout();
+    if let Err(err) = handle_with_writer(cmd, &mut stdout) {
+        eprintln!("{err}");
+    }
+}
+
+pub fn handle_with_writer(cmd: ExplorerCmd, writer: &mut impl Write) -> Result<(), String> {
     match cmd {
         ExplorerCmd::ReleaseHistory {
             state,
@@ -118,13 +176,8 @@ pub fn handle(cmd: ExplorerCmd) {
             page_size,
         } => {
             let store = GovStore::open(&state);
-            let mut releases = match controller::approved_releases(&store) {
-                Ok(list) => list,
-                Err(err) => {
-                    eprintln!("failed to load releases: {err}");
-                    return;
-                }
-            };
+            let mut releases = controller::approved_releases(&store)
+                .map_err(|err| format!("failed to load releases: {err}"))?;
             releases.sort_by_key(|r| Reverse(r.activated_epoch));
             let filtered: Vec<_> = releases
                 .into_iter()
@@ -140,10 +193,18 @@ pub fn handle(cmd: ExplorerCmd) {
             let size = page_size.max(1);
             let start = page.saturating_mul(size);
             let end = (start + size).min(filtered.len());
-            println!("showing releases {}-{} of {}", start, end, filtered.len());
+            writeln!(
+                writer,
+                "showing releases {}-{} of {}",
+                start,
+                end,
+                filtered.len()
+            )
+            .map_err(|err| format!("failed to write output: {err}"))?;
             for release in filtered.into_iter().skip(start).take(size) {
                 let last_install = release.install_times.last().cloned().unwrap_or(0);
-                println!(
+                writeln!(
+                    writer,
                     "hash={} proposer={} epoch={} installs={} last_install={} threshold={} quorum={}",
                     release.build_hash,
                     release.proposer,
@@ -152,8 +213,35 @@ pub fn handle(cmd: ExplorerCmd) {
                     last_install,
                     release.signature_threshold,
                     release.signatures.len() as u32 >= release.signature_threshold,
-                );
+                )
+                .map_err(|err| format!("failed to write output: {err}"))?;
             }
+            Ok(())
+        }
+        ExplorerCmd::BlockPayouts { db, hash, height } => {
+            let store = ExplorerStore::open(&db)
+                .map_err(|err| format!("failed to open explorer database {db}: {err}"))?;
+            let hash_value = match (hash.as_ref(), height) {
+                (Some(hash_value), None) => hash_value.clone(),
+                (None, Some(height_value)) => store
+                    .block_hash_by_height(height_value)
+                    .map_err(|err| {
+                        format!("failed to resolve block hash at height {height_value}: {err}")
+                    })?
+                    .ok_or_else(|| format!("no block found at height {height_value}"))?,
+                _ => return Err("must supply exactly one of '--hash' or '--height'".into()),
+            };
+            let breakdown = store
+                .block_payouts(&hash_value)
+                .map_err(|err| format!("failed to fetch block payouts for {hash_value}: {err}"))?
+                .ok_or_else(|| format!("no block found with hash {hash_value}"))?;
+            let payload = json::to_vec_pretty(&breakdown.to_json_value())
+                .map_err(|err| format!("failed to serialize payouts: {err}"))?;
+            writer
+                .write_all(&payload)
+                .and_then(|_| writer.write_all(b"\n"))
+                .map_err(|err| format!("failed to write output: {err}"))?;
+            Ok(())
         }
     }
 }

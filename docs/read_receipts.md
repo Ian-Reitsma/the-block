@@ -104,6 +104,8 @@ if they wish to compare raw acknowledgement bytes with the pending payout map.
 - Runtime telemetry counters `subsidy_bytes_total{type="read"}`,
   `read_denied_total{reason}`, and `read_ack_processed_total{result}` reflect
   subsidy issuance, rate‑limit drops, and acknowledgement validation outcomes.
+  Sustained growth in `read_ack_processed_total{result="invalid_signature"}` should trigger the governance playbook described in
+  [governance.md](governance.md#read-acknowledgement-anomaly-response) and the monitoring response loop that correlates the spike with offending domains.
 
 ## 5. Subsidy distribution and advertising settlement
 

@@ -9,6 +9,20 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-30)
+
+- Explorer payout lookups now cover the legacy JSON path entirely inside the
+  existing SQLite/`foundation_serialization` stack, and the CLI’s
+  `explorer block-payouts` command exercises mutual-exclusion checks plus
+  missing-block errors through the first-party mock transport—no serde_json or
+  HTTP shims reinstated. Grafana gains a matching “Block Payouts” row generated
+  by the in-house dashboard builder, keeping dashboards dependency-free.
+
+## Recent progress (2025-10-29)
+
+- Explorer `/blocks/:hash/payouts` reuses the first-party SQLite codec to emit per-role read/ad totals without serde_json fallbacks, and the CLI’s `explorer block-payouts` command forwards JSON-RPC envelopes exclusively through the in-house transport abstraction. Integration tests rely on the mock transport and stub SQLite backend, keeping FIRST_PARTY_ONLY coverage hermetic while exercising the new payloads.
+- Governance and monitoring documentation now codify the response to rising `read_ack_processed_total{result="invalid_signature"}` counts without introducing external alert tooling; operators remain on the native dashboards/CLI.
+
 ## Recent progress (2025-10-28)
 
 - Gateway `ReadAck` submissions now ride entirely on first-party HTTP and

@@ -160,6 +160,17 @@ also appends a balance snapshot noting the delta, resulting balance, and any
 associated disbursement ID, keeping historical accruals in lockstep with the
 legacy JSON snapshots.
 
+### Read-acknowledgement anomaly response
+
+Governance stewards the acknowledgement policy because sustained invalid receipt rates can signal hostile gateways or broken client integrations. When dashboards show `read_ack_processed_total{result="invalid_signature"}` rising faster than the `ok` series:
+
+1. Confirm the background worker is still draining the queue by checking the node logs (`read_ack_worker=drain` entries) and verifying the accepted counter is advancing.
+2. Pull the latest governance parameters for read-subsidy distribution (`contract gov params show --filter read_subsidy_*`) and ensure no recent proposal redirected subsidies away from the affected roles.
+3. Coordinate with gateway operators to rotate client keys or disable offending domains. Use the explorer `/receipts/domain/:id` view to identify which hosts dominate the invalid set.
+4. If signatures remain invalid after remediation, schedule an emergency governance vote to pause subsidy minting (`kill_switch_subsidy_reduction` or policy-specific percentage cuts) until the ack stream recovers. Document the action in `governance/history/param_changes.json` for auditors.
+
+These playbooks keep subsidy accounting intact while telemetry, explorer, and CLI surfaces continue to expose per-role payouts for reconciliation.
+
 #### RPC surfaces and CLI fetch workflow
 
 The node exposes the treasury state over first-party JSON-RPC endpoints:

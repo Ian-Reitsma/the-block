@@ -2,6 +2,7 @@ pub mod ai;
 pub mod bridge;
 pub mod codec_helpers;
 pub mod compute;
+pub mod explorer;
 pub mod gov;
 pub mod http_client;
 pub mod identity;

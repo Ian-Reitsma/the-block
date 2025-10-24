@@ -121,6 +121,14 @@ const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str = "Oldest scheduled treasury d
 const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
 const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
 const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
+const PAYOUT_ROW_TITLE: &str = "Block Payouts";
+const PAYOUT_READ_PANEL_TITLE: &str = "Read subsidy payouts (5m delta)";
+const PAYOUT_READ_EXPR: &str =
+    "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
+const PAYOUT_AD_PANEL_TITLE: &str = "Advertising payouts (5m delta)";
+const PAYOUT_AD_EXPR: &str =
+    "sum by (role)(increase(explorer_block_payout_ad_total[5m]))";
+const PAYOUT_ROLE_LEGEND: &str = "{{role}}";
 const BRIDGE_REWARD_CLAIMS_PANEL_TITLE: &str = "bridge_reward_claims_total (5m delta)";
 const BRIDGE_REWARD_CLAIMS_EXPR: &str = "increase(bridge_reward_claims_total[5m])";
 const BRIDGE_REWARD_APPROVALS_PANEL_TITLE: &str = "bridge_reward_approvals_consumed_total (5m delta)";
@@ -265,6 +273,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut dex = Vec::new();
     let mut compute = Vec::new();
     let mut treasury = Vec::new();
+    let mut payouts = Vec::new();
     let mut bridge = Vec::new();
     let mut gossip = Vec::new();
     let mut tls = Vec::new();
@@ -328,6 +337,24 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             ));
             continue;
         }
+        if metric.name == "explorer_block_payout_read_total" {
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_READ_PANEL_TITLE,
+                PAYOUT_READ_EXPR,
+                PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_block_payout_ad_total" {
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_AD_PANEL_TITLE,
+                PAYOUT_AD_EXPR,
+                PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            continue;
+        }
         if metric.name == "bridge_reward_claims_total" {
             bridge.push(build_bridge_delta_panel(
                 BRIDGE_REWARD_CLAIMS_PANEL_TITLE,
@@ -345,7 +372,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_settlement_results_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_SETTLEMENT_RESULTS_PANEL_TITLE,
                 BRIDGE_SETTLEMENT_RESULTS_EXPR,
                 BRIDGE_SETTLEMENT_RESULTS_LEGEND,
@@ -354,7 +381,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_dispute_outcomes_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE,
                 BRIDGE_DISPUTE_OUTCOMES_EXPR,
                 BRIDGE_DISPUTE_OUTCOMES_LEGEND,
@@ -363,7 +390,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_liquidity_locked_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_LIQUIDITY_LOCKED_PANEL_TITLE,
                 BRIDGE_LIQUIDITY_LOCKED_EXPR,
                 BRIDGE_LIQUIDITY_LEGEND,
@@ -372,7 +399,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_liquidity_unlocked_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_LIQUIDITY_UNLOCKED_PANEL_TITLE,
                 BRIDGE_LIQUIDITY_UNLOCKED_EXPR,
                 BRIDGE_LIQUIDITY_LEGEND,
@@ -381,7 +408,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_liquidity_minted_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_LIQUIDITY_MINTED_PANEL_TITLE,
                 BRIDGE_LIQUIDITY_MINTED_EXPR,
                 BRIDGE_LIQUIDITY_LEGEND,
@@ -390,7 +417,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_liquidity_burned_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_LIQUIDITY_BURNED_PANEL_TITLE,
                 BRIDGE_LIQUIDITY_BURNED_EXPR,
                 BRIDGE_LIQUIDITY_LEGEND,
@@ -399,7 +426,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_remediation_action_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_REMEDIATION_PANEL_TITLE,
                 BRIDGE_REMEDIATION_EXPR,
                 BRIDGE_REMEDIATION_LEGEND,
@@ -408,7 +435,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_remediation_dispatch_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE,
                 BRIDGE_REMEDIATION_DISPATCH_EXPR,
                 BRIDGE_REMEDIATION_DISPATCH_LEGEND,
@@ -417,7 +444,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             continue;
         }
         if metric.name == "bridge_remediation_dispatch_ack_total" {
-            bridge.push(build_bridge_grouped_delta_panel(
+            bridge.push(build_grouped_delta_panel(
                 BRIDGE_REMEDIATION_ACK_PANEL_TITLE,
                 BRIDGE_REMEDIATION_ACK_EXPR,
                 BRIDGE_REMEDIATION_ACK_LEGEND,
@@ -571,6 +598,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("DEX", dex),
         ("Compute", compute),
         ("Treasury", treasury),
+        (PAYOUT_ROW_TITLE, payouts),
         ("Bridge", bridge),
         ("Gossip", gossip),
         ("TLS", tls),
@@ -662,7 +690,7 @@ fn build_bridge_metric_panel(title: &str, expr: &str, description: &str) -> Valu
     Value::Object(panel)
 }
 
-fn build_bridge_grouped_delta_panel(
+fn build_grouped_delta_panel(
     title: &str,
     expr: &str,
     legend_format: &str,
@@ -1379,6 +1407,113 @@ mod tests {
             .collect();
 
         assert_eq!(titles, vec!["DEX", "Compute", "Gossip", "Other"]);
+    }
+
+    #[test]
+    fn payouts_row_includes_grouped_panels() {
+        let metrics = vec![
+            Metric {
+                name: "explorer_block_payout_read_total".into(),
+                description: "Read subsidy payouts".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "explorer_block_payout_ad_total".into(),
+                description: "Advertising payouts".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+        ];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 3);
+
+        let row = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    Some(map)
+                }
+                _ => None,
+            })
+            .expect("payout row present");
+        assert_eq!(row.get("title"), Some(&Value::from(PAYOUT_ROW_TITLE)));
+
+        let read_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == PAYOUT_READ_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("read payout panel present");
+        assert_eq!(
+            read_panel.get("description"),
+            Some(&Value::from("Read subsidy payouts"))
+        );
+        let read_target = read_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| target.as_object())
+            .expect("read target object");
+        assert_eq!(read_target.get("expr"), Some(&Value::from(PAYOUT_READ_EXPR)));
+        assert_eq!(
+            read_target.get("legendFormat"),
+            Some(&Value::from(PAYOUT_ROLE_LEGEND))
+        );
+        let read_options = read_panel
+            .get("options")
+            .and_then(Value::as_object)
+            .and_then(|opts| opts.get("legend"))
+            .and_then(Value::as_object)
+            .and_then(|legend| legend.get("showLegend"))
+            .and_then(Value::as_bool)
+            .expect("legend flag");
+        assert!(read_options);
+
+        let ad_panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == PAYOUT_AD_PANEL_TITLE)
+                        .unwrap_or(false) => Some(map),
+                _ => None,
+            })
+            .expect("advertising payout panel present");
+        let ad_target = ad_panel
+            .get("targets")
+            .and_then(|targets| match targets {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|target| target.as_object())
+            .expect("ad target object");
+        assert_eq!(ad_target.get("expr"), Some(&Value::from(PAYOUT_AD_EXPR)));
+        assert_eq!(
+            ad_target.get("legendFormat"),
+            Some(&Value::from(PAYOUT_ROLE_LEGEND))
+        );
     }
 
     #[test]

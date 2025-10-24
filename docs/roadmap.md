@@ -1,4 +1,5 @@
 # Status & Roadmap
+> **Review (2025-10-30, morning):** Explorer payout lookups now defend the JSON fallback path so legacy blocks without the new per-role fields still render viewer/host/hardware/verifier/liquidity/miner totals. CLI coverage exercises the exclusive hash/height arguments and missing-block errors, while the monitoring generator adds a “Block Payouts” row that charts the read-subsidy and advertising role counters from Prometheus. Operators can now reconcile historical blocks, CLI automation, and dashboards without leaving the first-party toolchain.
 > **Review (2025-10-29, early morning):** Read subsidies now route through governance-
 > controlled splits. The node’s acknowledgement worker validates signatures,
 > increments `read_ack_processed_total{result}`, and stages per-role byte ledgers

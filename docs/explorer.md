@@ -4,9 +4,16 @@
 
 The explorer exposes a lightweight REST service for querying on-chain data and analytics. DID anchors are cached in-process so repeated resolves hit memory rather than RocksDB, and the dedicated `did_view` page links anchors to wallet details for faster operator workflows.
 
+### Block payout breakdowns
+
+Blocks indexed after the governance split now store per-role CT distributions for both read subsidies and advertising settlements. The `/blocks/:hash/payouts` endpoint surfaces those totals without requiring callers to decode the full binary block image; the explorer falls back to the JSON payload written to SQLite when the binary codec is unavailable (e.g., the stubbed test harness). Responses include the block hash, height, and two role maps (`read_subsidy`, `advertising`) with totals for viewers, hosts, hardware vendors, verifiers, the liquidity pool, and the residual miner share. The CLI mirrors this endpoint via `contract-cli explorer block-payouts`, accepting either a block hash or height and printing the JSON response directly for automation.
+
+Unit coverage now exercises the JSON fallback with legacy snapshots that omit the per-role fields entirely, guaranteeing FIRST_PARTY_ONLY builds continue to render historical payouts even as the header shape evolves. The CLI command also validates that exactly one of `--hash` or `--height` is supplied and reports a clear error when a block is missing, keeping automation flows hermetic without shell scripting or third-party JSON tooling.
+
 ## Endpoints
 
 - `GET /blocks/:hash` – fetch a block by hash.
+- `GET /blocks/:hash/payouts` – return per-role CT totals for read subsidies and advertising flows persisted in the block header.
 - `GET /blocks/:hash/proof` – fetch the light-client proof for a block.
 - `GET /txs/:hash` – fetch a transaction by hash.
 - `GET /gov/proposals/:id` – fetch a governance proposal.

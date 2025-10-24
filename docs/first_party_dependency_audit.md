@@ -1,5 +1,9 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-30 update (payout fallback coverage & dashboard row):** Explorer payout queries now exercise the JSON fallback with legacy snapshots entirely inside the existing SQLite/`foundation_serialization` stack, the CLI’s error-path tests ride the mock transport without HTTP shims, and the Grafana generator renders the new “Block Payouts” row through the in-house dashboard builder. No third-party codecs, JSON libraries, or charting packages were introduced—the updates expand test coverage and templates while staying within the workspace crates.
+
+> **2025-10-29 update (explorer/CLI payout surfaces & ack incident playbook):** Explorer `/blocks/:hash/payouts` and `contract-cli explorer block-payouts` reuse the existing first-party SQLite + JSON codecs to render per-role read/ad totals with no external serialization helpers, and the node integration test proving mixed flows mines blocks through the in-house ledger. Governance/monitoring docs covering the `read_ack_processed_total{result="invalid_signature"}` response loop are pure documentation updates—no third-party alert tooling or SDKs were introduced.
+
 > **2025-10-29 update (read subsidy split & ad marketplace):** The new `ad_market`
 > crate, acknowledgement worker, and block subsidy split land entirely on
 > first-party crates. Campaign matching, settlement breakdowns, and the
@@ -33,7 +37,7 @@
 > `--json` options so responders and automation filter or stream persisted
 > actions without introducing third-party tooling.
 
-_Last updated: 2025-10-29 01:05:00Z_
+_Last updated: 2025-10-30 13:05:00Z_
 
 > **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
 > remediation engine now escalates and retries pending playbooks using only the

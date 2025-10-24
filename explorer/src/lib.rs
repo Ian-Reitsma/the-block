@@ -3,7 +3,9 @@ use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex::encode as hex_encode;
 use diagnostics::anyhow::{self, Result as AnyhowResult};
 use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
-use foundation_sqlite::{params, Connection, OptionalExtension, Value as SqlValue};
+use foundation_sqlite::{
+    params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
+};
 use httpd::{HttpError, Request, Response, Router, StatusCode};
 use std::env;
 use std::num::NonZeroUsize;
@@ -61,6 +63,7 @@ impl ExplorerHttpState {
 pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
     Router::new(state)
         .get("/blocks/:hash", block_by_hash)
+        .get("/blocks/:hash/payouts", block_payouts)
         .get("/blocks/:hash/summary", block_summary)
         .get("/txs/:hash", transaction_by_hash)
         .get("/gov/proposals/:id", gov_proposal)
@@ -117,6 +120,22 @@ async fn block_by_hash(request: Request<ExplorerHttpState>) -> Result<Response, 
         }
     };
     Response::new(StatusCode::OK).json(&block)
+}
+
+async fn block_payouts(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(hash) = request.param("hash") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let payouts = match explorer.block_payouts(hash) {
+        Ok(payouts) => payouts,
+        Err(err) => {
+            log_error("failed to compute block payouts", &err);
+            None
+        }
+    };
+    let payload = payouts.as_ref().map(BlockPayoutBreakdown::to_json_value);
+    Response::new(StatusCode::OK).json(&payload)
 }
 
 async fn block_summary(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
@@ -547,7 +566,10 @@ async fn treasury_disbursements(
     };
 
     match explorer.treasury_disbursements(page, page_size, filter) {
-        Ok(result) => Response::new(StatusCode::OK).json(&result),
+        Ok(result) => {
+            let payload = result.to_json_value();
+            Response::new(StatusCode::OK).json(&payload)
+        }
         Err(err) => {
             log_error("treasury disbursement query failed", &err);
             Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
@@ -710,6 +732,229 @@ pub struct ProviderSettlementRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RolePayoutBreakdown {
+    pub total_ct: u64,
+    pub viewer_ct: u64,
+    pub host_ct: u64,
+    pub hardware_ct: u64,
+    pub verifier_ct: u64,
+    pub liquidity_ct: u64,
+    pub miner_ct: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockPayoutBreakdown {
+    pub hash: String,
+    pub height: u64,
+    pub read_subsidy: RolePayoutBreakdown,
+    pub advertising: RolePayoutBreakdown,
+}
+
+impl BlockPayoutBreakdown {
+    pub fn from_block(block: &Block) -> Self {
+        let read_total = block.read_sub_ct.get();
+        let read_viewer = block.read_sub_viewer_ct.get();
+        let read_host = block.read_sub_host_ct.get();
+        let read_hardware = block.read_sub_hardware_ct.get();
+        let read_verifier = block.read_sub_verifier_ct.get();
+        let read_liquidity = block.read_sub_liquidity_ct.get();
+        let read_roles_sum = read_viewer
+            .saturating_add(read_host)
+            .saturating_add(read_hardware)
+            .saturating_add(read_verifier)
+            .saturating_add(read_liquidity);
+        let read_miner = read_total.saturating_sub(read_roles_sum);
+        let read_breakdown = RolePayoutBreakdown {
+            total_ct: read_total,
+            viewer_ct: read_viewer,
+            host_ct: read_host,
+            hardware_ct: read_hardware,
+            verifier_ct: read_verifier,
+            liquidity_ct: read_liquidity,
+            miner_ct: read_miner,
+        };
+
+        let ad_viewer = block.ad_viewer_ct.get();
+        let ad_host = block.ad_host_ct.get();
+        let ad_hardware = block.ad_hardware_ct.get();
+        let ad_verifier = block.ad_verifier_ct.get();
+        let ad_liquidity = block.ad_liquidity_ct.get();
+        let ad_miner = block.ad_miner_ct.get();
+        let ad_total = ad_viewer
+            .saturating_add(ad_host)
+            .saturating_add(ad_hardware)
+            .saturating_add(ad_verifier)
+            .saturating_add(ad_liquidity)
+            .saturating_add(ad_miner);
+        let ad_breakdown = RolePayoutBreakdown {
+            total_ct: ad_total,
+            viewer_ct: ad_viewer,
+            host_ct: ad_host,
+            hardware_ct: ad_hardware,
+            verifier_ct: ad_verifier,
+            liquidity_ct: ad_liquidity,
+            miner_ct: ad_miner,
+        };
+
+        Self {
+            hash: block.hash.clone(),
+            height: block.index,
+            read_subsidy: read_breakdown,
+            advertising: ad_breakdown,
+        }
+    }
+
+    fn number(value: u64) -> json::Value {
+        json::Value::Number(json::Number::from(value))
+    }
+
+    fn field_u64(map: &json::Value, key: &str) -> u64 {
+        map.get(key).and_then(|value| value.as_u64()).unwrap_or(0)
+    }
+
+    fn from_json_with_hint(hash_hint: &str, map: &json::Value) -> Option<Self> {
+        let hash = map
+            .get("hash")
+            .and_then(|value| value.as_str())
+            .unwrap_or(hash_hint)
+            .to_string();
+        let height = map
+            .get("height")
+            .and_then(|value| value.as_u64())
+            .or_else(|| map.get("index").and_then(|value| value.as_u64()))
+            .unwrap_or(0);
+
+        let read_total = Self::field_u64(map, "read_sub_ct");
+        let read_viewer = Self::field_u64(map, "read_sub_viewer_ct");
+        let read_host = Self::field_u64(map, "read_sub_host_ct");
+        let read_hardware = Self::field_u64(map, "read_sub_hardware_ct");
+        let read_verifier = Self::field_u64(map, "read_sub_verifier_ct");
+        let read_liquidity = Self::field_u64(map, "read_sub_liquidity_ct");
+        let read_roles_sum = read_viewer
+            .saturating_add(read_host)
+            .saturating_add(read_hardware)
+            .saturating_add(read_verifier)
+            .saturating_add(read_liquidity);
+        let read_miner = read_total.saturating_sub(read_roles_sum);
+        let read_breakdown = RolePayoutBreakdown {
+            total_ct: read_total,
+            viewer_ct: read_viewer,
+            host_ct: read_host,
+            hardware_ct: read_hardware,
+            verifier_ct: read_verifier,
+            liquidity_ct: read_liquidity,
+            miner_ct: read_miner,
+        };
+
+        let ad_viewer = Self::field_u64(map, "ad_viewer_ct");
+        let ad_host = Self::field_u64(map, "ad_host_ct");
+        let ad_hardware = Self::field_u64(map, "ad_hardware_ct");
+        let ad_verifier = Self::field_u64(map, "ad_verifier_ct");
+        let ad_liquidity = Self::field_u64(map, "ad_liquidity_ct");
+        let ad_miner = Self::field_u64(map, "ad_miner_ct");
+        let ad_total = ad_viewer
+            .saturating_add(ad_host)
+            .saturating_add(ad_hardware)
+            .saturating_add(ad_verifier)
+            .saturating_add(ad_liquidity)
+            .saturating_add(ad_miner);
+        let ad_breakdown = RolePayoutBreakdown {
+            total_ct: ad_total,
+            viewer_ct: ad_viewer,
+            host_ct: ad_host,
+            hardware_ct: ad_hardware,
+            verifier_ct: ad_verifier,
+            liquidity_ct: ad_liquidity,
+            miner_ct: ad_miner,
+        };
+
+        Some(Self {
+            hash,
+            height,
+            read_subsidy: read_breakdown,
+            advertising: ad_breakdown,
+        })
+    }
+
+    pub fn from_json_map(map: &json::Value) -> Option<Self> {
+        if let (Some(read_map), Some(ad_map)) = (map.get("read_subsidy"), map.get("advertising")) {
+            let hash = map
+                .get("hash")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            let height = map
+                .get("height")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            let read_subsidy = RolePayoutBreakdown::from_json_value(read_map)?;
+            let advertising = RolePayoutBreakdown::from_json_value(ad_map)?;
+            return Some(Self {
+                hash,
+                height,
+                read_subsidy,
+                advertising,
+            });
+        }
+
+        Self::from_json_with_hint("", map)
+    }
+
+    pub fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert("hash".into(), json::Value::String(self.hash.clone()));
+        map.insert("height".into(), Self::number(self.height));
+        map.insert("read_subsidy".into(), self.read_subsidy.to_json_value());
+        map.insert("advertising".into(), self.advertising.to_json_value());
+        json::Value::Object(map)
+    }
+}
+
+impl RolePayoutBreakdown {
+    fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert(
+            "total_ct".into(),
+            BlockPayoutBreakdown::number(self.total_ct),
+        );
+        map.insert(
+            "viewer_ct".into(),
+            BlockPayoutBreakdown::number(self.viewer_ct),
+        );
+        map.insert("host_ct".into(), BlockPayoutBreakdown::number(self.host_ct));
+        map.insert(
+            "hardware_ct".into(),
+            BlockPayoutBreakdown::number(self.hardware_ct),
+        );
+        map.insert(
+            "verifier_ct".into(),
+            BlockPayoutBreakdown::number(self.verifier_ct),
+        );
+        map.insert(
+            "liquidity_ct".into(),
+            BlockPayoutBreakdown::number(self.liquidity_ct),
+        );
+        map.insert(
+            "miner_ct".into(),
+            BlockPayoutBreakdown::number(self.miner_ct),
+        );
+        json::Value::Object(map)
+    }
+
+    fn from_json_value(map: &json::Value) -> Option<Self> {
+        Some(Self {
+            total_ct: BlockPayoutBreakdown::field_u64(map, "total_ct"),
+            viewer_ct: BlockPayoutBreakdown::field_u64(map, "viewer_ct"),
+            host_ct: BlockPayoutBreakdown::field_u64(map, "host_ct"),
+            hardware_ct: BlockPayoutBreakdown::field_u64(map, "hardware_ct"),
+            verifier_ct: BlockPayoutBreakdown::field_u64(map, "verifier_ct"),
+            liquidity_ct: BlockPayoutBreakdown::field_u64(map, "liquidity_ct"),
+            miner_ct: BlockPayoutBreakdown::field_u64(map, "miner_ct"),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustLineRecord {
     pub from: String,
@@ -799,6 +1044,94 @@ pub struct TreasuryDisbursementPage {
     pub page: usize,
     pub page_size: usize,
     pub disbursements: Vec<TreasuryDisbursementRow>,
+}
+
+impl TreasuryDisbursementRow {
+    fn number(value: u64) -> json::Value {
+        json::Value::Number(json::Number::from(value))
+    }
+
+    fn status_json(status: &DisbursementStatus) -> json::Value {
+        match status {
+            DisbursementStatus::Scheduled => json::Value::String("Scheduled".into()),
+            DisbursementStatus::Executed {
+                tx_hash,
+                executed_at,
+            } => {
+                let mut inner = json::Map::new();
+                inner.insert("tx_hash".into(), json::Value::String(tx_hash.clone()));
+                inner.insert("executed_at".into(), Self::number(*executed_at));
+                let mut outer = json::Map::new();
+                outer.insert("Executed".into(), json::Value::Object(inner));
+                json::Value::Object(outer)
+            }
+            DisbursementStatus::Cancelled {
+                reason,
+                cancelled_at,
+            } => {
+                let mut inner = json::Map::new();
+                inner.insert("reason".into(), json::Value::String(reason.clone()));
+                inner.insert("cancelled_at".into(), Self::number(*cancelled_at));
+                let mut outer = json::Map::new();
+                outer.insert("Cancelled".into(), json::Value::Object(inner));
+                json::Value::Object(outer)
+            }
+        }
+    }
+
+    fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert("id".into(), Self::number(self.id));
+        map.insert(
+            "destination".into(),
+            json::Value::String(self.destination.clone()),
+        );
+        map.insert("amount_ct".into(), Self::number(self.amount_ct));
+        map.insert("memo".into(), json::Value::String(self.memo.clone()));
+        map.insert("scheduled_epoch".into(), Self::number(self.scheduled_epoch));
+        map.insert("created_at".into(), Self::number(self.created_at));
+        map.insert(
+            "status_label".into(),
+            json::Value::String(self.status_label.clone()),
+        );
+        map.insert(
+            "status_timestamp".into(),
+            Self::number(self.status_timestamp),
+        );
+        map.insert("status".into(), Self::status_json(&self.status));
+        if let Some(hash) = &self.executed_tx_hash {
+            map.insert("executed_tx_hash".into(), json::Value::String(hash.clone()));
+        }
+        if let Some(reason) = &self.cancel_reason {
+            map.insert("cancel_reason".into(), json::Value::String(reason.clone()));
+        }
+        json::Value::Object(map)
+    }
+}
+
+impl TreasuryDisbursementPage {
+    fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert(
+            "total".into(),
+            json::Value::Number(json::Number::from(self.total as u64)),
+        );
+        map.insert(
+            "page".into(),
+            json::Value::Number(json::Number::from(self.page as u64)),
+        );
+        map.insert(
+            "page_size".into(),
+            json::Value::Number(json::Number::from(self.page_size as u64)),
+        );
+        let disbursements = self
+            .disbursements
+            .iter()
+            .map(TreasuryDisbursementRow::to_json_value)
+            .collect();
+        map.insert("disbursements".into(), json::Value::Array(disbursements));
+        json::Value::Object(map)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1005,26 +1338,42 @@ impl Explorer {
             "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount_ct INTEGER NOT NULL, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT)",
             params![],
         )?;
-        conn.execute(
+        if let Err(err) = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_treasury_disbursements_status ON treasury_disbursements(status)",
             params![],
-        )?;
-        conn.execute(
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
+        if let Err(err) = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_treasury_disbursements_schedule ON treasury_disbursements(scheduled_epoch DESC, id DESC)",
             params![],
-        )?;
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
         conn.execute(
             "CREATE TABLE IF NOT EXISTS did_records (address TEXT NOT NULL, hash TEXT NOT NULL, anchored_at INTEGER NOT NULL, PRIMARY KEY(address, anchored_at))",
             params![],
         )?;
-        conn.execute(
+        if let Err(err) = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_did_records_address ON did_records(address)",
             params![],
-        )?;
-        conn.execute(
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
+        if let Err(err) = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_did_records_time ON did_records(anchored_at DESC)",
             params![],
-        )?;
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
         let did_registry = DidRegistry::open(DidRegistry::default_path());
         let mut cache = LruCache::new(NonZeroUsize::new(256).unwrap());
         {
@@ -1139,6 +1488,57 @@ impl Explorer {
             )
             .optional()?;
         Ok(bytes.map(|b| Self::decode_block(&b).expect("failed to decode block from explorer db")))
+    }
+
+    pub fn get_block_by_height(&self, height: u64) -> DbResult<Option<Block>> {
+        let conn = self.conn()?;
+        let bytes: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT data FROM blocks WHERE height=?1",
+                params![height],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(bytes.map(|b| Self::decode_block(&b).expect("failed to decode block from explorer db")))
+    }
+
+    pub fn block_payouts(&self, hash: &str) -> DbResult<Option<BlockPayoutBreakdown>> {
+        let conn = self.conn()?;
+        let bytes: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT data FROM blocks WHERE hash=?1",
+                params![hash],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+
+        match Self::decode_block(&bytes) {
+            Ok(block) => Ok(Some(BlockPayoutBreakdown::from_block(&block))),
+            Err(err) => {
+                if let Ok(value) = decode_json::<json::Value>(&bytes) {
+                    if let Some(breakdown) = BlockPayoutBreakdown::from_json_with_hint(hash, &value)
+                    {
+                        return Ok(Some(breakdown));
+                    }
+                }
+                log_error("failed to decode block payouts", &err);
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn block_hash_by_height(&self, height: u64) -> DbResult<Option<String>> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT hash FROM blocks WHERE height=?1",
+            params![height],
+            |row| row.get(0),
+        )
+        .optional()
     }
 
     /// Fetch the base fee at the specified block height if present.
@@ -1857,6 +2257,11 @@ impl Explorer {
         for entry in rows {
             records.push(entry?);
         }
+        records.sort_by(|a, b| {
+            b.scheduled_epoch
+                .cmp(&a.scheduled_epoch)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         let filtered: Vec<TreasuryDisbursementRow> = records
             .into_iter()
             .filter(|row| filter.matches(row))
@@ -1999,22 +2404,16 @@ mod tests {
     #[test]
     fn index_and_query() {
         let dir = tempfile::tempdir().unwrap();
-        let receipts = dir.path().join("receipts");
-        std::fs::create_dir_all(&receipts).unwrap();
-        let r = Receipt::new(
-            "job".into(),
-            "buyer".into(),
-            "prov".into(),
-            10,
-            1,
-            false,
-            the_block::transaction::FeeLane::Consumer,
-        );
-        let bytes = binary::encode(&vec![r]).unwrap();
-        std::fs::write(receipts.join("1"), bytes).unwrap();
         let db = dir.path().join("explorer.db");
         let ex = Explorer::open(&db).unwrap();
-        ex.ingest_dir(&receipts).unwrap();
+        ex.index_receipt(&ReceiptRecord {
+            key: "key-1".into(),
+            epoch: 1,
+            provider: "prov".into(),
+            buyer: "buyer".into(),
+            amount: 10,
+        })
+        .unwrap();
         assert_eq!(ex.receipts_by_provider("prov").unwrap().len(), 1);
         assert_eq!(ex.receipts_by_domain("buyer").unwrap().len(), 1);
     }
