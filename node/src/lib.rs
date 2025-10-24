@@ -20,6 +20,7 @@ use crate::governance::NODE_GOV_STORE;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
+use ad_market::SettlementBreakdown;
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
@@ -61,6 +62,11 @@ mod read_receipt;
 pub mod simple_db;
 use config::NodeConfig;
 pub use read_receipt::{ReadAck, ReadBatcher};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadAckError {
+    InvalidSignature,
+}
 pub use runtime;
 pub use runtime::{
     block_on, handle, interval, sleep, spawn, spawn_blocking, timeout, yield_now, JoinHandle,
@@ -574,6 +580,39 @@ pub struct Block {
     /// CT subsidy minted for read delivery in this block
     pub read_sub_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
+    /// Portion of the read subsidy paid to viewers in this block
+    pub read_sub_viewer_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Portion of the read subsidy paid to hosts in this block
+    pub read_sub_host_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Portion of the read subsidy paid to hardware providers in this block
+    pub read_sub_hardware_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Portion of the read subsidy paid to verifiers in this block
+    pub read_sub_verifier_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Portion of the read subsidy routed to the liquidity pool in this block
+    pub read_sub_liquidity_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens paid out from advertising campaigns to viewers
+    pub ad_viewer_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens paid out from advertising campaigns to hosts
+    pub ad_host_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens paid out from advertising campaigns to hardware providers
+    pub ad_hardware_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens paid out from advertising campaigns to verifiers
+    pub ad_verifier_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens routed to the liquidity pool from advertising campaigns
+    pub ad_liquidity_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Consumer tokens routed to the miner from advertising campaigns
+    pub ad_miner_ct: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for compute in this block
     pub compute_sub_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -758,6 +797,24 @@ pub struct Blockchain {
     pub epoch_storage_bytes: u64,
     /// Bytes served during the current epoch
     pub epoch_read_bytes: u64,
+    /// Viewer byte totals for the current epoch keyed by viewer address
+    pub epoch_viewer_bytes: HashMap<String, u64>,
+    /// Host byte totals for the current epoch keyed by domain
+    pub epoch_host_bytes: HashMap<String, u64>,
+    /// Hardware provider byte totals keyed by provider identifier
+    pub epoch_hardware_bytes: HashMap<String, u64>,
+    /// Verifier byte totals keyed by verifier identifier
+    pub epoch_verifier_bytes: HashMap<String, u64>,
+    /// Viewer byte totals that have already been settled this epoch
+    pub settled_viewer_bytes: HashMap<String, u64>,
+    /// Host byte totals that have already been settled this epoch
+    pub settled_host_bytes: HashMap<String, u64>,
+    /// Hardware byte totals that have already been settled this epoch
+    pub settled_hardware_bytes: HashMap<String, u64>,
+    /// Verifier byte totals that have already been settled this epoch
+    pub settled_verifier_bytes: HashMap<String, u64>,
+    /// Total read bytes settled for subsidy distribution this epoch
+    pub settled_read_bytes: u64,
     /// CPU milliseconds consumed during the current epoch
     pub epoch_cpu_ms: u64,
     /// Bytes of dynamic compute output during the current epoch
@@ -770,6 +827,8 @@ pub struct Blockchain {
     pub blob_scheduler: blob_chain::BlobScheduler,
     /// Pending read acknowledgements awaiting batching
     pub read_batcher: crate::read_receipt::ReadBatcher,
+    /// Pending advertising settlements awaiting credit assignment
+    pub pending_ad_settlements: Vec<AdSettlementRecord>,
     /// Persisted proof rebate tracker
     pub proof_tracker: crate::light_client::proof_tracker::ProofTracker,
     /// Tracker for intermediate block hashes used in reorg rollback
@@ -903,12 +962,22 @@ impl Default for Blockchain {
             lambda_bytes_out_sub_ct_raw: 5,
             epoch_storage_bytes: 0,
             epoch_read_bytes: 0,
+            epoch_viewer_bytes: HashMap::new(),
+            epoch_host_bytes: HashMap::new(),
+            epoch_hardware_bytes: HashMap::new(),
+            epoch_verifier_bytes: HashMap::new(),
+            settled_viewer_bytes: HashMap::new(),
+            settled_host_bytes: HashMap::new(),
+            settled_hardware_bytes: HashMap::new(),
+            settled_verifier_bytes: HashMap::new(),
+            settled_read_bytes: 0,
             epoch_cpu_ms: 0,
             epoch_bytes_out: 0,
             blob_mempool: Vec::new(),
             pending_blob_bytes: 0,
             blob_scheduler: blob_chain::BlobScheduler::default(),
             read_batcher: crate::read_receipt::ReadBatcher::new(),
+            pending_ad_settlements: Vec::new(),
             proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
             reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
@@ -1244,12 +1313,172 @@ impl Blockchain {
     }
 
     /// Inject a client-signed read acknowledgement into the current epoch batch.
-    pub fn submit_read_ack(&mut self, ack: crate::read_receipt::ReadAck) {
-        if ack.verify() {
-            self.epoch_read_bytes = self.epoch_read_bytes.saturating_add(ack.bytes);
-            self.read_batcher.push(ack);
+    pub fn submit_read_ack(
+        &mut self,
+        ack: crate::read_receipt::ReadAck,
+    ) -> Result<(), ReadAckError> {
+        if !ack.verify() {
+            return Err(ReadAckError::InvalidSignature);
+        }
+        self.epoch_read_bytes = self.epoch_read_bytes.saturating_add(ack.bytes);
+        let viewer_addr = viewer_address_from_pk(&ack.pk);
+        let viewer_entry = self.epoch_viewer_bytes.entry(viewer_addr).or_insert(0);
+        *viewer_entry = viewer_entry.saturating_add(ack.bytes);
+        let host_addr = host_address(&ack.domain);
+        let host_entry = self.epoch_host_bytes.entry(host_addr).or_insert(0);
+        *host_entry = host_entry.saturating_add(ack.bytes);
+        let provider_id = if ack.provider.is_empty() {
+            ack.domain.clone()
+        } else {
+            ack.provider.clone()
+        };
+        let hardware_addr = hardware_address(&provider_id);
+        let hardware_entry = self.epoch_hardware_bytes.entry(hardware_addr).or_insert(0);
+        *hardware_entry = hardware_entry.saturating_add(ack.bytes);
+        let verifier_addr = verifier_address(&ack.domain);
+        let verifier_entry = self.epoch_verifier_bytes.entry(verifier_addr).or_insert(0);
+        *verifier_entry = verifier_entry.saturating_add(ack.bytes);
+        self.read_batcher.push(ack);
+        Ok(())
+    }
+
+    pub fn record_ad_settlement(
+        &mut self,
+        ack: &crate::read_receipt::ReadAck,
+        settlement: SettlementBreakdown,
+    ) {
+        let viewer_addr = viewer_address_from_pk(&ack.pk);
+        let host_addr = host_address(&ack.domain);
+        let provider_id = if ack.provider.is_empty() {
+            ack.domain.clone()
+        } else {
+            ack.provider.clone()
+        };
+        let hardware_addr = hardware_address(&provider_id);
+        let verifier_addr = verifier_address(&ack.domain);
+        let record = AdSettlementRecord {
+            campaign_id: settlement.campaign_id.clone(),
+            creative_id: settlement.creative_id.clone(),
+            bytes: settlement.bytes,
+            viewer_addr,
+            host_addr,
+            hardware_addr,
+            verifier_addr,
+            viewer_ct: settlement.viewer_ct,
+            host_ct: settlement.host_ct,
+            hardware_ct: settlement.hardware_ct,
+            verifier_ct: settlement.verifier_ct,
+            liquidity_ct: settlement.liquidity_ct,
+            miner_ct: settlement.miner_ct,
+            total_ct: settlement.total_ct,
+        };
+        self.pending_ad_settlements.push(record);
+    }
+}
+
+fn viewer_address_from_pk(pk: &[u8; 32]) -> String {
+    format!("0000:{}", crypto_suite::hex::encode(pk))
+}
+
+fn host_address(domain: &str) -> String {
+    format!("0001:host:{}", domain)
+}
+
+fn hardware_address(provider: &str) -> String {
+    format!("0002:hardware:{}", provider)
+}
+
+fn verifier_address(domain: &str) -> String {
+    format!("0003:verifier:{}", domain)
+}
+
+fn liquidity_address() -> &'static str {
+    "0004:liquidity:pool"
+}
+
+#[derive(Clone, Debug)]
+pub struct AdSettlementRecord {
+    pub campaign_id: String,
+    pub creative_id: String,
+    pub bytes: u64,
+    pub viewer_addr: String,
+    pub host_addr: String,
+    pub hardware_addr: String,
+    pub verifier_addr: String,
+    pub viewer_ct: u64,
+    pub host_ct: u64,
+    pub hardware_ct: u64,
+    pub verifier_ct: u64,
+    pub liquidity_ct: u64,
+    pub miner_ct: u64,
+    pub total_ct: u64,
+}
+
+fn distribute_scalar(total: u64, weights: &[(usize, u64)]) -> Vec<u64> {
+    if total == 0 || weights.is_empty() {
+        return vec![0; weights.len()];
+    }
+    let sum_weights: u128 = weights.iter().map(|(_, w)| u128::from(*w)).sum();
+    if sum_weights == 0 {
+        return vec![0; weights.len()];
+    }
+    let mut allocations = vec![0u64; weights.len()];
+    let mut distributed = 0u64;
+    let mut remainders: Vec<(usize, usize, u64)> = Vec::with_capacity(weights.len());
+    for (idx, (order, weight)) in weights.iter().enumerate() {
+        if *weight == 0 {
+            remainders.push((idx, *order, 0));
+            continue;
+        }
+        let numerator = u128::from(total) * u128::from(*weight);
+        let base = (numerator / sum_weights) as u64;
+        let remainder = (numerator % sum_weights) as u64;
+        allocations[idx] = base;
+        distributed = distributed.saturating_add(base);
+        remainders.push((idx, *order, remainder));
+    }
+    let mut remainder_tokens = total.saturating_sub(distributed);
+    if remainder_tokens > 0 {
+        remainders.sort_by(|a, b| {
+            b.2.cmp(&a.2)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        for (idx, _, _) in &remainders {
+            if remainder_tokens == 0 {
+                break;
+            }
+            allocations[*idx] = allocations[*idx].saturating_add(1);
+            remainder_tokens -= 1;
+        }
+        if remainder_tokens > 0 && !allocations.is_empty() {
+            allocations[0] = allocations[0].saturating_add(remainder_tokens);
         }
     }
+    allocations
+}
+
+fn distribute_proportional(total: u64, weights: &[(String, u64)]) -> Vec<(String, u64)> {
+    if total == 0 || weights.is_empty() {
+        return Vec::new();
+    }
+    let scalar_weights: Vec<(usize, u64)> = weights
+        .iter()
+        .enumerate()
+        .map(|(idx, (_, weight))| (idx, *weight))
+        .collect();
+    let allocations = distribute_scalar(total, &scalar_weights);
+    weights
+        .iter()
+        .zip(allocations.into_iter())
+        .filter_map(|((addr, _), amount)| {
+            if amount > 0 {
+                Some((addr.clone(), amount))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 impl Blockchain {
@@ -1328,6 +1557,17 @@ impl Blockchain {
                                 b.coinbase_industrial,
                                 b.storage_sub_ct,
                                 b.read_sub_ct,
+                                b.read_sub_viewer_ct,
+                                b.read_sub_host_ct,
+                                b.read_sub_hardware_ct,
+                                b.read_sub_verifier_ct,
+                                b.read_sub_liquidity_ct,
+                                b.ad_viewer_ct,
+                                b.ad_host_ct,
+                                b.ad_hardware_ct,
+                                b.ad_verifier_ct,
+                                b.ad_liquidity_ct,
+                                b.ad_miner_ct,
                                 b.compute_sub_ct,
                                 b.proof_rebate_ct,
                                 b.storage_sub_it,
@@ -1456,6 +1696,17 @@ impl Blockchain {
                                     b.coinbase_industrial,
                                     b.storage_sub_ct,
                                     b.read_sub_ct,
+                                    b.read_sub_viewer_ct,
+                                    b.read_sub_host_ct,
+                                    b.read_sub_hardware_ct,
+                                    b.read_sub_verifier_ct,
+                                    b.read_sub_liquidity_ct,
+                                    b.ad_viewer_ct,
+                                    b.ad_host_ct,
+                                    b.ad_hardware_ct,
+                                    b.ad_verifier_ct,
+                                    b.ad_liquidity_ct,
+                                    b.ad_miner_ct,
                                     b.compute_sub_ct,
                                     b.proof_rebate_ct,
                                     b.storage_sub_it,
@@ -1605,6 +1856,17 @@ impl Blockchain {
                             b.coinbase_industrial,
                             b.storage_sub_ct,
                             b.read_sub_ct,
+                            b.read_sub_viewer_ct,
+                            b.read_sub_host_ct,
+                            b.read_sub_hardware_ct,
+                            b.read_sub_verifier_ct,
+                            b.read_sub_liquidity_ct,
+                            b.ad_viewer_ct,
+                            b.ad_host_ct,
+                            b.ad_hardware_ct,
+                            b.ad_verifier_ct,
+                            b.ad_liquidity_ct,
+                            b.ad_miner_ct,
                             b.compute_sub_ct,
                             b.proof_rebate_ct,
                             b.storage_sub_it,
@@ -2191,6 +2453,17 @@ impl Blockchain {
             coinbase_industrial: TokenAmount::new(0),
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
+            read_sub_viewer_ct: TokenAmount::new(0),
+            read_sub_host_ct: TokenAmount::new(0),
+            read_sub_hardware_ct: TokenAmount::new(0),
+            read_sub_verifier_ct: TokenAmount::new(0),
+            read_sub_liquidity_ct: TokenAmount::new(0),
+            ad_viewer_ct: TokenAmount::new(0),
+            ad_host_ct: TokenAmount::new(0),
+            ad_hardware_ct: TokenAmount::new(0),
+            ad_verifier_ct: TokenAmount::new(0),
+            ad_liquidity_ct: TokenAmount::new(0),
+            ad_miner_ct: TokenAmount::new(0),
             compute_sub_ct: TokenAmount::new(0),
             proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
@@ -3532,7 +3805,10 @@ impl Blockchain {
         self.epoch_bytes_out = self.epoch_bytes_out.saturating_add(bytes_out);
         let storage_sub_ct =
             (self.beta_storage_sub_ct_raw as u64).saturating_mul(self.epoch_storage_bytes);
-        let read_sub_ct = (self.gamma_read_sub_ct_raw as u64).saturating_mul(self.epoch_read_bytes);
+        let delta_read_bytes = self
+            .epoch_read_bytes
+            .saturating_sub(self.settled_read_bytes);
+        let read_sub_ct = (self.gamma_read_sub_ct_raw as u64).saturating_mul(delta_read_bytes);
         let compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
             .saturating_mul(self.epoch_cpu_ms)
             .saturating_add(
@@ -3541,10 +3817,186 @@ impl Blockchain {
         let mut base_coinbase_consumer = reward_consumer
             .0
             .checked_add(storage_sub_ct)
-            .and_then(|v| v.checked_add(read_sub_ct))
             .and_then(|v| v.checked_add(compute_sub_ct))
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
+
+        let viewer_deltas: Vec<(String, u64)> = self
+            .epoch_viewer_bytes
+            .iter()
+            .map(|(addr, total)| {
+                let settled = self
+                    .settled_viewer_bytes
+                    .get(addr)
+                    .copied()
+                    .unwrap_or_default();
+                let delta = total.saturating_sub(settled);
+                (addr.clone(), delta)
+            })
+            .filter(|(_, delta)| *delta > 0)
+            .collect();
+        let host_deltas: Vec<(String, u64)> = self
+            .epoch_host_bytes
+            .iter()
+            .map(|(addr, total)| {
+                let settled = self
+                    .settled_host_bytes
+                    .get(addr)
+                    .copied()
+                    .unwrap_or_default();
+                let delta = total.saturating_sub(settled);
+                (addr.clone(), delta)
+            })
+            .filter(|(_, delta)| *delta > 0)
+            .collect();
+        let hardware_deltas: Vec<(String, u64)> = self
+            .epoch_hardware_bytes
+            .iter()
+            .map(|(addr, total)| {
+                let settled = self
+                    .settled_hardware_bytes
+                    .get(addr)
+                    .copied()
+                    .unwrap_or_default();
+                let delta = total.saturating_sub(settled);
+                (addr.clone(), delta)
+            })
+            .filter(|(_, delta)| *delta > 0)
+            .collect();
+        let verifier_deltas: Vec<(String, u64)> = self
+            .epoch_verifier_bytes
+            .iter()
+            .map(|(addr, total)| {
+                let settled = self
+                    .settled_verifier_bytes
+                    .get(addr)
+                    .copied()
+                    .unwrap_or_default();
+                let delta = total.saturating_sub(settled);
+                (addr.clone(), delta)
+            })
+            .filter(|(_, delta)| *delta > 0)
+            .collect();
+
+        let viewer_percent = self.params.read_subsidy_viewer_percent.max(0) as u64;
+        let host_percent = self.params.read_subsidy_host_percent.max(0) as u64;
+        let hardware_percent = self.params.read_subsidy_hardware_percent.max(0) as u64;
+        let verifier_percent = self.params.read_subsidy_verifier_percent.max(0) as u64;
+        let liquidity_percent = self.params.read_subsidy_liquidity_percent.max(0) as u64;
+        let role_allocations = distribute_scalar(
+            read_sub_ct,
+            &[
+                (0, viewer_percent),
+                (1, host_percent),
+                (2, hardware_percent),
+                (3, verifier_percent),
+                (4, liquidity_percent),
+            ],
+        );
+
+        let viewer_target = role_allocations.get(0).copied().unwrap_or(0);
+        let host_target = role_allocations.get(1).copied().unwrap_or(0);
+        let hardware_target = role_allocations.get(2).copied().unwrap_or(0);
+        let verifier_target = role_allocations.get(3).copied().unwrap_or(0);
+        let mut liquidity_paid = role_allocations.get(4).copied().unwrap_or(0);
+
+        let mut viewer_payouts = distribute_proportional(viewer_target, &viewer_deltas);
+        let viewer_read_paid: u64 = viewer_payouts.iter().map(|(_, amt)| *amt).sum();
+        liquidity_paid =
+            liquidity_paid.saturating_add(viewer_target.saturating_sub(viewer_read_paid));
+
+        let mut host_payouts = distribute_proportional(host_target, &host_deltas);
+        let host_read_paid: u64 = host_payouts.iter().map(|(_, amt)| *amt).sum();
+        liquidity_paid = liquidity_paid.saturating_add(host_target.saturating_sub(host_read_paid));
+
+        let mut hardware_payouts = distribute_proportional(hardware_target, &hardware_deltas);
+        let hardware_read_paid: u64 = hardware_payouts.iter().map(|(_, amt)| *amt).sum();
+        liquidity_paid =
+            liquidity_paid.saturating_add(hardware_target.saturating_sub(hardware_read_paid));
+
+        let mut verifier_payouts = distribute_proportional(verifier_target, &verifier_deltas);
+        let verifier_read_paid: u64 = verifier_payouts.iter().map(|(_, amt)| *amt).sum();
+        liquidity_paid =
+            liquidity_paid.saturating_add(verifier_target.saturating_sub(verifier_read_paid));
+
+        let mut miner_share_total = read_sub_ct
+            .saturating_sub(viewer_read_paid)
+            .saturating_sub(host_read_paid)
+            .saturating_sub(hardware_read_paid)
+            .saturating_sub(verifier_read_paid)
+            .saturating_sub(liquidity_paid);
+
+        let ad_settlements = std::mem::take(&mut self.pending_ad_settlements);
+        let mut ad_viewer_total = 0u64;
+        let mut ad_host_total = 0u64;
+        let mut ad_hardware_total = 0u64;
+        let mut ad_verifier_total = 0u64;
+        let mut ad_liquidity_total = 0u64;
+        let mut ad_miner_total = 0u64;
+        for record in &ad_settlements {
+            if record.viewer_ct > 0 {
+                viewer_payouts.push((record.viewer_addr.clone(), record.viewer_ct));
+                ad_viewer_total = ad_viewer_total.saturating_add(record.viewer_ct);
+            }
+            if record.host_ct > 0 {
+                host_payouts.push((record.host_addr.clone(), record.host_ct));
+                ad_host_total = ad_host_total.saturating_add(record.host_ct);
+            }
+            if record.hardware_ct > 0 {
+                hardware_payouts.push((record.hardware_addr.clone(), record.hardware_ct));
+                ad_hardware_total = ad_hardware_total.saturating_add(record.hardware_ct);
+            }
+            if record.verifier_ct > 0 {
+                verifier_payouts.push((record.verifier_addr.clone(), record.verifier_ct));
+                ad_verifier_total = ad_verifier_total.saturating_add(record.verifier_ct);
+            }
+            ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity_ct);
+            ad_miner_total = ad_miner_total.saturating_add(record.miner_ct);
+        }
+        liquidity_paid = liquidity_paid.saturating_add(ad_liquidity_total);
+        miner_share_total = miner_share_total.saturating_add(ad_miner_total);
+
+        let ad_viewer_token = TokenAmount::new(ad_viewer_total);
+        let ad_host_token = TokenAmount::new(ad_host_total);
+        let ad_hardware_token = TokenAmount::new(ad_hardware_total);
+        let ad_verifier_token = TokenAmount::new(ad_verifier_total);
+        let ad_liquidity_token = TokenAmount::new(ad_liquidity_total);
+        let ad_miner_token = TokenAmount::new(ad_miner_total);
+
+        self.settled_read_bytes = self.settled_read_bytes.saturating_add(delta_read_bytes);
+        for (addr, total) in &self.epoch_viewer_bytes {
+            self.settled_viewer_bytes.insert(addr.clone(), *total);
+        }
+        self.settled_viewer_bytes
+            .retain(|addr, _| self.epoch_viewer_bytes.contains_key(addr));
+        for (addr, total) in &self.epoch_host_bytes {
+            self.settled_host_bytes.insert(addr.clone(), *total);
+        }
+        self.settled_host_bytes
+            .retain(|addr, _| self.epoch_host_bytes.contains_key(addr));
+        for (addr, total) in &self.epoch_hardware_bytes {
+            self.settled_hardware_bytes.insert(addr.clone(), *total);
+        }
+        self.settled_hardware_bytes
+            .retain(|addr, _| self.epoch_hardware_bytes.contains_key(addr));
+        for (addr, total) in &self.epoch_verifier_bytes {
+            self.settled_verifier_bytes.insert(addr.clone(), *total);
+        }
+        self.settled_verifier_bytes
+            .retain(|addr, _| self.epoch_verifier_bytes.contains_key(addr));
+
+        let liquidity_payouts = if liquidity_paid > 0 {
+            vec![(liquidity_address().to_string(), liquidity_paid)]
+        } else {
+            Vec::new()
+        };
+
+        if miner_share_total > 0 {
+            base_coinbase_consumer = base_coinbase_consumer
+                .checked_add(miner_share_total)
+                .ok_or_else(|| py_value_err("Fee overflow"))?;
+        }
+
         let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
         let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
         if treasury_cut > 0 {
@@ -3573,6 +4025,11 @@ impl Blockchain {
 
         let storage_sub_token = TokenAmount::new(storage_sub_ct);
         let read_sub_token = TokenAmount::new(read_sub_ct);
+        let read_sub_viewer_token = TokenAmount::new(viewer_read_paid);
+        let read_sub_host_token = TokenAmount::new(host_read_paid);
+        let read_sub_hardware_token = TokenAmount::new(hardware_read_paid);
+        let read_sub_verifier_token = TokenAmount::new(verifier_read_paid);
+        let read_sub_liquidity_token = TokenAmount::new(liquidity_paid);
         let compute_sub_token = TokenAmount::new(compute_sub_ct);
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
@@ -3667,6 +4124,36 @@ impl Blockchain {
             .checked_add(coinbase_industrial_total)
             .ok_or_else(|| py_value_err("miner industrial overflow"))?;
 
+        for (addr, amount) in viewer_payouts
+            .iter()
+            .chain(host_payouts.iter())
+            .chain(hardware_payouts.iter())
+            .chain(verifier_payouts.iter())
+            .chain(liquidity_payouts.iter())
+        {
+            if *amount == 0 {
+                continue;
+            }
+            let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
+                address: addr.clone(),
+                balance: TokenBalance {
+                    consumer: 0,
+                    industrial: 0,
+                },
+                nonce: 0,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
+            });
+            entry.balance.consumer = entry
+                .balance
+                .consumer
+                .checked_add(*amount)
+                .ok_or_else(|| py_value_err("read subsidy overflow"))?;
+        }
+
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
@@ -3703,6 +4190,17 @@ impl Blockchain {
             coinbase_industrial: TokenAmount::new(coinbase_industrial_total),
             storage_sub_ct: storage_sub_token,
             read_sub_ct: read_sub_token,
+            read_sub_viewer_ct: read_sub_viewer_token,
+            read_sub_host_ct: read_sub_host_token,
+            read_sub_hardware_ct: read_sub_hardware_token,
+            read_sub_verifier_ct: read_sub_verifier_token,
+            read_sub_liquidity_ct: read_sub_liquidity_token,
+            ad_viewer_ct: ad_viewer_token,
+            ad_host_ct: ad_host_token,
+            ad_hardware_ct: ad_hardware_token,
+            ad_verifier_ct: ad_verifier_token,
+            ad_liquidity_ct: ad_liquidity_token,
+            ad_miner_ct: ad_miner_token,
             compute_sub_ct: compute_sub_token,
             proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
@@ -3734,6 +4232,17 @@ impl Blockchain {
                 block.coinbase_industrial,
                 block.storage_sub_ct,
                 block.read_sub_ct,
+                block.read_sub_viewer_ct,
+                block.read_sub_host_ct,
+                block.read_sub_hardware_ct,
+                block.read_sub_verifier_ct,
+                block.read_sub_liquidity_ct,
+                block.ad_viewer_ct,
+                block.ad_host_ct,
+                block.ad_hardware_ct,
+                block.ad_verifier_ct,
+                block.ad_liquidity_ct,
+                block.ad_miner_ct,
                 block.compute_sub_ct,
                 block.proof_rebate_ct,
                 block.storage_sub_it,
@@ -3830,6 +4339,15 @@ impl Blockchain {
                     crate::telemetry::INDUSTRIAL_MULTIPLIER.set(ind);
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
+                    self.epoch_viewer_bytes.clear();
+                    self.epoch_host_bytes.clear();
+                    self.epoch_hardware_bytes.clear();
+                    self.epoch_verifier_bytes.clear();
+                    self.settled_viewer_bytes.clear();
+                    self.settled_host_bytes.clear();
+                    self.settled_hardware_bytes.clear();
+                    self.settled_verifier_bytes.clear();
+                    self.settled_read_bytes = 0;
                     self.epoch_cpu_ms = 0;
                     self.epoch_bytes_out = 0;
                 }
@@ -4000,6 +4518,36 @@ impl Blockchain {
                     .checked_add(coinbase_industrial_total)
                     .ok_or_else(|| py_value_err("miner industrial overflow"))?;
                 changed.insert(miner_addr.to_owned());
+                for (addr, amount) in viewer_payouts
+                    .iter()
+                    .chain(host_payouts.iter())
+                    .chain(hardware_payouts.iter())
+                    .chain(verifier_payouts.iter())
+                    .chain(liquidity_payouts.iter())
+                {
+                    if *amount == 0 {
+                        continue;
+                    }
+                    let entry = self.accounts.entry(addr.clone()).or_insert(Account {
+                        address: addr.clone(),
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
+                        nonce: 0,
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
+                        pending_nonces: HashSet::new(),
+                        sessions: Vec::new(),
+                    });
+                    entry.balance.consumer = entry
+                        .balance
+                        .consumer
+                        .checked_add(*amount)
+                        .ok_or_else(|| py_value_err("read subsidy overflow"))?;
+                    changed.insert(addr.clone());
+                }
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
                 for addr in &changed {
                     touched_shards.insert(address::shard_id(addr));
@@ -4118,6 +4666,17 @@ impl Blockchain {
             block.coinbase_industrial,
             block.storage_sub_ct,
             block.read_sub_ct,
+            block.read_sub_viewer_ct,
+            block.read_sub_host_ct,
+            block.read_sub_hardware_ct,
+            block.read_sub_verifier_ct,
+            block.read_sub_liquidity_ct,
+            block.ad_viewer_ct,
+            block.ad_host_ct,
+            block.ad_hardware_ct,
+            block.ad_verifier_ct,
+            block.ad_liquidity_ct,
+            block.ad_miner_ct,
             block.compute_sub_ct,
             block.proof_rebate_ct,
             block.storage_sub_it,
@@ -4198,9 +4757,18 @@ impl Blockchain {
         {
             return Ok(false);
         }
+        let read_role_sum = block.read_sub_viewer_ct.0 as u128
+            + block.read_sub_host_ct.0 as u128
+            + block.read_sub_hardware_ct.0 as u128
+            + block.read_sub_verifier_ct.0 as u128
+            + block.read_sub_liquidity_ct.0 as u128;
+        if read_role_sum > block.read_sub_ct.0 as u128 {
+            return Ok(false);
+        }
+        let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
         let expected_consumer = self.block_reward_consumer.0 as u128
             + block.storage_sub_ct.0 as u128
-            + block.read_sub_ct.0 as u128
+            + read_miner_share
             + block.compute_sub_ct.0 as u128
             + block.proof_rebate_ct.0 as u128
             + fee_tot_consumer;
@@ -4474,6 +5042,17 @@ impl Blockchain {
                 b.coinbase_industrial,
                 b.storage_sub_ct,
                 b.read_sub_ct,
+                b.read_sub_viewer_ct,
+                b.read_sub_host_ct,
+                b.read_sub_hardware_ct,
+                b.read_sub_verifier_ct,
+                b.read_sub_liquidity_ct,
+                b.ad_viewer_ct,
+                b.ad_host_ct,
+                b.ad_hardware_ct,
+                b.ad_verifier_ct,
+                b.ad_liquidity_ct,
+                b.ad_miner_ct,
                 b.compute_sub_ct,
                 b.proof_rebate_ct,
                 b.storage_sub_it,
@@ -4889,6 +5468,126 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
     count
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crypto_suite::hashing::blake3::Hasher;
+    use crypto_suite::signatures::ed25519::SigningKey;
+
+    fn signed_ack(sk: &SigningKey, bytes: u64, domain: &str, provider: &str) -> ReadAck {
+        let pk = sk.verifying_key().to_bytes();
+        let mut ack = ReadAck {
+            manifest: [7u8; 32],
+            path_hash: [9u8; 32],
+            bytes,
+            ts: 42,
+            client_hash: [3u8; 32],
+            pk,
+            sig: Vec::new(),
+            domain: domain.to_string(),
+            provider: provider.to_string(),
+            campaign_id: None,
+            creative_id: None,
+        };
+        let mut hasher = Hasher::new();
+        hasher.update(&ack.manifest);
+        hasher.update(&ack.path_hash);
+        hasher.update(&ack.bytes.to_le_bytes());
+        hasher.update(&ack.ts.to_le_bytes());
+        hasher.update(&ack.client_hash);
+        let msg = hasher.finalize();
+        let sig = sk.sign(msg.as_bytes());
+        ack.sig = sig.to_bytes().to_vec();
+        ack
+    }
+
+    #[test]
+    fn read_subsidy_split_distribution() {
+        let mut bc = Blockchain::default();
+        bc.block_reward_consumer = TokenAmount::new(0);
+        bc.block_reward_industrial = TokenAmount::new(0);
+        bc.beta_storage_sub_ct_raw = 0;
+        bc.kappa_cpu_sub_ct_raw = 0;
+        bc.lambda_bytes_out_sub_ct_raw = 0;
+        bc.gamma_read_sub_ct_raw = 1;
+        bc.params.read_subsidy_viewer_percent = 40;
+        bc.params.read_subsidy_host_percent = 30;
+        bc.params.read_subsidy_hardware_percent = 15;
+        bc.params.read_subsidy_verifier_percent = 10;
+        bc.params.read_subsidy_liquidity_percent = 5;
+
+        let signing = SigningKey::from_bytes(&[11u8; 32]);
+        let ack = signed_ack(&signing, 100, "viewer.test", "provider-1");
+        bc.submit_read_ack(ack).expect("ack accepted");
+
+        let miner = "miner.test";
+        bc.add_account(miner.to_string(), 0, 0).unwrap();
+        let block = bc.mine_block_at(miner, 1).expect("mined");
+
+        assert_eq!(block.read_sub_ct.0, 100);
+        assert_eq!(block.read_sub_viewer_ct.0, 40);
+        assert_eq!(block.read_sub_host_ct.0, 30);
+        assert_eq!(block.read_sub_hardware_ct.0, 15);
+        assert_eq!(block.read_sub_verifier_ct.0, 10);
+        assert_eq!(block.read_sub_liquidity_ct.0, 5);
+        assert_eq!(block.ad_viewer_ct.0, 0);
+        assert_eq!(block.ad_host_ct.0, 0);
+        assert_eq!(block.ad_hardware_ct.0, 0);
+        assert_eq!(block.ad_verifier_ct.0, 0);
+        assert_eq!(block.ad_liquidity_ct.0, 0);
+        assert_eq!(block.ad_miner_ct.0, 0);
+
+        let pk = signing.verifying_key().to_bytes();
+        let viewer_address = super::viewer_address_from_pk(&pk);
+        let host_address = super::host_address("viewer.test");
+        let hardware_address = super::hardware_address("provider-1");
+        let verifier_address = super::verifier_address("viewer.test");
+        let liquidity_address = super::liquidity_address().to_string();
+
+        let viewer_balance = bc
+            .accounts
+            .get(&viewer_address)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(viewer_balance, 40);
+
+        let host_balance = bc
+            .accounts
+            .get(&host_address)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(host_balance, 30);
+
+        let hardware_balance = bc
+            .accounts
+            .get(&hardware_address)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(hardware_balance, 15);
+
+        let verifier_balance = bc
+            .accounts
+            .get(&verifier_address)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(verifier_balance, 10);
+
+        let liquidity_balance = bc
+            .accounts
+            .get(&liquidity_address)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(liquidity_balance, 5);
+
+        let miner_balance = bc
+            .accounts
+            .get(miner)
+            .map(|a| a.balance.consumer)
+            .unwrap_or(0);
+        assert_eq!(miner_balance, 0);
+    }
+}
+
 /// Deterministic block hashing as per `docs/detailed_updates.md`.
 /// Field order is fixed; all integers are little-endian.
 fn calculate_hash(
@@ -4902,6 +5601,17 @@ fn calculate_hash(
     coin_i: TokenAmount,
     storage_sub: TokenAmount,
     read_sub: TokenAmount,
+    read_sub_viewer: TokenAmount,
+    read_sub_host: TokenAmount,
+    read_sub_hardware: TokenAmount,
+    read_sub_verifier: TokenAmount,
+    read_sub_liquidity: TokenAmount,
+    ad_viewer: TokenAmount,
+    ad_host: TokenAmount,
+    ad_hardware: TokenAmount,
+    ad_verifier: TokenAmount,
+    ad_liquidity: TokenAmount,
+    ad_miner: TokenAmount,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
     storage_sub_it: TokenAmount,
@@ -4932,6 +5642,17 @@ fn calculate_hash(
         coin_i: coin_i.0,
         storage_sub: storage_sub.0,
         read_sub: read_sub.0,
+        read_sub_viewer: read_sub_viewer.0,
+        read_sub_host: read_sub_host.0,
+        read_sub_hardware: read_sub_hardware.0,
+        read_sub_verifier: read_sub_verifier.0,
+        read_sub_liquidity: read_sub_liquidity.0,
+        ad_viewer: ad_viewer.0,
+        ad_host: ad_host.0,
+        ad_hardware: ad_hardware.0,
+        ad_verifier: ad_verifier.0,
+        ad_liquidity: ad_liquidity.0,
+        ad_miner: ad_miner.0,
         compute_sub: compute_sub.0,
         proof_rebate: proof_rebate.0,
         storage_sub_it: storage_sub_it.0,

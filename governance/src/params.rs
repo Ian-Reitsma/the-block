@@ -265,6 +265,26 @@ pub struct ParamSpec {
 const DEFAULT_TIMELOCK_EPOCHS: u64 = 2;
 const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 
+fn default_read_subsidy_viewer_percent() -> i64 {
+    40
+}
+
+fn default_read_subsidy_host_percent() -> i64 {
+    30
+}
+
+fn default_read_subsidy_hardware_percent() -> i64 {
+    15
+}
+
+fn default_read_subsidy_verifier_percent() -> i64 {
+    10
+}
+
+fn default_read_subsidy_liquidity_percent() -> i64 {
+    5
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
@@ -279,6 +299,16 @@ pub struct Params {
     pub gamma_read_sub_ct: i64,
     pub kappa_cpu_sub_ct: i64,
     pub lambda_bytes_out_sub_ct: i64,
+    #[serde(default = "default_read_subsidy_viewer_percent")]
+    pub read_subsidy_viewer_percent: i64,
+    #[serde(default = "default_read_subsidy_host_percent")]
+    pub read_subsidy_host_percent: i64,
+    #[serde(default = "default_read_subsidy_hardware_percent")]
+    pub read_subsidy_hardware_percent: i64,
+    #[serde(default = "default_read_subsidy_verifier_percent")]
+    pub read_subsidy_verifier_percent: i64,
+    #[serde(default = "default_read_subsidy_liquidity_percent")]
+    pub read_subsidy_liquidity_percent: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub treasury_percent_ct: i64,
     #[serde(default = "default_proof_rebate_limit_ct")]
@@ -333,6 +363,11 @@ impl Default for Params {
             gamma_read_sub_ct: 20,
             kappa_cpu_sub_ct: 10,
             lambda_bytes_out_sub_ct: 5,
+            read_subsidy_viewer_percent: default_read_subsidy_viewer_percent(),
+            read_subsidy_host_percent: default_read_subsidy_host_percent(),
+            read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
+            read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
+            read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
             treasury_percent_ct: 0,
             proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
@@ -417,6 +452,26 @@ impl Params {
         map.insert(
             "lambda_bytes_out_sub_ct".into(),
             Value::Number(self.lambda_bytes_out_sub_ct.into()),
+        );
+        map.insert(
+            "read_subsidy_viewer_percent".into(),
+            Value::Number(self.read_subsidy_viewer_percent.into()),
+        );
+        map.insert(
+            "read_subsidy_host_percent".into(),
+            Value::Number(self.read_subsidy_host_percent.into()),
+        );
+        map.insert(
+            "read_subsidy_hardware_percent".into(),
+            Value::Number(self.read_subsidy_hardware_percent.into()),
+        );
+        map.insert(
+            "read_subsidy_verifier_percent".into(),
+            Value::Number(self.read_subsidy_verifier_percent.into()),
+        );
+        map.insert(
+            "read_subsidy_liquidity_percent".into(),
+            Value::Number(self.read_subsidy_liquidity_percent.into()),
         );
         map.insert(
             "treasury_percent_ct".into(),
@@ -566,6 +621,11 @@ impl Params {
             gamma_read_sub_ct: take_i64("gamma_read_sub_ct")?,
             kappa_cpu_sub_ct: take_i64("kappa_cpu_sub_ct")?,
             lambda_bytes_out_sub_ct: take_i64("lambda_bytes_out_sub_ct")?,
+            read_subsidy_viewer_percent: take_i64("read_subsidy_viewer_percent")?,
+            read_subsidy_host_percent: take_i64("read_subsidy_host_percent")?,
+            read_subsidy_hardware_percent: take_i64("read_subsidy_hardware_percent")?,
+            read_subsidy_verifier_percent: take_i64("read_subsidy_verifier_percent")?,
+            read_subsidy_liquidity_percent: take_i64("read_subsidy_liquidity_percent")?,
             treasury_percent_ct: take_i64("treasury_percent_ct")?,
             proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
             rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
@@ -722,6 +782,31 @@ fn apply_beta_storage_sub(v: i64, p: &mut Params) -> Result<(), ()> {
 
 fn apply_gamma_read_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     p.gamma_read_sub_ct = v;
+    Ok(())
+}
+
+fn apply_read_subsidy_viewer_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_subsidy_viewer_percent = v;
+    Ok(())
+}
+
+fn apply_read_subsidy_host_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_subsidy_host_percent = v;
+    Ok(())
+}
+
+fn apply_read_subsidy_hardware_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_subsidy_hardware_percent = v;
+    Ok(())
+}
+
+fn apply_read_subsidy_verifier_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_subsidy_verifier_percent = v;
+    Ok(())
+}
+
+fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_subsidy_liquidity_percent = v;
     Ok(())
 }
 
@@ -906,7 +991,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 38] = [
+    static REGS: [ParamSpec; 43] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1026,6 +1111,56 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "nCT per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_gamma_read_sub,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ReadSubsidyViewerPercent,
+            default: 40,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_read_subsidy_viewer_percent,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ReadSubsidyHostPercent,
+            default: 30,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_read_subsidy_host_percent,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ReadSubsidyHardwarePercent,
+            default: 15,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_read_subsidy_hardware_percent,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ReadSubsidyVerifierPercent,
+            default: 10,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_read_subsidy_verifier_percent,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ReadSubsidyLiquidityPercent,
+            default: 5,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_read_subsidy_liquidity_percent,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {

@@ -665,6 +665,11 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::GammaReadSubCt => "gamma_read_sub_ct",
         ParamKey::KappaCpuSubCt => "kappa_cpu_sub_ct",
         ParamKey::LambdaBytesOutSubCt => "lambda_bytes_out_sub_ct",
+        ParamKey::ReadSubsidyViewerPercent => "read_subsidy_viewer_percent",
+        ParamKey::ReadSubsidyHostPercent => "read_subsidy_host_percent",
+        ParamKey::ReadSubsidyHardwarePercent => "read_subsidy_hardware_percent",
+        ParamKey::ReadSubsidyVerifierPercent => "read_subsidy_verifier_percent",
+        ParamKey::ReadSubsidyLiquidityPercent => "read_subsidy_liquidity_percent",
         ParamKey::TreasuryPercentCt => "treasury_percent_ct",
         ParamKey::ProofRebateLimitCt => "proof_rebate_limit_ct",
         ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
@@ -1795,6 +1800,21 @@ impl GovStore {
                                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                                ParamKey::ReadSubsidyViewerPercent => {
+                                    params.read_subsidy_viewer_percent
+                                }
+                                ParamKey::ReadSubsidyHostPercent => {
+                                    params.read_subsidy_host_percent
+                                }
+                                ParamKey::ReadSubsidyHardwarePercent => {
+                                    params.read_subsidy_hardware_percent
+                                }
+                                ParamKey::ReadSubsidyVerifierPercent => {
+                                    params.read_subsidy_verifier_percent
+                                }
+                                ParamKey::ReadSubsidyLiquidityPercent => {
+                                    params.read_subsidy_liquidity_percent
+                                }
                                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
                                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
@@ -2007,6 +2027,11 @@ impl GovStore {
                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
+                ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
+                ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
+                ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
+                ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
                 ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
@@ -2051,6 +2076,11 @@ impl GovStore {
             ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
             ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
             ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+            ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
+            ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
+            ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
+            ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
+            ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
             ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
             ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
             ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,

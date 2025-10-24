@@ -59,6 +59,8 @@ bridge-types = { path = "../crates/bridge-types" }
 codec = { path = "../crates/codec" }
 # storage market primitives
 storage = { path = "../storage" }
+# advertising marketplace
+ad-market = { path = "../crates/ad_market", package = "ad_market" }
 # hardware detection
 # light-client integration
 light-client = { path = "../crates/light-client" }
@@ -83,6 +85,7 @@ sqlite-migration = ["dep:foundation_sqlite"]
 cli = []
 lightweight-integration = []
 integration-tests = []
+legacy-read-acks = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = []

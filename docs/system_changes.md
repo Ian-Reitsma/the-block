@@ -1,4 +1,21 @@
 # System-Wide Economic Changes
+> **Review (2025-10-29, early morning):** Read acknowledgements now flow through a
+background worker that validates signatures (`read_ack_processed_total{result}`),
+crediting governance-configured viewer/host/hardware/verifier/liquidity splits
+in `read_sub_*_ct` while settling matched ad campaigns into `ad_*_ct`. The new
+`ad_market` crate drives impression matching, gateway batches hash the expanded
+metadata, and the mobile cache persistence switched to the first-party binary
+cursor codec to eliminate serde stubs. Update dashboards and explorer views to
+surface the per-role subsidy fields and campaign settlements alongside the
+existing read subsidy totals.
+
+> **Review (2025-10-28, evening):** Gateway read acknowledgements now require
+> signed request headers. The HTTP server hashes `domain || client_ip` to derive
+> the client fingerprint, rejects mismatched byte counts, and enqueues
+> acknowledgements only after verifying the `X-TheBlock-Ack-*` signature bundle.
+> Gateway unit tests cover the signing path, and `docs/read_receipts.md`
+> documents the client contract so wallet and SDK integrations can ship
+> compatible payloads.
 > **Review (2025-10-27, late afternoon):** Bridge remediation spool artifacts now
 > persist across acknowledgement retries and are drained automatically once
 > hooks acknowledge or close an action. Snapshot restore replays the cleanup so

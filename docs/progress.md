@@ -1,4 +1,23 @@
 # Project Progress Snapshot
+> **Review (2025-10-29, early morning):** Read acknowledgements now propagate through
+> the node’s background worker, which increments `read_ack_processed_total{result}`
+> and populates per-role epoch ledgers. `Blockchain::finalize_block` uses the new
+> governance split (`read_subsidy_*_percent`) to mint viewer/host/hardware/verifier/
+> liquidity payouts, persists the totals in `read_sub_*_ct`, and flushes matched ad
+> campaign settlements into `ad_*_ct`. The `ad_market` crate powers campaign
+> matching, gateway batches hash the expanded metadata, and the mobile cache tests
+> exercise the first-party binary cursor codec so persistence no longer trips the
+> `foundation_serde` stub. Explorers, dashboards, and docs should surface the
+> per-role subsidy and advertising fields so operators can reconcile attention
+> payouts without replaying raw receipts.
+> **Review (2025-10-28, evening):** Gateway read acknowledgements now require
+> callers to supply signed payload headers. `web/gateway.rs` derives
+> `client_hash = blake3(domain || client_ip)`, verifies the Ed25519 signature
+> attached via the `X-TheBlock-Ack-*` headers, and drops zeroed acks unless the
+> legacy compatibility feature is enabled. The gateway test suite injects
+> synthetic signatures through the in-memory transport to prove the queue only
+> receives verifiable receipts, and the read-receipt documentation spells out
+> the signing contract for wallet and SDK integrations.
 > **Review (2025-10-27, late afternoon):** Bridge remediation spool directories
 > now retain retry artefacts across acknowledger restarts and flush them once
 > hooks acknowledge or close the action. The restart suite exercises the

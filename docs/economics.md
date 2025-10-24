@@ -144,6 +144,38 @@ If the previous \(\beta\) was 0.008 µCT/B, the clamp allows at most 0.0092
 read and compute multipliers, providing predictable, gradual reward scaling
 even under sudden utilization swings.
 
+### Read subsidy distribution & advertising offsets
+
+Prior to 2025-10 the entire `read_sub_ct` allocation flowed into the miner
+coinbase. The protocol now tracks per-role byte totals during the epoch and
+splits the minted CT across governance-controlled buckets when the block
+finalizes:
+
+- `read_sub_viewer_ct` – CT credited directly to the wallet that requested the
+  content.
+- `read_sub_host_ct` – CT credited to the domain’s hosting stake account.
+- `read_sub_hardware_ct` – CT for the physical provider that served the bytes.
+- `read_sub_verifier_ct` – CT rewarding the verification network.
+- `read_sub_liquidity_ct` – CT routed to the liquidity pool to back marketplace
+  swaps.
+- `read_sub_ct - Σ(read_sub_*_ct)` – residual CT that continues to flow to the
+  miner once all roles are satisfied.
+
+Governance parameters (`read_subsidy_viewer_percent`, `read_subsidy_host_percent`,
+`read_subsidy_hardware_percent`, `read_subsidy_verifier_percent`, and
+`read_subsidy_liquidity_percent`) express the target percentages for each role;
+any shortfall due to missing addresses automatically rolls into the liquidity
+share so minted CT remains conserved. Explorers and RPC snapshots expose every
+per-role field so wallets and settlement tooling can display the credited
+amounts without replaying acknowledgement batches.
+
+Advertising campaigns further augment the read payouts. When the gateway matches
+an impression to a campaign, the committed CT is split using the same
+distribution policy and materializes in the block as `ad_viewer_ct`,
+`ad_host_ct`, `ad_hardware_ct`, `ad_verifier_ct`, `ad_liquidity_ct`, and
+`ad_miner_ct`. These fields settle reserved campaign budget against the
+acknowledged reads without diluting the inflation schedule.
+
 ```rust
 fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
     let s = state.ct_supply();

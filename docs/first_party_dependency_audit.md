@@ -1,5 +1,19 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-29 update (read subsidy split & ad marketplace):** The new `ad_market`
+> crate, acknowledgement worker, and block subsidy split land entirely on
+> first-party crates. Campaign matching, settlement breakdowns, and the
+> `read_sub_*_ct`/`ad_*_ct` totals are persisted via manual binary/JSON builders
+> without introducing third-party SDKs. Mobile cache persistence now uses the
+> binary cursor codec so integration tests run under the stub backend without
+> serde panics, and telemetry (`read_ack_processed_total{result}`) comes from the
+> in-house metrics facade. Explorer/dashboard follow-ups should reuse the same
+> first-party fields—no external analytics libraries are required.
+> **2025-10-28 update (gateway ack signing):** Gateway reads now require the
+> first-party signature bundle supplied via the `X-TheBlock-Ack-*` headers. The
+> server derives the client hash locally, verifies the Ed25519 signature before
+> enqueueing a `ReadAck`, and the refreshed docs/tests cover the contract without
+> introducing any external crypto or HTTP tooling.
 > **2025-10-27 update (spool persistence & dashboard guard):** Bridge
 > remediation spool artefacts now persist across acknowledgement retries and are
 > drained automatically once hooks acknowledge or close an action. The restart
@@ -19,7 +33,7 @@
 > `--json` options so responders and automation filter or stream persisted
 > actions without introducing third-party tooling.
 
-_Last updated: 2025-10-27 14:45:00Z_
+_Last updated: 2025-10-29 01:05:00Z_
 
 > **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
 > remediation engine now escalates and retries pending playbooks using only the

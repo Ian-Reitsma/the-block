@@ -6,7 +6,7 @@ use foundation_profiler::ProfilerGuard;
 use foundation_serialization::json::{
     self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
 };
-use runtime::sync::CancellationToken;
+use runtime::sync::{mpsc, CancellationToken};
 use std::convert::TryFrom;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -26,6 +26,7 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
 use sys::process;
 
+use ad_market::{DistributionPolicy, InMemoryMarketplace, MarketplaceHandle, ReservationKey};
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -33,7 +34,8 @@ use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     generate_keypair,
     rpc::run_rpc_server,
-    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ShutdownFlag,
+    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
+    ShutdownFlag,
 };
 
 mod cli_support;
@@ -1083,6 +1085,63 @@ fn main() -> std::process::ExitCode {
     runtime::block_on(async_main())
 }
 
+fn spawn_read_ack_worker(
+    bc: Arc<Mutex<Blockchain>>,
+    market: Option<MarketplaceHandle>,
+) -> mpsc::Sender<ReadAck> {
+    let (tx, mut rx) = mpsc::channel(1024);
+    runtime::spawn(async move {
+        let market = market.clone();
+        while let Some(ack) = rx.recv().await {
+            let reservation_key = ReservationKey {
+                manifest: ack.manifest,
+                path_hash: ack.path_hash,
+            };
+            let result = {
+                let mut guard = bc.lock().unwrap();
+                guard.submit_read_ack(ack.clone())
+            };
+            match result {
+                Ok(()) => {
+                    #[cfg(feature = "telemetry")]
+                    {
+                        if let Ok(handle) = the_block::telemetry::READ_ACK_PROCESSED_TOTAL
+                            .ensure_handle_for_label_values(&["accepted"])
+                        {
+                            handle.inc();
+                        }
+                    }
+                    if let Some(market) = &market {
+                        if ack.campaign_id.is_some() {
+                            if let Some(settlement) = market.commit(&reservation_key) {
+                                let mut guard = bc.lock().unwrap();
+                                guard.record_ad_settlement(&ack, settlement);
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(market) = &market {
+                        market.cancel(&reservation_key);
+                    }
+                    #[cfg(feature = "telemetry")]
+                    {
+                        if let Ok(handle) = the_block::telemetry::READ_ACK_PROCESSED_TOTAL
+                            .ensure_handle_for_label_values(&[match err {
+                                ReadAckError::InvalidSignature => "invalid_signature",
+                            }])
+                        {
+                            handle.inc();
+                        }
+                    }
+                    diagnostics::log::warn!(format!("read_ack_rejected: {:?}", err));
+                }
+            }
+        }
+    });
+    tx
+}
+
 async fn async_main() -> std::process::ExitCode {
     let command = build_command();
     let (bin, args) = collect_args("node");
@@ -1191,6 +1250,18 @@ async fn async_main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+            let distribution = {
+                let guard = bc.lock().unwrap();
+                DistributionPolicy::new(
+                    guard.params.read_subsidy_viewer_percent.max(0) as u64,
+                    guard.params.read_subsidy_host_percent.max(0) as u64,
+                    guard.params.read_subsidy_hardware_percent.max(0) as u64,
+                    guard.params.read_subsidy_verifier_percent.max(0) as u64,
+                    guard.params.read_subsidy_liquidity_percent.max(0) as u64,
+                )
+            };
+            let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+            let _read_ack_tx = spawn_read_ack_worker(Arc::clone(&bc), Some(market.clone()));
 
             let overlay_choice = overlay_backend.map(OverlayBackend::from);
             let overlay_cfg = {

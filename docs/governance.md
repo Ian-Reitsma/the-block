@@ -213,6 +213,16 @@ Governance can adjust several runtime knobs without code changes:
 | `runtime.backend_policy` | bitmask defining the allowed async runtime backends | `gov_dependency_policy_allowed{kind="runtime"}` |
 | `transport.provider_policy` | QUIC providers permitted by governance (first entry becomes fallback) | `gov_dependency_policy_allowed{kind="transport"}`, `transport_provider_policy_enforced` |
 | `storage.engine_policy` | allowed storage engines and fallback ordering | `gov_dependency_policy_allowed{kind="storage"}`, `storage_engine_policy_enforced` |
+| `read_subsidy_viewer_percent` | viewer share of each epoch’s `READ_SUB_CT` | block header `read_sub_viewer_ct`, explorer subsidy snapshots |
+| `read_subsidy_host_percent` | host/domain share of `READ_SUB_CT` | block header `read_sub_host_ct`, explorer subsidy snapshots |
+| `read_subsidy_hardware_percent` | hardware provider share of `READ_SUB_CT` | block header `read_sub_hardware_ct`, explorer subsidy snapshots |
+| `read_subsidy_verifier_percent` | verifier network share of `READ_SUB_CT` | block header `read_sub_verifier_ct`, explorer subsidy snapshots |
+| `read_subsidy_liquidity_percent` | liquidity pool share of `READ_SUB_CT` | block header `read_sub_liquidity_ct`, explorer subsidy snapshots |
+
+Tune the percentages as a vector—the node immediately applies the new split to
+subsequent acknowledgements while keeping the liquidity bucket as a safety net
+for any unclaimed share. Advertising settlements reuse the same ratios, so
+campaign spend remains aligned with governance intent.
 
 The `contract` CLI provides shortcuts for parameter management and proposal
 crafting:

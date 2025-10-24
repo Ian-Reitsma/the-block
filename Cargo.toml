@@ -41,6 +41,7 @@ members = [
   "explorer",
   "bridges",
   "crates/bridge-types",
+  "crates/ad_market",
   "cli",
   "sled",
   "net/fuzz",

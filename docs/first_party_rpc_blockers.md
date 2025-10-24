@@ -9,6 +9,16 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-28)
+
+- Gateway `ReadAck` submissions now ride entirely on first-party HTTP and
+  signature tooling. The node verifies the `X-TheBlock-Ack-*` headers without
+  serde helpers, derives the client hash locally, and enqueues acknowledgements
+  only after the in-house Ed25519 backend validates the signature. Unit tests
+  cover the transport with deterministic fixtures, and the documentation spells
+  out the contract so SDKs can implement the headers without third-party JSON or
+  crypto crates.
+
 ## Recent progress (2025-10-27)
 
 - Bridge remediation spool artefacts now persist across acknowledgement retries,

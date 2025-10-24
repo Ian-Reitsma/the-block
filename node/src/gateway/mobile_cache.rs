@@ -4,10 +4,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::util::binary_struct::{self, DecodeError as BinaryDecodeError};
 use coding::{ChaCha20Poly1305Encryptor, Encryptor, CHACHA20_POLY1305_NONCE_LEN};
 use concurrency::{mutex, Lazy, MutexGuard, MutexT};
+use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 use foundation_serialization::json::Value;
-use foundation_serialization::{binary, json, Deserialize, Serialize};
+use foundation_serialization::{json, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
 
@@ -143,18 +145,111 @@ fn env_usize(key: &str, default_val: usize) -> usize {
         .unwrap_or(default_val)
 }
 
-#[derive(Serialize, Deserialize)]
+const PERSISTED_RESPONSE_FIELDS: u64 = 3;
+const PERSISTED_QUEUE_ITEM_FIELDS: u64 = 3;
+
+#[derive(Debug, Clone)]
 struct PersistedResponse {
     stored_at: u64,
     expires_at: u64,
     value: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct PersistedQueueItem {
     id: u64,
     enqueued_at: u64,
     value: Vec<u8>,
+}
+
+fn encode_persisted_response(value: &PersistedResponse) -> Vec<u8> {
+    let mut writer = BinaryWriter::new();
+    writer.write_struct(|s| {
+        s.field_u64("stored_at", value.stored_at);
+        s.field_u64("expires_at", value.expires_at);
+        s.field_with("value", |w| w.write_bytes(&value.value));
+    });
+    writer.finish()
+}
+
+fn decode_persisted_response(bytes: &[u8]) -> binary_struct::Result<PersistedResponse> {
+    let mut reader = BinaryReader::new(bytes);
+    let mut stored_at = None;
+    let mut expires_at = None;
+    let mut value = None;
+
+    binary_struct::decode_struct(
+        &mut reader,
+        Some(PERSISTED_RESPONSE_FIELDS),
+        |key, reader| match key {
+            "stored_at" => {
+                let val = reader.read_u64().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut stored_at, val, "stored_at")
+            }
+            "expires_at" => {
+                let val = reader.read_u64().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut expires_at, val, "expires_at")
+            }
+            "value" => {
+                let val = reader.read_bytes().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut value, val, "value")
+            }
+            other => Err(BinaryDecodeError::UnknownField(other.to_owned())),
+        },
+    )?;
+
+    binary_struct::ensure_exhausted(&reader)?;
+
+    Ok(PersistedResponse {
+        stored_at: stored_at.ok_or(BinaryDecodeError::MissingField("stored_at"))?,
+        expires_at: expires_at.ok_or(BinaryDecodeError::MissingField("expires_at"))?,
+        value: value.ok_or(BinaryDecodeError::MissingField("value"))?,
+    })
+}
+
+fn encode_persisted_queue_item(value: &PersistedQueueItem) -> Vec<u8> {
+    let mut writer = BinaryWriter::new();
+    writer.write_struct(|s| {
+        s.field_u64("id", value.id);
+        s.field_u64("enqueued_at", value.enqueued_at);
+        s.field_with("value", |w| w.write_bytes(&value.value));
+    });
+    writer.finish()
+}
+
+fn decode_persisted_queue_item(bytes: &[u8]) -> binary_struct::Result<PersistedQueueItem> {
+    let mut reader = BinaryReader::new(bytes);
+    let mut id = None;
+    let mut enqueued_at = None;
+    let mut value = None;
+
+    binary_struct::decode_struct(
+        &mut reader,
+        Some(PERSISTED_QUEUE_ITEM_FIELDS),
+        |key, reader| match key {
+            "id" => {
+                let val = reader.read_u64().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut id, val, "id")
+            }
+            "enqueued_at" => {
+                let val = reader.read_u64().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut enqueued_at, val, "enqueued_at")
+            }
+            "value" => {
+                let val = reader.read_bytes().map_err(BinaryDecodeError::from)?;
+                binary_struct::assign_once(&mut value, val, "value")
+            }
+            other => Err(BinaryDecodeError::UnknownField(other.to_owned())),
+        },
+    )?;
+
+    binary_struct::ensure_exhausted(&reader)?;
+
+    Ok(PersistedQueueItem {
+        id: id.ok_or(BinaryDecodeError::MissingField("id"))?,
+        enqueued_at: enqueued_at.ok_or(BinaryDecodeError::MissingField("enqueued_at"))?,
+        value: value.ok_or(BinaryDecodeError::MissingField("value"))?,
+    })
 }
 
 struct CacheEntry {
@@ -432,14 +527,14 @@ impl MobileCache {
             expires_at,
             value: entry.value.as_bytes().to_vec(),
         };
-        let plain =
-            binary::encode(&payload).map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
+        let plain = encode_persisted_response(&payload);
         self.encrypt(&plain)
     }
 
     fn deserialize_response(&self, data: &[u8]) -> Result<PersistedResponse, MobileCacheError> {
         let plain = self.decrypt(data)?;
-        binary::decode(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
+        decode_persisted_response(&plain)
+            .map_err(|e| MobileCacheError::Serialization(e.to_string()))
     }
 
     fn serialize_queue_item(&self, item: &QueueItem) -> Result<Vec<u8>, MobileCacheError> {
@@ -453,14 +548,14 @@ impl MobileCache {
             enqueued_at,
             value: item.value.as_bytes().to_vec(),
         };
-        let plain =
-            binary::encode(&payload).map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
+        let plain = encode_persisted_queue_item(&payload);
         self.encrypt(&plain)
     }
 
     fn deserialize_queue_item(&self, data: &[u8]) -> Result<PersistedQueueItem, MobileCacheError> {
         let plain = self.decrypt(data)?;
-        binary::decode(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
+        decode_persisted_queue_item(&plain)
+            .map_err(|e| MobileCacheError::Serialization(e.to_string()))
     }
 
     fn persist_entry(&self, key: &str, entry: &CacheEntry) -> Result<(), MobileCacheError> {
