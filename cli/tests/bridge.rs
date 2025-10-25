@@ -529,9 +529,7 @@ fn bridge_settlement_log_parser_handles_filters_and_pagination() {
         "--url".to_string(),
         "http://mock.bridge".to_string(),
     ];
-    let matches = parser
-        .parse(&args)
-        .expect("parse settlement-log command");
+    let matches = parser.parse(&args).expect("parse settlement-log command");
     let cmd = BridgeCmd::from_matches(&matches).expect("build settlement-log command");
 
     match cmd {
@@ -597,9 +595,7 @@ fn bridge_reward_accruals_parser_handles_all_filters() {
         "--url".to_string(),
         "http://mock.bridge".to_string(),
     ];
-    let matches = parser
-        .parse(&args)
-        .expect("parse reward-accruals command");
+    let matches = parser.parse(&args).expect("parse reward-accruals command");
     let cmd = BridgeCmd::from_matches(&matches).expect("build reward-accruals command");
 
     match cmd {
@@ -622,7 +618,7 @@ fn bridge_reward_accruals_parser_handles_all_filters() {
 
 #[test]
 fn bridge_assets_returns_supply_snapshot() {
-    let assets_payload = ok_response(json_object([( 
+    let assets_payload = ok_response(json_object([(
         "assets",
         JsonValue::Array(vec![json_object([
             ("symbol", json_string("btc")),

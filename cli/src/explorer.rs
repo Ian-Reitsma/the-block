@@ -24,7 +24,28 @@ pub enum ExplorerCmd {
         db: String,
         hash: Option<String>,
         height: Option<u64>,
+        format: PayoutOutputFormat,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayoutOutputFormat {
+    Json,
+    Table,
+    Prom,
+}
+
+impl PayoutOutputFormat {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "json" => Ok(Self::Json),
+            "table" => Ok(Self::Table),
+            "prom" | "prometheus" => Ok(Self::Prom),
+            other => Err(format!(
+                "invalid value '{other}' for '--format': expected one of json, table, prom"
+            )),
+        }
+    }
 }
 
 impl ExplorerCmd {
@@ -82,6 +103,14 @@ impl ExplorerCmd {
                     "height",
                     "Block height to inspect",
                 )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "format",
+                        "format",
+                        "Output format: json (default), table, or prom",
+                    )
+                    .default("json"),
+                ))
                 .build(),
             )
             .build()
@@ -151,7 +180,16 @@ impl ExplorerCmd {
                 if hash.is_none() && height.is_none() {
                     return Err("must supply '--hash' or '--height'".into());
                 }
-                Ok(ExplorerCmd::BlockPayouts { db, hash, height })
+                let format_value = sub_matches
+                    .get_string("format")
+                    .unwrap_or_else(|| "json".to_string());
+                let format = PayoutOutputFormat::parse(&format_value)?;
+                Ok(ExplorerCmd::BlockPayouts {
+                    db,
+                    hash,
+                    height,
+                    format,
+                })
             }
             other => Err(format!("unknown subcommand '{other}'")),
         }
@@ -218,7 +256,12 @@ pub fn handle_with_writer(cmd: ExplorerCmd, writer: &mut impl Write) -> Result<(
             }
             Ok(())
         }
-        ExplorerCmd::BlockPayouts { db, hash, height } => {
+        ExplorerCmd::BlockPayouts {
+            db,
+            hash,
+            height,
+            format,
+        } => {
             let store = ExplorerStore::open(&db)
                 .map_err(|err| format!("failed to open explorer database {db}: {err}"))?;
             let hash_value = match (hash.as_ref(), height) {
@@ -235,13 +278,139 @@ pub fn handle_with_writer(cmd: ExplorerCmd, writer: &mut impl Write) -> Result<(
                 .block_payouts(&hash_value)
                 .map_err(|err| format!("failed to fetch block payouts for {hash_value}: {err}"))?
                 .ok_or_else(|| format!("no block found with hash {hash_value}"))?;
-            let payload = json::to_vec_pretty(&breakdown.to_json_value())
-                .map_err(|err| format!("failed to serialize payouts: {err}"))?;
-            writer
-                .write_all(&payload)
-                .and_then(|_| writer.write_all(b"\n"))
-                .map_err(|err| format!("failed to write output: {err}"))?;
+            match format {
+                PayoutOutputFormat::Json => {
+                    let payload = json::to_vec_pretty(&breakdown.to_json_value())
+                        .map_err(|err| format!("failed to serialize payouts: {err}"))?;
+                    writer
+                        .write_all(&payload)
+                        .and_then(|_| writer.write_all(b"\n"))
+                        .map_err(|err| format!("failed to write output: {err}"))?;
+                }
+                PayoutOutputFormat::Table => {
+                    write_payout_table(&breakdown, writer)?;
+                }
+                PayoutOutputFormat::Prom => {
+                    write_prometheus_payload(&breakdown, writer)?;
+                }
+            }
             Ok(())
         }
     }
+}
+
+fn write_payout_table(
+    breakdown: &explorer::BlockPayoutBreakdown,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    writeln!(
+        writer,
+        "block hash: {} (height {})",
+        breakdown.hash, breakdown.height
+    )
+    .map_err(|err| format!("failed to write output: {err}"))?;
+    writeln!(writer, "{:<12} {:>16} {:>16}", "role", "read_ct", "ad_ct")
+        .map_err(|err| format!("failed to write output: {err}"))?;
+    writeln!(writer, "{:-<12} {:-<16} {:-<16}", "", "", "")
+        .map_err(|err| format!("failed to write output: {err}"))?;
+    for role in [
+        (
+            "viewer",
+            breakdown.read_subsidy.viewer_ct,
+            breakdown.advertising.viewer_ct,
+        ),
+        (
+            "host",
+            breakdown.read_subsidy.host_ct,
+            breakdown.advertising.host_ct,
+        ),
+        (
+            "hardware",
+            breakdown.read_subsidy.hardware_ct,
+            breakdown.advertising.hardware_ct,
+        ),
+        (
+            "verifier",
+            breakdown.read_subsidy.verifier_ct,
+            breakdown.advertising.verifier_ct,
+        ),
+        (
+            "liquidity",
+            breakdown.read_subsidy.liquidity_ct,
+            breakdown.advertising.liquidity_ct,
+        ),
+        (
+            "miner",
+            breakdown.read_subsidy.miner_ct,
+            breakdown.advertising.miner_ct,
+        ),
+    ] {
+        writeln!(writer, "{:<12} {:>16} {:>16}", role.0, role.1, role.2)
+            .map_err(|err| format!("failed to write output: {err}"))?;
+    }
+    writeln!(
+        writer,
+        "{:<12} {:>16} {:>16}",
+        "total", breakdown.read_subsidy.total_ct, breakdown.advertising.total_ct
+    )
+    .map_err(|err| format!("failed to write output: {err}"))?;
+    Ok(())
+}
+
+fn write_prometheus_payload(
+    breakdown: &explorer::BlockPayoutBreakdown,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    writeln!(
+        writer,
+        "# explorer block payouts hash={} height={}",
+        breakdown.hash, breakdown.height
+    )
+    .map_err(|err| format!("failed to write output: {err}"))?;
+    for (role, read, ad) in [
+        (
+            "viewer",
+            breakdown.read_subsidy.viewer_ct,
+            breakdown.advertising.viewer_ct,
+        ),
+        (
+            "host",
+            breakdown.read_subsidy.host_ct,
+            breakdown.advertising.host_ct,
+        ),
+        (
+            "hardware",
+            breakdown.read_subsidy.hardware_ct,
+            breakdown.advertising.hardware_ct,
+        ),
+        (
+            "verifier",
+            breakdown.read_subsidy.verifier_ct,
+            breakdown.advertising.verifier_ct,
+        ),
+        (
+            "liquidity",
+            breakdown.read_subsidy.liquidity_ct,
+            breakdown.advertising.liquidity_ct,
+        ),
+        (
+            "miner",
+            breakdown.read_subsidy.miner_ct,
+            breakdown.advertising.miner_ct,
+        ),
+    ] {
+        writeln!(
+            writer,
+            "explorer_block_payout_read_total{{role=\"{role}\"}} {}",
+            read
+        )
+        .map_err(|err| format!("failed to write output: {err}"))?;
+        writeln!(
+            writer,
+            "explorer_block_payout_ad_total{{role=\"{role}\"}} {}",
+            ad
+        )
+        .map_err(|err| format!("failed to write output: {err}"))?;
+    }
+    Ok(())
 }

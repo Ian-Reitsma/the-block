@@ -15,6 +15,7 @@ use crate::{
     transaction::FeeLane,
     Blockchain, SignedTransaction,
 };
+use ::ad_market::MarketplaceHandle;
 use ::storage::{contract::StorageContract, offer::StorageOffer};
 use base64_fp::decode_standard;
 use concurrency::Lazy;
@@ -52,6 +53,7 @@ pub mod limiter;
 pub mod scheduler;
 use limiter::{ClientState, RpcClientErrorCode};
 
+pub mod ad_market;
 #[cfg(feature = "telemetry")]
 pub mod analytics;
 pub mod bridge;
@@ -331,6 +333,7 @@ struct RpcState {
     handles: Arc<Mutex<HandleRegistry>>,
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
+    market: Option<MarketplaceHandle>,
     clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
     tokens_per_sec: f64,
     ban_secs: u64,
@@ -426,6 +429,8 @@ pub struct RpcRuntimeConfig {
 
 const PUBLIC_METHODS: &[&str] = &[
     "balance",
+    "ad_market.inventory",
+    "ad_market.distribution",
     "register_handle",
     "resolve_handle",
     "whoami",
@@ -517,6 +522,7 @@ const PUBLIC_METHODS: &[&str] = &[
 
 const ADMIN_METHODS: &[&str] = &[
     "set_snapshot_interval",
+    "ad_market.register_campaign",
     "compute_arm_real",
     "compute_cancel_arm",
     "compute_back_to_dry_run",
@@ -683,6 +689,7 @@ fn execute_rpc(
             Arc::clone(&state.handles),
             Arc::clone(&state.dids),
             Arc::clone(&runtime_cfg),
+            state.market.clone(),
         )
     };
 
@@ -987,6 +994,7 @@ fn dispatch(
     handles: Arc<Mutex<HandleRegistry>>,
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
+    market: Option<MarketplaceHandle>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
         let badge = req
@@ -1000,7 +1008,15 @@ fn dispatch(
         }
     }
 
+    let market_ref = market.as_ref();
+
     Ok(match req.method.as_str() {
+        "ad_market.inventory" => ad_market::inventory(market_ref),
+        "ad_market.distribution" => ad_market::distribution(market_ref),
+        "ad_market.register_campaign" => {
+            let params = req.params.as_value().clone();
+            ad_market::register_campaign(market_ref, &params)?
+        }
         "set_difficulty" => {
             let val = req
                 .params
@@ -2740,9 +2756,10 @@ fn dispatch(
     })
 }
 
-pub async fn run_rpc_server(
+pub async fn run_rpc_server_with_market(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
+    market: Option<MarketplaceHandle>,
     addr: String,
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
@@ -2797,6 +2814,7 @@ pub async fn run_rpc_server(
         handles,
         dids,
         runtime_cfg: Arc::clone(&runtime_cfg),
+        market,
         clients,
         tokens_per_sec,
         ban_secs,
@@ -2818,6 +2836,16 @@ pub async fn run_rpc_server(
     server_cfg.request_timeout = runtime_cfg.request_timeout;
     server_cfg.max_body_bytes = runtime_cfg.max_body_bytes;
     serve(listener, router, server_cfg).await
+}
+
+pub async fn run_rpc_server(
+    bc: Arc<Mutex<Blockchain>>,
+    mining: Arc<AtomicBool>,
+    addr: String,
+    cfg: RpcConfig,
+    ready: oneshot::Sender<String>,
+) -> std::io::Result<()> {
+    run_rpc_server_with_market(bc, mining, None, addr, cfg, ready).await
 }
 
 #[cfg(any(test, feature = "fuzzy"))]
@@ -2852,6 +2880,7 @@ pub fn fuzz_dispatch_request(
         handles,
         dids,
         runtime_cfg: Arc::clone(&runtime_cfg),
+        market: None,
         clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
         ban_secs: 1,

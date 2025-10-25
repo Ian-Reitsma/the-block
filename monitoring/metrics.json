@@ -210,6 +210,22 @@
     },
     {
       "deprecated": false,
+      "description": "Unix timestamp for the most recent read subsidy payout reported per role",
+      "labels": [
+        "role"
+      ],
+      "name": "explorer_block_payout_read_last_seen_timestamp"
+    },
+    {
+      "deprecated": false,
+      "description": "Unix timestamp for the most recent advertising payout reported per role",
+      "labels": [
+        "role"
+      ],
+      "name": "explorer_block_payout_ad_last_seen_timestamp"
+    },
+    {
+      "deprecated": false,
       "description": "Bridge reward claim operations processed",
       "labels": [],
       "name": "bridge_reward_claims_total"

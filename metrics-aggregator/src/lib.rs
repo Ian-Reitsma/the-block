@@ -208,6 +208,10 @@ const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_a
 const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
+const METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN: &str =
+    "explorer_block_payout_read_last_seen_timestamp";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
+    "explorer_block_payout_ad_last_seen_timestamp";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -231,6 +235,14 @@ const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
 const LABEL_ROLE: [&str; 1] = ["role"];
+const EXPLORER_PAYOUT_ROLES: [&str; 6] = [
+    "viewer",
+    "host",
+    "hardware",
+    "verifier",
+    "liquidity",
+    "miner",
+];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -1544,6 +1556,7 @@ impl AppState {
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
             &self.explorer_read_payout_counters,
             &registry.explorer_block_payout_read_total,
+            &registry.explorer_block_payout_read_last_seen,
         );
         self.record_explorer_payout_metric(
             peer_id,
@@ -1551,6 +1564,7 @@ impl AppState {
             METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
             &self.explorer_ad_payout_counters,
             &registry.explorer_block_payout_ad_total,
+            &registry.explorer_block_payout_ad_last_seen,
         );
     }
 
@@ -1561,6 +1575,7 @@ impl AppState {
         metric_name: &str,
         cache: &Mutex<HashMap<(String, String), f64>>,
         counter: &CounterVec,
+        last_seen: &GaugeVec,
     ) {
         let samples = extract_role_counter_metrics(metrics, metric_name);
         if samples.is_empty() {
@@ -1590,6 +1605,9 @@ impl AppState {
                         *previous = value;
                         if let Some(delta) = quantize_counter(delta_value) {
                             increment_role_counter(counter, metric_name, &role, delta);
+                            if delta > 0 {
+                                update_role_last_seen(last_seen, metric_name, &role);
+                            }
                         } else {
                             warn!(
                                 target: "aggregator",
@@ -1620,6 +1638,9 @@ impl AppState {
                     entry.insert(value);
                     if let Some(delta) = quantize_counter(value) {
                         increment_role_counter(counter, metric_name, &role, delta);
+                        if delta > 0 {
+                            update_role_last_seen(last_seen, metric_name, &role);
+                        }
                     } else {
                         warn!(
                             target: "aggregator",
@@ -1681,6 +1702,8 @@ struct AggregatorMetrics {
     bridge_remediation_spool_artifacts: Gauge,
     explorer_block_payout_read_total: CounterVec,
     explorer_block_payout_ad_total: CounterVec,
+    explorer_block_payout_read_last_seen: GaugeVec,
+    explorer_block_payout_ad_last_seen: GaugeVec,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2860,6 +2883,10 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(explorer_block_payout_read_total.clone()))
         .expect("register explorer_block_payout_read_total");
+    seed_role_counter(
+        &explorer_block_payout_read_total,
+        METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
+    );
     let explorer_block_payout_ad_total = CounterVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
@@ -2871,6 +2898,38 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(explorer_block_payout_ad_total.clone()))
         .expect("register explorer_block_payout_ad_total");
+    seed_role_counter(
+        &explorer_block_payout_ad_total,
+        METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
+    );
+    let explorer_block_payout_read_last_seen = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
+            "Unix timestamp of the most recent read subsidy payout per role",
+        ),
+        &LABEL_ROLE,
+    );
+    registry
+        .register(Box::new(explorer_block_payout_read_last_seen.clone()))
+        .expect("register explorer_block_payout_read_last_seen");
+    seed_role_gauge(
+        &explorer_block_payout_read_last_seen,
+        METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
+    );
+    let explorer_block_payout_ad_last_seen = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
+            "Unix timestamp of the most recent advertising payout per role",
+        ),
+        &LABEL_ROLE,
+    );
+    registry
+        .register(Box::new(explorer_block_payout_ad_last_seen.clone()))
+        .expect("register explorer_block_payout_ad_last_seen");
+    seed_role_gauge(
+        &explorer_block_payout_ad_last_seen,
+        METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
+    );
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2916,6 +2975,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_spool_artifacts,
         explorer_block_payout_read_total,
         explorer_block_payout_ad_total,
+        explorer_block_payout_read_last_seen,
+        explorer_block_payout_ad_last_seen,
     }
 });
 
@@ -6190,6 +6251,45 @@ fn increment_role_counter(counter: &CounterVec, metric: &str, role: &str, delta:
             "failed to update explorer payout counter"
         ),
     }
+}
+
+fn set_role_gauge(gauge: &GaugeVec, metric: &str, role: &str, value: f64) {
+    match gauge.ensure_handle_for_label_values(&[role]) {
+        Ok(handle) => match handle.into_result() {
+            Ok(inner) => inner.set(value),
+            Err(err) => warn!(
+                target: "aggregator",
+                metric,
+                %role,
+                ?err,
+                "failed to acquire explorer payout gauge handle",
+            ),
+        },
+        Err(err) => warn!(
+            target: "aggregator",
+            metric,
+            %role,
+            ?err,
+            "failed to update explorer payout gauge",
+        ),
+    }
+}
+
+fn seed_role_counter(counter: &CounterVec, metric: &str) {
+    for role in EXPLORER_PAYOUT_ROLES {
+        increment_role_counter(counter, metric, role, 0);
+    }
+}
+
+fn seed_role_gauge(gauge: &GaugeVec, metric: &str) {
+    for role in EXPLORER_PAYOUT_ROLES {
+        set_role_gauge(gauge, metric, role, 0.0);
+    }
+}
+
+fn update_role_last_seen(gauge: &GaugeVec, metric: &str, role: &str) {
+    let timestamp = unix_timestamp_secs() as f64;
+    set_role_gauge(gauge, metric, role, timestamp);
 }
 
 fn extract_tls_warning_counters(metrics: &Value) -> Vec<(String, String, f64)> {

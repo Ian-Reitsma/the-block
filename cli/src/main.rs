@@ -28,6 +28,7 @@ use version::VersionCmd;
 
 use crate::fee_estimator::RollingMedianEstimator;
 
+mod ad_market;
 mod ai;
 mod bridge;
 mod codec_helpers;
@@ -66,6 +67,7 @@ mod wallet;
 mod wasm;
 
 use crate::wasm::extract_wasm_metadata;
+use ad_market::{handle as handle_ad_market, AdMarketCmd};
 use ai::handle as handle_ai;
 use bridge::handle as handle_bridge;
 use bridge::BridgeCmd;
@@ -217,6 +219,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_ai(cmd);
             Ok(())
         }
+        "ad-market" => {
+            let cmd = AdMarketCmd::from_matches(sub_matches)?;
+            handle_ad_market(cmd);
+            Ok(())
+        }
         "compute" => {
             let cmd = ComputeCmd::from_matches(sub_matches)?;
             handle_compute(cmd);
@@ -345,6 +352,7 @@ fn build_root_command() -> Command {
         .subcommand(build_fees_command())
         .subcommand(ConfigCmd::command())
         .subcommand(VersionCmd::command())
+        .subcommand(AdMarketCmd::command())
         .subcommand(AiCmd::command())
         .subcommand(ComputeCmd::command())
         .subcommand(DexCmd::command())
