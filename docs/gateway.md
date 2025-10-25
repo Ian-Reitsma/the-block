@@ -10,6 +10,10 @@ detailed in [docs/read_receipts.md](read_receipts.md).
 
 Signed DNS TXT records advertise gateway policy and track read counters; see [docs/gateway_dns.md](gateway_dns.md) for publishing and retrieval semantics.
 
+`blockctl gateway domain` now exposes first-party helpers for premium-domain auctions, including stake registration/withdrawal,
+seller-driven cancellations, and audit-friendly stake-status queries (with per-transfer ledger references) layered over the
+`dns.*` RPC methods.
+
 ### DNS TXT Verification
 
 Nodes validating external domains fetch TXT records and require a `tb-verification=<node_id>` token before honoring on-chain DNS entries. Results are cached for one hour and exposed via `net dns verify <domain>` for manual checks. Operators may disable verification in development environments with `gateway_dns_disable_verify = true`.
@@ -95,6 +99,10 @@ Security considerations are catalogued under
   host, and provider counts clear the configured floor. The
   `ad_market.readiness` RPC and Prometheus gauges (`ad_readiness_ready`,
   `ad_readiness_unique_viewers`, etc.) expose current counters and blockers.
+- Readiness events persist to a sled namespace keyed by
+  `SimpleDb::names::GATEWAY_AD_READINESS`; startup replays the surviving window
+  before installing the global handle so readiness decisions survive restarts
+  as long as acknowledgements remain inside the configured horizon.
 - The `ad_market` crate now defaults to the sled-backed `SledMarketplace`,
   persisting campaign manifests, budgets, and distribution policies across
   restarts. RPC and CLI surfaces feed campaigns through the handwritten

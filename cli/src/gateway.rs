@@ -93,6 +93,32 @@ pub enum DomainAction {
         url: String,
         auth: Option<String>,
     },
+    Cancel {
+        domain: String,
+        seller: String,
+        url: String,
+        auth: Option<String>,
+    },
+    StakeRegister {
+        reference: String,
+        owner: String,
+        deposit_ct: u64,
+        url: String,
+        auth: Option<String>,
+    },
+    StakeWithdraw {
+        reference: String,
+        owner: String,
+        withdraw_ct: u64,
+        url: String,
+        auth: Option<String>,
+    },
+    StakeStatus {
+        reference: String,
+        url: String,
+        auth: Option<String>,
+        pretty: bool,
+    },
     Status {
         domain: Option<String>,
         url: String,
@@ -292,6 +318,114 @@ impl DomainAction {
         )
         .subcommand(
             CommandBuilder::new(
+                CommandId("gateway.domain.cancel"),
+                "cancel",
+                "Cancel an active auction before settlement",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "domain",
+                "Domain name",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "seller",
+                "seller",
+                "Seller account identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "auth",
+                "auth",
+                "Bearer token or basic auth",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gateway.domain.stake_register"),
+                "stake-register",
+                "Deposit CT into a stake reference",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "reference",
+                "Stake reference",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "deposit",
+                "Deposit amount (CT)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "owner",
+                "owner",
+                "Stake owner account",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "auth",
+                "auth",
+                "Bearer token or basic auth",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gateway.domain.stake_withdraw"),
+                "stake-withdraw",
+                "Withdraw CT from an unlocked stake reference",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "reference",
+                "Stake reference",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "amount",
+                "Withdrawal amount (CT)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "owner",
+                "owner",
+                "Stake owner account",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "auth",
+                "auth",
+                "Bearer token or basic auth",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gateway.domain.stake_status"),
+                "stake-status",
+                "Inspect a stake reference",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "reference",
+                "Stake reference",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "auth",
+                "auth",
+                "Bearer token or basic auth",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "pretty",
+                "pretty",
+                "Pretty-print JSON response",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
                 CommandId("gateway.domain.status"),
                 "status",
                 "Show auction status and sale history",
@@ -398,6 +532,66 @@ impl DomainAction {
                     force: sub_matches.get_flag("force"),
                     url,
                     auth: take_string(sub_matches, "auth"),
+                })
+            }
+            "cancel" => {
+                let domain = require_positional(sub_matches, "domain")?;
+                let seller = take_string(sub_matches, "seller")
+                    .ok_or_else(|| "missing required '--seller' option".to_string())?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(DomainAction::Cancel {
+                    domain,
+                    seller,
+                    url,
+                    auth: take_string(sub_matches, "auth"),
+                })
+            }
+            "stake-register" => {
+                let reference = require_positional(sub_matches, "reference")?;
+                let deposit_raw = require_positional(sub_matches, "deposit")?;
+                let deposit_ct = deposit_raw.parse::<u64>().map_err(|_| {
+                    format!("invalid value '{deposit_raw}' for 'deposit': expected integer")
+                })?;
+                let owner = take_string(sub_matches, "owner")
+                    .ok_or_else(|| "missing required '--owner' option".to_string())?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(DomainAction::StakeRegister {
+                    reference,
+                    owner,
+                    deposit_ct,
+                    url,
+                    auth: take_string(sub_matches, "auth"),
+                })
+            }
+            "stake-withdraw" => {
+                let reference = require_positional(sub_matches, "reference")?;
+                let amount_raw = require_positional(sub_matches, "amount")?;
+                let withdraw_ct = amount_raw.parse::<u64>().map_err(|_| {
+                    format!("invalid value '{amount_raw}' for 'amount': expected integer")
+                })?;
+                let owner = take_string(sub_matches, "owner")
+                    .ok_or_else(|| "missing required '--owner' option".to_string())?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(DomainAction::StakeWithdraw {
+                    reference,
+                    owner,
+                    withdraw_ct,
+                    url,
+                    auth: take_string(sub_matches, "auth"),
+                })
+            }
+            "stake-status" => {
+                let reference = require_positional(sub_matches, "reference")?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(DomainAction::StakeStatus {
+                    reference,
+                    url,
+                    auth: take_string(sub_matches, "auth"),
+                    pretty: sub_matches.get_flag("pretty"),
                 })
             }
             "status" => {
@@ -615,6 +809,155 @@ pub fn handle(cmd: GatewayCmd) {
                         }
                         Err(err) => {
                             eprintln!("complete auction failed: {err}");
+                        }
+                    }
+                }
+                DomainAction::Cancel {
+                    domain,
+                    seller,
+                    url,
+                    auth,
+                } => {
+                    let params = json_map_from(vec![
+                        ("domain".to_owned(), Value::String(domain)),
+                        ("seller_account".to_owned(), Value::String(seller)),
+                    ]);
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("dns.cancel_sale".to_owned()),
+                        ),
+                        ("params".to_owned(), Value::Object(params)),
+                    ]);
+                    match client.call_with_auth(&url, &payload, auth.as_deref()) {
+                        Ok(resp) => {
+                            if let Ok(text) = resp.text() {
+                                println!("{}", text);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("cancel auction failed: {err}");
+                        }
+                    }
+                }
+                DomainAction::StakeRegister {
+                    reference,
+                    owner,
+                    deposit_ct,
+                    url,
+                    auth,
+                } => {
+                    let params = json_map_from(vec![
+                        ("reference".to_owned(), Value::String(reference)),
+                        ("owner_account".to_owned(), Value::String(owner)),
+                        (
+                            "deposit_ct".to_owned(),
+                            Value::Number(Number::from(deposit_ct)),
+                        ),
+                    ]);
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("dns.register_stake".to_owned()),
+                        ),
+                        ("params".to_owned(), Value::Object(params)),
+                    ]);
+                    match client.call_with_auth(&url, &payload, auth.as_deref()) {
+                        Ok(resp) => {
+                            if let Ok(text) = resp.text() {
+                                println!("{}", text);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("stake register failed: {err}");
+                        }
+                    }
+                }
+                DomainAction::StakeWithdraw {
+                    reference,
+                    owner,
+                    withdraw_ct,
+                    url,
+                    auth,
+                } => {
+                    let params = json_map_from(vec![
+                        ("reference".to_owned(), Value::String(reference)),
+                        ("owner_account".to_owned(), Value::String(owner)),
+                        (
+                            "withdraw_ct".to_owned(),
+                            Value::Number(Number::from(withdraw_ct)),
+                        ),
+                    ]);
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("dns.withdraw_stake".to_owned()),
+                        ),
+                        ("params".to_owned(), Value::Object(params)),
+                    ]);
+                    match client.call_with_auth(&url, &payload, auth.as_deref()) {
+                        Ok(resp) => {
+                            if let Ok(text) = resp.text() {
+                                println!("{}", text);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("stake withdraw failed: {err}");
+                        }
+                    }
+                }
+                DomainAction::StakeStatus {
+                    reference,
+                    url,
+                    auth,
+                    pretty,
+                } => {
+                    let params = Value::Object(json_map_from(vec![(
+                        "reference".to_owned(),
+                        Value::String(reference),
+                    )]));
+                    let payload = json_object_from(vec![
+                        ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
+                        ("id".to_owned(), Value::from(1u32)),
+                        (
+                            "method".to_owned(),
+                            Value::String("dns.stake_status".to_owned()),
+                        ),
+                        ("params".to_owned(), params),
+                    ]);
+                    match client.call_with_auth(&url, &payload, auth.as_deref()) {
+                        Ok(resp) => match resp.text() {
+                            Ok(body) => {
+                                if pretty {
+                                    match json_from_str::<foundation_serialization::json::Value>(
+                                        &body,
+                                    ) {
+                                        Ok(value) => {
+                                            if let Ok(text) = json_to_string_pretty(&value) {
+                                                println!("{}", text);
+                                            }
+                                        }
+                                        Err(err) => {
+                                            eprintln!("failed to decode stake status: {err}");
+                                            println!("{}", body);
+                                        }
+                                    }
+                                } else {
+                                    println!("{}", body);
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("failed to read stake status response: {err}");
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("stake status failed: {err}");
                         }
                     }
                 }

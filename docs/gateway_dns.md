@@ -136,13 +136,23 @@ auction entry including the current bids array.
 ### 7.2 Bidding and completion
 
 - `dns.place_bid` requires `domain`, `bidder_account`, optional
-  `stake_reference`, and `bid_ct`. Bids must exceed the running minimums and the
-  current highest bid.
+  `stake_reference`, and `bid_ct`. Stake references are created via
+  `dns.register_stake`, which debits the bidder and records an escrow balance
+  tied to the provided `reference`. Bids must exceed the running minimums, and
+  when a stake requirement is configured the referenced escrow must exist, be
+  owned by the bidder, and cover the required amount. Losing bidders are
+  unlocked automatically when a higher offer lands.
 - `dns.complete_sale` finalises an auction once `end_ts` has elapsed (or
   immediately when `force=true` is supplied for manual settlement/testing).
-  Protocol fees are deposited into the treasury hook, royalties are paid to the
-  prior owner (if any), and ownership/sale history records are updated before
-  the auction is marked `settled`.
+  Ledger settlement is executed as an atomic batch: the winning bidder is
+  debited, seller proceeds and any seller-stake refunds are credited, royalties
+  are distributed, and treasury protocol fees are booked. The handler records
+  each batch operation’s transaction reference in the sale history so explorers
+  can verify the on-ledger transfers.
+- `dns.cancel_sale` lets the recorded seller abort an active auction prior to
+  settlement. The call releases any locked bidder stake, unlocks the seller’s
+  escrow (if present), marks the auction as `cancelled`, and leaves sale
+  history untouched so the name can be relisted cleanly.
 
 ### 7.3 Inspecting auctions and history
 
@@ -153,7 +163,8 @@ auction entry including the current bids array.
 ```
 
 The response includes the current auction (if active), persisted ownership
-record, and full sale history for auditing.
+record, and full sale history for auditing, including the ledger transaction
+references (`ledger_events`) recorded during settlement.
 
 ### 7.4 CLI helpers
 
@@ -162,10 +173,37 @@ record, and full sale history for auditing.
 ```bash
 blockctl gateway domain list premium.block 2500 --protocol-fee 400 --royalty 150
 blockctl gateway domain bid premium.block bidder 3600 --stake staker-ref
+blockctl gateway domain stake-register stake-ref 2500 --owner bidder
+blockctl gateway domain stake-withdraw stake-ref 500 --owner bidder
+blockctl gateway domain cancel premium.block --seller treasury-account
 blockctl gateway domain complete premium.block --force
+blockctl gateway domain stake-status stake-ref --pretty
 blockctl gateway domain status premium.block --pretty
 ```
 
-All commands reuse the shared JSON helpers and authenticated RPC client. Tests
-exercise successful flows, low-bid rejection, auction expiry, and resale royalty
-enforcement entirely through the first-party harness.
+All commands reuse the shared JSON helpers and authenticated RPC client.
+End-to-end tests now exercise winning and losing ledger flows, stake rejection
+paths, auction cancellation, stake withdrawals, and resale royalty enforcement
+through the first-party integration harness (`node/tests/dns_auction_ledger.rs`).
+
+### 7.5 Stake escrow management
+
+- `dns.register_stake` debits `deposit_ct` from `owner_account`, appends a
+  `stake_deposit` ledger event (with `tx_ref`) to the escrow history, and
+  persists the updated record under `reference`. Multiple deposits top up the
+  same escrow as long as the owner matches.
+- `dns.withdraw_stake` credits the owner after reducing the available escrow,
+  recording a `stake_withdraw` event for every successful transfer. Locked
+  portions (from active bids or ownership requirements) remain intact; the
+  handler refuses withdrawals that would dip into the locked balance. Zeroed
+  escrows remain in storage so their ledger history stays queryable.
+- `dns.stake_status` reports the current escrow (`amount_ct`, `locked_ct`,
+  derived `available_ct`, and `ledger_events`) so operators can audit deposits,
+  withdrawals, and outstanding locks with concrete transaction references.
+
+Stake entries live alongside auction state in `SimpleDb`. Production flows
+should register stake before bidding and can safely withdraw free balance after
+auctions settle or cancel. Both `stake-register` and `stake-withdraw` RPC calls
+now return the executed `tx_ref` alongside the enriched stake payload so CLI and
+explorer tooling can link escrow movements back to on-ledger batches without
+relying on off-ledger bookkeeping.

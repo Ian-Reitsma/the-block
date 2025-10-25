@@ -96,6 +96,8 @@ pub struct NodeConfig {
     pub jurisdiction: Option<String>,
     #[serde(default = "default_proof_rebate_rate")]
     pub proof_rebate_rate: u64,
+    #[serde(default = "default_treasury_account")]
+    pub treasury_account: String,
 }
 
 impl Default for NodeConfig {
@@ -138,8 +140,13 @@ impl Default for NodeConfig {
             telemetry: TelemetryConfig::default(),
             jurisdiction: None,
             proof_rebate_rate: default_proof_rebate_rate(),
+            treasury_account: default_treasury_account(),
         }
     }
+}
+
+fn default_treasury_account() -> String {
+    "treasury".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -1,4 +1,30 @@
 # System-Wide Economic Changes
+> **Review (2025-11-06, late morning):** Premium-domain stake escrow now runs
+> entirely on-ledger. Operators register deposits via `dns.register_stake`,
+> withdrawals credit unlocked balances through `dns.withdraw_stake`, and
+> `dns.stake_status` exposes live escrow totals (`amount_ct`, `locked_ct`,
+> `available_ct`) plus durable `ledger_events` with executed `tx_ref` values for
+> explorers/CLI. Auction settlement batches bidder debits,
+> seller proceeds, royalties, and protocol fees into a single ledger operation so
+> partial failures no longer double-charge or leave sled state ahead of CT
+> balances. Sellers can call `dns.cancel_sale` to unwind active auctions without
+> minting sale history, automatically releasing locked bidder and seller stakes.
+> CLI coverage mirrors the new RPCs with `gateway domain stake-register`,
+> `stake-withdraw`, `stake-status`, and `cancel`, and integration tests exercise
+> the stake flows alongside the existing ledger-settlement harness.
+> **Review (2025-11-05, afternoon):** Premium domain auctions now settle with
+> full ledger backing. `dns.complete_sale` debits the winning bidder, refunds
+> locked seller stake, and routes protocol and royalty fees to the treasury or
+> prior owner before minting the new ownership record. Sale history entries now
+> embed the ledger transaction references so explorers/CLI can reconcile on-
+> chain transfers alongside sled state. Stake escrows are enforced during
+> bidding with automatic unlocks for outbid offers, and the integration harness
+> covers winner/loser flows against a mocked ledger to prove balances move
+> exactly once. Gateway ad readiness now persists to a dedicated sled namespace;
+> startup replays the surviving window so activation remains ready across
+> restarts while ongoing acknowledgements keep the counters pruned and stored.
+> Governance-configured thresholds feed the handle at boot, and persistence
+> helpers compact stale events as they are reloaded.
 > **Review (2025-11-03, evening):** Gateway ad matching now honours governance-
 > defined readiness thresholds end to end. The runtime seeds a shared
 > `AdReadinessHandle`, the gateway skips campaign attachment until

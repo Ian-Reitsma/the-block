@@ -34,6 +34,7 @@ pub mod names {
     pub const COMPUTE_SETTLEMENT: &str = "compute_settlement";
     pub const DEX_STORAGE: &str = "dex_storage";
     pub const GATEWAY_DNS: &str = "gateway_dns";
+    pub const GATEWAY_AD_READINESS: &str = "gateway_ad_readiness";
     pub const GOSSIP_RELAY: &str = "gossip_relay";
     pub const IDENTITY_DID: &str = "identity_did";
     pub const IDENTITY_HANDLES: &str = "identity_handle_registry";

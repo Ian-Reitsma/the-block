@@ -1,4 +1,27 @@
 # Project Progress Snapshot
+> **Review (2025-11-06, late morning):** Premium-domain escrow and cancellation
+> flows are now fully first-party. Operators deposit CT via `dns.register_stake`,
+> withdraw unlocked balances with `dns.withdraw_stake`, and inspect live escrow
+> totals (and per-transfer `ledger_events`/`tx_ref` history) through
+> `dns.stake_status`. Auction settlement batches every ledger
+> debit/credit so failures cannot double-charge bidders or leave sled ahead of
+> the CT ledger. Sellers can unwind listings with `dns.cancel_sale`, releasing
+> locked bidder/seller stakes without forging sale history. The CLI picked up
+> `gateway domain stake-register`, `stake-withdraw`, `stake-status`, and `cancel`
+> helpers, while the integration harness now exercises stake deposits, partial
+> withdrawals, and cancellation flows alongside the existing ledger-settlement
+> tests.
+> **Review (2025-11-05, afternoon):** Premium domain auctions finally settle
+> entirely on-ledger. `dns.complete_sale` debits the winning bidder, refunds any
+> seller stake, books protocol/royalty fees to the treasury or prior owner, and
+> records every ledger reference inside sale history so explorers and CLI users
+> can audit the transfers. Stake escrows are enforced during bidding, releasing
+> automatically when bidders are outbid. Ad readiness counters now persist to a
+> dedicated sled namespace; startup replays the surviving window so nodes stay
+> “ready” across restarts, and the handle keeps pruning/recording without
+> dropping events. Integration coverage under `node/tests/dns_auction_ledger.rs`
+> exercises winning/losing settlements against the ledger mock while ad
+> readiness tests confirm replayed windows remain satisfied after reopening.
 > **Review (2025-11-03, evening):** Ad readiness now gates campaign matching with
 > governance-controlled thresholds. The node shares an `AdReadinessHandle` across
 > the gateway, RPC stack, and telemetry so readiness blockers and counters surface
