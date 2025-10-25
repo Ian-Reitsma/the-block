@@ -1,5 +1,27 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-03 update (ad readiness gating & domain auctions):** Readiness
+> thresholds live entirely inside the existing node crates—`ad_readiness`
+> exposes manual cursor codecs and shared handles, the gateway consults the
+> handle before matching, telemetry/RPC plumbing reuse the foundation metrics
+> facade, and the aggregator extends its recorder without pulling in Prometheus
+> clients or async runtimes. Premium domain auctions likewise stay on
+> first-party primitives: sled-backed `SimpleDb` buckets persist auctions,
+> bids, ownership, and sale history through handwritten binary cursor writers;
+> CLI commands build JSON payloads via the existing helpers; and regression
+> suites use std threads + in-process harnesses. No serde/jsonrpc/HTTP
+> dependencies were reintroduced.
+> **2025-11-03 update (governance-synced ad splits & atomic reservations):**
+> Wiring the governance runtime to the sled-backed marketplace kept everything
+> inside existing crates—`governance`, `ad_market`, and the node runtime share
+> a `MarketplaceHandle` without introducing new RPC clients or async runtimes.
+> Distribution updates use manual JSON/binary builders already in place, and the
+> new concurrency ledger in `ad_market` relies solely on `std` locks plus the
+> existing sled trees. The multi-threaded regression harness exercises the
+> in-process marketplace with pure std threads, so no third-party fuzzing or
+> testing frameworks were added. Operator docs/RPC coverage reuse the same
+> first-party helpers, keeping the migration story hermetic.
+
 > **2025-11-02 update (bridge parser coverage & remediation legends):** The contract CLI now exercises the settlement-log and reward-accrual commands through the first-party parser, locking optional asset/relayer filters, cursor forwarding, and default page sizes without reviving serde helpers. Node restart coverage stays inside the sled-backed bridge crate via `bridge_pending_dispute_persists_across_restart`, proving challenged withdrawals remain available through `pending_withdrawals` and `bridge.dispute_audit` after a reopen. Monitoring adds `dashboards_include_bridge_remediation_legends_and_tooltips` to assert Grafana legends/descriptions remain first-party across every generated template—no external validators or UI harnesses required.
 
 > **2025-11-01 update (bridge dispute audit defaults & Grafana guards):** The contract CLI now exercises `BridgeCmd::DisputeAudit` through the first-party parser to confirm the default page size and localhost RPC fallback survive option handling, and a new transport regression proves `asset=None`/`cursor=None` payloads serialise to JSON `null` without reintroducing serde helpers. Monitoring’s `dashboards_include_bridge_counter_panels` test walks every generated Grafana JSON (dashboard/operator/telemetry/dev) to assert the reward-claim, approval, settlement, and dispute panels retain their first-party expressions and legends. These additions expand coverage while keeping every harness strictly in-house—no third-party transports, validators, or dashboard tooling required.

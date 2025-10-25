@@ -92,3 +92,80 @@ blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.bl
 - Set `gateway_dns_allow_external = true` in `config.toml` to enable external domains; the default restricts lookups to `.block`.
 
 Keep this guide aligned with `node/src/gateway/dns.rs` whenever the schema or RPC parameters change.
+
+## 7. Premium Domain Auctions & Royalties
+
+Premium `.block` and verified external domains can be listed on-chain via a
+first-party auction engine persisted in the same `SimpleDb` namespace:
+
+- `dns_auction/<domain>` – current auction metadata (seller, stake requirement,
+  protocol-fee basis points, royalty rate, bids, and status).
+- `dns_ownership/<domain>` – active owner, last sale price, and sticky royalty
+  configuration carried into resales.
+- `dns_sales/<domain>` – historical sales entries (seller, buyer, price,
+  protocol-fee cut, royalty cut, timestamp).
+
+### 7.1 Listing a domain
+
+Call `dns.list_for_sale` with JSON parameters:
+
+```json
+{
+  "domain": "premium.block",
+  "min_bid_ct": 2500,
+  "stake_requirement_ct": 2500,
+  "duration_secs": 86400,
+  "protocol_fee_bps": 400,
+  "royalty_bps": 150,
+  "seller_account": "treasury-account",
+  "seller_stake": "stake-ref"
+}
+```
+
+- `min_bid_ct` must be non-zero; `stake_requirement_ct` defaults to the same
+  value and is clamped to the minimum bid.
+- `protocol_fee_bps` and `royalty_bps` are clamped to ≤10_000. When relisting a
+  previously sold domain, the stored royalty rate is reused and protocol fees
+  default to the prior auction’s setting if the request omits a value.
+- For resales the `seller_account` must match the stored owner; otherwise
+  `AuctionError::OwnershipMismatch` is returned.
+
+Listings return `{ "status": "ok", "auction": { ... } }` with the structured
+auction entry including the current bids array.
+
+### 7.2 Bidding and completion
+
+- `dns.place_bid` requires `domain`, `bidder_account`, optional
+  `stake_reference`, and `bid_ct`. Bids must exceed the running minimums and the
+  current highest bid.
+- `dns.complete_sale` finalises an auction once `end_ts` has elapsed (or
+  immediately when `force=true` is supplied for manual settlement/testing).
+  Protocol fees are deposited into the treasury hook, royalties are paid to the
+  prior owner (if any), and ownership/sale history records are updated before
+  the auction is marked `settled`.
+
+### 7.3 Inspecting auctions and history
+
+`dns.auctions` accepts an optional `domain` filter:
+
+```json
+{"method":"dns.auctions","params":{"domain":"premium.block"}}
+```
+
+The response includes the current auction (if active), persisted ownership
+record, and full sale history for auditing.
+
+### 7.4 CLI helpers
+
+`blockctl gateway domain` exposes first-party wrappers for the RPC endpoints:
+
+```bash
+blockctl gateway domain list premium.block 2500 --protocol-fee 400 --royalty 150
+blockctl gateway domain bid premium.block bidder 3600 --stake staker-ref
+blockctl gateway domain complete premium.block --force
+blockctl gateway domain status premium.block --pretty
+```
+
+All commands reuse the shared JSON helpers and authenticated RPC client. Tests
+exercise successful flows, low-bid rejection, auction expiry, and resale royalty
+enforcement entirely through the first-party harness.

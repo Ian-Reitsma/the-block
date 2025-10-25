@@ -4,7 +4,7 @@ use foundation_serialization::{
     Deserialize, Serialize,
 };
 use sled::{Config as SledConfig, Db as SledDb, Tree as SledTree};
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
@@ -464,12 +464,14 @@ pub struct SledMarketplace {
     metadata_tree: SledTree,
     campaigns: RwLock<HashMap<String, CampaignState>>,
     reservations: RwLock<HashMap<ReservationKey, ReservationState>>,
+    pending: RwLock<HashMap<String, u64>>,
     distribution: RwLock<DistributionPolicy>,
 }
 
 pub struct InMemoryMarketplace {
     campaigns: RwLock<HashMap<String, CampaignState>>,
     reservations: RwLock<HashMap<ReservationKey, ReservationState>>,
+    pending: RwLock<HashMap<String, u64>>,
     distribution: RwLock<DistributionPolicy>,
 }
 
@@ -478,6 +480,7 @@ impl InMemoryMarketplace {
         Self {
             campaigns: RwLock::new(HashMap::new()),
             reservations: RwLock::new(HashMap::new()),
+            pending: RwLock::new(HashMap::new()),
             distribution: RwLock::new(distribution.normalize()),
         }
     }
@@ -572,6 +575,7 @@ impl SledMarketplace {
             metadata_tree,
             campaigns: RwLock::new(campaigns),
             reservations: RwLock::new(HashMap::new()),
+            pending: RwLock::new(HashMap::new()),
             distribution: RwLock::new(distribution),
         };
 
@@ -695,9 +699,15 @@ impl Marketplace for InMemoryMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
+        let mut pending = self.pending.write().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
-        for state in campaigns.values() {
+        for (campaign_id, state) in campaigns.iter() {
             if !Self::matches_targeting(&state.campaign.targeting, &ctx) {
+                continue;
+            }
+            let reserved = pending.get(campaign_id).copied().unwrap_or(0);
+            let available_budget = state.remaining_budget_ct.saturating_sub(reserved);
+            if available_budget == 0 {
                 continue;
             }
             for creative in &state.campaign.creatives {
@@ -705,7 +715,7 @@ impl Marketplace for InMemoryMarketplace {
                     continue;
                 }
                 let cost = cost_for_bytes(creative.price_per_mib_ct, ctx.bytes);
-                if cost == 0 || state.remaining_budget_ct < cost {
+                if cost == 0 || available_budget < cost {
                     continue;
                 }
                 let outcome = MatchOutcome {
@@ -714,23 +724,27 @@ impl Marketplace for InMemoryMarketplace {
                     price_per_mib_ct: creative.price_per_mib_ct,
                 };
                 match &mut best {
-                    Some((current, _, current_cost)) => {
+                    Some((current, current_id, current_cost)) => {
                         if creative.price_per_mib_ct > current.price_per_mib_ct
                             || (creative.price_per_mib_ct == current.price_per_mib_ct
                                 && cost > *current_cost)
                         {
                             *current = outcome;
+                            *current_id = campaign_id.clone();
                             *current_cost = cost;
                         }
                     }
                     None => {
-                        best = Some((outcome, state.campaign.id.clone(), cost));
+                        best = Some((outcome, campaign_id.clone(), cost));
                     }
                 }
             }
         }
-        drop(campaigns);
         if let Some((outcome, campaign_id, cost_ct)) = best {
+            let entry = pending.entry(campaign_id.clone()).or_insert(0);
+            *entry = entry.saturating_add(cost_ct);
+            drop(pending);
+            drop(campaigns);
             let mut reservations = self.reservations.write().unwrap();
             reservations.insert(
                 key,
@@ -753,11 +767,23 @@ impl Marketplace for InMemoryMarketplace {
             guard.remove(key)
         }?;
         let mut campaigns = self.campaigns.write().unwrap();
+        let mut pending = self.pending.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
         if state.remaining_budget_ct < reservation.cost_ct {
             return None;
         }
         state.remaining_budget_ct -= reservation.cost_ct;
+        match pending.entry(reservation.campaign_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let value = entry.get_mut();
+                *value = value.saturating_sub(reservation.cost_ct);
+                if *value == 0 {
+                    entry.remove();
+                }
+            }
+            Entry::Vacant(_) => {}
+        }
+        drop(pending);
         let policy = *self.distribution.read().unwrap();
         let parts = InMemoryMarketplace::allocate(&policy, reservation.cost_ct);
         let distributed = parts
@@ -782,8 +808,20 @@ impl Marketplace for InMemoryMarketplace {
     }
 
     fn cancel(&self, key: &ReservationKey) {
-        let mut guard = self.reservations.write().unwrap();
-        guard.remove(key);
+        let reservation = {
+            let mut guard = self.reservations.write().unwrap();
+            guard.remove(key)
+        };
+        if let Some(res) = reservation {
+            let mut pending = self.pending.write().unwrap();
+            if let Entry::Occupied(mut entry) = pending.entry(res.campaign_id) {
+                let value = entry.get_mut();
+                *value = value.saturating_sub(res.cost_ct);
+                if *value == 0 {
+                    entry.remove();
+                }
+            }
+        }
     }
 
     fn distribution(&self) -> DistributionPolicy {
@@ -840,9 +878,15 @@ impl Marketplace for SledMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
+        let mut pending = self.pending.write().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
-        for state in campaigns.values() {
+        for (campaign_id, state) in campaigns.iter() {
             if !InMemoryMarketplace::matches_targeting(&state.campaign.targeting, &ctx) {
+                continue;
+            }
+            let reserved = pending.get(campaign_id).copied().unwrap_or(0);
+            let available_budget = state.remaining_budget_ct.saturating_sub(reserved);
+            if available_budget == 0 {
                 continue;
             }
             for creative in &state.campaign.creatives {
@@ -850,7 +894,7 @@ impl Marketplace for SledMarketplace {
                     continue;
                 }
                 let cost = cost_for_bytes(creative.price_per_mib_ct, ctx.bytes);
-                if cost == 0 || state.remaining_budget_ct < cost {
+                if cost == 0 || available_budget < cost {
                     continue;
                 }
                 let outcome = MatchOutcome {
@@ -859,23 +903,27 @@ impl Marketplace for SledMarketplace {
                     price_per_mib_ct: creative.price_per_mib_ct,
                 };
                 match &mut best {
-                    Some((current, _, current_cost)) => {
+                    Some((current, current_id, current_cost)) => {
                         if creative.price_per_mib_ct > current.price_per_mib_ct
                             || (creative.price_per_mib_ct == current.price_per_mib_ct
                                 && cost > *current_cost)
                         {
                             *current = outcome;
+                            *current_id = campaign_id.clone();
                             *current_cost = cost;
                         }
                     }
                     None => {
-                        best = Some((outcome, state.campaign.id.clone(), cost));
+                        best = Some((outcome, campaign_id.clone(), cost));
                     }
                 }
             }
         }
-        drop(campaigns);
         if let Some((outcome, campaign_id, cost_ct)) = best {
+            let entry = pending.entry(campaign_id.clone()).or_insert(0);
+            *entry = entry.saturating_add(cost_ct);
+            drop(pending);
+            drop(campaigns);
             let mut reservations = self.reservations.write().unwrap();
             reservations.insert(
                 key,
@@ -898,11 +946,23 @@ impl Marketplace for SledMarketplace {
             guard.remove(key)?
         };
         let mut campaigns = self.campaigns.write().unwrap();
+        let mut pending = self.pending.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
         if state.remaining_budget_ct < reservation.cost_ct {
             return None;
         }
         state.remaining_budget_ct -= reservation.cost_ct;
+        match pending.entry(reservation.campaign_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let value = entry.get_mut();
+                *value = value.saturating_sub(reservation.cost_ct);
+                if *value == 0 {
+                    entry.remove();
+                }
+            }
+            Entry::Vacant(_) => {}
+        }
+        drop(pending);
         let snapshot = state.clone();
         drop(campaigns);
         if let Err(err) = self.persist_campaign(&snapshot) {
@@ -941,8 +1001,20 @@ impl Marketplace for SledMarketplace {
     }
 
     fn cancel(&self, key: &ReservationKey) {
-        let mut guard = self.reservations.write().unwrap();
-        guard.remove(key);
+        let reservation = {
+            let mut guard = self.reservations.write().unwrap();
+            guard.remove(key)
+        };
+        if let Some(res) = reservation {
+            let mut pending = self.pending.write().unwrap();
+            if let Entry::Occupied(mut entry) = pending.entry(res.campaign_id) {
+                let value = entry.get_mut();
+                *value = value.saturating_sub(res.cost_ct);
+                if *value == 0 {
+                    entry.remove();
+                }
+            }
+        }
     }
 
     fn distribution(&self) -> DistributionPolicy {
@@ -966,6 +1038,10 @@ pub type MarketplaceHandle = Arc<dyn Marketplace>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Barrier, Mutex,
+    };
     use sys::tempfile::TempDir;
 
     #[test]
@@ -1069,5 +1145,144 @@ mod tests {
         assert_eq!(dist.hardware_percent, 15);
         assert_eq!(dist.verifier_percent, 5);
         assert_eq!(dist.liquidity_percent, 5);
+    }
+
+    #[test]
+    fn sled_marketplace_reservations_are_atomic() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("atomic_reservations.db");
+        let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
+        let market =
+            Arc::new(SledMarketplace::open(&path, distribution).expect("open sled market"));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-atomic".to_string(),
+                advertiser_account: "adv".to_string(),
+                budget_ct: 200,
+                creatives: vec![Creative {
+                    id: "creative".to_string(),
+                    price_per_mib_ct: 100,
+                    badges: Vec::new(),
+                    domains: vec!["example.test".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["example.test".to_string()],
+                    badges: Vec::new(),
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("campaign registered");
+
+        let barrier = Arc::new(Barrier::new(4));
+        let successes = Arc::new(AtomicUsize::new(0));
+        let reserved_keys = Arc::new(Mutex::new(Vec::new()));
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider-atomic".to_string()),
+            badges: Vec::new(),
+            bytes: 1_048_576,
+        };
+
+        let handles: Vec<_> = (0..4)
+            .map(|idx| {
+                let market = Arc::clone(&market);
+                let barrier = Arc::clone(&barrier);
+                let successes = Arc::clone(&successes);
+                let reserved_keys = Arc::clone(&reserved_keys);
+                let ctx = ctx.clone();
+                std::thread::spawn(move || {
+                    let key = ReservationKey {
+                        manifest: [idx as u8; 32],
+                        path_hash: [(idx + 1) as u8; 32],
+                    };
+                    barrier.wait();
+                    if market.reserve_impression(key, ctx).is_some() {
+                        successes.fetch_add(1, Ordering::SeqCst);
+                        reserved_keys.lock().unwrap().push(key);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("thread join");
+        }
+
+        assert_eq!(
+            successes.load(Ordering::SeqCst),
+            2,
+            "only funded reservations succeed"
+        );
+
+        let mut keys = reserved_keys.lock().unwrap();
+        for key in keys.drain(..) {
+            let settlement = market.commit(&key).expect("commit succeeds");
+            assert_eq!(settlement.total_ct, 100);
+        }
+
+        // Budget exhausted; additional reservations should fail and pending ledger must be clear.
+        let new_key = ReservationKey {
+            manifest: [9u8; 32],
+            path_hash: [8u8; 32],
+        };
+        let none = market.reserve_impression(new_key, ctx.clone());
+        assert!(none.is_none(), "budget exhausted prevents new reservations");
+
+        let campaigns = market.list_campaigns();
+        assert_eq!(campaigns.len(), 1);
+        assert_eq!(campaigns[0].remaining_budget_ct, 0);
+    }
+
+    #[test]
+    fn cancel_releases_pending_budget() {
+        let market = InMemoryMarketplace::new(DistributionPolicy::new(40, 30, 20, 5, 5));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-cancel".to_string(),
+                advertiser_account: "adv".to_string(),
+                budget_ct: 150,
+                creatives: vec![Creative {
+                    id: "creative".to_string(),
+                    price_per_mib_ct: 100,
+                    badges: Vec::new(),
+                    domains: vec!["example.test".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["example.test".to_string()],
+                    badges: Vec::new(),
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("campaign registered");
+
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider-cancel".to_string()),
+            badges: Vec::new(),
+            bytes: 1_048_576,
+        };
+        let key_one = ReservationKey {
+            manifest: [1u8; 32],
+            path_hash: [2u8; 32],
+        };
+        assert!(market.reserve_impression(key_one, ctx.clone()).is_some());
+
+        // Cancel the reservation and ensure budget becomes available again.
+        let cancel_key = ReservationKey {
+            manifest: [1u8; 32],
+            path_hash: [2u8; 32],
+        };
+        market.cancel(&cancel_key);
+
+        let key_two = ReservationKey {
+            manifest: [3u8; 32],
+            path_hash: [4u8; 32],
+        };
+        assert!(
+            market.reserve_impression(key_two, ctx).is_some(),
+            "budget should be reusable after cancellation"
+        );
     }
 }

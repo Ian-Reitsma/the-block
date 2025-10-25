@@ -15,7 +15,7 @@ fn proposal_vote_activation_rollback() {
     let store = GovStore::open(dir.path());
     let mut params = Params::default();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
 
     // invalid proposal (out of bounds)
     let bad = Proposal {

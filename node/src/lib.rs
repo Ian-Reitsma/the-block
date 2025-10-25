@@ -55,6 +55,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
+pub mod ad_readiness;
 pub mod config;
 pub mod dkg;
 pub mod exec;

@@ -1088,10 +1088,12 @@ fn main() -> std::process::ExitCode {
 fn spawn_read_ack_worker(
     bc: Arc<Mutex<Blockchain>>,
     market: Option<MarketplaceHandle>,
+    readiness: Option<the_block::ad_readiness::AdReadinessHandle>,
 ) -> mpsc::Sender<ReadAck> {
     let (tx, mut rx) = mpsc::channel(1024);
     runtime::spawn(async move {
         let market = market.clone();
+        let readiness = readiness.clone();
         while let Some(ack) = rx.recv().await {
             let reservation_key = ReservationKey {
                 manifest: ack.manifest,
@@ -1103,6 +1105,14 @@ fn spawn_read_ack_worker(
             };
             match result {
                 Ok(()) => {
+                    if let Some(handle) = &readiness {
+                        let provider = if ack.provider.is_empty() {
+                            None
+                        } else {
+                            Some(ack.provider.as_str())
+                        };
+                        handle.record_ack(ack.ts, ack.client_hash, &ack.domain, provider);
+                    }
                     #[cfg(feature = "telemetry")]
                     {
                         if let Ok(handle) = the_block::telemetry::READ_ACK_PROCESSED_TOTAL
@@ -1260,13 +1270,28 @@ async fn async_main() -> std::process::ExitCode {
                     guard.params.read_subsidy_liquidity_percent.max(0) as u64,
                 )
             };
+            let readiness_config = {
+                let guard = bc.lock().unwrap();
+                the_block::ad_readiness::AdReadinessConfig {
+                    window_secs: guard.params.ad_readiness_window_secs.max(1) as u64,
+                    min_unique_viewers: guard.params.ad_readiness_min_unique_viewers.max(0) as u64,
+                    min_host_count: guard.params.ad_readiness_min_host_count.max(0) as u64,
+                    min_provider_count: guard.params.ad_readiness_min_provider_count.max(0) as u64,
+                }
+            };
+            let readiness = the_block::ad_readiness::AdReadinessHandle::new(readiness_config);
+            the_block::ad_readiness::install_global(readiness.clone());
             let market_path = format!("{data_dir}/ad_market");
             let market: MarketplaceHandle = Arc::new(
                 SledMarketplace::open(&market_path, distribution).unwrap_or_else(|err| {
                     panic!("failed to open ad marketplace at {market_path}: {err}")
                 }),
             );
-            let _read_ack_tx = spawn_read_ack_worker(Arc::clone(&bc), Some(market.clone()));
+            let _read_ack_tx = spawn_read_ack_worker(
+                Arc::clone(&bc),
+                Some(market.clone()),
+                Some(readiness.clone()),
+            );
 
             let overlay_choice = overlay_backend.map(OverlayBackend::from);
             let overlay_cfg = {
@@ -1324,6 +1349,7 @@ async fn async_main() -> std::process::ExitCode {
                 Arc::clone(&bc),
                 Arc::clone(&mining),
                 Some(market.clone()),
+                Some(readiness.clone()),
                 rpc_addr.clone(),
                 rpc_cfg,
                 tx,

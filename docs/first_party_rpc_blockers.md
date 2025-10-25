@@ -9,6 +9,21 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-11-03)
+
+- Ad readiness gating stays within the existing RPC/runtime stack: governance
+  parameters wire an `AdReadinessHandle` into the node, the gateway consults the
+  shared handle before matching, and the new `ad_market.readiness` endpoint plus
+  telemetry gauges reuse the first-party JSON/metrics facades—no serde_json,
+  async runtimes, or external Prometheus clients were introduced. Integration
+  tests drive the in-process RPC harness to prove readiness blockers clear once
+  acknowledgements land.
+- Premium domain auctions now ship entirely through handwritten cursor codecs
+  persisted in `SimpleDb`. RPC handlers, CLI commands, and tests cover
+  listing/bidding/completion/status flows without reintroducing serde or
+  external databases. Resale royalties and protocol fees reuse the stored
+  policy values, and regression suites remain fully first party.
+
 ## Recent progress (2025-11-02)
 
 - Settlement-log and reward-accrual CLI commands now route through the first-party parser during tests, locking optional asset/relayer filters, cursor forwarding, and the default 50-row limit without clap stubs or serde_json helpers. The new `bridge_pending_dispute_persists_across_restart` regression keeps dispute persistence tests inside the sled-backed bridge crate, proving `pending_withdrawals` and `bridge.dispute_audit` retain challenged entries after a reopen. Monitoring gained `dashboards_include_bridge_remediation_legends_and_tooltips`, which inspects every generated Grafana JSON to ensure remediation panels keep their legends and descriptions first party—no external dashboard validators required.

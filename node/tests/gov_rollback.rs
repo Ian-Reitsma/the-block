@@ -12,7 +12,7 @@ fn rollback_specific_proposal() {
     let mut bc = Blockchain::default();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mut params = Params::default();
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let prop = gov_propose(
         &store,
         "alice".into(),

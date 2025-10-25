@@ -1,4 +1,28 @@
 # Status & Roadmap
+> **Review (2025-11-03, evening):** Ad activation now rides explicit readiness
+> policy knobs. Governance parameters define the rolling viewer/host/provider
+> thresholds, the node instantiates an `AdReadinessHandle` shared by the gateway,
+> read-ack worker, and RPC layer, and matching aborts with structured blockers
+> until traffic clears the configured floor. Metrics aggregation exports the
+> readiness gauges and JSON snapshots via `/metrics` and
+> `ad_market.readiness`, while the node/CLI expose manual domain auctions with
+> first-party cursor codecs, sled-backed state, and resale royalty enforcement.
+> Gateway DNS tests drive listing → bidding → settlement → resale to prove
+> royalties and protocol fees settle deterministically, and the CLI surfaces
+> `gateway domain {list,bid,complete,status}` so operators can manage premium
+> names without external markets.
+> **Review (2025-10-25, afternoon):** Governance activations now stream read-subsidy
+> retunes directly into the sled-backed ad marketplace. The runtime stitches the
+> shared `MarketplaceHandle` into parameter apply hooks so updates to
+> `read_subsidy_*_percent` immediately call `update_distribution`, and the RPC
+> harness exercises the end-to-end flow by mutating governance params and
+> asserting the JSON payload returned by `ad_market.distribution`. Concurrent
+> reservation races now resolve deterministically: the marketplace tracks
+> provisional budgets, promotes them to committed balances on `commit`, refunds
+> them on `cancel`, and the new multi-threaded regression proves oversubscribed
+> impressions can no longer leak unpaid acks. These fixes keep governance policy
+> in lockstep with production payouts while hardening the gateway-worker and
+> sled persistence path.
 > **Review (2025-10-25, evening):** Gateway badge targeting now threads the
 > concrete provider ID from storage manifests through read acknowledgements, the
 > gateway suite gained deterministic overrides plus a `just test-gateway` recipe

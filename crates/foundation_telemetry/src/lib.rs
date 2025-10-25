@@ -15,6 +15,22 @@ pub struct MemorySnapshotEntry {
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct AdReadinessTelemetry {
+    pub ready: bool,
+    pub window_secs: u64,
+    pub min_unique_viewers: u64,
+    pub min_host_count: u64,
+    pub min_provider_count: u64,
+    pub unique_viewers: u64,
+    pub host_count: u64,
+    pub provider_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub blockers: Vec<String>,
+    pub last_updated: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct WrapperMetricEntry {
     pub metric: String,
     pub labels: HashMap<String, String>,
@@ -38,6 +54,8 @@ pub struct TelemetrySummary {
     pub memory: HashMap<String, MemorySnapshotEntry>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub wrappers: WrapperSummaryEntry,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub ad_readiness: Option<AdReadinessTelemetry>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +154,42 @@ impl TelemetrySummary {
                 }
                 let value_field_path = child_path(&metric_path, "value");
                 expect_f64_field(metric_obj, "value", &value_field_path)?;
+            }
+        }
+
+        if let Some(readiness_value) = root.get("ad_readiness") {
+            if !matches!(readiness_value, Value::Null) {
+                let readiness_path = child_path("/", "ad_readiness");
+                let readiness =
+                    expect_object(readiness_value, &readiness_path, "ad readiness summary")?;
+                let ready_path = child_path(&readiness_path, "ready");
+                readiness
+                    .get("ready")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| ValidationError::new(ready_path, "ready must be a boolean"))?;
+                for field in [
+                    "window_secs",
+                    "min_unique_viewers",
+                    "min_host_count",
+                    "min_provider_count",
+                    "unique_viewers",
+                    "host_count",
+                    "provider_count",
+                    "last_updated",
+                ] {
+                    let field_path = child_path(&readiness_path, field);
+                    expect_u64_field(readiness, field, &field_path)?;
+                }
+                if let Some(blockers_value) = readiness.get("blockers") {
+                    let blockers_path = child_path(&readiness_path, "blockers");
+                    let blockers = blockers_value.as_array().ok_or_else(|| {
+                        ValidationError::new(blockers_path.clone(), "blockers must be an array")
+                    })?;
+                    for (idx, blocker) in blockers.iter().enumerate() {
+                        let path = format!("{}/{}", blockers_path, idx);
+                        expect_string(blocker, &path, "blocker")?;
+                    }
+                }
             }
         }
 

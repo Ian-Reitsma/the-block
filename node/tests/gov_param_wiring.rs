@@ -47,7 +47,7 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("a".into(), 0, 2_000).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);
     rt.set_snapshot_interval(Duration::from_secs(params.snapshot_interval_secs as u64));
@@ -134,7 +134,7 @@ fn industrial_min_capacity_param_wires_and_rollback() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);
     rt.set_snapshot_interval(Duration::from_secs(params.snapshot_interval_secs as u64));
@@ -207,7 +207,7 @@ fn scheduler_weights_apply_and_record_activation() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     let initial_weights = current_default_weights();
     let mut expected_old = initial_weights.clone();
@@ -311,7 +311,7 @@ fn snapshot_interval_param_updates_runtime() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);
     rt.set_snapshot_interval(Duration::from_secs(params.snapshot_interval_secs as u64));

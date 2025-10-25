@@ -21,7 +21,7 @@ use std::{
 use sys::signals::{Signals, SIGHUP};
 
 use crate::web::rate_limit::RateLimitFilter;
-use crate::{service_badge, storage::pipeline, vm::wasm, ReadAck};
+use crate::{ad_readiness::AdReadinessHandle, service_badge, storage::pipeline, vm::wasm, ReadAck};
 use foundation_serialization::json;
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
@@ -59,6 +59,7 @@ struct GatewayState {
     market: Option<MarketplaceHandle>,
     buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>>,
     filter: Arc<Mutex<RateLimitFilter>>,
+    readiness: Option<AdReadinessHandle>,
 }
 
 #[derive(Clone)]
@@ -226,7 +227,7 @@ fn parse_signed_ack(
     }
     let client_hash = compute_client_hash(&req.remote_addr(), domain);
     let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
-    let provider = infer_provider_for(&manifest, &path_hash, domain);
+    let provider = infer_provider_for(&manifest, &path_hash).unwrap_or_default();
     let ack = ReadAck {
         manifest,
         path_hash,
@@ -286,7 +287,7 @@ fn build_read_ack(
             pk: [0u8; 32],
             sig: vec![0u8; 64],
             domain: domain.to_string(),
-            provider: infer_provider_for(&[0; 32], &path_hash, domain),
+            provider: infer_provider_for(&[0; 32], &path_hash).unwrap_or_default(),
             campaign_id: None,
             creative_id: None,
         }),
@@ -299,8 +300,33 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         Some(handle) => handle,
         None => return,
     };
+    if let Some(handle) = &state.readiness {
+        let decision = handle.decision();
+        if !decision.ready() {
+            #[cfg(feature = "telemetry")]
+            {
+                if let Ok(counter) = the_block::telemetry::AD_READINESS_SKIPPED
+                    .ensure_handle_for_label_values(&[match decision.blockers().first() {
+                        Some(reason) => reason.as_str(),
+                        None => "unknown",
+                    }])
+                {
+                    counter.inc();
+                }
+            }
+            diagnostics::tracing::debug!(
+                blockers = ?decision.blockers(),
+                "ad_matching_skipped_due_to_readiness"
+            );
+            return;
+        }
+    }
     let provider = if ack.provider.is_empty() {
-        None
+        let resolved = infer_provider_for(&ack.manifest, &ack.path_hash);
+        if let Some(id) = resolved.clone() {
+            ack.provider = id.clone();
+        }
+        resolved
     } else {
         Some(ack.provider.clone())
     };
@@ -324,8 +350,8 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     }
 }
 
-fn infer_provider_for(manifest: &[u8; 32], path_hash: &[u8; 32], domain: &str) -> String {
-    pipeline::provider_for_manifest(manifest, path_hash).unwrap_or_else(|| domain.to_string())
+fn infer_provider_for(manifest: &[u8; 32], path_hash: &[u8; 32]) -> Option<String> {
+    pipeline::provider_for_manifest(manifest, path_hash)
 }
 
 #[cfg(test)]
@@ -375,6 +401,7 @@ pub async fn run(
     stake: Arc<dyn StakeTable + Send + Sync>,
     read_tx: mpsc::Sender<ReadAck>,
     market: Option<MarketplaceHandle>,
+    readiness: Option<AdReadinessHandle>,
 ) -> diagnostics::anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     let state = GatewayState {
@@ -383,6 +410,7 @@ pub async fn run(
         buckets: Arc::new(Mutex::new(HashMap::new())),
         filter: Arc::clone(&IP_FILTER),
         market,
+        readiness,
     };
     let router = Router::new(state)
         .upgrade("/ws/peer_metrics", ws_peer_metrics)
@@ -546,6 +574,7 @@ pub trait StakeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ad_readiness::{AdReadinessConfig, AdReadinessHandle};
     use crate::storage::pipeline;
     use ad_market::{
         Campaign, CampaignTargeting, Creative, DistributionPolicy, InMemoryMarketplace,
@@ -568,14 +597,16 @@ mod tests {
     use crypto_suite::signatures::ed25519::SigningKey;
     use rand::rngs::OsRng;
     use runtime::sync::mpsc::TryRecvError;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn state_with_domains(domains: &[&str]) -> (GatewayState, mpsc::Receiver<ReadAck>) {
-        state_with_market(domains, None)
+        state_with_market(domains, None, None)
     }
 
     fn state_with_market(
         domains: &[&str],
         market: Option<MarketplaceHandle>,
+        readiness: Option<AdReadinessHandle>,
     ) -> (GatewayState, mpsc::Receiver<ReadAck>) {
         let allowed = domains
             .iter()
@@ -589,6 +620,7 @@ mod tests {
                 buckets: Arc::new(Mutex::new(HashMap::new())),
                 filter: Arc::new(Mutex::new(RateLimitFilter::new())),
                 market,
+                readiness,
             },
             rx,
         )
@@ -750,7 +782,7 @@ mod tests {
                 metadata: HashMap::new(),
             })
             .expect("campaign registered");
-        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()));
+        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()), None);
         let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
         let remote: SocketAddr = "127.0.0.1:9300".parse().unwrap();
         let mut manifest = [0u8; 32];
@@ -803,6 +835,131 @@ mod tests {
     }
 
     #[test]
+    fn static_read_respects_ad_readiness() {
+        service_badge::clear_badges();
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+
+        let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-ready".to_string(),
+                advertiser_account: "adv-ready".to_string(),
+                budget_ct: 8_000,
+                creatives: vec![Creative {
+                    id: "creative-ready".to_string(),
+                    price_per_mib_ct: 128,
+                    badges: Vec::new(),
+                    domains: vec!["signed.test".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["signed.test".to_string()],
+                    badges: Vec::new(),
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("campaign registered");
+
+        let readiness = AdReadinessHandle::new(AdReadinessConfig {
+            window_secs: 600,
+            min_unique_viewers: 2,
+            min_host_count: 1,
+            min_provider_count: 1,
+        });
+
+        #[cfg(feature = "telemetry")]
+        {
+            the_block::telemetry::AD_READINESS_SKIPPED.reset();
+        }
+
+        let (state, mut rx) = state_with_market(
+            &["signed.test"],
+            Some(market.clone()),
+            Some(readiness.clone()),
+        );
+        let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
+        let remote: SocketAddr = "127.0.0.1:9310".parse().unwrap();
+        let mut manifest = [0u8; 32];
+        manifest[0] = 0x21;
+        let path = "/ad.html";
+        let bytes = 512_000u64;
+        let ts = 1_888_888_888u64;
+        pipeline::override_manifest_providers_for_test(
+            manifest,
+            vec!["gateway-sfo-01".to_string()],
+        );
+        pipeline::override_static_blob_for_test("signed.test", path, vec![1u8; bytes as usize]);
+        let mut rng = OsRng::default();
+        let signing = SigningKey::generate(&mut rng);
+        let pk_bytes = signing.verifying_key().to_bytes();
+        let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+        let client_hash = compute_client_hash(&remote, "signed.test");
+        let mut hasher = Hasher::new();
+        hasher.update(&manifest);
+        hasher.update(&path_hash);
+        hasher.update(&bytes.to_le_bytes());
+        hasher.update(&ts.to_le_bytes());
+        hasher.update(&client_hash);
+        let message = hasher.finalize();
+        let signature = signing.sign(message.as_bytes()).to_bytes();
+
+        let request = router
+            .request_builder()
+            .host("signed.test")
+            .path(path)
+            .remote_addr(remote)
+            .header(HEADER_ACK_MANIFEST, hex::encode(manifest))
+            .header(HEADER_ACK_PUBKEY, hex::encode(pk_bytes))
+            .header(HEADER_ACK_SIGNATURE, hex::encode(signature))
+            .header(HEADER_ACK_BYTES, bytes.to_string())
+            .header(HEADER_ACK_TIMESTAMP, ts.to_string())
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let ack = rx.try_recv().expect("ack queued");
+        assert!(ack.campaign_id.is_none());
+        assert!(ack.creative_id.is_none());
+        #[cfg(feature = "telemetry")]
+        {
+            let counter = the_block::telemetry::AD_READINESS_SKIPPED
+                .with_label_values(&["insufficient_unique_viewers"]);
+            assert_eq!(counter.get(), 1);
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("timestamp")
+            .as_secs();
+        readiness.record_ack(now, [0u8; 32], "signed.test", Some("gateway-sfo-01"));
+        readiness.record_ack(now + 1, [1u8; 32], "signed.test", Some("gateway-sfo-01"));
+
+        let request = router
+            .request_builder()
+            .host("signed.test")
+            .path(path)
+            .remote_addr(remote)
+            .header(HEADER_ACK_MANIFEST, hex::encode(manifest))
+            .header(HEADER_ACK_PUBKEY, hex::encode(pk_bytes))
+            .header(HEADER_ACK_SIGNATURE, hex::encode(signature))
+            .header(HEADER_ACK_BYTES, bytes.to_string())
+            .header(HEADER_ACK_TIMESTAMP, ts.to_string())
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let ack = rx.try_recv().expect("second ack queued");
+        assert_eq!(ack.campaign_id.as_deref(), Some("cmp-ready"));
+        assert_eq!(ack.creative_id.as_deref(), Some("creative-ready"));
+        assert_eq!(ack.provider, "gateway-sfo-01");
+
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+    }
+
+    #[test]
     fn static_read_matches_badge_targeted_campaign() {
         service_badge::clear_badges();
         pipeline::clear_test_manifest_providers();
@@ -831,7 +988,7 @@ mod tests {
             })
             .expect("badge campaign registered");
 
-        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()));
+        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()), None);
         let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
         let remote: SocketAddr = "127.0.0.1:9400".parse().unwrap();
         let manifest = [3u8; 32];

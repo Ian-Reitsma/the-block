@@ -1,4 +1,30 @@
 # System-Wide Economic Changes
+> **Review (2025-11-03, evening):** Gateway ad matching now honours governance-
+> defined readiness thresholds end to end. The runtime seeds a shared
+> `AdReadinessHandle`, the gateway skips campaign attachment until
+> rolling unique-viewer, host, and provider counts clear policy-set
+> minimums, and telemetry/RPC snapshots expose the decision plus blockers so
+> operators can audit activation. Metrics aggregation records the readiness
+> gauges (`ad_readiness_*`) and publishes them through Prometheus alongside a
+> new RPC surface (`ad_market.readiness`). Premium domain sales gained a first-
+> party auction/royalty engine persisted via `SimpleDb`: binary cursor codecs
+> encode auctions, bids, ownership, and sale history; CLI/RPC endpoints cover
+> listing, bidding, completion, and status; and resale flows enforce royalty
+> payouts while reusing established protocol-fee policy. Regression suites now
+> guard readiness gating, telemetry gauges, RPC round-trips, and multi-stage
+> domain auctions so governance can flip the ad rail and monetize scarce names
+> without third-party dependencies.
+> **Review (2025-11-03, early morning):** Read-subsidy governance knobs now
+> propagate directly into live ad payouts. The node runtime shares a
+> `MarketplaceHandle` with the governance activation path so applying
+> `read_subsidy_*_percent` immediately normalises and persists the updated
+> `DistributionPolicy`, keeping RPC/CLI surfaces aligned with the effective
+> split. The ad marketplace tracks provisional reservations in a dedicated
+> ledger, debits them atomically on `commit`, refunds on `cancel`, and exposes
+> concurrency-focused regressions to prove oversubscription no longer leaks
+> unmatched impressions. Operators can trust that governance votes retune
+> on-chain ad settlements without waiting for manual restarts or padding
+> campaign budgets to account for race conditions.
 > **Review (2025-11-02, evening):** Bridge CLI coverage now drives the settlement-log and reward-accrual commands through the first-party parser so optional asset/relayer filters, cursor forwarding, and the default 50-row limit stay locked without clap stubs. `bridge_pending_dispute_persists_across_restart` exercises a challenged withdrawal across a bridge reopen, confirming `pending_withdrawals` and `bridge.dispute_audit` retain challenger metadata under sled persistence. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` regression parses every Grafana template to ensure the remediation row legends and descriptions remain in sync with the first-party PromQL, eliminating the need for external validators.
 > **Review (2025-10-24, late night):** Campaign governance now survives restarts
 > via the sled-backed ad marketplace, and operators can audit active spend
