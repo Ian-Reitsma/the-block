@@ -13,10 +13,20 @@ workspace crates.
 ## Highlights
 
 - ✅ Bridge CLI RPC calls now flow through a new `BridgeRpcTransport` trait that
+- ✅ Bridge CLI parser regressions now cover settlement-log asset filters, reward-accrual relayer/asset cursors, and default pagination via the first-party `Parser`, while `bridge_pending_dispute_persists_across_restart` keeps dispute persistence tests inside the sled-backed bridge crate. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` guards Grafana legends/descriptions without third-party validators.
   wraps the production `RpcClient` while letting tests inject an in-memory
   `MockTransport`. The HTTP-based `JsonRpcMock` harness and async runtime
   dependency disappeared from `cli/tests`, keeping FIRST_PARTY_ONLY runs
   hermetic without background servers.
+- ✅ Bridge dispute audit regressions now drive the command builder through the
+  first-party `Parser` and transport, asserting optional `asset`/`cursor`
+  filters serialise to JSON `null`, the default 50-row page size remains intact,
+  and the localhost RPC fallback survives future refactors. Monitoring’s
+  `dashboards_include_bridge_counter_panels` helper parses every generated
+  Grafana JSON (dashboard/operator/telemetry/dev) to ensure the reward-claim,
+  approval, settlement, and dispute panels preserve their first-party queries
+  and legends across templates—no third-party validators or dashboard tooling
+  introduced.
 - ✅ Bridge remediation regressions now allocate a per-test `RemediationSpoolSandbox` using `sys::tempfile`, seeding isolated spool directories for page/throttle/quarantine/escalate targets and exercising `remediation_spool_sandbox_restores_environment` so scoped `TB_REMEDIATION_*_DIRS` guards tear down automatically. Retry-heavy suites stay hermetic with zero `/tmp` residue and no third-party harnesses.
 - ✅ Explorer `/blocks/:hash/payouts` and the matching CLI command reuse the
   first-party SQLite/JSON codecs to emit per-role read/ad totals. Tests insert

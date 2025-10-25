@@ -9,6 +9,20 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-11-02)
+
+- Settlement-log and reward-accrual CLI commands now route through the first-party parser during tests, locking optional asset/relayer filters, cursor forwarding, and the default 50-row limit without clap stubs or serde_json helpers. The new `bridge_pending_dispute_persists_across_restart` regression keeps dispute persistence tests inside the sled-backed bridge crate, proving `pending_withdrawals` and `bridge.dispute_audit` retain challenged entries after a reopen. Monitoring gained `dashboards_include_bridge_remediation_legends_and_tooltips`, which inspects every generated Grafana JSON to ensure remediation panels keep their legends and descriptions first party—no external dashboard validators required.
+
+## Recent progress (2025-11-01)
+
+- Bridge audit tooling stays fully first party: `bridge_dispute_audit_parser_defaults_limit_and_cursor` runs the command builder
+  through `cli_core::parse::Parser` so the CLI retains its default 50-row page size and localhost fallback without leaning on
+  clap-generated stubs, while `bridge_dispute_audit_serializes_optional_fields` proves `asset=None`/`cursor=None` envelopes emit
+  JSON `null` via the existing transport helpers. Monitoring’s
+  `dashboards_include_bridge_counter_panels` regression parses every generated Grafana JSON (dashboard/operator/telemetry/dev)
+  to confirm the reward-claim, approval, settlement, and dispute panels keep their first-party queries and legends across
+  templates—no external validators or dashboard tooling required.
+
 ## Recent progress (2025-10-31)
 
 - Bridge remediation integration tests now allocate a per-case `RemediationSpoolSandbox`, wiring `TB_REMEDIATION_*_DIRS` env
