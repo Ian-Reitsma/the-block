@@ -74,7 +74,7 @@ impl BigUint {
         if bytes.is_empty() {
             return Self::zero();
         }
-        let mut digits = Vec::with_capacity((bytes.len() + 3) / 4);
+        let mut digits = Vec::with_capacity(bytes.len().div_ceil(4));
         for chunk in bytes.chunks(4) {
             let mut limb = 0u32;
             for (shift, byte) in chunk.iter().enumerate() {
@@ -235,8 +235,7 @@ impl BigUint {
         let limb_shift = (bits / LIMB_BITS) as usize;
         let bit_shift = bits % LIMB_BITS;
         if bit_shift == 0 {
-            self.digits
-                .splice(0..0, std::iter::repeat(0).take(limb_shift));
+            self.digits.splice(0..0, std::iter::repeat_n(0, limb_shift));
             return;
         }
         let mut new_digits = vec![0u32; self.digits.len() + limb_shift + 1];
@@ -425,9 +424,9 @@ impl BigUint {
     fn sub_mul_at(dst: &mut [u32], start: usize, src: &[u32], multiplier: u32) -> bool {
         let mut carry = 0u128;
         let mut borrow = 0i64;
-        for i in 0..src.len() {
-            let idx = start + i;
-            let product = (src[i] as u128) * (multiplier as u128) + carry;
+        for (offset, &source_digit) in src.iter().enumerate() {
+            let idx = start + offset;
+            let product = (source_digit as u128) * (multiplier as u128) + carry;
             carry = product >> LIMB_BITS;
             let product_low = product as u32;
             let value = dst[idx] as i64 - product_low as i64 - borrow;
@@ -452,9 +451,9 @@ impl BigUint {
 
     fn add_at(dst: &mut [u32], start: usize, src: &[u32]) {
         let mut carry = 0u64;
-        for i in 0..src.len() {
-            let idx = start + i;
-            let sum = dst[idx] as u64 + src[i] as u64 + carry;
+        for (offset, &source_digit) in src.iter().enumerate() {
+            let idx = start + offset;
+            let sum = dst[idx] as u64 + source_digit as u64 + carry;
             dst[idx] = sum as u32;
             carry = sum >> LIMB_BITS;
         }
@@ -760,7 +759,7 @@ impl Shl<u32> for BigUint {
     }
 }
 
-impl<'a> Shl<u32> for &'a BigUint {
+impl Shl<u32> for &BigUint {
     type Output = BigUint;
 
     fn shl(self, rhs: u32) -> Self::Output {
@@ -785,7 +784,7 @@ impl Shr<u32> for BigUint {
     }
 }
 
-impl<'a> Shr<u32> for &'a BigUint {
+impl Shr<u32> for &BigUint {
     type Output = BigUint;
 
     fn shr(self, rhs: u32) -> Self::Output {

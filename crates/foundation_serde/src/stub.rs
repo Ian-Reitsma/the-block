@@ -719,7 +719,7 @@ pub mod ser {
         }
     }
 
-    impl<'a, T> Serialize for ::std::slice::Iter<'a, T>
+    impl<T> Serialize for ::std::slice::Iter<'_, T>
     where
         T: Serialize,
     {
@@ -727,9 +727,9 @@ pub mod ser {
         where
             S: Serializer,
         {
-            let mut iter = self.clone();
+            let iter = self.clone();
             let mut seq = serializer.serialize_seq(None)?;
-            while let Some(value) = iter.next() {
+            for value in iter {
                 SerializeSeq::serialize_element(&mut seq, value)?;
             }
             seq.end()
@@ -1022,7 +1022,7 @@ pub mod de {
         Other(&'a str),
     }
 
-    impl<'a> fmt::Display for Unexpected<'a> {
+    impl fmt::Display for Unexpected<'_> {
         fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             use Unexpected::*;
             match *self {
@@ -1062,7 +1062,7 @@ pub mod de {
 
     struct BoolVisitor;
 
-    impl<'de> Visitor<'de> for BoolVisitor {
+    impl Visitor<'_> for BoolVisitor {
         type Value = bool;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1143,7 +1143,7 @@ pub mod de {
 
     struct I128Visitor;
 
-    impl<'de> Visitor<'de> for I128Visitor {
+    impl Visitor<'_> for I128Visitor {
         type Value = i128;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1253,7 +1253,7 @@ pub mod de {
 
     struct U128Visitor;
 
-    impl<'de> Visitor<'de> for U128Visitor {
+    impl Visitor<'_> for U128Visitor {
         type Value = u128;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1297,7 +1297,7 @@ pub mod de {
 
     struct F32Visitor;
 
-    impl<'de> Visitor<'de> for F32Visitor {
+    impl Visitor<'_> for F32Visitor {
         type Value = f32;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1337,7 +1337,7 @@ pub mod de {
 
     struct F64Visitor;
 
-    impl<'de> Visitor<'de> for F64Visitor {
+    impl Visitor<'_> for F64Visitor {
         type Value = f64;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1377,7 +1377,7 @@ pub mod de {
 
     struct CharVisitor;
 
-    impl<'de> Visitor<'de> for CharVisitor {
+    impl Visitor<'_> for CharVisitor {
         type Value = char;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1415,7 +1415,7 @@ pub mod de {
 
     struct StringVisitor;
 
-    impl<'de> Visitor<'de> for StringVisitor {
+    impl Visitor<'_> for StringVisitor {
         type Value = String;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1448,7 +1448,7 @@ pub mod de {
 
     struct UnitVisitor;
 
-    impl<'de> Visitor<'de> for UnitVisitor {
+    impl Visitor<'_> for UnitVisitor {
         type Value = ();
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -2310,7 +2310,7 @@ pub mod de {
         }
     }
 
-    impl<'a> Expected for &'a str {
+    impl Expected for &str {
         fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             formatter.write_str(self)
         }
@@ -2840,7 +2840,7 @@ pub mod de {
             }
         }
 
-        impl<'de, E> IntoDeserializer<'de, E> for String
+        impl<E> IntoDeserializer<'_, E> for String
         where
             E: Error,
         {
@@ -2851,7 +2851,7 @@ pub mod de {
             }
         }
 
-        impl<'de, E> IntoDeserializer<'de, E> for StringDeserializer<E>
+        impl<E> IntoDeserializer<'_, E> for StringDeserializer<E>
         where
             E: Error,
         {

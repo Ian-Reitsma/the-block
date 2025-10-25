@@ -64,7 +64,11 @@ where
         if remaining == 0 {
             let mut results = Vec::with_capacity(outputs.len());
             for slot in outputs.iter_mut() {
-                results.push(slot.take().expect("join_all result missing"));
+                if let Some(value) = slot.take() {
+                    results.push(value);
+                } else {
+                    return Poll::Pending;
+                }
             }
             drop(outputs);
             Poll::Ready(results)

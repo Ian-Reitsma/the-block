@@ -37,11 +37,17 @@ Security considerations are catalogued under
    given the domain, provider metadata, and badge context. Provider badges come
    from the global registry maintained by `service_badge::provider_badges`, so
    physical-presence checks survive restarts and badge revocations without
-   querying sled mid-request. The winning creative (if any) is recorded on the
-   acknowledgement, the caller-supplied `X-TheBlock-Ack-*` headers are validated,
-   and the Ed25519 signature over the manifest, path hash, byte count,
-   timestamp, client hash, domain, provider, and campaign fields is verified
-   before the fully signed `ReadAck` is pushed into the batching queue.
+   querying sled mid-request. Provider identity now flows through
+   `storage::pipeline::provider_for_manifest`: manifests published with explicit
+   provider lists always win, and multi-provider manifests hash the reservation
+   key (domain + path + byte range) to select a stable entry. Gateway tests use
+   the new `pipeline::override_manifest_providers_for_test` hook so multi-provider
+   scenarios stay hermetic without touching the filesystem. The winning creative
+   (if any) is recorded on the acknowledgement, the caller-supplied
+   `X-TheBlock-Ack-*` headers are validated, and the Ed25519 signature over the
+   manifest, path hash, byte count, timestamp, client hash, domain, provider, and
+   campaign fields is verified before the fully signed `ReadAck` is pushed into
+   the batching queue.
 
 ### WebSocket peer metrics
 
@@ -82,9 +88,16 @@ Security considerations are catalogued under
 
 ## 4. Advertising Marketplace Integration
 
-- The `ad_market` crate provides an in-memory marketplace that ingests campaigns
-  (budget, creatives, targeting badges/domains) and hands back the best matching
-  creative when the gateway asks for an impression.
+- The `ad_market` crate now defaults to the sled-backed `SledMarketplace`,
+  persisting campaign manifests, budgets, and distribution policies across
+  restarts. RPC and CLI surfaces feed campaigns through the handwritten
+  `campaign_from_value` converter so FIRST_PARTY_ONLY builds never depend on the
+  `foundation_serde` stub.
+- Gateway tests and integration suites use the shared
+  `fuzz_dispatch_request`/`fuzz_runtime_config_with_admin` helpers to exercise
+  `ad_market.register_campaign` without binding TCP sockets, keeping duplicate
+  registration and invalid payload paths hermetic under the
+  `integration-tests` feature.
 - Reservations include a per-mebibyte CT price; when the acknowledgement is
   accepted the node commits the settlement, carves up the CT based on the active
   distribution policy, and publishes per-role totals (`ad_viewer_ct`,

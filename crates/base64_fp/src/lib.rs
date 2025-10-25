@@ -15,58 +15,58 @@ pub struct Error {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ErrorKind {
-    InvalidByte(u8),
-    InvalidLength,
-    InvalidPadding,
+    Byte(u8),
+    Length,
+    Padding,
 }
 
 impl Error {
     fn invalid_byte(byte: u8, index: usize) -> Self {
         Self {
-            kind: ErrorKind::InvalidByte(byte),
+            kind: ErrorKind::Byte(byte),
             index: Some(index),
         }
     }
 
     fn invalid_length() -> Self {
         Self {
-            kind: ErrorKind::InvalidLength,
+            kind: ErrorKind::Length,
             index: None,
         }
     }
 
     fn invalid_padding() -> Self {
         Self {
-            kind: ErrorKind::InvalidPadding,
+            kind: ErrorKind::Padding,
             index: None,
         }
     }
 
     /// Returns `true` when the error was triggered by an invalid byte.
     pub fn is_invalid_byte(&self) -> bool {
-        matches!(self.kind, ErrorKind::InvalidByte(_))
+        matches!(self.kind, ErrorKind::Byte(_))
     }
 
     /// Returns `true` when the failure stems from an invalid length.
     pub fn is_invalid_length(&self) -> bool {
-        matches!(self.kind, ErrorKind::InvalidLength)
+        matches!(self.kind, ErrorKind::Length)
     }
 
     /// Returns `true` when the error was caused by malformed padding.
     pub fn is_invalid_padding(&self) -> bool {
-        matches!(self.kind, ErrorKind::InvalidPadding)
+        matches!(self.kind, ErrorKind::Padding)
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            ErrorKind::InvalidByte(byte) => match self.index {
+            ErrorKind::Byte(byte) => match self.index {
                 Some(idx) => write!(f, "invalid base64 byte 0x{byte:02x} at index {idx}"),
                 None => write!(f, "invalid base64 byte 0x{byte:02x}"),
             },
-            ErrorKind::InvalidLength => write!(f, "invalid base64 length"),
-            ErrorKind::InvalidPadding => write!(f, "invalid base64 padding"),
+            ErrorKind::Length => write!(f, "invalid base64 length"),
+            ErrorKind::Padding => write!(f, "invalid base64 padding"),
         }
     }
 }
@@ -124,7 +124,7 @@ fn encode_internal(input: &[u8], alphabet: &[u8; 64], pad: bool) -> String {
         return String::new();
     }
 
-    let mut output = Vec::with_capacity(((input.len() + 2) / 3) * 4);
+    let mut output = Vec::with_capacity(input.len().div_ceil(3) * 4);
     let mut index = 0usize;
 
     while index + 3 <= input.len() {

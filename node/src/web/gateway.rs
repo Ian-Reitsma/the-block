@@ -8,21 +8,21 @@
 #![deny(warnings)]
 
 use ad_market::{ImpressionContext, MarketplaceHandle, ReservationKey};
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::hex;
+use std::fs;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::Instant,
 };
-mod rate_limit;
-use concurrency::Lazy;
-use rate_limit::RateLimitFilter;
-use std::fs;
 use sys::signals::{Signals, SIGHUP};
 
-use crate::{service_badge, storage::pipeline, vm::wasm, ReadAck, StakeTable};
+use crate::web::rate_limit::RateLimitFilter;
+use crate::{service_badge, storage::pipeline, vm::wasm, ReadAck};
+use foundation_serialization::json;
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -70,9 +70,17 @@ struct DynamicFunc {
 static DYNAMIC_FUNCS: Lazy<Mutex<HashMap<(String, String), DynamicFunc>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+fn normalize_dynamic_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix('/') {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 pub fn register_dynamic(domain: &str, path: &str, wasm: Vec<u8>, gas_limit: u64) {
     DYNAMIC_FUNCS.lock().unwrap().insert(
-        (domain.to_string(), path.to_string()),
+        (domain.to_string(), normalize_dynamic_path(path)),
         DynamicFunc { wasm, gas_limit },
     );
 }
@@ -81,7 +89,7 @@ fn lookup_dynamic(domain: &str, path: &str) -> Option<DynamicFunc> {
     DYNAMIC_FUNCS
         .lock()
         .unwrap()
-        .get(&(domain.to_string(), path.to_string()))
+        .get(&(domain.to_string(), normalize_dynamic_path(path)))
         .cloned()
 }
 
@@ -109,6 +117,7 @@ enum AckParseError {
 }
 
 impl AckParseError {
+    #[cfg(feature = "legacy-read-acks")]
     fn is_missing(self) -> bool {
         matches!(self, AckParseError::Missing(_))
     }
@@ -216,10 +225,11 @@ fn parse_signed_ack(
         });
     }
     let client_hash = compute_client_hash(&req.remote_addr(), domain);
-    let provider = infer_provider_for(domain, path);
-    let mut ack = ReadAck {
+    let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+    let provider = infer_provider_for(&manifest, &path_hash, domain);
+    let ack = ReadAck {
         manifest,
-        path_hash: blake3::hash(path.as_bytes()).into(),
+        path_hash,
         bytes,
         ts,
         client_hash,
@@ -261,6 +271,7 @@ fn build_read_ack(
     path: &str,
     bytes: u64,
 ) -> Result<ReadAck, Response> {
+    let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
     match parse_signed_ack(req, domain, path, bytes) {
         Ok(mut ack) => {
             attach_campaign_metadata(state, &mut ack);
@@ -268,14 +279,14 @@ fn build_read_ack(
         }
         Err(err) if err.is_missing() => Ok(ReadAck {
             manifest: [0; 32],
-            path_hash: blake3::hash(path.as_bytes()).into(),
+            path_hash,
             bytes,
             ts: now_ts(),
             client_hash: blake3::hash(domain.as_bytes()).into(),
             pk: [0u8; 32],
             sig: vec![0u8; 64],
             domain: domain.to_string(),
-            provider: infer_provider_for(domain, path),
+            provider: infer_provider_for(&[0; 32], &path_hash, domain),
             campaign_id: None,
             creative_id: None,
         }),
@@ -313,9 +324,8 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     }
 }
 
-fn infer_provider_for(domain: &str, _path: &str) -> String {
-    // TODO: plumb provider metadata from storage manifests / campaign service.
-    domain.to_string()
+fn infer_provider_for(manifest: &[u8; 32], path_hash: &[u8; 32], domain: &str) -> String {
+    pipeline::provider_for_manifest(manifest, path_hash).unwrap_or_else(|| domain.to_string())
 }
 
 #[cfg(test)]
@@ -415,7 +425,7 @@ pub fn install_blocklist_reload() {
     let path = BLOCKLIST_PATH.lock().unwrap().clone();
     if let Some(p) = path {
         std::thread::spawn(move || {
-            let mut signals = Signals::new([SIGHUP]).expect("signals");
+            let signals = Signals::new([SIGHUP]).expect("signals");
             for _ in signals.forever() {
                 load_blocklist(&p);
             }
@@ -494,22 +504,17 @@ async fn handle_static(req: Request<GatewayState>) -> Result<Response, HttpError
     Ok(Response::new(StatusCode::OK).with_body(blob))
 }
 
-async fn handle_api(mut req: Request<GatewayState>) -> Result<Response, HttpError> {
+async fn handle_api(req: Request<GatewayState>) -> Result<Response, HttpError> {
     let state = req.state().clone();
     let domain = match state.authorize(&req) {
         Ok(host) => host,
         Err(response) => return Ok(response),
     };
-    let tail = req.param("tail").unwrap_or("");
-    handle_func(domain, tail, req, state).await
+    handle_func(domain, req).await
 }
 
-async fn handle_func(
-    domain: String,
-    api: &str,
-    mut req: Request<GatewayState>,
-    state: Arc<GatewayState>,
-) -> Result<Response, HttpError> {
+async fn handle_func(domain: String, req: Request<GatewayState>) -> Result<Response, HttpError> {
+    let api = req.param("tail").unwrap_or("");
     if let Some(func) = lookup_dynamic(&domain, api) {
         let mut meter = wasm::GasMeter::new(func.gas_limit);
         match wasm::execute(&func.wasm, req.body_bytes(), &mut meter) {
@@ -519,12 +524,13 @@ async fn handle_func(
                 .close()),
         }
     } else {
-        let mut body = format!("dynamic endpoint '{api}' not registered\n").into_bytes();
+        let body = format!("dynamic endpoint '{api}' not registered\n").into_bytes();
         let _ = pipeline::fetch_wasm(&domain);
         Ok(Response::new(StatusCode::NOT_FOUND).with_body(body).close())
     }
 }
 
+#[cfg(feature = "legacy-read-acks")]
 fn now_ts() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -540,12 +546,13 @@ pub trait StakeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::pipeline;
     use ad_market::{
         Campaign, CampaignTargeting, Creative, DistributionPolicy, InMemoryMarketplace,
     };
     use httpd::{Method, Router, StatusCode};
     use runtime::sync::mpsc;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
     use std::sync::Arc;
 
     struct StaticStake {
@@ -592,7 +599,10 @@ mod tests {
         let (state, _rx) = state_with_domains(&["allowed.test"]);
         let router = Router::new(state.clone());
         let request = router.request_builder().host("allowed.test").build();
-        let host = state.authorize(&request).expect("authorized host");
+        let host = match state.authorize(&request) {
+            Ok(host) => host,
+            Err(response) => panic!("authorization failed with status {}", response.status()),
+        };
         assert_eq!(host, "allowed.test");
     }
 
@@ -652,7 +662,7 @@ mod tests {
             .path("/api/sum")
             .body(body)
             .build();
-        let response = router.handle(request).unwrap();
+        let response = runtime::block_on(router.handle(request)).unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), 10i64.to_le_bytes());
     }
@@ -668,6 +678,12 @@ mod tests {
         let path = "/index.html";
         let bytes = 0u64;
         let ts = 1_696_969_696u64;
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+        pipeline::override_manifest_providers_for_test(
+            manifest,
+            vec!["gateway-nyc-01".to_string()],
+        );
         let mut rng = OsRng::default();
         let signing = SigningKey::generate(&mut rng);
         let pk_bytes = signing.verifying_key().to_bytes();
@@ -693,7 +709,7 @@ mod tests {
             .header(HEADER_ACK_BYTES, bytes.to_string())
             .header(HEADER_ACK_TIMESTAMP, ts.to_string())
             .build();
-        let response = router.handle(request).unwrap();
+        let response = runtime::block_on(router.handle(request)).unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), Vec::<u8>::new());
 
@@ -705,9 +721,10 @@ mod tests {
         assert_eq!(ack.ts, ts);
         assert_eq!(ack.client_hash, client_hash);
         assert_eq!(ack.domain, "signed.test");
-        assert_eq!(ack.provider, "signed.test");
+        assert_eq!(ack.provider, "gateway-nyc-01");
         assert!(ack.campaign_id.is_none());
         assert!(ack.creative_id.is_none());
+        pipeline::clear_test_manifest_providers();
     }
 
     #[test]
@@ -741,6 +758,13 @@ mod tests {
         let path = "/creative.html";
         let bytes = 1_048_576u64;
         let ts = 1_777_777_777u64;
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+        pipeline::override_manifest_providers_for_test(
+            manifest,
+            vec!["gateway-sfo-01".to_string()],
+        );
+        pipeline::override_static_blob_for_test("signed.test", path, vec![0u8; bytes as usize]);
         let mut rng = OsRng::default();
         let signing = SigningKey::generate(&mut rng);
         let pk_bytes = signing.verifying_key().to_bytes();
@@ -766,19 +790,24 @@ mod tests {
             .header(HEADER_ACK_BYTES, bytes.to_string())
             .header(HEADER_ACK_TIMESTAMP, ts.to_string())
             .build();
-        let response = router.handle(request).unwrap();
+        let response = runtime::block_on(router.handle(request)).unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         let ack = rx.try_recv().expect("ack queued");
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp1"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative1"));
+        assert_eq!(ack.provider, "gateway-sfo-01");
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
         // The reservation should clear once the worker commits; ensure metadata persisted on ack.
     }
 
     #[test]
     fn static_read_matches_badge_targeted_campaign() {
         service_badge::clear_badges();
-        service_badge::set_physical_presence("signed.test", true);
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+        service_badge::set_physical_presence("gateway-ldn-01", true);
 
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
         let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
@@ -809,6 +838,11 @@ mod tests {
         let path = "/badge.html";
         let bytes = 1_048_576u64;
         let ts = 1_888_888_888u64;
+        pipeline::override_manifest_providers_for_test(
+            manifest,
+            vec!["gateway-ldn-01".to_string()],
+        );
+        pipeline::override_static_blob_for_test("signed.test", path, vec![0u8; bytes as usize]);
         let mut rng = OsRng::default();
         let signing = SigningKey::generate(&mut rng);
         let pk_bytes = signing.verifying_key().to_bytes();
@@ -833,14 +867,109 @@ mod tests {
             .header(HEADER_ACK_BYTES, bytes.to_string())
             .header(HEADER_ACK_TIMESTAMP, ts.to_string())
             .build();
-        let response = router.handle(request).unwrap();
+        let response = runtime::block_on(router.handle(request)).unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         let ack = rx.try_recv().expect("ack queued");
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp-badge"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative-badge"));
+        assert_eq!(ack.provider, "gateway-ldn-01");
 
         service_badge::clear_badges();
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+    }
+
+    #[test]
+    fn static_read_selects_provider_from_multiple_candidates() {
+        pipeline::clear_test_manifest_providers();
+
+        let manifest = [0x42u8; 32];
+        let providers = vec![
+            "gateway-ams-01".to_string(),
+            "gateway-ldn-01".to_string(),
+            "gateway-nyc-01".to_string(),
+        ];
+        pipeline::override_manifest_providers_for_test(manifest, providers);
+
+        let (state, mut rx) = state_with_domains(&["multi.test"]);
+        let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
+
+        let mut rng = OsRng::default();
+        let signing = SigningKey::generate(&mut rng);
+        let pk_bytes = signing.verifying_key().to_bytes();
+        let remote: SocketAddr = "127.0.0.1:9500".parse().unwrap();
+
+        let mut send_signed = |path: &str, ts: u64, expected: &str| -> String {
+            let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+            let computed =
+                pipeline::provider_for_manifest(&manifest, &path_hash).expect("provider available");
+            assert_eq!(
+                computed, expected,
+                "provider selection changed unexpectedly"
+            );
+            let bytes = 256u64;
+            pipeline::override_static_blob_for_test("multi.test", path, vec![0u8; bytes as usize]);
+            let client_hash = compute_client_hash(&remote, "multi.test");
+            let mut hasher = Hasher::new();
+            hasher.update(&manifest);
+            hasher.update(&path_hash);
+            hasher.update(&bytes.to_le_bytes());
+            hasher.update(&ts.to_le_bytes());
+            hasher.update(&client_hash);
+            let signature = signing.sign(hasher.finalize().as_bytes()).to_bytes();
+
+            let request = router
+                .request_builder()
+                .host("multi.test")
+                .path(path)
+                .remote_addr(remote)
+                .header(HEADER_ACK_MANIFEST, hex::encode(manifest))
+                .header(HEADER_ACK_PUBKEY, hex::encode(pk_bytes))
+                .header(HEADER_ACK_SIGNATURE, hex::encode(signature))
+                .header(HEADER_ACK_BYTES, bytes.to_string())
+                .header(HEADER_ACK_TIMESTAMP, ts.to_string())
+                .build();
+            let response = runtime::block_on(router.handle(request)).unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let ack = rx.try_recv().expect("ack queued");
+            assert_eq!(ack.provider, expected);
+            assert_eq!(ack.manifest, manifest);
+            assert_eq!(ack.pk, pk_bytes);
+            assert_eq!(ack.bytes, bytes);
+            ack.provider
+        };
+
+        let mut expected = Vec::new();
+        let mut unique = BTreeSet::new();
+        for path in [
+            "/multi/first",
+            "/multi/second",
+            "/multi/third",
+            "/multi/fourth",
+            "/multi/fifth",
+        ] {
+            let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+            let provider =
+                pipeline::provider_for_manifest(&manifest, &path_hash).expect("provider available");
+            unique.insert(provider.clone());
+            expected.push((path, provider));
+            if unique.len() > 1 {
+                break;
+            }
+        }
+        assert!(
+            unique.len() > 1,
+            "expected at least two providers to be selected"
+        );
+
+        for (idx, (path, provider)) in expected.into_iter().enumerate() {
+            let observed = send_signed(path, 1_700_000_001 + idx as u64, &provider);
+            assert_eq!(observed, provider);
+        }
+
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
     }
 
     #[test]
@@ -852,7 +981,7 @@ mod tests {
             .host("unsigned.test")
             .path("/file.txt")
             .build();
-        let response = router.handle(request).unwrap();
+        let response = runtime::block_on(router.handle(request)).unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(String::from_utf8_lossy(response.body()).contains("missing"));
         match rx.try_recv() {

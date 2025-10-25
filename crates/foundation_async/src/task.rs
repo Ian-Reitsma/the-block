@@ -22,10 +22,10 @@ impl AtomicWaker {
     /// If a wakeup arrived before registration, the newly stored waker is
     /// notified immediately so the caller does not miss the signal.
     pub fn register(&self, waker: &Waker) {
-        let mut slot = self.waker.lock().expect("atomic waker poisoned");
+        let mut slot = self.waker.lock().unwrap_or_else(|err| err.into_inner());
         let should_replace = slot
             .as_ref()
-            .map_or(true, |current| !current.will_wake(waker));
+            .is_none_or(|current| !current.will_wake(waker));
         if should_replace {
             *slot = Some(waker.clone());
         }
@@ -44,7 +44,12 @@ impl AtomicWaker {
     /// Wakes the stored waker, if any. If no waker is registered yet, the wake
     /// is remembered and delivered once a waker is installed via [`register`].
     pub fn wake(&self) {
-        if let Some(waker) = self.waker.lock().expect("atomic waker poisoned").clone() {
+        if let Some(waker) = self
+            .waker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
+        {
             waker.wake();
         } else {
             self.pending.store(true, Ordering::SeqCst);
@@ -54,10 +59,21 @@ impl AtomicWaker {
     /// Wakes the stored waker by reference, if any. If no waker is available
     /// yet, the wakeup is deferred to the next call to [`register`].
     pub fn wake_by_ref(&self) {
-        if let Some(waker) = self.waker.lock().expect("atomic waker poisoned").clone() {
+        if let Some(waker) = self
+            .waker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
+        {
             waker.wake_by_ref();
         } else {
             self.pending.store(true, Ordering::SeqCst);
         }
+    }
+}
+
+impl Default for AtomicWaker {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,6 +1,8 @@
 use core::fmt;
 use core::str::FromStr;
 
+use core::cmp::Ordering;
+
 use rand::{CryptoRng, RngCore};
 use thiserror::Error;
 
@@ -158,7 +160,7 @@ impl FieldElement {
         Self { limbs }.reduce()
     }
 
-    fn to_bytes(&self) -> [u8; POINT_LEN] {
+    fn to_bytes(self) -> [u8; POINT_LEN] {
         let mut limbs = self.normalize();
 
         // Final carry propagation to ensure each limb fits into 51 bits
@@ -186,8 +188,11 @@ impl FieldElement {
 
     fn add(&self, other: &Self) -> Self {
         let mut limbs = [0i128; 5];
-        for i in 0..5 {
-            limbs[i] = self.limbs[i] + other.limbs[i];
+        for (output, (left, right)) in limbs
+            .iter_mut()
+            .zip(self.limbs.iter().zip(other.limbs.iter()))
+        {
+            *output = left + right;
         }
         Self { limbs }.reduce()
     }
@@ -201,8 +206,13 @@ impl FieldElement {
             MODULUS_LIMB,
         ];
         let mut limbs = [0i128; 5];
-        for i in 0..5 {
-            limbs[i] = self.limbs[i] - other.limbs[i] + modulus[i] * 2;
+        for (output, ((left, right), modulus_limb)) in limbs.iter_mut().zip(
+            self.limbs
+                .iter()
+                .zip(other.limbs.iter())
+                .zip(modulus.iter()),
+        ) {
+            *output = left - right + modulus_limb * 2;
         }
         Self { limbs }.reduce()
     }
@@ -263,9 +273,8 @@ impl FieldElement {
         let z_2_100_0 = z_2_50_0.square_n(50).mul(&z_2_50_0);
         let z_2_200_0 = z_2_100_0.square_n(100).mul(&z_2_100_0);
         let z_2_250_0 = z_2_200_0.square_n(50).mul(&z_2_50_0);
-        let z_2_255_21 = z_2_250_0.square_n(5).mul(&z11);
 
-        z_2_255_21
+        z_2_250_0.square_n(5).mul(&z11)
     }
 
     fn reduce(mut self) -> Self {
@@ -328,27 +337,31 @@ impl FieldElement {
         ];
 
         let mut should_subtract = false;
-        for i in (0..5).rev() {
-            if limbs[i] > modulus[i] {
-                should_subtract = true;
-                break;
-            } else if limbs[i] < modulus[i] {
-                should_subtract = false;
-                break;
+        for (limb, modulus_limb) in limbs.iter().zip(modulus.iter()).rev() {
+            match limb.cmp(modulus_limb) {
+                Ordering::Greater => {
+                    should_subtract = true;
+                    break;
+                }
+                Ordering::Less => {
+                    should_subtract = false;
+                    break;
+                }
+                Ordering::Equal => {}
             }
         }
 
         if should_subtract {
             let mut borrow = 0i128;
-            for i in 0..5 {
-                let mut value = limbs[i] - modulus[i] - borrow;
+            for (limb, modulus_limb) in limbs.iter_mut().zip(modulus.iter()) {
+                let mut value = *limb - modulus_limb - borrow;
                 if value < 0 {
                     value += 1i128 << 51;
                     borrow = 1;
                 } else {
                     borrow = 0;
                 }
-                limbs[i] = value;
+                *limb = value;
             }
         }
 
@@ -358,10 +371,10 @@ impl FieldElement {
 
 fn conditional_swap(a: &mut FieldElement, b: &mut FieldElement, swap: u8) {
     let mask = -((swap & 1) as i128);
-    for i in 0..5 {
-        let diff = mask & (a.limbs[i] ^ b.limbs[i]);
-        a.limbs[i] ^= diff;
-        b.limbs[i] ^= diff;
+    for (a_limb, b_limb) in a.limbs.iter_mut().zip(b.limbs.iter_mut()) {
+        let diff = mask & (*a_limb ^ *b_limb);
+        *a_limb ^= diff;
+        *b_limb ^= diff;
     }
 }
 

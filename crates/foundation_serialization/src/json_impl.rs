@@ -151,29 +151,6 @@ impl Number {
         }
     }
 
-    fn to_string(&self) -> String {
-        match self.0 {
-            NumberRepr::PosInt(v) => v.to_string(),
-            NumberRepr::NegInt(v) => v.to_string(),
-            NumberRepr::Float(v) => {
-                if v.fract() == 0.0 {
-                    let mut s = format!("{:.1}", v);
-                    if s.contains('.') {
-                        while s.ends_with('0') {
-                            s.pop();
-                        }
-                        if s.ends_with('.') {
-                            s.push('0');
-                        }
-                    }
-                    s
-                } else {
-                    v.to_string()
-                }
-            }
-        }
-    }
-
     pub fn as_u64(&self) -> Option<u64> {
         match self.0 {
             NumberRepr::PosInt(v) => Some(v),
@@ -196,6 +173,31 @@ impl Number {
             NumberRepr::PosInt(v) => v as f64,
             NumberRepr::NegInt(v) => v as f64,
             NumberRepr::Float(v) => v,
+        }
+    }
+}
+
+impl core::fmt::Display for Number {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            NumberRepr::PosInt(v) => write!(f, "{}", v),
+            NumberRepr::NegInt(v) => write!(f, "{}", v),
+            NumberRepr::Float(v) => {
+                if v.fract() == 0.0 {
+                    let mut s = format!("{:.1}", v);
+                    if s.contains('.') {
+                        while s.ends_with('0') {
+                            s.pop();
+                        }
+                        if s.ends_with('.') {
+                            s.push('0');
+                        }
+                    }
+                    f.write_str(&s)
+                } else {
+                    write!(f, "{}", v)
+                }
+            }
         }
     }
 }
@@ -265,8 +267,9 @@ impl From<f64> for Number {
 }
 
 /// Representation of a JSON value.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum Value {
+    #[default]
     Null,
     Bool(bool),
     Number(Number),
@@ -276,12 +279,6 @@ pub enum Value {
 }
 
 static NULL: Value = Value::Null;
-
-impl Default for Value {
-    fn default() -> Self {
-        Value::Null
-    }
-}
 
 impl Serialize for Number {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -303,7 +300,7 @@ impl<'de> Deserialize<'de> for Number {
     {
         struct NumberVisitor;
 
-        impl<'de> Visitor<'de> for NumberVisitor {
+        impl Visitor<'_> for NumberVisitor {
             type Value = Number;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1380,7 +1377,7 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
         match self.value {
             Value::Number(n) => n
                 .as_i64()
-                .ok_or_else(|| Error::invalid_number())
+                .ok_or_else(Error::invalid_number)
                 .and_then(|v| visitor.visit_i64(v)),
             other => Err(unexpected_type("integer", other)),
         }
@@ -1414,7 +1411,7 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
         match self.value {
             Value::Number(n) => n
                 .as_u64()
-                .ok_or_else(|| Error::invalid_number())
+                .ok_or_else(Error::invalid_number)
                 .and_then(|v| visitor.visit_u64(v)),
             other => Err(unexpected_type("unsigned integer", other)),
         }
@@ -1484,7 +1481,7 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
                 for value in values {
                     match value {
                         Value::Number(n) => {
-                            let byte = n.as_u64().ok_or_else(|| Error::invalid_number())?;
+                            let byte = n.as_u64().ok_or_else(Error::invalid_number)?;
                             bytes.push(byte as u8);
                         }
                         other => return Err(unexpected_type("byte", other)),

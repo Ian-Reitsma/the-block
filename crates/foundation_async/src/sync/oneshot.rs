@@ -63,7 +63,11 @@ impl<T> Sender<T> {
     }
 
     fn send_inner(self, value: T) -> Result<(), T> {
-        let mut state = self.inner.state.lock().expect("oneshot poisoned");
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         if matches!(*state, State::Consumed | State::Closed) {
             return Err(value);
         }
@@ -81,7 +85,11 @@ impl<T> Sender<T> {
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
         if self.inner.sender_alive.swap(false, Ordering::SeqCst) {
-            let mut state = self.inner.state.lock().expect("oneshot poisoned");
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
             if matches!(*state, State::Pending) {
                 *state = State::Closed;
                 drop(state);
@@ -102,7 +110,11 @@ impl<T> Receiver<T> {
     /// will receive an error when attempting to send.
     pub fn close(&self) {
         if self.inner.receiver_alive.swap(false, Ordering::SeqCst) {
-            let mut state = self.inner.state.lock().expect("oneshot poisoned");
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
             if matches!(*state, State::Pending) {
                 *state = State::Closed;
             }
@@ -115,7 +127,7 @@ impl<T> Future for Receiver<T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let inner = &self.as_ref().get_ref().inner;
-        let mut state = inner.state.lock().expect("oneshot poisoned");
+        let mut state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
         match std::mem::replace(&mut *state, State::Consumed) {
             State::Value(value) => {
                 *state = State::Consumed;
@@ -147,7 +159,11 @@ impl<T> Future for Receiver<T> {
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         if self.inner.receiver_alive.swap(false, Ordering::SeqCst) {
-            let mut state = self.inner.state.lock().expect("oneshot poisoned");
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
             if matches!(*state, State::Pending) {
                 *state = State::Closed;
             }

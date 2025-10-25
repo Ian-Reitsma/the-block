@@ -11,26 +11,27 @@ use crate::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,
 };
 
+type ColumnFamily = HashMap<Vec<u8>, Vec<u8>>;
+type ColumnFamilies = HashMap<String, ColumnFamily>;
+
 #[derive(Default)]
 struct Inner {
-    column_families: HashMap<String, HashMap<Vec<u8>, Vec<u8>>>,
+    column_families: ColumnFamilies,
 }
 
 impl Inner {
-    fn ensure_cf(&mut self, name: &str) -> &mut HashMap<Vec<u8>, Vec<u8>> {
-        self.column_families
-            .entry(name.to_string())
-            .or_insert_with(HashMap::new)
+    fn ensure_cf(&mut self, name: &str) -> &mut ColumnFamily {
+        self.column_families.entry(name.to_string()).or_default()
     }
 
-    fn get_cf(&self, name: &str) -> Option<&HashMap<Vec<u8>, Vec<u8>>> {
+    fn get_cf(&self, name: &str) -> Option<&ColumnFamily> {
         self.column_families.get(name)
     }
 
     fn ensure_default(&mut self) {
         self.column_families
             .entry("default".to_string())
-            .or_insert_with(HashMap::new);
+            .or_default();
     }
 }
 
@@ -346,8 +347,8 @@ impl Default for MemoryEngine {
     }
 }
 
-fn load_column_families(path: &Path) -> io::Result<HashMap<String, HashMap<Vec<u8>, Vec<u8>>>> {
-    let mut result = HashMap::new();
+fn load_column_families(path: &Path) -> io::Result<ColumnFamilies> {
+    let mut result = ColumnFamilies::new();
     let mut legacy_paths: HashMap<String, PathBuf> = HashMap::new();
     let mut base64_loaded = HashSet::new();
     if !path.exists() {

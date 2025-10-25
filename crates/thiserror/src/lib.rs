@@ -365,7 +365,7 @@ impl Variant {
             variant = self.name,
             args = bindings
                 .iter()
-                .map(|b| format!("{b}"))
+                .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join(",")
         );
@@ -383,7 +383,7 @@ impl Variant {
                 )
             }
             VariantFormat::Transparent => {
-                let binding = bindings.get(0).cloned().unwrap_or_else(|| "_".to_string());
+                let binding = bindings.first().cloned().unwrap_or_else(|| "_".to_string());
                 format!(
                     "{pattern} => write!(f, \"{{}}\", {binding}),",
                     pattern = pattern,

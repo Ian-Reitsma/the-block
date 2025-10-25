@@ -263,7 +263,7 @@ pub struct Ref<'a, K, V> {
     guard: MutexGuard<'a, HashMap<K, V>>,
 }
 
-impl<'a, K, V> Ref<'a, K, V>
+impl<K, V> Ref<'_, K, V>
 where
     K: Eq + Hash,
 {
@@ -272,7 +272,7 @@ where
     }
 }
 
-impl<'a, K, V> Deref for Ref<'a, K, V>
+impl<K, V> Deref for Ref<'_, K, V>
 where
     K: Eq + Hash,
 {
@@ -290,7 +290,7 @@ pub struct RefMut<'a, K, V> {
     guard: MutexGuard<'a, HashMap<K, V>>,
 }
 
-impl<'a, K, V> RefMut<'a, K, V>
+impl<K, V> RefMut<'_, K, V>
 where
     K: Eq + Hash,
 {
@@ -299,7 +299,7 @@ where
     }
 }
 
-impl<'a, K, V> Deref for RefMut<'a, K, V>
+impl<K, V> Deref for RefMut<'_, K, V>
 where
     K: Eq + Hash,
 {
@@ -312,7 +312,7 @@ where
     }
 }
 
-impl<'a, K, V> DerefMut for RefMut<'a, K, V>
+impl<K, V> DerefMut for RefMut<'_, K, V>
 where
     K: Eq + Hash,
 {

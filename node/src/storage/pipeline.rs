@@ -16,15 +16,26 @@ use crate::telemetry::{
 };
 use crate::transaction::BlobTx;
 use coding::{Compressor, EncryptError, Encryptor};
+#[cfg(test)]
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{Deserialize, Serialize};
 use rand::{rngs::OsRng, RngCore};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::env;
+#[cfg(any(test, feature = "gateway"))]
+use std::fs;
+#[cfg(feature = "gateway")]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
@@ -1127,7 +1138,8 @@ mod tests {
     use super::{erasure, NodeCatalog};
     use crate::compute_market::settlement::{SettleMode, Settlement};
     use crate::storage::repair;
-    use crate::storage::types::ObjectManifest;
+    use crate::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry};
+    use crypto_suite::hashing::blake3;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use sys::tempfile::tempdir;
 
@@ -1190,6 +1202,29 @@ mod tests {
             db.get(&key).expect("manifest present")
         };
         decode_manifest(&bytes).expect("manifest decode")
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(prev) = &self.previous {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 
     fn sample_blob(len: usize) -> Vec<u8> {
@@ -1268,6 +1303,126 @@ mod tests {
             .expect("reconstruct");
         assert_eq!(restored, data);
     }
+
+    #[test]
+    fn normalize_providers_sorts_and_dedups() {
+        let providers = vec![
+            "gateway-ldn-01".to_string(),
+            "".to_string(),
+            "gateway-nyc-01".to_string(),
+            "gateway-ldn-01".to_string(),
+            "gateway-sfo-01".to_string(),
+        ];
+        let normalized = super::normalize_providers(providers);
+        assert_eq!(
+            normalized,
+            vec![
+                "gateway-ldn-01".to_string(),
+                "gateway-nyc-01".to_string(),
+                "gateway-sfo-01".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn select_provider_is_deterministic() {
+        let providers = vec![
+            "gateway-ams-01".to_string(),
+            "gateway-nyc-01".to_string(),
+            "gateway-sfo-01".to_string(),
+        ];
+        let manifest = [0xAAu8; 32];
+        let first_path: [u8; 32] = blake3::hash(b"/first").into();
+        let second_path: [u8; 32] = blake3::hash(b"/second").into();
+
+        let first =
+            super::select_provider(&providers, &manifest, &first_path).expect("provider selected");
+        let repeat = super::select_provider(&providers, &manifest, &first_path)
+            .expect("repeat provider selected");
+        assert_eq!(first, repeat);
+
+        let second =
+            super::select_provider(&providers, &manifest, &second_path).expect("provider selected");
+        assert!(providers.contains(&second));
+
+        let single = super::select_provider(&providers[..1], &manifest, &first_path)
+            .expect("single provider");
+        assert_eq!(single, providers[0]);
+
+        assert!(super::select_provider(&[], &manifest, &first_path).is_none());
+    }
+
+    #[test]
+    fn provider_for_manifest_prefers_override_then_manifest() {
+        let dir = tempdir().expect("pipeline tempdir");
+        let db_path = dir.path().join("pipeline-db");
+        let path_str = db_path.to_str().expect("db path str");
+        let _guard = EnvGuard::set("TB_STORAGE_PIPELINE_DIR", path_str);
+
+        fs::create_dir_all(&db_path).expect("pipeline directory");
+
+        let manifest_hash = [0xBCu8; 32];
+        let mut manifest = ObjectManifest {
+            version: 1,
+            total_len: 1024,
+            chunk_len: 1024,
+            chunks: vec![ChunkRef {
+                id: [0x11u8; 32],
+                nodes: vec!["gateway-nyc-01".to_string()],
+                provider_chunks: Vec::new(),
+            }],
+            redundancy: Redundancy::None,
+            content_key_enc: Vec::new(),
+            blake3: manifest_hash,
+            chunk_lens: vec![1024],
+            chunk_compressed_lens: vec![1024],
+            chunk_cipher_lens: vec![1040],
+            compression_alg: None,
+            compression_level: None,
+            encryption_alg: None,
+            erasure_alg: None,
+            provider_chunks: vec![ProviderChunkEntry {
+                provider: "gateway-sfo-01".to_string(),
+                chunk_indices: vec![0],
+                chunk_lens: vec![1024],
+                encryption_key: Vec::new(),
+            }],
+        };
+
+        let encoded = encode_manifest(&manifest).expect("manifest encode");
+        let mut db = SimpleDb::open_named(names::STORAGE_PIPELINE, path_str);
+        let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
+        assert!(db.insert(&key, encoded).is_none(), "manifest stored");
+
+        let path_hash: [u8; 32] = blake3::hash(b"/provider/test").into();
+        let selected =
+            super::provider_for_manifest(&manifest_hash, &path_hash).expect("manifest provider");
+        assert_eq!(selected, "gateway-sfo-01");
+
+        super::override_manifest_providers_for_test(
+            manifest_hash,
+            vec!["gateway-ams-01".to_string()],
+        );
+        let override_selected =
+            super::provider_for_manifest(&manifest_hash, &path_hash).expect("override provider");
+        assert_eq!(override_selected, "gateway-ams-01");
+
+        super::clear_test_manifest_providers();
+
+        manifest.provider_chunks = Vec::new();
+        manifest.chunks[0].provider_chunks = vec![ProviderChunkEntry {
+            provider: "gateway-ldn-01".to_string(),
+            chunk_indices: vec![0],
+            chunk_lens: vec![1024],
+            encryption_key: Vec::new(),
+        }];
+        let encoded = encode_manifest(&manifest).expect("manifest encode");
+        db.insert(&key, encoded).expect("manifest updated");
+
+        let fallback =
+            super::provider_for_manifest(&manifest_hash, &path_hash).expect("fallback provider");
+        assert_eq!(fallback, "gateway-ldn-01");
+    }
 }
 
 static L2_CAP_BYTES_PER_EPOCH: AtomicU64 = AtomicU64::new(33_554_432);
@@ -1279,4 +1434,200 @@ pub fn set_l2_cap_bytes_per_epoch(v: u64) {
 
 pub fn set_bytes_per_sender_epoch_cap(v: u64) {
     BYTES_PER_SENDER_EPOCH_CAP.store(v, AtomicOrdering::Relaxed);
+}
+
+fn pipeline_dir() -> String {
+    env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string())
+}
+
+fn load_manifest_from_store(hash: &[u8; 32]) -> Option<ObjectManifest> {
+    let path = pipeline_dir();
+    let db = SimpleDb::open_named(names::STORAGE_PIPELINE, &path);
+    let key = format!("manifest/{}", crypto_suite::hex::encode(hash));
+    let bytes = db.get(&key)?;
+    decode_manifest(&bytes).ok()
+}
+
+fn normalize_providers(mut providers: Vec<String>) -> Vec<String> {
+    providers.retain(|id| !id.is_empty());
+    providers.sort();
+    providers.dedup();
+    providers
+}
+
+fn providers_from_manifest(manifest: &ObjectManifest) -> Vec<String> {
+    let mut providers: Vec<String> = manifest
+        .provider_chunks
+        .iter()
+        .map(|entry| entry.provider.clone())
+        .collect();
+    if providers.is_empty() {
+        for chunk in &manifest.chunks {
+            providers.extend(chunk.nodes.iter().cloned());
+            providers.extend(
+                chunk
+                    .provider_chunks
+                    .iter()
+                    .map(|entry| entry.provider.clone()),
+            );
+        }
+    }
+    normalize_providers(providers)
+}
+
+fn select_provider(
+    providers: &[String],
+    manifest_hash: &[u8; 32],
+    path_hash: &[u8; 32],
+) -> Option<String> {
+    if providers.is_empty() {
+        return None;
+    }
+    if providers.len() == 1 {
+        return Some(providers[0].clone());
+    }
+    let mut hasher = Hasher::new();
+    hasher.update(manifest_hash);
+    hasher.update(path_hash);
+    let digest = hasher.finalize();
+    let mut idx_bytes = [0u8; 8];
+    idx_bytes.copy_from_slice(&digest.as_bytes()[..8]);
+    let idx = (u64::from_le_bytes(idx_bytes) as usize) % providers.len();
+    providers.get(idx).cloned()
+}
+
+pub fn provider_for_manifest(manifest: &[u8; 32], path_hash: &[u8; 32]) -> Option<String> {
+    #[cfg(test)]
+    {
+        if let Some(providers) = TEST_MANIFEST_PROVIDERS
+            .lock()
+            .unwrap()
+            .get(manifest)
+            .cloned()
+        {
+            let normalized = normalize_providers(providers);
+            return select_provider(&normalized, manifest, path_hash);
+        }
+    }
+
+    let manifest = load_manifest_from_store(manifest)?;
+    let providers = providers_from_manifest(&manifest);
+    let manifest_hash = manifest.blake3;
+    select_provider(&providers, &manifest_hash, path_hash)
+}
+
+#[cfg(feature = "gateway")]
+fn sanitize_component(value: &str) -> Option<&str> {
+    if value.is_empty() || value == "." || value == ".." {
+        return None;
+    }
+    if value.contains('/') || value.chars().any(|c| c == '\\') {
+        return None;
+    }
+    Some(value)
+}
+
+#[cfg(feature = "gateway")]
+fn sanitized_path(root: &Path, domain: &str, path: &str) -> Option<PathBuf> {
+    let mut out = PathBuf::from(root);
+    out.push(sanitize_component(domain)?);
+    for segment in path.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.chars().any(|c| c == '\\') {
+            continue;
+        }
+        out.push(segment);
+    }
+    Some(out)
+}
+
+#[cfg(feature = "gateway")]
+pub fn fetch_blob(domain: &str, path: &str) -> Option<Vec<u8>> {
+    #[cfg(test)]
+    {
+        if let Some(bytes) = TEST_GATEWAY_BLOBS
+            .lock()
+            .unwrap()
+            .get(&(domain.to_string(), path.to_string()))
+            .cloned()
+        {
+            return Some(bytes);
+        }
+    }
+
+    let root = PathBuf::from(pipeline_dir()).join("gateway").join("static");
+    let resolved = sanitized_path(&root, domain, path)?;
+    fs::read(resolved).ok()
+}
+
+#[cfg(feature = "gateway")]
+pub fn fetch_wasm(domain: &str) -> Option<Vec<u8>> {
+    #[cfg(test)]
+    {
+        if let Some(bytes) = TEST_GATEWAY_WASM.lock().unwrap().get(domain).cloned() {
+            return Some(bytes);
+        }
+    }
+
+    let sanitized = sanitize_component(domain)?;
+    let mut path = PathBuf::from(pipeline_dir());
+    path.push("gateway");
+    path.push("wasm");
+    path.push(sanitized);
+    path.set_extension("wasm");
+    fs::read(path).ok()
+}
+
+#[cfg(all(test, feature = "gateway"))]
+static TEST_GATEWAY_BLOBS: Lazy<Mutex<HashMap<(String, String), Vec<u8>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(all(test, feature = "gateway"))]
+static TEST_GATEWAY_WASM: Lazy<Mutex<HashMap<String, Vec<u8>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(all(test, feature = "gateway"))]
+pub fn override_static_blob_for_test(domain: &str, path: &str, data: Vec<u8>) {
+    TEST_GATEWAY_BLOBS
+        .lock()
+        .unwrap()
+        .insert((domain.to_string(), path.to_string()), data);
+}
+
+#[cfg(all(test, feature = "gateway"))]
+pub fn clear_test_static_blobs() {
+    TEST_GATEWAY_BLOBS.lock().unwrap().clear();
+}
+
+#[cfg(all(test, feature = "gateway"))]
+pub fn override_wasm_for_test(domain: &str, data: Vec<u8>) {
+    TEST_GATEWAY_WASM
+        .lock()
+        .unwrap()
+        .insert(domain.to_string(), data);
+}
+
+#[cfg(all(test, feature = "gateway"))]
+pub fn clear_test_wasm() {
+    TEST_GATEWAY_WASM.lock().unwrap().clear();
+}
+
+#[cfg(test)]
+static TEST_MANIFEST_PROVIDERS: Lazy<Mutex<HashMap<[u8; 32], Vec<String>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(test)]
+pub fn override_manifest_providers_for_test(manifest: [u8; 32], providers: Vec<String>) {
+    let normalized = normalize_providers(providers);
+    TEST_MANIFEST_PROVIDERS
+        .lock()
+        .unwrap()
+        .insert(manifest, normalized);
+}
+
+#[cfg(test)]
+pub fn clear_test_manifest_providers() {
+    TEST_MANIFEST_PROVIDERS.lock().unwrap().clear();
 }

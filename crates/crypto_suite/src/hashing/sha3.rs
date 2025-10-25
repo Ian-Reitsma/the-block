@@ -121,8 +121,8 @@ fn absorb_block(state: &mut [u64; STATE_SIZE], block: &[u8]) {
 fn squeeze(state: &mut [u64; STATE_SIZE], out: &mut [u8]) {
     let mut offset = 0;
     loop {
-        for lane in 0..(RATE / 8) {
-            let bytes = state[lane].to_le_bytes();
+        for value in state.iter().take(RATE / 8) {
+            let bytes = value.to_le_bytes();
             let remaining = out.len() - offset;
             let take = remaining.min(8);
             out[offset..offset + take].copy_from_slice(&bytes[..take]);

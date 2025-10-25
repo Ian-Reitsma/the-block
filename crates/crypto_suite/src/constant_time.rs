@@ -17,11 +17,6 @@ impl CtChoice {
     pub fn as_u8(self) -> u8 {
         self.0 & 1
     }
-
-    /// Return the negated choice.
-    pub fn not(self) -> Self {
-        Self::new(self.as_u8().not() & 1)
-    }
 }
 
 impl From<bool> for CtChoice {
@@ -37,6 +32,14 @@ impl From<bool> for CtChoice {
 impl From<CtChoice> for bool {
     fn from(value: CtChoice) -> Self {
         value.as_u8() == 1
+    }
+}
+
+impl Not for CtChoice {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self::new(self.as_u8().not() & 1)
     }
 }
 

@@ -89,6 +89,25 @@ the pipeline selects the healthiest providers from this catalog. See
 [`node/tests/provider_catalog.rs`](../node/tests/provider_catalog.rs) for
 examples.
 
+## Gateway Provider Resolution
+
+Gateway reads rely on manifests to identify the operator that should receive
+acknowledgement credit. `node/src/storage/pipeline.rs` exposes
+`provider_for_manifest(manifest_id, reservation_key)` which loads the manifest,
+normalises its provider list, and deterministically selects the matching
+provider using the reservation key’s hash. When a manifest omits providers the
+helper falls back to the first successfully fetched provider override, ensuring
+legacy uploads continue to resolve while tests can stub behaviour.
+
+Tests and integration harnesses can inject overrides via
+`override_manifest_providers_for_test(manifest_id, providers)` and clear them
+with `clear_test_manifest_providers()`. Static asset handlers rely on the same
+override registry for blobs and WASM modules using
+`override_static_blob_for_test`/`override_static_wasm_for_test`; production code
+continues to hit the filesystem through the shared `fetch_blob`/`fetch_wasm`
+helpers. Gateway unit tests pin specific provider IDs so badge-targeted
+campaigns and multi-provider manifests resolve consistently across reruns.
+
 ## Background Repair Loop
 
 `node/src/storage/repair.rs` spawns a periodic task that scans manifests and

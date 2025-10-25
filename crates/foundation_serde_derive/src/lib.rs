@@ -495,7 +495,7 @@ where
     I: Iterator<Item = TokenTree>,
 {
     let mut depth = 0isize;
-    while let Some(token) = iter.next() {
+    for token in iter.by_ref() {
         match token {
             TokenTree::Punct(p) => match p.as_char() {
                 '<' | '(' | '[' | '{' => {
