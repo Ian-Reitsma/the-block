@@ -20,6 +20,13 @@ for correlating metrics with structured logs across the fleet.
 - **Compute marketplace** – The `compute_market_dashboard.json` add-on highlights
   `fee_floor_current`, per-sender slot pressure, and SLA violation counters so
   admission policy or scheduler regressions trigger fast follow-up.
+- **Ad readiness** – Dashboards now chart `ad_readiness_ready`,
+  `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
+  `ad_readiness_provider_count`, and their configured minimums alongside the
+  cumulative `ad_readiness_skipped_total{reason}` counter. Page when readiness
+  remains `0` or skips climb for more than one readiness window so governance can
+  postpone activation or seed additional hosts/providers before enabling the ad
+  rail.
 - **Correlating anomalies** – `log_correlation_fail_total{metric}` increments
   whenever the aggregator cannot locate logs for a metric spike. Combine this
   with `aggregator_ingest_total{result="error"}` to detect ingest backpressure.

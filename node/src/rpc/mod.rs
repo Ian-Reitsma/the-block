@@ -334,6 +334,7 @@ struct RpcState {
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
+    ad_readiness: Option<crate::ad_readiness::AdReadinessHandle>,
     clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
     tokens_per_sec: f64,
     ban_secs: u64,
@@ -431,6 +432,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "balance",
     "ad_market.inventory",
     "ad_market.distribution",
+    "ad_market.readiness",
     "register_handle",
     "resolve_handle",
     "whoami",
@@ -451,6 +453,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "service_badge_issue",
     "service_badge_revoke",
     "dns.publish_record",
+    "dns.list_for_sale",
+    "dns.place_bid",
+    "dns.complete_sale",
+    "dns.auctions",
     "gateway.policy",
     "gateway.reads_since",
     "gov.release_signers",
@@ -690,6 +696,7 @@ fn execute_rpc(
             Arc::clone(&state.dids),
             Arc::clone(&runtime_cfg),
             state.market.clone(),
+            state.ad_readiness.clone(),
         )
     };
 
@@ -995,6 +1002,7 @@ fn dispatch(
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
+    readiness: Option<crate::ad_readiness::AdReadinessHandle>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
         let badge = req
@@ -1009,10 +1017,13 @@ fn dispatch(
     }
 
     let market_ref = market.as_ref();
+    let readiness_handle = readiness.clone();
+    let readiness_ref = readiness.as_ref();
 
     Ok(match req.method.as_str() {
         "ad_market.inventory" => ad_market::inventory(market_ref),
         "ad_market.distribution" => ad_market::distribution(market_ref),
+        "ad_market.readiness" => ad_market::readiness(market_ref, readiness_ref),
         "ad_market.register_campaign" => {
             let params = req.params.as_value().clone();
             ad_market::register_campaign(market_ref, &params)?
@@ -1209,6 +1220,22 @@ fn dispatch(
             }
         }
         "dns.publish_record" => match gateway::dns::publish_record(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.list_for_sale" => match gateway::dns::list_for_sale(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.place_bid" => match gateway::dns::place_bid(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.complete_sale" => match gateway::dns::complete_sale(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.auctions" => match gateway::dns::auctions(req.params.as_value()) {
             Ok(v) => v,
             Err(e) => return Err(rpc_error(e.code(), e.message())),
         },
@@ -2684,6 +2711,12 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime::new(&mut *chain);
+            if let Some(handle) = market.clone() {
+                rt.set_market(handle);
+            }
+            if let Some(handle) = readiness_handle.clone() {
+                rt.set_ad_readiness(handle);
+            }
             serialize_response(governance::gov_rollback_last(
                 &NODE_GOV_STORE,
                 &mut params,
@@ -2701,6 +2734,12 @@ fn dispatch(
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime::new(&mut *chain);
+            if let Some(handle) = market.clone() {
+                rt.set_market(handle);
+            }
+            if let Some(handle) = readiness_handle.clone() {
+                rt.set_ad_readiness(handle);
+            }
             serialize_response(governance::gov_rollback(
                 &NODE_GOV_STORE,
                 id,
@@ -2760,6 +2799,7 @@ pub async fn run_rpc_server_with_market(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
     market: Option<MarketplaceHandle>,
+    readiness: Option<crate::ad_readiness::AdReadinessHandle>,
     addr: String,
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
@@ -2815,6 +2855,7 @@ pub async fn run_rpc_server_with_market(
         dids,
         runtime_cfg: Arc::clone(&runtime_cfg),
         market,
+        ad_readiness: readiness,
         clients,
         tokens_per_sec,
         ban_secs,
@@ -2845,7 +2886,7 @@ pub async fn run_rpc_server(
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
 ) -> std::io::Result<()> {
-    run_rpc_server_with_market(bc, mining, None, addr, cfg, ready).await
+    run_rpc_server_with_market(bc, mining, None, None, addr, cfg, ready).await
 }
 
 #[cfg(any(test, feature = "fuzzy", feature = "integration-tests"))]
@@ -2883,6 +2924,7 @@ pub fn fuzz_dispatch_request(
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
+    readiness: Option<crate::ad_readiness::AdReadinessHandle>,
     request: RpcRequest,
     auth_header: Option<String>,
     peer_ip: Option<IpAddr>,
@@ -2895,6 +2937,7 @@ pub fn fuzz_dispatch_request(
         dids,
         runtime_cfg: Arc::clone(&runtime_cfg),
         market,
+        ad_readiness: readiness,
         clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
         ban_secs: 1,

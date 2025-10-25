@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{DistributionPolicy, MarketplaceHandle};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
@@ -54,6 +55,62 @@ pub fn distribution(market: Option<&MarketplaceHandle>) -> Value {
         distribution_to_value(handle.distribution()),
     );
     Value::Object(map)
+}
+
+pub fn readiness(
+    market: Option<&MarketplaceHandle>,
+    readiness: Option<&AdReadinessHandle>,
+) -> Value {
+    let Some(handle) = readiness else {
+        return unavailable();
+    };
+    let snapshot = handle.snapshot();
+    let mut root = Map::new();
+    root.insert("status".into(), Value::String("ok".into()));
+    root.insert("ready".into(), Value::Bool(snapshot.ready));
+    root.insert(
+        "window_secs".into(),
+        Value::Number(Number::from(snapshot.window_secs)),
+    );
+    root.insert(
+        "unique_viewers".into(),
+        Value::Number(Number::from(snapshot.unique_viewers)),
+    );
+    root.insert(
+        "host_count".into(),
+        Value::Number(Number::from(snapshot.host_count)),
+    );
+    root.insert(
+        "provider_count".into(),
+        Value::Number(Number::from(snapshot.provider_count)),
+    );
+    let mut thresholds = Map::new();
+    thresholds.insert(
+        "min_unique_viewers".into(),
+        Value::Number(Number::from(snapshot.min_unique_viewers)),
+    );
+    thresholds.insert(
+        "min_host_count".into(),
+        Value::Number(Number::from(snapshot.min_host_count)),
+    );
+    thresholds.insert(
+        "min_provider_count".into(),
+        Value::Number(Number::from(snapshot.min_provider_count)),
+    );
+    root.insert("thresholds".into(), Value::Object(thresholds));
+    root.insert(
+        "last_updated".into(),
+        Value::Number(Number::from(snapshot.last_updated)),
+    );
+    let blockers: Vec<Value> = snapshot.blockers.into_iter().map(Value::String).collect();
+    root.insert("blockers".into(), Value::Array(blockers));
+    if let Some(handle) = market {
+        root.insert(
+            "distribution".into(),
+            distribution_to_value(handle.distribution()),
+        );
+    }
+    Value::Object(root)
 }
 
 pub fn register_campaign(

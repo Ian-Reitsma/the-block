@@ -23,7 +23,7 @@ fn dependency_blocks_vote() {
     };
     let id1 = controller::submit_proposal(&store, p1).unwrap();
     let mut bc = the_block::Blockchain::default();
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     store
         .vote(

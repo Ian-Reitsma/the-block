@@ -1,6 +1,8 @@
 use super::ParamKey;
+use crate::ad_readiness::AdReadinessConfig;
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
+use ad_market::{DistributionPolicy, MarketplaceHandle};
 use bridge_types::BridgeIncentiveParameters;
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::info;
@@ -28,6 +30,8 @@ const STORAGE_ENGINE_MASK_ALL: i64 = mask_all(STORAGE_ENGINE_OPTIONS.len());
 pub struct Runtime<'a> {
     pub bc: &'a mut Blockchain,
     current_params: Option<Params>,
+    market: Option<MarketplaceHandle>,
+    ad_readiness: Option<crate::ad_readiness::AdReadinessHandle>,
 }
 
 impl<'a> Runtime<'a> {
@@ -35,7 +39,27 @@ impl<'a> Runtime<'a> {
         Self {
             bc,
             current_params: None,
+            market: None,
+            ad_readiness: None,
         }
+    }
+
+    pub fn with_market(bc: &'a mut Blockchain, market: MarketplaceHandle) -> Self {
+        Self {
+            bc,
+            current_params: None,
+            market: Some(market),
+            ad_readiness: None,
+        }
+    }
+
+    pub fn set_market(&mut self, market: MarketplaceHandle) {
+        self.market = Some(market);
+    }
+
+    pub fn set_ad_readiness(&mut self, readiness: crate::ad_readiness::AdReadinessHandle) {
+        self.ad_readiness = Some(readiness);
+        self.sync_ad_readiness();
     }
 
     pub fn set_current_params(&mut self, params: &Params) {
@@ -48,6 +72,35 @@ impl<'a> Runtime<'a> {
 
     pub fn params_snapshot(&self) -> Option<&Params> {
         self.current_params.as_ref()
+    }
+
+    fn sync_read_subsidy_distribution(&self) {
+        let market = match &self.market {
+            Some(handle) => handle,
+            None => return,
+        };
+        let policy = DistributionPolicy::new(
+            self.bc.params.read_subsidy_viewer_percent.max(0) as u64,
+            self.bc.params.read_subsidy_host_percent.max(0) as u64,
+            self.bc.params.read_subsidy_hardware_percent.max(0) as u64,
+            self.bc.params.read_subsidy_verifier_percent.max(0) as u64,
+            self.bc.params.read_subsidy_liquidity_percent.max(0) as u64,
+        );
+        market.update_distribution(policy);
+    }
+
+    fn sync_ad_readiness(&self) {
+        let readiness = match &self.ad_readiness {
+            Some(handle) => handle,
+            None => return,
+        };
+        let cfg = AdReadinessConfig {
+            window_secs: self.bc.params.ad_readiness_window_secs.max(1) as u64,
+            min_unique_viewers: self.bc.params.ad_readiness_min_unique_viewers.max(0) as u64,
+            min_host_count: self.bc.params.ad_readiness_min_host_count.max(0) as u64,
+            min_provider_count: self.bc.params.ad_readiness_min_provider_count.max(0) as u64,
+        };
+        readiness.update_config(cfg);
     }
 
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
@@ -190,6 +243,14 @@ pub struct Params {
     pub read_subsidy_verifier_percent: i64,
     #[serde(default = "default_read_subsidy_liquidity_percent")]
     pub read_subsidy_liquidity_percent: i64,
+    #[serde(default = "default_ad_readiness_window_secs")]
+    pub ad_readiness_window_secs: i64,
+    #[serde(default = "default_ad_readiness_min_unique_viewers")]
+    pub ad_readiness_min_unique_viewers: i64,
+    #[serde(default = "default_ad_readiness_min_host_count")]
+    pub ad_readiness_min_host_count: i64,
+    #[serde(default = "default_ad_readiness_min_provider_count")]
+    pub ad_readiness_min_provider_count: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub treasury_percent_ct: i64,
     #[serde(default = "default_proof_rebate_limit_ct")]
@@ -249,6 +310,10 @@ impl Default for Params {
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
+            ad_readiness_window_secs: default_ad_readiness_window_secs(),
+            ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
+            ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
+            ad_readiness_min_provider_count: default_ad_readiness_min_provider_count(),
             treasury_percent_ct: 0,
             proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
@@ -353,6 +418,22 @@ impl Params {
         map.insert(
             "read_subsidy_liquidity_percent".into(),
             Value::Number(self.read_subsidy_liquidity_percent.into()),
+        );
+        map.insert(
+            "ad_readiness_window_secs".into(),
+            Value::Number(self.ad_readiness_window_secs.into()),
+        );
+        map.insert(
+            "ad_readiness_min_unique_viewers".into(),
+            Value::Number(self.ad_readiness_min_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_readiness_min_host_count".into(),
+            Value::Number(self.ad_readiness_min_host_count.into()),
+        );
+        map.insert(
+            "ad_readiness_min_provider_count".into(),
+            Value::Number(self.ad_readiness_min_provider_count.into()),
         );
         map.insert(
             "treasury_percent_ct".into(),
@@ -522,6 +603,22 @@ impl Params {
                 .get("read_subsidy_liquidity_percent")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_read_subsidy_liquidity_percent),
+            ad_readiness_window_secs: obj
+                .get("ad_readiness_window_secs")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_window_secs),
+            ad_readiness_min_unique_viewers: obj
+                .get("ad_readiness_min_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_unique_viewers),
+            ad_readiness_min_host_count: obj
+                .get("ad_readiness_min_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_host_count),
+            ad_readiness_min_provider_count: obj
+                .get("ad_readiness_min_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_provider_count),
             treasury_percent_ct: take_i64("treasury_percent_ct")?,
             proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
             rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
@@ -582,6 +679,22 @@ const fn default_read_subsidy_verifier_percent() -> i64 {
 
 const fn default_read_subsidy_liquidity_percent() -> i64 {
     5
+}
+
+const fn default_ad_readiness_window_secs() -> i64 {
+    6 * 60 * 60
+}
+
+const fn default_ad_readiness_min_unique_viewers() -> i64 {
+    250
+}
+
+const fn default_ad_readiness_min_host_count() -> i64 {
+    25
+}
+
+const fn default_ad_readiness_min_provider_count() -> i64 {
+    10
 }
 
 const fn default_runtime_backend_policy() -> i64 {
@@ -723,6 +836,38 @@ fn apply_read_subsidy_verifier_percent(v: i64, p: &mut Params) -> Result<(), ()>
 
 fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()> {
     p.read_subsidy_liquidity_percent = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_window_secs(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v <= 0 {
+        return Err(());
+    }
+    p.ad_readiness_window_secs = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_unique_viewers = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_host_count = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_provider_count = v;
     Ok(())
 }
 
@@ -909,7 +1054,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 43] = [
+    static REGS: [ParamSpec; 47] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1033,6 +1178,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_viewer_percent,
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_viewer_percent = v;
+                rt.sync_read_subsidy_distribution();
                 Ok(())
             },
         },
@@ -1046,6 +1192,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_host_percent,
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_host_percent = v;
+                rt.sync_read_subsidy_distribution();
                 Ok(())
             },
         },
@@ -1059,6 +1206,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_hardware_percent,
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_hardware_percent = v;
+                rt.sync_read_subsidy_distribution();
                 Ok(())
             },
         },
@@ -1072,6 +1220,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_verifier_percent,
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_verifier_percent = v;
+                rt.sync_read_subsidy_distribution();
                 Ok(())
             },
         },
@@ -1085,6 +1234,63 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_liquidity_percent,
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_liquidity_percent = v;
+                rt.sync_read_subsidy_distribution();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessWindowSecs,
+            default: default_ad_readiness_window_secs(),
+            min: 60,
+            max: (24 * 60 * 60) as i64,
+            unit: "seconds",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_window_secs,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_readiness_window_secs = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinUniqueViewers,
+            default: default_ad_readiness_min_unique_viewers(),
+            min: 0,
+            max: 1_000_000,
+            unit: "unique viewers",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_unique_viewers,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_readiness_min_unique_viewers = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinHostCount,
+            default: default_ad_readiness_min_host_count(),
+            min: 0,
+            max: 1_000_000,
+            unit: "hosts",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_host_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_readiness_min_host_count = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinProviderCount,
+            default: default_ad_readiness_min_provider_count(),
+            min: 0,
+            max: 1_000_000,
+            unit: "providers",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_provider_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_readiness_min_provider_count = v;
+                rt.sync_ad_readiness();
                 Ok(())
             },
         },

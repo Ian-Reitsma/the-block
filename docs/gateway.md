@@ -88,6 +88,13 @@ Security considerations are catalogued under
 
 ## 4. Advertising Marketplace Integration
 
+- Campaign matching is gated behind governance-controlled readiness thresholds.
+  The node instantiates an `AdReadinessHandle` shared by the gateway, RPC
+  runtime, and telemetry summary; `attach_campaign_metadata` skips matching and
+  increments `ad_readiness_skipped_total{reason}` until rolling unique-viewer,
+  host, and provider counts clear the configured floor. The
+  `ad_market.readiness` RPC and Prometheus gauges (`ad_readiness_ready`,
+  `ad_readiness_unique_viewers`, etc.) expose current counters and blockers.
 - The `ad_market` crate now defaults to the sled-backed `SledMarketplace`,
   persisting campaign manifests, budgets, and distribution policies across
   restarts. RPC and CLI surfaces feed campaigns through the handwritten

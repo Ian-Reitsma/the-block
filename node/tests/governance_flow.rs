@@ -38,7 +38,7 @@ fn rollback_resets_metrics() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = the_block::Blockchain::new(dir.path().to_str().unwrap());
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     rt.set_snapshot_interval(Duration::from_secs(params.snapshot_interval_secs as u64));
     rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);

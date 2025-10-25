@@ -51,7 +51,8 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
 use foundation_serialization::json;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_telemetry::{
-    MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry, WrapperSummaryEntry,
+    AdReadinessTelemetry, MemorySnapshotEntry, TelemetrySummary, ValidationError,
+    WrapperMetricEntry, WrapperSummaryEntry,
 };
 use std::collections::{
     btree_map::Entry, hash_map::Entry as HashMapEntry, BTreeMap, HashMap, HashSet, VecDeque,
@@ -1462,6 +1463,7 @@ impl AppState {
         }
     }
     fn record_telemetry(&self, entry: TelemetrySummary) {
+        aggregator_metrics().record_ad_readiness(entry.ad_readiness.as_ref());
         if let Ok(mut map) = self.telemetry.lock() {
             let deque = map
                 .entry(entry.node_id.clone())
@@ -1704,6 +1706,14 @@ struct AggregatorMetrics {
     explorer_block_payout_ad_total: CounterVec,
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
+    ad_readiness_ready: Gauge,
+    ad_readiness_unique_viewers: Gauge,
+    ad_readiness_host_count: Gauge,
+    ad_readiness_provider_count: Gauge,
+    ad_readiness_window_secs: Gauge,
+    ad_readiness_min_unique_viewers: Gauge,
+    ad_readiness_min_host_count: Gauge,
+    ad_readiness_min_provider_count: Gauge,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2017,6 +2027,44 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
         });
     }
 
+    let ad_readiness = object.get("ad_readiness").and_then(|value| {
+        if matches!(value, Value::Null) {
+            return None;
+        }
+        let readiness_obj = value.as_object()?;
+        let ready = readiness_obj.get("ready")?.as_bool()?;
+        let window_secs = readiness_obj.get("window_secs")?.as_u64()?;
+        let min_unique_viewers = readiness_obj.get("min_unique_viewers")?.as_u64()?;
+        let min_host_count = readiness_obj.get("min_host_count")?.as_u64()?;
+        let min_provider_count = readiness_obj.get("min_provider_count")?.as_u64()?;
+        let unique_viewers = readiness_obj.get("unique_viewers")?.as_u64()?;
+        let host_count = readiness_obj.get("host_count")?.as_u64()?;
+        let provider_count = readiness_obj.get("provider_count")?.as_u64()?;
+        let last_updated = readiness_obj.get("last_updated")?.as_u64()?;
+        let blockers = readiness_obj
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(AdReadinessTelemetry {
+            ready,
+            window_secs,
+            min_unique_viewers,
+            min_host_count,
+            min_provider_count,
+            unique_viewers,
+            host_count,
+            provider_count,
+            blockers,
+            last_updated,
+        })
+    });
+
     Ok(TelemetrySummary {
         node_id,
         seq,
@@ -2027,6 +2075,7 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
         wrappers: WrapperSummaryEntry {
             metrics: wrapper_metrics,
         },
+        ad_readiness,
     })
 }
 
@@ -2122,6 +2171,38 @@ impl Default for TlsWarningMetadata {
 impl AggregatorMetrics {
     fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    fn record_ad_readiness(&self, readiness: Option<&AdReadinessTelemetry>) {
+        match readiness {
+            Some(snapshot) => {
+                self.ad_readiness_ready
+                    .set(if snapshot.ready { 1.0 } else { 0.0 });
+                self.ad_readiness_unique_viewers
+                    .set(snapshot.unique_viewers as f64);
+                self.ad_readiness_host_count.set(snapshot.host_count as f64);
+                self.ad_readiness_provider_count
+                    .set(snapshot.provider_count as f64);
+                self.ad_readiness_window_secs
+                    .set(snapshot.window_secs as f64);
+                self.ad_readiness_min_unique_viewers
+                    .set(snapshot.min_unique_viewers as f64);
+                self.ad_readiness_min_host_count
+                    .set(snapshot.min_host_count as f64);
+                self.ad_readiness_min_provider_count
+                    .set(snapshot.min_provider_count as f64);
+            }
+            None => {
+                self.ad_readiness_ready.set(0.0);
+                self.ad_readiness_unique_viewers.set(0.0);
+                self.ad_readiness_host_count.set(0.0);
+                self.ad_readiness_provider_count.set(0.0);
+                self.ad_readiness_window_secs.set(0.0);
+                self.ad_readiness_min_unique_viewers.set(0.0);
+                self.ad_readiness_min_host_count.set(0.0);
+                self.ad_readiness_min_provider_count.set(0.0);
+            }
+        }
     }
 }
 
@@ -2930,6 +3011,62 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &explorer_block_payout_ad_last_seen,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
     );
+    let ad_readiness_ready = registry
+        .register_gauge(
+            "ad_readiness_ready",
+            "Whether ad matching readiness requirements are satisfied (1 ready, 0 blocked)",
+        )
+        .expect("register ad_readiness_ready");
+    ad_readiness_ready.set(0.0);
+    let ad_readiness_unique_viewers = registry
+        .register_gauge(
+            "ad_readiness_unique_viewers",
+            "Unique viewers observed within the readiness window",
+        )
+        .expect("register ad_readiness_unique_viewers");
+    ad_readiness_unique_viewers.set(0.0);
+    let ad_readiness_host_count = registry
+        .register_gauge(
+            "ad_readiness_host_count",
+            "Distinct hosts observed within the readiness window",
+        )
+        .expect("register ad_readiness_host_count");
+    ad_readiness_host_count.set(0.0);
+    let ad_readiness_provider_count = registry
+        .register_gauge(
+            "ad_readiness_provider_count",
+            "Distinct providers observed within the readiness window",
+        )
+        .expect("register ad_readiness_provider_count");
+    ad_readiness_provider_count.set(0.0);
+    let ad_readiness_window_secs = registry
+        .register_gauge(
+            "ad_readiness_window_secs",
+            "Configured readiness sampling window in seconds",
+        )
+        .expect("register ad_readiness_window_secs");
+    ad_readiness_window_secs.set(0.0);
+    let ad_readiness_min_unique_viewers = registry
+        .register_gauge(
+            "ad_readiness_min_unique_viewers",
+            "Configured minimum unique viewers required for readiness",
+        )
+        .expect("register ad_readiness_min_unique_viewers");
+    ad_readiness_min_unique_viewers.set(0.0);
+    let ad_readiness_min_host_count = registry
+        .register_gauge(
+            "ad_readiness_min_host_count",
+            "Configured minimum host count required for readiness",
+        )
+        .expect("register ad_readiness_min_host_count");
+    ad_readiness_min_host_count.set(0.0);
+    let ad_readiness_min_provider_count = registry
+        .register_gauge(
+            "ad_readiness_min_provider_count",
+            "Configured minimum provider count required for readiness",
+        )
+        .expect("register ad_readiness_min_provider_count");
+    ad_readiness_min_provider_count.set(0.0);
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -2977,6 +3114,14 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         explorer_block_payout_ad_total,
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
+        ad_readiness_ready,
+        ad_readiness_unique_viewers,
+        ad_readiness_host_count,
+        ad_readiness_provider_count,
+        ad_readiness_window_secs,
+        ad_readiness_min_unique_viewers,
+        ad_readiness_min_host_count,
+        ad_readiness_min_provider_count,
     }
 });
 
@@ -7422,7 +7567,7 @@ mod tests {
         x25519::SecretKey,
     };
     use crypto_suite::hashing::blake3;
-    use foundation_telemetry::WrapperMetricEntry;
+    use foundation_telemetry::{AdReadinessTelemetry, WrapperMetricEntry, WrapperSummaryEntry};
     use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
     use rand::rngs::OsRng;
@@ -8254,6 +8399,59 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_summary_updates_readiness_gauges() {
+        let metrics = aggregator_metrics();
+        metrics.record_ad_readiness(None);
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("tok".into(), dir.path().join("ad_ready.json"), 60);
+        let readiness = AdReadinessTelemetry {
+            ready: true,
+            window_secs: 90,
+            min_unique_viewers: 2,
+            min_host_count: 1,
+            min_provider_count: 1,
+            unique_viewers: 5,
+            host_count: 3,
+            provider_count: 2,
+            blockers: Vec::new(),
+            last_updated: 77,
+        };
+        let summary = TelemetrySummary {
+            node_id: "node-ready".to_string(),
+            seq: 10,
+            timestamp: 555,
+            sample_rate_ppm: 1_000_000,
+            compaction_secs: 60,
+            memory: HashMap::new(),
+            wrappers: WrapperSummaryEntry::default(),
+            ad_readiness: Some(readiness),
+        };
+        state.record_telemetry(summary.clone());
+        assert_eq!(metrics.ad_readiness_ready.get(), 1.0);
+        assert_eq!(metrics.ad_readiness_unique_viewers.get(), 5.0);
+        assert_eq!(metrics.ad_readiness_host_count.get(), 3.0);
+        assert_eq!(metrics.ad_readiness_provider_count.get(), 2.0);
+        assert_eq!(metrics.ad_readiness_window_secs.get(), 90.0);
+        assert_eq!(metrics.ad_readiness_min_unique_viewers.get(), 2.0);
+        assert_eq!(metrics.ad_readiness_min_host_count.get(), 1.0);
+        assert_eq!(metrics.ad_readiness_min_provider_count.get(), 1.0);
+
+        let mut cleared = summary;
+        cleared.seq = 11;
+        cleared.timestamp = 777;
+        cleared.ad_readiness = None;
+        state.record_telemetry(cleared);
+        assert_eq!(metrics.ad_readiness_ready.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_unique_viewers.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_host_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_provider_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_window_secs.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_min_unique_viewers.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_min_host_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_min_provider_count.get(), 0.0);
+    }
+
+    #[test]
     fn wrappers_endpoint_returns_latest_metrics() {
         run_async(async {
             let dir = tempfile::tempdir().unwrap();
@@ -8276,6 +8474,7 @@ mod tests {
                         value: 2.0,
                     }],
                 },
+                ad_readiness: None,
             });
 
             let app = router(state);

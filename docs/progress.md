@@ -1,4 +1,27 @@
 # Project Progress Snapshot
+> **Review (2025-11-03, evening):** Ad readiness now gates campaign matching with
+> governance-controlled thresholds. The node shares an `AdReadinessHandle` across
+> the gateway, RPC stack, and telemetry so readiness blockers and counters surface
+> through `ad_market.readiness`, metrics exporters, and dashboards. Gateway tests
+> cover readiness skips/unlocks, while the RPC harness proves readiness snapshots
+> advance once acknowledgements land. Premium domain auctions now persist entirely
+> through first-party cursor codecs: auctions, bids, ownership, and sale history
+> live in sled-backed `SimpleDb` buckets, CLI commands manage listing/bidding/
+> completion/status, and resale flows enforce stored royalty rates and protocol
+> fees. New regressions drive auction expiry, resale royalty distribution, and CLI
+> plumbing so operators can stage `.block` sales without external marketplaces.
+> **Review (2025-10-25, evening):** Governance parameter activations now update
+> the live ad revenue split in lockstep with policy votes. The node runtime wires
+> the shared marketplace handle into the read-subsidy apply hooks, and the new
+> `governance_updates_distribution_policy` integration test toggles the five
+> `read_subsidy_*_percent` knobs at runtime before round-tripping the updated
+> `ad_market.distribution` response through the RPC harness. Budget reservations
+> are tracked atomically across both in-memory and sled backends via a
+> `pending` ledger that commits on success and refunds on cancel, with a
+> multi-threaded regression proving only funded impressions proceed while the
+> campaign balance drains deterministically. Together the pipeline keeps ad
+> payouts aligned with governance knobs and seals the oversubscription hole that
+> previously left unpaid acknowledgements.
 > **Review (2025-10-25, afternoon):** Workspace clippy now runs clean across the
 > foundation serialization layer (`foundation_serde`, `foundation_serialization`),
 > crypto primitives, concurrency helpers, and the bespoke HTTP/runtime shims by

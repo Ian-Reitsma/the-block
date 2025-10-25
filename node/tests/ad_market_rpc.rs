@@ -4,11 +4,13 @@ use std::collections::HashSet;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ad_market::{DistributionPolicy, MarketplaceHandle, SledMarketplace};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use the_block::{
+    ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},
     rpc::{fuzz_dispatch_request, fuzz_runtime_config_with_admin, RpcRuntimeConfig},
     Blockchain,
@@ -30,6 +32,7 @@ struct RpcHarness {
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: MarketplaceHandle,
     admin_token: String,
+    readiness: Option<AdReadinessHandle>,
 }
 
 impl RpcHarness {
@@ -44,6 +47,7 @@ impl RpcHarness {
             Arc::clone(&self.dids),
             Arc::clone(&self.runtime_cfg),
             Some(Arc::clone(&self.market)),
+            self.readiness.clone(),
             request,
             Some(auth_header),
             Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
@@ -93,6 +97,12 @@ fn ad_market_rpc_endpoints_round_trip() {
     let market_dir = dir.path().join("market");
     let sled = SledMarketplace::open(&market_dir, distribution).expect("market opened");
     let market: MarketplaceHandle = Arc::new(sled);
+    let readiness = AdReadinessHandle::new(AdReadinessConfig {
+        window_secs: 300,
+        min_unique_viewers: 1,
+        min_host_count: 1,
+        min_provider_count: 1,
+    });
 
     let harness = Arc::new(RpcHarness {
         bc,
@@ -103,6 +113,7 @@ fn ad_market_rpc_endpoints_round_trip() {
         runtime_cfg,
         market,
         admin_token,
+        readiness: Some(readiness.clone()),
     });
 
     let campaign = parse_json(
@@ -151,6 +162,37 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(dist["hardware_percent"].as_u64(), Some(20));
     assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
     assert_eq!(dist["liquidity_percent"].as_u64(), Some(5));
+
+    let readiness_initial = expect_ok(harness.call("ad_market.readiness", Value::Null));
+    assert_eq!(readiness_initial["status"].as_str(), Some("ok"));
+    assert_eq!(readiness_initial["ready"].as_bool(), Some(false));
+    let blockers = readiness_initial["blockers"]
+        .as_array()
+        .expect("blockers array");
+    assert!(blockers
+        .iter()
+        .any(|value| value.as_str() == Some("insufficient_unique_viewers")));
+    assert_eq!(
+        readiness_initial["distribution"]["viewer_percent"].as_u64(),
+        Some(40)
+    );
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("timestamp")
+        .as_secs();
+    readiness.record_ack(now, [0u8; 32], "example.test", Some("provider-ready"));
+    let readiness_ready = expect_ok(harness.call("ad_market.readiness", Value::Null));
+    assert_eq!(readiness_ready["status"].as_str(), Some("ok"));
+    assert_eq!(readiness_ready["ready"].as_bool(), Some(true));
+    assert_eq!(readiness_ready["unique_viewers"].as_u64(), Some(1));
+    assert_eq!(
+        readiness_ready["blockers"]
+            .as_array()
+            .expect("blockers array")
+            .len(),
+        0
+    );
 
     let duplicate = expect_error(harness.call(
         "ad_market.register_campaign",
@@ -249,4 +291,97 @@ fn ad_market_rpc_endpoints_round_trip() {
         .as_array()
         .expect("campaigns array");
     assert_eq!(campaigns.len(), 2);
+}
+
+#[testkit::tb_serial]
+fn governance_updates_distribution_policy() {
+    let dir = util::temp::temp_dir("ad_market_gov_sync");
+    let chain_path = dir.path().join("chain");
+    fs::create_dir_all(&chain_path).expect("chain path");
+    let bc = Arc::new(Mutex::new(Blockchain::new(
+        chain_path.to_str().expect("chain path"),
+    )));
+    let mining = Arc::new(AtomicBool::new(false));
+    let nonces = Arc::new(Mutex::new(HashSet::new()));
+    let handles_path = dir.path().join("handles");
+    fs::create_dir_all(&handles_path).expect("handles path");
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handles_path.to_str().expect("handles path"),
+    )));
+    let dids_path = dir.path().join("dids");
+    fs::create_dir_all(&dids_path).expect("dids path");
+    let dids = Arc::new(Mutex::new(DidRegistry::open(&dids_path)));
+    let admin_token = "integration-token".to_string();
+    let runtime_cfg = fuzz_runtime_config_with_admin(admin_token.clone());
+    let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
+    let market_dir = dir.path().join("market");
+    let sled = SledMarketplace::open(&market_dir, distribution).expect("market opened");
+    let market: MarketplaceHandle = Arc::new(sled);
+
+    let harness = RpcHarness {
+        bc: Arc::clone(&bc),
+        mining,
+        nonces,
+        handles,
+        dids,
+        runtime_cfg,
+        market: market.clone(),
+        admin_token,
+        readiness: None,
+    };
+
+    {
+        let mut chain = bc.lock().unwrap();
+        let mut params = chain.params.clone();
+        let mut runtime = the_block::governance::Runtime::with_market(&mut *chain, market.clone());
+        runtime.set_current_params(&params);
+
+        let specs = the_block::governance::registry();
+        let viewer = specs
+            .iter()
+            .find(|spec| spec.key == the_block::governance::ParamKey::ReadSubsidyViewerPercent)
+            .unwrap();
+        (viewer.apply)(55, &mut params).unwrap();
+        (viewer.apply_runtime)(55, &mut runtime).unwrap();
+
+        let host = specs
+            .iter()
+            .find(|spec| spec.key == the_block::governance::ParamKey::ReadSubsidyHostPercent)
+            .unwrap();
+        (host.apply)(25, &mut params).unwrap();
+        (host.apply_runtime)(25, &mut runtime).unwrap();
+
+        let hardware = specs
+            .iter()
+            .find(|spec| spec.key == the_block::governance::ParamKey::ReadSubsidyHardwarePercent)
+            .unwrap();
+        (hardware.apply)(12, &mut params).unwrap();
+        (hardware.apply_runtime)(12, &mut runtime).unwrap();
+
+        let verifier = specs
+            .iter()
+            .find(|spec| spec.key == the_block::governance::ParamKey::ReadSubsidyVerifierPercent)
+            .unwrap();
+        (verifier.apply)(5, &mut params).unwrap();
+        (verifier.apply_runtime)(5, &mut runtime).unwrap();
+
+        let liquidity = specs
+            .iter()
+            .find(|spec| spec.key == the_block::governance::ParamKey::ReadSubsidyLiquidityPercent)
+            .unwrap();
+        (liquidity.apply)(3, &mut params).unwrap();
+        (liquidity.apply_runtime)(3, &mut runtime).unwrap();
+
+        runtime.clear_current_params();
+        chain.params = params;
+    }
+
+    let response = harness.call("ad_market.distribution", Value::Null);
+    let value = expect_ok(response);
+    let dist = &value["distribution"];
+    assert_eq!(dist["viewer_percent"].as_u64(), Some(55));
+    assert_eq!(dist["host_percent"].as_u64(), Some(25));
+    assert_eq!(dist["hardware_percent"].as_u64(), Some(12));
+    assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
+    assert_eq!(dist["liquidity_percent"].as_u64(), Some(3));
 }

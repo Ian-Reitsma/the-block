@@ -19,6 +19,8 @@ pub struct TelemetrySummary {
     pub node_id: String,
     pub memory: HashMap<String, crate::telemetry::MemorySnapshot>,
     pub wrappers: crate::telemetry::WrapperSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ad_readiness: Option<foundation_telemetry::AdReadinessTelemetry>,
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -72,6 +74,20 @@ fn build_summary(seq: u64) -> TelemetrySummary {
         node_id: NODE_LABEL.clone(),
         memory,
         wrappers: crate::telemetry::wrapper_metrics_snapshot(),
+        ad_readiness: crate::ad_readiness::global_snapshot().map(|snapshot| {
+            foundation_telemetry::AdReadinessTelemetry {
+                ready: snapshot.ready,
+                window_secs: snapshot.window_secs,
+                min_unique_viewers: snapshot.min_unique_viewers,
+                min_host_count: snapshot.min_host_count,
+                min_provider_count: snapshot.min_provider_count,
+                unique_viewers: snapshot.unique_viewers,
+                host_count: snapshot.host_count,
+                provider_count: snapshot.provider_count,
+                blockers: snapshot.blockers,
+                last_updated: snapshot.last_updated,
+            }
+        }),
     }
 }
 

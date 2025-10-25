@@ -68,6 +68,15 @@ without scraping SQLite directly. Legends remain enabled by default, letting
 operators focus on specific roles or compare read versus advertising flows in
 the same pane.
 
+An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
+`ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
+`ad_readiness_provider_count`, and configured minimums, while a table lists the
+active blockers surfaced by `ad_market.readiness`. A counter panel charts
+`increase(ad_readiness_skipped_total[5m])` by reason so operators can spot
+insufficient viewer/host/provider diversity before enabling the ad rail. The
+HTML snapshot renders the same panels, keeping FIRST_PARTY_ONLY monitoring in
+sync with the Grafana templates.
+
 The metrics aggregator now persists the explorer payout counters per peer and
 role so deltas remain monotonic across scrapes.
 `AppState::record_explorer_payout_metric` tracks a `(peer_id, role)` cache and

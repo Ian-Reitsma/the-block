@@ -2684,6 +2684,21 @@ pub static READ_ACK_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_readiness_skipped_total",
+            "Ad impressions skipped due to readiness blockers",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad readiness skipped: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad readiness skipped: {e}"));
+    c
+});
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",

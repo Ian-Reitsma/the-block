@@ -139,6 +139,15 @@ pub trait RuntimeAdapter {
     fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
         None
     }
+    fn set_ad_distribution(
+        &mut self,
+        _viewer: u64,
+        _host: u64,
+        _hardware: u64,
+        _verifier: u64,
+        _liquidity: u64,
+    ) {
+    }
 }
 
 impl RuntimeAdapter for () {}
@@ -215,6 +224,30 @@ impl<'a> Runtime<'a> {
 
     pub fn set_storage_engine_policy(&mut self, allowed: &[String]) {
         self.adapter.set_storage_engine_policy(allowed);
+    }
+
+    pub fn set_ad_distribution(
+        &mut self,
+        viewer: u64,
+        host: u64,
+        hardware: u64,
+        verifier: u64,
+        liquidity: u64,
+    ) {
+        self.adapter
+            .set_ad_distribution(viewer, host, hardware, verifier, liquidity);
+    }
+
+    pub fn sync_ad_distribution(&mut self) {
+        if let Some(params) = self.params_snapshot() {
+            self.adapter.set_ad_distribution(
+                params.read_subsidy_viewer_percent.max(0) as u64,
+                params.read_subsidy_host_percent.max(0) as u64,
+                params.read_subsidy_hardware_percent.max(0) as u64,
+                params.read_subsidy_verifier_percent.max(0) as u64,
+                params.read_subsidy_liquidity_percent.max(0) as u64,
+            );
+        }
     }
 
     pub fn set_bridge_incentives(
@@ -1121,7 +1154,10 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "percent",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_read_subsidy_viewer_percent,
-            apply_runtime: |_v, _rt| Ok(()),
+            apply_runtime: |_v, rt| {
+                rt.sync_ad_distribution();
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::ReadSubsidyHostPercent,
@@ -1131,7 +1167,10 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "percent",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_read_subsidy_host_percent,
-            apply_runtime: |_v, _rt| Ok(()),
+            apply_runtime: |_v, rt| {
+                rt.sync_ad_distribution();
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::ReadSubsidyHardwarePercent,
@@ -1141,7 +1180,10 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "percent",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_read_subsidy_hardware_percent,
-            apply_runtime: |_v, _rt| Ok(()),
+            apply_runtime: |_v, rt| {
+                rt.sync_ad_distribution();
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::ReadSubsidyVerifierPercent,
@@ -1151,7 +1193,10 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "percent",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_read_subsidy_verifier_percent,
-            apply_runtime: |_v, _rt| Ok(()),
+            apply_runtime: |_v, rt| {
+                rt.sync_ad_distribution();
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::ReadSubsidyLiquidityPercent,
@@ -1161,7 +1206,10 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "percent",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_read_subsidy_liquidity_percent,
-            apply_runtime: |_v, _rt| Ok(()),
+            apply_runtime: |_v, rt| {
+                rt.sync_ad_distribution();
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::KappaCpuSubCt,

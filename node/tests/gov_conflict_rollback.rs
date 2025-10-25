@@ -12,7 +12,7 @@ fn rollback_conflicting_proposals() {
     let mut bc = Blockchain::default();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mut params = Params::default();
-    let mut rt = Runtime { bc: &mut bc };
+    let mut rt = Runtime::new(&mut bc);
 
     // First proposal sets snapshot interval to 60
     let p1 = gov_propose(
