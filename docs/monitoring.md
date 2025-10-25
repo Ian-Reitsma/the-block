@@ -104,7 +104,11 @@ windows expire and see the configured retry/escalation thresholds directly on
 the chart. Operators can filter every legend to drill into a specific asset,
 playbook, target, status, acknowledgement state, latency bucket, or policy, and
 the same queries back the HTML snapshot so FIRST_PARTY_ONLY deployments never
-rely on external Grafana instances to monitor bridge health.
+rely on external Grafana instances to monitor bridge health. A dedicated
+regression, `dashboards_include_bridge_counter_panels`, now parses each
+generated Grafana JSON (dashboard/operator/telemetry/dev) to ensure the
+reward-claim, approval, settlement, and dispute panels retain their queries and
+legends across templates. A companion test, `dashboards_include_bridge_remediation_legends_and_tooltips`, locks the remediation row legends and descriptions so Grafana tooltips stay aligned with the PromQL on every generated template.
 
 Pending follow-ups are now automated by policy instead of manual sweeps. Each
 remediation action records `dispatch_attempts`, `auto_retry_count`, retry

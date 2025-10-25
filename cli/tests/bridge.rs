@@ -1,3 +1,4 @@
+use cli_core::parse::Parser;
 use contract_cli::bridge::{handle_with_transport, BridgeCmd, BridgeRpcTransport};
 use foundation_serialization::json::{
     self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
@@ -445,8 +446,183 @@ fn bridge_dispute_audit_paginates_requests() {
 }
 
 #[test]
+fn bridge_dispute_audit_serializes_optional_fields() {
+    let empty_response = ok_response(json_object([
+        ("disputes", JsonValue::Array(Vec::new())),
+        ("next_cursor", json_null()),
+    ]));
+    let mock = MockTransport::new(vec![empty_response.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::DisputeAudit {
+            asset: None,
+            cursor: None,
+            limit: 50,
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("dispute audit command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope(
+        "bridge.dispute_audit",
+        json_object([
+            ("asset", json_null()),
+            ("cursor", json_null()),
+            ("limit", json_number(50)),
+        ]),
+    );
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, empty_response);
+}
+
+#[test]
+fn bridge_dispute_audit_parser_defaults_limit_and_cursor() {
+    let command = BridgeCmd::command();
+    let parser = Parser::new(&command);
+    let args = vec![
+        "dispute-audit".to_string(),
+        "--asset".to_string(),
+        "eth".to_string(),
+        "--url".to_string(),
+        "http://mock.bridge".to_string(),
+    ];
+    let matches = parser.parse(&args).expect("parse dispute-audit");
+    let cmd = BridgeCmd::from_matches(&matches).expect("build dispute-audit command");
+
+    match cmd {
+        BridgeCmd::DisputeAudit {
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            assert_eq!(asset, Some("eth".to_string()));
+            assert!(cursor.is_none());
+            assert_eq!(limit, 50);
+            assert_eq!(url, "http://mock.bridge".to_string());
+        }
+        _ => panic!("expected BridgeCmd::DisputeAudit"),
+    }
+}
+
+#[test]
+fn bridge_settlement_log_parser_handles_filters_and_pagination() {
+    let command = BridgeCmd::command();
+    let parser = Parser::new(&command);
+    let args = vec![
+        "settlement-log".to_string(),
+        "--asset".to_string(),
+        "btc".to_string(),
+        "--cursor".to_string(),
+        "120".to_string(),
+        "--limit".to_string(),
+        "25".to_string(),
+        "--url".to_string(),
+        "http://mock.bridge".to_string(),
+    ];
+    let matches = parser
+        .parse(&args)
+        .expect("parse settlement-log command");
+    let cmd = BridgeCmd::from_matches(&matches).expect("build settlement-log command");
+
+    match cmd {
+        BridgeCmd::SettlementLog {
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            assert_eq!(asset, Some("btc".to_string()));
+            assert_eq!(cursor, Some(120));
+            assert_eq!(limit, 25);
+            assert_eq!(url, "http://mock.bridge".to_string());
+        }
+        _ => panic!("expected BridgeCmd::SettlementLog"),
+    }
+}
+
+#[test]
+fn bridge_settlement_log_parser_defaults_when_flags_missing() {
+    let command = BridgeCmd::command();
+    let parser = Parser::new(&command);
+    let args = vec![
+        "settlement-log".to_string(),
+        "--url".to_string(),
+        "http://mock.bridge".to_string(),
+    ];
+    let matches = parser
+        .parse(&args)
+        .expect("parse settlement-log command without filters");
+    let cmd = BridgeCmd::from_matches(&matches).expect("build settlement-log command");
+
+    match cmd {
+        BridgeCmd::SettlementLog {
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            assert!(asset.is_none());
+            assert!(cursor.is_none());
+            assert_eq!(limit, 50);
+            assert_eq!(url, "http://mock.bridge".to_string());
+        }
+        _ => panic!("expected BridgeCmd::SettlementLog"),
+    }
+}
+
+#[test]
+fn bridge_reward_accruals_parser_handles_all_filters() {
+    let command = BridgeCmd::command();
+    let parser = Parser::new(&command);
+    let args = vec![
+        "reward-accruals".to_string(),
+        "--relayer".to_string(),
+        "carol".to_string(),
+        "--asset".to_string(),
+        "dot".to_string(),
+        "--cursor".to_string(),
+        "88".to_string(),
+        "--limit".to_string(),
+        "15".to_string(),
+        "--url".to_string(),
+        "http://mock.bridge".to_string(),
+    ];
+    let matches = parser
+        .parse(&args)
+        .expect("parse reward-accruals command");
+    let cmd = BridgeCmd::from_matches(&matches).expect("build reward-accruals command");
+
+    match cmd {
+        BridgeCmd::RewardAccruals {
+            relayer,
+            asset,
+            cursor,
+            limit,
+            url,
+        } => {
+            assert_eq!(relayer, Some("carol".to_string()));
+            assert_eq!(asset, Some("dot".to_string()));
+            assert_eq!(cursor, Some(88));
+            assert_eq!(limit, 15);
+            assert_eq!(url, "http://mock.bridge".to_string());
+        }
+        _ => panic!("expected BridgeCmd::RewardAccruals"),
+    }
+}
+
+#[test]
 fn bridge_assets_returns_supply_snapshot() {
-    let assets_payload = ok_response(json_object([(
+    let assets_payload = ok_response(json_object([( 
         "assets",
         JsonValue::Array(vec![json_object([
             ("symbol", json_string("btc")),

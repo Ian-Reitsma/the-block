@@ -27,7 +27,10 @@ ready to import once the foundation telemetry stack is running.
   `bridge_settlement_results_total{result,reason}`, and
   `bridge_dispute_outcomes_total{kind,outcome}` so operators can audit reward
   consumption, settlement results, and dispute resolutions without importing
-  third-party widgets. Additional panels plot
+  third-party widgets. `dashboards_include_bridge_counter_panels` now parses each
+  generated Grafana JSON (dashboard/operator/telemetry/dev) to ensure those
+  reward-claim, approval, settlement, and dispute panels retain their queries and
+  legends across templates. `dashboards_include_bridge_remediation_legends_and_tooltips` keeps the remediation row legends/descriptions in lockstep across templates so tooltips stay aligned with the PromQL. Additional panels plot
   `bridge_liquidity_locked_total{asset}`,
   `bridge_liquidity_unlocked_total{asset}`,
   `bridge_liquidity_minted_total{asset}`, and

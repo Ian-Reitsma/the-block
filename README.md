@@ -178,6 +178,9 @@ test real services today.
     invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
     both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
     CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history.
+    Contract CLI regressions now exercise dispute-audit pagination defaults and optional
+    filters through the first-party parser while monitoring parses every Grafana variant
+    to ensure bridge reward/approval/settlement/dispute panels retain their queries.
     (80.6% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).

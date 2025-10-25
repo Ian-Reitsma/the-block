@@ -172,6 +172,63 @@ fn bridge_records_receipts_and_slashes() {
 }
 
 #[test]
+fn bridge_pending_dispute_persists_across_restart() {
+    let tmp = tempdir().expect("tempdir");
+    let gov_path = tmp.path().join("gov");
+    let _guard = GovEnvGuard::set(&gov_path);
+
+    let bridge_path = tmp.path().join("bridge_db");
+    let headers_dir = tmp.path().join("headers_native");
+    let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+    configure_native_channel(&mut bridge, &headers_dir, 120);
+    let min_bond = BridgeIncentiveParameters::DEFAULT_MIN_BOND;
+    bridge.bond_relayer("r1", min_bond).unwrap();
+    bridge.bond_relayer("r2", min_bond).unwrap();
+
+    let header = sample_header();
+    let proof = sample_proof();
+    let bundle = sample_bundle("alice", 12);
+    bridge
+        .deposit("native", "r1", "alice", 12, &header, &proof, &bundle)
+        .expect("deposit");
+    let commitment = bundle.aggregate_commitment("alice", 12);
+    approve_release(&gov_path, "native", &commitment);
+    bridge
+        .request_withdrawal("native", "r1", "alice", 12, &bundle)
+        .expect("request withdrawal");
+
+    let challenge = bridge
+        .challenge_withdrawal("native", commitment, "auditor")
+        .expect("challenge withdrawal");
+    assert_eq!(challenge.commitment, commitment);
+
+    let pending_before = bridge.pending_withdrawals(Some("native"));
+    assert!(pending_before
+        .iter()
+        .any(|entry| entry.commitment == commitment && entry.challenged));
+
+    drop(bridge);
+
+    let bridge_path_str = bridge_path.to_str().expect("bridge path str");
+    let reopened = Bridge::open(bridge_path_str);
+    let pending_after = reopened.pending_withdrawals(Some("native"));
+    let pending_entry = pending_after
+        .iter()
+        .find(|entry| entry.commitment == commitment)
+        .expect("pending withdrawal after restart");
+    assert!(pending_entry.challenged);
+
+    let (disputes_after_restart, _) = reopened.dispute_audit(Some("native"), None, 256);
+    let dispute = disputes_after_restart
+        .iter()
+        .find(|entry| entry.commitment == commitment)
+        .expect("dispute entry after restart");
+    assert!(dispute.challenged);
+    assert_eq!(dispute.challenger.as_deref(), Some("auditor"));
+    assert!(dispute.challenged_at.is_some());
+}
+
+#[test]
 fn bridge_slashes_on_invalid_proofs() {
     let tmp = tempdir().expect("tempdir");
     let gov_path = tmp.path().join("gov");
