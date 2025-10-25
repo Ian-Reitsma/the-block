@@ -19,6 +19,8 @@ const ALERT_CONSUMER_FEE: &str = "ConsumerFeeComfortBreached";
 const ALERT_DEFERRAL_RATIO: &str = "IndustrialDeferralRatioHigh";
 const ALERT_SUBSIDY_SPIKE: &str = "SubsidyGrowthSpike";
 const ALERT_RENT_ESCROW: &str = "RentEscrowLockedSpike";
+const ALERT_PAYOUT_READ_STALLED: &str = "ExplorerReadPayoutStalled";
+const ALERT_PAYOUT_AD_STALLED: &str = "ExplorerAdPayoutStalled";
 const ALERT_TLS_BURST: &str = "TlsEnvWarningBurst";
 const ALERT_TLS_NEW_DETAIL: &str = "TlsEnvWarningNewDetailFingerprint";
 const ALERT_TLS_NEW_VARIABLES: &str = "TlsEnvWarningNewVariablesFingerprint";
@@ -44,6 +46,10 @@ const EXPECTED_CONSUMER_FEE_EXPR: &str = "max_over_time(CONSUMER_FEE_P90[10m])>o
 const EXPECTED_DEFERRAL_EXPR: &str = "(increase(INDUSTRIAL_DEFERRED_TOTAL[10m])/clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m])+increase(INDUSTRIAL_DEFERRED_TOTAL[10m]),1))>0.3";
 const EXPECTED_SUBSIDY_EXPR: &str = "increase(subsidy_cpu_ms_total[10m])>1e9orincrease(subsidy_bytes_total[10m])>1e12";
 const EXPECTED_RENT_EXPR: &str = "increase(rent_escrow_locked_ct_total[10m])>1e6";
+const EXPECTED_PAYOUT_READ_EXPR: &str =
+    "(time()-explorer_block_payout_read_last_seen_timestamp{role!=\"\"})>1800andon(role)(explorer_block_payout_read_total{role!=\"\"}>0)";
+const EXPECTED_PAYOUT_AD_EXPR: &str =
+    "(time()-explorer_block_payout_ad_last_seen_timestamp{role!=\"\"})>1800andon(role)(explorer_block_payout_ad_total{role!=\"\"}>0)";
 const EXPECTED_TLS_BURST_EXPR: &str = "sumby(prefix,code)(increase(tls_env_warning_total[5m]))>0";
 const EXPECTED_TLS_NEW_DETAIL_EXPR: &str = "increase(maxby(prefix,code)(tls_env_warning_detail_unique_fingerprints)[10m])>0";
 const EXPECTED_TLS_NEW_VARIABLES_EXPR: &str = "increase(maxby(prefix,code)(tls_env_warning_variables_unique_fingerprints)[10m])>0";
@@ -72,6 +78,8 @@ const EXPECTED_CONSUMER_FEE_SERIES: &[&str] = &["fee-comfort-breach"];
 const EXPECTED_DEFERRAL_SERIES: &[&str] = &["deferral-high"];
 const EXPECTED_SUBSIDY_SERIES: &[&str] = &["subsidy-cpu", "subsidy-bytes"];
 const EXPECTED_RENT_SERIES: &[&str] = &["rent-surge"];
+const EXPECTED_PAYOUT_READ_SERIES: &[&str] = &["read-role-stalled"];
+const EXPECTED_PAYOUT_AD_SERIES: &[&str] = &["ad-role-stalled"];
 const EXPECTED_TLS_BURST_SERIES: &[&str] = &["tls-burst-main"];
 const EXPECTED_TLS_NEW_DETAIL_SERIES: &[&str] = &["tls-new-detail"];
 const EXPECTED_TLS_NEW_VARIABLES_SERIES: &[&str] = &["tls-new-vars"];
@@ -223,6 +231,8 @@ fn validate_chain_health_alerts_from_str(content: &str) -> Result<(), Validation
     validate_expression(ALERT_DEFERRAL_RATIO, EXPECTED_DEFERRAL_EXPR, &alerts)?;
     validate_expression(ALERT_SUBSIDY_SPIKE, EXPECTED_SUBSIDY_EXPR, &alerts)?;
     validate_expression(ALERT_RENT_ESCROW, EXPECTED_RENT_EXPR, &alerts)?;
+    validate_expression(ALERT_PAYOUT_READ_STALLED, EXPECTED_PAYOUT_READ_EXPR, &alerts)?;
+    validate_expression(ALERT_PAYOUT_AD_STALLED, EXPECTED_PAYOUT_AD_EXPR, &alerts)?;
     validate_expression(ALERT_TLS_BURST, EXPECTED_TLS_BURST_EXPR, &alerts)?;
     validate_expression(ALERT_TLS_NEW_DETAIL, EXPECTED_TLS_NEW_DETAIL_EXPR, &alerts)?;
     validate_expression(ALERT_TLS_NEW_VARIABLES, EXPECTED_TLS_NEW_VARIABLES_EXPR, &alerts)?;
@@ -256,6 +266,16 @@ fn validate_chain_health_alerts_from_str(content: &str) -> Result<(), Validation
         ALERT_RENT_ESCROW,
         EXPECTED_RENT_SERIES,
         evaluate_rent_spike(&dataset.rent_escrow, 1.0e6),
+    )?;
+    validate_results(
+        ALERT_PAYOUT_READ_STALLED,
+        EXPECTED_PAYOUT_READ_SERIES,
+        evaluate_payout_staleness(&dataset.payout_read_last_seen, 1800.0),
+    )?;
+    validate_results(
+        ALERT_PAYOUT_AD_STALLED,
+        EXPECTED_PAYOUT_AD_SERIES,
+        evaluate_payout_staleness(&dataset.payout_ad_last_seen, 1800.0),
     )?;
     validate_results(
         ALERT_TLS_BURST,
@@ -483,6 +503,17 @@ fn evaluate_rent_spike(samples: &[RentSample], threshold: f64) -> BTreeSet<Strin
     samples
         .iter()
         .filter(|sample| sample.increase > threshold)
+        .map(|sample| sample.name.to_string())
+        .collect()
+}
+
+fn evaluate_payout_staleness(
+    samples: &[PayoutLastSeenSample],
+    threshold: f64,
+) -> BTreeSet<String> {
+    samples
+        .iter()
+        .filter(|sample| sample.has_activity && sample.age_secs > threshold)
         .map(|sample| sample.name.to_string())
         .collect()
 }
@@ -825,6 +856,40 @@ fn build_chain_health_dataset() -> ChainHealthDataset {
                 increase: 5.0e5,
             },
         ],
+        payout_read_last_seen: vec![
+            PayoutLastSeenSample {
+                name: "read-role-stalled",
+                age_secs: 5_400.0,
+                has_activity: true,
+            },
+            PayoutLastSeenSample {
+                name: "read-role-fresh",
+                age_secs: 900.0,
+                has_activity: true,
+            },
+            PayoutLastSeenSample {
+                name: "read-role-dormant",
+                age_secs: 7_200.0,
+                has_activity: false,
+            },
+        ],
+        payout_ad_last_seen: vec![
+            PayoutLastSeenSample {
+                name: "ad-role-stalled",
+                age_secs: 4_800.0,
+                has_activity: true,
+            },
+            PayoutLastSeenSample {
+                name: "ad-role-fresh",
+                age_secs: 600.0,
+                has_activity: true,
+            },
+            PayoutLastSeenSample {
+                name: "ad-role-paused",
+                age_secs: 6_000.0,
+                has_activity: false,
+            },
+        ],
         tls_bursts: vec![
             TlsBurstSample {
                 name: "tls-burst-main",
@@ -1011,6 +1076,8 @@ struct ChainHealthDataset {
     deferral_ratio: Vec<DeferralSample>,
     subsidy_growth: Vec<SubsidySample>,
     rent_escrow: Vec<RentSample>,
+    payout_read_last_seen: Vec<PayoutLastSeenSample>,
+    payout_ad_last_seen: Vec<PayoutLastSeenSample>,
     tls_bursts: Vec<TlsBurstSample>,
     tls_new_detail: Vec<TlsNewFingerprintSample>,
     tls_new_variables: Vec<TlsNewFingerprintSample>,
@@ -1045,6 +1112,12 @@ struct SubsidySample {
 struct RentSample {
     name: &'static str,
     increase: f64,
+}
+
+struct PayoutLastSeenSample {
+    name: &'static str,
+    age_secs: f64,
+    has_activity: bool,
 }
 
 struct TlsBurstSample {

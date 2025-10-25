@@ -101,9 +101,9 @@ fn attempt_build(keys: &[u64], seed: u64) -> Option<(Vec<u8>, usize)> {
     }
 
     let mut queue = VecDeque::new();
-    for i in 0..size {
-        if counts[i] == 1 {
-            queue.push_back(i);
+    for (index, &count) in counts.iter().enumerate().take(size) {
+        if count == 1 {
+            queue.push_back(index);
         }
     }
 

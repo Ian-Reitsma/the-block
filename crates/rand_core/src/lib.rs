@@ -89,7 +89,7 @@ impl OsRng {
         let since_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| Error::new(ErrorKind::Unavailable))?;
-        let nanos = since_epoch.as_nanos() as u128;
+        let nanos = since_epoch.as_nanos();
         Ok(Self {
             state: nanos ^ 0x9e37_79b9_7f4a_7c15_ffff,
         })

@@ -13,7 +13,15 @@ try {
   process.exit(1);
 }
 function checkPanels(panels) {
-  const allowed = new Set(['graph', 'stat', 'table', 'timeseries', 'gauge', 'piechart']);
+const allowed = new Set([
+  'graph',
+  'stat',
+  'table',
+  'timeseries',
+  'gauge',
+  'piechart',
+  'row',
+]);
   for (const p of panels || []) {
     if (!allowed.has(p.type)) {
       console.error(`unsupported panel type: ${p.type}`);

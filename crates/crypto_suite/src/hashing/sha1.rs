@@ -120,7 +120,7 @@ impl Sha1 {
         let mut d = self.state[3];
         let mut e = self.state[4];
 
-        for i in 0..80 {
+        for (i, word) in w.iter().enumerate() {
             let (f, k) = match i {
                 0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
                 20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
@@ -133,7 +133,7 @@ impl Sha1 {
                 .wrapping_add(f)
                 .wrapping_add(e)
                 .wrapping_add(k)
-                .wrapping_add(w[i]);
+                .wrapping_add(*word);
             e = d;
             d = c;
             c = b.rotate_left(30);

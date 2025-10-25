@@ -53,7 +53,7 @@ fn pkcs7_pad(input: &[u8]) -> Vec<u8> {
     let padding = BLOCK_LEN - (input.len() % BLOCK_LEN);
     let mut out = Vec::with_capacity(input.len() + padding);
     out.extend_from_slice(input);
-    out.extend(std::iter::repeat(padding as u8).take(padding));
+    out.extend(std::iter::repeat_n(padding as u8, padding));
     out
 }
 
@@ -95,8 +95,8 @@ fn expand_key(key: &[u8; KEY_LEN]) -> [u8; ROUND_KEYS_LEN] {
         } else if bytes_generated % KEY_LEN == 16 {
             temp = sub_word(temp);
         }
-        for i in 0..4 {
-            expanded[bytes_generated] = expanded[bytes_generated - KEY_LEN] ^ temp[i];
+        for &temp_byte in &temp {
+            expanded[bytes_generated] = expanded[bytes_generated - KEY_LEN] ^ temp_byte;
             bytes_generated += 1;
         }
     }

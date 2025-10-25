@@ -67,13 +67,6 @@ impl Number {
             NumberRepr::Signed(value) => value.try_into().ok(),
         }
     }
-
-    fn to_string(&self) -> String {
-        match self.0 {
-            NumberRepr::Unsigned(value) => value.to_string(),
-            NumberRepr::Signed(value) => value.to_string(),
-        }
-    }
 }
 
 impl From<u8> for Number {
@@ -153,6 +146,15 @@ impl FromJsonValue for String {
             Value::Bool(bool) => Ok(bool.to_string()),
             Value::Null => Ok(String::new()),
             _ => Err(Error::new("expected string")),
+        }
+    }
+}
+
+impl fmt::Display for Number {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            NumberRepr::Unsigned(value) => write!(f, "{}", value),
+            NumberRepr::Signed(value) => write!(f, "{}", value),
         }
     }
 }

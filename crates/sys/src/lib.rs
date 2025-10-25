@@ -79,8 +79,8 @@ mod unix_ffi {
     pub const F_GETFD: c_int = 1;
     pub const F_SETFD: c_int = 2;
     pub const FD_CLOEXEC: c_int = 1;
-    pub const O_NONBLOCK: c_int = 0o0004_000;
-    pub const O_NOFOLLOW: c_int = 0o0040_0000;
+    pub const O_NONBLOCK: c_int = 0o0_004_000;
+    pub const O_NOFOLLOW: c_int = 0o00_400_000;
     pub const LOCK_EX: c_int = 2;
 
     const SIGSET_WORDS: usize = 16;
@@ -289,8 +289,8 @@ pub mod inotify {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     use std::path::Path;
 
-    const IN_NONBLOCK: c_int = 0o0004_000;
-    const IN_CLOEXEC: c_int = 0o2000_000;
+    const IN_NONBLOCK: c_int = 0o0_004_000;
+    const IN_CLOEXEC: c_int = 0o2_000_000;
 
     #[repr(C)]
     struct RawInotifyEvent {
@@ -339,7 +339,7 @@ pub mod inotify {
             let c_path = CString::new(bytes)
                 .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "path contains null byte"))?;
             // SAFETY: `inotify_add_watch` reads the provided C string.
-            let wd = unsafe { inotify_add_watch(self.fd, c_path.as_ptr(), mask as u32) };
+            let wd = unsafe { inotify_add_watch(self.fd, c_path.as_ptr(), mask) };
             if wd < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -1463,6 +1463,12 @@ pub mod tempfile {
         suffix: Option<String>,
     }
 
+    impl Default for Builder {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl Builder {
         pub fn new() -> Self {
             Self {
@@ -1966,12 +1972,9 @@ pub mod archive {
             if data.len() < 22 {
                 return None;
             }
-            for index in (0..=data.len() - 4).rev() {
-                if read_u32(&data[index..]) == END_OF_CENTRAL_DIRECTORY_SIGNATURE {
-                    return Some(index);
-                }
-            }
-            None
+            (0..=data.len() - 4)
+                .rev()
+                .find(|&index| read_u32(&data[index..]) == END_OF_CENTRAL_DIRECTORY_SIGNATURE)
         }
 
         #[cfg(test)]

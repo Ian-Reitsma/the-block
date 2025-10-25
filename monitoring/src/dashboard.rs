@@ -125,9 +125,21 @@ const PAYOUT_ROW_TITLE: &str = "Block Payouts";
 const PAYOUT_READ_PANEL_TITLE: &str = "Read subsidy payouts (5m delta)";
 const PAYOUT_READ_EXPR: &str =
     "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
+const PAYOUT_READ_LAST_SEEN_PANEL_TITLE: &str = "Read subsidy last seen (timestamp)";
+const PAYOUT_READ_LAST_SEEN_EXPR: &str =
+    "max by (role)(explorer_block_payout_read_last_seen_timestamp)";
+const PAYOUT_READ_STALENESS_PANEL_TITLE: &str = "Read subsidy staleness (seconds)";
+const PAYOUT_READ_STALENESS_EXPR: &str =
+    "clamp_min(time() - max by (role)(explorer_block_payout_read_last_seen_timestamp), 0)";
 const PAYOUT_AD_PANEL_TITLE: &str = "Advertising payouts (5m delta)";
 const PAYOUT_AD_EXPR: &str =
     "sum by (role)(increase(explorer_block_payout_ad_total[5m]))";
+const PAYOUT_AD_LAST_SEEN_PANEL_TITLE: &str = "Advertising payout last seen (timestamp)";
+const PAYOUT_AD_LAST_SEEN_EXPR: &str =
+    "max by (role)(explorer_block_payout_ad_last_seen_timestamp)";
+const PAYOUT_AD_STALENESS_PANEL_TITLE: &str = "Advertising payout staleness (seconds)";
+const PAYOUT_AD_STALENESS_EXPR: &str =
+    "clamp_min(time() - max by (role)(explorer_block_payout_ad_last_seen_timestamp), 0)";
 const PAYOUT_ROLE_LEGEND: &str = "{{role}}";
 const BRIDGE_REWARD_CLAIMS_PANEL_TITLE: &str = "bridge_reward_claims_total (5m delta)";
 const BRIDGE_REWARD_CLAIMS_EXPR: &str = "increase(bridge_reward_claims_total[5m])";
@@ -333,6 +345,36 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             treasury.push(build_treasury_scalar_panel(
                 TREASURY_NEXT_EPOCH_PANEL_TITLE,
                 TREASURY_NEXT_EPOCH_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_block_payout_read_last_seen_timestamp" {
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_READ_LAST_SEEN_PANEL_TITLE,
+                PAYOUT_READ_LAST_SEEN_EXPR,
+                PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_READ_STALENESS_PANEL_TITLE,
+                PAYOUT_READ_STALENESS_EXPR,
+                PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_block_payout_ad_last_seen_timestamp" {
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_AD_LAST_SEEN_PANEL_TITLE,
+                PAYOUT_AD_LAST_SEEN_EXPR,
+                PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            payouts.push(build_grouped_delta_panel(
+                PAYOUT_AD_STALENESS_PANEL_TITLE,
+                PAYOUT_AD_STALENESS_EXPR,
+                PAYOUT_ROLE_LEGEND,
                 metric,
             ));
             continue;

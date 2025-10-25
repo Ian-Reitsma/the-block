@@ -38,8 +38,10 @@ impl RateLimitFilter {
     }
 
     fn rebuild(&mut self) {
-        if let Backend::Scalar(ref mut f) = self.backend {
-            *f = Xor8::populate(&self.keys).unwrap();
+        match &mut self.backend {
+            Backend::Scalar(filter) => {
+                *filter = Xor8::populate(&self.keys).unwrap();
+            }
         }
     }
 

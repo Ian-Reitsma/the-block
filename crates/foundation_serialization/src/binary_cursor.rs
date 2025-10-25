@@ -203,7 +203,7 @@ impl<'a> Reader<'a> {
         if self
             .position
             .checked_add(len)
-            .map_or(true, |end| end > self.input.len())
+            .is_none_or(|end| end > self.input.len())
         {
             return Err(CursorError::UnexpectedEof);
         }

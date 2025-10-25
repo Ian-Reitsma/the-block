@@ -1,0 +1,252 @@
+#![cfg(feature = "integration-tests")]
+
+use std::collections::HashSet;
+use std::fs;
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
+
+use ad_market::{DistributionPolicy, MarketplaceHandle, SledMarketplace};
+use foundation_rpc::{Request as RpcRequest, Response, RpcError};
+use foundation_serialization::json::{self as json_mod, Value};
+use the_block::{
+    identity::{handle_registry::HandleRegistry, DidRegistry},
+    rpc::{fuzz_dispatch_request, fuzz_runtime_config_with_admin, RpcRuntimeConfig},
+    Blockchain,
+};
+
+mod util;
+
+fn parse_json(src: &str) -> Value {
+    json_mod::from_str(src).expect("json value")
+}
+
+#[derive(Clone)]
+struct RpcHarness {
+    bc: Arc<Mutex<Blockchain>>,
+    mining: Arc<AtomicBool>,
+    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
+    handles: Arc<Mutex<HandleRegistry>>,
+    dids: Arc<Mutex<DidRegistry>>,
+    runtime_cfg: Arc<RpcRuntimeConfig>,
+    market: MarketplaceHandle,
+    admin_token: String,
+}
+
+impl RpcHarness {
+    fn call(&self, method: &str, params: Value) -> Response {
+        let request = RpcRequest::new(method.to_string(), params);
+        let auth_header = format!("Bearer {}", self.admin_token);
+        fuzz_dispatch_request(
+            Arc::clone(&self.bc),
+            Arc::clone(&self.mining),
+            Arc::clone(&self.nonces),
+            Arc::clone(&self.handles),
+            Arc::clone(&self.dids),
+            Arc::clone(&self.runtime_cfg),
+            Some(Arc::clone(&self.market)),
+            request,
+            Some(auth_header),
+            Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        )
+    }
+}
+
+fn expect_ok(response: Response) -> Value {
+    match response {
+        Response::Result { result, .. } => result,
+        Response::Error { error, .. } => panic!("rpc error: {} ({})", error.message(), error.code),
+    }
+}
+
+fn expect_error(response: Response) -> RpcError {
+    match response {
+        Response::Error { error, .. } => error,
+        Response::Result { .. } => panic!("expected rpc error"),
+    }
+}
+
+#[testkit::tb_serial]
+fn ad_market_rpc_endpoints_round_trip() {
+    let dir = util::temp::temp_dir("ad_market_rpc");
+    let chain_path = dir.path().join("chain");
+    fs::create_dir_all(&chain_path).expect("chain path");
+    let bc = Arc::new(Mutex::new(Blockchain::new(
+        chain_path.to_str().expect("chain path"),
+    )));
+    let mining = Arc::new(AtomicBool::new(false));
+    let nonces = Arc::new(Mutex::new(HashSet::new()));
+
+    let handles_path = dir.path().join("handles");
+    fs::create_dir_all(&handles_path).expect("handles path");
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handles_path.to_str().expect("handles path"),
+    )));
+
+    let dids_path = dir.path().join("dids");
+    fs::create_dir_all(&dids_path).expect("dids path");
+    let dids = Arc::new(Mutex::new(DidRegistry::open(&dids_path)));
+
+    let admin_token = "integration-token".to_string();
+    let runtime_cfg = fuzz_runtime_config_with_admin(admin_token.clone());
+
+    let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
+    let market_dir = dir.path().join("market");
+    let sled = SledMarketplace::open(&market_dir, distribution).expect("market opened");
+    let market: MarketplaceHandle = Arc::new(sled);
+
+    let harness = Arc::new(RpcHarness {
+        bc,
+        mining,
+        nonces,
+        handles,
+        dids,
+        runtime_cfg,
+        market,
+        admin_token,
+    });
+
+    let campaign = parse_json(
+        r#"{
+            "id": "cmp-1",
+            "advertiser_account": "adv-1",
+            "budget_ct": 5000,
+            "creatives": [
+                {
+                    "id": "creative-1",
+                    "price_per_mib_ct": 128,
+                    "badges": ["physical_presence"],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": ["physical_presence"]
+            },
+            "metadata": {}
+        }"#,
+    );
+
+    let register = harness.call("ad_market.register_campaign", campaign.clone());
+    let register_value = expect_ok(register);
+    assert_eq!(register_value["status"].as_str(), Some("ok"));
+
+    let inventory = expect_ok(harness.call("ad_market.inventory", Value::Null));
+    assert_eq!(inventory["status"].as_str(), Some("ok"));
+    let campaigns = inventory["campaigns"].as_array().expect("campaigns array");
+    assert_eq!(campaigns.len(), 1);
+    let entry = &campaigns[0];
+    assert_eq!(entry["id"].as_str(), Some("cmp-1"));
+    assert_eq!(entry["advertiser_account"].as_str(), Some("adv-1"));
+    assert_eq!(entry["remaining_budget_ct"].as_u64(), Some(5_000));
+    let creative_ids = entry["creatives"].as_array().expect("creatives array");
+    assert_eq!(creative_ids.len(), 1);
+    assert_eq!(creative_ids[0].as_str(), Some("creative-1"));
+
+    let distribution_resp = expect_ok(harness.call("ad_market.distribution", Value::Null));
+    assert_eq!(distribution_resp["status"].as_str(), Some("ok"));
+    let dist = &distribution_resp["distribution"];
+    assert_eq!(dist["viewer_percent"].as_u64(), Some(40));
+    assert_eq!(dist["host_percent"].as_u64(), Some(30));
+    assert_eq!(dist["hardware_percent"].as_u64(), Some(20));
+    assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
+    assert_eq!(dist["liquidity_percent"].as_u64(), Some(5));
+
+    let duplicate = expect_error(harness.call(
+        "ad_market.register_campaign",
+        parse_json(
+            r#"{
+                "id": "cmp-1",
+                "advertiser_account": "adv-1",
+                "budget_ct": 1000,
+                "creatives": [
+                    {
+                        "id": "creative-dup",
+                        "price_per_mib_ct": 64,
+                        "badges": [],
+                        "domains": ["example.test"],
+                        "metadata": {}
+                    }
+                ],
+                "targeting": {
+                    "domains": ["example.test"],
+                    "badges": []
+                },
+                "metadata": {}
+            }"#,
+        ),
+    ));
+    assert_eq!(duplicate.code, -32000);
+    assert_eq!(duplicate.message(), "campaign already exists");
+
+    let invalid = expect_error(harness.call(
+        "ad_market.register_campaign",
+        parse_json(r#"{ "id": "cmp-invalid" }"#),
+    ));
+    assert_eq!(invalid.code, -32602);
+    assert_eq!(invalid.message(), "invalid params");
+
+    harness
+        .market
+        .update_distribution(DistributionPolicy::new(45, 35, 10, 5, 5));
+    let updated = expect_ok(harness.call("ad_market.distribution", Value::Null));
+    let updated_dist = &updated["distribution"];
+    assert_eq!(updated_dist["viewer_percent"].as_u64(), Some(45));
+    assert_eq!(updated_dist["host_percent"].as_u64(), Some(35));
+    assert_eq!(updated_dist["hardware_percent"].as_u64(), Some(10));
+
+    let concurrent_payload = parse_json(
+        r#"{
+            "id": "cmp-concurrent",
+            "advertiser_account": "adv-2",
+            "budget_ct": 2500,
+            "creatives": [
+                {
+                    "id": "creative-concurrent",
+                    "price_per_mib_ct": 256,
+                    "badges": [],
+                    "domains": ["concurrent.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["concurrent.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+
+    let harness_for_threads = Arc::clone(&harness);
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let harness = Arc::clone(&harness_for_threads);
+            let payload = concurrent_payload.clone();
+            std::thread::spawn(move || harness.call("ad_market.register_campaign", payload))
+        })
+        .collect();
+
+    let mut ok_count = 0;
+    let mut duplicate_count = 0;
+    for handle in handles {
+        let response = handle.join().expect("thread join");
+        match response {
+            Response::Result { .. } => ok_count += 1,
+            Response::Error { error, .. } => {
+                if error.message() == "campaign already exists" {
+                    duplicate_count += 1;
+                } else {
+                    panic!("unexpected error: {}", error.message());
+                }
+            }
+        }
+    }
+    assert_eq!(ok_count, 1);
+    assert_eq!(duplicate_count, 1);
+
+    let post_inventory = expect_ok(harness.call("ad_market.inventory", Value::Null));
+    let campaigns = post_inventory["campaigns"]
+        .as_array()
+        .expect("campaigns array");
+    assert_eq!(campaigns.len(), 2);
+}

@@ -343,7 +343,7 @@ mod serde_impls {
 
     struct BytesVisitor;
 
-    impl<'de> Visitor<'de> for BytesVisitor {
+    impl Visitor<'_> for BytesVisitor {
         type Value = Bytes;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

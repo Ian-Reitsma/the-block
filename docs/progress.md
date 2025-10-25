@@ -1,4 +1,25 @@
 # Project Progress Snapshot
+> **Review (2025-10-25, afternoon):** Workspace clippy now runs clean across the
+> foundation serialization layer (`foundation_serde`, `foundation_serialization`),
+> crypto primitives, concurrency helpers, and the bespoke HTTP/runtime shims by
+> replacing placeholder iterators, lifetimes, and inherent `to_string` methods
+> with first-party Display impls and lock guards. The `integration-tests`
+> harness for `ad_market` exercises distribution updates and a concurrent
+> registration race so only one campaign lands while the duplicate path
+> preserves its error code, and the Justfile’s `test-gateway` recipe scopes the
+> web suite directly to `web::gateway::tests::` so CI keeps the feature-gated
+> server green.
+> **Review (2025-10-25, mid-morning):** Gateway provider inference now resolves
+> operators from storage manifests (falling back to deterministic hashing when
+> multiple providers are eligible) and the test harness exposes override hooks
+> so unit suites stay hermetic. The new `node/tests/ad_market_rpc.rs` drives the
+> RPC router in-process with a sled-backed marketplace, covering successful
+> registrations plus duplicate and malformed payload errors under the
+> `integration-tests` feature without opening sockets. Monitoring’s payout row
+> wires the last-seen gauges into the Grafana snapshots and the shared
+> `alert_validator` dataset so the `Explorer*PayoutStalled` rules stay audited,
+> and the `Justfile` now ships a `test-gateway` recipe that runs the
+> feature-gated gateway suite against the normalized module layout.
 > **Review (2025-10-24, late night):** The ad marketplace graduated from an
 > in-memory stub to a sled-backed store. `SledMarketplace` now persists
 > campaigns, budgets, and distribution policies so governance can audit live

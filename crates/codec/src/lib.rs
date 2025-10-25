@@ -281,7 +281,7 @@ impl Error {
 }
 
 /// Serialize `value` using the provided `codec` configuration.
-#[must_use]
+#[must_use = "serialization results should not be ignored"]
 pub fn serialize<T: Serialize>(codec: Codec, value: &T) -> Result<Vec<u8>> {
     let result = codec.encode(value);
     observe_result(
@@ -342,7 +342,7 @@ pub fn serialize_json_pretty<T: Serialize>(value: &T) -> Result<String> {
     let result =
         json::to_string_pretty(value).map_err(|err| Error::from_json(err, Direction::Serialize));
     observe_result(
-        result.as_ref().ok().map(|s| s.as_bytes().len()),
+        result.as_ref().ok().map(|s| s.len()),
         Codec::Json(JsonProfile::Canonical),
         Direction::Serialize,
     );

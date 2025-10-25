@@ -431,7 +431,7 @@ pub mod internal {
 
             let target = self.target.take().unwrap_or(default_target);
 
-            let message = self.message.take().unwrap_or_else(|| Cow::Borrowed(""));
+            let message = self.message.take().unwrap_or(Cow::Borrowed(""));
 
             LogRecord {
                 level: self.level,

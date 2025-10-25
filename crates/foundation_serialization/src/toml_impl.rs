@@ -12,7 +12,6 @@ pub type Value = JsonValue;
 pub type Table = JsonMap;
 
 /// Representation of a TOML number.
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -626,15 +625,13 @@ impl<'a> Parser<'a> {
             let number =
                 JsonNumber::from_f64(value).ok_or_else(|| Error::message("non-finite float"))?;
             Ok(JsonValue::Number(number))
+        } else if let Ok(value) = text.parse::<i64>() {
+            Ok(JsonValue::Number(JsonNumber::from(value)))
         } else {
-            if let Ok(value) = text.parse::<i64>() {
-                Ok(JsonValue::Number(JsonNumber::from(value)))
-            } else {
-                let value = text
-                    .parse::<u64>()
-                    .map_err(|_| Error::message("invalid integer literal"))?;
-                Ok(JsonValue::Number(JsonNumber::from(value)))
-            }
+            let value = text
+                .parse::<u64>()
+                .map_err(|_| Error::message("invalid integer literal"))?;
+            Ok(JsonValue::Number(JsonNumber::from(value)))
         }
     }
 

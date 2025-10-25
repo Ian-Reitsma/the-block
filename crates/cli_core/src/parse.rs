@@ -76,6 +76,12 @@ impl Matches {
     }
 }
 
+impl Default for Matches {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn parse_command(
     command: &Command,
     args: &[String],
@@ -247,9 +253,9 @@ fn parse_option_token(
                 }
             }
 
-            let parsed = if option.value_delimiter.is_some() {
-                ParsedValue::Many(values)
-            } else if option.multiple || values.len() > 1 {
+            let parse_as_many =
+                option.value_delimiter.is_some() || option.multiple || values.len() > 1;
+            let parsed = if parse_as_many {
                 ParsedValue::Many(values)
             } else if let Some(value) = values.into_iter().next() {
                 ParsedValue::Single(value)

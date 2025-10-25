@@ -31,6 +31,9 @@ test-peer-stats:
     cargo test -p the_block --test rate_limit --features telemetry --release -- -q
     cargo test -p the_block --test net_peer_stats --features telemetry --release -- -q
 
+test-gateway:
+    cargo test -p the_block --lib --features gateway web::gateway::tests::
+
 swarm-logs:
     sh scripts/swarm.sh logs
 

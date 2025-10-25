@@ -135,7 +135,7 @@ struct Serializer<'a> {
     output: &'a mut Vec<u8>,
 }
 
-impl<'a> Serializer<'a> {
+impl Serializer<'_> {
     fn write_u8(&mut self, value: u8) {
         self.output.push(value);
     }
@@ -414,7 +414,7 @@ impl<'a, 'b> SeqSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeSeq for SeqSerializer<'a, 'b> {
+impl SerializeSeq for SeqSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -428,7 +428,7 @@ impl<'a, 'b> SerializeSeq for SeqSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeTuple for SeqSerializer<'a, 'b> {
+impl SerializeTuple for SeqSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -441,7 +441,7 @@ impl<'a, 'b> SerializeTuple for SeqSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeTupleStruct for SeqSerializer<'a, 'b> {
+impl SerializeTupleStruct for SeqSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -469,7 +469,7 @@ impl<'a, 'b> TupleSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeTuple for TupleSerializer<'a, 'b> {
+impl SerializeTuple for TupleSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -491,7 +491,7 @@ impl<'a, 'b> SerializeTuple for TupleSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeTupleStruct for TupleSerializer<'a, 'b> {
+impl SerializeTupleStruct for TupleSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -520,7 +520,7 @@ impl<'a, 'b> TupleVariantSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeTupleVariant for TupleVariantSerializer<'a, 'b> {
+impl SerializeTupleVariant for TupleVariantSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -571,7 +571,7 @@ impl<'a, 'b> MapSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeMap for MapSerializer<'a, 'b> {
+impl SerializeMap for MapSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -617,7 +617,7 @@ impl<'a, 'b> StructSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeStruct for StructSerializer<'a, 'b> {
+impl SerializeStruct for StructSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -660,7 +660,7 @@ impl<'a, 'b> StructVariantSerializer<'a, 'b> {
     }
 }
 
-impl<'a, 'b> SerializeStructVariant for StructVariantSerializer<'a, 'b> {
+impl SerializeStructVariant for StructVariantSerializer<'_, '_> {
     type Ok = ();
     type Error = Error;
 
@@ -774,7 +774,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
@@ -1044,7 +1044,7 @@ struct SeqAccessDeserializer<'a, 'de> {
     remaining: usize,
 }
 
-impl<'de, 'a> SeqAccess<'de> for SeqAccessDeserializer<'a, 'de> {
+impl<'de> SeqAccess<'de> for SeqAccessDeserializer<'_, 'de> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -1065,7 +1065,7 @@ struct MapAccessDeserializer<'a, 'de> {
     awaiting_value: bool,
 }
 
-impl<'de, 'a> MapAccess<'de> for MapAccessDeserializer<'a, 'de> {
+impl<'de> MapAccess<'de> for MapAccessDeserializer<'_, 'de> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1101,7 +1101,7 @@ struct StructAccessDeserializer<'a, 'de> {
     pending_key: Option<String>,
 }
 
-impl<'de, 'a> MapAccess<'de> for StructAccessDeserializer<'a, 'de> {
+impl<'de> MapAccess<'de> for StructAccessDeserializer<'_, 'de> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1152,7 +1152,7 @@ struct VariantDeserializer<'a, 'de> {
     de: &'a mut Deserializer<'de>,
 }
 
-impl<'de, 'a> VariantAccess<'de> for VariantDeserializer<'a, 'de> {
+impl<'de> VariantAccess<'de> for VariantDeserializer<'_, 'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {

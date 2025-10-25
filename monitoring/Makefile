@@ -5,5 +5,5 @@ dashboard:
 	jq -e . grafana/dashboard.json >/dev/null
 
 lint: dashboard
-	npx jsonnet-lint grafana/dashboard.json
+	node tools/jsonnet-lint/index.js grafana/dashboard.json
 

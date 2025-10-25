@@ -77,6 +77,7 @@ fn dispatch_request(
         identity.handles(),
         identity.dids(),
         cfg,
+        None,
         request,
         auth_header,
         peer_ip,

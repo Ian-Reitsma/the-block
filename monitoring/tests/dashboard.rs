@@ -191,6 +191,49 @@ fn dashboards_include_bridge_counter_panels() {
 }
 
 #[test]
+fn dashboards_include_payout_last_seen_panels() {
+    let dashboards = [
+        "grafana/dashboard.json",
+        "grafana/dev.json",
+        "grafana/operator.json",
+        "grafana/telemetry.json",
+    ];
+    let expectations = [
+        PanelExpectation {
+            title: "Read subsidy last seen (timestamp)",
+            expr: "max by (role)(explorer_block_payout_read_last_seen_timestamp)",
+            legend: Some("{{role}}"),
+            description: None,
+        },
+        PanelExpectation {
+            title: "Read subsidy staleness (seconds)",
+            expr:
+                "clamp_min(time() - max by (role)(explorer_block_payout_read_last_seen_timestamp), 0)",
+            legend: Some("{{role}}"),
+            description: None,
+        },
+        PanelExpectation {
+            title: "Advertising payout last seen (timestamp)",
+            expr: "max by (role)(explorer_block_payout_ad_last_seen_timestamp)",
+            legend: Some("{{role}}"),
+            description: None,
+        },
+        PanelExpectation {
+            title: "Advertising payout staleness (seconds)",
+            expr:
+                "clamp_min(time() - max by (role)(explorer_block_payout_ad_last_seen_timestamp), 0)",
+            legend: Some("{{role}}"),
+            description: None,
+        },
+    ];
+    for path in dashboards {
+        for expectation in &expectations {
+            assert_panel(path, expectation);
+        }
+    }
+}
+
+#[test]
 fn dashboards_include_bridge_remediation_legends_and_tooltips() {
     let dashboards = [
         "grafana/dashboard.json",

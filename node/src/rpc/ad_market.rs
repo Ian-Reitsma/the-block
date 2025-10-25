@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use ad_market::{Campaign, DistributionPolicy, MarketplaceHandle};
+use ad_market::{DistributionPolicy, MarketplaceHandle};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
 
@@ -63,7 +63,7 @@ pub fn register_campaign(
     let Some(handle) = market else {
         return Err(RpcError::new(-32603, "ad market disabled"));
     };
-    let campaign: Campaign = foundation_serialization::json::from_value(params.clone())
+    let campaign = ad_market::campaign_from_value(params)
         .map_err(|_| RpcError::new(-32602, "invalid params"))?;
     match handle.register_campaign(campaign) {
         Ok(()) => {

@@ -2848,20 +2848,33 @@ pub async fn run_rpc_server(
     run_rpc_server_with_market(bc, mining, None, addr, cfg, ready).await
 }
 
-#[cfg(any(test, feature = "fuzzy"))]
+#[cfg(any(test, feature = "fuzzy", feature = "integration-tests"))]
 pub fn fuzz_runtime_config() -> Arc<RpcRuntimeConfig> {
+    fuzz_runtime_config_with_overrides(false, None)
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+pub fn fuzz_runtime_config_with_admin(token: impl Into<String>) -> Arc<RpcRuntimeConfig> {
+    fuzz_runtime_config_with_overrides(true, Some(token.into()))
+}
+
+#[cfg(any(test, feature = "fuzzy", feature = "integration-tests"))]
+fn fuzz_runtime_config_with_overrides(
+    enable_debug: bool,
+    admin_token: Option<String>,
+) -> Arc<RpcRuntimeConfig> {
     Arc::new(RpcRuntimeConfig {
         allowed_hosts: vec!["localhost".into()],
         cors_allow_origins: Vec::new(),
         max_body_bytes: 1024,
         request_timeout: Duration::from_secs(1),
-        enable_debug: false,
-        admin_token: None,
+        enable_debug,
+        admin_token,
         relay_only: false,
     })
 }
 
-#[cfg(any(test, feature = "fuzzy"))]
+#[cfg(any(test, feature = "fuzzy", feature = "integration-tests"))]
 pub fn fuzz_dispatch_request(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
@@ -2869,6 +2882,7 @@ pub fn fuzz_dispatch_request(
     handles: Arc<Mutex<HandleRegistry>>,
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
+    market: Option<MarketplaceHandle>,
     request: RpcRequest,
     auth_header: Option<String>,
     peer_ip: Option<IpAddr>,
@@ -2880,7 +2894,7 @@ pub fn fuzz_dispatch_request(
         handles,
         dids,
         runtime_cfg: Arc::clone(&runtime_cfg),
-        market: None,
+        market,
         clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
         ban_secs: 1,

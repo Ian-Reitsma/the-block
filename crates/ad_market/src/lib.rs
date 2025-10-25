@@ -198,7 +198,7 @@ fn campaign_to_value(campaign: &Campaign) -> JsonValue {
     JsonValue::Object(map)
 }
 
-fn campaign_from_value(value: &JsonValue) -> Result<Campaign, PersistenceError> {
+pub fn campaign_from_value(value: &JsonValue) -> Result<Campaign, PersistenceError> {
     let obj = value
         .as_object()
         .ok_or_else(|| invalid("campaign must be an object"))?;

@@ -1,6 +1,5 @@
-#![cfg(target_os = "linux")]
-
 use super::{Event, Interest, Token};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::mem::size_of;
@@ -187,22 +186,24 @@ impl Inner {
                 let mut buf = [0u8; size_of::<u64>()];
                 loop {
                     let res = unsafe { read(fd, buf.as_mut_ptr() as *mut c_void, buf.len()) };
-                    if res < 0 {
-                        let err = io::Error::last_os_error();
-                        if err.kind() == ErrorKind::Interrupted {
+                    match res.cmp(&0) {
+                        Ordering::Less => {
+                            let err = io::Error::last_os_error();
+                            if err.kind() == ErrorKind::Interrupted {
+                                continue;
+                            }
+                            if err.kind() == ErrorKind::WouldBlock {
+                                break;
+                            }
+                            break;
+                        }
+                        Ordering::Equal => break,
+                        Ordering::Greater => {
+                            if (res as usize) < buf.len() {
+                                break;
+                            }
                             continue;
                         }
-                        if err.kind() == ErrorKind::WouldBlock {
-                            break;
-                        }
-                        break;
-                    } else if res == 0 {
-                        break;
-                    } else {
-                        if (res as usize) < buf.len() {
-                            break;
-                        }
-                        continue;
                     }
                 }
             }

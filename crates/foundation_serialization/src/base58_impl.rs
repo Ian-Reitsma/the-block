@@ -166,9 +166,7 @@ pub fn decode(input: &str) -> Result<Vec<u8>, Error> {
         }
     }
 
-    for _ in 0..zeros {
-        decoded.push(0);
-    }
+    decoded.extend(std::iter::repeat_n(0, zeros));
 
     decoded.reverse();
 

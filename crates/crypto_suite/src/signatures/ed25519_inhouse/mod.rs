@@ -137,7 +137,7 @@ impl Signature {
         Self { bytes: *bytes }
     }
 
-    pub fn to_bytes(&self) -> [u8; SIGNATURE_LENGTH] {
+    pub fn to_bytes(self) -> [u8; SIGNATURE_LENGTH] {
         self.bytes
     }
 }

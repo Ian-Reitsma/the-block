@@ -400,7 +400,7 @@ impl InhouseEngine {
 
     fn reload_cfs(&self) -> StorageResult<()> {
         let manifest = self.inner.manifest.read().unwrap().clone();
-        for (cf, _) in &manifest.cfs {
+        for cf in manifest.cfs.keys() {
             let _ = self.cf_handle(cf)?;
         }
         Ok(())
@@ -573,7 +573,7 @@ impl CfState {
         self.memtable.clear();
         self.memtable_bytes = 0;
         // reset wal
-        fs::write(cf_path.join(WAL_FILE), &[]).map_err(StorageError::from)?;
+        fs::write(cf_path.join(WAL_FILE), []).map_err(StorageError::from)?;
         engine.invalidate_table(&table_path);
         Ok(())
     }

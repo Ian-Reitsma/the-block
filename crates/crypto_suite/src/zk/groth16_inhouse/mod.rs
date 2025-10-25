@@ -2,6 +2,7 @@
 
 use core::fmt;
 use std::ops::{Add, AddAssign, Mul, Sub};
+use std::str::FromStr;
 
 use foundation_bigint::BigUint;
 use foundation_lazy::sync::Lazy;
@@ -35,7 +36,7 @@ impl FieldElement {
         Self(BigUint::from(value)).reduce()
     }
 
-    pub fn from_str(value: &str) -> Result<Self, Groth16Error> {
+    pub fn from_decimal_str(value: &str) -> Result<Self, Groth16Error> {
         BigUint::parse_bytes(value.as_bytes(), 10)
             .ok_or_else(|| Groth16Error::FieldConversion(format!("invalid field element: {value}")))
             .map(Self)
@@ -64,6 +65,14 @@ impl FieldElement {
 impl fmt::Debug for FieldElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FieldElement({})", self.0)
+    }
+}
+
+impl FromStr for FieldElement {
+    type Err = Groth16Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::from_decimal_str(value)
     }
 }
 
@@ -382,7 +391,7 @@ impl<'a> AssignmentCS<'a> {
     }
 }
 
-impl<'a> ConstraintSystem for AssignmentCS<'a> {
+impl ConstraintSystem for AssignmentCS<'_> {
     fn alloc<F, V>(&mut self, _annotation: F, value: V) -> Result<Variable, SynthesisError>
     where
         F: FnOnce() -> String,

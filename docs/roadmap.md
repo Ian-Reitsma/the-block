@@ -1,4 +1,17 @@
 # Status & Roadmap
+> **Review (2025-10-25, evening):** Gateway badge targeting now threads the
+> concrete provider ID from storage manifests through read acknowledgements, the
+> gateway suite gained deterministic overrides plus a `just test-gateway` recipe
+> that CI drives directly against `web::gateway::tests::`, and the foundational
+> crates now compile without clippy lint noise after normalizing iterator
+> helpers, lifetimes, and Display implementations across the serialization
+> stack, crypto suite, concurrency utilities, and runtime wakers. The
+> `node/tests/ad_market_rpc.rs` harness boots the RPC router in-process with a
+> sled marketplace, covering successful, duplicate, malformed, and concurrently
+> racing campaign registrations without binding TCP sockets. The monitoring
+> generator and alert validator pin the explorer payout last-seen gauges,
+> keeping the `Explorer*PayoutStalled` rules audited alongside the refreshed
+> Grafana snapshots.
 > **Review (2025-10-24, late night):** The sled-backed ad marketplace now powers
 > governance audits and RPC/CLI automation. Campaign registration, distribution
 > policy reads, and inventory listings flow through first-party handlers, while
