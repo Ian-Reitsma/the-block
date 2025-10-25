@@ -9,6 +9,31 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-11-06)
+
+- DNS stake management moved entirely onto first-party RPCs. `dns.register_stake`,
+  `dns.withdraw_stake`, `dns.stake_status`, and `dns.cancel_sale` hand-build
+  JSON envelopes, operate on sled-backed escrows, and drive ledger settlement
+  through the existing `BlockchainLedger` facade—no serde/jsonrpc fallbacks or
+  external clients required. Escrow records now retain per-transfer
+  `ledger_events`/`tx_ref` metadata using the same handwritten codecs, and the
+  RPC responses expose those fields directly so downstream tooling can reconcile
+  ledger batches without glue code. CLI coverage (`gateway domain stake-*`,
+  `cancel`) reuses the same builders, and integration tests exercise stake
+  deposits, withdrawals, and cancellation without spawning mock servers.
+
+## Recent progress (2025-11-05)
+
+- Premium domain settlements now write ledger transaction references directly
+  into the auction sale history; RPC/CLI surfaces reuse the existing
+  first-party JSON builders so explorers can audit ledger-backed transfers
+  without serde/jsonrpc fallbacks. Stake escrow enforcement relies solely on
+  sled-backed helpers and deterministic JSON payloads.
+- Ad readiness persistence lives entirely inside the node crate. The RPC layer
+  continues to expose readiness snapshots via the first-party codecs while the
+  handle replays events from sled on startup—no external storage drivers or
+  async runtimes added.
+
 ## Recent progress (2025-11-03)
 
 - Ad readiness gating stays within the existing RPC/runtime stack: governance

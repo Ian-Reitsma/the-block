@@ -1,5 +1,32 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-06 update (stake escrow RPCs & atomic settlement):** DNS stake
+> management now rides entirely on handwritten JSON/binary helpers. The new
+> `dns.register_stake`, `dns.withdraw_stake`, `dns.stake_status`, and
+> `dns.cancel_sale` handlers operate on `SimpleDb` escrows plus the existing
+> `BlockchainLedger` facade—no serde, RPC clients, or async runtimes needed.
+> Escrow rows now capture per-transfer `ledger_events` (with `tx_ref`) using the
+> same handwritten codecs, and the RPC/CLI responses simply reflect those
+> records so explorers can reconcile deposits/withdrawals without layering on
+> third-party serializers.
+> Ledger settlement batches use the `DomainLedger::apply_batch` hook so bidder
+> debits, seller proceeds, royalties, and treasury fees all land atomically while
+> recording deterministic memo strings for history. CLI coverage reuses the
+> first-party JSON builders and RPC client (`gateway domain stake-*`, `cancel`).
+> Integration tests continue to run under the mocked ledger without sockets or
+> third-party harnesses, now covering stake deposits/withdrawals and auction
+> cancellation.
+> **2025-11-05 update (ledger-settled auctions & readiness persistence):**
+> Premium domain settlement stays entirely on the first-party ledger facade.
+> `BlockchainLedger` debits/credits accounts with deterministic memo strings,
+> the auction module records transaction references in sale history, and the
+> integration tests exercise winner/loser flows against the mocked chain without
+> external RPC clients or serialization crates. Stake enforcement reuses the
+> existing `SimpleDb` escrow records with handwritten codecs, so no third-party
+> staking helpers land. Ad readiness persistence now stores events via manual
+> binary writers in a dedicated sled namespace; startup replay and pruning run
+> through the same in-house helpers, keeping readiness thresholds durable across
+> restarts without adding databases or async runtimes.
 > **2025-11-03 update (ad readiness gating & domain auctions):** Readiness
 > thresholds live entirely inside the existing node crates—`ad_readiness`
 > exposes manual cursor codecs and shared handles, the gateway consults the

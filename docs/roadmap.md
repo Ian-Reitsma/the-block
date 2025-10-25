@@ -1,4 +1,28 @@
 # Status & Roadmap
+> **Review (2025-11-06, late morning):** Premium-domain stake flows now live in
+> first-party RPCs. Operators fund escrows via `dns.register_stake`, withdraw
+> unlocked balances through `dns.withdraw_stake`, and audit live totals plus
+> per-transfer `ledger_events`/`tx_ref` history with `dns.stake_status`.
+> `dns.complete_sale` batches all ledger debits/credits so
+> settlement either finishes or rolls back without double-debiting bidders, and
+> sellers can unwind active auctions with `dns.cancel_sale`, releasing locked
+> stakes without recording phantom sales. CLI coverage mirrors the new RPCs with
+> `gateway domain` subcommands for registering, withdrawing, cancelling, and
+> inspecting stake, while `node/tests/dns_auction_ledger.rs` now exercises stake
+> deposits/withdrawals alongside the original ledger-settlement flows.
+> **Review (2025-11-05, afternoon):** Premium auctions now settle directly on the
+> ledger: `dns.complete_sale` debits the winning bidder, refunds prior stake,
+> credits seller/royalty/treasury accounts, and embeds the resulting transaction
+> references in sale history so explorers/CLI can audit transfers. Stake escrow
+> is enforced during bidding with automatic unlocks when offers are outbid, and
+> the new integration harness (`node/tests/dns_auction_ledger.rs`) drives winner
+> and loser paths against the mocked chain to prove balances move exactly once.
+> Ad readiness counters persist to a sled namespace; startup replays the live
+> window before installing the global handle so restarts keep activation gates
+> ready when thresholds are still satisfied. Node config gained a
+> `treasury_account` field so operators can direct protocol fees without
+> hard-coded defaults, and governance-provided thresholds feed the persistence-
+> backed readiness handle at boot.
 > **Review (2025-11-03, evening):** Ad activation now rides explicit readiness
 > policy knobs. Governance parameters define the rolling viewer/host/provider
 > thresholds, the node instantiates an `AdReadinessHandle` shared by the gateway,

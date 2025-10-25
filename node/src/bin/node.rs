@@ -32,6 +32,7 @@ use the_block::config::OverlayBackend;
 use the_block::serve_metrics;
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
+    gateway::dns::{install_ledger_context, BlockchainLedger},
     generate_keypair,
     rpc::run_rpc_server_with_market,
     sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
@@ -1279,8 +1280,20 @@ async fn async_main() -> std::process::ExitCode {
                     min_provider_count: guard.params.ad_readiness_min_provider_count.max(0) as u64,
                 }
             };
-            let readiness = the_block::ad_readiness::AdReadinessHandle::new(readiness_config);
+            let readiness_path = format!("{data_dir}/ad_readiness");
+            let readiness = the_block::ad_readiness::AdReadinessHandle::open_with_storage(
+                &readiness_path,
+                readiness_config,
+            );
             the_block::ad_readiness::install_global(readiness.clone());
+            let treasury_account = {
+                let guard = bc.lock().unwrap();
+                guard.config.treasury_account.clone()
+            };
+            install_ledger_context(Arc::new(BlockchainLedger::new(
+                Arc::clone(&bc),
+                treasury_account,
+            )));
             let market_path = format!("{data_dir}/ad_market");
             let market: MarketplaceHandle = Arc::new(
                 SledMarketplace::open(&market_path, distribution).unwrap_or_else(|err| {

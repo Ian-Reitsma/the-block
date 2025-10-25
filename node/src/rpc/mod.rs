@@ -456,6 +456,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "dns.list_for_sale",
     "dns.place_bid",
     "dns.complete_sale",
+    "dns.cancel_sale",
+    "dns.register_stake",
+    "dns.withdraw_stake",
+    "dns.stake_status",
     "dns.auctions",
     "gateway.policy",
     "gateway.reads_since",
@@ -1232,6 +1236,22 @@ fn dispatch(
             Err(e) => return Err(rpc_error(e.code(), e.message())),
         },
         "dns.complete_sale" => match gateway::dns::complete_sale(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.cancel_sale" => match gateway::dns::cancel_sale(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.register_stake" => match gateway::dns::register_stake(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.withdraw_stake" => match gateway::dns::withdraw_stake(req.params.as_value()) {
+            Ok(v) => v,
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
+        },
+        "dns.stake_status" => match gateway::dns::stake_status(req.params.as_value()) {
             Ok(v) => v,
             Err(e) => return Err(rpc_error(e.code(), e.message())),
         },
