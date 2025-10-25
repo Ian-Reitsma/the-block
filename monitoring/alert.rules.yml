@@ -29,6 +29,24 @@ groups:
           severity: warn
         annotations:
           summary: "Subsidy counters growing unusually fast"
+      - alert: ExplorerReadPayoutStalled
+        expr: |
+          (time() - explorer_block_payout_read_last_seen_timestamp{role!=""}) > 1800
+            and on(role) (explorer_block_payout_read_total{role!=""} > 0)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Explorer read subsidy payouts stale for {{ $labels.role }}"
+      - alert: ExplorerAdPayoutStalled
+        expr: |
+          (time() - explorer_block_payout_ad_last_seen_timestamp{role!=""}) > 1800
+            and on(role) (explorer_block_payout_ad_total{role!=""} > 0)
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Explorer advertising payouts stale for {{ $labels.role }}"
       - alert: RentEscrowLockedSpike
         expr: increase(rent_escrow_locked_ct_total[10m]) > 1e6
         for: 10m

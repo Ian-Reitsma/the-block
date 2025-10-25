@@ -6,7 +6,7 @@ The explorer exposes a lightweight REST service for querying on-chain data and a
 
 ### Block payout breakdowns
 
-Blocks indexed after the governance split now store per-role CT distributions for both read subsidies and advertising settlements. The `/blocks/:hash/payouts` endpoint surfaces those totals without requiring callers to decode the full binary block image; the explorer falls back to the JSON payload written to SQLite when the binary codec is unavailable (e.g., the stubbed test harness). Responses include the block hash, height, and two role maps (`read_subsidy`, `advertising`) with totals for viewers, hosts, hardware vendors, verifiers, the liquidity pool, and the residual miner share. The CLI mirrors this endpoint via `contract-cli explorer block-payouts`, accepting either a block hash or height and printing the JSON response directly for automation.
+Blocks indexed after the governance split now store per-role CT distributions for both read subsidies and advertising settlements. The `/blocks/:hash/payouts` endpoint surfaces those totals without requiring callers to decode the full binary block image; the explorer falls back to the JSON payload written to SQLite when the binary codec is unavailable (e.g., the stubbed test harness). Responses include the block hash, height, and two role maps (`read_subsidy`, `advertising`) with totals for viewers, hosts, hardware vendors, verifiers, the liquidity pool, and the residual miner share. The CLI mirrors this endpoint via `contract-cli explorer block-payouts`, accepting either a block hash or height and exposing three output formats: raw JSON (default), a pretty table, or Prometheus text via `--format json|table|prom`.
 
 Integration coverage now pairs the JSON snapshots with binary block headers so decoder fallbacks stay verified when explorers mix historic and modern payloads in the same sync window. Unit coverage still exercises the JSON fallback with legacy snapshots that omit the per-role fields entirely, guaranteeing FIRST_PARTY_ONLY builds continue to render historical payouts even as the header shape evolves. The CLI command also validates that exactly one of `--hash` or `--height` is supplied and reports a clear error when a block is missing, keeping automation flows hermetic without shell scripting or third-party JSON tooling.
 
@@ -24,7 +24,19 @@ Height-driven payout lookup (the command resolves the hash automatically):
 contract-cli explorer block-payouts --height 123456
 ```
 
-Both commands emit the raw JSON payload so operators can feed the output directly into jq-alternatives such as the first-party `foundation_serialization` tooling, or redirect to files for downstream reconciliation jobs. To query the REST surface instead, resolve the hash (via the CLI `--height` helper or `GET /blocks/:hash`) and fetch the payout snapshot directly:
+JSON output remains the default so operators can feed responses directly into first-party tooling such as `foundation-json pretty`. Table output renders the same totals as a padded grid for dashboards or quick CLI audits:
+
+```bash
+contract-cli explorer block-payouts --height 123456 --format table
+```
+
+Prometheus text is available for automation hooks that ingest the CLI output into scrape pipelines without hitting the REST service:
+
+```bash
+contract-cli explorer block-payouts --hash 0xabc123... --format prom
+```
+
+To query the REST surface instead, resolve the hash (via the CLI `--height` helper or `GET /blocks/:hash`) and fetch the payout snapshot directly:
 
 ```bash
 curl -sS "http://explorer.local:8080/blocks/0xabc123.../payouts" | foundation-json pretty

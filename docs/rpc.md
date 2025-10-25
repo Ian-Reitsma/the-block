@@ -156,6 +156,19 @@ integration tests illustrate this flow end-to-end.
 - `gateway.dns_lookup` – returns `{record, verified}` without updating read counters.
 - `analytics` – returns `{reads, bytes}` served for a domain based on finalized
   `ReadAck` batches.
+- `ad_market.inventory` – returns `{status, distribution, campaigns}` where
+  `distribution` mirrors the active `DistributionPolicy` percentages and
+  `campaigns` is an array of `{id, advertiser_account, remaining_budget_ct,
+  creatives}` entries (creative IDs only) so governance and operators can audit
+  live spend without reading sled snapshots.
+- `ad_market.distribution` – surfaces the persisted
+  `{viewer_percent, host_percent, hardware_percent, verifier_percent,
+  liquidity_percent}` split backing subsidy settlements, matching the CLI output
+  format for dashboards.
+- `ad_market.register_campaign` – accepts a campaign JSON payload (matching
+  `ad_market::Campaign`) and registers it with the persistent marketplace,
+  returning `{status:"ok"}` on success, `-32000` on duplicates, or `-32603`
+  when persistence fails.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.
 - `inflation.params` – returns current subsidy multipliers, industrial backlog
   and utilisation, and rent rate.

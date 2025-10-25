@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 foundation_serialization = { path = "../foundation_serialization" }
 serde = { workspace = true }
+sled = { path = "../../sled" }
+
+[dev-dependencies]
+sys = { path = "../sys" }

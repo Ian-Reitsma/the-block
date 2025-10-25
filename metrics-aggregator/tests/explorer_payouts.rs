@@ -132,6 +132,18 @@ fn explorer_payout_counters_increment_on_ingest() {
                 .unwrap_or(0.0);
         let baseline_ad_miner =
             scrape_metric(&baseline_body, "explorer_block_payout_ad_total", "miner").unwrap_or(0.0);
+        let baseline_read_last_seen = scrape_metric(
+            &baseline_body,
+            "explorer_block_payout_read_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
+        let baseline_ad_last_seen = scrape_metric(
+            &baseline_body,
+            "explorer_block_payout_ad_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
 
         let first_payload = build_payload(
             &[("viewer", 100.0), ("host", 50.0)],
@@ -169,6 +181,20 @@ fn explorer_payout_counters_increment_on_ingest() {
             scrape_metric(&metrics_body, "explorer_block_payout_ad_total", "miner"),
             Some(baseline_ad_miner + 5.0)
         );
+        let first_read_last_seen = scrape_metric(
+            &metrics_body,
+            "explorer_block_payout_read_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
+        let first_ad_last_seen = scrape_metric(
+            &metrics_body,
+            "explorer_block_payout_ad_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
+        assert!(first_read_last_seen >= baseline_read_last_seen);
+        assert!(first_ad_last_seen >= baseline_ad_last_seen);
 
         let second_payload = build_payload(
             &[("viewer", 130.0), ("host", 55.0)],
@@ -211,6 +237,20 @@ fn explorer_payout_counters_increment_on_ingest() {
             scrape_metric(&updated_metrics, "explorer_block_payout_ad_total", "miner"),
             Some(baseline_ad_miner + 7.0)
         );
+        let updated_read_last_seen = scrape_metric(
+            &updated_metrics,
+            "explorer_block_payout_read_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
+        let updated_ad_last_seen = scrape_metric(
+            &updated_metrics,
+            "explorer_block_payout_ad_last_seen_timestamp",
+            "viewer",
+        )
+        .unwrap_or(0.0);
+        assert!(updated_read_last_seen >= first_read_last_seen);
+        assert!(updated_ad_last_seen >= first_ad_last_seen);
     });
 }
 

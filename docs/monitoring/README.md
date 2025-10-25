@@ -18,9 +18,15 @@ ready to import once the foundation telemetry stack is running.
   `explorer_block_payout_ad_total{role}`. The metrics aggregator now caches the
   most recent role totals per explorer peer and only increments the counter
   handles when a higher value arrives, so the Prometheus/Grafana panels chart
-  live deltas without double counting. Integration tests ingest successive
-  payloads and verify the counters advance on the second scrape, matching the
-  `increase()` queries baked into the dashboard.
+  live deltas without double counting. Complementary gauges
+  `explorer_block_payout_read_last_seen_timestamp{role}` and
+  `explorer_block_payout_ad_last_seen_timestamp{role}` record the Unix timestamp
+  of the latest increment, enabling the
+  `ExplorerReadPayoutStalled`/`ExplorerAdPayoutStalled` alerts to fire when a
+  role stays flat for thirty minutes after producing non-zero totals. Integration
+  tests ingest successive payloads and verify both the counters and gauges
+  advance on the second scrape, matching the `increase()` queries baked into the
+  dashboard.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,

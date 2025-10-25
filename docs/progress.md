@@ -1,4 +1,18 @@
 # Project Progress Snapshot
+> **Review (2025-10-24, late night):** The ad marketplace graduated from an
+> in-memory stub to a sled-backed store. `SledMarketplace` now persists
+> campaigns, budgets, and distribution policies so governance can audit live
+> spend after restarts, and the node exposes first-party RPC handlers for
+> `ad_market.inventory`, `ad_market.distribution`, and
+> `ad_market.register_campaign`. The contract CLI wires a dedicated
+> `ad-market` subcommand, while the explorer’s `block-payouts` command picks up
+> table/Prometheus output modes for automation. Gateway matching consumes the
+> refreshed service-badge registry—providers register physical-presence badges
+> that the web pipeline now threads through impression context—with an
+> end-to-end regression guarding badge-targeted campaigns. Metrics gain
+> `explorer_block_payout_{read,ad}_last_seen_timestamp{role}` gauges and paired
+> staleness alerts so dashboards and paging catch silent payout pipelines
+> without leaving the first-party stack.
 > **Review (2025-11-02, evening):** Bridge CLI parser coverage now walks the
 > settlement-log and reward-accrual commands through the in-house `Parser`,
 > locking optional asset/relayer filters, cursor forwarding, and the default

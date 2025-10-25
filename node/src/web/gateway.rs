@@ -22,7 +22,7 @@ use rate_limit::RateLimitFilter;
 use std::fs;
 use sys::signals::{Signals, SIGHUP};
 
-use crate::{storage::pipeline, vm::wasm, ReadAck, StakeTable};
+use crate::{service_badge, storage::pipeline, vm::wasm, ReadAck, StakeTable};
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -293,10 +293,14 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     } else {
         Some(ack.provider.clone())
     };
+    let badges = provider
+        .as_ref()
+        .map(|id| service_badge::provider_badges(id))
+        .unwrap_or_default();
     let ctx = ImpressionContext {
         domain: ack.domain.clone(),
         provider,
-        badges: Vec::new(),
+        badges,
         bytes: ack.bytes,
     };
     let key = ReservationKey {
@@ -769,6 +773,74 @@ mod tests {
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp1"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative1"));
         // The reservation should clear once the worker commits; ensure metadata persisted on ack.
+    }
+
+    #[test]
+    fn static_read_matches_badge_targeted_campaign() {
+        service_badge::clear_badges();
+        service_badge::set_physical_presence("signed.test", true);
+
+        let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-badge".to_string(),
+                advertiser_account: "adv-badge".to_string(),
+                budget_ct: 5_000,
+                creatives: vec![Creative {
+                    id: "creative-badge".to_string(),
+                    price_per_mib_ct: 64,
+                    badges: vec!["physical_presence".to_string()],
+                    domains: vec!["signed.test".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["signed.test".to_string()],
+                    badges: vec!["physical_presence".to_string()],
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("badge campaign registered");
+
+        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()));
+        let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
+        let remote: SocketAddr = "127.0.0.1:9400".parse().unwrap();
+        let manifest = [3u8; 32];
+        let path = "/badge.html";
+        let bytes = 1_048_576u64;
+        let ts = 1_888_888_888u64;
+        let mut rng = OsRng::default();
+        let signing = SigningKey::generate(&mut rng);
+        let pk_bytes = signing.verifying_key().to_bytes();
+        let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+        let client_hash = compute_client_hash(&remote, "signed.test");
+        let mut hasher = Hasher::new();
+        hasher.update(&manifest);
+        hasher.update(&path_hash);
+        hasher.update(&bytes.to_le_bytes());
+        hasher.update(&ts.to_le_bytes());
+        hasher.update(&client_hash);
+        let signature = signing.sign(hasher.finalize().as_bytes()).to_bytes();
+
+        let request = router
+            .request_builder()
+            .host("signed.test")
+            .path(path)
+            .remote_addr(remote)
+            .header(HEADER_ACK_MANIFEST, hex::encode(manifest))
+            .header(HEADER_ACK_PUBKEY, hex::encode(pk_bytes))
+            .header(HEADER_ACK_SIGNATURE, hex::encode(signature))
+            .header(HEADER_ACK_BYTES, bytes.to_string())
+            .header(HEADER_ACK_TIMESTAMP, ts.to_string())
+            .build();
+        let response = router.handle(request).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let ack = rx.try_recv().expect("ack queued");
+        assert_eq!(ack.campaign_id.as_deref(), Some("cmp-badge"));
+        assert_eq!(ack.creative_id.as_deref(), Some("creative-badge"));
+
+        service_badge::clear_badges();
     }
 
     #[test]

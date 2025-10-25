@@ -1,4 +1,13 @@
 # Status & Roadmap
+> **Review (2025-10-24, late night):** The sled-backed ad marketplace now powers
+> governance audits and RPC/CLI automation. Campaign registration, distribution
+> policy reads, and inventory listings flow through first-party handlers, while
+> the explorer CLI gains table/Prometheus output options for payout dashboards.
+> Gateway matching threads provider identities and physical-presence badges from
+> the refreshed `ServiceBadgeTracker`, and the metrics stack adds
+> `explorer_block_payout_{read,ad}_last_seen_timestamp{role}` gauges plus new
+> staleness alerts so dashboards and paging catch silent payout regressions
+> without third-party tooling.
 > **Review (2025-10-24, early afternoon):** Explorer integration coverage now mixes binary payloads with JSON fallbacks so `/blocks/:hash/payouts` keeps decoding modern headers even when older snapshots resurface. The metrics aggregator increments the new role-labelled counters directly through cached `CounterVec` handles, and the Prometheus integration test confirms the Grafana payout panels track live explorer ingests. Documentation adds CLI automation snippets for both hash- and height-driven payout queries so operators can script reconciliation end to end.
 > **Review (2025-10-30, morning):** Explorer payout lookups now defend the JSON fallback path so legacy blocks without the new per-role fields still render viewer/host/hardware/verifier/liquidity/miner totals. CLI coverage exercises the exclusive hash/height arguments and missing-block errors, while the monitoring generator adds a “Block Payouts” row that charts the read-subsidy and advertising role counters from Prometheus. Operators can now reconcile historical blocks, CLI automation, and dashboards without leaving the first-party toolchain.
 > **Review (2025-10-29, early morning):** Read subsidies now route through governance-

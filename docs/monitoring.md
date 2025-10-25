@@ -69,15 +69,22 @@ operators focus on specific roles or compare read versus advertising flows in
 the same pane.
 
 The metrics aggregator now persists the explorer payout counters per peer and
-role so deltas remain monotonic across scrapes. `AppState::record_explorer_payout_metric`
-tracks a `(peer_id, role)` cache and only updates the `CounterVec` handles when a
-new total exceeds the previously seen sample. The integration suite ingests two
-payloads and asserts that `explorer_block_payout_read_total` and
-`explorer_block_payout_ad_total` report the latest totals on the second `/metrics`
-scrape, guaranteeing the Grafana row and Prometheus assertions continue to plot
+role so deltas remain monotonic across scrapes.
+`AppState::record_explorer_payout_metric` tracks a `(peer_id, role)` cache and
+only updates the `CounterVec` handles when a new total exceeds the previously
+seen sample. It also seeds zero-value handles on startup and writes the current
+Unix timestamp to
+`explorer_block_payout_{read,ad}_last_seen_timestamp{role}` whenever a role
+advances, giving Prometheus a direct way to measure staleness via
+`time() - gauge`. The integration suite ingests two payloads and asserts that
+`explorer_block_payout_read_total`/`_ad_total` report the latest totals on the
+second `/metrics` scrape and that the last-seen gauges bump alongside the
+deltas, guaranteeing the Grafana row and Prometheus assertions continue to plot
 live data end-to-end. A churn-focused regression alternates viewer/host/hardware
-and viewer/miner/liquidity samples so the cache proves it ignores regressions even
-when peers rotate advertised roles between scrapes.
+and viewer/miner/liquidity samples so the cache proves it ignores regressions
+even when peers rotate advertised roles between scrapes, while the new
+`ExplorerReadPayoutStalled`/`ExplorerAdPayoutStalled` alerts warn when any role
+stays flat for thirty minutes after reporting non-zero totals.
 
 The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
 the newly instrumented counters. Panels plot five-minute deltas for

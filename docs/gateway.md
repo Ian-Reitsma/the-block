@@ -34,12 +34,14 @@ Security considerations are catalogued under
    limits, and its output streamed back to the client.
 6. **Campaign Match & ReadAck Append** – once the response body is sent, the
    gateway asks the first-party advertising marketplace for a matching campaign
-   given the domain, provider metadata, and badge context. The winning creative
-   (if any) is recorded on the acknowledgement, the caller-supplied
-   `X-TheBlock-Ack-*` headers are validated, and the Ed25519 signature over the
-   manifest, path hash, byte count, timestamp, client hash, domain, provider,
-   and campaign fields is verified before the fully signed `ReadAck` is pushed
-   into the batching queue.
+   given the domain, provider metadata, and badge context. Provider badges come
+   from the global registry maintained by `service_badge::provider_badges`, so
+   physical-presence checks survive restarts and badge revocations without
+   querying sled mid-request. The winning creative (if any) is recorded on the
+   acknowledgement, the caller-supplied `X-TheBlock-Ack-*` headers are validated,
+   and the Ed25519 signature over the manifest, path hash, byte count,
+   timestamp, client hash, domain, provider, and campaign fields is verified
+   before the fully signed `ReadAck` is pushed into the batching queue.
 
 ### WebSocket peer metrics
 

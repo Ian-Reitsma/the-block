@@ -26,14 +26,14 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
 use sys::process;
 
-use ad_market::{DistributionPolicy, InMemoryMarketplace, MarketplaceHandle, ReservationKey};
+use ad_market::{DistributionPolicy, MarketplaceHandle, ReservationKey, SledMarketplace};
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     generate_keypair,
-    rpc::run_rpc_server,
+    rpc::run_rpc_server_with_market,
     sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
     ShutdownFlag,
 };
@@ -1260,7 +1260,12 @@ async fn async_main() -> std::process::ExitCode {
                     guard.params.read_subsidy_liquidity_percent.max(0) as u64,
                 )
             };
-            let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+            let market_path = format!("{data_dir}/ad_market");
+            let market: MarketplaceHandle = Arc::new(
+                SledMarketplace::open(&market_path, distribution).unwrap_or_else(|err| {
+                    panic!("failed to open ad marketplace at {market_path}: {err}")
+                }),
+            );
             let _read_ack_tx = spawn_read_ack_worker(Arc::clone(&bc), Some(market.clone()));
 
             let overlay_choice = overlay_backend.map(OverlayBackend::from);
@@ -1315,9 +1320,10 @@ async fn async_main() -> std::process::ExitCode {
             let (tx, rx) = runtime::sync::oneshot::channel();
             let mut rpc_cfg = bc.lock().unwrap().config.rpc.clone();
             rpc_cfg.relay_only = relay_only;
-            let handle = runtime::spawn(run_rpc_server(
+            let handle = runtime::spawn(run_rpc_server_with_market(
                 Arc::clone(&bc),
                 Arc::clone(&mining),
+                Some(market.clone()),
                 rpc_addr.clone(),
                 rpc_cfg,
                 tx,

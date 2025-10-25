@@ -1,5 +1,74 @@
+use concurrency::Lazy;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 use std::time::Duration;
+
+const BADGE_PHYSICAL_PRESENCE: &str = "physical_presence";
+
+static BADGE_REGISTRY: Lazy<RwLock<HashMap<String, HashSet<String>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn register_badge(provider: &str, badge: &str) {
+    let mut guard = BADGE_REGISTRY
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner());
+    guard
+        .entry(provider.to_string())
+        .or_insert_with(HashSet::new)
+        .insert(badge.to_string());
+}
+
+fn unregister_badge(provider: &str, badge: &str) {
+    let mut guard = BADGE_REGISTRY
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if let Some(entry) = guard.get_mut(provider) {
+        entry.remove(badge);
+        if entry.is_empty() {
+            guard.remove(provider);
+        }
+    }
+}
+
+pub fn provider_badges(provider: &str) -> Vec<String> {
+    let guard = BADGE_REGISTRY
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner());
+    guard
+        .get(provider)
+        .map(|set| {
+            let mut badges: Vec<String> = set.iter().cloned().collect();
+            badges.sort();
+            badges
+        })
+        .unwrap_or_default()
+}
+
+fn register_physical_presence(provider: &str) {
+    register_badge(provider, BADGE_PHYSICAL_PRESENCE);
+}
+
+fn revoke_physical_presence(provider: &str) {
+    unregister_badge(provider, BADGE_PHYSICAL_PRESENCE);
+}
+
+#[cfg(test)]
+pub fn set_physical_presence(provider: &str, active: bool) {
+    if active {
+        register_physical_presence(provider);
+    } else {
+        revoke_physical_presence(provider);
+    }
+}
+
+#[cfg(test)]
+pub fn clear_badges() {
+    BADGE_REGISTRY
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clear();
+}
 
 /// Badge lifetime in seconds; adjustable via governance hooks.
 ///
@@ -27,6 +96,7 @@ pub struct ServiceBadgeTracker {
     expiry: Option<u64>,
     token: Option<String>,
     renewals: u64,
+    provider: Option<String>,
 }
 
 impl ServiceBadgeTracker {
@@ -35,11 +105,29 @@ impl ServiceBadgeTracker {
         Self::default()
     }
 
+    /// Assign the provider identifier associated with this tracker.
+    pub fn set_provider(&mut self, provider: &str) {
+        self.provider = Some(provider.to_string());
+    }
+
+    fn register_provider_badge(&self) {
+        if let Some(provider) = self.provider.as_deref() {
+            register_physical_presence(provider);
+        }
+    }
+
+    fn revoke_provider_badge(&self) {
+        if let Some(provider) = self.provider.as_deref() {
+            revoke_physical_presence(provider);
+        }
+    }
+
     /// Record a heartbeat proof for the current epoch.
     ///
     /// A valid proof counts toward uptime; missing or invalid proofs are
     /// treated as downtime and may revoke an existing badge.
     pub fn record_epoch(&mut self, provider: &str, proof_ok: bool, latency: Duration) {
+        self.provider = Some(provider.to_string());
         self.total_epochs += 1;
         if proof_ok {
             self.uptime_epochs += 1;
@@ -50,8 +138,6 @@ impl ServiceBadgeTracker {
             .ensure_handle_for_label_values(&[provider])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(self.uptime_percent().round() as i64);
-        #[cfg(not(feature = "telemetry"))]
-        let _ = provider;
         // Update badge status on each epoch so lapses trigger revocation.
         self.check_badges();
     }
@@ -93,6 +179,7 @@ impl ServiceBadgeTracker {
         self.last_mint = Some(now);
         self.expiry = Some(exp);
         self.token = Some(token.clone());
+        self.register_provider_badge();
         #[cfg(feature = "telemetry")]
         crate::telemetry::BADGE_ISSUED_TOTAL.inc();
         token
@@ -113,6 +200,7 @@ impl ServiceBadgeTracker {
         self.token = None;
         self.expiry = None;
         self.last_burn = Some(current_ts());
+        self.revoke_provider_badge();
         #[cfg(feature = "telemetry")]
         crate::telemetry::BADGE_REVOKED_TOTAL.inc();
     }

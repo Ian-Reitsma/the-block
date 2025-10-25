@@ -25,6 +25,28 @@ assert!(t.has_badge());
 Epochs are recorded automatically from `Blockchain::mine_block`, but external
 systems may call `record_epoch` with a provider identifier for test harnesses.
 
+## Provider badge registry
+
+The tracker now records the last provider ID passed to `record_epoch` and
+automatically mirrors badge state into a global registry. When a badge is
+minted, `set_physical_presence(provider, true)` registers the provider under the
+`physical_presence` flag so downstream consumers (gateway matching, metrics, and
+governance audits) can query `provider_badges(provider_id)` for the active badge
+set. Revocations call `revoke_physical_presence`, ensuring registry state stays
+in sync with the tracker. Test harnesses and simulation code can inject or clear
+badges directly with the helper functions:
+
+```rust
+use the_block::service_badge;
+service_badge::set_physical_presence("gateway-nyc-01", true);
+assert!(service_badge::provider_badges("gateway-nyc-01").contains(&"physical_presence".to_string()));
+service_badge::clear_badges();
+```
+
+Future badge types should add explicit helpers and registry wiring alongside
+their tracker logic so RPC/CLI surfaces can expose the augmented context without
+polling sled directly.
+
 ## Telemetry & RPC
 
 - Metrics: `badge_active`, `badge_last_change_seconds`, and
