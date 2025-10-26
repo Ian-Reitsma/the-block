@@ -1,4 +1,21 @@
 # Summary
+> **Review (2025-12-14, afternoon):** The autonomous WAN chaos lab now ships as a
+> first-party binary (`sim/chaos_lab.rs`) backed by deterministic overlay/storage
+> /compute scenarios. Signed readiness attestations feed directly into the
+> metrics aggregator via `/chaos/attest`, which verifies the payloads, surfaces
+> `/chaos/status`, and exports `chaos_readiness{module,scenario}` alongside
+> `chaos_sla_breach_total` for dashboards and CI gating. `just chaos-suite` and
+> `cargo xtask chaos` now gate releases, and the aggregator’s remediation tests
+> hold a global dispatch-log guard so concurrent suites stay hermetic. Grafana’s
+> auto-generated dashboard gained a dedicated **Chaos** row charting readiness and
+> five-minute breach deltas, while a new integration test pipes the `chaos_lab`
+> artefacts through `/chaos/attest` end-to-end to assert `/chaos/status` and metric
+> updates with the signer digest preserved. The chaos pipeline now rejects tampered
+> signatures in dedicated regression coverage, and both the gossip shard cache and
+> peer metrics store fall back to in-memory paths (or skip persistence) instead of
+> panicking when system clocks or scratch directories misbehave. The `sim/did.rs`
+> driver now renders DID documents through first-party JSON builders, sidestepping
+> the serde stub and keeping the binary panic-free under full crate testing.
 > **Review (2025-10-26, late morning):** Liquidity router coverage now exercises
 > multi-batch fairness, slack-aware trust routing, and hop-constrained fallbacks.
 > Integration tests prove challenged withdrawals never execute, excess DEX

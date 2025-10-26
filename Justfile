@@ -75,3 +75,8 @@ dependency-audit:
 check-windows:
     rustup target add x86_64-pc-windows-gnu
     FIRST_PARTY_ONLY=1 cargo check --target x86_64-pc-windows-gnu -p sys -p runtime
+
+chaos-suite:
+    mkdir -p target/chaos
+    TB_CHAOS_ATTESTATIONS=target/chaos/attestations.json \
+        cargo run -p tb-sim --bin chaos_lab --quiet

@@ -103,9 +103,13 @@ impl ShardStore {
 
     #[cfg(test)]
     fn temporary() -> Self {
-        let base = sys::tempfile::tempdir()
-            .map(|dir| dir.into_path())
-            .unwrap_or_else(|err| {
+        match sys::tempfile::tempdir().map(|dir| dir.into_path()) {
+            Ok(base) => {
+                let path = base.join("gossip_store");
+                let path_str = path.to_string_lossy().to_string();
+                Self::with_factory(&path_str, &SimpleDb::open_named)
+            }
+            Err(err) => {
                 log::warn!("gossip_shard_tempdir_fallback: {err}");
                 let mut fallback = std::env::temp_dir();
                 fallback.push(format!(
@@ -116,16 +120,26 @@ impl ShardStore {
                         .map(|d| d.as_millis())
                         .unwrap_or_default()
                 ));
-                if let Err(create_err) = std::fs::create_dir_all(&fallback) {
-                    panic!(
-                        "failed to create gossip shard fallback directory {fallback:?}: {create_err}"
-                    );
+                match std::fs::create_dir_all(&fallback) {
+                    Ok(()) => {
+                        let path = fallback.join("gossip_store");
+                        let path_str = path.to_string_lossy().to_string();
+                        Self::with_factory(&path_str, &SimpleDb::open_named)
+                    }
+                    Err(create_err) => {
+                        log::error!(
+                            "gossip_shard_tempdir_fallback_failed: {create_err}; using in-memory store"
+                        );
+                        let db = SimpleDb::default();
+                        let cache = Mutex::new(Self::load(&db));
+                        Self {
+                            db: Mutex::new(db),
+                            cache,
+                        }
+                    }
                 }
-                fallback
-            });
-        let path = base.join("gossip_store");
-        let path_str = path.to_string_lossy().to_string();
-        Self::with_factory(&path_str, &SimpleDb::open_named)
+            }
+        }
     }
 
     fn load(db: &SimpleDb) -> HashMap<ShardId, Vec<OverlayPeerId>> {

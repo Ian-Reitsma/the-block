@@ -38,29 +38,43 @@ fn assert_panel(path: &str, expectation: &PanelExpectation<'_>) {
             .and_then(|map| map.get("description"))
             .and_then(Value::as_str)
             .unwrap_or_default();
-        assert_eq!(description, expected_description, "mismatched description in {}", path);
+        assert_eq!(
+            description, expected_description,
+            "mismatched description in {}",
+            path
+        );
     }
     let targets = panel
         .as_object()
         .and_then(|map| map.get("targets"))
         .and_then(Value::as_array)
         .expect("targets array");
-    assert!(targets.iter().any(|target| {
-        target
-            .as_object()
-            .and_then(|map| map.get("expr"))
-            .and_then(Value::as_str)
-            == Some(expectation.expr)
-    }), "missing expression '{}' in {}", expectation.expr, path);
-
-    if let Some(expected_legend) = expectation.legend {
-        assert!(targets.iter().any(|target| {
+    assert!(
+        targets.iter().any(|target| {
             target
                 .as_object()
-                .and_then(|map| map.get("legendFormat"))
+                .and_then(|map| map.get("expr"))
                 .and_then(Value::as_str)
-                == Some(expected_legend)
-        }), "missing legend '{}' in {}", expected_legend, path);
+                == Some(expectation.expr)
+        }),
+        "missing expression '{}' in {}",
+        expectation.expr,
+        path
+    );
+
+    if let Some(expected_legend) = expectation.legend {
+        assert!(
+            targets.iter().any(|target| {
+                target
+                    .as_object()
+                    .and_then(|map| map.get("legendFormat"))
+                    .and_then(Value::as_str)
+                    == Some(expected_legend)
+            }),
+            "missing legend '{}' in {}",
+            expected_legend,
+            path
+        );
     }
 }
 
@@ -262,8 +276,7 @@ fn dashboards_include_bridge_remediation_legends_and_tooltips() {
             .and_then(Value::as_str)
             .unwrap_or_default();
         assert_eq!(
-            action_description,
-            "Bridge remediation actions grouped by outcome and playbook",
+            action_description, "Bridge remediation actions grouped by outcome and playbook",
             "bridge_remediation_action_total tooltip drift in {}",
             path
         );
@@ -287,11 +300,8 @@ fn dashboards_include_bridge_remediation_legends_and_tooltips() {
             path
         );
 
-        let ack_panel = find_panel(
-            panels,
-            "bridge_remediation_dispatch_ack_total (5m delta)",
-        )
-        .expect("dispatch ack panel present");
+        let ack_panel = find_panel(panels, "bridge_remediation_dispatch_ack_total (5m delta)")
+            .expect("dispatch ack panel present");
         assert_target_expr_legend(
             ack_panel,
             "sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))",
@@ -343,8 +353,8 @@ fn dashboards_include_bridge_remediation_legends_and_tooltips() {
             path
         );
 
-        let spool_panel = find_panel(panels, "bridge_remediation_spool_artifacts")
-            .expect("spool panel present");
+        let spool_panel =
+            find_panel(panels, "bridge_remediation_spool_artifacts").expect("spool panel present");
         assert_target_expr_legend(spool_panel, "bridge_remediation_spool_artifacts", None);
         let spool_description = spool_panel
             .as_object()

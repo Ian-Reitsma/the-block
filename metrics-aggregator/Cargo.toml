@@ -12,6 +12,7 @@ httpd = { path = "../crates/httpd" }
 http_env = { path = "../crates/http_env" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_telemetry = { path = "../crates/foundation_telemetry" }
+monitoring-build = { path = "../monitoring" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 crypto_suite = { path = "../crates/crypto_suite" }
 storage_engine = { path = "../crates/storage_engine" }
@@ -24,6 +25,7 @@ serde = { workspace = true }
 [dev-dependencies]
 rand = { path = "../crates/rand" }
 the_block = { path = "../node" }
+tb-sim = { path = "../sim" }
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

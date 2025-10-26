@@ -6,10 +6,7 @@ use httpd::{client::ClientError, Method, StatusCode};
 use monitoring_build::{parse_prometheus_snapshot, MetricSnapshot, MetricValue};
 use std::{
     collections::{BTreeMap, HashMap},
-    env,
-    fs,
-    io,
-    process,
+    env, fs, io, process,
     time::Duration,
 };
 
@@ -72,7 +69,12 @@ impl std::fmt::Display for CompareError {
                 }
             }
             CompareError::Mismatch(details) => {
-                write!(f, "{} mismatch{} detected", details.len(), if details.len() == 1 { "" } else { "es" })
+                write!(
+                    f,
+                    "{} mismatch{} detected",
+                    details.len(),
+                    if details.len() == 1 { "" } else { "es" }
+                )
             }
         }
     }

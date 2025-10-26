@@ -19,10 +19,12 @@ fn main() {
                 if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Ok(tmpl) = fs::read_to_string(&path) {
                         let mut merged = dash.clone();
-                        let tpl: Value = json::value_from_str(&tmpl)
-                            .unwrap_or_else(|err| panic!("invalid template '{}': {err}", path.display()));
-                        gen::apply_overrides(&mut merged, tpl)
-                            .unwrap_or_else(|err| panic!("failed to merge template '{}': {err}", path.display()));
+                        let tpl: Value = json::value_from_str(&tmpl).unwrap_or_else(|err| {
+                            panic!("invalid template '{}': {err}", path.display())
+                        });
+                        gen::apply_overrides(&mut merged, tpl).unwrap_or_else(|err| {
+                            panic!("failed to merge template '{}': {err}", path.display())
+                        });
                         let rendered = gen::render_pretty(&merged).expect("render template");
                         fs::write(format!("grafana/{}.json", name), rendered).unwrap();
                     }

@@ -13,6 +13,10 @@ use http_env::{http_client as env_http_client, register_tls_warning_sink, TlsEnv
 use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
+use monitoring_build::{
+    verify_attestation, ChaosAttestation, ChaosAttestationError, ChaosModule,
+    ChaosReadinessSnapshot,
+};
 use runtime::telemetry::{
     Counter, CounterVec, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntGaugeVec,
     Opts, Registry,
@@ -62,7 +66,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
 use tls_warning::{
@@ -198,6 +202,8 @@ const METRIC_TLS_ENV_WARNING_DETAIL_UNIQUE_FINGERPRINTS: &str =
 const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_variables_unique_fingerprints";
 const METRIC_BRIDGE_ANOMALY_TOTAL: &str = "bridge_anomaly_total";
+const METRIC_CHAOS_READINESS: &str = "chaos_readiness";
+const METRIC_CHAOS_BREACH_TOTAL: &str = "chaos_sla_breach_total";
 const METRIC_BRIDGE_COUNTER_DELTA: &str = "bridge_metric_delta";
 const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
 const METRIC_BRIDGE_REMEDIATION_ACTION_TOTAL: &str = "bridge_remediation_action_total";
@@ -426,6 +432,7 @@ pub struct AppState {
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
     treasury_source: Option<TreasurySource>,
+    chaos_status: Arc<Mutex<ChaosStatusTracker>>,
 }
 
 #[derive(Clone)]
@@ -508,6 +515,7 @@ impl AppState {
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
             treasury_source,
+            chaos_status: Arc::new(Mutex::new(ChaosStatusTracker::default())),
         };
         state.load_bridge_anomaly_state();
         state.load_bridge_remediation_state();
@@ -1714,6 +1722,8 @@ struct AggregatorMetrics {
     ad_readiness_min_unique_viewers: Gauge,
     ad_readiness_min_host_count: Gauge,
     ad_readiness_min_provider_count: Gauge,
+    chaos_readiness: GaugeVec,
+    chaos_breach_total: Counter,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2397,6 +2407,11 @@ impl Recorder for AggregatorRecorder {
                     }
                 }
             }
+            METRIC_CHAOS_BREACH_TOTAL => {
+                if let Some(delta) = Self::u64_delta(name, value) {
+                    metrics.chaos_breach_total.inc_by(delta);
+                }
+            }
             _ => {}
         }
     }
@@ -2546,6 +2561,25 @@ impl Recorder for AggregatorRecorder {
                                 metric = name,
                                 ?err,
                                 "failed to update tls_env_warning_variables_unique_fingerprints"
+                            ),
+                        }
+                    }
+                }
+            }
+            METRIC_CHAOS_READINESS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &["module", "scenario"])
+                    {
+                        match metrics
+                            .chaos_readiness
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update chaos_readiness"
                             ),
                         }
                     }
@@ -3067,6 +3101,22 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         )
         .expect("register ad_readiness_min_provider_count");
     ad_readiness_min_provider_count.set(0.0);
+    let chaos_readiness = GaugeVec::new(
+        Opts::new(
+            METRIC_CHAOS_READINESS,
+            "Chaos readiness scores grouped by module and scenario",
+        ),
+        &["module", "scenario"],
+    );
+    registry
+        .register(Box::new(chaos_readiness.clone()))
+        .expect("register chaos_readiness");
+    let chaos_breach_total = registry
+        .register_counter(
+            METRIC_CHAOS_BREACH_TOTAL,
+            "Total chaos SLA breaches recorded from attestations",
+        )
+        .expect("register chaos_sla_breach_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -3122,6 +3172,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         ad_readiness_min_unique_viewers,
         ad_readiness_min_host_count,
         ad_readiness_min_provider_count,
+        chaos_readiness,
+        chaos_breach_total,
     }
 });
 
@@ -3139,12 +3191,22 @@ fn bridge_dispatch_log() -> &'static Arc<Mutex<VecDeque<BridgeRemediationDispatc
     BRIDGE_DISPATCH_LOG.get_or_init(|| Arc::new(Mutex::new(VecDeque::new())))
 }
 
-pub fn reset_bridge_remediation_dispatch_log() {
+pub struct BridgeRemediationDispatchLogGuard {
+    _lock: MutexGuard<'static, ()>,
+}
+
+pub fn reset_bridge_remediation_dispatch_log() -> BridgeRemediationDispatchLogGuard {
+    static DISPATCH_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let lock = DISPATCH_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap();
     if let Some(log) = BRIDGE_DISPATCH_LOG.get() {
         if let Ok(mut guard) = log.lock() {
             guard.clear();
         }
     }
+    BridgeRemediationDispatchLogGuard { _lock: lock }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -7195,6 +7257,52 @@ async fn telemetry_node(request: Request<AppState>) -> Result<Response, HttpErro
     json_ok(telemetry_history_to_value(&history))
 }
 
+async fn chaos_attest(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let payload: Value = request.json()?;
+    let attestations: Vec<ChaosAttestation> = match payload {
+        Value::Array(items) => {
+            let mut parsed = Vec::with_capacity(items.len());
+            for item in items {
+                let attestation = ChaosAttestation::from_value(item).map_err(|err| {
+                    HttpError::Handler(format!("invalid chaos attestation payload: {err}"))
+                })?;
+                parsed.push(attestation);
+            }
+            parsed
+        }
+        value => {
+            let attestation = ChaosAttestation::from_value(value).map_err(|err| {
+                HttpError::Handler(format!("invalid chaos attestation payload: {err}"))
+            })?;
+            vec![attestation]
+        }
+    };
+
+    for attestation in attestations {
+        if let Err(err) = state.record_chaos_attestation(attestation) {
+            warn!(target: "aggregator", %err, "rejected chaos attestation");
+            let mut body = Map::new();
+            body.insert("error".into(), Value::String(err.to_string()));
+            return json_response(StatusCode::BAD_REQUEST, Value::Object(body));
+        }
+    }
+
+    Ok(Response::new(StatusCode::ACCEPTED))
+}
+
+async fn chaos_status(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let snapshots = state.chaos_snapshots();
+    let payload = Value::Array(
+        snapshots
+            .into_iter()
+            .map(|snapshot| snapshot.to_value())
+            .collect(),
+    );
+    json_ok(payload)
+}
+
 async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
     let state = Arc::clone(request.state());
     let payload = state.wrappers_latest();
@@ -7257,6 +7365,8 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/remediation/bridge/dispatches",
             bridge_remediation_dispatches,
         )
+        .post("/chaos/attest", chaos_attest)
+        .get("/chaos/status", chaos_status)
         .post("/telemetry", telemetry_post)
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)
@@ -7567,15 +7677,19 @@ mod tests {
         x25519::SecretKey,
     };
     use crypto_suite::hashing::blake3;
+    use crypto_suite::signatures::ed25519::SigningKey;
+    use foundation_serialization::json::Value;
     use foundation_telemetry::{AdReadinessTelemetry, WrapperMetricEntry, WrapperSummaryEntry};
     use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
+    use monitoring_build::{sign_attestation, ChaosAttestationDraft, ChaosModule};
     use rand::rngs::OsRng;
     use std::collections::HashMap;
     use std::future::Future;
     use std::time::{SystemTime, UNIX_EPOCH};
     use sys::archive::zip::ZipReader;
     use sys::tempfile;
+    use tb_sim::Simulation;
 
     fn run_async<T>(future: impl Future<Output = T>) -> T {
         runtime::block_on(future)
@@ -7590,6 +7704,260 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("monotonic clock")
             .as_nanos()
+    }
+
+    #[test]
+    fn chaos_attestation_round_trip() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("t".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+            let draft = ChaosAttestationDraft {
+                scenario: "overlay-wide-partition".to_string(),
+                module: ChaosModule::Overlay,
+                readiness: 0.83,
+                sla_threshold: 0.9,
+                breaches: 1,
+                window_start: 0,
+                window_end: 10,
+                issued_at: 10,
+            };
+            let attestation = sign_attestation(draft, &signing_key);
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&attestation.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+            let resp = app
+                .handle(app.request_builder().path("/chaos/status").build())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let payload: Value = json::from_slice(resp.body()).unwrap();
+            let array = payload.as_array().expect("array response");
+            assert_eq!(array.len(), 1);
+            let entry = array[0].as_object().expect("object entry");
+            assert_eq!(
+                entry.get("scenario").and_then(Value::as_str),
+                Some("overlay-wide-partition")
+            );
+            assert_eq!(entry.get("module").and_then(Value::as_str), Some("overlay"));
+            assert_eq!(entry.get("breaches").and_then(Value::as_u64), Some(1));
+        });
+    }
+
+    #[test]
+    fn chaos_lab_attestations_flow_through_status() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+
+            let mut sim = Simulation::new(64);
+            sim.drive(24);
+            let issued_at = 512_u64;
+            let drafts = sim.chaos_attestation_drafts(issued_at);
+
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+            let payload = Value::Array(
+                drafts
+                    .into_iter()
+                    .map(|draft| sign_attestation(draft, &signing_key).to_value())
+                    .collect(),
+            );
+
+            let resp = app
+                .handle(
+                    app.request_builder()
+                        .method(Method::Post)
+                        .path("/chaos/attest")
+                        .json(&payload)
+                        .unwrap()
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+            let resp = app
+                .handle(app.request_builder().path("/chaos/status").build())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body: Value = json::from_slice(resp.body()).unwrap();
+            let snapshots = body.as_array().expect("array payload");
+            assert_eq!(snapshots.len(), 3, "one entry per module");
+
+            let mut modules = snapshots
+                .iter()
+                .map(|entry| {
+                    entry
+                        .get("module")
+                        .and_then(Value::as_str)
+                        .expect("module field present")
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            modules.sort();
+            assert_eq!(modules, vec!["compute", "overlay", "storage"]);
+
+            let tracker = state.chaos_snapshots();
+            assert_eq!(tracker.len(), 3);
+            for snapshot in tracker {
+                assert_eq!(snapshot.issued_at, issued_at);
+                assert!(snapshot.readiness >= 0.0 && snapshot.readiness <= 1.0);
+                assert_eq!(
+                    snapshot.signer,
+                    signing_key.verifying_key().to_bytes(),
+                    "verifying key preserved"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn chaos_attestation_rejects_out_of_range_payloads() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+            let draft = ChaosAttestationDraft {
+                scenario: "overlay-wide-partition".to_string(),
+                module: ChaosModule::Overlay,
+                readiness: 0.95,
+                sla_threshold: 0.9,
+                breaches: 0,
+                window_start: 0,
+                window_end: 10,
+                issued_at: 10,
+            };
+            let attestation = sign_attestation(draft, &signing_key);
+            let mut tampered = attestation.clone();
+            tampered.readiness = 1.5; // outside the allowed [0, 1] range
+
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&tampered.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            let payload: Value = json::from_slice(resp.body()).unwrap();
+            let error = payload
+                .get("error")
+                .and_then(Value::as_str)
+                .expect("error response");
+            assert!(error.contains("chaos readiness must be between 0 and 1"));
+
+            let resp = app
+                .handle(app.request_builder().path("/chaos/status").build())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let payload: Value = json::from_slice(resp.body()).unwrap();
+            assert!(payload
+                .as_array()
+                .map(|entries| entries.is_empty())
+                .unwrap_or(false));
+        });
+    }
+
+    #[test]
+    fn chaos_attestation_rejects_digest_mismatch() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+            let draft = ChaosAttestationDraft {
+                scenario: "storage-dht-failure".to_string(),
+                module: ChaosModule::Storage,
+                readiness: 0.8,
+                sla_threshold: 0.9,
+                breaches: 1,
+                window_start: 0,
+                window_end: 5,
+                issued_at: 5,
+            };
+            let attestation = sign_attestation(draft, &signing_key);
+            let mut tampered = attestation.clone();
+            tampered.digest[0] ^= 0xAA;
+
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&tampered.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            let payload: Value = json::from_slice(resp.body()).unwrap();
+            let error = payload
+                .get("error")
+                .and_then(Value::as_str)
+                .expect("error response");
+            assert!(error.contains("chaos attestation digest mismatch"));
+
+            let snapshots = state.chaos_snapshots();
+            assert!(snapshots.is_empty());
+        });
+    }
+
+    #[test]
+    fn chaos_attestation_rejects_invalid_signature() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+            let draft = ChaosAttestationDraft {
+                scenario: "compute-pipeline-failure".to_string(),
+                module: ChaosModule::Compute,
+                readiness: 0.75,
+                sla_threshold: 0.7,
+                breaches: 2,
+                window_start: 10,
+                window_end: 20,
+                issued_at: 25,
+            };
+            let attestation = sign_attestation(draft, &signing_key);
+            let mut tampered = attestation.clone();
+            tampered.signature[0] ^= 0xFF;
+
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&tampered.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            let payload: Value = json::from_slice(resp.body()).unwrap();
+            let error = payload
+                .get("error")
+                .and_then(Value::as_str)
+                .expect("error response");
+            assert!(error.contains("invalid chaos attestation signature"));
+
+            let snapshots = state.chaos_snapshots();
+            assert!(snapshots.is_empty());
+        });
     }
 
     #[test]
@@ -8506,5 +8874,62 @@ mod tests {
                 .expect("labels object");
             assert_eq!(labels.get("codec").and_then(Value::as_str), Some("json"));
         });
+    }
+}
+
+impl AppState {
+    fn record_chaos_attestation(
+        &self,
+        attestation: ChaosAttestation,
+    ) -> Result<ChaosReadinessSnapshot, ChaosAttestationError> {
+        verify_attestation(&attestation)?;
+        let snapshot = {
+            let mut guard = self
+                .chaos_status
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            guard.record(&attestation)
+        };
+        gauge!(
+            METRIC_CHAOS_READINESS,
+            snapshot.readiness,
+            "module" => attestation.module.as_str(),
+            "scenario" => attestation.scenario.as_str()
+        );
+        if attestation.breaches > 0 {
+            increment_counter!(METRIC_CHAOS_BREACH_TOTAL, attestation.breaches as f64);
+        }
+        Ok(snapshot)
+    }
+
+    fn chaos_snapshots(&self) -> Vec<ChaosReadinessSnapshot> {
+        let guard = self
+            .chaos_status
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.snapshots()
+    }
+}
+
+#[derive(Default)]
+struct ChaosStatusTracker {
+    snapshots: HashMap<(String, ChaosModule), ChaosReadinessSnapshot>,
+}
+
+impl ChaosStatusTracker {
+    fn record(&mut self, attestation: &ChaosAttestation) -> ChaosReadinessSnapshot {
+        let snapshot = ChaosReadinessSnapshot::from(attestation);
+        self.snapshots.insert(snapshot.key(), snapshot.clone());
+        snapshot
+    }
+
+    fn snapshots(&self) -> Vec<ChaosReadinessSnapshot> {
+        let mut values: Vec<_> = self.snapshots.values().cloned().collect();
+        values.sort_by(|a, b| {
+            a.scenario
+                .cmp(&b.scenario)
+                .then(a.module.as_str().cmp(b.module.as_str()))
+        });
+        values
     }
 }
