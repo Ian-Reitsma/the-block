@@ -89,6 +89,7 @@ members = [
   "crates/sys",
   "crates/http_env",
   "crates/tls_warning",
+  "crates/zkp",
 ]
 default-members = [
   "node",

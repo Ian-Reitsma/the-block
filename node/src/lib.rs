@@ -67,6 +67,7 @@ pub use read_receipt::{ReadAck, ReadBatcher};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadAckError {
     InvalidSignature,
+    PrivacyProofRejected,
 }
 pub use runtime;
 pub use runtime::{
@@ -666,6 +667,54 @@ pub struct Block {
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Optional Dilithium signature over the header hash.
     pub dilithium_sig: Vec<u8>,
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            previous_hash: String::new(),
+            timestamp_millis: 0,
+            transactions: Vec::new(),
+            difficulty: 0,
+            retune_hint: 0,
+            nonce: 0,
+            hash: String::new(),
+            coinbase_consumer: TokenAmount::new(0),
+            coinbase_industrial: TokenAmount::new(0),
+            storage_sub_ct: TokenAmount::new(0),
+            read_sub_ct: TokenAmount::new(0),
+            read_sub_viewer_ct: TokenAmount::new(0),
+            read_sub_host_ct: TokenAmount::new(0),
+            read_sub_hardware_ct: TokenAmount::new(0),
+            read_sub_verifier_ct: TokenAmount::new(0),
+            read_sub_liquidity_ct: TokenAmount::new(0),
+            ad_viewer_ct: TokenAmount::new(0),
+            ad_host_ct: TokenAmount::new(0),
+            ad_hardware_ct: TokenAmount::new(0),
+            ad_verifier_ct: TokenAmount::new(0),
+            ad_liquidity_ct: TokenAmount::new(0),
+            ad_miner_ct: TokenAmount::new(0),
+            compute_sub_ct: TokenAmount::new(0),
+            proof_rebate_ct: TokenAmount::new(0),
+            storage_sub_it: TokenAmount::new(0),
+            read_sub_it: TokenAmount::new(0),
+            compute_sub_it: TokenAmount::new(0),
+            read_root: [0u8; 32],
+            fee_checksum: String::new(),
+            state_root: String::new(),
+            base_fee: 0,
+            l2_roots: Vec::new(),
+            l2_sizes: Vec::new(),
+            vdf_commit: [0u8; 32],
+            vdf_output: [0u8; 32],
+            vdf_proof: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium_pubkey: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium_sig: Vec::new(),
+        }
+    }
 }
 
 impl Block {
@@ -1318,9 +1367,10 @@ impl Blockchain {
         &mut self,
         ack: crate::read_receipt::ReadAck,
     ) -> Result<(), ReadAckError> {
-        if !ack.verify() {
+        if !ack.verify_signature() {
             return Err(ReadAckError::InvalidSignature);
         }
+        crate::blockchain::privacy::verify_ack(self.config.read_ack_privacy, &ack)?;
         self.epoch_read_bytes = self.epoch_read_bytes.saturating_add(ack.bytes);
         let viewer_addr = viewer_address_from_pk(&ack.pk);
         let viewer_entry = self.epoch_viewer_bytes.entry(viewer_addr).or_insert(0);
@@ -5489,6 +5539,8 @@ mod tests {
             provider: provider.to_string(),
             campaign_id: None,
             creative_id: None,
+            readiness: None,
+            zk_proof: None,
         };
         let mut hasher = Hasher::new();
         hasher.update(&ack.manifest);

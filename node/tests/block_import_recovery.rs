@@ -47,31 +47,8 @@ fn recovers_from_crash_during_import() {
         .unwrap();
         let block = the_block::Block {
             index: 1,
-            previous_hash: String::new(),
-            timestamp_millis: 0,
             transactions: vec![tx],
-            difficulty: 0,
-            retune_hint: 0,
-            nonce: 0,
-            hash: String::new(),
-            coinbase_consumer: TokenAmount::new(0),
-            coinbase_industrial: TokenAmount::new(0),
-            storage_sub_ct: TokenAmount::new(0),
-            read_sub_ct: TokenAmount::new(0),
-            compute_sub_ct: TokenAmount::new(0),
-            proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
-            read_root: [0; 32],
-            fee_checksum: String::new(),
-            state_root: String::new(),
-            base_fee: 0,
-            l2_roots: Vec::new(),
-            l2_sizes: Vec::new(),
-            vdf_commit: [0; 32],
-            vdf_output: [0; 32],
-            vdf_proof: Vec::new(),
+            ..the_block::Block::default()
         };
         let deltas = validate_and_apply(&bc, &block).unwrap();
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {

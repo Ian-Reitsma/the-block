@@ -39,6 +39,8 @@ fn build_signed_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
         provider: provider.to_string(),
         campaign_id: Some("cmp-1".into()),
         creative_id: Some("creative-1".into()),
+        readiness: None,
+        zk_proof: None,
     }
 }
 

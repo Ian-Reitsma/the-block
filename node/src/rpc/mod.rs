@@ -1,6 +1,6 @@
 use crate::{
     compute_market::settlement::{SettleMode, Settlement},
-    config::RpcConfig,
+    config::{ReadAckPrivacyMode, RpcConfig},
     consensus::pow::{self, BlockHeader},
     gateway,
     governance::{Params, NODE_GOV_STORE},
@@ -1041,6 +1041,30 @@ fn dispatch(
             match bc.lock() {
                 Ok(mut guard) => {
                     guard.difficulty = val;
+                    status_value("ok")
+                }
+                Err(_) => error_value("lock poisoned"),
+            }
+        }
+        "node.get_ack_privacy" => {
+            let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+            Value::String(guard.config.read_ack_privacy.to_string())
+        }
+        "node.set_ack_privacy" => {
+            let mode_str = req
+                .params
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("enforce");
+            let mode = mode_str
+                .parse::<ReadAckPrivacyMode>()
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
+            match bc.lock() {
+                Ok(mut guard) => {
+                    if guard.config.read_ack_privacy != mode {
+                        guard.config.read_ack_privacy = mode;
+                        guard.save_config();
+                    }
                     status_value("ok")
                 }
                 Err(_) => error_value("lock poisoned"),

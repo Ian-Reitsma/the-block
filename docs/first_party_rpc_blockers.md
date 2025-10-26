@@ -128,6 +128,15 @@ RPC client.
 
 ## Recent progress (2025-10-25)
 
+- Read acknowledgement privacy now ships entirely on first-party helpers. The
+  gateway attaches readiness proofs from the new `zkp` crate, the node verifies
+  them via `ReadAckPrivacyProof`, and operators can toggle enforcement with
+  `node run --ack-privacy` or the `node.{get,set}_ack_privacy` RPCs—no external
+  crypto libraries or transports required. Ad reservations hash a per-ack
+  discriminator so duplicate fetches no longer clobber entries, and integration
+  tests cover both the proof flow and collision-free settlements through the
+  in-process RPC harness.
+
 - Remediation follow-ups now queue automated retries and governance escalations
   without leaving the first-party engine. Actions persist `dispatch_attempts`,
   `auto_retry_count`, retry timestamps, and follow-up notes so CLI/tests can

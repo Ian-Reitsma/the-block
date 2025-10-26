@@ -859,6 +859,7 @@ dependencies = [
  "tls_warning",
  "transport",
  "wallet",
+ "zkp",
 ]
 
 [[package]]
@@ -932,4 +933,13 @@ dependencies = [
  "diagnostics",
  "foundation_serialization",
  "sys",
+]
+
+[[package]]
+name = "zkp"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_serde",
+ "foundation_serialization",
 ]

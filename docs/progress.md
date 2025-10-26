@@ -33,6 +33,13 @@
 > completion/status, and resale flows enforce stored royalty rates and protocol
 > fees. New regressions drive auction expiry, resale royalty distribution, and CLI
 > plumbing so operators can stage `.block` sales without external marketplaces.
+> **Review (2025-10-25, late evening):** Read acknowledgements now bundle zero-
+> knowledge commitments. The gateway stamps each `ReadAck` with a readiness
+> snapshot proof and derives a per-ack reservation discriminator, the node
+> exposes `--ack-privacy`/`node.set_ack_privacy` toggles, and ledger submission
+> logs `read_ack_processed_total{result="invalid_privacy"}` whenever proofs fail
+> under observe mode. New regression tests cover the proof round-trip and enforce
+> that identical reads no longer collide in the ad marketplace.
 > **Review (2025-10-25, evening):** Governance parameter activations now update
 > the live ad revenue split in lockstep with policy votes. The node runtime wires
 > the shared marketplace handle into the read-subsidy apply hooks, and the new

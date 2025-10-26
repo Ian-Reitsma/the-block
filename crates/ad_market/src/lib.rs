@@ -316,6 +316,7 @@ fn read_string_map(map: &JsonMap, key: &str) -> Result<HashMap<String, String>, 
 pub struct ReservationKey {
     pub manifest: [u8; 32],
     pub path_hash: [u8; 32],
+    pub discriminator: [u8; 32],
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -699,7 +700,7 @@ impl Marketplace for InMemoryMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
-        let mut pending = self.pending.write().unwrap();
+        let pending = self.pending.write().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
         for (campaign_id, state) in campaigns.iter() {
             if !Self::matches_targeting(&state.campaign.targeting, &ctx) {
@@ -740,21 +741,26 @@ impl Marketplace for InMemoryMarketplace {
                 }
             }
         }
+        drop(pending);
+        drop(campaigns);
         if let Some((outcome, campaign_id, cost_ct)) = best {
-            let entry = pending.entry(campaign_id.clone()).or_insert(0);
-            *entry = entry.saturating_add(cost_ct);
-            drop(pending);
-            drop(campaigns);
             let mut reservations = self.reservations.write().unwrap();
+            if reservations.contains_key(&key) {
+                return None;
+            }
             reservations.insert(
                 key,
                 ReservationState {
-                    campaign_id,
+                    campaign_id: campaign_id.clone(),
                     creative_id: outcome.creative_id.clone(),
                     bytes: ctx.bytes,
                     cost_ct,
                 },
             );
+            drop(reservations);
+            let mut pending = self.pending.write().unwrap();
+            let entry = pending.entry(campaign_id).or_insert(0);
+            *entry = entry.saturating_add(cost_ct);
             Some(outcome)
         } else {
             None
@@ -878,7 +884,7 @@ impl Marketplace for SledMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
-        let mut pending = self.pending.write().unwrap();
+        let pending = self.pending.write().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
         for (campaign_id, state) in campaigns.iter() {
             if !InMemoryMarketplace::matches_targeting(&state.campaign.targeting, &ctx) {
@@ -919,21 +925,26 @@ impl Marketplace for SledMarketplace {
                 }
             }
         }
+        drop(pending);
+        drop(campaigns);
         if let Some((outcome, campaign_id, cost_ct)) = best {
-            let entry = pending.entry(campaign_id.clone()).or_insert(0);
-            *entry = entry.saturating_add(cost_ct);
-            drop(pending);
-            drop(campaigns);
             let mut reservations = self.reservations.write().unwrap();
+            if reservations.contains_key(&key) {
+                return None;
+            }
             reservations.insert(
                 key,
                 ReservationState {
-                    campaign_id,
+                    campaign_id: campaign_id.clone(),
                     creative_id: outcome.creative_id.clone(),
                     bytes: ctx.bytes,
                     cost_ct,
                 },
             );
+            drop(reservations);
+            let mut pending = self.pending.write().unwrap();
+            let entry = pending.entry(campaign_id).or_insert(0);
+            *entry = entry.saturating_add(cost_ct);
             Some(outcome)
         } else {
             None
@@ -1069,6 +1080,7 @@ mod tests {
         let key = ReservationKey {
             manifest: [1u8; 32],
             path_hash: [2u8; 32],
+            discriminator: [3u8; 32],
         };
         let ctx = ImpressionContext {
             domain: "example".to_string(),
@@ -1119,6 +1131,7 @@ mod tests {
         let key = ReservationKey {
             manifest: [9u8; 32],
             path_hash: [8u8; 32],
+            discriminator: [7u8; 32],
         };
         let ctx = ImpressionContext {
             domain: "example".to_string(),
@@ -1195,6 +1208,7 @@ mod tests {
                     let key = ReservationKey {
                         manifest: [idx as u8; 32],
                         path_hash: [(idx + 1) as u8; 32],
+                        discriminator: [idx.wrapping_add(2) as u8; 32],
                     };
                     barrier.wait();
                     if market.reserve_impression(key, ctx).is_some() {
@@ -1225,6 +1239,7 @@ mod tests {
         let new_key = ReservationKey {
             manifest: [9u8; 32],
             path_hash: [8u8; 32],
+            discriminator: [7u8; 32],
         };
         let none = market.reserve_impression(new_key, ctx.clone());
         assert!(none.is_none(), "budget exhausted prevents new reservations");
@@ -1266,6 +1281,7 @@ mod tests {
         let key_one = ReservationKey {
             manifest: [1u8; 32],
             path_hash: [2u8; 32],
+            discriminator: [5u8; 32],
         };
         assert!(market.reserve_impression(key_one, ctx.clone()).is_some());
 
@@ -1273,12 +1289,14 @@ mod tests {
         let cancel_key = ReservationKey {
             manifest: [1u8; 32],
             path_hash: [2u8; 32],
+            discriminator: [5u8; 32],
         };
         market.cancel(&cancel_key);
 
         let key_two = ReservationKey {
             manifest: [3u8; 32],
             path_hash: [4u8; 32],
+            discriminator: [6u8; 32],
         };
         assert!(
             market.reserve_impression(key_two, ctx).is_some(),

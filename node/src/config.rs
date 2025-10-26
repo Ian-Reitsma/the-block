@@ -11,8 +11,10 @@ use governance_spec::{
     DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
     DEFAULT_TRANSPORT_PROVIDER_POLICY,
 };
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -98,6 +100,8 @@ pub struct NodeConfig {
     pub proof_rebate_rate: u64,
     #[serde(default = "default_treasury_account")]
     pub treasury_account: String,
+    #[serde(default = "default_read_ack_privacy")]
+    pub read_ack_privacy: ReadAckPrivacyMode,
 }
 
 impl Default for NodeConfig {
@@ -141,12 +145,17 @@ impl Default for NodeConfig {
             jurisdiction: None,
             proof_rebate_rate: default_proof_rebate_rate(),
             treasury_account: default_treasury_account(),
+            read_ack_privacy: default_read_ack_privacy(),
         }
     }
 }
 
 fn default_treasury_account() -> String {
     "treasury".to_string()
+}
+
+fn default_read_ack_privacy() -> ReadAckPrivacyMode {
+    ReadAckPrivacyMode::Enforce
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -192,6 +201,44 @@ impl Default for OverlayConfig {
         Self {
             peer_db_path: default_overlay_db_path(),
             backend: OverlayBackend::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadAckPrivacyMode {
+    Enforce,
+    Observe,
+    Disabled,
+}
+
+impl Default for ReadAckPrivacyMode {
+    fn default() -> Self {
+        ReadAckPrivacyMode::Enforce
+    }
+}
+
+impl fmt::Display for ReadAckPrivacyMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            ReadAckPrivacyMode::Enforce => "enforce",
+            ReadAckPrivacyMode::Observe => "observe",
+            ReadAckPrivacyMode::Disabled => "disabled",
+        };
+        f.write_str(label)
+    }
+}
+
+impl FromStr for ReadAckPrivacyMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "enforce" => Ok(ReadAckPrivacyMode::Enforce),
+            "observe" | "warn" => Ok(ReadAckPrivacyMode::Observe),
+            "disabled" | "disable" | "off" => Ok(ReadAckPrivacyMode::Disabled),
+            other => Err(format!("invalid ack privacy mode '{other}'")),
         }
     }
 }
