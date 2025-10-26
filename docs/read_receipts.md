@@ -1,5 +1,9 @@
 # Read Receipts and Audit Workflow
 > **Review (2025-10-25, evening):** Read acknowledgements now attach zero-knowledge readiness proofs and identity commitments via the first-party `zkp` crate. Gateway/node operators can tune enforcement with `--ack-privacy` or the `node.{get,set}_ack_privacy` RPCs, and ledger submission emits `read_ack_processed_total{result="invalid_privacy"}` when proofs fail under `observe` mode.
+> **Review (2025-10-26, evening):** The `read_ack_privacy` integration suite now
+> reuses a `concurrency::Lazy` fixture so the readiness snapshot and signature
+> material are generated once per test run, cutting redundant RNG/proof setup
+> without introducing third-party cells.
 > **Review (2025-09-25):** Synced Read Receipts and Audit Workflow guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 

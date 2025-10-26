@@ -1,4 +1,18 @@
 # Summary
+> **Review (2025-11-02, morning):** A deterministic, first-party liquidity router
+> now sequences DEX escrows, bridge withdrawals, and trust-line rebalances
+> through `node/src/liquidity/router.rs`. Governance configures batch size,
+> fairness jitter, hop limits, and rebalance thresholds while bridge finalisers
+> honour the router’s ordering so cross-chain FX stays MEV-resistant. Runtime’s
+> integration suites gained explicit `clippy::unwrap_used`/`expect_used`
+> allowances and NaN guards, clearing the longstanding full-workspace lint debt.
+> **Review (2025-10-26, evening):** Read-ack integration tests reuse a shared
+> fixture through the first-party `concurrency::Lazy` helper, trimming duplicate
+> RNG/proof setup while keeping `invalid_privacy` detection coverage intact.
+> Concurrent reservation tests now prove the in-memory and sled marketplaces
+> hold their pending-budget locks through insertion so campaigns are never
+> oversubscribed, and the compute dashboard adds a "Read Ack Outcomes" panel to
+> surface the new `read_ack_processed_total{result="invalid_privacy"}` series.
 > **Review (2025-10-25, late evening):** Read acknowledgements now ship readiness
 > and identity proofs via the first-party `zkp` crate. Operators can toggle
 > enforcement with `--ack-privacy` or the `node.{get,set}_ack_privacy` RPCs, and

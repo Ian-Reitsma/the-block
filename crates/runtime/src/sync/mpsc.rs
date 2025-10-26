@@ -3,7 +3,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, LockResult, Mutex};
 use std::task::{Context, Poll};
 
 use foundation_async::stream::Stream;
@@ -33,6 +33,19 @@ impl Waiter {
     fn wake(&self) {
         if !self.ready.swap(true, Ordering::SeqCst) {
             self.waker.wake();
+        }
+    }
+}
+
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }
@@ -94,7 +107,7 @@ impl<T> Inner<T> {
     }
 
     fn cancel_sender_waiter(&self, waiter: &Arc<Waiter>) {
-        let mut state = self.state.lock().expect("mpsc poisoned");
+        let mut state = self.state.lock().recover();
         if let Some(pos) = state
             .sender_waiters
             .iter()
@@ -105,7 +118,7 @@ impl<T> Inner<T> {
     }
 
     fn cancel_receiver_waiter(&self, waiter: &Arc<Waiter>) {
-        let mut state = self.state.lock().expect("mpsc poisoned");
+        let mut state = self.state.lock().recover();
         if let Some(pos) = state
             .receiver_waiters
             .iter()
@@ -121,9 +134,11 @@ impl<T> Inner<T> {
         waiter_slot: &mut Option<Arc<Waiter>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), SendError<T>>> {
-        let mut state = self.state.lock().expect("mpsc poisoned");
+        let mut state = self.state.lock().recover();
         if !state.receiver_alive {
-            let value = value.take().expect("value");
+            let value = value
+                .take()
+                .unwrap_or_else(|| panic!("send waiter missing value"));
             drop(state);
             return Poll::Ready(Err(SendError::new(value)));
         }
@@ -132,7 +147,9 @@ impl<T> Inner<T> {
             Capacity::Bounded(cap) => state.queue.len() < cap,
         };
         if can_push {
-            let v = value.take().expect("value");
+            let v = value
+                .take()
+                .unwrap_or_else(|| panic!("send waiter missing value"));
             state.queue.push_back(v);
             self.wake_next_receiver(state);
             return Poll::Ready(Ok(()));
@@ -162,7 +179,9 @@ impl<T> SendError<T> {
 
     /// Extracts the value that failed to send.
     pub fn into_inner(mut self) -> T {
-        self.value.take().expect("value already taken")
+        self.value
+            .take()
+            .unwrap_or_else(|| panic!("send error value already taken"))
     }
 }
 
@@ -238,10 +257,14 @@ impl<T> Sender<T> {
     /// Blocks the current thread until the value is sent.
     pub fn blocking_send(&self, value: T) -> Result<(), SendError<T>> {
         let mut value = Some(value);
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         loop {
             if !state.receiver_alive {
-                let err = SendError::new(value.take().expect("value"));
+                let err = SendError::new(
+                    value
+                        .take()
+                        .unwrap_or_else(|| panic!("send waiter missing value")),
+                );
                 drop(state);
                 return Err(err);
             }
@@ -250,17 +273,19 @@ impl<T> Sender<T> {
                 Capacity::Bounded(cap) => state.queue.len() < cap,
             };
             if can_push {
-                let v = value.take().expect("value");
+                let v = value
+                    .take()
+                    .unwrap_or_else(|| panic!("send waiter missing value"));
                 state.queue.push_back(v);
                 self.inner.wake_next_receiver(state);
                 return Ok(());
             }
-            state = self.inner.available.wait(state).expect("mpsc poisoned");
+            state = self.inner.available.wait(state).recover();
         }
     }
 
     fn last_sender_dropped(&self) {
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         let waiters = state.receiver_waiters.drain(..).collect::<Vec<_>>();
         drop(state);
         for waiter in waiters {
@@ -323,7 +348,7 @@ impl<T> Receiver<T> {
         waiter_slot: &mut Option<Arc<Waiter>>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<T>> {
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         if let Some(value) = state.queue.pop_front() {
             self.inner.wake_next_sender(state);
             return Poll::Ready(Some(value));
@@ -350,7 +375,7 @@ impl<T> Receiver<T> {
 
     /// Attempts to receive a value without waiting.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         if let Some(value) = state.queue.pop_front() {
             self.inner.wake_next_sender(state);
             Ok(value)
@@ -370,7 +395,7 @@ impl<T> Drop for Receiver<T> {
             return;
         }
         self.closed = true;
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         if !state.receiver_alive {
             drop(state);
             return;
@@ -391,7 +416,7 @@ pub struct Recv<'a, T> {
     waiter: Option<Arc<Waiter>>,
 }
 
-impl<'a, T> Future for Recv<'a, T> {
+impl<T> Future for Recv<'_, T> {
     type Output = Option<T>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -400,7 +425,7 @@ impl<'a, T> Future for Recv<'a, T> {
     }
 }
 
-impl<'a, T> Drop for Recv<'a, T> {
+impl<T> Drop for Recv<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = self.waiter.take() {
             self.receiver.inner.cancel_receiver_waiter(&waiter);
@@ -444,7 +469,7 @@ impl<T> Clone for UnboundedSender<T> {
 impl<T> UnboundedSender<T> {
     /// Sends a value without waiting.
     pub fn send(&self, value: T) -> Result<(), SendError<T>> {
-        let mut state = self.inner.state.lock().expect("mpsc poisoned");
+        let mut state = self.inner.state.lock().recover();
         if !state.receiver_alive {
             return Err(SendError::new(value));
         }
@@ -457,7 +482,7 @@ impl<T> UnboundedSender<T> {
 impl<T> Drop for UnboundedSender<T> {
     fn drop(&mut self) {
         if self.inner.sender_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let mut state = self.inner.state.lock().expect("mpsc poisoned");
+            let mut state = self.inner.state.lock().recover();
             let waiters = state.receiver_waiters.drain(..).collect::<Vec<_>>();
             drop(state);
             for waiter in waiters {

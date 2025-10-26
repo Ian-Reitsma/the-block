@@ -3637,6 +3637,27 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
+      "description": "Read acknowledgement outcomes grouped by result",
+      "id": 248,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result)(increase(read_ack_processed_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "title": "read_ack_processed_total (5m delta)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
       "id": 194,
       "options": {
         "legend": {

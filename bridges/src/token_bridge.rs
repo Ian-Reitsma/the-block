@@ -72,7 +72,7 @@ impl TokenBridge {
                 if let Ok(handle) =
                     BRIDGE_LIQUIDITY_LOCKED_TOTAL.ensure_handle_for_label_values(&[symbol])
                 {
-                    handle.inc_by(amount as f64);
+                    handle.inc_by(amount);
                 }
             }
         }
@@ -89,7 +89,7 @@ impl TokenBridge {
                 if let Ok(handle) =
                     BRIDGE_LIQUIDITY_MINTED_TOTAL.ensure_handle_for_label_values(&[symbol])
                 {
-                    handle.inc_by(amount as f64);
+                    handle.inc_by(amount);
                 }
             }
         }
@@ -112,7 +112,7 @@ impl TokenBridge {
             if let Ok(handle) =
                 BRIDGE_LIQUIDITY_UNLOCKED_TOTAL.ensure_handle_for_label_values(&[symbol])
             {
-                handle.inc_by(amount as f64);
+                handle.inc_by(amount);
             }
         }
     }
@@ -133,7 +133,7 @@ impl TokenBridge {
             if let Ok(handle) =
                 BRIDGE_LIQUIDITY_BURNED_TOTAL.ensure_handle_for_label_values(&[symbol])
             {
-                handle.inc_by(amount as f64);
+                handle.inc_by(amount);
             }
         }
     }

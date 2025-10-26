@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use runtime::{self, timeout};
 use std::time::Duration;
 

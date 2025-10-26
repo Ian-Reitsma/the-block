@@ -111,6 +111,7 @@ pub mod gossip;
 pub mod identity;
 pub mod kyc;
 pub mod light_client;
+pub mod liquidity;
 pub mod localnet;
 pub mod net;
 pub mod partition_recover;

@@ -259,8 +259,10 @@ pub fn write_telemetry_metrics(report: &ViolationReport, out_dir: &Path) -> Resu
         total.inc();
     }
 
-    fs::write(&path, registry.render_bytes())
-        .with_context(|| format!("unable to write {}", path.display()))
+    let bytes = registry
+        .render_bytes()
+        .map_err(|err| diag_anyhow::anyhow!(err.to_string()))?;
+    fs::write(&path, bytes).with_context(|| format!("unable to write {}", path.display()))
 }
 
 pub fn write_check_telemetry(out_dir: &Path, telemetry: &CheckTelemetry) -> Result<()> {
@@ -305,8 +307,10 @@ pub fn write_check_telemetry(out_dir: &Path, telemetry: &CheckTelemetry) -> Resu
         }
     }
 
-    fs::write(&path, registry.render_bytes())
-        .with_context(|| format!("unable to write {}", path.display()))
+    let bytes = registry
+        .render_bytes()
+        .map_err(|err| diag_anyhow::anyhow!(err.to_string()))?;
+    fs::write(&path, bytes).with_context(|| format!("unable to write {}", path.display()))
 }
 
 pub fn write_check_summary(out_dir: &Path, telemetry: &CheckTelemetry) -> Result<()> {

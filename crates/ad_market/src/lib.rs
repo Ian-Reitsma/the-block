@@ -700,7 +700,7 @@ impl Marketplace for InMemoryMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
-        let pending = self.pending.write().unwrap();
+        let pending = self.pending.read().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
         for (campaign_id, state) in campaigns.iter() {
             if !Self::matches_targeting(&state.campaign.targeting, &ctx) {
@@ -748,6 +748,26 @@ impl Marketplace for InMemoryMarketplace {
             if reservations.contains_key(&key) {
                 return None;
             }
+            let remaining_budget = {
+                let guard = self.campaigns.read().unwrap();
+                guard
+                    .get(&campaign_id)
+                    .map(|state| state.remaining_budget_ct)
+            };
+            let remaining_budget = match remaining_budget {
+                Some(value) => value,
+                None => {
+                    drop(reservations);
+                    return None;
+                }
+            };
+            let mut pending_guard = self.pending.write().unwrap();
+            let reserved = pending_guard.get(&campaign_id).copied().unwrap_or(0);
+            if remaining_budget < reserved.saturating_add(cost_ct) {
+                drop(pending_guard);
+                drop(reservations);
+                return None;
+            }
             reservations.insert(
                 key,
                 ReservationState {
@@ -757,9 +777,7 @@ impl Marketplace for InMemoryMarketplace {
                     cost_ct,
                 },
             );
-            drop(reservations);
-            let mut pending = self.pending.write().unwrap();
-            let entry = pending.entry(campaign_id).or_insert(0);
+            let entry = pending_guard.entry(campaign_id).or_insert(0);
             *entry = entry.saturating_add(cost_ct);
             Some(outcome)
         } else {
@@ -884,7 +902,7 @@ impl Marketplace for SledMarketplace {
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
         let campaigns = self.campaigns.read().unwrap();
-        let pending = self.pending.write().unwrap();
+        let pending = self.pending.read().unwrap();
         let mut best: Option<(MatchOutcome, String, u64)> = None;
         for (campaign_id, state) in campaigns.iter() {
             if !InMemoryMarketplace::matches_targeting(&state.campaign.targeting, &ctx) {
@@ -932,6 +950,26 @@ impl Marketplace for SledMarketplace {
             if reservations.contains_key(&key) {
                 return None;
             }
+            let remaining_budget = {
+                let guard = self.campaigns.read().unwrap();
+                guard
+                    .get(&campaign_id)
+                    .map(|state| state.remaining_budget_ct)
+            };
+            let remaining_budget = match remaining_budget {
+                Some(value) => value,
+                None => {
+                    drop(reservations);
+                    return None;
+                }
+            };
+            let mut pending_guard = self.pending.write().unwrap();
+            let reserved = pending_guard.get(&campaign_id).copied().unwrap_or(0);
+            if remaining_budget < reserved.saturating_add(cost_ct) {
+                drop(pending_guard);
+                drop(reservations);
+                return None;
+            }
             reservations.insert(
                 key,
                 ReservationState {
@@ -941,9 +979,7 @@ impl Marketplace for SledMarketplace {
                     cost_ct,
                 },
             );
-            drop(reservations);
-            let mut pending = self.pending.write().unwrap();
-            let entry = pending.entry(campaign_id).or_insert(0);
+            let entry = pending_guard.entry(campaign_id).or_insert(0);
             *entry = entry.saturating_add(cost_ct);
             Some(outcome)
         } else {
@@ -1053,6 +1089,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc, Barrier, Mutex,
     };
+    use std::thread;
     use sys::tempfile::TempDir;
 
     #[test]
@@ -1101,6 +1138,87 @@ mod tests {
         assert_eq!(settlement.liquidity_ct, 5);
         assert_eq!(settlement.miner_ct, 0);
         assert!(market.commit(&key).is_none());
+    }
+
+    #[test]
+    fn concurrent_reservations_do_not_oversubscribe_budget() {
+        let market = Arc::new(InMemoryMarketplace::new(DistributionPolicy::new(
+            40, 30, 20, 5, 5,
+        )));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-budget".to_string(),
+                advertiser_account: "adv".to_string(),
+                budget_ct: 150,
+                creatives: vec![Creative {
+                    id: "creative".to_string(),
+                    price_per_mib_ct: 100,
+                    badges: Vec::new(),
+                    domains: vec!["example".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["example".to_string()],
+                    badges: Vec::new(),
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("campaign registered");
+
+        let keys = [
+            ReservationKey {
+                manifest: [1u8; 32],
+                path_hash: [2u8; 32],
+                discriminator: [3u8; 32],
+            },
+            ReservationKey {
+                manifest: [4u8; 32],
+                path_hash: [5u8; 32],
+                discriminator: [6u8; 32],
+            },
+        ];
+
+        let barrier = Arc::new(Barrier::new(3));
+        let successes = Arc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = keys
+            .iter()
+            .copied()
+            .map(|key| {
+                let market = Arc::clone(&market);
+                let barrier = Arc::clone(&barrier);
+                let successes = Arc::clone(&successes);
+                thread::spawn(move || {
+                    let ctx = ImpressionContext {
+                        domain: "example".to_string(),
+                        provider: Some("provider".to_string()),
+                        badges: Vec::new(),
+                        bytes: 1_048_576,
+                    };
+                    barrier.wait();
+                    if market.reserve_impression(key, ctx).is_some() {
+                        successes.fetch_add(1, Ordering::SeqCst);
+                    }
+                    barrier.wait();
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("thread");
+        }
+
+        assert_eq!(successes.load(Ordering::SeqCst), 1);
+
+        let mut committed = 0;
+        for key in keys {
+            if market.commit(&key).is_some() {
+                committed += 1;
+            }
+        }
+        assert_eq!(committed, 1);
     }
 
     #[test]
@@ -1197,7 +1315,7 @@ mod tests {
             bytes: 1_048_576,
         };
 
-        let handles: Vec<_> = (0..4)
+        let handles: Vec<_> = (0u8..4u8)
             .map(|idx| {
                 let market = Arc::clone(&market);
                 let barrier = Arc::clone(&barrier);

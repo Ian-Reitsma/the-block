@@ -6,7 +6,7 @@ use std::future::Future;
 use std::panic::{self, AssertUnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::sync::{Arc, Condvar, LockResult, Mutex, Weak};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,6 +37,21 @@ pub(crate) struct InHouseRuntime {
 type PendingCounter = Arc<AtomicI64>;
 
 type TaskFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+type JoinSenderSlot<T> = Arc<Mutex<Option<oneshot::Sender<Result<T, InHouseJoinError>>>>>;
+
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
 
 pub(crate) fn runtime() -> Arc<InHouseRuntime> {
     Arc::new(InHouseRuntime {
@@ -71,29 +86,17 @@ impl InHouseRuntime {
             let outcome = catch_unwind(AssertUnwindSafe(cancelable)).await;
             match outcome {
                 Ok(CancelOutcome::Completed(value)) => {
-                    if let Some(sender) = sender_for_task
-                        .lock()
-                        .expect("inhouse sender poisoned")
-                        .take()
-                    {
+                    if let Some(sender) = sender_for_task.lock().recover().take() {
                         let _ = sender.send(Ok(value));
                     }
                 }
                 Ok(CancelOutcome::Cancelled) => {
-                    if let Some(sender) = sender_for_task
-                        .lock()
-                        .expect("inhouse sender poisoned")
-                        .take()
-                    {
+                    if let Some(sender) = sender_for_task.lock().recover().take() {
                         let _ = sender.send(Err(InHouseJoinError::cancelled()));
                     }
                 }
                 Err(_) => {
-                    if let Some(sender) = sender_for_task
-                        .lock()
-                        .expect("inhouse sender poisoned")
-                        .take()
-                    {
+                    if let Some(sender) = sender_for_task.lock().recover().take() {
                         let _ = sender.send(Err(InHouseJoinError::panic()));
                     }
                 }
@@ -122,11 +125,7 @@ impl InHouseRuntime {
             foundation_metrics::histogram!(SPAWN_LATENCY_METRIC, start.elapsed().as_secs_f64());
             let _guard = tracker;
             if cancel_for_job.load(AtomicOrdering::SeqCst) {
-                if let Some(sender) = sender_for_job
-                    .lock()
-                    .expect("inhouse sender poisoned")
-                    .take()
-                {
+                if let Some(sender) = sender_for_job.lock().recover().take() {
                     let _ = sender.send(Err(InHouseJoinError::cancelled()));
                 }
                 return;
@@ -134,20 +133,12 @@ impl InHouseRuntime {
 
             match panic::catch_unwind(AssertUnwindSafe(func)) {
                 Ok(value) => {
-                    if let Some(sender) = sender_for_job
-                        .lock()
-                        .expect("inhouse sender poisoned")
-                        .take()
-                    {
+                    if let Some(sender) = sender_for_job.lock().recover().take() {
                         let _ = sender.send(Ok(value));
                     }
                 }
                 Err(_) => {
-                    if let Some(sender) = sender_for_job
-                        .lock()
-                        .expect("inhouse sender poisoned")
-                        .take()
-                    {
+                    if let Some(sender) = sender_for_job.lock().recover().take() {
                         let _ = sender.send(Err(InHouseJoinError::panic()));
                     }
                 }
@@ -229,10 +220,7 @@ impl Inner {
     }
 
     fn spawn_workers(self: &Arc<Self>, worker_count: usize) {
-        let mut handles = self
-            .worker_handles
-            .lock()
-            .expect("worker handle mutex poisoned");
+        let mut handles = self.worker_handles.lock().recover();
         for index in 0..worker_count {
             let runtime = Arc::clone(self);
             let queue = self.queue.clone();
@@ -241,7 +229,7 @@ impl Inner {
                 .spawn(move || {
                     SchedulerWorker::new(runtime, queue).run();
                 })
-                .expect("failed to spawn in-house runtime worker");
+                .unwrap_or_else(|err| panic!("failed to spawn in-house runtime worker: {err}"));
             handles.push(handle);
         }
     }
@@ -257,10 +245,7 @@ impl Drop for Inner {
         self.queue.notify_all();
         self.reactor.shutdown();
         self.blocking.shutdown();
-        let mut handles = self
-            .worker_handles
-            .lock()
-            .expect("worker handle mutex poisoned");
+        let mut handles = self.worker_handles.lock().recover();
         for handle in handles.drain(..) {
             let _ = handle.join();
         }
@@ -322,7 +307,7 @@ impl Task {
 
     fn run(self: Arc<Self>) {
         self.scheduled.store(false, AtomicOrdering::SeqCst);
-        let mut slot = self.future.lock().expect("inhouse task mutex poisoned");
+        let mut slot = self.future.lock().recover();
         if let Some(mut future) = slot.take() {
             let waker = Waker::from(Arc::clone(&self));
             let mut cx = Context::from_waker(&waker);
@@ -374,13 +359,13 @@ impl<T> WorkQueue<T> {
     }
 
     fn push(&self, item: T) {
-        let mut guard = self.inner.queue.lock().expect("work queue mutex poisoned");
+        let mut guard = self.inner.queue.lock().recover();
         guard.push_back(item);
         self.inner.cv.notify_one();
     }
 
     fn pop(&self, shutdown: &AtomicBool) -> Option<T> {
-        let mut guard = self.inner.queue.lock().expect("work queue mutex poisoned");
+        let mut guard = self.inner.queue.lock().recover();
         loop {
             if let Some(item) = guard.pop_front() {
                 return Some(item);
@@ -390,7 +375,7 @@ impl<T> WorkQueue<T> {
                 return None;
             }
 
-            guard = self.inner.cv.wait(guard).expect("work queue wait poisoned");
+            guard = self.inner.cv.wait(guard).recover();
         }
     }
 
@@ -418,7 +403,7 @@ impl BlockingPool {
                     .spawn(move || {
                         BlockingWorker::new(queue_clone, shutdown_clone).run();
                     })
-                    .expect("failed to spawn in-house blocking worker")
+                    .unwrap_or_else(|err| panic!("failed to spawn in-house blocking worker: {err}"))
             })
             .collect();
         Self {
@@ -437,7 +422,7 @@ impl BlockingPool {
             return;
         }
         self.queue.notify_all();
-        let mut handles = self.workers.lock().expect("blocking worker mutex poisoned");
+        let mut handles = self.workers.lock().recover();
         for handle in handles.drain(..) {
             let _ = handle.join();
         }
@@ -521,10 +506,11 @@ pub(crate) struct ReactorInner {
 
 impl ReactorInner {
     fn new() -> Arc<Self> {
-        let poll = ReactorPoll::new().expect("failed to create reactor poller");
+        let poll = ReactorPoll::new()
+            .unwrap_or_else(|err| panic!("failed to create reactor poller: {err}"));
         let waker = poll
             .create_waker(REACTOR_WAKER_TOKEN)
-            .expect("failed to create reactor waker");
+            .unwrap_or_else(|err| panic!("failed to create reactor waker: {err}"));
         let inner = Arc::new(Self {
             poll,
             waker,
@@ -538,8 +524,8 @@ impl ReactorInner {
         let handle = thread::Builder::new()
             .name("inhouse-reactor".into())
             .spawn(move || reactor_clone.run())
-            .expect("failed to spawn in-house reactor");
-        *inner.thread.lock().expect("reactor thread mutex poisoned") = Some(handle);
+            .unwrap_or_else(|err| panic!("failed to spawn in-house reactor: {err}"));
+        *inner.thread.lock().recover() = Some(handle);
         inner
     }
 
@@ -560,7 +546,7 @@ impl ReactorInner {
     }
 
     fn compute_timeout(&self) -> Option<Duration> {
-        let mut state = self.timers.lock().expect("reactor timers mutex poisoned");
+        let mut state = self.timers.lock().recover();
         state.prune();
         state
             .peek_deadline()
@@ -570,7 +556,7 @@ impl ReactorInner {
     fn fire_due_timers(&self) {
         loop {
             let maybe_waker = {
-                let mut state = self.timers.lock().expect("reactor timers mutex poisoned");
+                let mut state = self.timers.lock().recover();
                 state.pop_due()
             };
             match maybe_waker {
@@ -586,7 +572,7 @@ impl ReactorInner {
         let mut wake_write = None;
 
         {
-            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            let mut state = self.io.lock().recover();
             if let Some(entry) = state.entries.get_mut(&token_index) {
                 if event.is_readable()
                     || event.is_read_closed()
@@ -621,7 +607,7 @@ impl ReactorInner {
         let _ = self.waker.wake();
         self.poll.register(fd, token, interest)?;
         {
-            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            let mut state = self.io.lock().recover();
             state.insert(token, fd);
         }
         Ok(token)
@@ -630,7 +616,7 @@ impl ReactorInner {
     fn deregister_fd(&self, fd: ReactorRaw, token: Token) -> io::Result<()> {
         let _ = self.waker.wake();
         self.poll.deregister(fd, token)?;
-        let mut state = self.io.lock().expect("reactor io mutex poisoned");
+        let mut state = self.io.lock().recover();
         state.remove(token);
         Ok(())
     }
@@ -642,7 +628,7 @@ impl ReactorInner {
         cx: &Context<'_>,
     ) -> Poll<io::Result<()>> {
         {
-            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            let mut state = self.io.lock().recover();
             let entry = match state.entries.get_mut(&token.0) {
                 Some(entry) => entry,
                 None => {
@@ -690,7 +676,7 @@ impl ReactorInner {
     ) -> TimerRegistration {
         let id = self.next_token.fetch_add(1, AtomicOrdering::SeqCst);
         {
-            let mut state = self.timers.lock().expect("reactor timers mutex poisoned");
+            let mut state = self.timers.lock().recover();
             state.insert(id, deadline, waker, interval);
         }
         let _ = self.waker.wake();
@@ -701,12 +687,12 @@ impl ReactorInner {
     }
 
     fn update_waker(&self, id: u64, waker: Waker) {
-        let mut state = self.timers.lock().expect("reactor timers mutex poisoned");
+        let mut state = self.timers.lock().recover();
         state.update_waker(id, waker);
     }
 
     fn cancel(&self, id: u64) {
-        let mut state = self.timers.lock().expect("reactor timers mutex poisoned");
+        let mut state = self.timers.lock().recover();
         state.cancel(id);
     }
 
@@ -715,12 +701,7 @@ impl ReactorInner {
             return;
         }
         let _ = self.waker.wake();
-        if let Some(handle) = self
-            .thread
-            .lock()
-            .expect("reactor thread mutex poisoned")
-            .take()
-        {
+        if let Some(handle) = self.thread.lock().recover().take() {
             let _ = handle.join();
         }
     }
@@ -998,14 +979,14 @@ struct IntervalTick<'a> {
     interval: &'a mut InHouseInterval,
 }
 
-impl<'a> Future for IntervalTick<'a> {
+impl Future for IntervalTick<'_> {
     type Output = Instant;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         if Instant::now() >= this.interval.next {
             let fired = this.interval.next;
-            this.interval.next = this.interval.next + this.interval.period;
+            this.interval.next += this.interval.period;
             return Poll::Ready(fired);
         }
         this.interval.ensure_registered(cx);
@@ -1075,7 +1056,7 @@ impl Future for YieldNow {
 #[derive(Debug)]
 pub(crate) struct InHouseJoinHandle<T> {
     receiver: Mutex<Option<oneshot::Receiver<Result<T, InHouseJoinError>>>>,
-    sender: Arc<Mutex<Option<oneshot::Sender<Result<T, InHouseJoinError>>>>>,
+    sender: JoinSenderSlot<T>,
     cancelled: Arc<AtomicBool>,
     task: Option<Weak<Task>>,
 }
@@ -1083,7 +1064,7 @@ pub(crate) struct InHouseJoinHandle<T> {
 impl<T> InHouseJoinHandle<T> {
     fn new(
         receiver: oneshot::Receiver<Result<T, InHouseJoinError>>,
-        sender: Arc<Mutex<Option<oneshot::Sender<Result<T, InHouseJoinError>>>>>,
+        sender: JoinSenderSlot<T>,
         cancelled: Arc<AtomicBool>,
         task: Option<Arc<Task>>,
     ) -> Self {
@@ -1100,20 +1081,17 @@ impl<T> InHouseJoinHandle<T> {
             if let Some(task) = self.task.as_ref().and_then(|task| task.upgrade()) {
                 task.schedule();
             }
-            if let Some(sender) = self.sender.lock().expect("inhouse sender poisoned").take() {
+            if let Some(sender) = self.sender.lock().recover().take() {
                 let _ = sender.send(Err(InHouseJoinError::cancelled()));
             }
         }
     }
 
     pub(crate) fn poll(&self, cx: &mut Context<'_>) -> Poll<Result<T, InHouseJoinError>> {
-        let mut receiver = self
-            .receiver
-            .lock()
-            .expect("inhouse join handle mutex poisoned");
+        let mut receiver = self.receiver.lock().recover();
         let receiver = receiver
             .as_mut()
-            .expect("inhouse join handle missing receiver");
+            .unwrap_or_else(|| panic!("inhouse join handle missing receiver"));
         match Pin::new(receiver).poll(cx) {
             Poll::Ready(Ok(result)) => Poll::Ready(result),
             Poll::Ready(Err(_)) => Poll::Ready(Err(InHouseJoinError::cancelled())),

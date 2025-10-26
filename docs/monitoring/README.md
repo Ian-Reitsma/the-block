@@ -13,6 +13,10 @@ ready to import once the foundation telemetry stack is running.
   operators can compare pricing policy with realised demand. Governance changes
   to `mempool.fee_floor_window` and `mempool.fee_floor_percentile` increment
   `fee_floor_window_changed_total` and surface in the same dashboard.
+  A new "Read Ack Outcomes (5m delta)" panel breaks down
+  `read_ack_processed_total{result="ok|invalid_signature|invalid_privacy"}` so
+  the fresh `invalid_privacy` label is visible without digging through raw
+  PromQL.
 - The explorer block-payout row pulls straight from
   `explorer_block_payout_read_total{role}` and
   `explorer_block_payout_ad_total{role}`. The metrics aggregator now caches the

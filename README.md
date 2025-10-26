@@ -431,6 +431,9 @@ Subsidy multipliers are governed on-chain via `inflation.params` proposals.
 - `(cd monitoring && npm ci && make lint)`
 - `scripts/fuzz_coverage.sh /tmp/fcov` *(run after generating `.profraw` files via `cargo fuzz` with coverage flags)*
 - `cargo test -p the_block --test settlement_audit --release` *(runs receipt verification against the explorer indexer)*
+- `cargo test --manifest-path node/Cargo.toml --features integration-tests --test read_ack_privacy`
+  *(shared `concurrency::Lazy` fixtures keep the privacy proofs/signatures first
+  party without repeated RNG setup)*
 
 CI path-gates monitoring lint on `monitoring/**` changes.
 

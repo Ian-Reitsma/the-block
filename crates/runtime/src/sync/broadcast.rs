@@ -3,7 +3,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LockResult, Mutex};
 use std::task::{Context, Poll};
 
 use foundation_async::task::AtomicWaker;
@@ -32,6 +32,19 @@ impl Waiter {
     fn wake(&self) {
         if !self.ready.swap(true, Ordering::SeqCst) {
             self.waker.wake();
+        }
+    }
+}
+
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }
@@ -79,7 +92,7 @@ impl<T> Inner<T> {
     }
 
     fn cancel_waiter(&self, waiter: &Arc<Waiter>) {
-        let mut state = self.state.lock().expect("broadcast poisoned");
+        let mut state = self.state.lock().recover();
         if let Some(pos) = state.waiters.iter().position(|w| Arc::ptr_eq(w, waiter)) {
             state.waiters.remove(pos);
         }
@@ -98,7 +111,9 @@ impl<T> SendError<T> {
 
     /// Extracts the value that failed to send.
     pub fn into_inner(mut self) -> T {
-        self.value.take().expect("value already taken")
+        self.value
+            .take()
+            .unwrap_or_else(|| panic!("send error value already taken"))
     }
 }
 
@@ -182,7 +197,7 @@ impl<T: Clone> Sender<T> {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State<T>> {
-        self.inner.state.lock().expect("broadcast poisoned")
+        self.inner.state.lock().recover()
     }
 
     /// Subscribes to the channel, receiving only new messages.
@@ -241,7 +256,7 @@ impl<T: Clone> Receiver<T> {
     }
 
     fn poll_recv_internal(&mut self, cx: &mut Context<'_>) -> Poll<Result<T, RecvError>> {
-        let mut state = self.inner.state.lock().expect("broadcast poisoned");
+        let mut state = self.inner.state.lock().recover();
         if let Some(front) = state.buffer.front() {
             if front.sequence > self.next_sequence {
                 let missed = front.sequence - self.next_sequence;
@@ -280,7 +295,7 @@ impl<T: Clone> Receiver<T> {
 impl<T: Clone> Drop for Receiver<T> {
     fn drop(&mut self) {
         if self.inner.subscriber_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let mut state = self.inner.state.lock().expect("broadcast poisoned");
+            let mut state = self.inner.state.lock().recover();
             let waiters = state.waiters.drain(..).collect::<Vec<_>>();
             drop(state);
             for waiter in waiters {
@@ -288,7 +303,7 @@ impl<T: Clone> Drop for Receiver<T> {
             }
         }
         if let Some(waiter) = self.waiter.take() {
-            let mut state = self.inner.state.lock().expect("broadcast poisoned");
+            let mut state = self.inner.state.lock().recover();
             if let Some(pos) = state.waiters.iter().position(|w| Arc::ptr_eq(w, &waiter)) {
                 state.waiters.remove(pos);
             }
@@ -301,7 +316,7 @@ pub struct Recv<'a, T: Clone> {
     receiver: &'a mut Receiver<T>,
 }
 
-impl<'a, T: Clone> Future for Recv<'a, T> {
+impl<T: Clone> Future for Recv<'_, T> {
     type Output = Result<T, RecvError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -310,7 +325,7 @@ impl<'a, T: Clone> Future for Recv<'a, T> {
     }
 }
 
-impl<'a, T: Clone> Drop for Recv<'a, T> {
+impl<T: Clone> Drop for Recv<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = self.receiver.waiter.take() {
             self.receiver.inner.cancel_waiter(&waiter);

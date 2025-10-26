@@ -6,7 +6,7 @@ use std::os::fd::AsRawFd;
 #[cfg(target_os = "windows")]
 use std::os::windows::io::AsRawSocket;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LockResult, Mutex};
 use std::task::{Context, Poll};
 
 use super::{InHouseRuntime, IoRegistration, ReactorInner};
@@ -50,10 +50,7 @@ impl TcpListener {
     }
 
     pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
-        let guard = self
-            .inner
-            .lock()
-            .expect("inhouse tcp listener mutex poisoned");
+        let guard = self.inner.lock().recover();
         guard.local_addr()
     }
 }
@@ -183,16 +180,12 @@ pub(crate) struct AcceptFuture<'a> {
     listener: &'a TcpListener,
 }
 
-impl<'a> Future for AcceptFuture<'a> {
+impl Future for AcceptFuture<'_> {
     type Output = io::Result<(TcpStream, SocketAddr)>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
-            let guard = self
-                .listener
-                .inner
-                .lock()
-                .expect("inhouse tcp listener mutex poisoned");
+            let guard = self.listener.inner.lock().recover();
             match guard.accept() {
                 Ok((stream, addr)) => {
                     drop(guard);
@@ -229,7 +222,12 @@ impl Future for ConnectFuture {
         let this = self.get_mut();
         loop {
             if this.ready {
-                let stream = this.stream.as_mut().expect("connect future missing stream");
+                let Some(stream) = this.stream.as_mut() else {
+                    return Poll::Ready(Err(io::Error::new(
+                        ErrorKind::Other,
+                        "connect future missing stream",
+                    )));
+                };
                 match stream.take_error()? {
                     Some(err) => {
                         if err.kind() == ErrorKind::WouldBlock || is_connect_in_progress(&err) {
@@ -239,8 +237,18 @@ impl Future for ConnectFuture {
                         return Poll::Ready(Err(err));
                     }
                     None => {
-                        let stream = this.stream.take().expect("stream taken");
-                        let registration = this.registration.take().expect("registration missing");
+                        let Some(stream) = this.stream.take() else {
+                            return Poll::Ready(Err(io::Error::new(
+                                ErrorKind::Other,
+                                "connect future missing stream",
+                            )));
+                        };
+                        let Some(registration) = this.registration.take() else {
+                            return Poll::Ready(Err(io::Error::new(
+                                ErrorKind::Other,
+                                "connect future missing registration",
+                            )));
+                        };
                         let tcp_stream = TcpStream {
                             inner: stream,
                             registration,
@@ -250,10 +258,12 @@ impl Future for ConnectFuture {
                 }
             }
 
-            let registration = this
-                .registration
-                .as_ref()
-                .expect("connect future registration missing");
+            let Some(registration) = this.registration.as_ref() else {
+                return Poll::Ready(Err(io::Error::new(
+                    ErrorKind::Other,
+                    "connect future missing registration",
+                )));
+            };
             match registration.poll_write_ready(cx) {
                 Poll::Ready(Ok(())) => {
                     this.ready = true;
@@ -292,7 +302,7 @@ pub(crate) struct TcpReadFuture<'a> {
     buf: &'a mut [u8],
 }
 
-impl<'a> Future for TcpReadFuture<'a> {
+impl Future for TcpReadFuture<'_> {
     type Output = io::Result<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -318,7 +328,7 @@ pub(crate) struct TcpWriteFuture<'a> {
     buf: &'a [u8],
 }
 
-impl<'a> Future for TcpWriteFuture<'a> {
+impl Future for TcpWriteFuture<'_> {
     type Output = io::Result<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -344,7 +354,7 @@ pub(crate) struct UdpRecvFuture<'a> {
     buf: &'a mut [u8],
 }
 
-impl<'a> Future for UdpRecvFuture<'a> {
+impl Future for UdpRecvFuture<'_> {
     type Output = io::Result<(usize, SocketAddr)>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -371,7 +381,7 @@ pub(crate) struct UdpSendFuture<'a> {
     addr: SocketAddr,
 }
 
-impl<'a> Future for UdpSendFuture<'a> {
+impl Future for UdpSendFuture<'_> {
     type Output = io::Result<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -388,6 +398,18 @@ impl<'a> Future for UdpSendFuture<'a> {
                 }
                 Err(err) => return Poll::Ready(Err(err)),
             }
+        }
+    }
+}
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }

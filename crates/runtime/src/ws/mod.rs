@@ -25,8 +25,8 @@ pub type IoFuture<'a, T> = Pin<Box<dyn Future<Output = io::Result<T>> + Send + '
 pub trait WebSocketIo: Send + 'static {
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize>;
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize>;
-    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()>;
-    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()>;
+    fn flush(&mut self) -> IoFuture<'_, ()>;
+    fn shutdown(&mut self) -> IoFuture<'_, ()>;
 }
 
 /// Convenience helpers mirroring `TcpStream`'s extension methods for any
@@ -77,11 +77,11 @@ impl WebSocketIo for TcpStream {
         Box::pin(async move { TcpStream::write(self, buf).await })
     }
 
-    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()> {
+    fn flush(&mut self) -> IoFuture<'_, ()> {
         Box::pin(async move { TcpStream::flush(self).await })
     }
 
-    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()> {
+    fn shutdown(&mut self) -> IoFuture<'_, ()> {
         Box::pin(async move { TcpStream::shutdown(self).await })
     }
 }
@@ -335,7 +335,7 @@ impl WebSocketStream {
             header.extend_from_slice(&(len_byte as u16).to_be_bytes());
         } else {
             header.push(if mask_payload { 0xFF } else { 127 });
-            header.extend_from_slice(&(len_byte as u64).to_be_bytes());
+            header.extend_from_slice(&len_byte.to_be_bytes());
         }
 
         let mut mask = [0u8; 4];
@@ -390,7 +390,11 @@ impl WebSocketStream {
                 };
                 fragment.data.extend_from_slice(&frame.payload);
                 if frame.fin {
-                    let fragment = self.fragment.take().expect("fragment exists");
+                    debug_assert!(self.fragment.is_some(), "fragment must exist on finalize");
+                    let fragment = self
+                        .fragment
+                        .take()
+                        .unwrap_or_else(|| unreachable!("fragment must exist on finalize"));
                     return Self::finalize_fragment(fragment);
                 }
                 Ok(None)

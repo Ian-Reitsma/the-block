@@ -1,7 +1,7 @@
 use concurrency::DashMap;
 use std::io::Write as IoWrite;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LockResult, RwLock};
 
 /// Errors returned by the telemetry registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,8 @@ pub enum TelemetryError {
     DuplicateMetric(String),
     /// Metric definition was invalid.
     InvalidMetric(String),
+    /// Failed while encoding metrics for export.
+    EncodeFailure(String),
 }
 
 impl std::fmt::Display for TelemetryError {
@@ -19,6 +21,7 @@ impl std::fmt::Display for TelemetryError {
                 write!(f, "duplicate metric name: {name}")
             }
             TelemetryError::InvalidMetric(msg) => write!(f, "invalid metric definition: {msg}"),
+            TelemetryError::EncodeFailure(msg) => write!(f, "failed to encode metrics: {msg}"),
         }
     }
 }
@@ -73,6 +76,19 @@ struct RegistryInner {
     collectors: RwLock<Vec<Arc<dyn Collector>>>,
 }
 
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
 impl Default for Registry {
     fn default() -> Self {
         Self::new()
@@ -115,11 +131,7 @@ impl Registry {
         &self,
         collector: Box<dyn Collector>,
     ) -> std::result::Result<(), TelemetryError> {
-        let mut guard = self
-            .inner
-            .collectors
-            .write()
-            .expect("telemetry registry poisoned");
+        let mut guard = self.inner.collectors.write().recover();
         if guard
             .iter()
             .any(|existing| existing.name() == collector.name())
@@ -133,28 +145,34 @@ impl Registry {
     }
 
     pub fn gather(&self) -> Vec<MetricFamily> {
-        let guard = self
-            .inner
-            .collectors
-            .read()
-            .expect("telemetry registry poisoned");
+        let guard = self.inner.collectors.read().recover();
         guard.iter().map(|c| c.collect()).collect()
     }
 
     /// Render all registered metrics into a UTF-8 text payload.
-    pub fn render_bytes(&self) -> Vec<u8> {
+    pub fn render_bytes(&self) -> std::result::Result<Vec<u8>, TelemetryError> {
         let families = self.gather();
         let encoder = TextEncoder::new();
         let mut buffer = Vec::new();
         encoder
             .encode(&families, &mut buffer)
-            .expect("encoding telemetry snapshot");
-        buffer
+            .map_err(|err| TelemetryError::EncodeFailure(err.to_string()))?;
+        Ok(buffer)
     }
 
-    /// Render all registered metrics to a UTF-8 string payload.
+    /// Render all registered metrics to a UTF-8 string payload. Errors are rendered as
+    /// descriptive text so callers printing the snapshot still surface failure context.
     pub fn render(&self) -> String {
-        String::from_utf8(self.render_bytes()).expect("telemetry output must be valid utf8")
+        match self.render_bytes() {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(err) => {
+                    let detail = err.utf8_error().to_string();
+                    format!("telemetry payload is not valid utf-8: {detail}")
+                }
+            },
+            Err(err) => format!("telemetry export failed: {err}"),
+        }
     }
 
     /// Capture an immutable snapshot of the registered metrics.
@@ -244,6 +262,12 @@ pub struct TextEncoder;
 impl TextEncoder {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for TextEncoder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -499,7 +523,7 @@ impl CounterVec {
             .label_names
             .iter()
             .cloned()
-            .zip(key_values.into_iter())
+            .zip(key_values.iter().cloned())
             .collect::<Vec<_>>();
         let counter = Counter {
             inner: Arc::new(CounterInner {
@@ -861,7 +885,7 @@ impl IntGaugeVec {
             .label_names
             .iter()
             .cloned()
-            .zip(key_vec.into_iter())
+            .zip(key_vec.iter().cloned())
             .collect::<Vec<_>>();
         let gauge = IntGauge {
             inner: Arc::new(IntGaugeInner {
@@ -1016,7 +1040,7 @@ impl GaugeVec {
             .label_names
             .iter()
             .cloned()
-            .zip(key_vec.into_iter())
+            .zip(key_vec.iter().cloned())
             .collect::<Vec<_>>();
         let gauge = Gauge {
             inner: Arc::new(GaugeInner {
@@ -1098,7 +1122,10 @@ impl HistogramConfig {
         if buckets.is_empty() {
             return Err(MetricError::InvalidBuckets("at least one bucket required"));
         }
-        buckets.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if buckets.iter().any(|value| value.is_nan()) {
+            return Err(MetricError::InvalidBuckets("bucket contains NaN"));
+        }
+        buckets.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         buckets.dedup();
         if buckets.is_empty() {
             return Err(MetricError::InvalidBuckets(
@@ -1337,7 +1364,7 @@ impl HistogramVec {
             .label_names
             .iter()
             .cloned()
-            .zip(key_vec.into_iter())
+            .zip(key_vec.iter().cloned())
             .collect::<Vec<_>>();
         let hist = self.inner.base.with_labels(labels);
         self.inner.values.insert(key, hist.inner.clone());
@@ -1438,6 +1465,8 @@ pub fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]

@@ -87,7 +87,7 @@ RPC client.
 ## Recent progress (2025-10-29)
 
 - Explorer `/blocks/:hash/payouts` reuses the first-party SQLite codec to emit per-role read/ad totals without serde_json fallbacks, and the CLI’s `explorer block-payouts` command forwards JSON-RPC envelopes exclusively through the in-house transport abstraction. Integration tests rely on the mock transport and stub SQLite backend, keeping FIRST_PARTY_ONLY coverage hermetic while exercising the new payloads.
-- Governance and monitoring documentation now codify the response to rising `read_ack_processed_total{result="invalid_signature"}` counts without introducing external alert tooling; operators remain on the native dashboards/CLI.
+- Governance and monitoring documentation now codify the response to rising `read_ack_processed_total{result="invalid_signature"}` or `invalid_privacy` counts without introducing external alert tooling; operators remain on the native dashboards/CLI, and the compute dashboard’s "Read Ack Outcomes" panel charts the first-party metric directly.
 
 ## Recent progress (2025-10-28)
 

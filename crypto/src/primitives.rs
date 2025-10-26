@@ -181,7 +181,7 @@ pub mod hash {
         impl fmt::Debug for Hash {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_tuple("Hash")
-                    .field(&self.to_hex().to_string())
+                    .field(&self.to_hex().to_hex_string())
                     .finish()
             }
         }
@@ -207,7 +207,7 @@ pub mod hash {
         pub struct HexOutput([u8; OUT_LEN]);
 
         impl HexOutput {
-            pub fn to_string(&self) -> String {
+            pub fn to_hex_string(&self) -> String {
                 encode_hex(&self.0)
             }
         }
@@ -642,7 +642,7 @@ pub mod hash {
                 ];
                 for (len, expected_hex) in cases {
                     let digest = hash(&patterned_input(len));
-                    assert_eq!(digest.to_hex().to_string(), expected_hex);
+                    assert_eq!(digest.to_hex().to_hex_string(), expected_hex);
                 }
             }
 
@@ -652,7 +652,7 @@ pub mod hash {
                 let key: [u8; KEY_LEN] = *b"whats the Elvish word for friend";
                 let keyed = keyed_hash(&key, &input);
                 assert_eq!(
-                    keyed.to_hex().to_string(),
+                    keyed.to_hex().to_hex_string(),
                     "ba8ced36f327700d213f120b1a207a3b8c04330528586f414d09f2f7d9ccb7e6"
                 );
 
