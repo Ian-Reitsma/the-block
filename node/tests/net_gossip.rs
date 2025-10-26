@@ -323,30 +323,9 @@ fn invalid_gossip_block_rejected() {
     let block = Block {
         index: 99,
         previous_hash: "bad".into(),
-        timestamp_millis: 0,
-        transactions: Vec::new(),
-        difficulty: 0,
-        retune_hint: 0,
-        nonce: 0,
         hash: "bad".into(),
-        coinbase_consumer: TokenAmount::new(0),
-        coinbase_industrial: TokenAmount::new(0),
-        storage_sub_ct: TokenAmount::new(0),
-        read_sub_ct: TokenAmount::new(0),
-        compute_sub_ct: TokenAmount::new(0),
-        proof_rebate_ct: TokenAmount::new(0),
-        storage_sub_it: TokenAmount::new(0),
-        read_sub_it: TokenAmount::new(0),
-        compute_sub_it: TokenAmount::new(0),
-        read_root: [0u8; 32],
-        fee_checksum: String::new(),
-        state_root: String::new(),
         base_fee: 1,
-        l2_roots: Vec::new(),
-        l2_sizes: Vec::new(),
-        vdf_commit: [0u8; 32],
-        vdf_output: [0u8; 32],
-        vdf_proof: Vec::new(),
+        ..Block::default()
     };
     send(addr, &kp, Payload::Block(0, block));
 
@@ -372,30 +351,8 @@ fn forged_identity_rejected() {
     let block = Block {
         index: 0,
         previous_hash: "0".repeat(64),
-        timestamp_millis: 0,
-        transactions: Vec::new(),
-        difficulty: 0,
-        retune_hint: 0,
-        nonce: 0,
-        hash: String::new(),
-        coinbase_consumer: TokenAmount::new(0),
-        coinbase_industrial: TokenAmount::new(0),
-        storage_sub_ct: TokenAmount::new(0),
-        read_sub_ct: TokenAmount::new(0),
-        compute_sub_ct: TokenAmount::new(0),
-        proof_rebate_ct: TokenAmount::new(0),
-        storage_sub_it: TokenAmount::new(0),
-        read_sub_it: TokenAmount::new(0),
-        compute_sub_it: TokenAmount::new(0),
-        read_root: [0u8; 32],
-        fee_checksum: String::new(),
-        state_root: String::new(),
         base_fee: 1,
-        l2_roots: Vec::new(),
-        l2_sizes: Vec::new(),
-        vdf_commit: [0u8; 32],
-        vdf_output: [0u8; 32],
-        vdf_proof: Vec::new(),
+        ..Block::default()
     };
     send(addr, &kp, Payload::Block(0, block));
 

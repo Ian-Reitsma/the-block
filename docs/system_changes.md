@@ -40,6 +40,15 @@
 > guard readiness gating, telemetry gauges, RPC round-trips, and multi-stage
 > domain auctions so governance can flip the ad rail and monetize scarce names
 > without third-party dependencies.
+> **Review (2025-10-25, late evening):** Read acknowledgements now attach
+> zero-knowledge proofs. The gateway stamps each ack with a readiness commitment
+> and the node derives per-client identity commitments from signature salts.
+> `Blockchain::submit_read_ack` enforces proofs by default, operators can switch
+> to observe/disabled via `--ack-privacy` or `node.set_ack_privacy`, and telemetry
+> exposes `read_ack_processed_total{result="invalid_privacy"}` when proofs fail
+> under observation. Advertising reservations now incorporate a discriminator so
+> identical fetches no longer overwrite one another, and new regression tests
+> cover both the proof flow and collision-free settlements.
 > **Review (2025-11-03, early morning):** Read-subsidy governance knobs now
 > propagate directly into live ad payouts. The node runtime shares a
 > `MarketplaceHandle` with the governance activation path so applying

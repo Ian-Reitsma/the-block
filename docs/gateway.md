@@ -73,9 +73,10 @@ Security considerations are catalogued under
   and campaign metadata included), and writes the resulting binary batch and
   Merkle root to disk. Roots anchor on‑chain so auditors can reconstruct traffic.
 - `spawn_read_ack_worker()` inside `node/src/bin/node.rs` receives each
-  acknowledgement from the gateway, records telemetry via
-  `read_ack_processed_total{result}`, feeds the ledger’s per-role byte maps, and
-  commits advertising reservations as pending settlements.
+  acknowledgement from the gateway, attaches the current readiness snapshot,
+  records telemetry via `read_ack_processed_total{result="ok|invalid_signature|invalid_privacy"}`,
+  feeds the ledger’s per-role byte maps, and commits advertising reservations as
+  pending settlements.
 - The `analytics` RPC exposes per‑domain totals computed from finalized batches
   allowing site operators to verify pageviews or ad impressions.
 
@@ -88,7 +89,10 @@ Security considerations are catalogued under
   totals in the block header.
 - Runtime telemetry counters `subsidy_bytes_total{type="read"}` and
   `read_ack_processed_total{result}` increment with every anchored batch and
-  validation decision so operators can reconcile payouts and rejected receipts.
+  validation decision. Watch for growth in
+  `read_ack_processed_total{result="invalid_signature"}` or
+  `{result="invalid_privacy"}` to catch replayed signatures or mismatched proofs
+  before they impact campaign settlements.
 
 ## 4. Advertising Marketplace Integration
 

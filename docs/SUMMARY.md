@@ -1,4 +1,10 @@
 # Summary
+> **Review (2025-10-25, late evening):** Read acknowledgements now ship readiness
+> and identity proofs via the first-party `zkp` crate. Operators can toggle
+> enforcement with `--ack-privacy` or the `node.{get,set}_ack_privacy` RPCs, and
+> telemetry surfaces `read_ack_processed_total{result="invalid_privacy"}` when
+> observe mode spots mismatched proofs. Advertising reservations include a
+> per-ack discriminator so identical fetches no longer overwrite each other.
 > **Review (2025-11-01, early morning):** Bridge audit tooling stays hermetic—new
 > CLI regressions run the dispute-audit builder through the first-party parser,
 > confirm optional filters serialise to JSON `null`, and monitoring parses every

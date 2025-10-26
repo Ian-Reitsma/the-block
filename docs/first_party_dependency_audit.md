@@ -1,5 +1,14 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-25 update (read-ack privacy proofs & collision-free reservations):**
+> Read acknowledgements now rely on the in-house `zkp` crate for readiness and
+> identity commitments. Gateway and node wiring derives signature-salted identity
+> hashes, attaches readiness proofs, and exposes `--ack-privacy` plus
+> `node.{get,set}_ack_privacy` without introducing third-party crypto stacks. The
+> ad marketplace hashes a per-ack discriminator so identical fetches no longer
+> overwrite reservations, and integration tests cover both the proof flow and
+> collision-free settlements end to end.
+>
 > **2025-11-06 update (stake escrow RPCs & atomic settlement):** DNS stake
 > management now rides entirely on handwritten JSON/binary helpers. The new
 > `dns.register_stake`, `dns.withdraw_stake`, `dns.stake_status`, and

@@ -3,11 +3,13 @@
 use crate::simple_db::{names, SimpleDb};
 use crate::util::binary_struct::{ensure_exhausted, DecodeError};
 use concurrency::Lazy;
+use crypto_suite::hashing::blake3;
 use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zkp::{ReadinessPrivacyProof, ReadinessStatement, ReadinessWitness};
 
 const MAX_WINDOW_SECS: u64 = 24 * 60 * 60;
 const DEFAULT_WINDOW_SECS: u64 = 6 * 60 * 60;
@@ -15,6 +17,15 @@ const DEFAULT_MIN_VIEWERS: u64 = 250;
 const DEFAULT_MIN_HOSTS: u64 = 25;
 const DEFAULT_MIN_PROVIDERS: u64 = 10;
 const KEY_EVENTS: &str = "events";
+
+fn new_privacy_seed() -> [u8; 32] {
+    let now = current_timestamp();
+    let pid = std::process::id();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&now.to_le_bytes());
+    hasher.update(&pid.to_le_bytes());
+    hasher.finalize().into()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -86,6 +97,8 @@ pub struct AdReadinessSnapshot {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub blockers: Vec<String>,
     pub last_updated: u64,
+    #[serde(default)]
+    pub zk_proof: Option<ReadinessPrivacyProof>,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -101,6 +114,23 @@ impl Default for AdReadinessSnapshot {
             ready: false,
             blockers: Vec::new(),
             last_updated: 0,
+            zk_proof: None,
+        }
+    }
+}
+
+impl AdReadinessSnapshot {
+    pub fn to_statement(&self) -> ReadinessStatement {
+        ReadinessStatement {
+            window_secs: self.window_secs,
+            min_unique_viewers: self.min_unique_viewers,
+            min_host_count: self.min_host_count,
+            min_provider_count: self.min_provider_count,
+            unique_viewers: self.unique_viewers,
+            host_count: self.host_count,
+            provider_count: self.provider_count,
+            ready: self.ready,
+            last_updated: self.last_updated,
         }
     }
 }
@@ -248,13 +278,26 @@ impl AdReadinessInner {
     }
 }
 
-#[derive(Default)]
 struct AdReadinessState {
     events: VecDeque<ReadinessEvent>,
     viewer_counts: HashMap<[u8; 32], u64>,
     host_counts: HashMap<String, u64>,
     provider_counts: HashMap<String, u64>,
     last_updated: u64,
+    privacy_seed: [u8; 32],
+}
+
+impl Default for AdReadinessState {
+    fn default() -> Self {
+        Self {
+            events: VecDeque::new(),
+            viewer_counts: HashMap::new(),
+            host_counts: HashMap::new(),
+            provider_counts: HashMap::new(),
+            last_updated: 0,
+            privacy_seed: new_privacy_seed(),
+        }
+    }
 }
 
 impl AdReadinessState {
@@ -276,6 +319,10 @@ impl AdReadinessState {
         }
         self.last_updated = event.ts;
         self.events.push_back(event);
+    }
+
+    fn readiness_witness(&self) -> ReadinessWitness {
+        ReadinessWitness::new(self.privacy_seed)
     }
 
     fn push(
@@ -353,7 +400,7 @@ impl AdReadinessState {
                 blockers.push("insufficient_provider_diversity".to_string());
             }
             let ready = blockers.is_empty();
-            return AdReadinessSnapshot {
+            let mut snapshot = AdReadinessSnapshot {
                 window_secs: config.window_secs,
                 min_unique_viewers: config.min_unique_viewers,
                 min_host_count: config.min_host_count,
@@ -364,7 +411,12 @@ impl AdReadinessState {
                 ready,
                 blockers,
                 last_updated: 0,
+                zk_proof: None,
             };
+            let statement = snapshot.to_statement();
+            let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
+            snapshot.zk_proof = Some(proof);
+            return snapshot;
         }
         let now = current_timestamp();
         self.prune(now, config.window_secs);
@@ -382,7 +434,7 @@ impl AdReadinessState {
             blockers.push("insufficient_provider_diversity".to_string());
         }
         let ready = blockers.is_empty();
-        AdReadinessSnapshot {
+        let mut snapshot = AdReadinessSnapshot {
             window_secs: config.window_secs,
             min_unique_viewers: config.min_unique_viewers,
             min_host_count: config.min_host_count,
@@ -393,7 +445,12 @@ impl AdReadinessState {
             ready,
             blockers,
             last_updated: self.last_updated,
-        }
+            zk_proof: None,
+        };
+        let statement = snapshot.to_statement();
+        let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
+        snapshot.zk_proof = Some(proof);
+        snapshot
     }
 }
 

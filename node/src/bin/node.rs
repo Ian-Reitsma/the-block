@@ -509,6 +509,36 @@ impl std::str::FromStr for OverlayBackendArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AckPrivacyArg {
+    Enforce,
+    Observe,
+    Disabled,
+}
+
+impl From<AckPrivacyArg> for ReadAckPrivacyMode {
+    fn from(arg: AckPrivacyArg) -> Self {
+        match arg {
+            AckPrivacyArg::Enforce => ReadAckPrivacyMode::Enforce,
+            AckPrivacyArg::Observe => ReadAckPrivacyMode::Observe,
+            AckPrivacyArg::Disabled => ReadAckPrivacyMode::Disabled,
+        }
+    }
+}
+
+impl std::str::FromStr for AckPrivacyArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "enforce" => Ok(Self::Enforce),
+            "observe" | "warn" => Ok(Self::Observe),
+            "disabled" | "disable" | "off" => Ok(Self::Disabled),
+            other => Err(format!("invalid ack privacy mode '{other}'")),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Commands {
     /// Run a full node with JSON-RPC controls
@@ -521,6 +551,9 @@ enum Commands {
 
         /// Interval in blocks between full snapshots
         snapshot_interval: u64,
+
+        /// Privacy verification mode for read acknowledgements
+        ack_privacy: AckPrivacyArg,
 
         /// Expose Prometheus metrics on this address (requires `--features telemetry`)
         metrics_addr: Option<String>,
@@ -715,6 +748,14 @@ fn build_run_command() -> CliCommand {
             "Interval in blocks between full snapshots",
         )
         .default("600"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "ack_privacy",
+            "ack-privacy",
+            "Read acknowledgement privacy mode (enforce|observe|disabled)",
+        )
+        .default("enforce"),
     ))
     .arg(ArgSpec::Option(OptionSpec::new(
         "metrics_addr",
@@ -952,12 +993,18 @@ fn parse_run(matches: &Matches) -> Result<Commands, String> {
         .get_string("overlay_backend")
         .map(|value| value.parse::<OverlayBackendArg>())
         .transpose()?;
+    let ack_privacy = matches
+        .get_string("ack_privacy")
+        .map(|value| value.parse::<AckPrivacyArg>())
+        .transpose()?
+        .unwrap_or(AckPrivacyArg::Enforce);
     let enable_vm_debug = matches.get_flag("enable_vm_debug");
 
     Ok(Commands::Run {
         rpc_addr,
         mempool_purge_interval,
         snapshot_interval,
+        ack_privacy,
         metrics_addr,
         db_path,
         data_dir,
@@ -1099,6 +1146,7 @@ fn spawn_read_ack_worker(
             let reservation_key = ReservationKey {
                 manifest: ack.manifest,
                 path_hash: ack.path_hash,
+                discriminator: ack.reservation_discriminator(),
             };
             let result = {
                 let mut guard = bc.lock().unwrap();
@@ -1140,6 +1188,7 @@ fn spawn_read_ack_worker(
                         if let Ok(handle) = the_block::telemetry::READ_ACK_PROCESSED_TOTAL
                             .ensure_handle_for_label_values(&[match err {
                                 ReadAckError::InvalidSignature => "invalid_signature",
+                                ReadAckError::PrivacyProofRejected => "invalid_privacy",
                             }])
                         {
                             handle.inc();
@@ -1180,6 +1229,7 @@ async fn async_main() -> std::process::ExitCode {
             rpc_addr,
             mempool_purge_interval,
             snapshot_interval,
+            ack_privacy,
             metrics_addr,
             db_path,
             data_dir,
@@ -1224,6 +1274,11 @@ async fn async_main() -> std::process::ExitCode {
                 }
             };
             let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
+            let ack_privacy_mode = ReadAckPrivacyMode::from(ack_privacy);
+            if inner.config.read_ack_privacy != ack_privacy_mode {
+                inner.config.read_ack_privacy = ack_privacy_mode;
+                inner.save_config();
+            }
             if let Some(path) = snapshot.as_ref() {
                 if let Ok((height, accounts, _root)) =
                     the_block::blockchain::snapshot::load_file(path)

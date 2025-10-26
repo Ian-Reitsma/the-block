@@ -162,7 +162,7 @@ legacy JSON snapshots.
 
 ### Read-acknowledgement anomaly response
 
-Governance stewards the acknowledgement policy because sustained invalid receipt rates can signal hostile gateways or broken client integrations. When dashboards show `read_ack_processed_total{result="invalid_signature"}` rising faster than the `ok` series:
+Governance stewards the acknowledgement policy because sustained invalid receipt rates can signal hostile gateways or broken client integrations. When dashboards show `read_ack_processed_total{result="invalid_signature"}` or `{result="invalid_privacy"}` rising faster than the `ok` series:
 
 1. Confirm the background worker is still draining the queue by checking the node logs (`read_ack_worker=drain` entries) and verifying the accepted counter is advancing.
 2. Pull the latest governance parameters for read-subsidy distribution (`contract gov params show --filter read_subsidy_*`) and ensure no recent proposal redirected subsidies away from the affected roles.

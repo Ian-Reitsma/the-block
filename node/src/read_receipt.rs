@@ -1,6 +1,11 @@
-use crypto_suite::hashing::blake3::Hasher;
+use crate::ad_readiness::AdReadinessSnapshot;
+use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
+use zkp::{
+    read_ack::{self, ReadAckPrivacyProof, ReadAckStatement, ReadAckWitness},
+    readiness,
+};
 
 /// Client-signed acknowledgement that a path was read from a manifest.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,11 +37,22 @@ pub struct ReadAck {
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Optional creative identifier returned by the ad marketplace.
     pub creative_id: Option<String>,
+    #[serde(default)]
+    /// Snapshot of readiness counters and proof bindings for this acknowledgement.
+    pub readiness: Option<AdReadinessSnapshot>,
+    #[serde(default)]
+    /// Privacy proof binding this acknowledgement to its readiness commitment.
+    pub zk_proof: Option<ReadAckPrivacyProof>,
 }
 
 impl ReadAck {
     /// Serialize fields and verify the signature against the embedded public key.
     pub fn verify(&self) -> bool {
+        self.verify_signature() && self.verify_privacy()
+    }
+
+    /// Verify the Ed25519 signature embedded in this acknowledgement.
+    pub fn verify_signature(&self) -> bool {
         let mut h = Hasher::new();
         h.update(&self.manifest);
         h.update(&self.path_hash);
@@ -54,6 +70,67 @@ impl ReadAck {
         };
         let sig = Signature::from_bytes(&arr);
         pk.verify(msg.as_bytes(), &sig).is_ok()
+    }
+
+    /// Compute the reservation discriminator to avoid collisions across identical reads.
+    pub fn reservation_discriminator(&self) -> [u8; 32] {
+        let mut h = blake3::Hasher::new();
+        h.update(&self.manifest);
+        h.update(&self.path_hash);
+        h.update(&self.ts.to_le_bytes());
+        h.update(&self.client_hash);
+        h.update(&self.sig);
+        h.finalize().into()
+    }
+
+    fn privacy_statement(&self) -> ReadAckStatement {
+        ReadAckStatement::new(
+            self.manifest,
+            self.path_hash,
+            self.bytes,
+            self.ts,
+            self.client_hash,
+            self.domain.clone(),
+            self.provider.clone(),
+            self.campaign_id.clone(),
+            self.creative_id.clone(),
+        )
+    }
+
+    /// Attach a privacy proof derived from the provided readiness snapshot.
+    pub fn attach_privacy(&mut self, snapshot: AdReadinessSnapshot) {
+        let readiness_commitment = match snapshot.zk_proof.as_ref() {
+            Some(proof) => *proof.commitment(),
+            None => {
+                self.readiness = Some(snapshot);
+                self.zk_proof = None;
+                return;
+            }
+        };
+        let witness = ReadAckWitness::derive_from_signature(&self.sig);
+        let statement = self.privacy_statement();
+        let proof = read_ack::prove(&statement, &readiness_commitment, &witness);
+        self.readiness = Some(snapshot);
+        self.zk_proof = Some(proof);
+    }
+
+    /// Verify the privacy proof if present.
+    pub fn verify_privacy(&self) -> bool {
+        match (&self.readiness, &self.zk_proof) {
+            (Some(snapshot), Some(proof)) => match snapshot.zk_proof.as_ref() {
+                Some(readiness_proof) => {
+                    let statement = snapshot.to_statement();
+                    if !readiness::verify(&statement, readiness_proof) {
+                        return false;
+                    }
+                    let ack_statement = self.privacy_statement();
+                    read_ack::verify(&ack_statement, proof)
+                }
+                None => false,
+            },
+            (None, None) => true,
+            (None, Some(_)) | (Some(_), None) => false,
+        }
     }
 }
 
@@ -137,6 +214,36 @@ fn hash_ack(ack: &ReadAck) -> [u8; 32] {
     }
     if let Some(creative) = &ack.creative_id {
         h.update(creative.as_bytes());
+    } else {
+        h.update(&[0u8]);
+    }
+    if let Some(snapshot) = &ack.readiness {
+        h.update(&snapshot.window_secs.to_le_bytes());
+        h.update(&snapshot.min_unique_viewers.to_le_bytes());
+        h.update(&snapshot.min_host_count.to_le_bytes());
+        h.update(&snapshot.min_provider_count.to_le_bytes());
+        h.update(&snapshot.unique_viewers.to_le_bytes());
+        h.update(&snapshot.host_count.to_le_bytes());
+        h.update(&snapshot.provider_count.to_le_bytes());
+        h.update(&[snapshot.ready as u8]);
+        h.update(&snapshot.last_updated.to_le_bytes());
+        for blocker in &snapshot.blockers {
+            h.update(blocker.as_bytes());
+        }
+        if let Some(proof) = snapshot.zk_proof.as_ref() {
+            h.update(proof.commitment());
+            h.update(proof.blinding());
+        } else {
+            h.update(&[0u8]);
+        }
+    } else {
+        h.update(&[0u8]);
+    }
+    if let Some(proof) = &ack.zk_proof {
+        h.update(proof.ack_commitment());
+        h.update(proof.identity_commitment());
+        h.update(proof.readiness_commitment());
+        h.update(proof.identity_salt());
     } else {
         h.update(&[0u8]);
     }

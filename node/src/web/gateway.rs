@@ -240,6 +240,8 @@ fn parse_signed_ack(
         provider,
         campaign_id: None,
         creative_id: None,
+        readiness: None,
+        zk_proof: None,
     };
     if ack.verify() {
         Ok(ack)
@@ -259,6 +261,7 @@ fn build_read_ack(
     parse_signed_ack(req, domain, path, bytes)
         .map(|mut ack| {
             attach_campaign_metadata(state, &mut ack);
+            attach_readiness_attestation(state, &mut ack);
             ack
         })
         .map_err(ack_error_response)
@@ -276,6 +279,7 @@ fn build_read_ack(
     match parse_signed_ack(req, domain, path, bytes) {
         Ok(mut ack) => {
             attach_campaign_metadata(state, &mut ack);
+            attach_readiness_attestation(state, &mut ack);
             Ok(ack)
         }
         Err(err) if err.is_missing() => Ok(ReadAck {
@@ -290,6 +294,8 @@ fn build_read_ack(
             provider: infer_provider_for(&[0; 32], &path_hash).unwrap_or_default(),
             campaign_id: None,
             creative_id: None,
+            readiness: None,
+            zk_proof: None,
         }),
         Err(err) => Err(ack_error_response(err)),
     }
@@ -343,10 +349,18 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     let key = ReservationKey {
         manifest: ack.manifest,
         path_hash: ack.path_hash,
+        discriminator: ack.reservation_discriminator(),
     };
     if let Some(outcome) = market.reserve_impression(key, ctx) {
         ack.campaign_id = Some(outcome.campaign_id);
         ack.creative_id = Some(outcome.creative_id);
+    }
+}
+
+fn attach_readiness_attestation(state: &GatewayState, ack: &mut ReadAck) {
+    if let Some(handle) = &state.readiness {
+        let snapshot = handle.snapshot();
+        ack.attach_privacy(snapshot);
     }
 }
 

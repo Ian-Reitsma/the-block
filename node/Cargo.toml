@@ -61,6 +61,7 @@ codec = { path = "../crates/codec" }
 storage = { path = "../storage" }
 # advertising marketplace
 ad-market = { path = "../crates/ad_market", package = "ad_market" }
+zkp = { path = "../crates/zkp" }
 # hardware detection
 # light-client integration
 light-client = { path = "../crates/light-client" }

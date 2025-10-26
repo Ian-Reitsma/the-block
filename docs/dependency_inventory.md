@@ -12,6 +12,7 @@ workspace crates.
 
 ## Highlights
 
+- ✅ Read-acknowledgement privacy proofs live entirely inside the workspace. The new `zkp` crate exposes readiness and acknowledgement commitments without pulling third-party SNARK libraries, and the node/gateway plumbing reuses existing hashing/serialization helpers while exposing `--ack-privacy` and `node.set_ack_privacy`.
 - ✅ Bridge CLI RPC calls now flow through a new `BridgeRpcTransport` trait that
 - ✅ Bridge CLI parser regressions now cover settlement-log asset filters, reward-accrual relayer/asset cursors, and default pagination via the first-party `Parser`, while `bridge_pending_dispute_persists_across_restart` keeps dispute persistence tests inside the sled-backed bridge crate. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` guards Grafana legends/descriptions without third-party validators.
   wraps the production `RpcClient` while letting tests inject an in-memory

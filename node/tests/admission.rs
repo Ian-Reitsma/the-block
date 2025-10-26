@@ -185,30 +185,15 @@ fn validate_block_rejects_nonce_gap() {
     let block = the_block::Block {
         index,
         previous_hash: prev,
-        timestamp_millis: 0,
         transactions: txs,
         difficulty: diff,
-        retune_hint: 0,
         nonce,
         hash,
         coinbase_consumer: TokenAmount::new(reward_c),
         coinbase_industrial: TokenAmount::new(reward_i),
-        storage_sub_ct: TokenAmount::new(0),
-        read_sub_ct: TokenAmount::new(0),
-        compute_sub_ct: TokenAmount::new(0),
-        proof_rebate_ct: TokenAmount::new(0),
-        storage_sub_it: TokenAmount::new(0),
-        read_sub_it: TokenAmount::new(0),
-        compute_sub_it: TokenAmount::new(0),
-        read_root: [0u8; 32],
-        fee_checksum,
-        state_root: String::new(),
         base_fee: 1,
-        l2_roots: Vec::new(),
-        l2_sizes: Vec::new(),
-        vdf_commit: [0u8; 32],
-        vdf_output: [0u8; 32],
-        vdf_proof: Vec::new(),
+        fee_checksum,
+        ..the_block::Block::default()
     };
     assert!(!bc.validate_block(&block).unwrap());
 }

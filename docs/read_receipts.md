@@ -1,4 +1,5 @@
 # Read Receipts and Audit Workflow
+> **Review (2025-10-25, evening):** Read acknowledgements now attach zero-knowledge readiness proofs and identity commitments via the first-party `zkp` crate. Gateway/node operators can tune enforcement with `--ack-privacy` or the `node.{get,set}_ack_privacy` RPCs, and ledger submission emits `read_ack_processed_total{result="invalid_privacy"}` when proofs fail under `observe` mode.
 > **Review (2025-09-25):** Synced Read Receipts and Audit Workflow guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
@@ -32,6 +33,12 @@ explicit hosting and campaign metadata:
 - `provider` – storage/hosting identifier inferred for the response.
 - `campaign_id`/`creative_id` – optional identifiers emitted by the advertising
   marketplace when an impression reserves budget for a campaign.
+- `readiness` – optional `AdReadinessSnapshot` captured when the gateway attaches
+  campaign metadata. The snapshot commits to rolling viewer/host/provider
+  counters and is accompanied by a zero-knowledge proof.
+- `zk_proof` – optional `ReadAckPrivacyProof` binding the acknowledgement to the
+  readiness commitment while hiding the viewer identity salt derived from the
+  signature.
 
 All fields serialize through the first-party binary codec. The Merkle hash for
 each acknowledgement incorporates every field above (including optional
@@ -39,6 +46,27 @@ campaign metadata) so downstream audits observe the exact domain/provider pair
 that earned the read and can link impressions to campaign settlements. Legacy
 gateways may still ingest CBOR archives for replay, but new batches emit the
 first-party `.bin` format exclusively.
+
+`ReadAck::reservation_discriminator()` derives a per-ack 32-byte key from the
+manifest, path hash, timestamp, client hash, and signature so concurrent fetches
+of the same asset never collide in the advertising marketplace.
+
+## 1.1 Privacy commitments
+
+The first-party `zkp` crate exposes two helper proofs that keep operators out of
+the identity path while still demonstrating service quality:
+
+- `ReadinessPrivacyProof` commits to the rolling readiness snapshot (window
+  length, thresholds, viewer/host/provider counts, readiness flag, and
+  timestamp) using a deterministic blinding derived from a node-local seed.
+- `ReadAckPrivacyProof` hashes the acknowledgement payload together with the
+  readiness commitment and an identity commitment derived from the client hash
+  and a salt hashed from the Ed25519 signature.
+
+Nodes running in `enforce` mode reject any acknowledgement whose proofs fail.
+`observe` mode accepts the read but emits
+`read_ack_processed_total{result="invalid_privacy"}` so dashboards capture the
+anomaly; `disabled` mode skips verification entirely for controlled migrations.
 
 ### HTTP signing contract
 
@@ -72,12 +100,24 @@ payload to `receipts/read/<epoch>/<sequence>.bin`.
 
 The gateway forwards every signed acknowledgement to the node over an
 `mpsc` channel. `spawn_read_ack_worker()` in `node/src/bin/node.rs` drains this
-channel, calls `Blockchain::submit_read_ack`, and emits the
-`read_ack_processed_total{result="ok|error"}` counter so operators can surface
-invalid receipts in telemetry. Successful acknowledgements populate
-epoch-scoped byte ledgers keyed by viewer, host, hardware provider, verifier,
-and liquidity pool account addresses; ad impressions simultaneously reserve
-campaign budget for settlement.
+channel, attaches the current `AdReadinessSnapshot`, and calls
+`Blockchain::submit_read_ack` which validates signatures and (depending on the
+configured privacy mode) the readiness and acknowledgement proofs. The worker
+increments `read_ack_processed_total{result="ok|invalid_signature|invalid_privacy"}`
+so operators can surface rejected signatures or proofs in telemetry. Successful
+acknowledgements populate epoch-scoped byte ledgers keyed by viewer, host,
+hardware provider, verifier, and liquidity pool account addresses; ad
+impressions simultaneously reserve campaign budget using the
+reservation discriminator described above.
+
+### Privacy verification modes
+
+- **CLI:** `node run --ack-privacy={enforce|observe|disabled}` sets the runtime
+  enforcement level before the worker starts. Enforce rejects invalid proofs,
+  observe logs and counts them, and disabled skips verification.
+- **RPC:** `node.get_ack_privacy` reports the active mode, and
+  `node.set_ack_privacy {"mode": "observe"}` switches modes at runtime while
+  persisting the updated configuration.
 
 ## 3. Audit flow
 
@@ -104,7 +144,8 @@ if they wish to compare raw acknowledgement bytes with the pending payout map.
 - Runtime telemetry counters `subsidy_bytes_total{type="read"}`,
   `read_denied_total{reason}`, and `read_ack_processed_total{result}` reflect
   subsidy issuance, rate‑limit drops, and acknowledgement validation outcomes.
-  Sustained growth in `read_ack_processed_total{result="invalid_signature"}` should trigger the governance playbook described in
+  Sustained growth in `read_ack_processed_total{result="invalid_signature"}` or
+  `{result="invalid_privacy"}` should trigger the governance playbook described in
   [governance.md](governance.md#read-acknowledgement-anomaly-response) and the monitoring response loop that correlates the spike with offending domains.
 
 ## 5. Subsidy distribution and advertising settlement

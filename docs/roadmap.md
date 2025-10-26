@@ -35,6 +35,14 @@
 > royalties and protocol fees settle deterministically, and the CLI surfaces
 > `gateway domain {list,bid,complete,status}` so operators can manage premium
 > names without external markets.
+> **Review (2025-10-25, late evening):** Read acknowledgements now bind readiness
+> counters and viewer salts via the first-party `zkp` crate. Gateways attach a
+> `ReadinessPrivacyProof`, nodes derive identity commitments from signatures, and
+> the worker exposes `--ack-privacy` plus `node.{get,set}_ack_privacy` so
+> operators can enforce, observe, or temporarily disable proof checks. The ad
+> marketplace hashes a per-ack reservation discriminator to prevent duplicate
+> impressions from overwriting each other, and integration tests cover both the
+> proof round-trip and collision-free settlements.
 > **Review (2025-10-25, afternoon):** Governance activations now stream read-subsidy
 > retunes directly into the sled-backed ad marketplace. The runtime stitches the
 > shared `MarketplaceHandle` into parameter apply hooks so updates to

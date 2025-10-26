@@ -14,6 +14,15 @@ tracks such redactions.
 Operators can enable differential privacy for metric emission to obscure exact
 values while retaining aggregate trends.
 
+## Zero-knowledge read acknowledgements
+The gateway and node attach zero-knowledge proofs (`ReadinessPrivacyProof` and
+`ReadAckPrivacyProof`) to every acknowledgement. The proofs demonstrate that
+readiness thresholds were met and that acknowledgements are bound to anonymous
+client commitments without leaking viewer identities. Enforcement is controlled
+via `--ack-privacy` on the node CLI or the `node.{get,set}_ack_privacy` RPCs,
+allowing operators to tighten or observe the policy while maintaining
+compliance.
+
 ## Law-Enforcement Requests
 The LE portal accepts partial subpoenas and returns cryptographic proofs of
 compliance, ensuring that only authorized data is revealed.
