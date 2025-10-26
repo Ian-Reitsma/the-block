@@ -112,11 +112,63 @@ script loads `metrics.json` artifacts, calculates deltas for latency, failure
 counts, and codec throughput, and emits a markdown summary suitable for PRs or
 governance artefacts.
 
+## WAN Chaos & Attestation Harness
+
+The WAN chaos harness coordinates overlay, storage, and compute faults across
+the `Simulation` struct.  The simulator now embeds a `ChaosHarness` that
+registers module-specific scenarios (overlay partitions, DHT shard loss, and
+compute throttling) and advances them on every `Simulation::step`.  Readiness
+metrics derived from the harness surface in snapshots as
+`overlay_readiness`, `storage_readiness`, `compute_readiness`, and the aggregate
+`chaos_breaches` counter.  CSV dashboards produced by
+`Simulation::run` include these columns so operators can correlate economic
+outputs with module-specific fault budgets.
+
+Use the new `sim/chaos_lab.rs` binary to continuously exercise the harness,
+persist CSV dashboards, and emit signed readiness attestations:
+
+```bash
+cargo run -p tb-sim --bin chaos_lab -- \
+  --steps 180 \
+  --attestations sim/output/chaos/attestations.json \
+  --dashboard sim/output/chaos/dashboard.csv
+```
+
+`chaos_lab` reads an Ed25519 signing key from `TB_CHAOS_SIGNING_KEY` (hex) or
+falls back to an ephemeral key, printing the verifying key to stderr.  The
+binary serializes each `ChaosAttestation` via the monitoring crate’s
+first-party codec, ensuring both the simulator and the metrics aggregator agree
+on payloads.  Operators can feed the generated attestations directly into the
+metrics aggregator `/chaos/attest` endpoint (see
+[`docs/monitoring.md`](monitoring.md)).
+
+Harness configuration lives in `sim/src/chaos.rs`; extend the registered
+scenarios to model additional overlays, storage tiers, or compute pipelines.
+Integration coverage in `sim/tests/chaos_harness.rs` exercises breach detection,
+recovery, and attestation draft generation. Downstream verification relies on
+`metrics-aggregator/tests::chaos_lab_attestations_flow_through_status`, which
+posts the emitted artefacts into `/chaos/attest` and asserts `/chaos/status`
+alongside the readiness/breach metrics using only first-party crates, and
+`chaos_attestation_rejects_invalid_signature`, which tampers with the signature
+bytes to ensure forged payloads never reach the readiness cache.
+
+CI and release workflows wire the harness into both `just chaos-suite` and
+`cargo xtask chaos`.  The recipes allocate `target/chaos/attestations.json`, run
+the `chaos_lab` binary, and surface readiness failures as hard gate blockers
+before governance tags advance.
+
 ## Deterministic Replay
 
 Each run records a PRNG seed and serializes all events. Re-running with the same
 `--seed` and scenario yields identical outcomes. Logs contain a SHA256 hash of
 the scenario to detect tampering.
+
+## Identity simulation
+
+The DID simulator (`sim/did.rs`) now assembles documents via
+`foundation_serialization::json` builders rather than serde derives so the
+binary runs cleanly during full workspace test sweeps without invoking any
+third-party stubs.
 
 ## Further Reading
 

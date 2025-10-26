@@ -9,6 +9,25 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-12-14)
+
+- The WAN chaos pipeline stays entirely first party. `sim/src/chaos.rs` and the
+  `chaos_lab` binary emit signed readiness attestations, while the metrics
+  aggregator verifies `/chaos/attest` payloads through the existing
+  `monitoring-build` crate and exposes `/chaos/status` plus the
+  `chaos_readiness{module,scenario}`/`chaos_sla_breach_total` gauges via the
+  foundation metrics facade. Release automation invokes `just chaos-suite` and
+  `cargo xtask chaos`, both of which call the in-house binaries—no third-party
+  chaos tooling, HTTP clients, or RPC stubs were introduced. The new
+  `chaos_lab_attestations_flow_through_status` regression depends only on the
+  first-party `tb-sim` crate to feed `/chaos/attest`, and Grafana’s generated
+  dashboards (`monitoring/build.rs`) now surface a dedicated **Chaos** row without
+  introducing external templating stacks. Additional regression coverage
+  (`chaos_attestation_rejects_invalid_signature`) mutates signatures with the
+  first-party crypto facade to confirm `/chaos/attest` rejects forged payloads,
+  while the gossip relay and peer metrics store handle temp-dir failures using
+  in-process fallbacks—no RPC shim or third-party filesystem helper was needed.
+
 ## Recent progress (2025-11-06)
 
 - DNS stake management moved entirely onto first-party RPCs. `dns.register_stake`,

@@ -67,6 +67,7 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("summary", sub_matches)) => run_summary(sub_matches),
         Some(("check-deps", sub_matches)) => run_check_deps(sub_matches),
+        Some(("chaos", sub_matches)) => run_chaos(sub_matches),
         None => {
             print_root_help(&command, &bin);
             Ok(())
@@ -126,6 +127,14 @@ fn build_command() -> Command {
                 "baseline",
                 "Baseline registry snapshot used for drift detection",
             )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("xtask.chaos"),
+                "chaos",
+                "Run the WAN chaos verifier suite",
+            )
             .build(),
         )
         .build()
@@ -196,6 +205,20 @@ fn run_summary(matches: &cli_core::parse::Matches) -> Result<()> {
     summary.write_pretty_json(io::stdout())?;
     if !summary.title_ok {
         bail!("PR title does not match modified areas");
+    }
+    Ok(())
+}
+
+fn run_chaos(_matches: &cli_core::parse::Matches) -> Result<()> {
+    let out_dir = Path::new("target/chaos");
+    fs::create_dir_all(out_dir).context("failed to create chaos output directory")?;
+    let status = StdCommand::new("cargo")
+        .args(["run", "-p", "tb-sim", "--bin", "chaos_lab", "--quiet"])
+        .env("TB_CHAOS_ATTESTATIONS", out_dir.join("attestations.json"))
+        .status()
+        .context("failed to execute chaos verifier")?;
+    if !status.success() {
+        bail!("chaos verifier failed with status {status}");
     }
     Ok(())
 }

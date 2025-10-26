@@ -5,10 +5,13 @@ use crate::net::peer::PeerMetrics;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
 use concurrency::{MutexExt, OnceCell};
+use diagnostics::log;
 use sled::Tree;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const CLOCK_FALLBACK_SECS: u64 = 0;
 
 pub struct PeerMetricsStore {
     tree: Tree,
@@ -22,10 +25,17 @@ impl PeerMetricsStore {
     }
 
     fn now() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(err) => {
+                let fallback = err.duration().as_secs();
+                log::warn!(
+                    "peer_metrics_clock_backwards: {:?} seconds; using fallback",
+                    fallback
+                );
+                fallback.max(CLOCK_FALLBACK_SECS)
+            }
+        }
     }
 
     pub fn insert(&self, pk: &[u8; 32], metrics: &PeerMetrics, retention: u64) {
@@ -128,19 +138,41 @@ pub fn init(path: &str) {
 }
 
 pub fn store() -> Option<PeerMetricsStoreGuard<'static>> {
-    STORE
-        .get()
-        .map(|m| PeerMetricsStoreGuard { inner: m.guard() })
-        .and_then(|g| if g.inner.is_some() { Some(g) } else { None })
+    let cell = STORE.get()?;
+    let guard = cell.guard();
+    if guard.is_some() {
+        Some(PeerMetricsStoreGuard { inner: guard })
+    } else {
+        None
+    }
 }
 
 pub struct PeerMetricsStoreGuard<'a> {
     inner: std::sync::MutexGuard<'a, Option<PeerMetricsStore>>,
 }
 
-impl<'a> std::ops::Deref for PeerMetricsStoreGuard<'a> {
-    type Target = PeerMetricsStore;
-    fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().unwrap()
+impl<'a> PeerMetricsStoreGuard<'a> {
+    pub fn insert(&self, pk: &[u8; 32], metrics: &PeerMetrics, retention: u64) {
+        if let Some(store) = self.inner.as_ref() {
+            store.insert(pk, metrics, retention);
+        }
+    }
+
+    pub fn load(&self, retention: u64) -> HashMap<[u8; 32], PeerMetrics> {
+        self.inner
+            .as_ref()
+            .map(|store| store.load(retention))
+            .unwrap_or_default()
+    }
+
+    pub fn flush(&self) -> sled::Result<()> {
+        match self.inner.as_ref() {
+            Some(store) => store.flush(),
+            None => Ok(()),
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.inner.as_ref().map(|store| store.count()).unwrap_or(0)
     }
 }

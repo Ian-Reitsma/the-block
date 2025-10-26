@@ -822,7 +822,7 @@ fn bridge_anomaly_detector_respects_cooldown_and_labels() {
 #[test]
 fn bridge_remediation_exposes_actions() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -926,7 +926,7 @@ fn bridge_remediation_exposes_actions() {
 #[test]
 fn bridge_remediation_emits_throttle_playbook() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state);
@@ -997,7 +997,7 @@ fn bridge_remediation_emits_throttle_playbook() {
 #[test]
 fn bridge_remediation_dispatches_to_spool_hooks() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let mut spool = RemediationSpoolSandbox::new();
         let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
@@ -1186,7 +1186,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
 #[test]
 fn bridge_remediation_records_http_acknowledgements() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let response = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":true,"notes":"pager"}"#)
@@ -1288,7 +1288,7 @@ fn bridge_remediation_records_http_acknowledgements() {
 #[test]
 fn bridge_remediation_parses_text_acknowledgements() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let response = HookResponse::Text("acknowledged: pager".to_string());
         let (override_guard, captured) = install_http_override(response);
@@ -1376,7 +1376,7 @@ fn bridge_remediation_parses_text_acknowledgements() {
 #[test]
 fn bridge_remediation_retries_pending_acknowledgements() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let response = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
@@ -1466,7 +1466,7 @@ fn bridge_remediation_retries_pending_acknowledgements() {
 #[test]
 fn bridge_remediation_escalates_pending_acknowledgements() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let mut spool = RemediationSpoolSandbox::new();
         let spool_dir = spool.enable(RemediationSpoolTarget::Escalate).to_path_buf();
@@ -1563,7 +1563,7 @@ fn bridge_remediation_escalates_pending_acknowledgements() {
 #[test]
 fn bridge_remediation_ack_policy_respects_playbook_overrides() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let response = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":false,"notes":"pending"}"#)
@@ -1639,7 +1639,7 @@ fn bridge_remediation_ack_policy_respects_playbook_overrides() {
 #[test]
 fn bridge_remediation_records_http_closure_acknowledgements() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let response = HookResponse::Json(
             json::value_from_str(r#"{"acknowledged":true,"closed":true,"notes":"resolved"}"#)
@@ -1738,7 +1738,7 @@ fn bridge_remediation_records_http_closure_acknowledgements() {
 #[test]
 fn bridge_remediation_records_spool_failures() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
         let spool_file = NamedTempFile::new().unwrap();
         let spool_path = spool_file.path().to_path_buf();
@@ -1809,7 +1809,7 @@ fn bridge_remediation_records_spool_failures() {
 #[test]
 fn bridge_remediation_records_skipped_dispatch_when_unconfigured() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let _url_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "");
         let _dir_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_DIRS", "");
         let dir = tempfile::tempdir().unwrap();
@@ -2002,7 +2002,7 @@ fn bridge_metric_gauges_persist_across_restart() {
 #[test]
 fn bridge_remediation_ack_latency_persists_across_restart() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");
@@ -2129,7 +2129,7 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
 #[test]
 fn bridge_remediation_cleans_spool_artifacts_after_restart() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");
@@ -2264,7 +2264,7 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
 #[test]
 fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
     run_async(async {
-        reset_bridge_remediation_dispatch_log();
+        let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");

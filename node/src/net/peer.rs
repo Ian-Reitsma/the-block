@@ -2073,6 +2073,8 @@ struct QuicEndpoint {
 mod tests {
     use super::*;
     use foundation_serialization::json::Value;
+    #[cfg(feature = "telemetry")]
+    use runtime::telemetry::MetricError;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use sys::tempfile::tempdir;
@@ -2139,6 +2141,40 @@ mod tests {
 
         let next = set.check_rate(&pk).expect_err("peer should remain banned");
         assert!(matches!(next, PeerErrorCode::Banned));
+    }
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn telemetry_helpers_warn_and_skip_on_missing_labels() {
+        use diagnostics::internal::install_subscriber;
+        use std::sync::{Arc, Mutex};
+
+        let messages: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let capture = Arc::clone(&messages);
+        let guard = install_subscriber(move |record| {
+            if record.target.as_ref() == "telemetry" {
+                if let Ok(mut logs) = capture.lock() {
+                    logs.push(record.message.to_string());
+                }
+            }
+        });
+        let executed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&executed);
+        super::with_metric_handle(
+            "test_metric",
+            &["peer"],
+            || Err(MetricError::MissingLabelSet),
+            move |_| {
+                flag.store(true, Ordering::SeqCst);
+            },
+        );
+        drop(guard);
+        assert!(messages
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|msg| msg.contains("failed to obtain telemetry handle")));
+        assert!(!executed.load(Ordering::SeqCst));
     }
 
     #[test]

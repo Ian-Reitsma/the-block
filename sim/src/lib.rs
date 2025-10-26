@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
 pub mod bridging;
+pub mod chaos;
 pub mod dashboard;
 pub mod demand;
 pub mod dex;
@@ -22,6 +23,7 @@ pub mod token_model;
 pub mod dependency_fault_harness;
 
 use bridging::BridgeModel;
+use chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario};
 use dashboard::Snapshot;
 use demand::DemandModel;
 use inflation::InflationModel;
@@ -44,6 +46,7 @@ pub struct Simulation {
     pub demand: DemandModel,
     pub backlog: f64,
     pub backend: Backend,
+    pub chaos: ChaosHarness,
     rng: StdRng,
     partition_steps: u64,
     reconciliation_latency: u64,
@@ -59,6 +62,56 @@ impl Simulation {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(42);
+        let mut chaos = ChaosHarness::new();
+        chaos.register(
+            ChaosScenario::new("overlay-wide-partition", ChaosModule::Overlay, 0.9, 0.12)
+                .add_event(ChaosEvent::new(
+                    5,
+                    12,
+                    0.35,
+                    ChaosFault::OverlayPartition { loss_ratio: 0.7 },
+                ))
+                .add_event(ChaosEvent::new(
+                    25,
+                    8,
+                    0.5,
+                    ChaosFault::OverlayPartition { loss_ratio: 0.5 },
+                )),
+        );
+        chaos.register(
+            ChaosScenario::new("storage-dht-failure", ChaosModule::Storage, 0.88, 0.08)
+                .add_event(ChaosEvent::new(
+                    10,
+                    15,
+                    0.4,
+                    ChaosFault::StorageCorruption { shard_loss: 0.5 },
+                ))
+                .add_event(ChaosEvent::new(
+                    40,
+                    10,
+                    0.2,
+                    ChaosFault::StorageCorruption { shard_loss: 0.3 },
+                )),
+        );
+        chaos.register(
+            ChaosScenario::new("compute-backpressure", ChaosModule::Compute, 0.9, 0.1)
+                .add_event(ChaosEvent::new(
+                    15,
+                    20,
+                    0.45,
+                    ChaosFault::ComputeBackpressure {
+                        throttle_ratio: 0.6,
+                    },
+                ))
+                .add_event(ChaosEvent::new(
+                    60,
+                    15,
+                    0.35,
+                    ChaosFault::ComputeBackpressure {
+                        throttle_ratio: 0.5,
+                    },
+                )),
+        );
         Self {
             nodes,
             subsidy: 0.0,
@@ -68,6 +121,7 @@ impl Simulation {
             demand: DemandModel::default(),
             backlog: 0.0,
             backend: Backend::Memory,
+            chaos,
             rng: StdRng::seed_from_u64(seed),
             partition_steps: 0,
             reconciliation_latency: 0,
@@ -94,6 +148,13 @@ impl Simulation {
     pub fn start_partition(&mut self, steps: u64) {
         self.partition_steps = steps;
         self.reconciliation_latency = steps;
+    }
+
+    /// Run the simulation without exporting dashboards.
+    pub fn drive(&mut self, steps: u64) {
+        for step in 0..steps {
+            let _ = self.step(step);
+        }
     }
 
     /// Run the simulation for the given number of steps and write a CSV dashboard.
@@ -168,7 +229,18 @@ impl Simulation {
         } else {
             self.liquidity.token_reserve / self.backlog.max(1.0)
         };
-        let readiness = 1.0 / (1.0 + self.backlog);
+        let base_readiness = 1.0 / (1.0 + self.backlog);
+        let chaos_report = self.chaos.step(step, &mut self.rng);
+        let overlay_readiness = chaos_report.overlay.readiness;
+        let storage_readiness = chaos_report.storage.readiness;
+        let compute_readiness = chaos_report.compute.readiness;
+        let readiness_multiplier = overlay_readiness
+            .min(storage_readiness)
+            .min(compute_readiness);
+        let readiness = base_readiness * readiness_multiplier;
+        let chaos_breaches = chaos_report.overlay.breaches
+            + chaos_report.storage.breaches
+            + chaos_report.compute.breaches;
         let partition_active = self.partition_steps > 0;
         let snap = Snapshot {
             step,
@@ -182,6 +254,10 @@ impl Simulation {
             inflation_rate,
             sell_coverage,
             readiness,
+            overlay_readiness,
+            storage_readiness,
+            compute_readiness,
+            chaos_breaches,
             partition_active,
             reconciliation_latency: self.reconciliation_latency,
             active_sessions: self.session_keys,
@@ -202,13 +278,13 @@ impl Simulation {
 }
 
 fn write_dashboard_header<W: Write>(writer: &mut W) -> io::Result<()> {
-    writer.write_all(b"step,subsidy,supply,liquidity,bridged,consumer_demand,industrial_demand,backlog,inflation_rate,sell_coverage,readiness,partition_active,reconciliation_latency,active_sessions,expired_sessions,wasm_exec\n")
+    writer.write_all(b"step,subsidy,supply,liquidity,bridged,consumer_demand,industrial_demand,backlog,inflation_rate,sell_coverage,readiness,overlay_readiness,storage_readiness,compute_readiness,chaos_breaches,partition_active,reconciliation_latency,active_sessions,expired_sessions,wasm_exec\n")
 }
 
 fn write_dashboard_row<W: Write>(writer: &mut W, snap: &Snapshot) -> io::Result<()> {
     writeln!(
         writer,
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         snap.step,
         snap.subsidy,
         snap.supply,
@@ -220,6 +296,10 @@ fn write_dashboard_row<W: Write>(writer: &mut W, snap: &Snapshot) -> io::Result<
         snap.inflation_rate,
         snap.sell_coverage,
         snap.readiness,
+        snap.overlay_readiness,
+        snap.storage_readiness,
+        snap.compute_readiness,
+        snap.chaos_breaches,
         snap.partition_active,
         snap.reconciliation_latency,
         snap.active_sessions,

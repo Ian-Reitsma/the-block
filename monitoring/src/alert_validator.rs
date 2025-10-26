@@ -41,29 +41,36 @@ const EXPECTED_RATE_EXPR: &str = "(bridge_metric_rate_per_second>avg_over_time(b
 const EXPECTED_DELTA_LABEL_EXPR: &str = "(bridge_metric_delta{labels!=\"\"}>avg_over_time(bridge_metric_delta{labels!=\"\"}[30m])*3)and(bridge_metric_delta{labels!=\"\"}>5)and(count_over_time(bridge_metric_delta{labels!=\"\"}[30m])>=6)";
 const EXPECTED_RATE_LABEL_EXPR: &str = "(bridge_metric_rate_per_second{labels!=\"\"}>avg_over_time(bridge_metric_rate_per_second{labels!=\"\"}[30m])*3)and(bridge_metric_rate_per_second{labels!=\"\"}>0.25)and(count_over_time(bridge_metric_rate_per_second{labels!=\"\"}[30m])>=6)";
 
-const EXPECTED_CONVERGENCE_EXPR: &str = "histogram_quantile(0.95,sum(rate(gossip_convergence_seconds_bucket[5m]))by(le))>30";
+const EXPECTED_CONVERGENCE_EXPR: &str =
+    "histogram_quantile(0.95,sum(rate(gossip_convergence_seconds_bucket[5m]))by(le))>30";
 const EXPECTED_CONSUMER_FEE_EXPR: &str = "max_over_time(CONSUMER_FEE_P90[10m])>on()param_change_active{key=\"ConsumerFeeComfortP90Microunits\"}";
 const EXPECTED_DEFERRAL_EXPR: &str = "(increase(INDUSTRIAL_DEFERRED_TOTAL[10m])/clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m])+increase(INDUSTRIAL_DEFERRED_TOTAL[10m]),1))>0.3";
-const EXPECTED_SUBSIDY_EXPR: &str = "increase(subsidy_cpu_ms_total[10m])>1e9orincrease(subsidy_bytes_total[10m])>1e12";
+const EXPECTED_SUBSIDY_EXPR: &str =
+    "increase(subsidy_cpu_ms_total[10m])>1e9orincrease(subsidy_bytes_total[10m])>1e12";
 const EXPECTED_RENT_EXPR: &str = "increase(rent_escrow_locked_ct_total[10m])>1e6";
 const EXPECTED_PAYOUT_READ_EXPR: &str =
     "(time()-explorer_block_payout_read_last_seen_timestamp{role!=\"\"})>1800andon(role)(explorer_block_payout_read_total{role!=\"\"}>0)";
 const EXPECTED_PAYOUT_AD_EXPR: &str =
     "(time()-explorer_block_payout_ad_last_seen_timestamp{role!=\"\"})>1800andon(role)(explorer_block_payout_ad_total{role!=\"\"}>0)";
 const EXPECTED_TLS_BURST_EXPR: &str = "sumby(prefix,code)(increase(tls_env_warning_total[5m]))>0";
-const EXPECTED_TLS_NEW_DETAIL_EXPR: &str = "increase(maxby(prefix,code)(tls_env_warning_detail_unique_fingerprints)[10m])>0";
-const EXPECTED_TLS_NEW_VARIABLES_EXPR: &str = "increase(maxby(prefix,code)(tls_env_warning_variables_unique_fingerprints)[10m])>0";
+const EXPECTED_TLS_NEW_DETAIL_EXPR: &str =
+    "increase(maxby(prefix,code)(tls_env_warning_detail_unique_fingerprints)[10m])>0";
+const EXPECTED_TLS_NEW_VARIABLES_EXPR: &str =
+    "increase(maxby(prefix,code)(tls_env_warning_variables_unique_fingerprints)[10m])>0";
 const EXPECTED_TLS_DETAIL_FLOOD_EXPR: &str = "sumby(prefix,code,fingerprint)(increase(tls_env_warning_detail_fingerprint_total{fingerprint!=\"none\"}[5m]))>10";
 const EXPECTED_TLS_VARIABLES_FLOOD_EXPR: &str = "sumby(prefix,code,fingerprint)(increase(tls_env_warning_variables_fingerprint_total{fingerprint!=\"none\"}[5m]))>10";
 const EXPECTED_TLS_STALE_EXPR: &str = "tls_env_warning_stale_snapshots>0";
 
 const EXPECTED_DEP_DRIFT_EXPR: &str = "max(dependency_registry_check_status{status=\"drift\"})>0";
-const EXPECTED_DEP_VIOLATIONS_EXPR: &str = "max(dependency_registry_check_status{status=\"violations\"})>0";
-const EXPECTED_DEP_BASELINE_EXPR: &str = "max(dependency_registry_check_status{status=\"baseline_error\"})>0";
+const EXPECTED_DEP_VIOLATIONS_EXPR: &str =
+    "max(dependency_registry_check_status{status=\"violations\"})>0";
+const EXPECTED_DEP_BASELINE_EXPR: &str =
+    "max(dependency_registry_check_status{status=\"baseline_error\"})>0";
 const EXPECTED_DEP_VIOLATION_SPIKE_EXPR: &str = "increase(dependency_policy_violation_total[5m])>0";
 
 const EXPECTED_TREASURY_SNAPSHOT_EXPR: &str = "treasury_disbursement_snapshot_age_seconds>900";
-const EXPECTED_TREASURY_OVERDUE_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds>7200";
+const EXPECTED_TREASURY_OVERDUE_EXPR: &str =
+    "treasury_disbursement_scheduled_oldest_age_seconds>7200";
 
 const METRIC_DELTA: &str = "bridge_metric_delta";
 const METRIC_RATE: &str = "bridge_metric_rate_per_second";
@@ -231,13 +238,29 @@ fn validate_chain_health_alerts_from_str(content: &str) -> Result<(), Validation
     validate_expression(ALERT_DEFERRAL_RATIO, EXPECTED_DEFERRAL_EXPR, &alerts)?;
     validate_expression(ALERT_SUBSIDY_SPIKE, EXPECTED_SUBSIDY_EXPR, &alerts)?;
     validate_expression(ALERT_RENT_ESCROW, EXPECTED_RENT_EXPR, &alerts)?;
-    validate_expression(ALERT_PAYOUT_READ_STALLED, EXPECTED_PAYOUT_READ_EXPR, &alerts)?;
+    validate_expression(
+        ALERT_PAYOUT_READ_STALLED,
+        EXPECTED_PAYOUT_READ_EXPR,
+        &alerts,
+    )?;
     validate_expression(ALERT_PAYOUT_AD_STALLED, EXPECTED_PAYOUT_AD_EXPR, &alerts)?;
     validate_expression(ALERT_TLS_BURST, EXPECTED_TLS_BURST_EXPR, &alerts)?;
     validate_expression(ALERT_TLS_NEW_DETAIL, EXPECTED_TLS_NEW_DETAIL_EXPR, &alerts)?;
-    validate_expression(ALERT_TLS_NEW_VARIABLES, EXPECTED_TLS_NEW_VARIABLES_EXPR, &alerts)?;
-    validate_expression(ALERT_TLS_DETAIL_FLOOD, EXPECTED_TLS_DETAIL_FLOOD_EXPR, &alerts)?;
-    validate_expression(ALERT_TLS_VARIABLES_FLOOD, EXPECTED_TLS_VARIABLES_FLOOD_EXPR, &alerts)?;
+    validate_expression(
+        ALERT_TLS_NEW_VARIABLES,
+        EXPECTED_TLS_NEW_VARIABLES_EXPR,
+        &alerts,
+    )?;
+    validate_expression(
+        ALERT_TLS_DETAIL_FLOOD,
+        EXPECTED_TLS_DETAIL_FLOOD_EXPR,
+        &alerts,
+    )?;
+    validate_expression(
+        ALERT_TLS_VARIABLES_FLOOD,
+        EXPECTED_TLS_VARIABLES_FLOOD_EXPR,
+        &alerts,
+    )?;
     validate_expression(ALERT_TLS_STALE, EXPECTED_TLS_STALE_EXPR, &alerts)?;
 
     let dataset = build_chain_health_dataset();
@@ -352,8 +375,16 @@ fn validate_dependency_registry_alerts_from_str(content: &str) -> Result<(), Val
 fn validate_treasury_alerts_from_str(content: &str) -> Result<(), ValidationError> {
     let alerts = extract_group_alerts(content, GROUP_TREASURY);
 
-    validate_expression(ALERT_TREASURY_SNAPSHOT, EXPECTED_TREASURY_SNAPSHOT_EXPR, &alerts)?;
-    validate_expression(ALERT_TREASURY_OVERDUE, EXPECTED_TREASURY_OVERDUE_EXPR, &alerts)?;
+    validate_expression(
+        ALERT_TREASURY_SNAPSHOT,
+        EXPECTED_TREASURY_SNAPSHOT_EXPR,
+        &alerts,
+    )?;
+    validate_expression(
+        ALERT_TREASURY_OVERDUE,
+        EXPECTED_TREASURY_OVERDUE_EXPR,
+        &alerts,
+    )?;
 
     let dataset = build_treasury_dataset();
 
@@ -395,7 +426,8 @@ fn validate_results(
     expected: &[&str],
     actual: BTreeSet<String>,
 ) -> Result<(), ValidationError> {
-    let expected_set: BTreeSet<String> = expected.iter().map(|value| (*value).to_string()).collect();
+    let expected_set: BTreeSet<String> =
+        expected.iter().map(|value| (*value).to_string()).collect();
     if actual != expected_set {
         return Err(ValidationError::UnexpectedAlertResult {
             alert,
@@ -507,10 +539,7 @@ fn evaluate_rent_spike(samples: &[RentSample], threshold: f64) -> BTreeSet<Strin
         .collect()
 }
 
-fn evaluate_payout_staleness(
-    samples: &[PayoutLastSeenSample],
-    threshold: f64,
-) -> BTreeSet<String> {
+fn evaluate_payout_staleness(samples: &[PayoutLastSeenSample], threshold: f64) -> BTreeSet<String> {
     samples
         .iter()
         .filter(|sample| sample.has_activity && sample.age_secs > threshold)
@@ -534,10 +563,7 @@ fn evaluate_tls_new_fingerprint(samples: &[TlsNewFingerprintSample]) -> BTreeSet
         .collect()
 }
 
-fn evaluate_tls_fingerprint_flood(
-    samples: &[TlsFloodSample],
-    threshold: u64,
-) -> BTreeSet<String> {
+fn evaluate_tls_fingerprint_flood(samples: &[TlsFloodSample], threshold: u64) -> BTreeSet<String> {
     samples
         .iter()
         .filter(|sample| sample.delta > threshold)
@@ -572,10 +598,7 @@ fn evaluate_dependency_violation(samples: &[DependencyViolationSample]) -> BTree
         .collect()
 }
 
-fn evaluate_treasury_threshold(
-    samples: &[TreasurySample],
-    threshold: f64,
-) -> BTreeSet<String> {
+fn evaluate_treasury_threshold(samples: &[TreasurySample], threshold: f64) -> BTreeSet<String> {
     samples
         .iter()
         .filter(|sample| sample.age_secs > threshold)
@@ -781,7 +804,7 @@ fn build_bridge_dataset() -> Vec<Series> {
         Series::new(
             "recovery-approvals-delta",
             METRIC_DELTA,
-            "result=failed,reason=quorum", 
+            "result=failed,reason=quorum",
             build_recovery_series(0.4, 18, 3.8, &[1.4, 0.7, 0.5, 0.4]),
         ),
         Series::new(
@@ -1048,7 +1071,12 @@ struct Series {
 }
 
 impl Series {
-    fn new(name: &'static str, metric: &'static str, labels: &'static str, values: Vec<f64>) -> Self {
+    fn new(
+        name: &'static str,
+        metric: &'static str,
+        labels: &'static str,
+        values: Vec<f64>,
+    ) -> Self {
         Self {
             name,
             metric,

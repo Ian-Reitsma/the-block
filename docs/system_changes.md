@@ -1,4 +1,23 @@
 # System-Wide Economic Changes
+> **Review (2025-12-14, afternoon):** The WAN chaos lab is now baked into the
+> simulation harness (`sim/src/chaos.rs`) and exposed via the `chaos_lab`
+> binary. Signed readiness attestations feed the metrics aggregator through
+> `/chaos/attest`, which verifies payloads and publishes `/chaos/status`,
+> `chaos_readiness{module,scenario}`, and `chaos_sla_breach_total`. Release
+> tooling wires the suite into `just chaos-suite` and `cargo xtask chaos` so
+> tags advance only after the chaos scenarios succeed. The aggregator also
+> introduces a dispatch-log guard so remediation tests manipulating
+> `TB_REMEDIATION_*` environments run sequentially, eliminating cross-test
+> races in CI. Grafana’s auto-generated dashboard adds a dedicated **Chaos** row
+> plotting readiness and five-minute breach deltas, the
+> `chaos_lab_attestations_flow_through_status` regression drives signed artefacts
+> through `/chaos/attest` to assert `/chaos/status` plus metric updates, fresh
+> negative coverage rejects tampered signatures before readiness gauges mutate,
+> and the gossip shard store plus peer metrics cache now degrade to in-memory
+> fallbacks (or skip persistence) rather than panicking when temporary
+> directories or system clocks misbehave. The DID simulator (`sim/did.rs`) now
+> builds documents via first-party JSON helpers so full workspace test runs avoid
+> the placeholder serde shim entirely.
 > **Review (2025-10-26, late morning):** Trust-line routing now prioritises
 > residual capacity before hop count. `find_best_path` promotes the path with the
 > widest minimum slack while still exposing a shortest-path fallback when hop

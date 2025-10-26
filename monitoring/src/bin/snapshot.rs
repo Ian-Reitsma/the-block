@@ -1,8 +1,8 @@
 use http_env::blocking_client;
 use httpd::{client::ClientError, Method, StatusCode};
 use monitoring_build::{
-    ensure_monitoring_recorder, install_monitoring_recorder, load_metrics_spec,
-    monitoring_metrics, parse_prometheus_snapshot, record_snapshot_error, record_snapshot_success,
+    ensure_monitoring_recorder, install_monitoring_recorder, load_metrics_spec, monitoring_metrics,
+    parse_prometheus_snapshot, record_snapshot_error, record_snapshot_success,
     render_html_snapshot, DashboardError, MetricSnapshot,
 };
 use std::env;

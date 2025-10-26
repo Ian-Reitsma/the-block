@@ -59,6 +59,50 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
 
+## Chaos attestations and readiness metrics
+
+The WAN chaos verifier now lives entirely inside the workspace:
+
+- `sim/src/chaos.rs` models overlay, storage, and compute scenarios with
+  deterministic recovery curves. The `chaos_lab` binary (`cargo run -p tb-sim
+  --bin chaos_lab`) drives the harness, exports CSV snapshots, and signs one
+  attestation per module using an Ed25519 key (automatically generated when
+  `TB_CHAOS_SIGNING_KEY` is absent).
+- `monitoring/src/chaos.rs` defines the attestation codecs and verification
+  helpers the aggregator consumes. Drafts clamp readiness/SLA scores into `[0,1]`
+  before hashing, and signed payloads record the scenario, module, readiness,
+  breach count, observation window, and verifying key fingerprint.
+- `metrics-aggregator` ingests the signed payloads through `/chaos/attest`,
+  persists the latest readiness snapshot per `(scenario,module)` pair, and
+  exposes `/chaos/status` for downstream tooling. Accepted payloads update the
+  new metrics `chaos_readiness{module,scenario}` and
+  `chaos_sla_breach_total`, letting dashboards display readiness over time and
+  count accumulated SLA breaches per scenario.
+- A dedicated regression (`chaos_attestation_round_trip`) posts the `chaos_lab`
+  output into `/chaos/attest`, verifies the `/chaos/status` response, and
+  exercises out-of-range, digest-mismatch, and signature-tampering paths so
+  invalid attestations never poison the readiness cache. A second end-to-end test
+  (`chaos_lab_attestations_flow_through_status`) drives the actual
+  `chaos_lab` artefacts through the HTTP handler using only first-party crates
+  (`tb-sim` as a dev-dependency), asserting the returned status payload and the
+  `chaos_readiness`/`chaos_sla_breach_total` updates plus signer digests.
+- CI wires the harness into `just chaos-suite` and `xtask chaos`, ensuring
+  release tags only advance once the chaos scenarios complete and emit the new
+  readiness metrics.
+
+The Grafana and HTML dashboards now include a dedicated **Chaos** row that
+charts `chaos_readiness{module,scenario}` and the five-minute delta of
+`chaos_sla_breach_total`. Automation runbooks continue to reference
+`/chaos/status` for human-readable snapshots. Signed attestation archives now
+live under `monitoring/output/chaos/` when operators supply
+`TB_CHAOS_ATTESTATIONS` during `make monitor`, keeping the historical artefacts
+inside first-party storage.
+
+When filesystem scratch space disappears mid-test, the gossip relay shard cache
+falls back to an in-memory store, and the peer metrics persistence layer skips
+flushes while logging clock rollback warnings. Operators still get readiness
+updates, but no panic escapes into CI or long-running chaos rehearsals.
+
 The dashboard generator now inserts a “Block Payouts” row ahead of the bridge
 section. Panels chart `sum by (role)(increase(explorer_block_payout_read_total[5m]))`
 and `sum by (role)(increase(explorer_block_payout_ad_total[5m]))`, rendering the
@@ -510,6 +554,35 @@ database path and injects secrets for TLS keys and auth tokens.
    `metrics_aggregator.auth_token` in `config.toml`.
 3. Verify ingestion by hitting `http://aggregator:9300/metrics` and
    looking for `aggregator_ingest_total`.
+
+#### Chaos readiness endpoints
+
+The aggregator now ingests signed chaos attestations produced by the simulation
+harness or live drills. Submit one or more `ChaosAttestation` payloads via
+`POST /chaos/attest`:
+
+```bash
+curl -X POST http://aggregator:9300/chaos/attest \
+  -H "content-type: application/json" \
+  -d @chaos_attestations.json
+```
+
+Payloads must include the module (`"overlay"`, `"storage"`, or `"compute"`),
+readiness and SLA thresholds (0.0–1.0), breach counts, observation window
+boundaries, and an Ed25519 signature over the normalized digest. Invalid
+signatures, digests, or out-of-range readiness values are rejected with
+`400` responses and diagnostic logs; successful submissions return `202` and
+update the following telemetry:
+
+- `chaos_readiness{module,scenario}` — latest readiness score per module.
+- `chaos_sla_breach_total` — cumulative SLA breaches recorded across attested
+  scenarios.
+
+Operators can retrieve the current readiness view via `GET /chaos/status`. The
+response is an array of `ChaosReadinessSnapshot` objects containing the latest
+scenario per module, normalized readiness figures, and signer metadata. These
+snapshots back the `/chaos/status` Grafana panel and power automation that gates
+releases on WAN chaos rehearsals.
 
 #### Troubleshooting
 

@@ -1,5 +1,27 @@
 # First-Party Dependency Migration Audit
 
+> **2025-12-14 update (WAN chaos attestations & aggregator gating):** The new
+> `ChaosHarness` lives entirely in `sim/src/chaos.rs` and signs readiness drafts
+> via the first-party `monitoring` crate—`monitoring/src/chaos.rs` defines the
+> codecs, digest, and Ed25519 verification helpers without leaning on serde or
+> external crypto. The metrics aggregator depends on `monitoring-build` to parse
+> `/chaos/attest` payloads, stores snapshots in the existing in-house store, and
+> publishes readiness gauges through the foundation metrics facade. CI invokes
+> `just chaos-suite` and `cargo xtask chaos`, both of which execute the
+> first-party `chaos_lab` binary; no third-party orchestration tooling or HTTP
+> clients were introduced. Aggregator remediation tests now share a
+> first-party dispatch-log guard so environment mutations run sequentially while
+> remaining entirely on `std::sync` primitives. The metrics aggregator pulls in
+> `tb-sim` as a dev-dependency solely for the new
+> `chaos_lab_attestations_flow_through_status` regression, keeping the end-to-end
+> verification loop first-party, and Grafana’s auto-generated dashboards continue
+> to render via `monitoring/build.rs` without outside tooling while adding the
+> dedicated **Chaos** row for readiness/breach panels. Follow-up negative
+> coverage (`chaos_attestation_rejects_invalid_signature`) tampers with payloads
+> using only first-party helpers, while the gossip relay and peer metrics cache
+> degrade to in-process fallbacks instead of panicking—no external temp-dir or
+> timing crates were pulled in to achieve the new resilience.
+
 > **2025-10-25 update (read-ack privacy proofs & collision-free reservations):**
 > Read acknowledgements now rely on the in-house `zkp` crate for readiness and
 > identity commitments. Gateway and node wiring derives signature-salted identity

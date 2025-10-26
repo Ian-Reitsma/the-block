@@ -9,8 +9,7 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_metrics = { path = "../crates/foundation_metrics" }
 http_env = { path = "../crates/http_env" }
 httpd = { path = "../crates/httpd" }
-
-[workspace]
+crypto_suite = { path = "../crates/crypto_suite" }
 
 [build-dependencies]
 foundation_serialization = { path = "../crates/foundation_serialization" }

@@ -846,6 +846,30 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - Telemetry handle acquisition now logs failures instead of panicking via the
     shared `telemetry_handle`/`with_metric_handle` helpers, keeping peer event
     processing alive while surfacing structured warnings for operators.
+    - Peer metrics persistence now tolerates clock skew and store init failures:
+      `node/src/net/peer_metrics_store.rs` falls back to empty snapshots when
+      sled can’t open the backing tree and emits structured warnings when the
+      system clock moves backwards instead of unwrapping poisoned state.
+  - WAN chaos scenarios run through the first-party `ChaosHarness`
+    (`sim/src/chaos.rs`) and `chaos_lab` binary, emitting signed readiness
+    attestations for overlay/storage/compute. The metrics aggregator verifies
+    `/chaos/attest` payloads, publishes `/chaos/status`, and exports
+    `chaos_readiness{module,scenario}` plus `chaos_sla_breach_total`; CI gates
+    releases via `just chaos-suite` and `cargo xtask chaos`.
+    - The `metrics-aggregator` integration suite now posts the `chaos_lab`
+      artefacts through `/chaos/attest` (`chaos_lab_attestations_flow_through_status`)
+      and asserts `/chaos/status`, gauge updates, and signer digests, closing the
+      loop between the simulation harness and the aggregator without third-party
+      dependencies. Grafana’s auto-generated dashboards (`monitoring/src/dashboard.rs`
+      → `monitoring/grafana/*.json`) gained a dedicated **Chaos** row charting
+      readiness and five-minute SLA breach deltas for operators.
+    - `sim/did.rs` now assembles DID documents through the first-party JSON helpers
+      (no `serde` derive) so the DID simulator runs cleanly during full workspace
+      test sweeps.
+    - The aggregator rejects forged signatures before mutating readiness gauges
+      (`chaos_attestation_rejects_invalid_signature`), and `node/src/gossip/relay.rs`
+      degrades to an in-memory shard cache when temporary directories cannot be
+      created, eliminating the last panic in the gossip relay path.
   - ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
@@ -858,7 +882,8 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Uptime-based fee rebates tracked in `node/src/net/uptime.rs` with `peer.rebate_status` RPC (`docs/fee_rebates.md`).
 
 **Gaps**
-- Large-scale WAN chaos experiments remain open; cross-provider failover drills still pending.
+- Cross-provider failover drills remain; extend the chaos harness with
+  mixed-provider overlays to finish WAN-scale validation.
 - Bootstrap peer churn analysis missing.
     - Overlay soak tests need long-lived fault injection, and the dependency registry now focuses on automating storage migration drills plus the upcoming dependency fault simulation harness to certify fallbacks.
 

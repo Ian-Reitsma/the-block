@@ -1,8 +1,6 @@
 use foundation_serialization::json::{self, Map, Value};
 use std::{collections::HashMap, fs, path::PathBuf};
 
-
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Metric {
@@ -14,10 +12,19 @@ pub struct Metric {
 
 #[derive(Debug)]
 pub enum DashboardError {
-    Io { path: PathBuf, source: std::io::Error },
-    Parse { path: PathBuf, source: foundation_serialization::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        source: foundation_serialization::Error,
+    },
     InvalidStructure(&'static str),
-    InvalidMetric { name: Option<String>, field: &'static str },
+    InvalidMetric {
+        name: Option<String>,
+        field: &'static str,
+    },
 }
 
 impl DashboardError {
@@ -39,12 +46,14 @@ impl std::fmt::Display for DashboardError {
                 write!(f, "failed to parse '{}': {}", path.display(), source)
             }
             DashboardError::InvalidStructure(msg) => f.write_str(msg),
-            DashboardError::InvalidMetric { name, field } => {
-                match name {
-                    Some(name) => write!(f, "invalid metric '{}': missing/invalid '{}' field", name, field),
-                    None => write!(f, "invalid metric entry: missing/invalid '{}' field", field),
-                }
-            }
+            DashboardError::InvalidMetric { name, field } => match name {
+                Some(name) => write!(
+                    f,
+                    "invalid metric '{}': missing/invalid '{}' field",
+                    name, field
+                ),
+                None => write!(f, "invalid metric entry: missing/invalid '{}' field", field),
+            },
         }
     }
 }
@@ -117,14 +126,14 @@ const TREASURY_AMOUNT_PANEL_TITLE: &str = "Treasury disbursement CT by status";
 const TREASURY_AMOUNT_EXPR: &str = "treasury_disbursement_amount_ct";
 const TREASURY_SNAPSHOT_AGE_PANEL_TITLE: &str = "Treasury snapshot age (seconds)";
 const TREASURY_SNAPSHOT_AGE_EXPR: &str = "treasury_disbursement_snapshot_age_seconds";
-const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str = "Oldest scheduled treasury disbursement age (seconds)";
+const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str =
+    "Oldest scheduled treasury disbursement age (seconds)";
 const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
 const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
 const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
 const PAYOUT_ROW_TITLE: &str = "Block Payouts";
 const PAYOUT_READ_PANEL_TITLE: &str = "Read subsidy payouts (5m delta)";
-const PAYOUT_READ_EXPR: &str =
-    "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
+const PAYOUT_READ_EXPR: &str = "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
 const PAYOUT_READ_LAST_SEEN_PANEL_TITLE: &str = "Read subsidy last seen (timestamp)";
 const PAYOUT_READ_LAST_SEEN_EXPR: &str =
     "max by (role)(explorer_block_payout_read_last_seen_timestamp)";
@@ -132,8 +141,7 @@ const PAYOUT_READ_STALENESS_PANEL_TITLE: &str = "Read subsidy staleness (seconds
 const PAYOUT_READ_STALENESS_EXPR: &str =
     "clamp_min(time() - max by (role)(explorer_block_payout_read_last_seen_timestamp), 0)";
 const PAYOUT_AD_PANEL_TITLE: &str = "Advertising payouts (5m delta)";
-const PAYOUT_AD_EXPR: &str =
-    "sum by (role)(increase(explorer_block_payout_ad_total[5m]))";
+const PAYOUT_AD_EXPR: &str = "sum by (role)(increase(explorer_block_payout_ad_total[5m]))";
 const PAYOUT_AD_LAST_SEEN_PANEL_TITLE: &str = "Advertising payout last seen (timestamp)";
 const PAYOUT_AD_LAST_SEEN_EXPR: &str =
     "max by (role)(explorer_block_payout_ad_last_seen_timestamp)";
@@ -143,7 +151,8 @@ const PAYOUT_AD_STALENESS_EXPR: &str =
 const PAYOUT_ROLE_LEGEND: &str = "{{role}}";
 const BRIDGE_REWARD_CLAIMS_PANEL_TITLE: &str = "bridge_reward_claims_total (5m delta)";
 const BRIDGE_REWARD_CLAIMS_EXPR: &str = "increase(bridge_reward_claims_total[5m])";
-const BRIDGE_REWARD_APPROVALS_PANEL_TITLE: &str = "bridge_reward_approvals_consumed_total (5m delta)";
+const BRIDGE_REWARD_APPROVALS_PANEL_TITLE: &str =
+    "bridge_reward_approvals_consumed_total (5m delta)";
 const BRIDGE_REWARD_APPROVALS_EXPR: &str = "increase(bridge_reward_approvals_consumed_total[5m])";
 const BRIDGE_SETTLEMENT_RESULTS_PANEL_TITLE: &str = "bridge_settlement_results_total (5m delta)";
 const BRIDGE_SETTLEMENT_RESULTS_EXPR: &str =
@@ -175,8 +184,7 @@ const BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE: &str =
 const BRIDGE_REMEDIATION_DISPATCH_EXPR: &str =
     "sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))";
 const BRIDGE_REMEDIATION_DISPATCH_LEGEND: &str = "{{action}} · {{target}} · {{status}}";
-const BRIDGE_REMEDIATION_ACK_PANEL_TITLE: &str =
-    "bridge_remediation_dispatch_ack_total (5m delta)";
+const BRIDGE_REMEDIATION_ACK_PANEL_TITLE: &str = "bridge_remediation_dispatch_ack_total (5m delta)";
 const BRIDGE_REMEDIATION_ACK_EXPR: &str =
     "sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))";
 const BRIDGE_REMEDIATION_ACK_LEGEND: &str = "{{action}} · {{target}} · {{state}}";
@@ -211,7 +219,12 @@ impl Metric {
         let unit = Self::string_field(map, "unit").unwrap_or_default();
         let deprecated = match map.get("deprecated") {
             Some(Value::Bool(flag)) => *flag,
-            Some(_) => return Err(DashboardError::invalid_metric(Some(name.clone()), "deprecated")),
+            Some(_) => {
+                return Err(DashboardError::invalid_metric(
+                    Some(name.clone()),
+                    "deprecated",
+                ))
+            }
             None => false,
         };
 
@@ -231,7 +244,10 @@ impl Metric {
     }
 }
 
-pub fn generate_dashboard(metrics_path: &str, overrides_path: Option<&str>) -> Result<Value, DashboardError> {
+pub fn generate_dashboard(
+    metrics_path: &str,
+    overrides_path: Option<&str>,
+) -> Result<Value, DashboardError> {
     let metrics = load_metrics_spec(metrics_path)?;
     let overrides = match overrides_path {
         Some(path) => Some(read_json(path)?),
@@ -685,7 +701,10 @@ fn build_bridge_delta_panel(title: &str, expr: &str, metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -742,7 +761,10 @@ fn build_grouped_delta_panel(
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -772,7 +794,10 @@ fn build_bridge_ack_latency_panel(metric: &Metric) -> Value {
         Value::from(BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE),
     );
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let quantiles = [(0.5, "p50"), (0.95, "p95")];
@@ -780,8 +805,7 @@ fn build_bridge_ack_latency_panel(metric: &Metric) -> Value {
     for (quantile, label) in quantiles {
         let expr = format!(
             "histogram_quantile({:.2}, sum by (le, playbook, state)(rate({}_bucket[5m])))",
-            quantile,
-            BRIDGE_REMEDIATION_ACK_LATENCY_METRIC
+            quantile, BRIDGE_REMEDIATION_ACK_LATENCY_METRIC
         );
         let mut target = Map::new();
         target.insert("expr".into(), Value::from(expr));
@@ -827,7 +851,10 @@ fn build_tls_panel(metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(TLS_PANEL_TITLE));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -862,7 +889,10 @@ fn build_dependency_status_panel(metric: &Metric) -> Value {
 
     let mut target = Map::new();
     target.insert("expr".into(), Value::from(DEP_STATUS_EXPR));
-    target.insert("legendFormat".into(), Value::from("{{status}} · {{detail}}"));
+    target.insert(
+        "legendFormat".into(),
+        Value::from("{{status}} · {{detail}}"),
+    );
     panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
 
     let mut legend = Map::new();
@@ -976,7 +1006,10 @@ fn build_treasury_status_panel(title: &str, expr: &str, metric: &Metric) -> Valu
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1003,7 +1036,10 @@ fn build_treasury_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Valu
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1030,7 +1066,10 @@ fn build_tls_last_seen_panel(metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(TLS_LAST_SEEN_PANEL_TITLE));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1057,7 +1096,10 @@ fn build_tls_freshness_panel(metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(TLS_FRESHNESS_PANEL_TITLE));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1096,7 +1138,10 @@ fn build_tls_hash_panel(title: &str, expr: &str, metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1127,7 +1172,10 @@ fn build_tls_fingerprint_delta_panel(title: &str, expr: &str, metric: &Metric) -
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1157,7 +1205,10 @@ fn build_tls_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {
     panel.insert("type".into(), Value::from("timeseries"));
     panel.insert("title".into(), Value::from(title));
     if !metric.description.is_empty() {
-        panel.insert("description".into(), Value::from(metric.description.clone()));
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
     }
 
     let mut target = Map::new();
@@ -1209,10 +1260,7 @@ fn parse_metric_value(value: &str) -> Option<MetricValue> {
     if let Ok(uint) = value.parse::<u64>() {
         return Some(MetricValue::Unsigned(uint));
     }
-    value
-        .parse::<f64>()
-        .ok()
-        .map(MetricValue::Float)
+    value.parse::<f64>().ok().map(MetricValue::Float)
 }
 
 /// Render the in-house HTML snapshot used by the telemetry dashboard helpers.
@@ -1500,7 +1548,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == PAYOUT_READ_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("read payout panel present");
@@ -1516,7 +1567,10 @@ mod tests {
             })
             .and_then(|target| target.as_object())
             .expect("read target object");
-        assert_eq!(read_target.get("expr"), Some(&Value::from(PAYOUT_READ_EXPR)));
+        assert_eq!(
+            read_target.get("expr"),
+            Some(&Value::from(PAYOUT_READ_EXPR))
+        );
         assert_eq!(
             read_target.get("legendFormat"),
             Some(&Value::from(PAYOUT_ROLE_LEGEND))
@@ -1539,7 +1593,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == PAYOUT_AD_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("advertising payout panel present");
@@ -1599,7 +1656,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == super::TLS_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("tls panel present");
@@ -1688,7 +1748,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == TREASURY_COUNT_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("treasury panel present");
@@ -1851,7 +1914,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REWARD_CLAIMS_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("claims panel present");
@@ -1877,7 +1943,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REMEDIATION_DISPATCH_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("dispatch panel present");
@@ -1903,7 +1972,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REMEDIATION_ACK_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("dispatch acknowledgement panel present");
@@ -1942,7 +2014,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REMEDIATION_ACK_LATENCY_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("ack latency panel present");
@@ -2035,7 +2110,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REMEDIATION_SPOOL_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("spool artifact panel present");
@@ -2069,7 +2147,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_METRIC_DELTA_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("delta panel present");
@@ -2113,7 +2194,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_LIQUIDITY_LOCKED_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("locked liquidity panel present");
@@ -2145,7 +2229,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_REMEDIATION_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("remediation panel present");
@@ -2177,7 +2264,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_ANOMALY_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("anomaly panel present");
@@ -2203,7 +2293,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_METRIC_RATE_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("rate panel present");
@@ -2247,7 +2340,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == BRIDGE_DISPUTE_OUTCOMES_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("dispute panel present");
@@ -2294,7 +2390,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == super::TLS_LAST_SEEN_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("last seen panel present");
@@ -2320,7 +2419,10 @@ mod tests {
                         .get("title")
                         .and_then(Value::as_str)
                         .map(|title| title == super::TLS_FRESHNESS_PANEL_TITLE)
-                        .unwrap_or(false) => Some(map),
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
                 _ => None,
             })
             .expect("freshness panel present");
@@ -2414,7 +2516,8 @@ mod tests {
 
     #[test]
     fn rejects_invalid_metric() {
-        let value = json::value_from_str(r#"{"metrics":[{"description":"missing name"}]}"#).unwrap();
+        let value =
+            json::value_from_str(r#"{"metrics":[{"description":"missing name"}]}"#).unwrap();
         let error = extract_metrics(&value).expect_err("missing name should fail");
         match error {
             DashboardError::InvalidMetric { field, .. } => assert_eq!(field, "name"),
@@ -2432,7 +2535,10 @@ scheduler_match_total_bucket{result="ok",le="0.5"} 1
 scheduler_match_total_sum 10
 "#;
         let parsed = parse_prometheus_snapshot(payload);
-        assert_eq!(parsed.get("dex_trades_total"), Some(&MetricValue::Integer(42)));
+        assert_eq!(
+            parsed.get("dex_trades_total"),
+            Some(&MetricValue::Integer(42))
+        );
         assert!(!parsed.contains_key("scheduler_match_total_bucket"));
         assert!(!parsed.contains_key("scheduler_match_total_sum"));
     }
@@ -2466,18 +2572,9 @@ scheduler_match_total_sum 10
 
     #[test]
     fn format_metric_value_trims_trailing_zeroes() {
-        assert_eq!(
-            format_metric_value(&MetricValue::Float(42.0)),
-            "42"
-        );
-        assert_eq!(
-            format_metric_value(&MetricValue::Float(3.140000)),
-            "3.14"
-        );
-        assert_eq!(
-            format_metric_value(&MetricValue::Float(0.0)),
-            "0"
-        );
+        assert_eq!(format_metric_value(&MetricValue::Float(42.0)), "42");
+        assert_eq!(format_metric_value(&MetricValue::Float(3.140000)), "3.14");
+        assert_eq!(format_metric_value(&MetricValue::Float(0.0)), "0");
         assert_eq!(
             format_metric_value(&MetricValue::Float(f64::INFINITY)),
             "inf"

@@ -136,7 +136,9 @@ net gossip-status
 This command calls the new `net.gossip_status` RPC and displays the TTL, cache
 occupancy, current fanout bounds, recent adaptive decisions, partition status,
 and persisted shard peer lists. Passing `--json` returns the raw JSON payload
-for automation.
+for automation. During testing the relay now falls back to an in-memory shard
+cache if temporary directories cannot be created, so diagnostics stay available
+even when CI agents run without writable scratch space.
 - `peer_reputation_decay` – rate at which reputation decays toward `1.0`
 
 See [`docs/networking.md`](networking.md) for peer database recovery and

@@ -83,7 +83,9 @@ pub fn install_monitoring_recorder() -> Result<(), RecorderInstallError> {
 
 /// Returns the current metrics snapshot if a recorder is installed.
 pub fn monitoring_metrics() -> Option<MonitoringMetrics> {
-    MONITORING_RECORDER.get().map(|recorder| recorder.snapshot())
+    MONITORING_RECORDER
+        .get()
+        .map(|recorder| recorder.snapshot())
 }
 
 /// Resets the monitoring counters. Primarily used from tests to obtain a clean

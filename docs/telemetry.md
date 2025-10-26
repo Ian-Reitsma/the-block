@@ -36,6 +36,10 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_handshake_fail_total{peer_id,reason}` records QUIC handshake errors
 - `peer_metrics_active` gauges the number of peers currently tracked
 - `peer_metrics_memory_bytes` approximates memory used by peer metrics
+  - Persistence now degrades gracefully: if sled cannot open the backing tree or
+    the system clock moves backwards, `node/src/net/peer_metrics_store.rs`
+    returns an empty snapshot and logs a warning rather than panicking, so metric
+    exports continue even when disks misbehave during chaos drills.
 - `overlay_backend_active{backend}` flips to 1 for the active overlay backend
   (stub or libp2p)
 - `overlay_peer_total{backend}` counts overlay peers currently tracked by the

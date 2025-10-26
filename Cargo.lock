@@ -555,12 +555,25 @@ dependencies = [
  "governance",
  "http_env",
  "httpd",
+ "monitoring-build",
  "rand",
  "runtime",
  "storage_engine",
  "sys",
+ "tb-sim",
  "the_block",
  "tls_warning",
+]
+
+[[package]]
+name = "monitoring-build"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_metrics",
+ "foundation_serialization",
+ "http_env",
+ "httpd",
 ]
 
 [[package]]
@@ -767,8 +780,10 @@ dependencies = [
  "foundation_lazy",
  "foundation_serde",
  "foundation_serialization",
+ "foundation_time",
  "ledger",
  "light-client",
+ "monitoring-build",
  "p2p_overlay",
  "rand",
  "runtime",
