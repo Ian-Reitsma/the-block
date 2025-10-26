@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 
@@ -69,15 +70,15 @@ impl TrustLedger {
                 break;
             }
             for ((a, b), line) in self.lines.iter() {
-                if a == &cur
-                    && line.authorized
-                    && line.limit >= (line.balance.abs() as u64 + amount)
-                    && !visited.contains(b)
-                {
-                    visited.insert(b.clone());
-                    prev.insert(b.clone(), cur.clone());
-                    q.push_back(b.clone());
+                if a != &cur || visited.contains(b) {
+                    continue;
                 }
+                if Self::edge_available(line, amount).is_none() {
+                    continue;
+                }
+                visited.insert(b.clone());
+                prev.insert(b.clone(), cur.clone());
+                q.push_back(b.clone());
             }
         }
         if !visited.contains(dst) {
@@ -104,14 +105,21 @@ impl TrustLedger {
         dst: &str,
         amount: u64,
     ) -> Option<(Vec<String>, Option<Vec<String>>)> {
-        let primary = self.dijkstra(src, dst, amount, &HashSet::new())?;
-        // exclude edges from primary and search for fallback
-        let mut excluded = HashSet::new();
-        for w in primary.windows(2) {
-            excluded.insert((w[0].clone(), w[1].clone()));
-        }
-        let fallback = self.dijkstra(src, dst, amount, &excluded);
-        Some((primary, fallback))
+        let shortest = self.dijkstra(src, dst, amount, &HashSet::new())?;
+        let slack_path = self
+            .max_slack_path(src, dst, amount)
+            .unwrap_or_else(|| shortest.clone());
+        let fallback = if slack_path != shortest {
+            Some(shortest)
+        } else {
+            let mut excluded = HashSet::new();
+            for window in slack_path.windows(2) {
+                excluded.insert((window[0].clone(), window[1].clone()));
+            }
+            let disjoint = self.dijkstra(src, dst, amount, &excluded);
+            disjoint.filter(|path| *path != slack_path)
+        };
+        Some((slack_path, fallback))
     }
 
     pub fn lines_iter(&self) -> impl Iterator<Item = (&(String, String), &TrustLine)> {
@@ -196,7 +204,7 @@ impl TrustLedger {
                 if a != &node || excluded.contains(&(a.clone(), b.clone())) {
                     continue;
                 }
-                if !line.authorized || line.limit < (line.balance.abs() as u64 + amount) {
+                if Self::edge_available(line, amount).is_none() {
                     continue;
                 }
                 let next = cost + 1;
@@ -225,5 +233,105 @@ impl TrustLedger {
         }
         path.reverse();
         Some(path)
+    }
+
+    fn max_slack_path(&self, src: &str, dst: &str, amount: u64) -> Option<Vec<String>> {
+        #[derive(Eq, PartialEq)]
+        struct SlackState {
+            slack: u64,
+            hops: usize,
+            node: String,
+        }
+
+        impl Ord for SlackState {
+            fn cmp(&self, other: &Self) -> Ordering {
+                match self.slack.cmp(&other.slack) {
+                    Ordering::Equal => other.hops.cmp(&self.hops),
+                    order => order,
+                }
+            }
+        }
+
+        impl PartialOrd for SlackState {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        let mut best: HashMap<String, (u64, usize)> = HashMap::new();
+        let mut prev: HashMap<String, String> = HashMap::new();
+        let mut heap = BinaryHeap::new();
+        heap.push(SlackState {
+            slack: u64::MAX,
+            hops: 0,
+            node: src.to_string(),
+        });
+        best.insert(src.to_string(), (u64::MAX, 0));
+
+        while let Some(SlackState { slack, hops, node }) = heap.pop() {
+            if node == dst {
+                break;
+            }
+            if let Some((best_slack, best_hops)) = best.get(&node).copied() {
+                if slack < best_slack || (slack == best_slack && hops > best_hops) {
+                    continue;
+                }
+            }
+            for ((a, b), line) in self.lines.iter() {
+                if a != &node {
+                    continue;
+                }
+                if let Some(edge_slack) = Self::edge_available(line, amount) {
+                    let candidate_slack = slack.min(edge_slack);
+                    let candidate_hops = hops + 1;
+                    let entry = best.get(b).copied().unwrap_or((0, usize::MAX));
+                    if candidate_slack > entry.0
+                        || (candidate_slack == entry.0 && candidate_hops < entry.1)
+                    {
+                        best.insert(b.clone(), (candidate_slack, candidate_hops));
+                        prev.insert(b.clone(), node.clone());
+                        heap.push(SlackState {
+                            slack: candidate_slack,
+                            hops: candidate_hops,
+                            node: b.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if !best.contains_key(dst) {
+            return None;
+        }
+        let mut path = Vec::new();
+        let mut cur = dst.to_string();
+        path.push(cur.clone());
+        while let Some(p) = prev.get(&cur) {
+            cur = p.clone();
+            path.push(cur.clone());
+            if &cur == src {
+                break;
+            }
+        }
+        path.reverse();
+        if path.first().map(|s| s.as_str()) != Some(src)
+            || path.last().map(|s| s.as_str()) != Some(dst)
+        {
+            return None;
+        }
+        Some(path)
+    }
+
+    fn edge_available(line: &TrustLine, amount: u64) -> Option<u64> {
+        if !line.authorized {
+            return None;
+        }
+        let balance_abs = line.balance.checked_abs()?;
+        let balance_abs = u64::try_from(balance_abs).ok()?;
+        let required = balance_abs.checked_add(amount)?;
+        if line.limit < required {
+            return None;
+        }
+        Some(line.limit - required)
     }
 }

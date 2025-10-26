@@ -1,4 +1,17 @@
 # Summary
+> **Review (2025-10-26, late morning):** Liquidity router coverage now exercises
+> multi-batch fairness, slack-aware trust routing, and hop-constrained fallbacks.
+> Integration tests prove challenged withdrawals never execute, excess DEX
+> intents roll deterministically into follow-up batches, and the router downgrades
+> to the shortest-path fallback when governance hop limits would reject the
+> slack-optimised route. The DEX documentation captures the new search heuristic
+> and test plan so operators understand why wider corridors may pre-emptively
+> win when they safeguard future capacity.
+> **Review (2025-11-07, morning):** Peer telemetry registration now routes
+> through shared helpers that log metric/label combinations when registration
+> fails instead of aborting the process. Networking keeps processing peer events
+> even when labels drift, and operators see structured warnings tagged with the
+> offending metric to chase down configuration issues without downtime.
 > **Review (2025-11-02, morning):** A deterministic, first-party liquidity router
 > now sequences DEX escrows, bridge withdrawals, and trust-line rebalances
 > through `node/src/liquidity/router.rs`. Governance configures batch size,

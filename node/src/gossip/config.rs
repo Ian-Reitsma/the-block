@@ -4,7 +4,7 @@ use foundation_serialization::Deserialize;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Runtime tunables for the gossip relay deduplication and fanout heuristics.
 #[derive(Clone, Deserialize, Debug)]
@@ -117,9 +117,9 @@ impl GossipConfig {
 
     /// Return the deduplication capacity as a [`NonZeroUsize`] for cache sizing.
     pub fn dedup_capacity(&self) -> NonZeroUsize {
-        NonZeroUsize::new(self.dedup_capacity).unwrap_or_else(|| {
-            NonZeroUsize::new(Self::default_dedup_capacity()).expect("non-zero capacity")
-        })
+        NonZeroUsize::new(self.dedup_capacity)
+            .or_else(|| NonZeroUsize::new(Self::default_dedup_capacity()))
+            .unwrap_or(NonZeroUsize::MIN)
     }
 }
 
@@ -144,6 +144,14 @@ impl Default for GossipConfig {
 static CURRENT: Lazy<RwLock<GossipConfig>> = Lazy::new(|| RwLock::new(GossipConfig::default()));
 static DIR: Lazy<RwLock<Option<String>>> = Lazy::new(|| RwLock::new(None));
 
+fn read_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockReadGuard<'a, T> {
+    lock.read().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn write_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockWriteGuard<'a, T> {
+    lock.write().unwrap_or_else(|poison| poison.into_inner())
+}
+
 fn config_path(dir: &str) -> PathBuf {
     Path::new(dir).join("gossip.toml")
 }
@@ -154,26 +162,26 @@ fn reload_from_dir(dir: Option<String>) {
         .and_then(|d| GossipConfig::load_from(&config_path(d)))
         .unwrap_or_default()
         .validate();
-    *CURRENT.write().unwrap() = cfg;
+    *write_lock(&*CURRENT) = cfg;
 }
 
 /// Persist the active configuration directory for future reloads and prime the
 /// current snapshot by reading `gossip.toml` if it exists.
 pub fn set_dir(dir: &str) {
     {
-        *DIR.write().unwrap() = Some(dir.to_string());
+        *write_lock(&*DIR) = Some(dir.to_string());
     }
     reload_from_dir(Some(dir.to_string()));
 }
 
 /// Snapshot the current gossip relay configuration.
 pub fn current() -> GossipConfig {
-    CURRENT.read().unwrap().clone()
+    read_lock(&*CURRENT).clone()
 }
 
 /// Reload configuration from disk using the last configured directory.
 pub fn reload() {
-    let dir = DIR.read().unwrap().clone();
+    let dir = read_lock(&*DIR).clone();
     reload_from_dir(dir);
 }
 

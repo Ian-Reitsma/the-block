@@ -53,6 +53,14 @@ RPC client.
 
 - Settlement-log and reward-accrual CLI commands now route through the first-party parser during tests, locking optional asset/relayer filters, cursor forwarding, and the default 50-row limit without clap stubs or serde_json helpers. The new `bridge_pending_dispute_persists_across_restart` regression keeps dispute persistence tests inside the sled-backed bridge crate, proving `pending_withdrawals` and `bridge.dispute_audit` retain challenged entries after a reopen. Monitoring gained `dashboards_include_bridge_remediation_legends_and_tooltips`, which inspects every generated Grafana JSON to ensure remediation panels keep their legends and descriptions first party—no external dashboard validators required.
 
+## Recent progress (2025-10-26)
+
+- Liquidity router coverage expanded entirely inside the node crate—multi-batch
+  fairness, hop-limited trust fallbacks, and challenged withdrawal handling all
+  run through in-process integration tests without introducing new RPC surfaces
+  or external harnesses. Documentation updates reflect the slack-aware routing
+  logic so downstream RPC contracts remain unchanged.
+
 ## Recent progress (2025-11-01)
 
 - Bridge audit tooling stays fully first party: `bridge_dispute_audit_parser_defaults_limit_and_cursor` runs the command builder

@@ -55,6 +55,43 @@ use super::{ban_store, peer_metrics_store};
 #[cfg(feature = "quic")]
 use super::{record_peer_certificate, verify_peer_fingerprint};
 
+#[cfg(feature = "telemetry")]
+fn telemetry_handle<T, F>(metric: &'static str, labels: &[&str], fetch: F) -> Option<T>
+where
+    F: FnOnce() -> runtime::telemetry::Result<T>,
+{
+    match fetch() {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            let label_snapshot: Vec<String> =
+                labels.iter().map(|label| (*label).to_string()).collect();
+            diagnostics::tracing::warn!(
+                target: "telemetry",
+                %metric,
+                labels = ?label_snapshot,
+                %err,
+                "failed to obtain telemetry handle"
+            );
+            None
+        }
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn with_metric_handle<T, Fetch, Action>(
+    metric: &'static str,
+    labels: &[&str],
+    fetch: Fetch,
+    action: Action,
+) where
+    Fetch: FnOnce() -> runtime::telemetry::Result<T>,
+    Action: FnOnce(T),
+{
+    if let Some(handle) = telemetry_handle(metric, labels, fetch) {
+        action(handle);
+    }
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -331,19 +368,22 @@ impl PeerSet {
             }
             let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
             entry.banned_until = Some(until);
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_else(|e| panic!("time error: {e}"))
-                .as_secs()
-                + *P2P_BAN_SECS as u64;
+            let ts = now_secs() + *P2P_BAN_SECS as u64;
             ban_store_guard().ban(pk, ts);
             #[cfg(feature = "telemetry")]
             {
                 let id = overlay_peer_label(pk);
-                crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
-                    .ensure_handle_for_label_values(&[id.as_str()])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                let label = id.as_str();
+                let labels = [label];
+                with_metric_handle(
+                    "p2p_request_limit_hits_total",
+                    &labels,
+                    || {
+                        crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                    },
+                    |counter| counter.inc(),
+                );
             }
             return Err(PeerErrorCode::RateLimit);
         }
@@ -387,19 +427,22 @@ impl PeerSet {
         }
         let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
         entry.banned_until = Some(until);
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|e| panic!("time error: {e}"))
-            .as_secs()
-            + *P2P_BAN_SECS as u64;
+        let ts = now_secs() + *P2P_BAN_SECS as u64;
         ban_store_guard().ban(pk, ts);
         #[cfg(feature = "telemetry")]
         {
             let id = overlay_peer_label(pk);
-            crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let label = id.as_str();
+            let labels = [label];
+            with_metric_handle(
+                "p2p_request_limit_hits_total",
+                &labels,
+                || {
+                    crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
+                        .ensure_handle_for_label_values(&labels)
+                },
+                |counter| counter.inc(),
+            );
         }
         Err(PeerErrorCode::RateLimit)
     }
@@ -460,10 +503,16 @@ impl PeerSet {
             if let Some(_m) = peer_stats(&peer_key) {
                 #[cfg(feature = "telemetry")]
                 if let Some(reason) = _m.throttle_reason.as_deref() {
-                    crate::telemetry::PEER_BACKPRESSURE_DROPPED_TOTAL
-                        .ensure_handle_for_label_values(&[reason])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                    let labels = [reason];
+                    with_metric_handle(
+                        "peer_backpressure_dropped_total",
+                        &labels,
+                        || {
+                            crate::telemetry::PEER_BACKPRESSURE_DROPPED_TOTAL
+                                .ensure_handle_for_label_values(&labels)
+                        },
+                        |counter| counter.inc(),
+                    );
                 }
             }
             record_drop(&peer_key, DropReason::TooBusy);
@@ -494,14 +543,25 @@ impl PeerSet {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
                     #[cfg(feature = "telemetry")]
                     {
-                        crate::telemetry::PEER_REJECTED_TOTAL
-                            .ensure_handle_for_label_values(&["protocol"])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc();
-                        crate::telemetry::HANDSHAKE_FAIL_TOTAL
-                            .ensure_handle_for_label_values(&["protocol"])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc();
+                        let labels = ["protocol"];
+                        with_metric_handle(
+                            "peer_rejected_total",
+                            &labels,
+                            || {
+                                crate::telemetry::PEER_REJECTED_TOTAL
+                                    .ensure_handle_for_label_values(&labels)
+                            },
+                            |counter| counter.inc(),
+                        );
+                        with_metric_handle(
+                            "handshake_fail_total",
+                            &labels,
+                            || {
+                                crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                    .ensure_handle_for_label_values(&labels)
+                            },
+                            |counter| counter.inc(),
+                        );
                     }
                     record_handshake_fail(&peer_key, HandshakeError::Version);
                     return;
@@ -512,10 +572,16 @@ impl PeerSet {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     #[cfg(feature = "telemetry")]
                     {
-                        crate::telemetry::HANDSHAKE_FAIL_TOTAL
-                            .ensure_handle_for_label_values(&["feature"])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc();
+                        let labels = ["feature"];
+                        with_metric_handle(
+                            "handshake_fail_total",
+                            &labels,
+                            || {
+                                crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                    .ensure_handle_for_label_values(&labels)
+                            },
+                            |counter| counter.inc(),
+                        );
                     }
                     record_handshake_fail(&peer_key, HandshakeError::Other);
                     return;
@@ -531,10 +597,16 @@ impl PeerSet {
                         telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                         #[cfg(feature = "telemetry")]
                         {
-                            crate::telemetry::HANDSHAKE_FAIL_TOTAL
-                                .ensure_handle_for_label_values(&["certificate"])
-                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                                .inc();
+                            let labels = ["certificate"];
+                            with_metric_handle(
+                                "handshake_fail_total",
+                                &labels,
+                                || {
+                                    crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                        .ensure_handle_for_label_values(&labels)
+                                },
+                                |counter| counter.inc(),
+                            );
                         }
                         record_handshake_fail(&peer_key, HandshakeError::Certificate);
                         return;
@@ -655,14 +727,17 @@ impl PeerSet {
                         );
                         #[cfg(feature = "telemetry")]
                         {
-                            crate::telemetry::REPUTATION_GOSSIP_TOTAL
-                                .ensure_handle_for_label_values(&[if _applied {
-                                    "applied"
-                                } else {
-                                    "ignored"
-                                }])
-                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                                .inc();
+                            let label = if _applied { "applied" } else { "ignored" };
+                            let labels = [label];
+                            with_metric_handle(
+                                "reputation_gossip_total",
+                                &labels,
+                                || {
+                                    crate::telemetry::REPUTATION_GOSSIP_TOTAL
+                                        .ensure_handle_for_label_values(&labels)
+                                },
+                                |counter| counter.inc(),
+                            );
                             let latency = now_secs().saturating_sub(e.epoch) as f64;
                             crate::telemetry::REPUTATION_GOSSIP_LATENCY_SECONDS.observe(latency);
                             if !_applied {
@@ -850,10 +925,13 @@ impl PeerErrorCode {
 fn telemetry_peer_error(code: PeerErrorCode) {
     #[cfg(feature = "telemetry")]
     {
-        crate::telemetry::PEER_ERROR_TOTAL
-            .ensure_handle_for_label_values(&[code.as_str()])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc();
+        let labels = [code.as_str()];
+        with_metric_handle(
+            "peer_error_total",
+            &labels,
+            || crate::telemetry::PEER_ERROR_TOTAL.ensure_handle_for_label_values(&labels),
+            |counter| counter.inc(),
+        );
     }
     #[cfg(not(feature = "telemetry"))]
     let _ = code;
@@ -895,14 +973,25 @@ fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u
             entry.backoff_level = entry.backoff_level.saturating_add(1);
             #[cfg(feature = "telemetry")]
             {
-                crate::telemetry::PEER_THROTTLE_TOTAL
-                    .ensure_handle_for_label_values(&[r])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
-                crate::telemetry::PEER_BACKPRESSURE_ACTIVE_TOTAL
-                    .ensure_handle_for_label_values(&[r])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                let labels = [r];
+                with_metric_handle(
+                    "peer_throttle_total",
+                    &labels,
+                    || {
+                        crate::telemetry::PEER_THROTTLE_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                    },
+                    |counter| counter.inc(),
+                );
+                with_metric_handle(
+                    "peer_backpressure_active_total",
+                    &labels,
+                    || {
+                        crate::telemetry::PEER_BACKPRESSURE_ACTIVE_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                    },
+                    |counter| counter.inc(),
+                );
                 if crate::telemetry::should_log("p2p") {
                     let id = overlay_peer_label(pk);
                     diagnostics::tracing::warn!(
@@ -946,10 +1035,18 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
                     let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                     if sample <= 1 || sends % sample == 0 {
                         let id = overlay_peer_label(&pk);
-                        crate::telemetry::PEER_BYTES_SENT_TOTAL
-                            .ensure_handle_for_label_values(&[id.as_str()])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc_by(bytes as u64 * sample as u64);
+                        let label = id.as_str();
+                        let labels = [label];
+                        let delta = bytes as u64 * sample as u64;
+                        with_metric_handle(
+                            "peer_bytes_sent_total",
+                            &labels,
+                            || {
+                                crate::telemetry::PEER_BYTES_SENT_TOTAL
+                                    .ensure_handle_for_label_values(&labels)
+                            },
+                            |counter| counter.inc_by(delta),
+                        );
                     }
                 }
             }
@@ -983,10 +1080,18 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
                     let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                     if sample <= 1 || sends % sample == 0 {
                         let id = overlay_peer_label(&pk);
-                        crate::telemetry::PEER_BYTES_SENT_TOTAL
-                            .ensure_handle_for_label_values(&[id.as_str()])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc_by(bytes as u64 * sample as u64);
+                        let label = id.as_str();
+                        let labels = [label];
+                        let delta = bytes as u64 * sample as u64;
+                        with_metric_handle(
+                            "peer_bytes_sent_total",
+                            &labels,
+                            || {
+                                crate::telemetry::PEER_BYTES_SENT_TOTAL
+                                    .ensure_handle_for_label_values(&labels)
+                            },
+                            |counter| counter.inc_by(delta),
+                        );
                     }
                 }
             }
@@ -1017,10 +1122,17 @@ pub fn record_request(pk: &[u8; 32]) {
                 let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                 if sample <= 1 || reqs % sample == 0 {
                     let id = overlay_peer_label(pk);
-                    crate::telemetry::PEER_REQUEST_TOTAL
-                        .ensure_handle_for_label_values(&[id.as_str()])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc_by(sample as u64);
+                    let label = id.as_str();
+                    let labels = [label];
+                    with_metric_handle(
+                        "peer_request_total",
+                        &labels,
+                        || {
+                            crate::telemetry::PEER_REQUEST_TOTAL
+                                .ensure_handle_for_label_values(&labels)
+                        },
+                        |counter| counter.inc_by(sample as u64),
+                    );
                 }
             }
         }
@@ -1056,10 +1168,17 @@ pub fn record_request(pk: &[u8; 32]) {
                 let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                 if sample <= 1 || reqs % sample == 0 {
                     let id = overlay_peer_label(pk);
-                    crate::telemetry::PEER_REQUEST_TOTAL
-                        .ensure_handle_for_label_values(&[id.as_str()])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc_by(sample as u64);
+                    let label = id.as_str();
+                    let labels = [label];
+                    with_metric_handle(
+                        "peer_request_total",
+                        &labels,
+                        || {
+                            crate::telemetry::PEER_REQUEST_TOTAL
+                                .ensure_handle_for_label_values(&labels)
+                        },
+                        |counter| counter.inc_by(sample as u64),
+                    );
                 }
             }
         }
@@ -1120,10 +1239,15 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = overlay_peer_label(pk);
-            crate::telemetry::PEER_DROP_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str(), reason.as_ref()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let label_peer = id.as_str();
+            let reason_label = reason.as_ref();
+            let labels = [label_peer, reason_label];
+            with_metric_handle(
+                "peer_drop_total",
+                &labels,
+                || crate::telemetry::PEER_DROP_TOTAL.ensure_handle_for_label_values(&labels),
+                |counter| counter.inc(),
+            );
         }
     }
     #[cfg(feature = "quic")]
@@ -1176,19 +1300,39 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = overlay_peer_label(pk);
-            crate::telemetry::PEER_HANDSHAKE_FAIL_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str(), reason.as_str()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
-            crate::telemetry::HANDSHAKE_FAIL_TOTAL
-                .ensure_handle_for_label_values(&[reason.as_str()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let peer_label = id.as_str();
+            let reason_label = reason.as_str();
+            let peer_labels = [peer_label, reason_label];
+            with_metric_handle(
+                "peer_handshake_fail_total",
+                &peer_labels,
+                || {
+                    crate::telemetry::PEER_HANDSHAKE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&peer_labels)
+                },
+                |counter| counter.inc(),
+            );
+            let reason_only = [reason_label];
+            with_metric_handle(
+                "handshake_fail_total",
+                &reason_only,
+                || {
+                    crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&reason_only)
+                },
+                |counter| counter.inc(),
+            );
             if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
-                crate::telemetry::PEER_TLS_ERROR_TOTAL
-                    .ensure_handle_for_label_values(&[id.as_str()])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                let tls_labels = [peer_label];
+                with_metric_handle(
+                    "peer_tls_error_total",
+                    &tls_labels,
+                    || {
+                        crate::telemetry::PEER_TLS_ERROR_TOTAL
+                            .ensure_handle_for_label_values(&tls_labels)
+                    },
+                    |counter| counter.inc(),
+                );
             }
         }
     }
@@ -1221,10 +1365,16 @@ fn record_handshake_success(pk: &[u8; 32]) {
     #[cfg(feature = "telemetry")]
     if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
         let id = overlay_peer_label(pk);
-        crate::telemetry::PEER_HANDSHAKE_SUCCESS_TOTAL
-            .ensure_handle_for_label_values(&[id.as_str()])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc();
+        let labels = [id.as_str()];
+        with_metric_handle(
+            "peer_handshake_success_total",
+            &labels,
+            || {
+                crate::telemetry::PEER_HANDSHAKE_SUCCESS_TOTAL
+                    .ensure_handle_for_label_values(&labels)
+            },
+            |counter| counter.inc(),
+        );
     }
 }
 
@@ -1293,10 +1443,13 @@ fn update_reputation_metric(pk: &[u8; 32], score: f64) {
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = overlay_peer_label(pk);
-            crate::telemetry::PEER_REPUTATION_SCORE
-                .ensure_handle_for_label_values(&[id.as_str()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .set(score);
+            let labels = [id.as_str()];
+            with_metric_handle(
+                "peer_reputation_score",
+                &labels,
+                || crate::telemetry::PEER_REPUTATION_SCORE.ensure_handle_for_label_values(&labels),
+                |gauge| gauge.set(score),
+            );
         }
     }
     #[cfg(not(feature = "telemetry"))]
@@ -1314,10 +1467,16 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
                 remove_peer_metrics(pk);
                 update_reputation_metric(pk, 1.0);
                 let id = overlay_peer_label(pk);
-                crate::telemetry::PEER_STATS_RESET_TOTAL
-                    .ensure_handle_for_label_values(&[id.as_str()])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                let labels = [id.as_str()];
+                with_metric_handle(
+                    "peer_stats_reset_total",
+                    &labels,
+                    || {
+                        crate::telemetry::PEER_STATS_RESET_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                    },
+                    |counter| counter.inc(),
+                );
                 if crate::telemetry::should_log("p2p") {
                     diagnostics::tracing::info!(peer = id.as_str(), "reset_peer_metrics");
                 }
@@ -1347,25 +1506,47 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
         {
             let path = KEY_HISTORY_PATH.guard().clone();
             if let Some(parent) = std::path::Path::new(&path).parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if let Err(err) = std::fs::create_dir_all(parent) {
+                    diagnostics::tracing::warn!(
+                        path = %parent.display(),
+                        %err,
+                        "failed to create key history directory"
+                    );
+                }
             }
-            let mut file = std::fs::OpenOptions::new()
+            match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&path)
-                .unwrap();
-            let mut entry = Map::new();
-            entry.insert(
-                "old".to_owned(),
-                Value::String(crypto_suite::hex::encode(old)),
-            );
-            entry.insert(
-                "new".to_owned(),
-                Value::String(crypto_suite::hex::encode(new)),
-            );
-            entry.insert("ts".to_owned(), Value::from(now_secs()));
-            let value = Value::Object(entry);
-            let _ = writeln!(file, "{}", json::to_string_value(&value));
+            {
+                Ok(mut file) => {
+                    let mut entry = Map::new();
+                    entry.insert(
+                        "old".to_owned(),
+                        Value::String(crypto_suite::hex::encode(old)),
+                    );
+                    entry.insert(
+                        "new".to_owned(),
+                        Value::String(crypto_suite::hex::encode(new)),
+                    );
+                    entry.insert("ts".to_owned(), Value::from(now_secs()));
+                    let value = Value::Object(entry);
+                    if let Err(err) = writeln!(file, "{}", json::to_string_value(&value)) {
+                        diagnostics::tracing::warn!(
+                            path = %path,
+                            %err,
+                            "failed to append key history entry"
+                        );
+                    }
+                }
+                Err(err) => {
+                    diagnostics::tracing::warn!(
+                        path = %path,
+                        %err,
+                        "failed to open key history log"
+                    );
+                }
+            }
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
         ROTATED_KEYS.guard().insert(*old, (new, revoke));
@@ -1391,10 +1572,13 @@ pub fn peer_stats(pk: &[u8; 32]) -> Option<PeerMetrics> {
     #[cfg(feature = "telemetry")]
     if res.is_some() && EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
         let id = overlay_peer_label(pk);
-        crate::telemetry::PEER_STATS_QUERY_TOTAL
-            .ensure_handle_for_label_values(&[id.as_str()])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc();
+        let labels = [id.as_str()];
+        with_metric_handle(
+            "peer_stats_query_total",
+            &labels,
+            || crate::telemetry::PEER_STATS_QUERY_TOTAL.ensure_handle_for_label_values(&labels),
+            |counter| counter.inc(),
+        );
     }
     res
 }
@@ -1481,10 +1665,16 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let label = if res.is_ok() { "ok" } else { "error" };
-            crate::telemetry::PEER_STATS_EXPORT_TOTAL
-                .ensure_handle_for_label_values(&[label])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let labels = [label];
+            with_metric_handle(
+                "peer_stats_export_total",
+                &labels,
+                || {
+                    crate::telemetry::PEER_STATS_EXPORT_TOTAL
+                        .ensure_handle_for_label_values(&labels)
+                },
+                |counter| counter.inc(),
+            );
         }
     }
 
@@ -1635,24 +1825,36 @@ pub fn export_all_peer_stats(
             if let Err(err) = validate_metrics_archive(&path) {
                 #[cfg(feature = "telemetry")]
                 {
-                    crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
-                        .ensure_handle_for_label_values(&["error"])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                    let labels = ["error"];
+                    with_metric_handle(
+                        "peer_stats_export_validate_total",
+                        &labels,
+                        || {
+                            crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
+                                .ensure_handle_for_label_values(&labels)
+                        },
+                        |counter| counter.inc(),
+                    );
                     diagnostics::tracing::warn!(
                         path = %path.display(),
                         error = ?err,
-                        "peer metrics archive validation failed"
+                        "peer metrics archive validation failed",
                     );
                 }
                 return Err(err);
             }
             #[cfg(feature = "telemetry")]
             {
-                crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
-                    .ensure_handle_for_label_values(&["ok"])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                let labels = ["ok"];
+                with_metric_handle(
+                    "peer_stats_export_validate_total",
+                    &labels,
+                    || {
+                        crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                    },
+                    |counter| counter.inc(),
+                );
             }
             Ok(overwritten)
         } else {
@@ -1739,10 +1941,16 @@ pub fn export_all_peer_stats(
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let label = if res.is_ok() { "ok" } else { "error" };
-            crate::telemetry::PEER_STATS_EXPORT_ALL_TOTAL
-                .ensure_handle_for_label_values(&[label])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let labels = [label];
+            with_metric_handle(
+                "peer_stats_export_all_total",
+                &labels,
+                || {
+                    crate::telemetry::PEER_STATS_EXPORT_ALL_TOTAL
+                        .ensure_handle_for_label_values(&labels)
+                },
+                |counter| counter.inc(),
+            );
         }
     }
 
@@ -1828,10 +2036,14 @@ pub fn record_ip_drop(ip: &SocketAddr) {
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = ip.to_string();
-            crate::telemetry::PEER_DROP_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str(), DropReason::Duplicate.as_ref()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            let peer_label = id.as_str();
+            let labels = [peer_label, DropReason::Duplicate.as_ref()];
+            with_metric_handle(
+                "peer_drop_total",
+                &labels,
+                || crate::telemetry::PEER_DROP_TOTAL.ensure_handle_for_label_values(&labels),
+                |counter| counter.inc(),
+            );
         }
     }
     #[cfg(test)]
@@ -2063,10 +2275,8 @@ static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    Mutex::new(SimpleDb::open_named(
-        names::NET_PEER_CHUNKS,
-        path.to_str().unwrap(),
-    ))
+    let path_string = path.to_string_lossy().into_owned();
+    Mutex::new(SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string))
 });
 
 fn persist_peers(set: &HashSet<SocketAddr>) {
@@ -2324,7 +2534,16 @@ impl AggregatorClient {
 
     #[cfg(feature = "telemetry")]
     async fn telemetry_summary(&self, summary: crate::telemetry::summary::TelemetrySummary) {
-        let body = json::to_value(summary).unwrap();
+        let body = match json::to_value(summary) {
+            Ok(value) => value,
+            Err(err) => {
+                diagnostics::tracing::warn!(
+                    %err,
+                    "failed to encode telemetry summary for aggregator"
+                );
+                Value::Null
+            }
+        };
         self.post("telemetry", body).await;
     }
 
@@ -2601,14 +2820,22 @@ pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
     entry.backoff_level = entry.backoff_level.saturating_add(1);
     #[cfg(feature = "telemetry")]
     {
-        crate::telemetry::PEER_THROTTLE_TOTAL
-            .ensure_handle_for_label_values(&[reason])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc();
-        crate::telemetry::PEER_BACKPRESSURE_ACTIVE_TOTAL
-            .ensure_handle_for_label_values(&[reason])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc();
+        let labels = [reason];
+        with_metric_handle(
+            "peer_throttle_total",
+            &labels,
+            || crate::telemetry::PEER_THROTTLE_TOTAL.ensure_handle_for_label_values(&labels),
+            |counter| counter.inc(),
+        );
+        with_metric_handle(
+            "peer_backpressure_active_total",
+            &labels,
+            || {
+                crate::telemetry::PEER_BACKPRESSURE_ACTIVE_TOTAL
+                    .ensure_handle_for_label_values(&labels)
+            },
+            |counter| counter.inc(),
+        );
         if crate::telemetry::should_log("p2p") {
             let id = overlay_peer_label(pk);
             diagnostics::tracing::warn!(
@@ -2718,25 +2945,40 @@ fn evict_lru(map: &mut OrderedMap<[u8; 32], PeerMetrics>) -> Option<[u8; 32]> {
 fn register_peer_metrics(pk: &[u8; 32], m: &PeerMetrics) {
     if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
         let id = overlay_peer_label(pk);
-        crate::telemetry::PEER_REQUEST_TOTAL
-            .ensure_handle_for_label_values(&[id.as_str()])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc_by(m.requests);
-        crate::telemetry::PEER_BYTES_SENT_TOTAL
-            .ensure_handle_for_label_values(&[id.as_str()])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .inc_by(m.bytes_sent);
+        let label = id.as_str();
+        let labels = [label];
+        with_metric_handle(
+            "peer_request_total",
+            &labels,
+            || crate::telemetry::PEER_REQUEST_TOTAL.ensure_handle_for_label_values(&labels),
+            |counter| counter.inc_by(m.requests),
+        );
+        with_metric_handle(
+            "peer_bytes_sent_total",
+            &labels,
+            || crate::telemetry::PEER_BYTES_SENT_TOTAL.ensure_handle_for_label_values(&labels),
+            |counter| counter.inc_by(m.bytes_sent),
+        );
         for (r, c) in &m.drops {
-            crate::telemetry::PEER_DROP_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str(), r.as_ref()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc_by(*c);
+            let drop_labels = [label, r.as_ref()];
+            with_metric_handle(
+                "peer_drop_total",
+                &drop_labels,
+                || crate::telemetry::PEER_DROP_TOTAL.ensure_handle_for_label_values(&drop_labels),
+                |counter| counter.inc_by(*c),
+            );
         }
         for (r, c) in &m.handshake_fail {
-            crate::telemetry::PEER_HANDSHAKE_FAIL_TOTAL
-                .ensure_handle_for_label_values(&[id.as_str(), r.as_str()])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc_by(*c);
+            let handshake_labels = [label, r.as_str()];
+            with_metric_handle(
+                "peer_handshake_fail_total",
+                &handshake_labels,
+                || {
+                    crate::telemetry::PEER_HANDSHAKE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&handshake_labels)
+                },
+                |counter| counter.inc_by(*c),
+            );
         }
         update_reputation_metric(pk, m.reputation.score);
     }

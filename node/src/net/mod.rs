@@ -82,7 +82,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::Duration;
 use sys::paths;
@@ -135,6 +135,18 @@ static OVERLAY_SERVICE: Lazy<RwLock<DynOverlayService>> = Lazy::new(|| {
     RwLock::new(build_inhouse_overlay(path))
 });
 
+fn read_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockReadGuard<'a, T> {
+    lock.read().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn write_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockWriteGuard<'a, T> {
+    lock.write().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn lock_mutex<'a, T>(mutex: &'a Mutex<T>) -> MutexGuard<'a, T> {
+    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
 #[cfg(feature = "telemetry")]
 const OVERLAY_BACKENDS: [&str; 2] = ["inhouse", "stub"];
 
@@ -144,61 +156,99 @@ fn overlay_metric_value(value: usize) -> i64 {
 }
 
 #[cfg(feature = "telemetry")]
+fn with_metric_handle<T, E, F, const N: usize>(
+    metric: &str,
+    labels: [&str; N],
+    result: Result<T, E>,
+    apply: F,
+) where
+    F: FnOnce(T),
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(handle) => apply(handle),
+        Err(err) => diagnostics::log::warn!(
+            "metric_label_registration_failed: metric={metric} labels={labels:?} err={err}"
+        ),
+    }
+}
+
+#[cfg(feature = "telemetry")]
 fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
     let active = overlay_metric_value(snapshot.active_peers);
     let persisted = overlay_metric_value(snapshot.persisted_peers);
 
     for backend in OVERLAY_BACKENDS {
         let is_active = if backend == snapshot.label { 1 } else { 0 };
-        OVERLAY_BACKEND_ACTIVE
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(is_active);
-        OVERLAY_PEER_TOTAL
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(if backend == snapshot.label { active } else { 0 });
-        OVERLAY_PEER_PERSISTED_TOTAL
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(if backend == snapshot.label {
-                persisted
-            } else {
-                0
-            });
+        with_metric_handle(
+            "overlay_backend_active",
+            [backend],
+            OVERLAY_BACKEND_ACTIVE.ensure_handle_for_label_values(&[backend]),
+            |handle| handle.set(is_active),
+        );
+        with_metric_handle(
+            "overlay_peer_total",
+            [backend],
+            OVERLAY_PEER_TOTAL.ensure_handle_for_label_values(&[backend]),
+            |handle| handle.set(if backend == snapshot.label { active } else { 0 }),
+        );
+        with_metric_handle(
+            "overlay_peer_persisted_total",
+            [backend],
+            OVERLAY_PEER_PERSISTED_TOTAL.ensure_handle_for_label_values(&[backend]),
+            |handle| {
+                handle.set(if backend == snapshot.label {
+                    persisted
+                } else {
+                    0
+                })
+            },
+        );
     }
 
     if !OVERLAY_BACKENDS.contains(&snapshot.label) {
-        OVERLAY_BACKEND_ACTIVE
-            .ensure_handle_for_label_values(&[snapshot.label])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(1);
-        OVERLAY_PEER_TOTAL
-            .ensure_handle_for_label_values(&[snapshot.label])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(active);
-        OVERLAY_PEER_PERSISTED_TOTAL
-            .ensure_handle_for_label_values(&[snapshot.label])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(persisted);
+        with_metric_handle(
+            "overlay_backend_active",
+            [snapshot.label],
+            OVERLAY_BACKEND_ACTIVE.ensure_handle_for_label_values(&[snapshot.label]),
+            |handle| handle.set(1),
+        );
+        with_metric_handle(
+            "overlay_peer_total",
+            [snapshot.label],
+            OVERLAY_PEER_TOTAL.ensure_handle_for_label_values(&[snapshot.label]),
+            |handle| handle.set(active),
+        );
+        with_metric_handle(
+            "overlay_peer_persisted_total",
+            [snapshot.label],
+            OVERLAY_PEER_PERSISTED_TOTAL.ensure_handle_for_label_values(&[snapshot.label]),
+            |handle| handle.set(persisted),
+        );
     }
 }
 
 #[cfg(feature = "telemetry")]
 fn clear_overlay_metrics() {
     for backend in OVERLAY_BACKENDS {
-        OVERLAY_BACKEND_ACTIVE
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(0);
-        OVERLAY_PEER_TOTAL
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(0);
-        OVERLAY_PEER_PERSISTED_TOTAL
-            .ensure_handle_for_label_values(&[backend])
-            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(0);
+        with_metric_handle(
+            "overlay_backend_active",
+            [backend],
+            OVERLAY_BACKEND_ACTIVE.ensure_handle_for_label_values(&[backend]),
+            |handle| handle.set(0),
+        );
+        with_metric_handle(
+            "overlay_peer_total",
+            [backend],
+            OVERLAY_PEER_TOTAL.ensure_handle_for_label_values(&[backend]),
+            |handle| handle.set(0),
+        );
+        with_metric_handle(
+            "overlay_peer_persisted_total",
+            [backend],
+            OVERLAY_PEER_PERSISTED_TOTAL.ensure_handle_for_label_values(&[backend]),
+            |handle| handle.set(0),
+        );
     }
 }
 
@@ -256,13 +306,13 @@ fn default_overlay_path() -> PathBuf {
 
 pub fn install_overlay(service: DynOverlayService) {
     {
-        *OVERLAY_SERVICE.write().unwrap() = service;
+        *write_lock(&*OVERLAY_SERVICE) = service;
     }
     update_overlay_metrics();
 }
 
 pub fn overlay_service() -> DynOverlayService {
-    OVERLAY_SERVICE.read().unwrap().clone()
+    read_lock(&*OVERLAY_SERVICE).clone()
 }
 
 pub fn configure_overlay(cfg: &OverlayConfig) {
@@ -346,13 +396,13 @@ static TRANSPORT_REGISTRY: Lazy<RwLock<Option<TransportProviderRegistry>>> =
 
 #[cfg(feature = "quic")]
 pub fn install_transport_factory(factory: Arc<dyn transport::TransportFactory>) {
-    *TRANSPORT_FACTORY.write().unwrap() = factory;
+    *write_lock(&*TRANSPORT_FACTORY) = factory;
 }
 
 #[cfg(feature = "quic")]
 pub fn configure_transport(cfg: &TransportConfig) -> diagnostics::anyhow::Result<()> {
     let callbacks = build_transport_callbacks();
-    let factory = TRANSPORT_FACTORY.read().unwrap().clone();
+    let factory = read_lock(&*TRANSPORT_FACTORY).clone();
     #[cfg(all(feature = "quic", feature = "inhouse"))]
     {
         let override_path = if cfg.provider == ProviderKind::Inhouse {
@@ -363,7 +413,7 @@ pub fn configure_transport(cfg: &TransportConfig) -> diagnostics::anyhow::Result
         transport_quic::set_inhouse_cert_store_override(override_path);
     }
     let registry = factory.create(cfg, &callbacks)?;
-    *TRANSPORT_REGISTRY.write().unwrap() = Some(registry);
+    *write_lock(&*TRANSPORT_REGISTRY) = Some(registry);
     #[cfg(feature = "telemetry")]
     crate::telemetry::record_transport_backend(cfg.provider.id());
     Ok(())
@@ -372,7 +422,7 @@ pub fn configure_transport(cfg: &TransportConfig) -> diagnostics::anyhow::Result
 #[cfg(feature = "quic")]
 pub(crate) fn transport_registry() -> Option<TransportProviderRegistry> {
     {
-        let guard = TRANSPORT_REGISTRY.read().unwrap();
+        let guard = read_lock(&*TRANSPORT_REGISTRY);
         if guard.is_some() {
             return guard.clone();
         }
@@ -383,7 +433,7 @@ pub(crate) fn transport_registry() -> Option<TransportProviderRegistry> {
         #[cfg(not(feature = "telemetry"))]
         eprintln!("transport_configure_default_failed: {err}");
     }
-    TRANSPORT_REGISTRY.read().unwrap().clone()
+    read_lock(&*TRANSPORT_REGISTRY).clone()
 }
 
 #[cfg(feature = "quic")]
@@ -396,14 +446,19 @@ fn build_transport_callbacks() -> TransportCallbacks {
         let cb = Arc::new(|provider: &'static str| {
             #[cfg(feature = "telemetry")]
             {
-                crate::telemetry::TRANSPORT_PROVIDER_CONNECT_TOTAL
-                    .ensure_handle_for_label_values(&[provider])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
-                QUIC_PROVIDER_CONNECT_TOTAL
-                    .ensure_handle_for_label_values(&[provider])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "transport_provider_connect_total",
+                    [provider],
+                    crate::telemetry::TRANSPORT_PROVIDER_CONNECT_TOTAL
+                        .ensure_handle_for_label_values(&[provider]),
+                    |handle| handle.inc(),
+                );
+                with_metric_handle(
+                    "quic_provider_connect_total",
+                    [provider],
+                    QUIC_PROVIDER_CONNECT_TOTAL.ensure_handle_for_label_values(&[provider]),
+                    |handle| handle.inc(),
+                );
             }
             #[cfg(not(feature = "telemetry"))]
             let _ = provider;
@@ -433,10 +488,15 @@ fn build_transport_callbacks() -> TransportCallbacks {
             {
                 if peer::track_handshake_fail_enabled() {
                     let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
-                    QUIC_HANDSHAKE_FAIL_TOTAL
-                        .ensure_handle_for_label_values(&[peer_label.as_str(), mapped.as_str()])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                    with_metric_handle(
+                        "quic_handshake_fail_total",
+                        [peer_label.as_str(), mapped.as_str()],
+                        QUIC_HANDSHAKE_FAIL_TOTAL.ensure_handle_for_label_values(&[
+                            peer_label.as_str(),
+                            mapped.as_str(),
+                        ]),
+                        |handle| handle.inc(),
+                    );
                 }
                 diagnostics::tracing::error!(reason = mapped.as_str(), "quic_connect_fail");
             }
@@ -468,10 +528,12 @@ fn build_transport_callbacks() -> TransportCallbacks {
             #[cfg(feature = "telemetry")]
             {
                 let label = reason.label();
-                QUIC_DISCONNECT_TOTAL
-                    .ensure_handle_for_label_values(&[label.as_ref()])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "quic_disconnect_total",
+                    [label.as_ref()],
+                    QUIC_DISCONNECT_TOTAL.ensure_handle_for_label_values(&[label.as_ref()]),
+                    |handle| handle.inc(),
+                );
             }
             #[cfg(not(feature = "telemetry"))]
             let _ = reason;
@@ -486,10 +548,12 @@ fn build_transport_callbacks() -> TransportCallbacks {
         }
         s2n.cert_rotated = Some(Arc::new(|label: &'static str| {
             #[cfg(feature = "telemetry")]
-            QUIC_CERT_ROTATION_TOTAL
-                .ensure_handle_for_label_values(&[label])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc();
+            with_metric_handle(
+                "quic_cert_rotation_total",
+                [label],
+                QUIC_CERT_ROTATION_TOTAL.ensure_handle_for_label_values(&[label]),
+                |handle| handle.inc(),
+            );
             #[cfg(not(feature = "telemetry"))]
             let _ = label;
         }));
@@ -498,10 +562,13 @@ fn build_transport_callbacks() -> TransportCallbacks {
             #[cfg(feature = "telemetry")]
             {
                 let peer_label = quic_stats::peer_label(None);
-                QUIC_HANDSHAKE_FAIL_TOTAL
-                    .ensure_handle_for_label_values(&[peer_label.as_str(), reason])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "quic_handshake_fail_total",
+                    [peer_label.as_str(), reason],
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&[peer_label.as_str(), reason]),
+                    |handle| handle.inc(),
+                );
             }
             #[cfg(not(feature = "telemetry"))]
             let _ = reason;
@@ -531,10 +598,13 @@ fn build_transport_callbacks() -> TransportCallbacks {
             #[cfg(feature = "telemetry")]
             {
                 let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
-                QUIC_HANDSHAKE_FAIL_TOTAL
-                    .ensure_handle_for_label_values(&[peer_label.as_str(), reason])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "quic_handshake_fail_total",
+                    [peer_label.as_str(), reason],
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .ensure_handle_for_label_values(&[peer_label.as_str(), reason]),
+                    |handle| handle.inc(),
+                );
             }
         }));
     }
@@ -627,7 +697,7 @@ static PEER_CERT_ENC_KEY: OnceCell<Option<[u8; 32]>> = OnceCell::new();
 static GOSSIP_RELAY: Lazy<RwLock<Option<std::sync::Arc<Relay>>>> = Lazy::new(|| RwLock::new(None));
 
 pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
-    *GOSSIP_RELAY.write().unwrap() = Some(relay);
+    *write_lock(&*GOSSIP_RELAY) = Some(relay);
 }
 
 /// Restores the previous gossip relay when dropped.
@@ -637,22 +707,20 @@ pub struct GossipRelayGuard {
 
 impl Drop for GossipRelayGuard {
     fn drop(&mut self) {
-        let mut slot = GOSSIP_RELAY.write().unwrap();
+        let mut slot = write_lock(&*GOSSIP_RELAY);
         *slot = self.previous.take();
     }
 }
 
 /// Install a temporary gossip relay, restoring the prior instance when the guard is dropped.
 pub fn scoped_gossip_relay(relay: std::sync::Arc<Relay>) -> GossipRelayGuard {
-    let mut slot = GOSSIP_RELAY.write().unwrap();
+    let mut slot = write_lock(&*GOSSIP_RELAY);
     let previous = slot.replace(relay);
     GossipRelayGuard { previous }
 }
 
 pub fn gossip_status() -> Option<RelayStatus> {
-    GOSSIP_RELAY
-        .read()
-        .unwrap()
+    read_lock(&*GOSSIP_RELAY)
         .as_ref()
         .map(|relay| relay.status())
 }
@@ -662,7 +730,7 @@ pub fn gossip_selected_peers() -> Option<Vec<String>> {
 }
 
 pub fn register_shard_peer(shard: ShardId, peer: OverlayPeerId) {
-    if let Some(relay) = GOSSIP_RELAY.read().unwrap().as_ref() {
+    if let Some(relay) = read_lock(&*GOSSIP_RELAY).as_ref() {
         relay.register_peer(shard, peer);
     }
 }
@@ -890,7 +958,7 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
                         }
                     }
                 }
-                let mut map = PEER_CERTS.write().unwrap();
+                let mut map = write_lock(&*PEER_CERTS);
                 *map = rebuilt;
                 true
             }
@@ -898,7 +966,7 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
         },
         Err(err) => {
             if err.kind() == std::io::ErrorKind::NotFound {
-                let mut map = PEER_CERTS.write().unwrap();
+                let mut map = write_lock(&*PEER_CERTS);
                 map.clear();
                 true
             } else {
@@ -917,7 +985,7 @@ fn spawn_peer_cert_store_watch(path: PathBuf) {
     if !peer_cert_persistence_enabled() {
         return;
     }
-    let mut guard = PEER_CERT_WATCH_PATH.lock().unwrap();
+    let mut guard = lock_mutex(&*PEER_CERT_WATCH_PATH);
     if guard.as_ref() == Some(&path) {
         return;
     }
@@ -1103,7 +1171,7 @@ pub fn record_peer_certificate(
         }
     }
     ensure_peer_cert_store_loaded();
-    let mut map = PEER_CERTS.write().unwrap();
+    let mut map = write_lock(&*PEER_CERTS);
     let now = unix_now();
     let key = provider.to_string();
     match map.entry(*peer) {
@@ -1151,10 +1219,13 @@ pub fn record_peer_certificate(
                 #[cfg(feature = "telemetry")]
                 {
                     let label = crypto_suite::hex::encode(peer);
-                    crate::telemetry::QUIC_CERT_ROTATION_TOTAL
-                        .ensure_handle_for_label_values(&[label.as_str()])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                    with_metric_handle(
+                        "quic_cert_rotation_total",
+                        [label.as_str()],
+                        crate::telemetry::QUIC_CERT_ROTATION_TOTAL
+                            .ensure_handle_for_label_values(&[label.as_str()]),
+                        |handle| handle.inc(),
+                    );
                 }
             } else {
                 store.current.cert = cert.clone();
@@ -1205,14 +1276,14 @@ fn verify_peer_fingerprint_inner(
 pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) -> bool {
     ensure_peer_cert_store_loaded();
     {
-        let map = PEER_CERTS.read().unwrap();
+        let map = read_lock(&*PEER_CERTS);
         let result = verify_peer_fingerprint_inner(&map, peer, None, fingerprint);
         if result || fingerprint.is_none() {
             return result;
         }
     }
     if reload_peer_cert_store_from_disk() {
-        let map = PEER_CERTS.read().unwrap();
+        let map = read_lock(&*PEER_CERTS);
         return verify_peer_fingerprint_inner(&map, peer, None, fingerprint);
     }
     false
@@ -1220,7 +1291,7 @@ pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) 
 
 pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
     ensure_peer_cert_store_loaded();
-    let map = PEER_CERTS.read().unwrap();
+    let map = read_lock(&*PEER_CERTS);
     let mut snapshots = Vec::new();
     for (peer, providers) in sorted_peer_provider_entries(&map) {
         for (provider, store) in providers {
@@ -1247,7 +1318,7 @@ fn history_record(snapshot: &CertSnapshot, now: u64) -> PeerCertHistoryRecord {
 pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
     ensure_peer_cert_store_loaded();
     let now = unix_now();
-    let map = PEER_CERTS.read().unwrap();
+    let map = read_lock(&*PEER_CERTS);
     let mut entries: Vec<_> = Vec::new();
     for (peer, providers) in sorted_peer_provider_entries(&map) {
         for (provider, store) in providers {
@@ -1357,8 +1428,9 @@ mod tests {
         let recorded_fps: Vec<u8> = provider
             .history
             .iter()
-            .map(|h| u8::from_str_radix(&h.fingerprint[..2], 16).unwrap())
+            .filter_map(|h| u8::from_str_radix(&h.fingerprint[..2], 16).ok())
             .collect();
+        assert_eq!(recorded_fps.len(), history.len());
         assert_eq!(
             recorded_fps,
             history.iter().map(|(fp, _)| *fp).collect::<Vec<_>>()
@@ -1380,7 +1452,7 @@ pub fn current_peer_fingerprint_for_provider(
     provider: Option<&str>,
 ) -> Option<[u8; 32]> {
     ensure_peer_cert_store_loaded();
-    let map = PEER_CERTS.read().unwrap();
+    let map = read_lock(&*PEER_CERTS);
     let stores = map.get(peer)?;
     if let Some(id) = provider {
         stores.get(id).map(|store| store.current.fingerprint)

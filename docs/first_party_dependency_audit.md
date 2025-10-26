@@ -17,6 +17,13 @@
 > reservation insertion for both in-memory and sled backends, preventing
 > oversubscription without reaching for external synchronization crates; the new
 > concurrent reservation test proves only funded campaigns admit reservations.
+> **2025-10-26 update (slack-aware trust routing & fallback coverage):**
+> `TrustLedger::find_best_path` now favours the path with the highest residual
+> slack via a heap backed entirely by `std` collections, then reuses the existing
+> Dijkstra search to surface a shortest-path fallback. No graph crates or
+> optimisers were introduced. Integration tests exercising multi-batch fairness,
+> challenged withdrawals, and hop-limited fallbacks run exclusively against the
+> in-tree router, bridge, and trust-ledger modules.
 >
 > **2025-11-02 update (deterministic liquidity router & runtime lint debt):**
 > The new `node/src/liquidity/router.rs` module orchestrates DEX escrows,

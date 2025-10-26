@@ -149,16 +149,26 @@ alert on any metric to detect stuck settlements. See
 
 Used for quick reachability checks when no costs are attached. It performs a BFS over authorised edges requiring each hop to have at least `amount` headroom (`limit >= |balance| + amount`). Returns the first path discovered.
 
-### 3.2 Dijkstra with Fallback (`find_best_path`)
+### 3.2 Slack-Aware Search with Fallback (`find_best_path`)
 
-For optimal routing, `dijkstra` assigns each hop a cost of `1` (one trust-line traversal). The algorithm:
+For production routing the ledger now balances *capacity* against *hop count*:
 
-1. Initialises a min-heap ordered by cumulative hop count.
-2. Pops the lowest-cost node, exploring authorised neighbours that still have credit for `amount`.
-3. Records predecessor pointers to reconstruct the cheapest path to `dst`.
-4. After the primary path is found, edges along that path are excluded and a second `dijkstra` run searches for a fallback route.
+1. `max_slack_path` walks the trust graph with a max-heap ordered by the
+   smallest residual headroom on the path so far. The primary route is the one
+   that maximises the minimum slack (`limit - (|balance| + amount)`) while still
+   respecting authorisations and credit limits. This favours wider corridors
+   that are less likely to saturate in follow-up batches, even if they require
+   extra hops.
+2. The traditional hop-count `dijkstra` still runs to recover the shortest path
+   for fallback purposes.
+3. If the slack-optimised path and the shortest path differ, the latter becomes
+   the fallback. Otherwise the router searches for a disjoint alternative by
+   excluding the primary edges and re-running `dijkstra`.
 
-`find_best_path` returns `(primary, fallback)` where `fallback` is `None` if no disjoint route exists.
+`find_best_path` returns `(primary, fallback)` where `fallback` is `None` if no
+hop-limited or disjoint alternative exists. The liquidity router consumes the
+pair, automatically downgrading to the fallback when governance-configured hop
+limits would otherwise reject the primary route.
 
 ## 4. Monitoring
 
@@ -196,3 +206,14 @@ assert_eq!(ledger.balance("bob", "carol"), 50);
 - Progress and remaining gaps for the DEX: `docs/progress.md` §7.
 
 Keep this doc updated as routing metrics, cost functions, or persistence formats evolve.
+
+### 5.1 Test Coverage
+
+- `node/tests/liquidity_router.rs` now exercises multi-batch fairness (excess
+  intents spill into deterministic follow-up batches), challenged bridge
+  withdrawals (challenged commitments are skipped), and hop-limited fallback
+  behaviour (the router selects the direct path when the slack-optimised route
+  would exceed `max_trust_hops`).
+- `node/tests/trust_routing.rs` verifies that `find_best_path` favours the
+  highest-slack route while still exposing a shorter fallback for hop-limited
+  schedulers.
