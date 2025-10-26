@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};

@@ -3613,6 +3613,37 @@ impl Bridge {
     }
 }
 
+#[cfg(any(test, feature = "integration-tests"))]
+impl Bridge {
+    pub fn force_enqueue_withdrawal_for_router(
+        &mut self,
+        asset: &str,
+        user: &str,
+        amount: u64,
+        initiated_at: u64,
+    ) -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        hasher.update(asset.as_bytes());
+        hasher.update(user.as_bytes());
+        hasher.update(&amount.to_le_bytes());
+        hasher.update(&initiated_at.to_le_bytes());
+        let commitment = *hasher.finalize().as_bytes();
+        let channel = self.ensure_channel(asset);
+        channel.bridge.pending_withdrawals.insert(
+            commitment,
+            PendingWithdrawal {
+                user: user.to_string(),
+                amount,
+                relayers: vec!["router".into()],
+                initiated_at,
+                challenged: false,
+            },
+        );
+        self.refresh_dispute_history(Some(asset));
+        commitment
+    }
+}
+
 fn paginate<T>(items: Vec<T>, cursor: Option<u64>, limit: usize) -> (Vec<T>, Option<u64>) {
     if items.is_empty() {
         return (Vec::new(), None);

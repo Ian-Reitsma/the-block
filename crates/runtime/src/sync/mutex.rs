@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, LockResult, Mutex as StdMutex};
 use std::task::{Context, Poll};
 
 use foundation_async::task::AtomicWaker;
@@ -30,6 +30,19 @@ impl Waiter {
     fn wake(&self) {
         if !self.ready.swap(true, Ordering::SeqCst) {
             self.waker.wake();
+        }
+    }
+}
+
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }
@@ -67,27 +80,36 @@ impl<T> Mutex<T> {
 
     /// Returns a mutable reference to the contained value.
     pub fn get_mut(&mut self) -> &mut T {
-        let inner = self.inner.get_mut().expect("mutex poisoned");
-        inner.value.as_mut().expect("mutex value missing")
+        let inner = match self.inner.get_mut() {
+            Ok(inner) => inner,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        inner
+            .value
+            .as_mut()
+            .unwrap_or_else(|| panic!("mutex value missing"))
     }
 
     /// Consumes the mutex, returning the underlying value.
     pub fn into_inner(self) -> T {
         self.inner
             .into_inner()
-            .expect("mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .value
-            .expect("mutex value missing")
+            .unwrap_or_else(|| panic!("mutex value missing"))
     }
 
     /// Attempts to acquire the mutex without waiting.
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        let mut state = self.inner.lock().expect("mutex poisoned");
+        let mut state = self.inner.lock().recover();
         if state.locked {
             return None;
         }
         state.locked = true;
-        let value = state.value.take().expect("mutex value missing");
+        let value = state
+            .value
+            .take()
+            .unwrap_or_else(|| panic!("mutex value missing"));
         Some(MutexGuard {
             mutex: self,
             value: Some(value),
@@ -95,12 +117,12 @@ impl<T> Mutex<T> {
     }
 
     fn enqueue_waiter(&self, waiter: Arc<Waiter>) {
-        let mut state = self.inner.lock().expect("mutex poisoned");
+        let mut state = self.inner.lock().recover();
         state.waiters.push_back(waiter);
     }
 
     fn cancel_waiter(&self, waiter: &Arc<Waiter>) {
-        let mut state = self.inner.lock().expect("mutex poisoned");
+        let mut state = self.inner.lock().recover();
         if let Some(pos) = state
             .waiters
             .iter()
@@ -111,16 +133,21 @@ impl<T> Mutex<T> {
     }
 
     fn acquire(&self) -> Option<T> {
-        let mut state = self.inner.lock().expect("mutex poisoned");
+        let mut state = self.inner.lock().recover();
         if state.locked {
             return None;
         }
         state.locked = true;
-        Some(state.value.take().expect("mutex value missing"))
+        Some(
+            state
+                .value
+                .take()
+                .unwrap_or_else(|| panic!("mutex value missing")),
+        )
     }
 
     fn release(&self, mut value: Option<T>) {
-        let mut state = self.inner.lock().expect("mutex poisoned");
+        let mut state = self.inner.lock().recover();
         assert!(state.locked, "mutex released while unlocked");
         assert!(state.value.is_none(), "mutex double release");
         state.value = value.take();
@@ -171,7 +198,7 @@ impl<'a, T> Future for Lock<'a, T> {
     }
 }
 
-impl<'a, T> Drop for Lock<'a, T> {
+impl<T> Drop for Lock<'_, T> {
     fn drop(&mut self) {
         if let Some(waiter) = self.waiter.take() {
             self.mutex.cancel_waiter(&waiter);
@@ -185,23 +212,27 @@ pub struct MutexGuard<'a, T> {
     value: Option<T>,
 }
 
-impl<'a, T> Drop for MutexGuard<'a, T> {
+impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
         let value = self.value.take();
         self.mutex.release(value);
     }
 }
 
-impl<'a, T> std::ops::Deref for MutexGuard<'a, T> {
+impl<T> std::ops::Deref for MutexGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.value.as_ref().expect("mutex guard missing value")
+        self.value
+            .as_ref()
+            .unwrap_or_else(|| panic!("mutex guard missing value"))
     }
 }
 
-impl<'a, T> std::ops::DerefMut for MutexGuard<'a, T> {
+impl<T> std::ops::DerefMut for MutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value.as_mut().expect("mutex guard missing value")
+        self.value
+            .as_mut()
+            .unwrap_or_else(|| panic!("mutex guard missing value"))
     }
 }

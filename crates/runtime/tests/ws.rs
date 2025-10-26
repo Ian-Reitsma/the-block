@@ -1,4 +1,5 @@
 #![cfg(feature = "inhouse-backend")]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use runtime::net::{TcpListener, TcpStream};
 use runtime::ws::{self, Message, ServerStream};

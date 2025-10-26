@@ -9,6 +9,26 @@
 > overwrite reservations, and integration tests cover both the proof flow and
 > collision-free settlements end to end.
 >
+> **2025-10-26 update (read-ack fixture reuse & marketplace locking):** The
+> `read_ack_privacy` regression replaced `once_cell`-style globals with the
+> first-party `concurrency::Lazy` helper so readiness snapshots and signing keys
+> build once per run—no external cells required—and still exercise tampering
+> coverage. The ad marketplace now holds its pending-budget lock through
+> reservation insertion for both in-memory and sled backends, preventing
+> oversubscription without reaching for external synchronization crates; the new
+> concurrent reservation test proves only funded campaigns admit reservations.
+>
+> **2025-11-02 update (deterministic liquidity router & runtime lint debt):**
+> The new `node/src/liquidity/router.rs` module orchestrates DEX escrows,
+> bridge withdrawals, and trust-line rebalances using only existing first-party
+> crates (`dex`, `bridge`, `TrustLedger`). Governance-configurable batch size,
+> fairness jitter, hop caps, and rebalance thresholds ride through the shared
+> config structs, and execution hands off to the in-tree escrow/bridge helpers—no
+> external schedulers, crypto crates, or dependency graph changes. Runtime’s
+> integration suites explicitly allow `clippy::unwrap_used`/`expect_used` in
+> test modules and guard histogram bucket sorting against NaNs, clearing the
+> outstanding lint debt so `cargo clippy --workspace --all-targets` runs cleanly
+> without third-party suppressors.
 > **2025-11-06 update (stake escrow RPCs & atomic settlement):** DNS stake
 > management now rides entirely on handwritten JSON/binary helpers. The new
 > `dns.register_stake`, `dns.withdraw_stake`, `dns.stake_status`, and
@@ -101,7 +121,7 @@
 > `--json` options so responders and automation filter or stream persisted
 > actions without introducing third-party tooling.
 
-_Last updated: 2025-10-31 23:40:00Z_
+_Last updated: 2025-11-02 09:00:00Z_
 
 > **2025-10-25 update (remediation auto-retry & text acknowledgements):** The
 > remediation engine now escalates and retries pending playbooks using only the

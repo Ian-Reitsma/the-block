@@ -180,7 +180,7 @@ mod inhouse {
         target_os = "netbsd",
         target_os = "dragonfly"
     ))]
-    impl<'a> std::future::Future for ReadReadyFuture<'a> {
+    impl std::future::Future for ReadReadyFuture<'_> {
         type Output = io::Result<()>;
 
         fn poll(

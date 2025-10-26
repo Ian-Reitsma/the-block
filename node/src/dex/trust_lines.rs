@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 
 #[derive(Debug, Default)]
 pub struct TrustLedger {
@@ -111,6 +112,45 @@ impl TrustLedger {
         }
         let fallback = self.dijkstra(src, dst, amount, &excluded);
         Some((primary, fallback))
+    }
+
+    pub fn lines_iter(&self) -> impl Iterator<Item = (&(String, String), &TrustLine)> {
+        self.lines.iter()
+    }
+
+    pub fn settle_path(&mut self, path: &[String], amount: u64) -> bool {
+        if amount == 0 {
+            return true;
+        }
+        if path.len() < 2 {
+            return false;
+        }
+        let amount_i64 = match i64::try_from(amount) {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+        let mut applied: Vec<(String, String)> = Vec::new();
+        for window in path.windows(2) {
+            let from = window[0].clone();
+            let to = window[1].clone();
+            if !self.adjust(&from, &to, amount_i64) {
+                for (src, dst) in applied.into_iter().rev() {
+                    let _ = self.adjust(&src, &dst, -amount_i64);
+                    let _ = self.adjust(&dst, &src, amount_i64);
+                }
+                return false;
+            }
+            if !self.adjust(&to, &from, -amount_i64) {
+                let _ = self.adjust(&from, &to, -amount_i64);
+                for (src, dst) in applied.into_iter().rev() {
+                    let _ = self.adjust(&src, &dst, -amount_i64);
+                    let _ = self.adjust(&dst, &src, amount_i64);
+                }
+                return false;
+            }
+            applied.push((from, to));
+        }
+        true
     }
 
     fn dijkstra(

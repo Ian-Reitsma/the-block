@@ -1,4 +1,12 @@
 # System-Wide Economic Changes
+> **Review (2025-11-02, morning):** Deterministic liquidity routing now shares a
+> scheduler across DEX escrows, bridge withdrawals, and trust-line rebalances.
+> Governance steers batch size, fairness jitter, hop limits, and rebalance
+> thresholds, while bridge finalisers honour the router’s ordering to keep
+> cross-chain FX automation MEV-resistant. Runtime integration suites gained
+> explicit `clippy::unwrap_used`/`clippy::expect_used` allowances and NaN guards,
+> clearing the workspace lint debt blocking full `cargo clippy --workspace`
+> runs.
 > **Review (2025-11-06, late morning):** Premium-domain stake escrow now runs
 > entirely on-ledger. Operators register deposits via `dns.register_stake`,
 > withdrawals credit unlocked balances through `dns.withdraw_stake`, and
@@ -57,9 +65,12 @@
 > split. The ad marketplace tracks provisional reservations in a dedicated
 > ledger, debits them atomically on `commit`, refunds on `cancel`, and exposes
 > concurrency-focused regressions to prove oversubscription no longer leaks
-> unmatched impressions. Operators can trust that governance votes retune
-> on-chain ad settlements without waiting for manual restarts or padding
-> campaign budgets to account for race conditions.
+> unmatched impressions. Pending-budget write locks now stay held through
+> reservation insertion and both backends re-check budgets before recording the
+> reservation, so racing `reserve_impression` calls cannot exceed available
+> funds. Operators can trust that governance votes retune on-chain ad settlements
+> without waiting for manual restarts or padding campaign budgets to account for
+> race conditions.
 > **Review (2025-11-02, evening):** Bridge CLI coverage now drives the settlement-log and reward-accrual commands through the first-party parser so optional asset/relayer filters, cursor forwarding, and the default 50-row limit stay locked without clap stubs. `bridge_pending_dispute_persists_across_restart` exercises a challenged withdrawal across a bridge reopen, confirming `pending_withdrawals` and `bridge.dispute_audit` retain challenger metadata under sled persistence. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` regression parses every Grafana template to ensure the remediation row legends and descriptions remain in sync with the first-party PromQL, eliminating the need for external validators.
 > **Review (2025-10-24, late night):** Campaign governance now survives restarts
 > via the sled-backed ad marketplace, and operators can audit active spend

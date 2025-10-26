@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::rngs::OsRng;
@@ -42,18 +43,22 @@ fn build_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
     }
 }
 
-#[test]
-fn privacy_proof_verifies_and_detects_tampering() {
+struct PrivacyFixtures {
+    valid: ReadAck,
+    tampered: ReadAck,
+    mismatched: ReadAck,
+    reservation_a: ReadAck,
+    reservation_b: ReadAck,
+}
+
+fn init_privacy_fixtures() -> PrivacyFixtures {
     let mut ack = build_ack(512, "example.org", "edge-01");
-    assert!(ack.verify());
     let readiness = AdReadinessHandle::new(AdReadinessConfig::default());
     let snapshot = readiness.snapshot();
     ack.attach_privacy(snapshot.clone());
-    assert!(ack.verify_privacy());
 
     let mut tampered = ack.clone();
     tampered.domain = "evil.example".into();
-    assert!(!tampered.verify_privacy());
 
     let mut mismatched = ack.clone();
     mismatched
@@ -61,13 +66,39 @@ fn privacy_proof_verifies_and_detects_tampering() {
         .as_mut()
         .and_then(|snap| snap.zk_proof.as_mut())
         .map(|proof| proof.blinding_mut()[0] ^= 0xFF);
-    assert!(!mismatched.verify_privacy());
+
+    let reservation_a = build_ack(256, "example.org", "edge-01");
+    let reservation_b = build_ack(256, "example.org", "edge-01");
+
+    PrivacyFixtures {
+        valid: ack,
+        tampered,
+        mismatched,
+        reservation_a,
+        reservation_b,
+    }
+}
+
+static PRIVACY_FIXTURES: Lazy<PrivacyFixtures> = Lazy::new(init_privacy_fixtures);
+
+fn fixtures() -> &'static PrivacyFixtures {
+    PRIVACY_FIXTURES.get()
+}
+
+#[test]
+fn privacy_proof_verifies_and_detects_tampering() {
+    let fixtures = fixtures();
+    assert!(fixtures.valid.verify());
+    assert!(fixtures.valid.verify_privacy());
+    assert!(!fixtures.tampered.verify_privacy());
+    assert!(!fixtures.mismatched.verify_privacy());
 }
 
 #[test]
 fn reservation_discriminator_differs_per_signature() {
-    let ack_a = build_ack(256, "example.org", "edge-01");
-    let ack_b = build_ack(256, "example.org", "edge-01");
+    let fixtures = fixtures();
+    let ack_a = fixtures.reservation_a.clone();
+    let ack_b = fixtures.reservation_b.clone();
     assert_ne!(
         ack_a.reservation_discriminator(),
         ack_b.reservation_discriminator()
@@ -75,13 +106,8 @@ fn reservation_discriminator_differs_per_signature() {
 }
 
 fn tampered_ack() -> (ReadAck, ReadAck) {
-    let mut ack = build_ack(512, "example.org", "edge-01");
-    let readiness = AdReadinessHandle::new(AdReadinessConfig::default());
-    let snapshot = readiness.snapshot();
-    ack.attach_privacy(snapshot);
-    let mut tampered = ack.clone();
-    tampered.domain = "other.example".into();
-    (ack, tampered)
+    let fixtures = fixtures();
+    (fixtures.valid.clone(), fixtures.tampered.clone())
 }
 
 #[test]

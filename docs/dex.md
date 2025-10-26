@@ -55,6 +55,44 @@ capturing the ordered entries, the next identifier, and the aggregate locked
 total. `Escrow::from_snapshot()` restores that state so `DexStore` can persist
 and reload escrows purely through the first-party codecs.
 
+## 2.2 Deterministic Liquidity Router
+
+`node/src/liquidity/router.rs` unifies DEX escrows, bridge withdrawals, and
+trust-line rebalancing under a shared, deterministic scheduler. The router
+collects three intent types on each planning tick:
+
+- **`DexEscrow`** – in-flight escrows (`EscrowState::locks`) are sorted by their
+  `locked_at` timestamp and batched so the oldest trades settle first. Before
+  releasing funds, the router re-runs `find_best_path` to guarantee a
+  trust-line path exists and then executes the transfer via
+  `TrustLedger::settle_path`.
+- **`BridgeWithdrawal`** – withdrawals past their challenge deadline are pulled
+  from `Bridge::pending_withdrawals` and finalised through
+  `Bridge::finalize_withdrawal`, keeping bridge commitments and escrow releases
+  sequenced together.
+- **`TrustRebalance`** – positive trust-line imbalances above a configured
+  threshold are routed through `find_best_path`/fallback pairs and settled to
+  keep multi-hop credit loops balanced.
+
+To resist front-running, each batch derives a deterministic tie-breaker by
+hashing the previous block entropy and the intent fingerprint. A fairness
+window injects jitter within the intent’s priority band so operators can audit
+ordering without leaking the final sequence ahead of time.
+
+Governance surfaces four knobs via `RouterConfig`:
+
+| Parameter | Description |
+| --- | --- |
+| `batch_size` | Maximum intents executed per tick. Larger values drain queues faster at the cost of longer single-batch commits. |
+| `fairness_window` | Maximum jitter (default 250 ms) applied when ranking intents, providing MEV resistance while keeping auditability. |
+| `max_trust_hops` | Caps how many trust-line edges a rebalance may traverse; routes exceeding the cap fall back to secondary paths. |
+| `min_trust_rebalance` | Minimum outstanding balance (in destination units) before a trust-line rebalance intent is emitted. |
+
+The router returns a `LiquidityBatch` describing the ordered intents plus their
+assigned slots. Execution helpers in the DEX and bridge modules apply each
+intent atomically so escrow releases, bridge finalisations, and credit
+rebalancing share the same ledger commit window.
+
 ### CLI Escrow Lifecycle
 
 ```bash

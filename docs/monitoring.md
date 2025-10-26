@@ -532,7 +532,10 @@ signatures, failing proofs (in observe mode), or channel back-pressure before
 receipts starve subsidy splits. Pair the counter with explorer snapshots of
 `read_sub_*_ct` and `ad_*_ct` block fields to confirm governance-configured
 viewer/host/hardware/verifier/liquidity shares and advertising settlements
-remain in sync with observed acknowledgement volume.
+remain in sync with observed acknowledgement volume. The compute-market
+dashboard ships a "Read Ack Outcomes (5m delta)" panel charting
+`increase(read_ack_processed_total[5m])` by result so the
+`result="invalid_privacy"` label is visible alongside the existing series.
 
 When `read_ack_processed_total{result="invalid_signature"}` or
 `{result="invalid_privacy"}` accelerates, pivot into the response loop documented in [governance.md](governance.md#read-acknowledgement-anomaly-response):

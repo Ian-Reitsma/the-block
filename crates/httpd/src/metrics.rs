@@ -12,9 +12,14 @@ use runtime::telemetry::Registry;
 /// first-party monitoring stack.
 #[must_use]
 pub fn telemetry_snapshot(registry: &Registry) -> Response {
-    Response::new(StatusCode::OK)
-        .with_header("content-type", runtime::telemetry::TEXT_MIME)
-        .with_body(registry.render_bytes())
+    match registry.render_bytes() {
+        Ok(body) => Response::new(StatusCode::OK)
+            .with_header("content-type", runtime::telemetry::TEXT_MIME)
+            .with_body(body),
+        Err(err) => Response::new(StatusCode::INTERNAL_SERVER_ERROR)
+            .with_header("content-type", runtime::telemetry::TEXT_MIME)
+            .with_body(format!("telemetry export failed: {err}").into_bytes()),
+    }
 }
 
 #[cfg(test)]

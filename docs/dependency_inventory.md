@@ -1,10 +1,12 @@
 # Dependency Inventory
 
-_Last refreshed: 2025-10-21._  The workspace `Cargo.lock` no longer references
+_Last refreshed: 2025-11-02._  The workspace `Cargo.lock` no longer references
 any crates from crates.io; every dependency in the graph is now first-party.
 The final external cluster—the optional `legacy-format` sled importer—has been
 replaced with an in-house manifest shim so the lockfile resolves solely to
-workspace crates.
+workspace crates. `node/tests/read_ack_privacy` now leans on the existing
+`concurrency::Lazy` helper for fixture reuse, keeping tests free of third-party
+cells while trimming runtime.
 
 | Tier | Crate | Version | Origin | License | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -13,6 +15,11 @@ workspace crates.
 ## Highlights
 
 - ✅ Read-acknowledgement privacy proofs live entirely inside the workspace. The new `zkp` crate exposes readiness and acknowledgement commitments without pulling third-party SNARK libraries, and the node/gateway plumbing reuses existing hashing/serialization helpers while exposing `--ack-privacy` and `node.set_ack_privacy`.
+- ✅ Deterministic liquidity routing lives in `node/src/liquidity/router.rs` and
+  depends only on existing bridge/DEX/trust-line modules. Governance-configured
+  batch size, fairness jitter, hop limits, and rebalance thresholds all flow
+  through first-party config structs, and execution hands off to the in-tree
+  bridge/Dex helpers—no external schedulers or crypto libraries introduced.
 - ✅ Bridge CLI RPC calls now flow through a new `BridgeRpcTransport` trait that
 - ✅ Bridge CLI parser regressions now cover settlement-log asset filters, reward-accrual relayer/asset cursors, and default pagination via the first-party `Parser`, while `bridge_pending_dispute_persists_across_restart` keeps dispute persistence tests inside the sled-backed bridge crate. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` guards Grafana legends/descriptions without third-party validators.
   wraps the production `RpcClient` while letting tests inject an in-memory
@@ -29,6 +36,10 @@ workspace crates.
   and legends across templates—no third-party validators or dashboard tooling
   introduced.
 - ✅ Bridge remediation regressions now allocate a per-test `RemediationSpoolSandbox` using `sys::tempfile`, seeding isolated spool directories for page/throttle/quarantine/escalate targets and exercising `remediation_spool_sandbox_restores_environment` so scoped `TB_REMEDIATION_*_DIRS` guards tear down automatically. Retry-heavy suites stay hermetic with zero `/tmp` residue and no third-party harnesses.
+- ✅ Runtime integration suites explicitly allow `clippy::unwrap_used`/`expect_used`
+  in test modules and guard histogram bucket sorting against NaNs, eliminating the
+  lint debt that previously blocked workspace `cargo clippy` runs—no external
+  lint suppressors or forks required.
 - ✅ Explorer `/blocks/:hash/payouts` and the matching CLI command reuse the
   first-party SQLite/JSON codecs to emit per-role read/ad totals. Tests insert
   JSON directly, avoiding serde stubs while staying in-tree, and the new

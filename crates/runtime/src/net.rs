@@ -62,8 +62,8 @@ impl Iterator for LookupHost {
 }
 
 impl LookupHost {
-    /// Returns the collected socket addresses.
-    pub fn into_iter(self) -> std::vec::IntoIter<SocketAddr> {
+    /// Returns the underlying iterator over resolved socket addresses.
+    pub fn into_inner(self) -> std::vec::IntoIter<SocketAddr> {
         self.addrs
     }
 }

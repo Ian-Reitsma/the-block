@@ -1,4 +1,5 @@
 #![cfg(feature = "inhouse-backend")]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use runtime::io::{read_length_prefixed, write_length_prefixed};
 use runtime::net::{lookup_host, TcpListener, TcpStream, UdpSocket};

@@ -3,7 +3,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, LockResult, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use foundation_async::task::AtomicWaker;
@@ -67,6 +67,19 @@ impl Waiter {
     }
 }
 
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
 impl Semaphore {
     /// Creates a new semaphore with the provided number of permits.
     pub fn new(permits: usize) -> Self {
@@ -84,7 +97,7 @@ impl Semaphore {
 
     /// Returns the number of permits currently available.
     pub fn available_permits(&self) -> usize {
-        let state = self.inner.state.lock().expect("semaphore poisoned");
+        let state = self.inner.state.lock().recover();
         state.permits
     }
 
@@ -93,7 +106,7 @@ impl Semaphore {
         if permits == 0 {
             return;
         }
-        let mut state = self.inner.state.lock().expect("semaphore poisoned");
+        let mut state = self.inner.state.lock().recover();
         state.permits = state.permits.saturating_add(permits);
         for _ in 0..permits {
             if let Some(waiter) = state.waiters.pop_front() {
@@ -108,7 +121,7 @@ impl Semaphore {
 
     /// Prevents additional permits from being acquired. Existing waiters receive an error.
     pub fn close(&self) {
-        let mut state = self.inner.state.lock().expect("semaphore poisoned");
+        let mut state = self.inner.state.lock().recover();
         if state.closed {
             return;
         }
@@ -122,22 +135,22 @@ impl Semaphore {
     }
 
     /// Returns a future that waits until a permit is available.
-    pub fn acquire(&self) -> Acquire<'_> {
+    pub fn acquire(&self) -> Acquire {
         Acquire {
-            semaphore: &self.inner,
+            semaphore: Arc::clone(&self.inner),
             waiter: None,
         }
     }
 
     /// Blocks the current thread until a permit becomes available.
-    pub fn blocking_acquire(&self) -> Result<Permit<'_>, AcquireError> {
-        let mut state = self.inner.state.lock().expect("semaphore poisoned");
+    pub fn blocking_acquire(&self) -> Result<Permit, AcquireError> {
+        let mut state = self.inner.state.lock().recover();
         loop {
             if state.permits > 0 {
                 state.permits -= 1;
                 drop(state);
                 return Ok(Permit {
-                    semaphore: &self.inner,
+                    semaphore: Arc::clone(&self.inner),
                     released: false,
                 });
             }
@@ -145,11 +158,7 @@ impl Semaphore {
                 drop(state);
                 return Err(AcquireError);
             }
-            state = self
-                .inner
-                .available
-                .wait(state)
-                .expect("semaphore poisoned");
+            state = self.inner.available.wait(state).recover();
         }
     }
 
@@ -166,7 +175,7 @@ impl Semaphore {
         waiter_slot: &mut Option<Arc<Waiter>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), AcquireError>> {
-        let mut state = inner.state.lock().expect("semaphore poisoned");
+        let mut state = inner.state.lock().recover();
         if state.permits > 0 {
             state.permits -= 1;
             if let Some(waiter) = waiter_slot.take() {
@@ -194,7 +203,7 @@ impl Semaphore {
     }
 
     fn release(inner: &Arc<Inner>) {
-        let mut state = inner.state.lock().expect("semaphore poisoned");
+        let mut state = inner.state.lock().recover();
         state.permits = state.permits.saturating_add(1);
         if let Some(waiter) = state.waiters.pop_front() {
             waiter.wake();
@@ -204,7 +213,7 @@ impl Semaphore {
     }
 
     fn cancel_waiter(inner: &Arc<Inner>, waiter: &Arc<Waiter>) {
-        let mut state = inner.state.lock().expect("semaphore poisoned");
+        let mut state = inner.state.lock().recover();
         if let Some(pos) = state.waiters.iter().position(|w| Arc::ptr_eq(w, waiter)) {
             state.waiters.remove(pos);
         }
@@ -212,26 +221,26 @@ impl Semaphore {
 }
 
 /// A permit acquired from a [`Semaphore`] reference.
-pub struct Permit<'a> {
-    semaphore: &'a Arc<Inner>,
+pub struct Permit {
+    semaphore: Arc<Inner>,
     released: bool,
 }
 
-impl<'a> Permit<'a> {
+impl Permit {
     /// Releases the held permit back to the semaphore.
     pub fn release(mut self) {
         if !self.released {
             self.released = true;
-            Semaphore::release(self.semaphore);
+            Semaphore::release(&self.semaphore);
         }
     }
 }
 
-impl<'a> Drop for Permit<'a> {
+impl Drop for Permit {
     fn drop(&mut self) {
         if !self.released {
             self.released = true;
-            Semaphore::release(self.semaphore);
+            Semaphore::release(&self.semaphore);
         }
     }
 }
@@ -262,19 +271,19 @@ impl Drop for OwnedSemaphorePermit {
 }
 
 /// Future returned from [`Semaphore::acquire`].
-pub struct Acquire<'a> {
-    semaphore: &'a Arc<Inner>,
+pub struct Acquire {
+    semaphore: Arc<Inner>,
     waiter: Option<Arc<Waiter>>,
 }
 
-impl<'a> Future for Acquire<'a> {
-    type Output = Result<Permit<'a>, AcquireError>;
+impl Future for Acquire {
+    type Output = Result<Permit, AcquireError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        match Semaphore::poll_acquire(this.semaphore, &mut this.waiter, cx) {
+        match Semaphore::poll_acquire(&this.semaphore, &mut this.waiter, cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(Permit {
-                semaphore: this.semaphore,
+                semaphore: Arc::clone(&this.semaphore),
                 released: false,
             })),
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
@@ -283,10 +292,10 @@ impl<'a> Future for Acquire<'a> {
     }
 }
 
-impl<'a> Drop for Acquire<'a> {
+impl Drop for Acquire {
     fn drop(&mut self) {
         if let Some(waiter) = self.waiter.take() {
-            Semaphore::cancel_waiter(self.semaphore, &waiter);
+            Semaphore::cancel_waiter(&self.semaphore, &waiter);
         }
     }
 }

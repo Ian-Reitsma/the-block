@@ -99,7 +99,9 @@ Additional subsystem counters include:
   by the node worker (`result=ok|invalid_signature|invalid_privacy`), surfacing
   malformed signatures, failing privacy proofs (in observe mode), or channel
   back-pressure so operators can alert on rejected receipts before they impact
-  subsidy payouts.
+  subsidy payouts. The compute-market dashboard plots a "Read Ack Outcomes"
+  panel summarising `increase(read_ack_processed_total[5m])` by result so the
+  new `invalid_privacy` series is visible alongside signature failures.
 - `PROOF_REBATES_PENDING_TOTAL`/`PROOF_REBATES_CLAIMED_TOTAL` track light-client rebate balances and payouts; alert when the pending gauge grows faster than block production.
 - `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` track governance-backed payout flows, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` records settlement submissions, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` captures duty resolution outcomes alongside the `bridge_pending_withdrawals` gauges of outstanding releases per asset.
 

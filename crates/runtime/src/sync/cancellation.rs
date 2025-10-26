@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LockResult, Mutex};
 use std::task::{Context, Poll};
 
 use foundation_async::task::AtomicWaker;
@@ -42,28 +42,33 @@ impl Inner {
     }
 
     fn wake_all(&self) {
-        let waiters = self
-            .waiters
-            .lock()
-            .expect("cancellation waiters poisoned")
-            .drain(..)
-            .collect::<Vec<_>>();
+        let waiters = self.waiters.lock().recover().drain(..).collect::<Vec<_>>();
         for waiter in waiters {
             waiter.wake();
         }
     }
 
     fn push_waiter(&self, waiter: Arc<Waiter>) {
-        self.waiters
-            .lock()
-            .expect("cancellation waiters poisoned")
-            .push(waiter);
+        self.waiters.lock().recover().push(waiter);
     }
 
     fn remove_waiter(&self, waiter: &Arc<Waiter>) {
-        let mut waiters = self.waiters.lock().expect("cancellation waiters poisoned");
+        let mut waiters = self.waiters.lock().recover();
         if let Some(pos) = waiters.iter().position(|w| Arc::ptr_eq(w, waiter)) {
             waiters.remove(pos);
+        }
+    }
+}
+
+trait LockResultExt<T> {
+    fn recover(self) -> T;
+}
+
+impl<T> LockResultExt<T> for LockResult<T> {
+    fn recover(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }
@@ -109,7 +114,7 @@ pub struct Cancelled<'a> {
     waiter: Option<Arc<Waiter>>,
 }
 
-impl<'a> Future for Cancelled<'a> {
+impl Future for Cancelled<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -133,7 +138,7 @@ impl<'a> Future for Cancelled<'a> {
     }
 }
 
-impl<'a> Drop for Cancelled<'a> {
+impl Drop for Cancelled<'_> {
     fn drop(&mut self) {
         if let Some(waiter) = self.waiter.take() {
             self.token.inner.remove_waiter(&waiter);

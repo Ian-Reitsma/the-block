@@ -91,6 +91,19 @@ The bridge store persists incentive parameters and per-relayer accounting snapsh
 - Duty assignments are stored as `DutyRecord` entries (`Pending`, `Completed`, `Failed`, or `Settlement`). Operators can query the log via `bridge.duty_log` / `blockctl bridge duties` with optional filters and limits.
 - Challenge and finalize flows update the duty store in place, ensuring every reward or slash is backed by a recorded duty outcome. Integration coverage in `node/tests/bridge_incentives.rs` simulates honest/faulty relayers, settlement proofs, and dispute escalations to verify the accounting end-to-end.
 
+### Liquidity Router Coordination
+
+Bridge withdrawals now share the deterministic liquidity router documented in
+[`docs/dex.md`](dex.md#22-deterministic-liquidity-router). On each planning tick
+the router inspects `Bridge::pending_withdrawals`, extracts commitments whose
+challenge deadline has elapsed, and sequences them alongside DEX escrows and
+trust-line rebalances. Governance steers the batching behaviour via
+`RouterConfig` (batch size, fairness window, maximum trust hops, and minimum
+rebalance threshold), giving operators a single control surface for cross-chain
+liquidity. `Bridge::finalize_withdrawal` enforces the router’s order during
+execution so bridge releases cannot jump the queue ahead of DEX-settled credit
+flows, keeping on-ledger FX automation MEV-resistant.
+
 ### Governance Reward Claims
 
 Governance now mints reward approvals that relayers redeem on-demand. Authorizations are stored as `RewardClaimApproval` records in the sled-backed governance store (`GovStore::record_reward_claim`) and surfaced via `bridge.reward_claims` / `blockctl bridge reward-claims` for audit. Requests accept optional `cursor`/`limit` parameters and return both the current page and the `next_cursor`, allowing operators to stream large histories without materialising the full retention window. A relayer redeems an approval by issuing `blockctl bridge claim <relayer> <amount> <approval-key>`, which forwards to `bridge.claim_rewards`. The node consults governance via `ensure_reward_claim_authorized`, decrements the remaining allowance, and persists a signed `RewardClaimRecord` with monotonic IDs so operators can reconcile payouts.
