@@ -7,8 +7,29 @@ use crate::storage::settings;
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
+
+#[cfg(feature = "telemetry")]
+fn with_metric_handle<T, E, F, const N: usize>(
+    metric: &str,
+    labels: [&str; N],
+    result: Result<T, E>,
+    apply: F,
+) where
+    F: FnOnce(T),
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(handle) => apply(handle),
+        Err(err) => log::warn!(
+            "metric_label_registration_failed: metric={metric} labels={labels:?} err={err}"
+        ),
+    }
+}
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted};
+use concurrency::MutexExt;
 use crypto_suite::hashing::blake3::Hasher;
+#[cfg(feature = "telemetry")]
+use diagnostics::log;
 use foundation_serialization::binary_cursor::{Reader, Writer};
 use foundation_serialization::json::{self, Map, Value};
 use foundation_time::UtcDateTime;
@@ -17,6 +38,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -39,18 +61,23 @@ pub fn spawn(path: String, period: Duration) {
                     #[cfg(feature = "telemetry")]
                     {
                         let algorithms = settings::algorithms();
-                        STORAGE_REPAIR_FAILURES_TOTAL
-                            .ensure_handle_for_label_values(&[
+                        with_metric_handle(
+                            "storage_repair_failures_total",
+                            [err.label(), algorithms.erasure(), algorithms.compression()],
+                            STORAGE_REPAIR_FAILURES_TOTAL.ensure_handle_for_label_values(&[
                                 err.label(),
                                 algorithms.erasure(),
                                 algorithms.compression(),
-                            ])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc();
-                        STORAGE_REPAIR_ATTEMPTS_TOTAL
-                            .ensure_handle_for_label_values(&["fatal"])
-                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                            .inc();
+                            ]),
+                            |handle| handle.inc(),
+                        );
+                        with_metric_handle(
+                            "storage_repair_attempts_total",
+                            ["fatal"],
+                            STORAGE_REPAIR_ATTEMPTS_TOTAL
+                                .ensure_handle_for_label_values(&["fatal"]),
+                            |handle| handle.inc(),
+                        );
                     }
                 }
                 notify_iteration();
@@ -711,7 +738,7 @@ fn run_scheduled_jobs(jobs: Vec<ScheduledJob>) -> Vec<RepairOutcome> {
     use std::sync::{Arc, Mutex};
 
     let queue = Arc::new(Mutex::new(VecDeque::from(jobs)));
-    let workers = MAX_CONCURRENT_REPAIRS.min(queue.lock().unwrap().len());
+    let workers = MAX_CONCURRENT_REPAIRS.min(queue.guard().len());
     if workers == 0 {
         return Vec::new();
     }
@@ -725,7 +752,7 @@ fn run_scheduled_jobs(jobs: Vec<ScheduledJob>) -> Vec<RepairOutcome> {
                 let mut local = Vec::new();
                 loop {
                     let job = {
-                        let mut guard = queue.lock().expect("repair queue lock");
+                        let mut guard = queue.guard();
                         guard.pop_front()
                     };
                     match job {
@@ -737,7 +764,10 @@ fn run_scheduled_jobs(jobs: Vec<ScheduledJob>) -> Vec<RepairOutcome> {
             }));
         }
         for handle in handles {
-            outcomes.extend(handle.join().expect("repair worker panicked"));
+            match handle.join() {
+                Ok(result) => outcomes.extend(result),
+                Err(err) => panic::resume_unwind(err),
+            }
         }
     });
     outcomes
@@ -847,18 +877,26 @@ fn handle_outcome(
                 #[cfg(feature = "telemetry")]
                 {
                     let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
-                    STORAGE_REPAIR_ATTEMPTS_TOTAL
-                        .ensure_handle_for_label_values(&["failure"])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
-                    STORAGE_REPAIR_FAILURES_TOTAL
-                        .ensure_handle_for_label_values(&[
+                    with_metric_handle(
+                        "storage_repair_attempts_total",
+                        ["failure"],
+                        STORAGE_REPAIR_ATTEMPTS_TOTAL.ensure_handle_for_label_values(&["failure"]),
+                        |handle| handle.inc(),
+                    );
+                    with_metric_handle(
+                        "storage_repair_failures_total",
+                        [
                             RepairErrorKind::Database.label(),
                             erasure_alg.as_str(),
                             compression_alg.as_str(),
-                        ])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                        ],
+                        STORAGE_REPAIR_FAILURES_TOTAL.ensure_handle_for_label_values(&[
+                            RepairErrorKind::Database.label(),
+                            erasure_alg.as_str(),
+                            compression_alg.as_str(),
+                        ]),
+                        |handle| handle.inc(),
+                    );
                 }
                 log.append(&RepairLogEntry {
                     timestamp,
@@ -877,10 +915,12 @@ fn handle_outcome(
                 summary.bytes_repaired = summary.bytes_repaired.saturating_add(bytes);
                 #[cfg(feature = "telemetry")]
                 {
-                    STORAGE_REPAIR_ATTEMPTS_TOTAL
-                        .ensure_handle_for_label_values(&["success"])
-                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                        .inc();
+                    with_metric_handle(
+                        "storage_repair_attempts_total",
+                        ["success"],
+                        STORAGE_REPAIR_ATTEMPTS_TOTAL.ensure_handle_for_label_values(&["success"]),
+                        |handle| handle.inc(),
+                    );
                     if bytes > 0 {
                         STORAGE_REPAIR_BYTES_TOTAL.inc_by(bytes);
                     }
@@ -918,18 +958,26 @@ fn handle_outcome(
             #[cfg(feature = "telemetry")]
             {
                 let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
-                STORAGE_REPAIR_ATTEMPTS_TOTAL
-                    .ensure_handle_for_label_values(&["failure"])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
-                STORAGE_REPAIR_FAILURES_TOTAL
-                    .ensure_handle_for_label_values(&[
+                with_metric_handle(
+                    "storage_repair_attempts_total",
+                    ["failure"],
+                    STORAGE_REPAIR_ATTEMPTS_TOTAL.ensure_handle_for_label_values(&["failure"]),
+                    |handle| handle.inc(),
+                );
+                with_metric_handle(
+                    "storage_repair_failures_total",
+                    [
                         error.label(),
                         erasure_alg.as_str(),
                         compression_alg.as_str(),
-                    ])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                    ],
+                    STORAGE_REPAIR_FAILURES_TOTAL.ensure_handle_for_label_values(&[
+                        error.label(),
+                        erasure_alg.as_str(),
+                        compression_alg.as_str(),
+                    ]),
+                    |handle| handle.inc(),
+                );
             }
             log.append(&RepairLogEntry {
                 timestamp,
@@ -950,10 +998,12 @@ fn handle_outcome(
             summary.skipped += 1;
             #[cfg(feature = "telemetry")]
             {
-                STORAGE_REPAIR_ATTEMPTS_TOTAL
-                    .ensure_handle_for_label_values(&["skipped"])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "storage_repair_attempts_total",
+                    ["skipped"],
+                    STORAGE_REPAIR_ATTEMPTS_TOTAL.ensure_handle_for_label_values(&["skipped"]),
+                    |handle| handle.inc(),
+                );
             }
             match reason {
                 SkipReason::Backoff { next_retry_at } => {
@@ -1093,12 +1143,17 @@ fn stop_flag() -> &'static AtomicBool {
 
 #[cfg(test)]
 pub(crate) fn install_iteration_hook(sender: UnboundedSender<()>) {
-    *iteration_hook().lock().unwrap() = Some(sender);
+    *iteration_hook()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner()) = Some(sender);
 }
 
 #[cfg(test)]
 pub(crate) fn clear_iteration_hook() {
-    iteration_hook().lock().unwrap().take();
+    iteration_hook()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .take();
     stop_flag().store(false, Ordering::SeqCst);
 }
 
@@ -1109,7 +1164,11 @@ pub(crate) fn request_stop() {
 
 #[cfg(test)]
 fn notify_iteration() {
-    if let Some(tx) = iteration_hook().lock().unwrap().as_ref() {
+    if let Some(tx) = iteration_hook()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .as_ref()
+    {
         let _ = tx.send(());
     }
 }
@@ -1135,9 +1194,15 @@ mod tests {
 
     #[test]
     fn spawn_runs_loop_and_signals_iterations() {
-        let tempdir = tempdir().expect("temp dir");
+        let tempdir = match tempdir() {
+            Ok(dir) => dir,
+            Err(err) => panic!("temp dir unavailable: {err}"),
+        };
         let path = tempdir.path().join("repair-db");
-        let path_str = path.to_str().expect("path").to_string();
+        let path_str = match path.to_str() {
+            Some(p) => p.to_string(),
+            None => panic!("path encoding invalid"),
+        };
         runtime::block_on(async move {
             let _guard = tempdir; // keep directory alive for the background task
             let (tx, mut rx) = runtime::sync::mpsc::unbounded_channel();
@@ -1145,10 +1210,12 @@ mod tests {
             spawn(path_str, Duration::from_millis(10));
 
             for _ in 0..2 {
-                runtime::timeout(Duration::from_secs(1), rx.recv())
+                let tick = runtime::timeout(Duration::from_secs(1), rx.recv())
                     .await
-                    .expect("timer")
-                    .expect("iteration");
+                    .unwrap_or_else(|err| panic!("timer: {err}"));
+                if tick.is_none() {
+                    panic!("iteration channel closed");
+                }
             }
 
             request_stop();
@@ -1165,19 +1232,28 @@ mod tests {
         };
         let encoded = encode_failure_record(&record);
         let mut reader = BinaryReader::new(&encoded);
-        assert_eq!(reader.read_u64().expect("field count"), 2);
-        assert_eq!(reader.read_string().expect("attempts key"), "attempts");
-        assert_eq!(reader.read_u32().expect("attempts"), record.attempts);
-        assert_eq!(
-            reader.read_string().expect("next_retry_at key"),
-            "next_retry_at"
-        );
-        assert_eq!(
-            reader.read_i64().expect("next_retry_at"),
-            record.next_retry_at
-        );
+        match reader.read_u64() {
+            Ok(value) => assert_eq!(value, 2),
+            Err(err) => panic!("field count: {err}"),
+        }
+        match reader.read_string() {
+            Ok(key) => assert_eq!(key, "attempts"),
+            Err(err) => panic!("attempts key: {err}"),
+        }
+        match reader.read_u32() {
+            Ok(value) => assert_eq!(value, record.attempts),
+            Err(err) => panic!("attempts value: {err}"),
+        }
+        match reader.read_string() {
+            Ok(key) => assert_eq!(key, "next_retry_at"),
+            Err(err) => panic!("next_retry_at key: {err}"),
+        }
+        match reader.read_i64() {
+            Ok(value) => assert_eq!(value, record.next_retry_at),
+            Err(err) => panic!("next_retry_at value: {err}"),
+        }
 
-        let decoded = decode_failure_record(&encoded).expect("decode");
+        let decoded = decode_failure_record(&encoded).unwrap_or_else(|err| panic!("decode: {err}"));
         assert_eq!(decoded, record);
     }
 }

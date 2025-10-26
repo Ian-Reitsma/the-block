@@ -10,6 +10,8 @@ use codec::profiles;
 use concurrency::cache::LruCache;
 use concurrency::{Bytes, MutexExt, MutexGuard};
 use crypto_suite::hashing::blake3::hash;
+#[cfg(feature = "telemetry")]
+use diagnostics::log;
 use foundation_serialization::Serialize;
 use ledger::address::ShardId;
 use rand::seq::SliceRandom;
@@ -26,6 +28,24 @@ use crate::telemetry::{
     GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_LATENCY_BUCKETS, GOSSIP_PEER_FAILURE_TOTAL,
     GOSSIP_TTL_DROP_TOTAL,
 };
+
+#[cfg(feature = "telemetry")]
+fn with_metric_handle<T, E, F, const N: usize>(
+    metric: &str,
+    labels: [&str; N],
+    result: Result<T, E>,
+    apply: F,
+) where
+    F: FnOnce(T),
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(handle) => apply(handle),
+        Err(err) => log::warn!(
+            "metric_label_registration_failed: metric={metric} labels={labels:?} err={err}"
+        ),
+    }
+}
 
 use crate::range_boost;
 use p2p_overlay::PeerId;
@@ -83,8 +103,26 @@ impl ShardStore {
 
     #[cfg(test)]
     fn temporary() -> Self {
-        let dir = sys::tempfile::tempdir().expect("tempdir");
-        let base = dir.into_path();
+        let base = sys::tempfile::tempdir()
+            .map(|dir| dir.into_path())
+            .unwrap_or_else(|err| {
+                log::warn!("gossip_shard_tempdir_fallback: {err}");
+                let mut fallback = std::env::temp_dir();
+                fallback.push(format!(
+                    "the-block-gossip-shard-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or_default()
+                ));
+                if let Err(create_err) = std::fs::create_dir_all(&fallback) {
+                    panic!(
+                        "failed to create gossip shard fallback directory {fallback:?}: {create_err}"
+                    );
+                }
+                fallback
+            });
         let path = base.join("gossip_store");
         let path_str = path.to_string_lossy().to_string();
         Self::with_factory(&path_str, &SimpleDb::open_named)
@@ -259,10 +297,12 @@ impl Relay {
             #[cfg(feature = "telemetry")]
             {
                 GOSSIP_DUPLICATE_TOTAL.inc();
-                GOSSIP_PEER_FAILURE_TOTAL
-                    .ensure_handle_for_label_values(&["duplicate"])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc();
+                with_metric_handle(
+                    "gossip_peer_failure_total",
+                    ["duplicate"],
+                    GOSSIP_PEER_FAILURE_TOTAL.ensure_handle_for_label_values(&["duplicate"]),
+                    |handle| handle.inc(),
+                );
             }
             return false;
         }
@@ -328,17 +368,14 @@ impl Relay {
             .collect::<HashMap<OverlayPeerId, PeerMetrics>>();
         for (addr, transport, cert) in peers.iter() {
             let peer_id = pk_from_addr(addr).and_then(|pk| overlay_peer_from_bytes(&pk).ok());
-            if let Some(peer) = peer_id.as_ref() {
-                if PARTITION_WATCH.is_isolated(peer) {
-                    skipped_partition += 1;
-                    continue;
-                }
-            }
-            if peer_id.is_none() {
+            let Some(peer_id) = peer_id else {
+                skipped_partition += 1;
+                continue;
+            };
+            if PARTITION_WATCH.is_isolated(&peer_id) {
                 skipped_partition += 1;
                 continue;
             }
-            let peer_id = peer_id.unwrap();
             let metrics = stats.get(&peer_id);
             let latency = range_boost::peer_latency(addr)
                 .map(|l| l as f64)
@@ -356,10 +393,12 @@ impl Relay {
         }
         #[cfg(feature = "telemetry")]
         if skipped_partition > 0 {
-            GOSSIP_PEER_FAILURE_TOTAL
-                .ensure_handle_for_label_values(&["partition"])
-                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                .inc_by(skipped_partition as u64);
+            with_metric_handle(
+                "gossip_peer_failure_total",
+                ["partition"],
+                GOSSIP_PEER_FAILURE_TOTAL.ensure_handle_for_label_values(&["partition"]),
+                |handle| handle.inc_by(skipped_partition as u64),
+            );
         }
         #[cfg(not(feature = "telemetry"))]
         let _ = skipped_partition;
@@ -430,10 +469,12 @@ impl Relay {
                 .count();
             let skipped_low = deprioritized.len().saturating_sub(used_deprioritized);
             if skipped_low > 0 {
-                GOSSIP_PEER_FAILURE_TOTAL
-                    .ensure_handle_for_label_values(&["low_score"])
-                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-                    .inc_by(skipped_low as u64);
+                with_metric_handle(
+                    "gossip_peer_failure_total",
+                    ["low_score"],
+                    GOSSIP_PEER_FAILURE_TOTAL.ensure_handle_for_label_values(&["low_score"]),
+                    |handle| handle.inc_by(skipped_low as u64),
+                );
             }
         }
         #[cfg(not(feature = "telemetry"))]
@@ -671,16 +712,22 @@ mod tests {
         let msg = Message::new(Payload::Hello(vec![]), &sk);
         let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..16)
             .map(|i| {
+                let port = match u16::try_from(10000 + i) {
+                    Ok(port) => port,
+                    Err(_) => panic!("test port out of range"),
+                };
                 (
-                    format!("127.0.0.1:{}", 10000 + i).parse().unwrap(),
+                    SocketAddr::from(([127, 0, 0, 1], port)),
                     Transport::Tcp,
                     None,
                 )
             })
             .collect();
         for (idx, (addr, _, _)) in peers.iter().enumerate() {
-            let peer =
-                crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]).expect("peer id");
+            let peer = match crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]) {
+                Ok(peer) => peer,
+                Err(err) => panic!("peer id decode failed: {err}"),
+            };
             crate::net::peer::inject_addr_mapping_for_tests(*addr, peer);
         }
         let mut delivered = 0usize;
@@ -696,16 +743,22 @@ mod tests {
         let msg = Message::new(Payload::Hello(vec![]), &sk);
         let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..8)
             .map(|i| {
+                let port = match u16::try_from(12000 + i) {
+                    Ok(port) => port,
+                    Err(_) => panic!("test port out of range"),
+                };
                 (
-                    format!("127.0.0.1:{}", 12000 + i).parse().unwrap(),
+                    SocketAddr::from(([127, 0, 0, 1], port)),
                     Transport::Tcp,
                     None,
                 )
             })
             .collect();
         for (idx, (addr, _, _)) in peers.iter().enumerate() {
-            let peer =
-                crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]).expect("peer id");
+            let peer = match crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]) {
+                Ok(peer) => peer,
+                Err(err) => panic!("peer id decode failed: {err}"),
+            };
             crate::net::peer::inject_addr_mapping_for_tests(*addr, peer);
         }
         let mut first_hits = HashMap::new();
@@ -723,14 +776,17 @@ mod tests {
     #[test]
     fn relay_status_surfaces_selected_peers_as_base58() {
         let relay = relay_for_tests();
-        let peer = crate::net::overlay_peer_from_bytes(&[9u8; 32]).expect("overlay peer");
+        let peer = match crate::net::overlay_peer_from_bytes(&[9u8; 32]) {
+            Ok(peer) => peer,
+            Err(err) => panic!("overlay peer decode failed: {err}"),
+        };
         relay.update_metrics(&[peer.clone()], 3, 1.4);
 
         let status = relay.status();
-        let selected = status
-            .fanout
-            .selected_peers
-            .expect("selected peers present");
+        let selected = match status.fanout.selected_peers {
+            Some(peers) => peers,
+            None => panic!("selected peers missing"),
+        };
         assert_eq!(selected, vec![crate::net::overlay_peer_to_base58(&peer)]);
     }
 }

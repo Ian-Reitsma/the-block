@@ -1,4 +1,14 @@
 # Project Progress Snapshot
+> **Review (2025-10-26, late morning):** Liquidity routing now stress-tests
+> multi-batch fairness, hop-limited trust fallbacks, and challenged withdrawals.
+> `node/tests/liquidity_router.rs` proves excess intents roll into deterministic
+> follow-up batches, challenged bridge commitments never reach execution, and
+> hop limits downgrade slack-optimised paths to direct fallbacks. Trust-ledger
+> coverage (`node/tests/trust_routing.rs`) verifies the slack-aware
+> `find_best_path` still surfaces a shortest-path fallback for schedulers with
+> tighter hop budgets. Documentation captures the new slack-aware routing model
+> and test expectations so operators understand why wider corridors may be
+> preferred while fairness remains deterministic.
 > **Review (2025-11-06, late morning):** Premium-domain escrow and cancellation
 > flows are now fully first-party. Operators deposit CT via `dns.register_stake`,
 > withdraw unlocked balances with `dns.withdraw_stake`, and inspect live escrow
@@ -833,6 +843,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
   - Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
   - Peer database and chunk cache persist across restarts with configurable paths (`node/src/net/peer.rs` via `TB_PEER_DB_PATH` and `TB_CHUNK_DB_PATH`); `TB_PEER_SEED` fixes shuffle order for reproducible bootstraps.
+  - Telemetry handle acquisition now logs failures instead of panicking via the
+    shared `telemetry_handle`/`with_metric_handle` helpers, keeping peer event
+    processing alive while surfacing structured warnings for operators.
   - ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.

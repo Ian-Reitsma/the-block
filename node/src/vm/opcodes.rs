@@ -78,7 +78,9 @@ pub fn write_abi(path: &std::path::Path) -> std::io::Result<()> {
     for op in OpCode::all() {
         map.insert(format!("{:?}", op).to_lowercase(), (*op as u8).into());
     }
-    std::fs::create_dir_all(path.parent().unwrap())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let abi = foundation_serialization::json::Value::Object(map);
     let bytes = json::to_vec_pretty(&abi)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;

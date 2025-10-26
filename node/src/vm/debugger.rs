@@ -249,7 +249,9 @@ impl Debugger {
         let mut outer = Map::new();
         outer.insert("traceEvents".to_string(), Value::Array(events));
         let out = Value::Object(outer);
-        let _ = std::fs::write(path, json::to_vec_pretty(&out).unwrap());
+        if let Ok(bytes) = json::to_vec_pretty(&out) {
+            let _ = std::fs::write(path, bytes);
+        }
     }
 
     pub fn trace(&self) -> &[TraceStep] {

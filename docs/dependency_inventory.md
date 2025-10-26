@@ -20,6 +20,10 @@ cells while trimming runtime.
   batch size, fairness jitter, hop limits, and rebalance thresholds all flow
   through first-party config structs, and execution hands off to the in-tree
   bridge/Dex helpers—no external schedulers or crypto libraries introduced.
+- ✅ Slack-aware trust routing reuses the same modules: the new
+  `TrustLedger::max_slack_path` helper and hop-limited fallback logic rely
+  exclusively on in-tree collections/iterators, so widening corridors and
+  fallback selection required no third-party graph or optimisation crates.
 - ✅ Bridge CLI RPC calls now flow through a new `BridgeRpcTransport` trait that
 - ✅ Bridge CLI parser regressions now cover settlement-log asset filters, reward-accrual relayer/asset cursors, and default pagination via the first-party `Parser`, while `bridge_pending_dispute_persists_across_restart` keeps dispute persistence tests inside the sled-backed bridge crate. Monitoring’s `dashboards_include_bridge_remediation_legends_and_tooltips` guards Grafana legends/descriptions without third-party validators.
   wraps the production `RpcClient` while letting tests inject an in-memory

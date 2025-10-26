@@ -1,4 +1,17 @@
 # System-Wide Economic Changes
+> **Review (2025-10-26, late morning):** Trust-line routing now prioritises
+> residual capacity before hop count. `find_best_path` promotes the path with the
+> widest minimum slack while still exposing a shortest-path fallback when hop
+> limits would reject the primary. Liquidity router tests demonstrate
+> deterministic batching across DEX escrows, challenged bridge withdrawals, and
+> hop-constrained fallbacks, keeping sequencing MEV-resistant while respecting
+> governance-configured hop ceilings.
+> **Review (2025-11-07, morning):** Peer telemetry registration now relies on a
+> shared `telemetry_handle`/`with_metric_handle` helper that logs the metric name
+> and label snapshot when registration fails instead of panicking. Networking
+> keeps processing peer events, metrics counters simply skip the offending
+> update, and operators get structured warnings tagged with the failed metric
+> for dashboards or alerting hooks.
 > **Review (2025-11-02, morning):** Deterministic liquidity routing now shares a
 > scheduler across DEX escrows, bridge withdrawals, and trust-line rebalances.
 > Governance steers batch size, fairness jitter, hop limits, and rebalance

@@ -38,6 +38,15 @@ crate.
    ```
 A steadily increasing peer count after bootstrap indicates healthy gossip.
 
+## Telemetry Guard Rails
+
+Peer metric registration no longer panics when a label set is missing or
+misconfigured. The node now records any registration failure with the metric
+name and label snapshot, skips the update, and continues processing the peer
+event stream. Operators can watch the telemetry logs for
+`failed to obtain telemetry handle` warnings to identify bad label payloads
+without triggering process aborts.
+
 ## Overlay Backend Troubleshooting
 
 Overlay swaps now rely on the `crates/p2p_overlay` abstraction. When a node
