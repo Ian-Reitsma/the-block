@@ -13,7 +13,7 @@ pub use alert_validator::{
 pub use chaos::{
     sign_attestation, verify_attestation, ChaosAttestation, ChaosAttestationDecodeError,
     ChaosAttestationDraft, ChaosAttestationError, ChaosModule, ChaosProviderKind,
-    ChaosReadinessSnapshot, ChaosSiteReadiness,
+    ChaosReadinessSnapshot, ChaosSiteReadiness, ChaosSnapshotDecodeError,
 };
 pub use dashboard::*;
 pub use metrics::{

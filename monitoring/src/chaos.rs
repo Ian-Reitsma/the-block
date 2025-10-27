@@ -536,6 +536,165 @@ impl ChaosReadinessSnapshot {
         }
         Value::Object(map)
     }
+
+    pub fn decode_array(value: &Value) -> Result<Vec<Self>, ChaosSnapshotDecodeError> {
+        let entries = value.as_array().ok_or_else(|| {
+            ChaosSnapshotDecodeError::new("chaos/status payload must be an array")
+        })?;
+        let mut snapshots = Vec::with_capacity(entries.len());
+        for entry in entries {
+            snapshots.push(Self::from_value(entry)?);
+        }
+        Ok(snapshots)
+    }
+
+    pub fn from_value(value: &Value) -> Result<Self, ChaosSnapshotDecodeError> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| ChaosSnapshotDecodeError::new("chaos/status entry must be an object"))?;
+        let scenario = read_string(map, "scenario")?;
+        let module = read_module(map, "module")?;
+        let readiness = read_f64(map, "readiness")?;
+        let sla_threshold = read_f64(map, "sla_threshold")?;
+        let breaches = read_u64(map, "breaches")?;
+        let window_start = read_u64(map, "window_start")?;
+        let window_end = read_u64(map, "window_end")?;
+        let issued_at = read_u64(map, "issued_at")?;
+        let signer = read_bytes::<32>(map, "signer")?;
+        let digest = read_bytes::<32>(map, "digest")?;
+        let site_readiness = match map.get("site_readiness") {
+            Some(Value::Array(entries)) => {
+                let mut sites = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    sites.push(ChaosSiteReadiness::from_value(entry)?);
+                }
+                sites
+            }
+            Some(_) => {
+                return Err(ChaosSnapshotDecodeError::new(
+                    "site_readiness must be an array when present",
+                ))
+            }
+            None => Vec::new(),
+        };
+        Ok(ChaosReadinessSnapshot {
+            scenario,
+            module,
+            readiness,
+            sla_threshold,
+            breaches,
+            window_start,
+            window_end,
+            issued_at,
+            signer,
+            digest,
+            site_readiness,
+        })
+    }
+}
+
+impl ChaosSiteReadiness {
+    pub fn from_value(value: &Value) -> Result<Self, ChaosSnapshotDecodeError> {
+        let map = value.as_object().ok_or_else(|| {
+            ChaosSnapshotDecodeError::new("site_readiness entries must be objects")
+        })?;
+        let site = read_string(map, "site")?;
+        let readiness = read_f64(map, "readiness")?;
+        let provider_kind = match map.get("provider_kind") {
+            Some(Value::String(text)) => ChaosProviderKind::from_str(text).ok_or_else(|| {
+                ChaosSnapshotDecodeError::new(format!(
+                    "invalid provider kind '{text}' in site_readiness"
+                ))
+            })?,
+            Some(other) => {
+                return Err(ChaosSnapshotDecodeError::new(format!(
+                    "site_readiness.provider_kind must be a string, got {other:?}"
+                )))
+            }
+            None => ChaosProviderKind::Unknown,
+        };
+        Ok(ChaosSiteReadiness {
+            site,
+            readiness,
+            provider_kind,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChaosSnapshotDecodeError(String);
+
+impl ChaosSnapshotDecodeError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+impl fmt::Display for ChaosSnapshotDecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ChaosSnapshotDecodeError {}
+
+fn read_string(map: &Map, field: &str) -> Result<String, ChaosSnapshotDecodeError> {
+    map.get(field)
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .ok_or_else(|| {
+            ChaosSnapshotDecodeError::new(format!("missing or invalid {field} in chaos/status"))
+        })
+}
+
+fn read_f64(map: &Map, field: &str) -> Result<f64, ChaosSnapshotDecodeError> {
+    map.get(field).and_then(Value::as_f64).ok_or_else(|| {
+        ChaosSnapshotDecodeError::new(format!("missing or invalid {field} in chaos/status"))
+    })
+}
+
+fn read_u64(map: &Map, field: &str) -> Result<u64, ChaosSnapshotDecodeError> {
+    map.get(field).and_then(Value::as_u64).ok_or_else(|| {
+        ChaosSnapshotDecodeError::new(format!("missing or invalid {field} in chaos/status"))
+    })
+}
+
+fn read_module(map: &Map, field: &str) -> Result<ChaosModule, ChaosSnapshotDecodeError> {
+    let value = map.get(field).and_then(Value::as_str).ok_or_else(|| {
+        ChaosSnapshotDecodeError::new(format!("missing or invalid {field} in chaos/status"))
+    })?;
+    ChaosModule::from_str(value).ok_or_else(|| {
+        ChaosSnapshotDecodeError::new(format!("unknown module '{value}' in chaos/status"))
+    })
+}
+
+fn read_bytes<const N: usize>(map: &Map, field: &str) -> Result<[u8; N], ChaosSnapshotDecodeError> {
+    let value = map
+        .get(field)
+        .ok_or_else(|| ChaosSnapshotDecodeError::new(format!("missing {field} in chaos/status")))?;
+    let array = value.as_array().ok_or_else(|| {
+        ChaosSnapshotDecodeError::new(format!("{field} must be an array of bytes in chaos/status"))
+    })?;
+    if array.len() != N {
+        return Err(ChaosSnapshotDecodeError::new(format!(
+            "{field} must contain {N} entries"
+        )));
+    }
+    let mut bytes = [0u8; N];
+    for (index, entry) in array.iter().enumerate() {
+        let value = entry.as_u64().ok_or_else(|| {
+            ChaosSnapshotDecodeError::new(format!(
+                "{field}[{index}] must be a byte in chaos/status"
+            ))
+        })?;
+        if value > u8::MAX as u64 {
+            return Err(ChaosSnapshotDecodeError::new(format!(
+                "{field}[{index}] must be within 0-255"
+            )));
+        }
+        bytes[index] = value as u8;
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

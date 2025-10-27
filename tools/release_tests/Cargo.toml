@@ -5,6 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [dev-dependencies]
+foundation_serialization = { path = "../../crates/foundation_serialization" }
 sys = { path = "../../crates/sys" }
 
 [build-dependencies]

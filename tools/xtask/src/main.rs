@@ -5,9 +5,7 @@ use cli_core::{
     parse::{ParseError, Parser},
 };
 use diagnostics::{anyhow, bail, Context, Result, TbError};
-extern crate foundation_serialization as serde;
-
-use foundation_serialization::{json, Deserialize};
+use foundation_serialization::json::{self, Map, Value};
 use monitoring_build::ChaosReadinessSnapshot;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -49,7 +47,6 @@ impl Summary {
 
 const OVERLAY_EPSILON: f64 = 1e-6;
 
-#[derive(Deserialize)]
 struct OverlayReadinessRow {
     scenario: String,
     module: String,
@@ -61,65 +58,216 @@ struct OverlayReadinessRow {
     provider_before: Option<String>,
 }
 
-#[derive(Deserialize)]
 struct StatusDiffEntry {
     scenario: String,
     module: String,
-    #[serde(default)]
     readiness_before: Option<f64>,
-    #[serde(default)]
     readiness_after: Option<f64>,
-    #[serde(default)]
     site_added: Vec<DiffSite>,
-    #[serde(default)]
     site_removed: Vec<DiffSite>,
-    #[serde(default)]
     site_changed: Vec<DiffChange>,
 }
 
-#[derive(Deserialize)]
 struct DiffSite {
     site: String,
-    #[allow(dead_code)]
-    #[serde(default)]
-    provider_kind: String,
+    _provider_kind: String,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize)]
 struct DiffChange {
-    site: String,
-    #[serde(default)]
-    before: Option<f64>,
-    #[serde(default)]
-    after: Option<f64>,
-    #[serde(default)]
-    provider_before: Option<String>,
-    #[serde(default)]
-    provider_after: Option<String>,
+    _site: String,
+    _before: Option<f64>,
+    _after: Option<f64>,
+    _provider_before: Option<String>,
+    _provider_after: Option<String>,
 }
 
-#[derive(Deserialize)]
 struct ProviderScenarioReport {
     scenario: String,
     module: String,
-    #[serde(default = "usize::default")]
     impacted_sites: usize,
-    #[serde(default)]
     readiness_before: f64,
-    #[serde(default)]
     readiness_after: f64,
-    #[serde(default = "usize::default")]
     diff_entries: usize,
 }
 
-#[derive(Deserialize)]
 struct ProviderFailoverReport {
     provider: String,
-    #[serde(default = "usize::default")]
     total_diff_entries: usize,
-    #[serde(default)]
     scenarios: Vec<ProviderScenarioReport>,
+}
+
+impl OverlayReadinessRow {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("overlay readiness entry must be an object"))?;
+        Ok(Self {
+            scenario: read_string(map, "scenario")?,
+            module: read_string(map, "module")?,
+            site: read_string(map, "site")?,
+            provider: read_string(map, "provider")?,
+            readiness: read_f64(map, "readiness")?,
+            scenario_readiness: read_f64(map, "scenario_readiness")?,
+            readiness_before: map.get("readiness_before").and_then(Value::as_f64),
+            provider_before: map
+                .get("provider_before")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
+        })
+    }
+}
+
+impl StatusDiffEntry {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("status diff entry must be an object"))?;
+        let site_added = parse_sites(map.get("site_added"))?;
+        let site_removed = parse_sites(map.get("site_removed"))?;
+        let site_changed = parse_changes(map.get("site_changed"))?;
+        Ok(Self {
+            scenario: read_string(map, "scenario")?,
+            module: read_string(map, "module")?,
+            readiness_before: map.get("readiness_before").and_then(Value::as_f64),
+            readiness_after: map.get("readiness_after").and_then(Value::as_f64),
+            site_added,
+            site_removed,
+            site_changed,
+        })
+    }
+}
+
+impl DiffSite {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("diff site entry must be an object"))?;
+        Ok(Self {
+            site: read_string(map, "site")?,
+            _provider_kind: map
+                .get("provider_kind")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        })
+    }
+}
+
+impl DiffChange {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("diff change entry must be an object"))?;
+        Ok(Self {
+            _site: read_string(map, "site")?,
+            _before: map.get("before").and_then(Value::as_f64),
+            _after: map.get("after").and_then(Value::as_f64),
+            _provider_before: map
+                .get("provider_before")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
+            _provider_after: map
+                .get("provider_after")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
+        })
+    }
+}
+
+impl ProviderScenarioReport {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("provider scenario entry must be an object"))?;
+        Ok(Self {
+            scenario: read_string(map, "scenario")?,
+            module: read_string(map, "module")?,
+            impacted_sites: map
+                .get("impacted_sites")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize,
+            readiness_before: map
+                .get("readiness_before")
+                .and_then(Value::as_f64)
+                .unwrap_or_default(),
+            readiness_after: map
+                .get("readiness_after")
+                .and_then(Value::as_f64)
+                .unwrap_or_default(),
+            diff_entries: map
+                .get("diff_entries")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize,
+        })
+    }
+}
+
+impl ProviderFailoverReport {
+    fn from_value(value: &Value) -> Result<Self> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| anyhow!("provider report must be an object"))?;
+        let scenarios = match map.get("scenarios") {
+            Some(Value::Array(entries)) => {
+                let mut reports = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    reports.push(ProviderScenarioReport::from_value(entry)?);
+                }
+                reports
+            }
+            Some(_) => bail!("provider scenarios must be an array"),
+            None => Vec::new(),
+        };
+        Ok(Self {
+            provider: read_string(map, "provider")?,
+            total_diff_entries: map
+                .get("total_diff_entries")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize,
+            scenarios,
+        })
+    }
+}
+
+fn parse_sites(value: Option<&Value>) -> Result<Vec<DiffSite>> {
+    match value {
+        Some(Value::Array(entries)) => {
+            let mut sites = Vec::with_capacity(entries.len());
+            for entry in entries {
+                sites.push(DiffSite::from_value(entry)?);
+            }
+            Ok(sites)
+        }
+        Some(_) => bail!("diff site list must be an array"),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn parse_changes(value: Option<&Value>) -> Result<Vec<DiffChange>> {
+    match value {
+        Some(Value::Array(entries)) => {
+            let mut changes = Vec::with_capacity(entries.len());
+            for entry in entries {
+                changes.push(DiffChange::from_value(entry)?);
+            }
+            Ok(changes)
+        }
+        Some(_) => bail!("diff change list must be an array"),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn read_string(map: &Map, field: &str) -> Result<String> {
+    map.get(field)
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .ok_or_else(|| anyhow!("missing or invalid {field}"))
+}
+
+fn read_f64(map: &Map, field: &str) -> Result<f64> {
+    map.get(field)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| anyhow!("missing or invalid {field}"))
 }
 
 fn main() -> Result<()> {
@@ -234,6 +382,31 @@ fn build_command() -> Command {
                 "baseline",
                 "Baseline snapshot path used for diffs",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "archive-dir",
+                "archive-dir",
+                "Directory to archive chaos artefacts for long-lived retention",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "archive-label",
+                "archive-label",
+                "Optional label recorded alongside archived artefacts",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "publish-dir",
+                "publish-dir",
+                "Mirror chaos archive artefacts into the provided directory",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "publish-bucket",
+                "publish-bucket",
+                "Upload chaos archive artefacts to the given object store bucket",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "publish-prefix",
+                "publish-prefix",
+                "Override the key prefix used when uploading chaos artefacts",
+            )))
             .arg(ArgSpec::Flag(FlagSpec::new(
                 "require-diff",
                 "require-diff",
@@ -334,6 +507,11 @@ fn run_chaos(matches: &cli_core::parse::Matches) -> Result<()> {
         .get_string("baseline")
         .map(PathBuf::from)
         .unwrap_or_else(|| out_dir.join("status.baseline.json"));
+    let archive_dir_opt = matches.get_string("archive-dir");
+    let archive_label = matches.get_string("archive-label");
+    let publish_dir = matches.get_string("publish-dir");
+    let publish_bucket = matches.get_string("publish-bucket");
+    let publish_prefix = matches.get_string("publish-prefix");
 
     let attestation_path = out_dir.join("attestations.json");
     let snapshot_path = out_dir.join("status.snapshot.json");
@@ -367,6 +545,21 @@ fn run_chaos(matches: &cli_core::parse::Matches) -> Result<()> {
 
     if require_diff {
         command.env("TB_CHAOS_REQUIRE_DIFF", "1");
+    }
+    if let Some(ref archive_dir) = archive_dir_opt {
+        command.env("TB_CHAOS_ARCHIVE_DIR", archive_dir);
+    }
+    if let Some(ref label) = archive_label {
+        command.env("TB_CHAOS_ARCHIVE_LABEL", label);
+    }
+    if let Some(ref publish_dir) = publish_dir {
+        command.env("TB_CHAOS_ARCHIVE_PUBLISH_DIR", publish_dir);
+    }
+    if let Some(ref publish_bucket) = publish_bucket {
+        command.env("TB_CHAOS_ARCHIVE_BUCKET", publish_bucket);
+    }
+    if let Some(ref publish_prefix) = publish_prefix {
+        command.env("TB_CHAOS_ARCHIVE_PREFIX", publish_prefix);
     }
 
     let status = command
@@ -591,6 +784,31 @@ fn run_chaos(matches: &cli_core::parse::Matches) -> Result<()> {
             baseline_path.display()
         );
     }
+    if let Some(archive_dir) = archive_dir_opt {
+        let latest = Path::new(&archive_dir).join("latest.json");
+        if latest.exists() {
+            println!("chaos archive latest manifest: {}", latest.display());
+        } else {
+            println!(
+                "warning: chaos archive latest manifest missing at {}",
+                latest.display()
+            );
+        }
+    }
+    if let Some(dir) = publish_dir {
+        println!("chaos archive mirrored to {}", dir);
+    }
+    if let Some(bucket) = publish_bucket {
+        let prefix_trimmed = publish_prefix
+            .as_deref()
+            .map(|value| value.trim_matches('/'))
+            .filter(|value| !value.is_empty());
+        if let Some(prefix) = prefix_trimmed {
+            println!("chaos archive uploaded to s3://{bucket}/{prefix}");
+        } else {
+            println!("chaos archive uploaded to s3://{bucket}");
+        }
+    }
 
     Ok(())
 }
@@ -600,9 +818,11 @@ fn load_snapshots(path: &Path) -> Result<Vec<ChaosReadinessSnapshot>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let snapshots =
+    let value: Value =
         json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(snapshots)
+    ChaosReadinessSnapshot::decode_array(&value)
+        .map_err(|err| anyhow!(err))
+        .with_context(|| format!("failed to parse {}", path.display()))
 }
 
 fn load_overlay_rows(path: &Path) -> Result<Vec<OverlayReadinessRow>> {
@@ -610,8 +830,15 @@ fn load_overlay_rows(path: &Path) -> Result<Vec<OverlayReadinessRow>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let rows =
+    let value: Value =
         json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
+    let entries = value
+        .as_array()
+        .ok_or_else(|| anyhow!("overlay readiness must be an array"))?;
+    let mut rows = Vec::with_capacity(entries.len());
+    for entry in entries {
+        rows.push(OverlayReadinessRow::from_value(entry)?);
+    }
     Ok(rows)
 }
 
@@ -623,9 +850,16 @@ fn load_status_diff(path: &Path) -> Result<Vec<StatusDiffEntry>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let entries =
+    let value: Value =
         json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(entries)
+    let entries = value
+        .as_array()
+        .ok_or_else(|| anyhow!("status diff must be an array"))?;
+    let mut diffs = Vec::with_capacity(entries.len());
+    for entry in entries {
+        diffs.push(StatusDiffEntry::from_value(entry)?);
+    }
+    Ok(diffs)
 }
 
 fn load_provider_reports(path: &Path) -> Result<Vec<ProviderFailoverReport>> {
@@ -636,8 +870,15 @@ fn load_provider_reports(path: &Path) -> Result<Vec<ProviderFailoverReport>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let reports =
+    let value: Value =
         json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
+    let entries = value
+        .as_array()
+        .ok_or_else(|| anyhow!("provider failover reports must be an array"))?;
+    let mut reports = Vec::with_capacity(entries.len());
+    for entry in entries {
+        reports.push(ProviderFailoverReport::from_value(entry)?);
+    }
     Ok(reports)
 }
 

@@ -281,6 +281,16 @@ name = "foundation_metrics"
 version = "0.1.0"
 
 [[package]]
+name = "foundation_object_store"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_time",
+ "httpd",
+ "thiserror",
+]
+
+[[package]]
 name = "foundation_profiler"
 version = "0.1.0"
 
@@ -548,6 +558,7 @@ dependencies = [
  "dependency_guard",
  "diagnostics",
  "foundation_metrics",
+ "foundation_object_store",
  "foundation_serde",
  "foundation_serialization",
  "foundation_telemetry",
@@ -667,6 +678,7 @@ name = "release_tests"
 version = "0.1.0"
 dependencies = [
  "dependency_guard",
+ "foundation_serialization",
  "sys",
 ]
 
@@ -778,9 +790,11 @@ dependencies = [
  "dkg",
  "explorer",
  "foundation_lazy",
+ "foundation_object_store",
  "foundation_serde",
  "foundation_serialization",
  "foundation_time",
+ "http_env",
  "httpd",
  "ledger",
  "light-client",

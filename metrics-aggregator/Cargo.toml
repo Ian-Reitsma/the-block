@@ -21,6 +21,7 @@ sys = { path = "../crates/sys" }
 tls_warning = { path = "../crates/tls_warning" }
 governance = { path = "../governance" }
 serde = { workspace = true }
+foundation_object_store = { path = "../crates/foundation_object_store", optional = true }
 
 [dev-dependencies]
 rand = { path = "../crates/rand" }
@@ -32,4 +33,4 @@ dependency_guard = { path = "../crates/dependency_guard" }
 
 
 [features]
-s3 = []
+s3 = ["dep:foundation_object_store"]

@@ -11,6 +11,16 @@ RPC client.
 
 ## Recent progress (2025-10-27)
 
+- Chaos archive publishing now persists `archive/latest.json`, per-run
+  `manifest.json`, and zipped bundles using the handwritten
+  `foundation_serialization::json::Value` helpers in
+  `sim/chaos_lab.rs`. `cargo xtask chaos` forwards optional
+  `--publish-dir`/`--publish-bucket` flags to the new
+  `foundation_object_store` crate so artefacts mirror into object storage
+  without third-party SDKs, while `scripts/release_provenance.sh` and
+  `scripts/verify_release.sh` insist on the manifest/bundle set before
+  tagging. Downstream dashboards and automation ingest the same
+  first-party JSON without serde stubs or external tooling.
 - Chaos readiness now exposes provider-labelled breakdowns without introducing
   external RPC clients. `sim/src/chaos.rs` emits `ChaosSite::with_kind` entries
   and `monitoring/src/chaos.rs` serialises them through the existing codecs so

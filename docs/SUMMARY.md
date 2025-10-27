@@ -1,4 +1,21 @@
 # Summary
+> **Review (2025-10-27, evening):** Chaos artefacts now ship with preserved
+> manifests and first-party publishing hooks. `sim/chaos_lab.rs` writes a
+> run-scoped `manifest.json` alongside a `latest.json` pointer under
+> `chaos/archive/`, records BLAKE3 digests and byte sizes for every snapshot,
+> diff, overlay, and provider-failover file, and bundles the set into a
+> `run_id.zip` archive. Optional `--publish-dir`, `--publish-bucket`, and
+> `--publish-prefix` flags mirror the manifests and bundle into downstream
+> directories or S3-compatible object stores through the new
+> `foundation_object_store` crate, keeping uploads on first-party HTTP/TLS
+> clients. `tools/xtask` now consumes the manifests via manual
+> `foundation_serialization::json::Value` decoding, surfaces publish targets, and
+> honours the new flags so release automation and dashboards see identical
+> artefact inventories. `scripts/release_provenance.sh` refuses to continue unless
+> `chaos/archive/latest.json` and the referenced run manifest exist, while
+> `scripts/verify_release.sh` parses the manifest to ensure every archived file is
+> present and that the recorded bundle size matches the on-disk `run_id.zip`,
+> closing the loop without third-party tooling.
 > **Review (2025-10-27, afternoon):** `/chaos/status` baselines now flow entirely
 > through first-party tooling. `sim/chaos_lab.rs` pulls snapshots with
 > `httpd::BlockingClient`, decodes them manually via
