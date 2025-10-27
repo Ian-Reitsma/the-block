@@ -5,6 +5,7 @@ use std::sync::{
 };
 
 use concurrency::Lazy;
+use diagnostics::tracing;
 
 use super::OverlayPeerId;
 #[cfg(feature = "telemetry")]
@@ -32,7 +33,7 @@ impl PartitionWatch {
 
     /// Mark a peer as unreachable.
     pub fn mark_unreachable(&self, peer: OverlayPeerId) {
-        let mut set = self.unreachable.lock().unwrap();
+        let mut set = self.lock_unreachable("mark_unreachable");
         set.insert(peer);
         if set.len() >= self.threshold && !self.active.swap(true, Ordering::SeqCst) {
             #[cfg(feature = "telemetry")]
@@ -43,7 +44,7 @@ impl PartitionWatch {
 
     /// Mark a peer as reachable again.
     pub fn mark_reachable(&self, peer: OverlayPeerId) {
-        let mut set = self.unreachable.lock().unwrap();
+        let mut set = self.lock_unreachable("mark_reachable");
         set.remove(&peer);
         if set.len() < self.threshold {
             self.active.store(false, Ordering::SeqCst);
@@ -67,9 +68,7 @@ impl PartitionWatch {
     /// Snapshot the set of peers currently considered unreachable.
     pub fn isolated_peers(&self) -> Vec<OverlayPeerId> {
         let mut peers = self
-            .unreachable
-            .lock()
-            .unwrap()
+            .lock_unreachable("isolated_peers")
             .iter()
             .cloned()
             .collect::<Vec<_>>();
@@ -79,7 +78,21 @@ impl PartitionWatch {
 
     /// Returns true if the provided peer is currently marked unreachable.
     pub fn is_isolated(&self, peer: &OverlayPeerId) -> bool {
-        self.unreachable.lock().unwrap().contains(peer)
+        self.lock_unreachable("is_isolated").contains(peer)
+    }
+
+    fn lock_unreachable(&self, context: &str) -> std::sync::MutexGuard<'_, HashSet<OverlayPeerId>> {
+        match self.unreachable.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                tracing::warn!(
+                    target = "net",
+                    context = context,
+                    "partition_watch_poisoned"
+                );
+                err.into_inner()
+            }
+        }
     }
 }
 

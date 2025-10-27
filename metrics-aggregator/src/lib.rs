@@ -203,6 +203,7 @@ const METRIC_TLS_ENV_WARNING_VARIABLES_UNIQUE_FINGERPRINTS: &str =
     "tls_env_warning_variables_unique_fingerprints";
 const METRIC_BRIDGE_ANOMALY_TOTAL: &str = "bridge_anomaly_total";
 const METRIC_CHAOS_READINESS: &str = "chaos_readiness";
+const METRIC_CHAOS_SITE_READINESS: &str = "chaos_site_readiness";
 const METRIC_CHAOS_BREACH_TOTAL: &str = "chaos_sla_breach_total";
 const METRIC_BRIDGE_COUNTER_DELTA: &str = "bridge_metric_delta";
 const METRIC_BRIDGE_COUNTER_RATE: &str = "bridge_metric_rate_per_second";
@@ -242,6 +243,7 @@ const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
 const LABEL_ROLE: [&str; 1] = ["role"];
+const LABEL_CHAOS_SITE: [&str; 3] = ["module", "scenario", "site"];
 const EXPLORER_PAYOUT_ROLES: [&str; 6] = [
     "viewer",
     "host",
@@ -1723,6 +1725,7 @@ struct AggregatorMetrics {
     ad_readiness_min_host_count: Gauge,
     ad_readiness_min_provider_count: Gauge,
     chaos_readiness: GaugeVec,
+    chaos_site_readiness: GaugeVec,
     chaos_breach_total: Counter,
 }
 
@@ -2585,6 +2588,24 @@ impl Recorder for AggregatorRecorder {
                     }
                 }
             }
+            METRIC_CHAOS_SITE_READINESS => {
+                if let Some(sample) = Self::f64_value(name, value) {
+                    if let Some(values) = Self::label_values(name, labels, &LABEL_CHAOS_SITE) {
+                        match metrics
+                            .chaos_site_readiness
+                            .ensure_handle_for_label_values(&values)
+                        {
+                            Ok(handle) => handle.set(sample),
+                            Err(err) => warn!(
+                                target: "aggregator",
+                                metric = name,
+                                ?err,
+                                "failed to update chaos_site_readiness"
+                            ),
+                        }
+                    }
+                }
+            }
             METRIC_BRIDGE_COUNTER_DELTA => {
                 if let Some(sample) = Self::f64_value(name, value) {
                     if let Some(values) = Self::label_values(name, labels, &LABEL_BRIDGE_COUNTER) {
@@ -3111,6 +3132,16 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(chaos_readiness.clone()))
         .expect("register chaos_readiness");
+    let chaos_site_readiness = GaugeVec::new(
+        Opts::new(
+            METRIC_CHAOS_SITE_READINESS,
+            "Chaos readiness scores grouped by module, scenario, and site",
+        ),
+        &["module", "scenario", "site"],
+    );
+    registry
+        .register(Box::new(chaos_site_readiness.clone()))
+        .expect("register chaos_site_readiness");
     let chaos_breach_total = registry
         .register_counter(
             METRIC_CHAOS_BREACH_TOTAL,
@@ -3173,6 +3204,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         ad_readiness_min_host_count,
         ad_readiness_min_provider_count,
         chaos_readiness,
+        chaos_site_readiness,
         chaos_breach_total,
     }
 });
@@ -7682,7 +7714,9 @@ mod tests {
     use foundation_telemetry::{AdReadinessTelemetry, WrapperMetricEntry, WrapperSummaryEntry};
     use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
-    use monitoring_build::{sign_attestation, ChaosAttestationDraft, ChaosModule};
+    use monitoring_build::{
+        sign_attestation, ChaosAttestationDraft, ChaosModule, ChaosSiteReadiness,
+    };
     use rand::rngs::OsRng;
     use std::collections::HashMap;
     use std::future::Future;
@@ -7723,6 +7757,10 @@ mod tests {
                 window_start: 0,
                 window_end: 10,
                 issued_at: 10,
+                site_readiness: vec![ChaosSiteReadiness {
+                    site: "provider-a".into(),
+                    readiness: 0.81,
+                }],
             };
             let attestation = sign_attestation(draft, &signing_key);
             let req = app
@@ -7750,6 +7788,16 @@ mod tests {
             );
             assert_eq!(entry.get("module").and_then(Value::as_str), Some("overlay"));
             assert_eq!(entry.get("breaches").and_then(Value::as_u64), Some(1));
+            let sites = entry
+                .get("site_readiness")
+                .and_then(Value::as_array)
+                .expect("site readiness array");
+            assert_eq!(sites.len(), 1);
+            let site_entry = sites[0].as_object().expect("site entry");
+            assert_eq!(
+                site_entry.get("site").and_then(Value::as_str),
+                Some("provider-a")
+            );
         });
     }
 
@@ -7809,6 +7857,16 @@ mod tests {
             modules.sort();
             assert_eq!(modules, vec!["compute", "overlay", "storage"]);
 
+            let overlay_entry = snapshots
+                .iter()
+                .find(|entry| entry.get("module").and_then(Value::as_str) == Some("overlay"))
+                .expect("overlay snapshot present");
+            let overlay_sites = overlay_entry
+                .get("site_readiness")
+                .and_then(Value::as_array)
+                .expect("overlay site readiness array");
+            assert!(!overlay_sites.is_empty());
+
             let tracker = state.chaos_snapshots();
             assert_eq!(tracker.len(), 3);
             for snapshot in tracker {
@@ -7819,6 +7877,9 @@ mod tests {
                     signing_key.verifying_key().to_bytes(),
                     "verifying key preserved"
                 );
+                if snapshot.module == ChaosModule::Overlay {
+                    assert!(!snapshot.site_readiness.is_empty());
+                }
             }
         });
     }
@@ -7840,10 +7901,15 @@ mod tests {
                 window_start: 0,
                 window_end: 10,
                 issued_at: 10,
+                site_readiness: vec![ChaosSiteReadiness {
+                    site: "provider-a".into(),
+                    readiness: 0.9,
+                }],
             };
             let attestation = sign_attestation(draft, &signing_key);
             let mut tampered = attestation.clone();
             tampered.readiness = 1.5; // outside the allowed [0, 1] range
+            tampered.site_readiness[0].readiness = 1.2;
 
             let req = app
                 .request_builder()
@@ -7891,6 +7957,7 @@ mod tests {
                 window_start: 0,
                 window_end: 5,
                 issued_at: 5,
+                site_readiness: Vec::new(),
             };
             let attestation = sign_attestation(draft, &signing_key);
             let mut tampered = attestation.clone();
@@ -7934,6 +8001,7 @@ mod tests {
                 window_start: 10,
                 window_end: 20,
                 issued_at: 25,
+                site_readiness: Vec::new(),
             };
             let attestation = sign_attestation(draft, &signing_key);
             let mut tampered = attestation.clone();
@@ -8884,10 +8952,16 @@ impl AppState {
     ) -> Result<ChaosReadinessSnapshot, ChaosAttestationError> {
         verify_attestation(&attestation)?;
         let snapshot = {
-            let mut guard = self
-                .chaos_status
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
+            let mut guard = match self.chaos_status.lock() {
+                Ok(guard) => guard,
+                Err(poison) => {
+                    warn!(
+                        target: "aggregator",
+                        "chaos_status_tracker_poisoned_recovering"
+                    );
+                    poison.into_inner()
+                }
+            };
             guard.record(&attestation)
         };
         gauge!(
@@ -8896,6 +8970,15 @@ impl AppState {
             "module" => attestation.module.as_str(),
             "scenario" => attestation.scenario.as_str()
         );
+        for site in &snapshot.site_readiness {
+            gauge!(
+                METRIC_CHAOS_SITE_READINESS,
+                site.readiness,
+                "module" => attestation.module.as_str(),
+                "scenario" => attestation.scenario.as_str(),
+                "site" => site.site.as_str()
+            );
+        }
         if attestation.breaches > 0 {
             increment_counter!(METRIC_CHAOS_BREACH_TOTAL, attestation.breaches as f64);
         }
@@ -8918,7 +9001,8 @@ struct ChaosStatusTracker {
 
 impl ChaosStatusTracker {
     fn record(&mut self, attestation: &ChaosAttestation) -> ChaosReadinessSnapshot {
-        let snapshot = ChaosReadinessSnapshot::from(attestation);
+        let mut snapshot = ChaosReadinessSnapshot::from(attestation);
+        snapshot.site_readiness.sort_by(|a, b| a.site.cmp(&b.site));
         self.snapshots.insert(snapshot.key(), snapshot.clone());
         snapshot
     }

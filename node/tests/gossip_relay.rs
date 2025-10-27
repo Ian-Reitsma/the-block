@@ -28,7 +28,7 @@ tb_prop_test!(dedup_entries_expire, |runner| {
             cfg.max_fanout = 6;
             let (relay, _dir) = relay_with_config(cfg);
             let sk = SigningKey::from_bytes(&[7u8; 32]);
-            let msg = Message::new(Payload::Hello(vec![]), &sk);
+            let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
             let start = Instant::now();
             assert!(relay.should_process_at(&msg, start));
             let before = start + Duration::from_millis(499);
@@ -49,7 +49,7 @@ tb_prop_test!(dedup_entries_expire, |runner| {
             cfg.max_fanout = cfg.base_fanout + 3;
             let (relay, _dir) = relay_with_config(cfg);
             let sk = SigningKey::from_bytes(&[7u8; 32]);
-            let msg = Message::new(Payload::Hello(vec![]), &sk);
+            let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
             let start = Instant::now();
             assert!(relay.should_process_at(&msg, start));
             let before = start + Duration::from_millis(ttl_ms.saturating_sub(1));
@@ -77,7 +77,7 @@ tb_prop_test!(fanout_respects_configuration, |runner| {
             cfg.max_fanout = max;
             let (relay, _dir) = relay_with_config(cfg);
             let sk = SigningKey::from_bytes(&[9u8; 32]);
-            let msg = Message::new(Payload::Hello(vec![]), &sk);
+            let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
             let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..peers_count)
                 .map(|i| {
                     (

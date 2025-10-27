@@ -23,10 +23,35 @@ use transport::{
 };
 
 #[cfg(feature = "inhouse")]
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+#[cfg(feature = "inhouse")]
+use diagnostics::tracing;
 
 #[cfg(feature = "inhouse")]
 static INHOUSE_STORE_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
+
+#[cfg(feature = "inhouse")]
+fn write_override<'a>(lock: &'a RwLock<Option<PathBuf>>) -> RwLockWriteGuard<'a, Option<PathBuf>> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(err) => {
+            tracing::warn!(target = "net", "inhouse_cert_store_override_poisoned");
+            err.into_inner()
+        }
+    }
+}
+
+#[cfg(feature = "inhouse")]
+fn read_override<'a>(lock: &'a RwLock<Option<PathBuf>>) -> RwLockReadGuard<'a, Option<PathBuf>> {
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(err) => {
+            tracing::warn!(target = "net", "inhouse_cert_store_override_poisoned");
+            err.into_inner()
+        }
+    }
+}
 
 use super::{load_net_key, transport_registry};
 
@@ -116,7 +141,7 @@ fn active_provider() -> Result<ActiveProvider> {
 #[cfg(feature = "inhouse")]
 pub(crate) fn set_inhouse_cert_store_override(path: Option<PathBuf>) {
     let lock = INHOUSE_STORE_OVERRIDE.get_or_init(|| RwLock::new(None));
-    *lock.write().unwrap() = path;
+    *write_override(lock) = path;
 }
 
 #[cfg(feature = "inhouse")]
@@ -130,7 +155,7 @@ fn cert_store_path() -> PathBuf {
     const CERT_STORE_FILE: &str = "quic_certs.json";
     #[cfg(feature = "inhouse")]
     if let Some(lock) = INHOUSE_STORE_OVERRIDE.get() {
-        if let Some(path) = lock.read().unwrap().clone() {
+        if let Some(path) = read_override(lock).as_ref().cloned() {
             return path;
         }
     }

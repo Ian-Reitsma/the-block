@@ -35,10 +35,10 @@ pub struct Message {
 
 impl Message {
     /// Sign `body` with `kp` producing an authenticated message.
-    pub fn new(body: Payload, sk: &SigningKey) -> Self {
-        let bytes = encode_payload(&body).unwrap_or_else(|e| panic!("serialize message body: {e}"));
+    pub fn new(body: Payload, sk: &SigningKey) -> EncodeResult<Self> {
+        let bytes = encode_payload(&body)?;
         let sig = sk.sign(&bytes);
-        Self {
+        Ok(Self {
             pubkey: sk.verifying_key().to_bytes(),
             signature: Bytes::from(sig.to_bytes().to_vec()),
             body,
@@ -54,7 +54,7 @@ impl Message {
                     None
                 }
             },
-        }
+        })
     }
 }
 
@@ -186,10 +186,10 @@ fn read_message(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Message>
 
     Ok(Message {
         pubkey: pubkey.ok_or(DecodeError::MissingField("pubkey"))?,
-        signature: signature.unwrap_or_else(Bytes::new),
+        signature: signature.ok_or(DecodeError::MissingField("signature"))?,
         body: body.ok_or(DecodeError::MissingField("body"))?,
-        partition: partition.unwrap_or(None),
-        cert_fingerprint: cert_fingerprint.unwrap_or(None),
+        partition: partition.flatten(),
+        cert_fingerprint: cert_fingerprint.flatten(),
     })
 }
 
@@ -300,7 +300,7 @@ fn read_blob_chunk(reader: &mut BinaryReader<'_>) -> binary_struct::Result<BlobC
         root: root.ok_or(DecodeError::MissingField("root"))?,
         index: index.ok_or(DecodeError::MissingField("index"))?,
         total: total.ok_or(DecodeError::MissingField("total"))?,
-        data: data.unwrap_or_else(Bytes::new),
+        data: data.ok_or(DecodeError::MissingField("data"))?,
     })
 }
 

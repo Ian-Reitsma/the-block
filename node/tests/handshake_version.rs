@@ -31,7 +31,7 @@ fn rejects_wrong_version() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &kp);
+    let msg = Message::new(Payload::Handshake(hello), &kp).expect("sign handshake");
     let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
     peers.handle_message(msg, None, &chain);
     assert!(peers.list().is_empty());

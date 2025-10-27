@@ -12,6 +12,7 @@ use crate::net::{record_ip_drop, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
 use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
+use diagnostics::tracing;
 
 /// Deterministic fanout tree inspired by Turbine gossip.
 pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Bytes>)]) {
@@ -35,8 +36,16 @@ pub fn broadcast_chunk(
     sk: &SigningKey,
     peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
-    let msg = Message::new(crate::net::message::Payload::BlobChunk(chunk.clone()), sk);
-    broadcast(&msg, peers);
+    match Message::new(crate::net::message::Payload::BlobChunk(chunk.clone()), sk) {
+        Ok(msg) => broadcast(&msg, peers),
+        Err(err) => {
+            tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_blob_chunk"
+            );
+        }
+    }
 }
 
 /// Broadcast reputation gossip entries.
@@ -45,11 +54,19 @@ pub fn broadcast_reputation(
     sk: &SigningKey,
     peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
-    let msg = Message::new(
+    match Message::new(
         crate::net::message::Payload::Reputation(entries.to_vec()),
         sk,
-    );
-    broadcast(&msg, peers);
+    ) {
+        Ok(msg) => broadcast(&msg, peers),
+        Err(err) => {
+            tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_reputation_payload"
+            );
+        }
+    }
 }
 
 /// Broadcast with a custom send function, useful for tests.
@@ -63,11 +80,16 @@ pub fn broadcast_with<F>(
     static SEEN: Lazy<Mutex<(HashSet<[u8; 32]>, VecDeque<[u8; 32]>)>> =
         Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
     const MAX_SEEN: usize = 1024;
-    let hash = {
-        let encoded = encode_message(msg).unwrap_or_default();
-        let mut h = Hasher::new();
-        h.update(&encoded);
-        *h.finalize().as_bytes()
+    let hash = match encode_message(msg) {
+        Ok(encoded) => {
+            let mut h = Hasher::new();
+            h.update(&encoded);
+            *h.finalize().as_bytes()
+        }
+        Err(err) => {
+            tracing::error!(target = "net", reason = %err, "encode_message_failed_for_hash");
+            return;
+        }
     };
     let mut guard = SEEN.guard();
     if guard.0.contains(&hash) {
@@ -135,7 +157,7 @@ mod tests {
 
             quic_capabilities: Vec::new(),
         };
-        Message::new(Payload::Handshake(hello), &sk)
+        Message::new(Payload::Handshake(hello), &sk).expect("sign handshake")
     }
 
     #[test]

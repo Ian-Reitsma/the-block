@@ -142,8 +142,33 @@ on payloads.  Operators can feed the generated attestations directly into the
 metrics aggregator `/chaos/attest` endpoint (see
 [`docs/monitoring.md`](monitoring.md)).
 
+Site-specific readiness can be orchestrated through the
+`TB_CHAOS_SITE_TOPOLOGY` environment variable.  Setting
+
+```
+TB_CHAOS_SITE_TOPOLOGY="overlay=us-east:0.6:0.1,eu-west:0.4:0.2;compute=us-central:0.5:0.1"
+```
+
+overrides the default per-module site roster with named locations, weight
+targets, and optional wake-up delays.  The harness automatically normalises
+weights, exposes site-level readiness in each attestation draft, and persists
+the selected topology so dashboards and the metrics aggregator report identical
+module/site breakdowns.  The implementation lives in `ChaosSite::new` and
+`ChaosScenario::set_sites`, ensuring every scenario shares a common,
+first-party representation that the attestation draft simply clones into its
+`site_readiness` vector.
+
+Malformed attestation payloads are now rejected explicitly: monitoring-based
+tests cover unknown modules, truncated signature arrays, and invalid byte
+entries, while the simulator exercises distributed site weighting through
+`sim/tests/chaos_harness.rs`.
+
 Harness configuration lives in `sim/src/chaos.rs`; extend the registered
-scenarios to model additional overlays, storage tiers, or compute pipelines.
+scenarios to model additional overlays, storage tiers, or compute pipelines and
+call `configure_sites` to seed per-scenario provider mixes. `Simulation::new`
+demonstrates the default overlay mix (`ChaosSite::new("provider-a", …)` and
+`ChaosSite::new("provider-b", …)`) so integration tests immediately exercise the
+site readiness export path.
 Integration coverage in `sim/tests/chaos_harness.rs` exercises breach detection,
 recovery, and attestation draft generation. Downstream verification relies on
 `metrics-aggregator/tests::chaos_lab_attestations_flow_through_status`, which
@@ -168,7 +193,11 @@ the scenario to detect tampering.
 The DID simulator (`sim/did.rs`) now assembles documents via
 `foundation_serialization::json` builders rather than serde derives so the
 binary runs cleanly during full workspace test sweeps without invoking any
-third-party stubs.
+third-party stubs. Likewise, `sim/src/lib.rs` provides a
+`mobile_sync::measure_sync_latency` stub when the `runtime-wrapper` feature is
+disabled; the stub logs `mobile_sync_stub_inactive_runtime` and returns a zero
+duration so CI and documentation builds retain deterministic output without
+linking to external runtime crates.
 
 ## Further Reading
 

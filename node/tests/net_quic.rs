@@ -199,7 +199,8 @@ fn quic_handshake_roundtrip() {
             quic_provider: None,
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        let msg =
+            Message::new(Payload::Handshake(hello.clone()), &sample_sk()).expect("sign message");
         let bytes = binary::encode(&msg).unwrap();
         quic::send(&conn, &bytes).await.unwrap();
         let recv = rx.await.unwrap();
@@ -262,14 +263,15 @@ fn quic_gossip_roundtrip() {
             quic_provider: None,
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        let msg =
+            Message::new(Payload::Handshake(hello.clone()), &sample_sk()).expect("sign message");
         quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
         let recv = hs_rx.await.unwrap();
         let parsed: Message = binary::decode(&recv).unwrap();
         assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
-        let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk());
+        let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk()).expect("sign message");
         quic::send(&conn, &binary::encode(&gossip).unwrap())
             .await
             .unwrap();
@@ -326,7 +328,7 @@ fn quic_disconnect() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk()).expect("sign message");
         quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
@@ -369,7 +371,7 @@ fn quic_fallback_to_tcp() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk()).expect("sign message");
         let msg_clone = msg.clone();
         the_block::spawn_blocking(move || {
             let relay = relay;
@@ -696,7 +698,8 @@ fn quic_version_mismatch() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        let msg =
+            Message::new(Payload::Handshake(hello.clone()), &sample_sk()).expect("sign message");
         quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
@@ -759,7 +762,7 @@ fn quic_packet_loss_env() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk()).expect("sign message");
         quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();

@@ -8,6 +8,8 @@ fn make_header(prev: &Header, height: u64) -> Header {
         prev_hash: prev.hash(),
         merkle_root: [0u8; 32],
         checkpoint_hash: [0u8; 32],
+        validator_key: None,
+        checkpoint_sig: None,
         nonce: 0,
         difficulty: 1,
         timestamp_millis: 0,
@@ -34,6 +36,8 @@ fn measures_sync_latency() {
         prev_hash: [0u8; 32],
         merkle_root: [0u8; 32],
         checkpoint_hash: [0u8; 32],
+        validator_key: None,
+        checkpoint_sig: None,
         nonce: 0,
         difficulty: 1,
         timestamp_millis: 0,
@@ -47,5 +51,9 @@ fn measures_sync_latency() {
     let h2 = make_header(&h1, 2);
     let headers = vec![genesis, h1, h2];
     let dur = measure_sync_latency(headers, Duration::from_millis(2));
-    assert!(dur.as_millis() >= 4);
+    if cfg!(feature = "runtime-wrapper") {
+        assert!(dur.as_millis() >= 4);
+    } else {
+        assert_eq!(dur, Duration::default());
+    }
 }

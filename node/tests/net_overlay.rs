@@ -51,7 +51,8 @@ fn relay_broadcast_records_selected_peers() {
     the_block::net::peer::inject_addr_mapping_for_tests(addr, peer.clone());
 
     let sk = crypto_suite::signatures::ed25519::SigningKey::from_bytes(&[4u8; 32]);
-    let msg = the_block::net::Message::new(the_block::net::Payload::Hello(vec![]), &sk);
+    let msg = the_block::net::Message::new(the_block::net::Payload::Hello(vec![]), &sk)
+        .expect("sign hello");
     relay.broadcast_with(
         &msg,
         &[(addr, the_block::net::Transport::Tcp, None)],

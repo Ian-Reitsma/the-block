@@ -63,7 +63,7 @@ use crate::{
 };
 use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
-use concurrency::{Bytes, Lazy, OnceCell};
+use concurrency::{Bytes, Lazy, MutexExt, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
@@ -78,7 +78,7 @@ use p2p_overlay::{
 use rand::{OsRng, Rng, RngCore};
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -136,15 +136,33 @@ static OVERLAY_SERVICE: Lazy<RwLock<DynOverlayService>> = Lazy::new(|| {
 });
 
 fn read_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockReadGuard<'a, T> {
-    lock.read().unwrap_or_else(|poison| poison.into_inner())
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(poison) => {
+            diagnostics::tracing::warn!(target: "net", "rwlock_read_poisoned_recovered");
+            poison.into_inner()
+        }
+    }
 }
 
 fn write_lock<'a, T>(lock: &'a RwLock<T>) -> RwLockWriteGuard<'a, T> {
-    lock.write().unwrap_or_else(|poison| poison.into_inner())
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poison) => {
+            diagnostics::tracing::warn!(target: "net", "rwlock_write_poisoned_recovered");
+            poison.into_inner()
+        }
+    }
 }
 
 fn lock_mutex<'a, T>(mutex: &'a Mutex<T>) -> MutexGuard<'a, T> {
-    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poison) => {
+            diagnostics::tracing::warn!(target: "net", "mutex_poisoned_recovered");
+            poison.into_inner()
+        }
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -1602,10 +1620,7 @@ impl Node {
             Some((addr, cert)) => (Some(addr), Some(cert)),
             None => (None, None),
         };
-        ban_store::store()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .purge_expired();
+        ban_store::store().guard().purge_expired();
         let relay = std::sync::Arc::new(Relay::default());
         set_gossip_relay(std::sync::Arc::clone(&relay));
         Self {
@@ -1623,21 +1638,19 @@ impl Node {
     }
 
     /// Start the listener thread handling inbound gossip.
-    pub fn start(&self) -> thread::JoinHandle<()> {
+    pub fn start(&self) -> io::Result<thread::JoinHandle<()>> {
         let flag = ShutdownFlag::new();
         self.start_with_flag(&flag)
     }
 
     /// Start the listener thread handling inbound gossip that stops when `shutdown` is triggered.
-    pub fn start_with_flag(&self, shutdown: &ShutdownFlag) -> thread::JoinHandle<()> {
-        let listener = TcpListener::bind(self.addr).unwrap_or_else(|e| panic!("bind: {e}"));
-        listener
-            .set_nonblocking(true)
-            .unwrap_or_else(|e| panic!("nonblock: {e}"));
+    pub fn start_with_flag(&self, shutdown: &ShutdownFlag) -> io::Result<thread::JoinHandle<()>> {
+        let listener = bind_tcp_listener(self.addr)?;
+        listener.set_nonblocking(true)?;
         let stop = shutdown.as_arc();
         let peers = self.peers.clone();
         let chain = Arc::clone(&self.chain);
-        thread::spawn(move || loop {
+        Ok(thread::spawn(move || loop {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
@@ -1664,7 +1677,7 @@ impl Node {
                 }
                 Err(_) => break,
             }
-        })
+        }))
     }
 
     /// Broadcast a transaction to all known peers.
@@ -1759,16 +1772,18 @@ impl Node {
             #[cfg(not(feature = "quic"))]
             quic_capabilities: Vec::new(),
         };
-        let hs_msg = Message::new(Payload::Handshake(hello), &self.key);
-        for p in &peers {
-            let _ = send_msg(*p, &hs_msg);
+        if let Some(hs_msg) = self.sign_payload(Payload::Handshake(hello), "handshake") {
+            for p in &peers {
+                let _ = send_msg(*p, &hs_msg);
+            }
         }
         // advertise our peer set
         let mut addrs = peers.clone();
         addrs.push(self.addr);
-        let hello_msg = Message::new(Payload::Hello(addrs), &self.key);
-        for p in self.peers.list() {
-            let _ = send_msg(p, &hello_msg);
+        if let Some(hello_msg) = self.sign_payload(Payload::Hello(addrs), "hello") {
+            for p in self.peers.list() {
+                let _ = send_msg(p, &hello_msg);
+            }
         }
     }
 
@@ -1815,8 +1830,24 @@ impl Node {
     }
 
     fn broadcast_payload(&self, body: Payload) {
-        let msg = Message::new(body.clone(), &self.key);
-        self.broadcast(&msg);
+        if let Some(msg) = self.sign_payload(body.clone(), "broadcast") {
+            self.broadcast(&msg);
+        }
+    }
+
+    fn sign_payload(&self, body: Payload, context: &str) -> Option<Message> {
+        match Message::new(body, &self.key) {
+            Ok(msg) => Some(msg),
+            Err(err) => {
+                diagnostics::tracing::error!(
+                    target = "net",
+                    context,
+                    reason = %err,
+                    "message_encode_failed"
+                );
+                None
+            }
+        }
     }
 
     fn broadcast(&self, msg: &Message) {
@@ -1842,6 +1873,21 @@ impl Node {
     }
 }
 
+fn bind_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
+    match TcpListener::bind(addr) {
+        Ok(listener) => Ok(listener),
+        Err(err) => {
+            diagnostics::tracing::warn!(
+                target: "net",
+                error = %err,
+                %addr,
+                "gossip_listener_bind_failed"
+            );
+            Err(err)
+        }
+    }
+}
+
 pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     let mut rng = rand::thread_rng();
     if let Ok(loss_str) = std::env::var("TB_NET_PACKET_LOSS") {
@@ -1858,7 +1904,8 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
         }
     }
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
-    let bytes = message::encode_message(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    let bytes = message::encode_message(msg)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("serialize: {err}")))?;
     #[cfg(feature = "telemetry")]
     if crate::telemetry::should_log("p2p") {
         let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
@@ -1878,7 +1925,8 @@ pub(crate) fn send_quic_msg(
     use crate::net::quic;
     #[cfg(feature = "telemetry")]
     use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
-    let bytes = message::encode_message(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    let bytes = message::encode_message(msg)
+        .map_err(|err| quic::ConnectError::Other(anyhow!("serialize: {err}")))?;
     let cert = quic::certificate_from_der(cert.clone()).map_err(quic::ConnectError::Other)?;
     let res = runtime::block_on(async {
         let conn = quic::get_connection(addr, &cert).await?;
@@ -1938,8 +1986,20 @@ pub fn load_net_key() -> SigningKey {
     }
     let sk = SigningKey::from_bytes(&seed);
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(err) = fs::create_dir_all(parent) {
+            diagnostics::tracing::warn!(
+                path = %path.display(),
+                reason = %err,
+                "net_key_dir_create_failed"
+            );
+        }
     }
-    fs::write(&path, sk.to_keypair_bytes()).unwrap_or_else(|e| panic!("write net_key: {e}"));
+    if let Err(err) = fs::write(&path, sk.to_keypair_bytes()) {
+        diagnostics::tracing::error!(
+            path = %path.display(),
+            reason = %err,
+            "net_key_persist_failed"
+        );
+    }
     sk
 }

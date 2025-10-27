@@ -60,7 +60,7 @@ impl TestNode {
         std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
         let node = Node::new(addr, peers, bc);
         let flag = ShutdownFlag::new();
-        let handle = node.start_with_flag(&flag);
+        let handle = node.start_with_flag(&flag).expect("start gossip node");
         node.discover_peers();
         Self {
             addr,
@@ -184,7 +184,7 @@ fn kill_node_recovers() {
             }
         }
         let flag = ShutdownFlag::new();
-        let handle = node3.start_with_flag(&flag);
+        let handle = node3.start_with_flag(&flag).expect("start gossip node");
         node3.discover_peers();
         let dir = std::mem::replace(&mut nodes[2].dir, tempdir().unwrap());
         nodes[2] = TestNode {

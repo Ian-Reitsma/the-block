@@ -41,7 +41,7 @@ fn handshake_requires_compute_market_bit() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign handshake");
     peers.handle_message(msg, Some(addr), &bc);
     assert!(!peers.list().contains(&addr));
 
@@ -62,7 +62,7 @@ fn handshake_requires_compute_market_bit() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg_ok = Message::new(Payload::Handshake(hello_ok), &sk);
+    let msg_ok = Message::new(Payload::Handshake(hello_ok), &sk).expect("sign handshake");
     peers.handle_message(msg_ok, Some(addr), &bc);
     assert!(peers.list().contains(&addr));
 }

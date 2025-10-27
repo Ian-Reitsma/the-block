@@ -1,4 +1,18 @@
 # Summary
+> **Review (2025-10-26, late night):** Mixed-provider chaos rehearsals now feed
+> per-site readiness into the aggregator. The simulator’s overlay scenarios wire
+> provider weights and latency penalties into `ChaosSite` entries so
+> `chaos_lab` exports site-level readiness vectors, and `/chaos/status` returns
+> those arrays alongside module rollups while the new
+> `chaos_site_readiness{module,scenario,site}` gauge tracks them for dashboards
+> and automation. The aggregator hardens `/chaos/attest` against poisoned locks,
+> warns when the status tracker must recover from a mutex poison, and keeps the
+> site gauges sorted to produce stable Grafana/JSON snapshots. Mobile sync tests
+> now fall back to a first-party stub whenever the runtime wrapper feature is
+> disabled, preserving lint/test runs without importing a third-party client,
+> and a `Node::start` integration test binds an occupied port to prove the
+> gossip listener surfaces a warning instead of panicking when sockets are
+> unavailable.
 > **Review (2025-12-14, afternoon):** The autonomous WAN chaos lab now ships as a
 > first-party binary (`sim/chaos_lab.rs`) backed by deterministic overlay/storage
 > /compute scenarios. Signed readiness attestations feed directly into the
@@ -16,6 +30,14 @@
 > panicking when system clocks or scratch directories misbehave. The `sim/did.rs`
 > driver now renders DID documents through first-party JSON builders, sidestepping
 > the serde stub and keeping the binary panic-free under full crate testing.
+> **Review (2025-10-26, night):** Distributed chaos site overrides now flow from
+> `TB_CHAOS_SITE_TOPOLOGY` through the simulator and monitoring dashboards,
+> exposing `chaos_site_readiness{module,site}` alongside module readiness and SLA
+> deltas. The aggregator rejects malformed module labels and truncated byte
+> arrays before mutating readiness gauges, gossip nodes return
+> `io::Result<JoinHandle>` on startup, and `load_net_key` logs persistence
+> failures instead of panicking so WAN chaos rehearsals continue even when bind or
+> fsync operations fail.
 > **Review (2025-10-26, late morning):** Liquidity router coverage now exercises
 > multi-batch fairness, slack-aware trust routing, and hop-constrained fallbacks.
 > Integration tests prove challenged withdrawals never execute, excess DEX

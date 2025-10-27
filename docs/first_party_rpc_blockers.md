@@ -9,6 +9,21 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-26)
+
+- Chaos readiness now exposes site-level breakdowns without introducing external
+  RPC clients. `sim/src/chaos.rs` emits `ChaosSite` entries and
+  `monitoring/src/chaos.rs` serialises them through the existing
+  first-party codecs so `/chaos/status` returns a sorted
+  `chaos_site_readiness{module,scenario,site}` array alongside module rollups.
+  The aggregator logs `chaos_status_tracker_poisoned_recovering` when it heals a
+  poisoned readiness mutex, but recovery still rides on the in-tree
+  `diagnostics` facade. Mobile sync tests that previously required the optional
+  runtime wrapper now fall back to a first-party stub and continue logging via
+  the shared tracing sink, and the `Node::start` bind regression captures gossip
+  warnings using the existing subscriber. No new RPC shims or third-party
+  transports were added.
+
 ## Recent progress (2025-12-14)
 
 - The WAN chaos pipeline stays entirely first party. `sim/src/chaos.rs` and the

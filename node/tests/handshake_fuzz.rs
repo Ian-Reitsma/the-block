@@ -36,7 +36,8 @@ tb_prop_test!(fuzz_identifier_exchange, |runner| {
                 quic_provider: None,
                 quic_capabilities: Vec::new(),
             };
-            let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+            let msg =
+                Message::new(Payload::Handshake(hello), &sample_sk()).expect("sign handshake");
             peers.handle_message(msg, None, &bc);
         })
         .expect("register case");
@@ -64,7 +65,8 @@ tb_prop_test!(fuzz_identifier_exchange, |runner| {
                 quic_provider: None,
                 quic_capabilities: Vec::new(),
             };
-            let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+            let msg =
+                Message::new(Payload::Handshake(hello), &sample_sk()).expect("sign handshake");
             peers.handle_message(msg, None, &bc);
         })
         .expect("register random case");

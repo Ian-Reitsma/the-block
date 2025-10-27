@@ -17,13 +17,29 @@ pub mod inflation;
 pub mod liquidity;
 #[cfg(feature = "runtime-wrapper")]
 pub mod mobile_sync;
+#[cfg(not(feature = "runtime-wrapper"))]
+pub mod mobile_sync {
+    use diagnostics::tracing::warn;
+    use light_client::Header;
+    use std::time::Duration;
+
+    /// Stubbed mobile sync latency measurement used when the runtime wrapper is
+    /// unavailable. Returns zero duration while emitting a warning so callers
+    /// know the benchmark was skipped.
+    pub fn measure_sync_latency(headers: Vec<Header>, _delay: Duration) -> Duration {
+        if !headers.is_empty() {
+            warn!(target: "sim", "mobile_sync_stub_inactive_runtime");
+        }
+        Duration::default()
+    }
+}
 pub mod token_model;
 
 #[cfg(feature = "dependency-fault")]
 pub mod dependency_fault_harness;
 
 use bridging::BridgeModel;
-use chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario};
+use chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario, ChaosSite};
 use dashboard::Snapshot;
 use demand::DemandModel;
 use inflation::InflationModel;
@@ -77,6 +93,13 @@ impl Simulation {
                     0.5,
                     ChaosFault::OverlayPartition { loss_ratio: 0.5 },
                 )),
+        );
+        chaos.configure_sites(
+            ChaosModule::Overlay,
+            vec![
+                ChaosSite::new("provider-a", 0.55, 0.1),
+                ChaosSite::new("provider-b", 0.45, 0.18),
+            ],
         );
         chaos.register(
             ChaosScenario::new("storage-dht-failure", ChaosModule::Storage, 0.88, 0.08)

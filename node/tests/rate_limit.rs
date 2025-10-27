@@ -59,12 +59,12 @@ fn rate_limit_drop_records_reason() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &key);
+    let msg = Message::new(Payload::Handshake(hello), &key).expect("sign handshake");
     peers.handle_message(msg, Some(addr), &chain);
 
     // Send enough messages to exceed the lowered rate limit (10 per sec)
     for _ in 0..20 {
-        let msg = Message::new(Payload::Hello(vec![]), &key);
+        let msg = Message::new(Payload::Hello(vec![]), &key).expect("sign hello");
         peers.handle_message(msg, Some(addr), &chain);
     }
 
@@ -128,7 +128,7 @@ fn evicts_least_recently_used_peer() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &key);
+        let msg = Message::new(Payload::Handshake(hello), &key).expect("sign handshake");
         peers.handle_message(msg, Some(addr), chain);
         (pk, key, addr)
     }
@@ -137,7 +137,7 @@ fn evicts_least_recently_used_peer() {
     let (pk2, _k2, _addr2) = handshake(&peers, &chain, 8002);
 
     // touch pk1 to mark as recently used
-    let msg = Message::new(Payload::Hello(vec![]), &k1);
+    let msg = Message::new(Payload::Hello(vec![]), &k1).expect("sign hello");
     peers.handle_message(msg, Some(addr1), &chain);
 
     let (pk3, _k3, _addr3) = handshake(&peers, &chain, 8003);
@@ -172,10 +172,10 @@ fn reputation_decreases_on_rate_limit() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &key);
+    let msg = Message::new(Payload::Handshake(hello), &key).expect("sign handshake");
     peers.handle_message(msg, Some(addr), &chain);
     for _ in 0..101 {
-        let m = Message::new(Payload::Hello(vec![]), &key);
+        let m = Message::new(Payload::Hello(vec![]), &key).expect("sign hello");
         peers.handle_message(m, Some(addr), &chain);
     }
     let rep = peer_stats(&pk).unwrap().reputation.score;

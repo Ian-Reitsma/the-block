@@ -1,4 +1,14 @@
 # Project Progress Snapshot
+> **Review (2025-10-26, late night):** Chaos readiness now tracks mixed-provider
+> overlays end to end. The simulator seeds overlay scenarios with weighted
+> `ChaosSite` entries, the aggregator mirrors them through
+> `chaos_site_readiness{module,scenario,site}` and heals poisoned readiness locks
+> with a `chaos_status_tracker_poisoned_recovering` warning, and Grafana/JSON
+> snapshots remain sorted so automation can diff runs deterministically. The
+> mobile sync suite gained a first-party stub for builds without the
+> `runtime-wrapper` feature, and a `Node::start` regression binds an occupied
+> socket to assert gossip emits `gossip_listener_bind_failed` instead of
+> panicking.
 > **Review (2025-10-26, late morning):** Liquidity routing now stress-tests
 > multi-batch fairness, hop-limited trust fallbacks, and challenged withdrawals.
 > `node/tests/liquidity_router.rs` proves excess intents roll into deterministic
@@ -854,22 +864,28 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     (`sim/src/chaos.rs`) and `chaos_lab` binary, emitting signed readiness
     attestations for overlay/storage/compute. The metrics aggregator verifies
     `/chaos/attest` payloads, publishes `/chaos/status`, and exports
-    `chaos_readiness{module,scenario}` plus `chaos_sla_breach_total`; CI gates
-    releases via `just chaos-suite` and `cargo xtask chaos`.
+    `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,site}`, and
+    `chaos_sla_breach_total`; CI gates releases via `just chaos-suite` and
+    `cargo xtask chaos`.
     - The `metrics-aggregator` integration suite now posts the `chaos_lab`
       artefacts through `/chaos/attest` (`chaos_lab_attestations_flow_through_status`)
       and asserts `/chaos/status`, gauge updates, and signer digests, closing the
       loop between the simulation harness and the aggregator without third-party
       dependencies. Grafana’s auto-generated dashboards (`monitoring/src/dashboard.rs`
       → `monitoring/grafana/*.json`) gained a dedicated **Chaos** row charting
-      readiness and five-minute SLA breach deltas for operators.
+      module and site readiness alongside five-minute SLA breach deltas for
+      operators.
     - `sim/did.rs` now assembles DID documents through the first-party JSON helpers
       (no `serde` derive) so the DID simulator runs cleanly during full workspace
       test sweeps.
     - The aggregator rejects forged signatures before mutating readiness gauges
-      (`chaos_attestation_rejects_invalid_signature`), and `node/src/gossip/relay.rs`
-      degrades to an in-memory shard cache when temporary directories cannot be
-      created, eliminating the last panic in the gossip relay path.
+      (`chaos_attestation_rejects_invalid_signature`) and now fails closed on
+      malformed module labels or truncated signer arrays, while
+      `node/src/gossip/relay.rs` degrades to an in-memory shard cache when
+      temporary directories cannot be created, eliminating the last panic in the
+      gossip relay path. Gossip node startup returns `io::Result<JoinHandle>` and
+      logs key persistence failures so chaos rehearsals continue even when bind
+      or fsync operations fail.
   - ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.

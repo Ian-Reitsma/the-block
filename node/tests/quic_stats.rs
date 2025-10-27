@@ -84,7 +84,7 @@ fn quic_stats_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign handshake");
         peers.handle_message(msg, Some(listen_addr), &bc);
 
         let (accept_tx, accept_rx) = runtime::sync::oneshot::channel();
