@@ -76,6 +76,8 @@ if [[ ${SKIP_CHAOS_GATING:-0} != 1 ]]; then
   if [[ ${TB_CHAOS_REQUIRE_DIFF:-0} != 0 ]]; then
     CHAOS_ARGS+=(--require-diff)
   fi
+  CHAOS_ARGS+=(--archive-dir "$CHAOS_OUTDIR/archive")
+  CHAOS_ARGS+=(--archive-label "${TB_CHAOS_ARCHIVE_LABEL:-$TAG}")
   echo "Running chaos verification: cargo ${CHAOS_ARGS[*]}"
   cargo "${CHAOS_ARGS[@]}"
   for artifact in \
@@ -89,6 +91,11 @@ if [[ ${SKIP_CHAOS_GATING:-0} != 1 ]]; then
       exit 1
     fi
   done
+  ARCHIVE_MANIFEST="$CHAOS_OUTDIR/archive/latest.json"
+  if [[ ! -s "$ARCHIVE_MANIFEST" ]]; then
+    echo "chaos gating missing archive manifest: $ARCHIVE_MANIFEST" >&2
+    exit 1
+  fi
 else
   echo "SKIP_CHAOS_GATING=1 — skipping chaos verification" >&2
 fi

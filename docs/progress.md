@@ -1,4 +1,20 @@
 # Project Progress Snapshot
+> **Review (2025-10-27, evening):** Chaos rehearsals now archive preserved manifests
+> and mirror bundles without leaving first-party tooling. `sim/chaos_lab.rs`
+> generates a run-scoped `manifest.json` under `chaos/archive/<run_id>/` and a
+> `latest.json` pointer that records filenames, byte sizes, and BLAKE3 digests for
+> every snapshot, diff, overlay readiness table, and provider failover report,
+> then writes a deterministic `run_id.zip` bundle. Optional `--publish-dir`,
+> `--publish-bucket`, and `--publish-prefix` flags copy the manifests and bundle
+> into long-lived directories or S3-compatible buckets via the new
+> `foundation_object_store` crate so downstream dashboards and auditors ingest the
+> same artefacts release engineering enforces. `tools/xtask` manually decodes the
+> manifests with `foundation_serialization::json::Value`, reports publish targets,
+> and honours the new flags alongside existing readiness analytics. Release
+> automation now fails immediately when `chaos/archive/latest.json` or the
+> referenced manifest is missing, and the verifier parses the manifest to confirm
+> every archived file exists and that the recorded bundle size matches the on-disk
+> `run_id.zip`, preventing tags when artefacts drift or uploads truncate.
 > **Review (2025-10-27, afternoon):** Chaos automation now loops entirely through
 > first-party tooling. `sim/chaos_lab.rs` fetches `/chaos/status` baselines with
 > `httpd::BlockingClient`, decodes them manually via

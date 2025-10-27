@@ -215,6 +215,16 @@ artefacts, and `scripts/verify_release.sh` aborts when the published archive
 omits the resulting snapshot/diff/overlay/provider failover JSON files, keeping
 release provenance aligned with the automation harness.
 
+Each run also persists a bundle in `chaos/archive/`. `chaos_lab` writes a
+run-scoped `manifest.json` containing the file name, byte length, and BLAKE3
+digest for every snapshot, diff, overlay readiness table, and provider failover
+report, plus a `latest.json` pointer to the newest manifest and a deterministic
+`run_id.zip` bundle. Operators can mirror those manifests and the bundle into
+long-lived directories or S3-compatible buckets with `--publish-dir`,
+`--publish-bucket`, and `--publish-prefix`. Uploads run through the
+first-party `foundation_object_store` crate, which wraps the existing HTTP/TLS
+client so external SDKs are never required.
+
 ## Deterministic Replay
 
 Each run records a PRNG seed and serializes all events. Re-running with the same

@@ -1,0 +1,10 @@
+[package]
+name = "foundation_object_store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crypto_suite = { path = "../crypto_suite" }
+foundation_time = { path = "../foundation_time" }
+httpd = { path = "../httpd" }
+thiserror = { path = "../thiserror" }

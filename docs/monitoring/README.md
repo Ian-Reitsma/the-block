@@ -125,12 +125,20 @@ ready to import once the foundation telemetry stack is running.
   snapshot. CI recipes (`just chaos-suite`, `cargo xtask chaos`) run the same
   first-party binaries, ensure `chaos_provider_failover.json` captures simulated
   provider outages, and now block releases whenever overlays regress or failover
-  diffs go missing—no third-party gating tooling required. Release packaging now
-  shells out to `cargo xtask chaos --out-dir releases/<tag>/chaos` inside
+  diffs go missing—no third-party gating tooling required. The archive step now
+  emits `archive/latest.json`, per-run `manifest.json`, and a zipped bundle named
+  `<run_id>.zip`, each populated through the handwritten
+  `foundation_serialization::json::Value` helpers. Optional
+  `--publish-dir`/`--publish-bucket` flags mirror the manifest and bundle via the
+  in-tree `foundation_object_store` crate so operators can surface artefacts in
+  dashboards or pipelines without AWS/GCP SDKs. Release packaging shells out to
+  `cargo xtask chaos --out-dir releases/<tag>/chaos` inside
   `scripts/release_provenance.sh`, refusing to tag when the snapshot/diff/overlay/
-  provider failover artefacts are absent or fail the gating heuristics. The
-  companion verifier script aborts when a published archive omits those JSON
-  files, so everyone downstream inherits the same guardrails. The auto-generated
+  provider failover artefacts or manifests are missing or fail the gating
+  heuristics. The companion verifier script now reads `archive/latest.json`, loads
+  the referenced run manifest, checks every digest/size, and aborts when a
+  published archive omits the JSON set or the zipped bundle, so everyone
+  downstream inherits the same guardrails. The auto-generated
   Grafana dashboard includes a dedicated **Chaos** row visualising module/site
   readiness and five-minute breach deltas, the
   `chaos_lab_attestations_flow_through_status` regression keeps the HTTP ingest

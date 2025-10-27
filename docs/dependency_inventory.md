@@ -1,6 +1,6 @@
 # Dependency Inventory
 
-_Last refreshed: 2025-11-02._  The workspace `Cargo.lock` no longer references
+_Last refreshed: 2025-10-27._  The workspace `Cargo.lock` no longer references
 any crates from crates.io; every dependency in the graph is now first-party.
 The final external cluster—the optional `legacy-format` sled importer—has been
 replaced with an in-house manifest shim so the lockfile resolves solely to
@@ -14,6 +14,14 @@ cells while trimming runtime.
 
 ## Highlights
 
+- ✅ Chaos archive manifests and publish hooks remain first party. `sim/chaos_lab.rs`
+  now writes `archive/latest.json`, per-run `manifest.json`, and zipped bundles
+  via explicit `foundation_serialization::json::Value` builders. The new
+  `foundation_object_store` crate mirrors archives to directories or object
+  storage without third-party SDKs, while `cargo xtask chaos` and the release
+  scripts (`scripts/release_provenance.sh`, `scripts/verify_release.sh`) insist
+  on the manifest/bundle set before tagging. Release tests cover the same flow so
+  dashboards and automation consume only first-party JSON.
 - ✅ WAN chaos readiness stays in-house. `sim/src/chaos.rs` and the `chaos_lab` driver emit signed overlay/storage/compute attestations, and the `monitoring` crate (`monitoring/src/chaos.rs`) defines the codecs/verification helpers without pulling serde or external crypto. The metrics aggregator depends only on `monitoring-build` to parse `/chaos/attest`, stores snapshots in the in-house metrics store, and exposes `/chaos/status` plus the `chaos_readiness{module,scenario}`/`chaos_site_readiness{module,scenario,site,provider}`/`chaos_sla_breach_total` gauges through the foundation metrics facade while logging `chaos_status_tracker_poisoned_recovering` on poisoned-lock recovery. Provider churn is handled entirely by the in-house Prometheus wrapper (`remove_label_values`), letting automation diff provider-aware readiness without external tooling. CI wires the suite into `just chaos-suite` and `cargo xtask chaos`, both of which execute the first-party binaries—no third-party chaos tooling or HTTP clients required. A new regression (`chaos_lab_attestations_flow_through_status`) imports `tb-sim` as a dev-dependency to push the signed artefacts through `/chaos/attest` and assert `/chaos/status` plus metric updates end-to-end, and Grafana’s generated dashboards (`monitoring/src/dashboard.rs` → `monitoring/grafana/*.json`) now surface a dedicated **Chaos** row without involving external templating engines.
   - `/chaos/status` baselines are fetched via the in-house `httpd::BlockingClient` and decoded manually with `foundation_serialization::json::Value`, so automation never relies on serde derives or third-party HTTP stacks. The emitted overlay readiness JSON is parsed by `cargo xtask chaos` through the same facade to report module totals, readiness deltas, provider churn, duplicate site detection, and the provider failover matrix while blocking releases when overlays regress—all using `std` collections. Release provenance calls `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing artefacts and fails closed when the gate trips, and the verifier rejects archives without the snapshot/diff/overlay/provider failover JSON payloads, keeping first-party guardrails intact.
   - Follow-up coverage (`chaos_attestation_rejects_invalid_signature`) mutates payloads with the first-party crypto facade to ensure `/chaos/attest` rejects tampering, the gossip relay + peer metrics persistence layers fall back to in-memory stores when temp dirs or clocks fail, and mobile sync tests drop to a first-party stub whenever the optional runtime wrapper is disabled—no external filesystem helpers, HTTP clients, or runtime crates were required.

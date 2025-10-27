@@ -628,6 +628,26 @@ scenario per module, normalized readiness figures, and signer metadata. These
 snapshots back the `/chaos/status` Grafana panel and power automation that gates
 releases on WAN chaos rehearsals.
 
+`sim/chaos_lab.rs` also preserves every artefact in `chaos/archive/`. Each run
+emits a `manifest.json` containing the file name, byte length, and BLAKE3 digest
+for the snapshot, diff, overlay readiness table, and provider failover report,
+and `latest.json` points at the newest run. A deterministic `run_id.zip` bundle
+captures the same files, letting operators archive or mirror the entire set.
+Optional `--publish-dir`, `--publish-bucket`, and `--publish-prefix` flags copy
+the manifests and bundle into long-lived directories or S3-compatible buckets
+through the first-party `foundation_object_store` client so dashboards and
+release automation ingest the same preserved artefacts.
+
+`tools/xtask chaos` consumes these manifests via manual
+`foundation_serialization::json::Value` decoding, prints publish targets
+alongside readiness regressions, provider churn, and duplicate-site analytics,
+and still fails closed when overlay readiness drops or failover drills do not
+produce diffs. `scripts/release_provenance.sh` refuses to continue unless
+`chaos/archive/latest.json` and the referenced manifest are present, and
+`scripts/verify_release.sh` parses the manifest to ensure every archived file
+exists and that the recorded bundle size matches the on-disk `run_id.zip` before
+approving a release.
+
 #### Troubleshooting
 
 | Status/Log message | Meaning | Fix |

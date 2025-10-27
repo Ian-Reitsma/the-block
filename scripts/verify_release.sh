@@ -108,6 +108,127 @@ if [ -d "$chaos_dir" ]; then
   if [ "$missing" -ne 0 ]; then
     exit 1
   fi
+  archive_dir="$chaos_dir/archive"
+  latest_manifest="$archive_dir/latest.json"
+  if [ ! -s "$latest_manifest" ]; then
+    echo "warning: chaos archive latest manifest missing at $latest_manifest" >&2
+    exit 1
+  fi
+  python3 - "$archive_dir" "$latest_manifest" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+archive_root = Path(sys.argv[1])
+latest_manifest = Path(sys.argv[2])
+
+with latest_manifest.open("r", encoding="utf-8") as handle:
+    latest = json.load(handle)
+
+manifest_rel = latest.get("manifest")
+if not manifest_rel:
+    print(f"warning: chaos archive latest manifest missing 'manifest' field", file=sys.stderr)
+    sys.exit(1)
+
+manifest_path = archive_root / manifest_rel
+if not manifest_path.exists():
+    print(f"warning: chaos archive manifest missing at {manifest_path}", file=sys.stderr)
+    sys.exit(1)
+
+with manifest_path.open("r", encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
+run_id = manifest.get("run_id")
+artifacts = manifest.get("artifacts", {})
+if not artifacts:
+    print("warning: chaos archive manifest contains no artefacts", file=sys.stderr)
+    sys.exit(1)
+
+bundle = manifest.get("bundle")
+if not bundle:
+    print("warning: chaos archive manifest missing bundle metadata", file=sys.stderr)
+    sys.exit(1)
+
+bundle_file = bundle.get("file")
+if not bundle_file:
+    print("warning: chaos archive bundle missing 'file' entry", file=sys.stderr)
+    sys.exit(1)
+
+bundle_path = archive_root / bundle_file
+if not bundle_path.exists() or bundle_path.stat().st_size == 0:
+    print(f"warning: archived chaos bundle missing at {bundle_path}", file=sys.stderr)
+    sys.exit(1)
+
+recorded_size = bundle.get("size")
+if recorded_size is not None and bundle_path.stat().st_size != recorded_size:
+    print(
+        f"warning: bundle size mismatch for {bundle_path} (expected {recorded_size}, found {bundle_path.stat().st_size})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+missing = []
+for name, meta in artifacts.items():
+    filename = meta.get("file")
+    if not filename:
+        missing.append((name, "<unknown>"))
+        continue
+    artefact_path = archive_root / run_id / filename if run_id else archive_root / filename
+    if not artefact_path.exists() or artefact_path.stat().st_size == 0:
+        missing.append((name, str(artefact_path)))
+
+if missing:
+    for name, path in missing:
+        print(f"warning: archived chaos artefact '{name}' missing at {path}", file=sys.stderr)
+    sys.exit(1)
+PY
+  diff_path="$chaos_dir/status.diff.json"
+  python3 - "$diff_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+diff_path = Path(sys.argv[1])
+if not diff_path.exists():
+    print(f"warning: chaos diff missing at {diff_path}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    with diff_path.open("r", encoding="utf-8") as handle:
+        diff = json.load(handle)
+except json.JSONDecodeError as exc:
+    print(f"warning: failed to parse chaos diff: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+overlay_failures = []
+epsilon = 1e-6
+has_overlay_entries = False
+for entry in diff:
+    if entry.get("module") != "overlay":
+        continue
+    has_overlay_entries = True
+    before = entry.get("readiness_before")
+    after = entry.get("readiness_after")
+    if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+        if after + epsilon < before:
+            overlay_failures.append(
+                f"scenario {entry.get('scenario')} readiness dropped {before:.3f} -> {after:.3f}"
+            )
+    removed = entry.get("site_removed") or []
+    if removed:
+        sites = ", ".join(str(item.get("site")) for item in removed)
+        overlay_failures.append(
+            f"scenario {entry.get('scenario')} lost provider sites: {sites}"
+        )
+
+if not has_overlay_entries:
+    overlay_failures.append("chaos/status diff did not include overlay module entries")
+
+if overlay_failures:
+    for failure in overlay_failures:
+        print(f"warning: overlay regression detected: {failure}", file=sys.stderr)
+    sys.exit(1)
+PY
 else
   echo "warning: chaos verification artifacts missing (expected directory $chaos_dir)" >&2
   exit 1

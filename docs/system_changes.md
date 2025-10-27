@@ -1,4 +1,21 @@
 # System-Wide Economic Changes
+> **Review (2025-10-27, evening):** Chaos artefacts now include explicit
+> manifests and bundles, and publishing stays first party. `sim/chaos_lab.rs`
+> persists a run-specific `manifest.json` (referenced by `archive/latest.json`)
+> that records the file name, byte length, and BLAKE3 digest for every snapshot,
+> diff, overlay readiness table, and provider failover report. Each run also
+> emits a deterministic `run_id.zip` bundle, and optional `--publish-dir`,
+> `--publish-bucket`, and `--publish-prefix` flags mirror both manifests and the
+> bundle into long-lived directories or S3-compatible buckets via the new
+> `foundation_object_store` crate. The crate wraps the existing first-party HTTP
+> client so uploads never rely on external SDKs. `tools/xtask` decodes the
+> manifests through manual `foundation_serialization::json::Value` helpers,
+> prints publish locations, and honours the new flags so automation can surface
+> preserved artefacts alongside readiness summaries. `scripts/release_provenance.sh`
+> now fails immediately when `chaos/archive/latest.json` or the referenced run
+> manifest is missing, while `scripts/verify_release.sh` parses the manifest to
+> confirm every archived file exists and that the recorded bundle size matches
+> the on-disk `run_id.zip`, blocking tags when artefacts drift.
 > **Review (2025-10-27, afternoon):** The chaos pipeline now fetches
 > `/chaos/status` baselines and overlays entirely via first-party helpers.
 > `sim/chaos_lab.rs` issues HTTP requests through `httpd::BlockingClient`,

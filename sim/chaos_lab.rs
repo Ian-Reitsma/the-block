@@ -1,21 +1,24 @@
 #![forbid(unsafe_code)]
 
+use crypto_suite::hashing::blake3;
 use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::{SigningKey, SECRET_KEY_LENGTH};
-use foundation_serialization::json::{self, Map, Value};
+use foundation_object_store::S3Client;
+use foundation_serialization::json::{self, Map, Number, Value};
 use foundation_time::UtcDateTime;
+use http_env::blocking_client as env_blocking_client;
 use httpd::{BlockingClient, Method};
 use monitoring_build::{
-    sign_attestation, ChaosAttestation, ChaosReadinessSnapshot, ChaosSiteReadiness,
+    sign_attestation, ChaosAttestation, ChaosReadinessSnapshot, ChaosSnapshotDecodeError,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::error::Error;
-use std::fmt;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use sys::archive::zip::ZipBuilder;
 use tb_sim::chaos::{ChaosModule, ChaosProviderKind, ChaosSite};
 use tb_sim::Simulation;
 
@@ -200,6 +203,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         "[chaos-lab] verifier={}",
         hex::encode(signing_key.verifying_key().to_bytes())
     );
+    let archive_outcome = if let Some(archive_dir) = env::var("TB_CHAOS_ARCHIVE_DIR")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        let label = env::var("TB_CHAOS_ARCHIVE_LABEL").ok();
+        archive_chaos_run(
+            &archive_dir,
+            label.as_deref(),
+            &snapshots,
+            &attestation_path,
+            status_snapshot_path.as_deref(),
+            &diff_path,
+            overlay_path_env.as_deref(),
+            &provider_failover_path,
+        )?
+    } else {
+        None
+    };
+    if let Some(outcome) = archive_outcome {
+        publish_archive_outcome(&outcome)?;
+    }
     Ok(())
 }
 
@@ -218,6 +242,444 @@ fn persist_attestations(
     file.write_all(&data)?;
     file.flush()?;
     Ok(())
+}
+
+fn archive_chaos_run(
+    archive_dir: &str,
+    label: Option<&str>,
+    snapshots: &[ChaosReadinessSnapshot],
+    attestation_path: &str,
+    snapshot_path: Option<&str>,
+    diff_path: &str,
+    overlay_path: Option<&str>,
+    provider_failover_path: &str,
+) -> Result<Option<ChaosArchiveOutcome>, Box<dyn Error>> {
+    if snapshots.is_empty() {
+        return Ok(None);
+    }
+
+    let issued_at = snapshots
+        .iter()
+        .map(|snapshot| snapshot.issued_at)
+        .max()
+        .unwrap_or_default();
+    let archive_root = Path::new(archive_dir);
+    fs::create_dir_all(archive_root)?;
+
+    let mut run_dir = archive_root.join(issued_at.to_string());
+    let mut suffix = 0u64;
+    while run_dir.exists() {
+        suffix = suffix.saturating_add(1);
+        run_dir = archive_root.join(format!("{}-{}", issued_at, suffix));
+    }
+    fs::create_dir_all(&run_dir)?;
+
+    let mut artifacts: BTreeMap<String, ArchivedArtifact> = BTreeMap::new();
+
+    artifacts.insert(
+        "attestations".to_string(),
+        copy_with_digest(attestation_path, &run_dir)?,
+    );
+
+    if let Some(path) = snapshot_path {
+        if Path::new(path).exists() {
+            artifacts.insert(
+                "status_snapshot".to_string(),
+                copy_with_digest(path, &run_dir)?,
+            );
+        }
+    }
+
+    if Path::new(diff_path).exists() {
+        artifacts.insert(
+            "status_diff".to_string(),
+            copy_with_digest(diff_path, &run_dir)?,
+        );
+    }
+
+    if let Some(path) = overlay_path {
+        if Path::new(path).exists() {
+            artifacts.insert(
+                "overlay_readiness".to_string(),
+                copy_with_digest(path, &run_dir)?,
+            );
+        }
+    }
+
+    if Path::new(provider_failover_path).exists() {
+        artifacts.insert(
+            "provider_failover".to_string(),
+            copy_with_digest(provider_failover_path, &run_dir)?,
+        );
+    }
+
+    let run_id = run_dir
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| issued_at.to_string());
+
+    let mut manifest = ChaosArchiveManifest {
+        issued_at,
+        run_id: run_id.clone(),
+        label: label.map(|value| value.to_string()),
+        artifacts,
+        bundle: None,
+    };
+
+    let mut latest = ChaosArchiveLatest {
+        issued_at,
+        run_id: run_id.clone(),
+        label: manifest.label.clone(),
+        manifest: format!("{run_id}/manifest.json"),
+        bundle: None,
+    };
+
+    let manifest_bytes = {
+        let value = manifest.to_value();
+        json::to_vec_pretty(&value)?
+    };
+    let latest_bytes = {
+        let value = latest.to_value();
+        json::to_vec_pretty(&value)?
+    };
+    let bundle = create_archive_bundle(
+        archive_root,
+        &run_dir,
+        &run_id,
+        &manifest_bytes,
+        &latest_bytes,
+        &manifest.artifacts,
+    )?;
+
+    if let Some(bundle) = &bundle {
+        manifest.bundle = Some(ArchivedBundle {
+            file: bundle.file.clone(),
+            blake3: bundle.digest.clone(),
+            size: bundle.size,
+        });
+        latest.bundle = Some(bundle.file.clone());
+    }
+
+    let manifest_path = run_dir.join("manifest.json");
+    let manifest_value_final = manifest.to_value();
+    write_json_value(&manifest_path, &manifest_value_final)?;
+
+    let latest_path = archive_root.join("latest.json");
+    let latest_value_final = latest.to_value();
+    write_json_value(&latest_path, &latest_value_final)?;
+
+    if let Some(bundle) = &bundle {
+        eprintln!(
+            "[chaos-lab] archived chaos artefacts to {} (run {}) bundle={} blake3={}",
+            run_dir.display(),
+            run_id,
+            bundle.file,
+            bundle.digest
+        );
+    } else {
+        eprintln!(
+            "[chaos-lab] archived chaos artefacts to {} (run {})",
+            run_dir.display(),
+            run_id
+        );
+    }
+
+    Ok(Some(ChaosArchiveOutcome {
+        run_id,
+        manifest_path,
+        latest_path,
+        bundle_path: bundle.as_ref().map(|info| info.path.clone()),
+        bundle_file: bundle.as_ref().map(|info| info.file.clone()),
+        bundle_digest: bundle.as_ref().map(|info| info.digest.clone()),
+    }))
+}
+
+fn copy_with_digest(path: &str, dest_dir: &Path) -> Result<ArchivedArtifact, Box<dyn Error>> {
+    let source = Path::new(path);
+    let name = source
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "artifact.json".to_string());
+    let destination = dest_dir.join(&name);
+    fs::copy(source, &destination)?;
+    let bytes = fs::read(&destination)?;
+    let digest = blake3::hash(&bytes).to_hex().to_string();
+    Ok(ArchivedArtifact {
+        file: name,
+        blake3: digest,
+    })
+}
+
+struct ArchiveBundleResult {
+    file: String,
+    path: PathBuf,
+    digest: String,
+    size: u64,
+}
+
+fn create_archive_bundle(
+    archive_root: &Path,
+    run_dir: &Path,
+    run_id: &str,
+    manifest_bytes: &[u8],
+    latest_bytes: &[u8],
+    artifacts: &BTreeMap<String, ArchivedArtifact>,
+) -> Result<Option<ArchiveBundleResult>, Box<dyn Error>> {
+    if artifacts.is_empty() {
+        return Ok(None);
+    }
+
+    let mut builder = ZipBuilder::new();
+    builder.add_file("manifest.json", manifest_bytes)?;
+    builder.add_file("latest.json", latest_bytes)?;
+    for artifact in artifacts.values() {
+        let path = run_dir.join(&artifact.file);
+        if path.exists() {
+            let bytes = fs::read(&path)?;
+            builder.add_file(&artifact.file, &bytes)?;
+        }
+    }
+
+    let bytes = builder.finish()?;
+    let file = format!("{run_id}.zip");
+    let path = archive_root.join(&file);
+    fs::write(&path, &bytes)?;
+    let digest = blake3::hash(&bytes).to_hex().to_string();
+    let size = bytes.len() as u64;
+    Ok(Some(ArchiveBundleResult {
+        file,
+        path,
+        digest,
+        size,
+    }))
+}
+
+struct ChaosArchiveOutcome {
+    run_id: String,
+    manifest_path: PathBuf,
+    latest_path: PathBuf,
+    bundle_path: Option<PathBuf>,
+    bundle_file: Option<String>,
+    bundle_digest: Option<String>,
+}
+
+fn publish_archive_outcome(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn Error>> {
+    publish_to_directory(outcome)?;
+    publish_to_object_store(outcome)?;
+    Ok(())
+}
+
+fn publish_to_directory(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn Error>> {
+    let publish_dir = match env::var("TB_CHAOS_ARCHIVE_PUBLISH_DIR")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        Some(path) => path,
+        None => return Ok(()),
+    };
+    let publish_root = Path::new(&publish_dir);
+    fs::create_dir_all(publish_root)?;
+
+    let latest_dest = publish_root.join("latest.json");
+    fs::copy(&outcome.latest_path, &latest_dest)?;
+
+    let run_dest = publish_root.join(&outcome.run_id);
+    fs::create_dir_all(&run_dest)?;
+    fs::copy(&outcome.manifest_path, run_dest.join("manifest.json"))?;
+
+    if let Some(bundle_path) = &outcome.bundle_path {
+        let bundle_name = outcome
+            .bundle_file
+            .clone()
+            .unwrap_or_else(|| format!("{}.zip", outcome.run_id));
+        fs::copy(bundle_path, publish_root.join(&bundle_name))?;
+        if let Some(digest) = &outcome.bundle_digest {
+            eprintln!(
+                "[chaos-lab] published bundle {} (blake3={}) to {}",
+                bundle_name,
+                digest,
+                publish_root.display()
+            );
+        } else {
+            eprintln!(
+                "[chaos-lab] published bundle {} to {}",
+                bundle_name,
+                publish_root.display()
+            );
+        }
+    }
+
+    eprintln!(
+        "[chaos-lab] mirrored archive run {} to {}",
+        outcome.run_id,
+        publish_root.display()
+    );
+    Ok(())
+}
+
+fn publish_to_object_store(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn Error>> {
+    let bucket = match env::var("TB_CHAOS_ARCHIVE_BUCKET")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        Some(bucket) => bucket,
+        None => return Ok(()),
+    };
+
+    let prefix = env::var("TB_CHAOS_ARCHIVE_PREFIX").unwrap_or_else(|_| "chaos".to_string());
+    let prefix = prefix.trim_matches('/').to_string();
+    let manifest_key = join_object_key(&prefix, &format!("{}/manifest.json", outcome.run_id));
+    let latest_key = join_object_key(&prefix, "latest.json");
+
+    let client = S3Client::from_env()?;
+    let http = env_blocking_client(&["TB_CHAOS_ARCHIVE_TLS", "TB_HTTP_TLS"], "chaos-archive");
+
+    let manifest_bytes = fs::read(&outcome.manifest_path)?;
+    client.put_object_blocking(&http, &bucket, &manifest_key, manifest_bytes)?;
+
+    let latest_bytes = fs::read(&outcome.latest_path)?;
+    client.put_object_blocking(&http, &bucket, &latest_key, latest_bytes)?;
+
+    if let Some(bundle_path) = &outcome.bundle_path {
+        let bundle_file = outcome
+            .bundle_file
+            .clone()
+            .unwrap_or_else(|| format!("{}.zip", outcome.run_id));
+        let bundle_key = join_object_key(&prefix, &bundle_file);
+        let bundle_bytes = fs::read(bundle_path)?;
+        client.put_object_blocking(&http, &bucket, &bundle_key, bundle_bytes)?;
+        if let Some(digest) = &outcome.bundle_digest {
+            eprintln!(
+                "[chaos-lab] uploaded bundle s3://{}/{} (blake3={})",
+                bucket, bundle_key, digest
+            );
+        } else {
+            eprintln!("[chaos-lab] uploaded bundle s3://{}/{}", bucket, bundle_key);
+        }
+    } else {
+        eprintln!(
+            "[chaos-lab] uploaded chaos manifest s3://{}/{}",
+            bucket, manifest_key
+        );
+    }
+
+    Ok(())
+}
+
+fn join_object_key(prefix: &str, suffix: &str) -> String {
+    let trimmed_suffix = suffix.trim_start_matches('/');
+    if trimmed_suffix.is_empty() {
+        return prefix.trim_matches('/').to_string();
+    }
+    let trimmed_prefix = prefix.trim_matches('/');
+    if trimmed_prefix.is_empty() {
+        trimmed_suffix.to_string()
+    } else {
+        format!("{}/{}", trimmed_prefix, trimmed_suffix)
+    }
+}
+
+fn write_json_value(path: &Path, value: &Value) -> Result<(), Box<dyn Error>> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    let mut file = File::create(path)?;
+    let bytes = json::to_vec_pretty(value)?;
+    file.write_all(&bytes)?;
+    file.flush()?;
+    Ok(())
+}
+
+#[derive(Clone)]
+struct ArchivedArtifact {
+    file: String,
+    blake3: String,
+}
+
+#[derive(Clone)]
+struct ArchivedBundle {
+    file: String,
+    blake3: String,
+    size: u64,
+}
+
+struct ChaosArchiveManifest {
+    issued_at: u64,
+    run_id: String,
+    label: Option<String>,
+    artifacts: BTreeMap<String, ArchivedArtifact>,
+    bundle: Option<ArchivedBundle>,
+}
+
+struct ChaosArchiveLatest {
+    issued_at: u64,
+    run_id: String,
+    label: Option<String>,
+    manifest: String,
+    bundle: Option<String>,
+}
+
+impl ArchivedArtifact {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("file".into(), Value::String(self.file.clone()));
+        map.insert("blake3".into(), Value::String(self.blake3.clone()));
+        Value::Object(map)
+    }
+}
+
+impl ArchivedBundle {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("file".into(), Value::String(self.file.clone()));
+        map.insert("blake3".into(), Value::String(self.blake3.clone()));
+        map.insert("size".into(), Value::Number(Number::from(self.size)));
+        Value::Object(map)
+    }
+}
+
+impl ChaosArchiveManifest {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "issued_at".into(),
+            Value::Number(Number::from(self.issued_at)),
+        );
+        map.insert("run_id".into(), Value::String(self.run_id.clone()));
+        if let Some(label) = &self.label {
+            map.insert("label".into(), Value::String(label.clone()));
+        }
+        let mut artifacts = Map::new();
+        for (name, artifact) in &self.artifacts {
+            artifacts.insert(name.clone(), artifact.to_value());
+        }
+        map.insert("artifacts".into(), Value::Object(artifacts));
+        if let Some(bundle) = &self.bundle {
+            map.insert("bundle".into(), bundle.to_value());
+        }
+        Value::Object(map)
+    }
+}
+
+impl ChaosArchiveLatest {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "issued_at".into(),
+            Value::Number(Number::from(self.issued_at)),
+        );
+        map.insert("run_id".into(), Value::String(self.run_id.clone()));
+        if let Some(label) = &self.label {
+            map.insert("label".into(), Value::String(label.clone()));
+        }
+        map.insert("manifest".into(), Value::String(self.manifest.clone()));
+        if let Some(bundle) = &self.bundle {
+            map.insert("bundle".into(), Value::String(bundle.clone()));
+        }
+        Value::Object(map)
+    }
 }
 
 fn persist_status_snapshot(
@@ -247,7 +709,9 @@ fn load_status_snapshot(path: &str) -> Result<Vec<ChaosReadinessSnapshot>, Box<d
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    let snapshots: Vec<ChaosReadinessSnapshot> = json::from_slice(&data)?;
+    let payload: Value = json::from_slice(&data)?;
+    let snapshots =
+        decode_status_payload(payload).map_err(|err| Box::new(err) as Box<dyn Error>)?;
     Ok(snapshots)
 }
 
@@ -607,162 +1071,11 @@ fn fetch_status_snapshot(endpoint: &str) -> Result<Vec<ChaosReadinessSnapshot>, 
     Ok(snapshots)
 }
 
-fn decode_status_payload(value: Value) -> Result<Vec<ChaosReadinessSnapshot>, SnapshotDecodeError> {
-    let entries = value
-        .as_array()
-        .ok_or_else(|| SnapshotDecodeError::new("chaos/status payload must be an array"))?;
-    let mut snapshots = Vec::with_capacity(entries.len());
-    for entry in entries {
-        snapshots.push(snapshot_from_value(entry)?);
-    }
-    Ok(snapshots)
+fn decode_status_payload(
+    value: Value,
+) -> Result<Vec<ChaosReadinessSnapshot>, ChaosSnapshotDecodeError> {
+    ChaosReadinessSnapshot::decode_array(&value)
 }
-
-fn snapshot_from_value(value: &Value) -> Result<ChaosReadinessSnapshot, SnapshotDecodeError> {
-    let map = value
-        .as_object()
-        .ok_or_else(|| SnapshotDecodeError::new("chaos/status entry must be an object"))?;
-    let scenario = read_string(map, "scenario")?;
-    let module = read_module(map, "module")?;
-    let readiness = read_f64(map, "readiness")?;
-    let sla_threshold = read_f64(map, "sla_threshold")?;
-    let breaches = read_u64(map, "breaches")?;
-    let window_start = read_u64(map, "window_start")?;
-    let window_end = read_u64(map, "window_end")?;
-    let issued_at = read_u64(map, "issued_at")?;
-    let signer = read_bytes::<32>(map, "signer")?;
-    let digest = read_bytes::<32>(map, "digest")?;
-    let site_readiness = match map.get("site_readiness") {
-        Some(Value::Array(entries)) => {
-            let mut sites = Vec::with_capacity(entries.len());
-            for entry in entries {
-                sites.push(site_from_value(entry)?);
-            }
-            sites
-        }
-        Some(_) => {
-            return Err(SnapshotDecodeError::new(
-                "site_readiness must be an array when present",
-            ))
-        }
-        None => Vec::new(),
-    };
-    Ok(ChaosReadinessSnapshot {
-        scenario,
-        module,
-        readiness,
-        sla_threshold,
-        breaches,
-        window_start,
-        window_end,
-        issued_at,
-        signer,
-        digest,
-        site_readiness,
-    })
-}
-
-fn site_from_value(value: &Value) -> Result<ChaosSiteReadiness, SnapshotDecodeError> {
-    let map = value
-        .as_object()
-        .ok_or_else(|| SnapshotDecodeError::new("site_readiness entries must be objects"))?;
-    let site = read_string(map, "site")?;
-    let readiness = read_f64(map, "readiness")?;
-    let provider_kind = match map.get("provider_kind") {
-        Some(value) => {
-            let text = value.as_str().ok_or_else(|| {
-                SnapshotDecodeError::new("site_readiness.provider_kind must be a string")
-            })?;
-            ChaosProviderKind::from_str(text).ok_or_else(|| {
-                SnapshotDecodeError::new(format!(
-                    "invalid provider kind '{text}' in site_readiness"
-                ))
-            })?
-        }
-        None => ChaosProviderKind::Unknown,
-    };
-    Ok(ChaosSiteReadiness {
-        site,
-        readiness,
-        provider_kind,
-    })
-}
-
-fn read_string(map: &Map, field: &'static str) -> Result<String, SnapshotDecodeError> {
-    map.get(field)
-        .and_then(Value::as_str)
-        .map(|value| value.to_string())
-        .ok_or_else(|| SnapshotDecodeError::new(format!("missing or invalid {field}")))
-}
-
-fn read_f64(map: &Map, field: &'static str) -> Result<f64, SnapshotDecodeError> {
-    map.get(field)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| SnapshotDecodeError::new(format!("missing or invalid {field}")))
-}
-
-fn read_u64(map: &Map, field: &'static str) -> Result<u64, SnapshotDecodeError> {
-    map.get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| SnapshotDecodeError::new(format!("missing or invalid {field}")))
-}
-
-fn read_module(map: &Map, field: &'static str) -> Result<ChaosModule, SnapshotDecodeError> {
-    let value = map
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| SnapshotDecodeError::new(format!("missing or invalid {field}")))?;
-    ChaosModule::from_str(value).ok_or_else(|| {
-        SnapshotDecodeError::new(format!("unknown module '{value}' in chaos/status"))
-    })
-}
-
-fn read_bytes<const N: usize>(
-    map: &Map,
-    field: &'static str,
-) -> Result<[u8; N], SnapshotDecodeError> {
-    let value = map
-        .get(field)
-        .ok_or_else(|| SnapshotDecodeError::new(format!("missing {field}")))?;
-    let array = value
-        .as_array()
-        .ok_or_else(|| SnapshotDecodeError::new(format!("{field} must be an array of bytes")))?;
-    if array.len() != N {
-        return Err(SnapshotDecodeError::new(format!(
-            "{field} must contain {N} entries"
-        )));
-    }
-    let mut bytes = [0u8; N];
-    for (index, entry) in array.iter().enumerate() {
-        let value = entry
-            .as_u64()
-            .ok_or_else(|| SnapshotDecodeError::new(format!("{field}[{index}] must be a byte")))?;
-        if value > u8::MAX as u64 {
-            return Err(SnapshotDecodeError::new(format!(
-                "{field}[{index}] must be within 0-255"
-            )));
-        }
-        bytes[index] = value as u8;
-    }
-    Ok(bytes)
-}
-
-#[derive(Debug)]
-struct SnapshotDecodeError(String);
-
-impl SnapshotDecodeError {
-    fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
-
-impl fmt::Display for SnapshotDecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl Error for SnapshotDecodeError {}
 
 const STATUS_EPSILON: f64 = 1e-6;
 

@@ -73,10 +73,28 @@ METRICS
     shift || true
     if [[ $subcmd == 'chaos' ]]; then
       out_dir="target/chaos"
+      archive_dir=""
+      archive_label="stub"
+      publish_dir=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --out-dir)
             out_dir=$2
+            shift 2
+            ;;
+          --archive-dir)
+            archive_dir=$2
+            shift 2
+            ;;
+          --archive-label)
+            archive_label=$2
+            shift 2
+            ;;
+          --publish-dir)
+            publish_dir=$2
+            shift 2
+            ;;
+          --publish-bucket|--publish-prefix)
             shift 2
             ;;
           --status-endpoint|--baseline|--steps|--nodes)
@@ -91,12 +109,71 @@ METRICS
         esac
       done
       mkdir -p "$out_dir"
-      echo '[]' > "$out_dir/status.snapshot.json"
-      echo '[]' > "$out_dir/status.diff.json"
-      echo '[]' > "$out_dir/overlay.readiness.json"
-      cat <<'JSON' > "$out_dir/provider.failover.json"
-[]
+      cat <<'JSON' > "$out_dir/status.snapshot.json"
+[
+  {"scenario":"stub","module":"overlay","readiness":1.0}
+]
 JSON
+      cat <<'JSON' > "$out_dir/status.diff.json"
+[
+  {
+    "scenario": "stub",
+    "module": "overlay",
+    "readiness_before": 1.0,
+    "readiness_after": 1.0,
+    "site_added": [],
+    "site_removed": [],
+    "site_changed": []
+  }
+]
+JSON
+      echo '[]' > "$out_dir/overlay.readiness.json"
+      echo '[]' > "$out_dir/provider.failover.json"
+      if [[ -n $archive_dir ]]; then
+        run_id="stub-run"
+        mkdir -p "$archive_dir/$run_id"
+        cp "$out_dir/status.snapshot.json" "$archive_dir/$run_id/status.snapshot.json"
+        cp "$out_dir/status.diff.json" "$archive_dir/$run_id/status.diff.json"
+        cp "$out_dir/overlay.readiness.json" "$archive_dir/$run_id/overlay.readiness.json"
+        cp "$out_dir/provider.failover.json" "$archive_dir/$run_id/provider.failover.json"
+        bundle_path="$archive_dir/${run_id}.zip"
+        printf 'stub bundle\n' > "$bundle_path"
+        bundle_size=$(stat -c%s "$bundle_path")
+        snapshot_size=$(stat -c%s "$archive_dir/$run_id/status.snapshot.json")
+        diff_size=$(stat -c%s "$archive_dir/$run_id/status.diff.json")
+        overlay_size=$(stat -c%s "$archive_dir/$run_id/overlay.readiness.json")
+        provider_size=$(stat -c%s "$archive_dir/$run_id/provider.failover.json")
+        cat > "$archive_dir/$run_id/manifest.json" <<MANIFEST
+{
+  "run_id": "$run_id",
+  "label": "$archive_label",
+  "generated_at": 0,
+  "artifacts": {
+    "status_snapshot": {"file": "status.snapshot.json", "size": $snapshot_size, "digest": "0"},
+    "status_diff": {"file": "status.diff.json", "size": $diff_size, "digest": "0"},
+    "overlay_readiness": {"file": "overlay.readiness.json", "size": $overlay_size, "digest": "0"},
+    "provider_failover": {"file": "provider.failover.json", "size": $provider_size, "digest": "0"}
+  },
+  "bundle": {
+    "file": "${run_id}.zip",
+    "size": $bundle_size,
+    "digest": "0"
+  }
+}
+MANIFEST
+        cat > "$archive_dir/latest.json" <<LATEST
+{
+  "manifest": "$run_id/manifest.json",
+  "run_id": "$run_id"
+}
+LATEST
+        if [[ -n $publish_dir ]]; then
+          mkdir -p "$publish_dir/$run_id"
+          cp "$archive_dir/$run_id/"* "$publish_dir/$run_id/"
+          cp "$bundle_path" "$publish_dir/"
+          cp "$archive_dir/latest.json" "$publish_dir/latest.json"
+        fi
+      fi
       exit 0
     fi
     ;;
@@ -308,14 +385,69 @@ fn verify_release_requires_chaos_artifacts() {
     // Populate chaos artefacts and retry.
     let chaos_dir = release_path.join("chaos");
     fs::create_dir_all(&chaos_dir).expect("create chaos dir");
+    fs::write(
+        chaos_dir.join("status.snapshot.json"),
+        br#"[
+  {"scenario":"stub","module":"overlay","readiness":1.0}
+]
+"#,
+    )
+    .expect("write chaos snapshot");
+    fs::write(
+        chaos_dir.join("status.diff.json"),
+        br#"[
+  {
+    "scenario": "stub",
+    "module": "overlay",
+    "readiness_before": 1.0,
+    "readiness_after": 1.0,
+    "site_added": [],
+    "site_removed": [],
+    "site_changed": []
+  }
+]
+"#,
+    )
+    .expect("write chaos diff");
+    fs::write(chaos_dir.join("overlay.readiness.json"), b"[]").expect("write overlay readiness");
+    fs::write(chaos_dir.join("provider.failover.json"), b"[]").expect("write provider failover");
+
+    let archive_dir = chaos_dir.join("archive");
+    let run_id = "stub-run";
+    let run_dir = archive_dir.join(run_id);
+    fs::create_dir_all(&run_dir).expect("create archive run dir");
     for name in [
         "status.snapshot.json",
         "status.diff.json",
         "overlay.readiness.json",
         "provider.failover.json",
     ] {
-        fs::write(chaos_dir.join(name), b"[]").expect("write chaos artefact");
+        let src = chaos_dir.join(name);
+        let dst = run_dir.join(name);
+        fs::copy(&src, &dst).expect("copy chaos artefact into archive");
     }
+    let bundle_path = archive_dir.join(format!("{run_id}.zip"));
+    fs::create_dir_all(&archive_dir).expect("create archive root");
+    fs::write(&bundle_path, b"stub bundle\n").expect("write bundle");
+    let snapshot_size = fs::metadata(run_dir.join("status.snapshot.json"))
+        .expect("snapshot metadata")
+        .len();
+    let diff_size = fs::metadata(run_dir.join("status.diff.json"))
+        .expect("diff metadata")
+        .len();
+    let overlay_size = fs::metadata(run_dir.join("overlay.readiness.json"))
+        .expect("overlay metadata")
+        .len();
+    let provider_size = fs::metadata(run_dir.join("provider.failover.json"))
+        .expect("provider metadata")
+        .len();
+    let bundle_size = fs::metadata(&bundle_path).expect("bundle metadata").len();
+    let manifest = format!(
+        r#"{{"run_id":"{run_id}","label":"test","generated_at":0,"artifacts":{{"status_snapshot":{{"file":"status.snapshot.json","size":{snapshot_size},"digest":"0"}},"status_diff":{{"file":"status.diff.json","size":{diff_size},"digest":"0"}},"overlay_readiness":{{"file":"overlay.readiness.json","size":{overlay_size},"digest":"0"}},"provider_failover":{{"file":"provider.failover.json","size":{provider_size},"digest":"0"}}}},"bundle":{{"file":"{run_id}.zip","size":{bundle_size},"digest":"0"}}}}"#
+    );
+    fs::write(run_dir.join("manifest.json"), manifest).expect("write manifest");
+    let latest = format!(r#"{{"manifest":"{run_id}/manifest.json","run_id":"{run_id}"}}"#);
+    fs::write(archive_dir.join("latest.json"), latest).expect("write latest manifest");
 
     run_verify(true);
 }

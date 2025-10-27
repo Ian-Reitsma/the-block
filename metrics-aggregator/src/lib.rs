@@ -35,7 +35,7 @@ use crypto_suite::encryption::{
 };
 
 #[cfg(feature = "s3")]
-mod object_store;
+use foundation_object_store::S3Client;
 
 mod leader;
 
@@ -43,12 +43,27 @@ pub use leader::LeaderElectionConfig;
 
 #[cfg(feature = "s3")]
 fn upload_sync(bucket: &str, data: Vec<u8>) {
-    if let Err(err) = object_store::upload_metrics_snapshot(bucket, data) {
-        warn!(
-            target: "aggregator",
-            error = %err,
-            "failed to upload metrics snapshot"
-        );
+    const METRICS_OBJECT_KEY: &str = "metrics/latest.zip";
+    match S3Client::from_env() {
+        Ok(s3) => {
+            let client = http_client();
+            if let Err(err) =
+                runtime::handle().block_on(s3.put_object(&client, bucket, METRICS_OBJECT_KEY, data))
+            {
+                warn!(
+                    target: "aggregator",
+                    error = %err,
+                    "failed to upload metrics snapshot"
+                );
+            }
+        }
+        Err(err) => {
+            warn!(
+                target: "aggregator",
+                error = %err,
+                "failed to initialise S3 client for metrics snapshot upload"
+            );
+        }
     }
 }
 
