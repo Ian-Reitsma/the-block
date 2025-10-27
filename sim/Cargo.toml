@@ -40,6 +40,7 @@ codec = { path = "../crates/codec", optional = true }
 crypto_suite = { path = "../crates/crypto_suite" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
 foundation_time = { path = "../crates/foundation_time" }
+httpd = { path = "../crates/httpd" }
 monitoring-build = { path = "../monitoring" }
 p2p_overlay = { path = "../crates/p2p_overlay", optional = true }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"], optional = true }

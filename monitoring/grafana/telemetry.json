@@ -950,7 +950,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "description": "Chaos readiness grouped by module, scenario, and site",
+      "description": "Chaos readiness grouped by module, scenario, site, and provider",
       "id": 52,
       "options": {
         "legend": {
@@ -960,7 +960,7 @@
       "targets": [
         {
           "expr": "chaos_site_readiness",
-          "legendFormat": "{{module}} · {{scenario}} · {{site}}"
+          "legendFormat": "{{module}} · {{scenario}} · {{site}} · {{provider}}"
         }
       ],
       "title": "Chaos site readiness",

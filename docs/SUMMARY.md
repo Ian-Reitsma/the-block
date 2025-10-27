@@ -1,4 +1,15 @@
 # Summary
+> **Review (2025-10-27, afternoon):** `/chaos/status` baselines now flow entirely
+> through first-party tooling. `sim/chaos_lab.rs` pulls snapshots with
+> `httpd::BlockingClient`, decodes them manually via
+> `foundation_serialization::json::Value`, and persists overlay readiness rows so
+> soak automation can diff provider-aware regressions without serde stubs or
+> third-party HTTP clients. `cargo xtask chaos` consumes the emitted JSON through
+> the same facade, reporting module totals, scenario readiness, provider churn,
+> readiness improvements/regressions, and duplicate site detection using only
+> `std` collections. The existing provider-labelled gauges, signed attestations,
+> and bind-warning unification remain in place, giving operators a fully
+> first-party chaos loop from harness to dashboards to CI gating.
 > **Review (2025-10-26, late night):** Mixed-provider chaos rehearsals now feed
 > per-site readiness into the aggregator. The simulator’s overlay scenarios wire
 > provider weights and latency penalties into `ChaosSite` entries so

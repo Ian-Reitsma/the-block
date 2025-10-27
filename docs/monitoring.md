@@ -96,6 +96,43 @@ The WAN chaos verifier now lives entirely inside the workspace:
   release tags only advance once the chaos scenarios complete and emit the new
   readiness metrics.
 
+`chaos_lab` can also fetch an existing `/chaos/status` baseline when operators set
+`TB_CHAOS_STATUS_ENDPOINT`. The binary uses `httpd::BlockingClient` with a
+10-second timeout, decodes the payload via
+`foundation_serialization::json::Value`, and emits both the baseline snapshot
+(`TB_CHAOS_STATUS_BASELINE`) and a diff against the newly captured attestations
+(`TB_CHAOS_STATUS_DIFF`). Setting `TB_CHAOS_REQUIRE_DIFF=1` turns empty diffs into
+hard failures so soak automation cannot silently accept regressions. Per-site
+readiness rows are written to `TB_CHAOS_OVERLAY_READINESS` and contain the
+scenario, module, site, provider, scenario readiness, current readiness, and
+baseline deltas; they stay on the first-party codecs and power downstream
+automation. Setting `TB_CHAOS_PROVIDER_FAILOVER` captures
+`chaos_provider_failover.json`, which enumerates per-provider failover drills,
+recomputes scenario readiness, and fails the run when an outage does not drop
+readiness or surface a diff entry.
+
+`cargo xtask chaos` consumes those artefacts through the same
+`foundation_serialization` facade, summarising module totals, scenario readiness,
+readiness improvements/regressions, provider churn, duplicate scenario/site pairs,
+and the provider failover matrix with pure `std` collections. The command now
+enforces release gating by failing when overlay readiness drops, sites disappear,
+or provider failover drills do not register diffs, printing the captured diff
+count alongside per-scenario readiness transitions so release managers can review
+everything without external dashboards.
+
+The release tooling now bakes this gate into the provenance workflow.  Before
+hashing build artefacts, `scripts/release_provenance.sh` shells out to
+`cargo xtask chaos --out-dir releases/<tag>/chaos`, forwarding any
+`TB_CHAOS_*` environment overrides and refusing to proceed until the
+snapshot/diff/overlay/failover JSON payloads all exist and pass the same
+regression checks.  `scripts/verify_release.sh` mirrors that contract by failing
+whenever the published archive lacks the `chaos/` directory or any of the four
+artefacts, so downstream consumers can trust that every signed release exercised
+the provider failover matrix.  The `just chaos-suite` recipe now emits the same
+artefacts locally (attestations, status snapshot, diff, overlay readiness, and
+provider failover) so operators rehearsing the flow by hand observe identical
+files.
+
 The Grafana and HTML dashboards now include a dedicated **Chaos** row that
 charts `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,site,provider}`,
 and the five-minute delta of `chaos_sla_breach_total`. Automation runbooks

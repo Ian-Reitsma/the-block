@@ -204,7 +204,7 @@ const CHAOS_READINESS_EXPR: &str = "chaos_readiness";
 const CHAOS_READINESS_LEGEND: &str = "{{module}} · {{scenario}}";
 const CHAOS_SITE_READINESS_PANEL_TITLE: &str = "Chaos site readiness";
 const CHAOS_SITE_READINESS_EXPR: &str = "chaos_site_readiness";
-const CHAOS_SITE_READINESS_LEGEND: &str = "{{module}} · {{scenario}} · {{site}}";
+const CHAOS_SITE_READINESS_LEGEND: &str = "{{module}} · {{scenario}} · {{site}} · {{provider}}";
 const CHAOS_BREACH_PANEL_TITLE: &str = "Chaos SLA breaches (5m delta)";
 const CHAOS_BREACH_DELTA_EXPR: &str =
     "sum by (module, scenario)(increase(chaos_sla_breach_total[5m]))";

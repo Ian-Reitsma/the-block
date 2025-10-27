@@ -1,18 +1,33 @@
 # Project Progress Snapshot
-> **Review (2025-10-27, early morning):** Chaos automation now diffs provider-
-> aware readiness snapshots straight from long-running overlay soaks. The
-> simulator records provider kinds in `SiteReadinessState`, the chaos harness
-> emits mixed-provider attestations, and the metrics aggregator mirrors the
-> provider label through `/chaos/status`, `chaos_site_readiness{module,scenario,site,provider}`,
-> and baseline diff artefacts while pruning stale labels when sites disappear.
-> The new `sim/tests/chaos_harness.rs::reconfiguring_sites_replaces_previous_entries`
+> **Review (2025-10-27, afternoon):** Chaos automation now loops entirely through
+> first-party tooling. `sim/chaos_lab.rs` fetches `/chaos/status` baselines with
+> `httpd::BlockingClient`, decodes them manually via
+> `foundation_serialization::json::Value`, and persists both the status diff and
+> overlay readiness rows so long-running soak jobs can diff provider-aware
+> regressions without serde stubs or external HTTP clients. The simulator still
+> records provider kinds in `SiteReadinessState`, the harness emits mixed-provider
+> attestations, and the metrics aggregator mirrors the provider label through
+> `/chaos/status`, `chaos_site_readiness{module,scenario,site,provider}`, and the
+> persisted diff artefacts while pruning stale labels when sites disappear. The
+> new `sim/tests/chaos_harness.rs::reconfiguring_sites_replaces_previous_entries`
 > and `metrics-aggregator::tests::chaos_site_updates_remove_stale_entries` guard
-> topology churn, and `sim/chaos_lab.rs` now persists provider-aware diff logs so
-> overlay soak automation can fail fast when readiness shifts. Listener binding
-> is also unified: `node/src/net/listener.rs` reports `*_listener_bind_failed`
-> warnings across RPC, gateway, and status servers, and the fresh
-> `node/tests/rpc_bind.rs` regression proves occupied sockets surface warnings
-> instead of panics.
+> topology churn, and `cargo xtask chaos` now consumes the overlay readiness JSON
+> to report module totals, scenario readiness, readiness improvements/regressions,
+> provider churn, and duplicate site detection with pure `std` collections. Listener
+> binding remains unified: `node/src/net/listener.rs` reports
+> `*_listener_bind_failed` warnings across RPC, gateway, status, and explorer
+> servers, `explorer/tests/explorer_bind.rs` proves the public HTTP surface logs
+> the warning when a port is occupied, and `node/tests/rpc_bind.rs` continues to
+> assert sockets surface warnings instead of panics. The ban CLI still ships tests
+> for storage/list failures so `ban store error:` warnings bubble through instead
+> of silently mutating metrics. Release tooling now shells out to
+> `cargo xtask chaos --out-dir releases/<tag>/chaos` inside
+> `scripts/release_provenance.sh`, verifies the snapshot/diff/overlay/provider
+> failover JSON payloads before hashing binaries, and refuses to proceed when the
+> gate fails; `scripts/verify_release.sh` mirrors the guard by erroring whenever a
+> published archive omits the `chaos/` directory or any of those files. The
+> `just chaos-suite` recipe emits the same artefacts (even without a baseline,
+> thanks to explicit empty diff emission) so local drills match the release path.
 > **Review (2025-10-26, late night):** Chaos readiness now tracks mixed-provider
 > overlays end to end. The simulator seeds overlay scenarios with weighted
 > `ChaosSite` entries, the aggregator mirrors them through
@@ -889,6 +904,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
       → `monitoring/grafana/*.json`) gained a dedicated **Chaos** row charting
       module and site readiness alongside five-minute SLA breach deltas for
       operators.
+    - `chaos_lab` now scripts provider failover drills via
+      `provider_failover_reports`, emits `chaos_provider_failover.json`, and fails
+      when any provider outage does not surface a diff entry or readiness drop.
+      `cargo xtask chaos` ingests the failover artefact, enforces overlay
+      regression gating (readiness drops, removed sites), and blocks release
+      tagging when mixed-provider overlays regress relative to the persisted
+      baseline. Overlay soak automation can diff `/chaos/status` snapshots and
+      consume the failover summaries without leaving first-party tooling.
     - `sim/did.rs` now assembles DID documents through the first-party JSON helpers
       (no `serde` derive) so the DID simulator runs cleanly during full workspace
       test sweeps.
@@ -912,8 +935,6 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Uptime-based fee rebates tracked in `node/src/net/uptime.rs` with `peer.rebate_status` RPC (`docs/fee_rebates.md`).
 
 **Gaps**
-- Cross-provider failover drills remain; extend the chaos harness with
-  mixed-provider overlays to finish WAN-scale validation.
 - Bootstrap peer churn analysis missing.
     - Overlay soak tests need long-lived fault injection, and the dependency registry now focuses on automating storage migration drills plus the upcoming dependency fault simulation harness to certify fallbacks.
 
