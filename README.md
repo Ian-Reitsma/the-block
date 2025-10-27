@@ -725,6 +725,13 @@ blockctl node --config ~/.block/config.toml \
 The compute marketplace's cancellation API integrates with telemetry: calling
 `compute.job_cancel` or `blockctl compute cancel` increments
 `scheduler_cancel_total{reason}` and the node refunds any locked bonds.
+Chaos automation now exports provider-labelled readiness snapshots through
+`chaos_site_readiness{module,scenario,site,provider}`, and the `chaos_lab`
+utility emits provider-aware diff artefacts so long-running overlay soaks can
+alert on churn without leaving first-party tooling. Node listeners now share a
+`gossip_listener_bind_failed`/`rpc_listener_bind_failed`/`status_listener_bind_failed`
+warning family, ensuring occupied sockets surface in telemetry while the process
+continues running.
 
 For lightweight HTML dashboards without Prometheus, the `monitoring` crate now
 ships a first-party snapshot utility. Run

@@ -9,13 +9,27 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-27)
+
+- Chaos readiness now exposes provider-labelled breakdowns without introducing
+  external RPC clients. `sim/src/chaos.rs` emits `ChaosSite::with_kind` entries
+  and `monitoring/src/chaos.rs` serialises them through the existing codecs so
+  `/chaos/status` returns sorted
+  `chaos_site_readiness{module,scenario,site,provider}` snapshots alongside
+  module rollups. The aggregator prunes stale label handles with its in-house
+  Prometheus facade and continues to log `chaos_status_tracker_poisoned_recovering`
+  via the shared `diagnostics` sink. Listener unification lives in
+  `node/src/net/listener.rs`, wrapping `std::net` types so RPC, gateway, and
+  status servers emit `*_listener_bind_failed` warnings instead of panicking—no
+  new transport crates or async runtimes were required.
+
 ## Recent progress (2025-10-26)
 
 - Chaos readiness now exposes site-level breakdowns without introducing external
   RPC clients. `sim/src/chaos.rs` emits `ChaosSite` entries and
   `monitoring/src/chaos.rs` serialises them through the existing
   first-party codecs so `/chaos/status` returns a sorted
-  `chaos_site_readiness{module,scenario,site}` array alongside module rollups.
+  `chaos_site_readiness{module,scenario,site,provider}` array alongside module rollups.
   The aggregator logs `chaos_status_tracker_poisoned_recovering` when it heals a
   poisoned readiness mutex, but recovery still rides on the in-tree
   `diagnostics` facade. Mobile sync tests that previously required the optional

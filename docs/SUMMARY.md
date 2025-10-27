@@ -4,7 +4,7 @@
 > provider weights and latency penalties into `ChaosSite` entries so
 > `chaos_lab` exports site-level readiness vectors, and `/chaos/status` returns
 > those arrays alongside module rollups while the new
-> `chaos_site_readiness{module,scenario,site}` gauge tracks them for dashboards
+> `chaos_site_readiness{module,scenario,site,provider}` gauge tracks them for dashboards
 > and automation. The aggregator hardens `/chaos/attest` against poisoned locks,
 > warns when the status tracker must recover from a mutex poison, and keeps the
 > site gauges sorted to produce stable Grafana/JSON snapshots. Mobile sync tests

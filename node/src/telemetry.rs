@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::net;
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};
@@ -5696,7 +5697,12 @@ pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServe
     use std::sync::{atomic::AtomicBool, Arc};
     use std::time::Duration;
 
-    let listener = TcpListener::bind(addr).map_err(|e| PyError::runtime(e.to_string()))?;
+    let socket_addr = addr
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| PyError::runtime(e.to_string()))?;
+    let listener =
+        net::listener::bind_sync("telemetry", "telemetry_listener_bind_failed", socket_addr)
+            .map_err(|e| PyError::runtime(e.to_string()))?;
     listener
         .set_nonblocking(true)
         .unwrap_or_else(|e| panic!("nonblocking: {e}"));

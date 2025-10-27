@@ -5,7 +5,7 @@ use cli_core::{
     command::{Command as CliCommand, CommandBuilder, CommandId},
     parse::Matches,
 };
-use the_block::net::ban_store::{self, BanStoreLike};
+use the_block::net::ban_store::{self, BanStoreError, BanStoreLike};
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
@@ -28,19 +28,19 @@ fn parse_pk(hexstr: &str) -> [u8; 32] {
     arr
 }
 
-fn run<S: BanStoreLike>(store: &S, cmd: Command) -> Vec<(String, u64)> {
+fn run<S: BanStoreLike>(store: &S, cmd: Command) -> Result<Vec<(String, u64)>, BanStoreError> {
     match cmd {
         Command::List => store.list(),
         Command::Ban { pk, secs } => {
             let arr = parse_pk(&pk);
             let until = current_ts() + secs;
-            store.ban(&arr, until);
-            Vec::new()
+            store.ban(&arr, until)?;
+            Ok(Vec::new())
         }
         Command::Unban { pk } => {
             let arr = parse_pk(&pk);
-            store.unban(&arr);
-            Vec::new()
+            store.unban(&arr)?;
+            Ok(Vec::new())
         }
     }
 }
@@ -62,7 +62,13 @@ fn main() {
     };
 
     let store = ban_store::store().lock().unwrap_or_else(|e| e.into_inner());
-    let out = run(&*store, cli.cmd);
+    let out = match run(&*store, cli.cmd) {
+        Ok(out) => out,
+        Err(err) => {
+            eprintln!("ban store error: {err}");
+            process::exit(1);
+        }
+    };
     for (peer, until) in out {
         println!("{peer} {until}");
     }
@@ -179,35 +185,38 @@ mod tests {
     }
 
     impl BanStoreLike for MockStore {
-        fn ban(&self, pk: &[u8; 32], until: u64) {
+        fn ban(&self, pk: &[u8; 32], until: u64) -> Result<(), BanStoreError> {
             self.map
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(*pk, until);
             self.update_metric();
+            Ok(())
         }
 
-        fn unban(&self, pk: &[u8; 32]) {
+        fn unban(&self, pk: &[u8; 32]) -> Result<(), BanStoreError> {
             self.map
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .remove(pk);
             self.update_metric();
+            Ok(())
         }
 
-        fn list(&self) -> Vec<(String, u64)> {
+        fn list(&self) -> Result<Vec<(String, u64)>, BanStoreError> {
             let now = current_ts();
             {
                 let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
                 map.retain(|_, ts| *ts > now);
             }
             self.update_metric();
-            self.map
-                .lock()
+            let list = self
+                .map
                 .unwrap_or_else(|e| e.into_inner())
                 .iter()
                 .map(|(k, v)| (crypto_suite::hex::encode(k), *v))
-                .collect()
+                .collect();
+            Ok(list)
         }
     }
 
@@ -227,11 +236,12 @@ mod tests {
                 pk: pk.clone(),
                 secs: 60,
             },
-        );
-        store.list();
+        )
+        .expect("ban");
+        store.list().expect("list");
         assert_eq!(BANNED_PEERS_TOTAL.get(), 1);
-        run(&store, Command::Unban { pk });
-        store.list();
+        run(&store, Command::Unban { pk }).expect("unban");
+        store.list().expect("list");
         assert_eq!(BANNED_PEERS_TOTAL.get(), 0);
     }
 
@@ -241,7 +251,7 @@ mod tests {
         let store = MockStore::default();
         let pk = [2u8; 32];
         store.insert_raw(pk, current_ts() - 1);
-        let out = run(&store, Command::List);
+        let out = run(&store, Command::List).expect("list");
         assert!(out.is_empty());
         assert_eq!(BANNED_PEERS_TOTAL.get(), 0);
     }

@@ -2,8 +2,8 @@
 
 use crate::Simulation;
 use diagnostics::tracing::{debug, warn};
-pub use monitoring_build::ChaosModule;
 use monitoring_build::{ChaosAttestationDraft, ChaosSiteReadiness};
+pub use monitoring_build::{ChaosModule, ChaosProviderKind};
 use rand::{rngs::StdRng, Rng};
 use std::collections::HashMap;
 
@@ -90,14 +90,25 @@ pub struct ChaosSite {
     pub name: String,
     pub weight: f64,
     pub latency_penalty: f64,
+    pub provider_kind: ChaosProviderKind,
 }
 
 impl ChaosSite {
     pub fn new(name: impl Into<String>, weight: f64, latency_penalty: f64) -> Self {
+        Self::with_kind(name, weight, latency_penalty, ChaosProviderKind::Unknown)
+    }
+
+    pub fn with_kind(
+        name: impl Into<String>,
+        weight: f64,
+        latency_penalty: f64,
+        provider_kind: ChaosProviderKind,
+    ) -> Self {
         Self {
             name: name.into(),
             weight: weight.max(0.0),
             latency_penalty: latency_penalty.clamp(0.0, 1.0),
+            provider_kind,
         }
     }
 }
@@ -112,6 +123,37 @@ impl ChaosFault {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SiteReadinessState {
+    readiness: f64,
+    provider_kind: ChaosProviderKind,
+}
+
+impl SiteReadinessState {
+    fn new(provider_kind: ChaosProviderKind) -> Self {
+        Self {
+            readiness: 1.0,
+            provider_kind,
+        }
+    }
+
+    pub fn readiness(&self) -> f64 {
+        self.readiness
+    }
+
+    pub fn provider_kind(&self) -> ChaosProviderKind {
+        self.provider_kind
+    }
+
+    pub(crate) fn set_provider_kind(&mut self, provider_kind: ChaosProviderKind) {
+        self.provider_kind = provider_kind;
+    }
+
+    pub(crate) fn set_readiness(&mut self, readiness: f64) {
+        self.readiness = readiness;
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ChaosModuleState {
     pub readiness: f64,
@@ -121,7 +163,7 @@ pub struct ChaosModuleState {
     pub window_end: u64,
     pub last_step: u64,
     pub scenario: String,
-    pub site_readiness: HashMap<String, f64>,
+    pub site_readiness: HashMap<String, SiteReadinessState>,
 }
 
 impl ChaosModuleState {
@@ -213,7 +255,8 @@ impl ChaosHarness {
                     module_state
                         .site_readiness
                         .entry(site.name.clone())
-                        .or_insert(1.0);
+                        .and_modify(|state| state.set_provider_kind(site.provider_kind))
+                        .or_insert_with(|| SiteReadinessState::new(site.provider_kind));
                 }
             }
             let mut applied = false;
@@ -227,7 +270,8 @@ impl ChaosHarness {
                             let penalty = (severity * site.weight * (1.0 + site.latency_penalty))
                                 .min(MAX_FAULT_SEVERITY);
                             if let Some(entry) = module_state.site_readiness.get_mut(&site.name) {
-                                *entry = (*entry * (1.0 - penalty)).max(0.0);
+                                let updated = (entry.readiness() * (1.0 - penalty)).max(0.0);
+                                entry.set_readiness(updated);
                             }
                         }
                     }
@@ -245,14 +289,15 @@ impl ChaosHarness {
                         if let Some(entry) = module_state.site_readiness.get_mut(&site.name) {
                             let recovery =
                                 scenario.recovery_rate * (1.0 - site.latency_penalty).max(0.0);
-                            *entry = (*entry + recovery).min(1.0);
+                            let updated = (entry.readiness() + recovery).min(1.0);
+                            entry.set_readiness(updated);
                         }
                     }
                 }
                 module_state.readiness = module_state
                     .site_readiness
                     .values()
-                    .copied()
+                    .map(|state| state.readiness)
                     .fold(1.0, f64::min);
             }
             if module_state.readiness < scenario.sla_threshold {
@@ -282,9 +327,10 @@ impl ChaosHarness {
             let mut site_readiness: Vec<ChaosSiteReadiness> = state
                 .site_readiness
                 .iter()
-                .map(|(site, readiness)| ChaosSiteReadiness {
+                .map(|(site, entry)| ChaosSiteReadiness {
                     site: site.clone(),
-                    readiness: *readiness,
+                    readiness: entry.readiness(),
+                    provider_kind: entry.provider_kind(),
                 })
                 .collect();
             site_readiness.sort_by(|a, b| a.site.cmp(&b.site));
@@ -362,7 +408,12 @@ impl ChaosHarness {
         let state = self.state_for_mut(module);
         state.site_readiness = normalized
             .iter()
-            .map(|site| (site.name.clone(), 1.0))
+            .map(|site| {
+                (
+                    site.name.clone(),
+                    SiteReadinessState::new(site.provider_kind),
+                )
+            })
             .collect();
         state.readiness = 1.0;
     }
@@ -403,13 +454,13 @@ mod tests {
             .compute
             .site_readiness
             .get("us-east")
-            .copied()
+            .map(|state| state.readiness())
             .expect("east site tracked");
         let west = report
             .compute
             .site_readiness
             .get("eu-west")
-            .copied()
+            .map(|state| state.readiness())
             .expect("west site tracked");
         assert!(report.compute.readiness <= east);
         assert!(report.compute.readiness <= west);

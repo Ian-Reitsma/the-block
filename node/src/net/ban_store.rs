@@ -1,6 +1,9 @@
 use concurrency::{MutexExt, OnceCell};
+use std::error::Error;
+use std::fmt;
+use std::io;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use crate::simple_db::{names, SimpleDb};
 
@@ -11,9 +14,9 @@ pub struct BanStore {
 /// Minimal trait so callers (and tests) can provide an alternate backend
 /// without touching the on-disk `sled` database.
 pub trait BanStoreLike {
-    fn ban(&self, pk: &[u8; 32], until: u64);
-    fn unban(&self, pk: &[u8; 32]);
-    fn list(&self) -> Vec<(String, u64)>;
+    fn ban(&self, pk: &[u8; 32], until: u64) -> Result<(), BanStoreError>;
+    fn unban(&self, pk: &[u8; 32]) -> Result<(), BanStoreError>;
+    fn list(&self) -> Result<Vec<(String, u64)>, BanStoreError>;
 }
 
 impl BanStore {
@@ -22,39 +25,42 @@ impl BanStore {
         Self { db: Mutex::new(db) }
     }
 
-    pub fn ban(&self, pk: &[u8; 32], until: u64) {
+    pub fn ban(&self, pk: &[u8; 32], until: u64) -> Result<(), BanStoreError> {
         let mut db = self.db.guard();
         let key = key_for(pk);
         db.put(key.as_bytes(), &until.to_be_bytes())
-            .unwrap_or_else(|e| panic!("store ban {key}: {e}"));
+            .map_err(BanStoreError::storage)?;
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         diagnostics::tracing::info!(peer = %crypto_suite::hex::encode(pk), until, "peer banned");
         self.update_metric();
+        Ok(())
     }
 
-    pub fn unban(&self, pk: &[u8; 32]) {
+    pub fn unban(&self, pk: &[u8; 32]) -> Result<(), BanStoreError> {
         let mut db = self.db.guard();
         let key = key_for(pk);
-        let _ = db.try_remove(&key);
+        let _ = db.try_remove(&key).map_err(BanStoreError::storage)?;
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         diagnostics::tracing::info!(peer = %crypto_suite::hex::encode(pk), "peer unbanned");
         self.update_metric();
+        Ok(())
     }
 
-    pub fn is_banned(&self, pk: &[u8; 32]) -> bool {
-        self.purge_expired();
+    pub fn is_banned(&self, pk: &[u8; 32]) -> Result<bool, BanStoreError> {
+        self.purge_expired()?;
+        let now = current_ts()?;
         let db = self.db.guard();
         let key = key_for(pk);
         if let Some(ts) = db.get(&key).and_then(as_timestamp) {
-            return ts > current_ts();
+            return Ok(ts > now);
         }
-        false
+        Ok(false)
     }
 
-    pub fn purge_expired(&self) {
-        let now = current_ts();
+    pub fn purge_expired(&self) -> Result<(), BanStoreError> {
+        let now = current_ts()?;
         let mut db = self.db.guard();
         let keys: Vec<String> = db
             .keys_with_prefix("")
@@ -67,15 +73,16 @@ impl BanStore {
             })
             .collect();
         for key in keys {
-            let _ = db.try_remove(&key);
+            let _ = db.try_remove(&key).map_err(BanStoreError::storage)?;
         }
         drop(db);
         self.update_metric();
+        Ok(())
     }
 
-    pub fn list(&self) -> Vec<(String, u64)> {
-        self.purge_expired();
-        self.entries()
+    pub fn list(&self) -> Result<Vec<(String, u64)>, BanStoreError> {
+        self.purge_expired()?;
+        Ok(self.entries())
     }
 
     fn update_metric(&self) {
@@ -103,24 +110,24 @@ impl BanStore {
 }
 
 impl BanStoreLike for BanStore {
-    fn ban(&self, pk: &[u8; 32], until: u64) {
-        BanStore::ban(self, pk, until);
+    fn ban(&self, pk: &[u8; 32], until: u64) -> Result<(), BanStoreError> {
+        BanStore::ban(self, pk, until)
     }
 
-    fn unban(&self, pk: &[u8; 32]) {
-        BanStore::unban(self, pk);
+    fn unban(&self, pk: &[u8; 32]) -> Result<(), BanStoreError> {
+        BanStore::unban(self, pk)
     }
 
-    fn list(&self) -> Vec<(String, u64)> {
+    fn list(&self) -> Result<Vec<(String, u64)>, BanStoreError> {
         BanStore::list(self)
     }
 }
 
-fn current_ts() -> u64 {
-    SystemTime::now()
+fn current_ts() -> Result<u64, BanStoreError> {
+    Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_else(|e| panic!("time error: {e}"))
-        .as_secs()
+        .map_err(BanStoreError::clock)?
+        .as_secs())
 }
 
 fn key_for(pk: &[u8; 32]) -> String {
@@ -154,5 +161,39 @@ pub fn init(path: &str) {
         *guard = BanStore::open(path);
     } else {
         let _ = BAN_STORE.set(Mutex::new(BanStore::open(path)));
+    }
+}
+
+#[derive(Debug)]
+pub enum BanStoreError {
+    Storage(io::Error),
+    Clock(SystemTimeError),
+}
+
+impl BanStoreError {
+    fn storage(err: io::Error) -> Self {
+        Self::Storage(err)
+    }
+
+    fn clock(err: SystemTimeError) -> Self {
+        Self::Clock(err)
+    }
+}
+
+impl fmt::Display for BanStoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BanStoreError::Storage(err) => write!(f, "ban store storage error: {err}"),
+            BanStoreError::Clock(err) => write!(f, "ban store clock error: {err}"),
+        }
+    }
+}
+
+impl Error for BanStoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            BanStoreError::Storage(err) => Some(err),
+            BanStoreError::Clock(err) => Some(err),
+        }
     }
 }

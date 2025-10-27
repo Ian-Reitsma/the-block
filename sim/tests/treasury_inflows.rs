@@ -28,7 +28,9 @@ fn treasury_inflows_scenario_models_outcomes() {
     let mut activated = std::collections::HashSet::new();
     let mut treasury = TreasuryState::default();
     for proposal in &proposals {
-        let Some(map) = proposal.as_object() else { continue };
+        let Some(map) = proposal.as_object() else {
+            continue;
+        };
         let id = map.get("id").and_then(Value::as_u64).unwrap_or_default();
         let deps = map
             .get("deps")

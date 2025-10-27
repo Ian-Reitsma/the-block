@@ -12,8 +12,8 @@ pub use alert_validator::{
 };
 pub use chaos::{
     sign_attestation, verify_attestation, ChaosAttestation, ChaosAttestationDecodeError,
-    ChaosAttestationDraft, ChaosAttestationError, ChaosModule, ChaosReadinessSnapshot,
-    ChaosSiteReadiness,
+    ChaosAttestationDraft, ChaosAttestationError, ChaosModule, ChaosProviderKind,
+    ChaosReadinessSnapshot, ChaosSiteReadiness,
 };
 pub use dashboard::*;
 pub use metrics::{

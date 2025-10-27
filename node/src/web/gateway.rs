@@ -21,7 +21,9 @@ use std::{
 use sys::signals::{Signals, SIGHUP};
 
 use crate::web::rate_limit::RateLimitFilter;
-use crate::{ad_readiness::AdReadinessHandle, service_badge, storage::pipeline, vm::wasm, ReadAck};
+use crate::{
+    ad_readiness::AdReadinessHandle, net, service_badge, storage::pipeline, vm::wasm, ReadAck,
+};
 use foundation_serialization::json;
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
@@ -417,7 +419,8 @@ pub async fn run(
     market: Option<MarketplaceHandle>,
     readiness: Option<AdReadinessHandle>,
 ) -> diagnostics::anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
+    let listener =
+        net::listener::bind_runtime("gateway", "gateway_listener_bind_failed", addr).await?;
     let state = GatewayState {
         stake,
         read_tx,

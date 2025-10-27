@@ -51,7 +51,10 @@ fn json_to_io_error(err: SerializationError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, err)
 }
 
-use super::{ban_store, peer_metrics_store};
+use super::{
+    ban_store::{self, BanStoreError},
+    peer_metrics_store,
+};
 #[cfg(feature = "quic")]
 use super::{record_peer_certificate, verify_peer_fingerprint};
 
@@ -320,8 +323,10 @@ impl PeerSet {
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
-        if ban_store_guard().is_banned(pk) {
-            return Err(PeerErrorCode::Banned);
+        match ban_store_guard().is_banned(pk) {
+            Ok(true) => return Err(PeerErrorCode::Banned),
+            Ok(false) => {}
+            Err(err) => log_ban_store_error("is_banned", pk, &err),
         }
         let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
@@ -369,7 +374,9 @@ impl PeerSet {
             let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
             entry.banned_until = Some(until);
             let ts = now_secs() + *P2P_BAN_SECS as u64;
-            ban_store_guard().ban(pk, ts);
+            if let Err(err) = ban_store_guard().ban(pk, ts) {
+                log_ban_store_error("ban", pk, &err);
+            }
             #[cfg(feature = "telemetry")]
             {
                 let id = overlay_peer_label(pk);
@@ -428,7 +435,9 @@ impl PeerSet {
         let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
         entry.banned_until = Some(until);
         let ts = now_secs() + *P2P_BAN_SECS as u64;
-        ban_store_guard().ban(pk, ts);
+        if let Err(err) = ban_store_guard().ban(pk, ts) {
+            log_ban_store_error("ban", pk, &err);
+        }
         #[cfg(feature = "telemetry")]
         {
             let id = overlay_peer_label(pk);
@@ -2179,9 +2188,8 @@ mod tests {
             },
         );
         drop(guard);
-        assert!(messages
-            .lock()
-            .unwrap()
+        let logs = messages.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(logs
             .iter()
             .any(|msg| msg.contains("failed to obtain telemetry handle")));
         assert!(!executed.load(Ordering::SeqCst));
@@ -2667,6 +2675,17 @@ pub fn publish_telemetry_summary<T>(_summary: T) {}
 
 fn ban_store_guard() -> std::sync::MutexGuard<'static, ban_store::BanStore> {
     ban_store::store().guard()
+}
+
+fn log_ban_store_error(context: &str, pk: &[u8; 32], err: &BanStoreError) {
+    let peer = overlay_peer_label(pk);
+    diagnostics::tracing::warn!(
+        target: "net",
+        %peer,
+        %context,
+        %err,
+        "ban store operation failed"
+    );
 }
 
 pub struct MetricsReceiver {

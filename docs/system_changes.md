@@ -1,11 +1,24 @@
 # System-Wide Economic Changes
+> **Review (2025-10-27, early morning):** Chaos readiness snapshots now carry
+> provider labels end-to-end. `SiteReadinessState` stores provider kind
+> alongside readiness, `ChaosHarness` emits mixed-provider attestations, and the
+> metrics aggregator surfaces them as
+> `chaos_site_readiness{module,scenario,site,provider}` while pruning stale label
+> handles whenever scenarios drop or reassign sites. `sim/chaos_lab.rs`
+> persists provider-aware diff artefacts so WAN soak automation can fail fast
+> on regressions, and `metrics-aggregator::tests::chaos_site_updates_remove_stale_entries`
+> plus `sim/tests/chaos_harness.rs::reconfiguring_sites_replaces_previous_entries`
+> guard topology churn. Listener startup is now standardised through
+> `node/src/net/listener.rs`, which wraps gossip, RPC, gateway, and status
+> servers with uniform `*_listener_bind_failed` warnings and returns `io::Result`
+> so tests like `node/tests/rpc_bind.rs` can assert bind failures no longer panic.
 > **Review (2025-10-26, late night):** The WAN chaos lab is now baked into the
 > simulation harness (`sim/src/chaos.rs`) with weighted `ChaosSite` entries and
 > exposed via the `chaos_lab` binary. Signed readiness attestations feed the
 > metrics aggregator through `/chaos/attest`, which verifies payloads, logs
 > `chaos_status_tracker_poisoned_recovering` if it has to recover from a
 > poisoned readiness mutex, and publishes `/chaos/status`,
-> `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,scenario,site}`,
+> `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,scenario,site,provider}`,
 > and `chaos_sla_breach_total`. Release tooling wires the suite into
 > `just chaos-suite` and `cargo xtask chaos` so tags advance only after the chaos
 > scenarios succeed. The aggregator still introduces a dispatch-log guard so

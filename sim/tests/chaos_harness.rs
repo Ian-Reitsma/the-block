@@ -1,5 +1,7 @@
 use rand::rngs::StdRng;
-use tb_sim::chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario, ChaosSite};
+use tb_sim::chaos::{
+    ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosProviderKind, ChaosScenario, ChaosSite,
+};
 
 #[test]
 fn records_breach_and_generates_attestations() {
@@ -69,16 +71,88 @@ fn distributed_sites_reflect_weighted_penalties() {
         .compute
         .site_readiness
         .get("us-east")
-        .copied()
+        .map(|state| state.readiness())
         .expect("east site tracked");
     let west = report
         .compute
         .site_readiness
         .get("eu-west")
-        .copied()
+        .map(|state| state.readiness())
         .expect("west site tracked");
     assert!(report.compute.readiness <= east);
     assert!(report.compute.readiness <= west);
     assert!(report.compute.readiness >= 0.0);
     assert!(report.compute.readiness <= 1.0);
+}
+
+#[test]
+fn reconfiguring_sites_replaces_previous_entries() {
+    let mut harness = ChaosHarness::new();
+    harness.register(
+        ChaosScenario::new("overlay-grid", ChaosModule::Overlay, 0.9, 0.05).add_event(
+            ChaosEvent::new(1, 2, 0.4, ChaosFault::OverlayPartition { loss_ratio: 0.5 }),
+        ),
+    );
+    harness.configure_sites(
+        ChaosModule::Overlay,
+        vec![
+            ChaosSite::with_kind("us-east", 0.6, 0.1, ChaosProviderKind::Foundation),
+            ChaosSite::with_kind("eu-west", 0.4, 0.2, ChaosProviderKind::Partner),
+        ],
+    );
+    let mut rng = StdRng::seed_from_u64(2025);
+    harness.step(0, &mut rng);
+    harness.step(1, &mut rng);
+
+    harness.configure_sites(
+        ChaosModule::Overlay,
+        vec![ChaosSite::with_kind(
+            "ap-south",
+            1.0,
+            0.15,
+            ChaosProviderKind::Community,
+        )],
+    );
+    let snapshot = harness.readiness_snapshot();
+    assert_eq!(snapshot.overlay.site_readiness.len(), 1);
+    assert!(snapshot.overlay.site_readiness.contains_key("ap-south"));
+    assert!(!snapshot.overlay.site_readiness.contains_key("us-east"));
+    assert_eq!(snapshot.overlay.readiness, 1.0);
+
+    harness.configure_sites(ChaosModule::Overlay, Vec::new());
+    let snapshot = harness.readiness_snapshot();
+    assert!(snapshot.overlay.site_readiness.is_empty());
+    assert_eq!(snapshot.overlay.readiness, 1.0);
+}
+
+#[test]
+fn provider_kind_round_trips_into_attestations() {
+    let mut harness = ChaosHarness::new();
+    harness.register(
+        ChaosScenario::new("overlay-providers", ChaosModule::Overlay, 0.9, 0.05).add_event(
+            ChaosEvent::new(1, 1, 0.2, ChaosFault::OverlayPartition { loss_ratio: 0.3 }),
+        ),
+    );
+    harness.configure_sites(
+        ChaosModule::Overlay,
+        vec![
+            ChaosSite::with_kind("foundation-east", 0.5, 0.1, ChaosProviderKind::Foundation),
+            ChaosSite::with_kind("partner-west", 0.5, 0.15, ChaosProviderKind::Partner),
+        ],
+    );
+    let mut rng = StdRng::seed_from_u64(7_777);
+    harness.step(0, &mut rng);
+    harness.step(1, &mut rng);
+    let drafts = harness.attestation_drafts(99);
+    let overlay = drafts
+        .into_iter()
+        .find(|draft| draft.module == ChaosModule::Overlay)
+        .expect("overlay draft");
+    assert_eq!(overlay.site_readiness.len(), 2);
+    let mut sites = overlay.site_readiness;
+    sites.sort_by(|a, b| a.site.cmp(&b.site));
+    assert_eq!(sites[0].site, "foundation-east");
+    assert_eq!(sites[0].provider_kind, ChaosProviderKind::Foundation);
+    assert_eq!(sites[1].site, "partner-west");
+    assert_eq!(sites[1].provider_kind, ChaosProviderKind::Partner);
 }

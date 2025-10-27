@@ -546,7 +546,7 @@ mod tests {
             agent: "blockd/1.0".into(),
             nonce: 42,
             transport: Transport::Tcp,
-            quic_addr: Some("127.0.0.1:9000".parse().unwrap()),
+            quic_addr: Some(SocketAddr::from(([127, 0, 0, 1], 9000))),
             quic_cert: Some(Bytes::from(vec![7, 7, 7])),
             quic_fingerprint: Some(Bytes::from(vec![1, 1])),
             quic_fingerprint_previous: vec![Bytes::from(vec![2, 2])],
@@ -581,8 +581,8 @@ mod tests {
     #[test]
     fn hello_payload_round_trips() {
         let addrs = vec![
-            "127.0.0.1:7000".parse().unwrap(),
-            "10.0.0.5:9000".parse().unwrap(),
+            SocketAddr::from(([127, 0, 0, 1], 7000)),
+            SocketAddr::from(([10, 0, 0, 5], 9000)),
         ];
         let decoded = round_trip_payload(Payload::Hello(addrs.clone()));
         match decoded {
