@@ -74,7 +74,7 @@ fn peer_key_rotate() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign handshake");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));

@@ -2,8 +2,8 @@
 
 use crate::Simulation;
 use diagnostics::tracing::{debug, warn};
-use monitoring_build::ChaosAttestationDraft;
 pub use monitoring_build::ChaosModule;
+use monitoring_build::{ChaosAttestationDraft, ChaosSiteReadiness};
 use rand::{rngs::StdRng, Rng};
 use std::collections::HashMap;
 
@@ -16,6 +16,7 @@ pub struct ChaosScenario {
     pub sla_threshold: f64,
     pub events: Vec<ChaosEvent>,
     pub recovery_rate: f64,
+    pub sites: Vec<ChaosSite>,
 }
 
 impl ChaosScenario {
@@ -31,12 +32,22 @@ impl ChaosScenario {
             sla_threshold: sla_threshold.clamp(0.0, 1.0),
             events: Vec::new(),
             recovery_rate: recovery_rate.clamp(0.0, 1.0),
+            sites: Vec::new(),
         }
     }
 
     pub fn add_event(mut self, event: ChaosEvent) -> Self {
         self.events.push(event);
         self
+    }
+
+    pub fn add_site(mut self, site: ChaosSite) -> Self {
+        self.sites.push(site);
+        self
+    }
+
+    pub fn set_sites(&mut self, sites: Vec<ChaosSite>) {
+        self.sites = sites;
     }
 }
 
@@ -74,6 +85,23 @@ pub enum ChaosFault {
     ComputeBackpressure { throttle_ratio: f64 },
 }
 
+#[derive(Clone, Debug)]
+pub struct ChaosSite {
+    pub name: String,
+    pub weight: f64,
+    pub latency_penalty: f64,
+}
+
+impl ChaosSite {
+    pub fn new(name: impl Into<String>, weight: f64, latency_penalty: f64) -> Self {
+        Self {
+            name: name.into(),
+            weight: weight.max(0.0),
+            latency_penalty: latency_penalty.clamp(0.0, 1.0),
+        }
+    }
+}
+
 impl ChaosFault {
     fn severity(&self) -> f64 {
         match self {
@@ -93,6 +121,7 @@ pub struct ChaosModuleState {
     pub window_end: u64,
     pub last_step: u64,
     pub scenario: String,
+    pub site_readiness: HashMap<String, f64>,
 }
 
 impl ChaosModuleState {
@@ -105,6 +134,7 @@ impl ChaosModuleState {
             window_end: 0,
             last_step: 0,
             scenario,
+            site_readiness: HashMap::new(),
         }
     }
 
@@ -175,17 +205,57 @@ impl ChaosHarness {
             let module_state = self.state_for_mut(scenario.module);
             module_state.sla_threshold = scenario.sla_threshold;
             module_state.scenario = scenario.name.clone();
+            if !scenario.sites.is_empty() {
+                module_state
+                    .site_readiness
+                    .retain(|name, _| scenario.sites.iter().any(|site| site.name == *name));
+                for site in &scenario.sites {
+                    module_state
+                        .site_readiness
+                        .entry(site.name.clone())
+                        .or_insert(1.0);
+                }
+            }
             let mut applied = false;
             for event in &scenario.events {
                 if event.is_active(step) {
                     let severity = event.impact() * rng.gen_range(0.8..=1.2);
-                    module_state.readiness *= (1.0 - severity).max(0.0);
+                    if scenario.sites.is_empty() {
+                        module_state.readiness *= (1.0 - severity).max(0.0);
+                    } else {
+                        for site in &scenario.sites {
+                            let penalty = (severity * site.weight * (1.0 + site.latency_penalty))
+                                .min(MAX_FAULT_SEVERITY);
+                            if let Some(entry) = module_state.site_readiness.get_mut(&site.name) {
+                                *entry = (*entry * (1.0 - penalty)).max(0.0);
+                            }
+                        }
+                    }
                     applied = true;
                 }
             }
-            if !applied {
-                module_state.readiness = (module_state.readiness + scenario.recovery_rate).min(1.0);
-            } else if module_state.readiness < scenario.sla_threshold {
+            if scenario.sites.is_empty() {
+                if !applied {
+                    module_state.readiness =
+                        (module_state.readiness + scenario.recovery_rate).min(1.0);
+                }
+            } else {
+                if !applied {
+                    for site in &scenario.sites {
+                        if let Some(entry) = module_state.site_readiness.get_mut(&site.name) {
+                            let recovery =
+                                scenario.recovery_rate * (1.0 - site.latency_penalty).max(0.0);
+                            *entry = (*entry + recovery).min(1.0);
+                        }
+                    }
+                }
+                module_state.readiness = module_state
+                    .site_readiness
+                    .values()
+                    .copied()
+                    .fold(1.0, f64::min);
+            }
+            if module_state.readiness < scenario.sla_threshold {
                 module_state.register_breach();
                 warn!(
                     target: "chaos",
@@ -209,6 +279,15 @@ impl ChaosHarness {
     pub fn attestation_drafts(&self, issued_at: u64) -> Vec<ChaosAttestationDraft> {
         let mut drafts = Vec::new();
         for (module, state) in self.state.as_map() {
+            let mut site_readiness: Vec<ChaosSiteReadiness> = state
+                .site_readiness
+                .iter()
+                .map(|(site, readiness)| ChaosSiteReadiness {
+                    site: site.clone(),
+                    readiness: *readiness,
+                })
+                .collect();
+            site_readiness.sort_by(|a, b| a.site.cmp(&b.site));
             let draft = ChaosAttestationDraft {
                 scenario: state.scenario.clone(),
                 module,
@@ -218,6 +297,7 @@ impl ChaosHarness {
                 window_start: state.window_start,
                 window_end: state.window_end,
                 issued_at,
+                site_readiness,
             };
             drafts.push(draft);
         }
@@ -244,5 +324,96 @@ impl Simulation {
 
     pub fn chaos_attestation_drafts(&self, issued_at: u64) -> Vec<ChaosAttestationDraft> {
         self.chaos.attestation_drafts(issued_at)
+    }
+}
+
+impl ChaosHarness {
+    pub fn configure_sites<I>(&mut self, module: ChaosModule, sites: I)
+    where
+        I: IntoIterator<Item = ChaosSite>,
+    {
+        let mut normalized: Vec<ChaosSite> = sites.into_iter().collect();
+        if normalized.is_empty() {
+            if let Some(scenario) = self
+                .scenarios
+                .iter_mut()
+                .find(|scenario| scenario.module == module)
+            {
+                scenario.sites.clear();
+            }
+            let state = self.state_for_mut(module);
+            state.site_readiness.clear();
+            state.readiness = 1.0;
+            return;
+        }
+        let total_weight: f64 = normalized.iter().map(|site| site.weight).sum();
+        if total_weight > 0.0 {
+            for site in &mut normalized {
+                site.weight /= total_weight;
+            }
+        }
+        if let Some(scenario) = self
+            .scenarios
+            .iter_mut()
+            .find(|scenario| scenario.module == module)
+        {
+            scenario.set_sites(normalized.clone());
+        }
+        let state = self.state_for_mut(module);
+        state.site_readiness = normalized
+            .iter()
+            .map(|site| (site.name.clone(), 1.0))
+            .collect();
+        state.readiness = 1.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn distributed_sites_reflect_weighted_penalties() {
+        let mut harness = ChaosHarness::new();
+        harness.register(
+            ChaosScenario::new("compute-grid", ChaosModule::Compute, 0.8, 0.05).add_event(
+                ChaosEvent::new(
+                    1,
+                    2,
+                    0.6,
+                    ChaosFault::ComputeBackpressure {
+                        throttle_ratio: 0.5,
+                    },
+                ),
+            ),
+        );
+        harness.configure_sites(
+            ChaosModule::Compute,
+            vec![
+                ChaosSite::new("us-east", 0.6, 0.1),
+                ChaosSite::new("eu-west", 0.4, 0.2),
+            ],
+        );
+        let mut rng = StdRng::seed_from_u64(4242);
+        harness.step(0, &mut rng);
+        let report = harness.step(1, &mut rng);
+        assert_eq!(report.compute.site_readiness.len(), 2);
+        let east = report
+            .compute
+            .site_readiness
+            .get("us-east")
+            .copied()
+            .expect("east site tracked");
+        let west = report
+            .compute
+            .site_readiness
+            .get("eu-west")
+            .copied()
+            .expect("west site tracked");
+        assert!(report.compute.readiness <= east);
+        assert!(report.compute.readiness <= west);
+        assert!(report.compute.readiness >= 0.0);
+        assert!(report.compute.readiness <= 1.0);
     }
 }

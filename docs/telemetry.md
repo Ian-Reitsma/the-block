@@ -152,6 +152,13 @@ cluster-wide gauges when compiled with `--features telemetry`:
   telemetry summaries. Values reset to `0` when no readiness data is available;
   otherwise the gauges mirror the latest rolling counts and configured
   thresholds so dashboards can track activation progress.
+- `chaos_readiness{module,scenario}`,
+  `chaos_site_readiness{module,scenario,site}`, and
+  `chaos_sla_breach_total` – readiness snapshots and breach counts derived from
+  signed chaos attestations. The aggregator sorts site entries before exposing
+  them via `/chaos/status` and logs `chaos_status_tracker_poisoned_recovering`
+  whenever it has to recover from a poisoned readiness mutex, ensuring gauges
+  stay deterministic across restarts and test failures.
 - Wrapper metrics exported by the runtime, transport, coding, codec, and crypto wrappers:
   - `runtime_backend_info{backend,compiled}` toggles to `1` for the active runtime backend and keeps `compiled=true` on backends linked into the binary.
   - `transport_provider_info{provider,compiled}` gauges the selected QUIC transport implementation, while `transport_provider_connect_total{provider}` accumulates successful dial attempts per provider.

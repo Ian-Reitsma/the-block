@@ -1,6 +1,7 @@
 #![cfg(feature = "quinn")]
 
 use concurrency::Lazy;
+use diagnostics::tracing;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::RwLock;
@@ -38,6 +39,16 @@ struct Store {
 
 static STORE: Lazy<RwLock<Store>> = Lazy::new(|| RwLock::new(Store::default()));
 
+fn store_write() -> std::sync::RwLockWriteGuard<'static, Store> {
+    match STORE.write() {
+        Ok(guard) => guard,
+        Err(err) => {
+            tracing::warn!(target = "net", "quic_stats_store_poisoned");
+            err.into_inner()
+        }
+    }
+}
+
 fn now() -> u64 {
     super::unix_now()
 }
@@ -47,7 +58,7 @@ fn invalidate_cache(store: &mut Store) {
 }
 
 pub(super) fn record_latency(peer: &[u8; 32], ms: u64) {
-    let mut guard = STORE.write().unwrap();
+    let mut guard = store_write();
     let entry = guard.peers.entry(*peer).or_default();
     entry.latency_ms = Some(ms);
     entry.last_updated = now();
@@ -55,7 +66,7 @@ pub(super) fn record_latency(peer: &[u8; 32], ms: u64) {
 }
 
 pub(super) fn record_handshake_failure(peer: &[u8; 32]) {
-    let mut guard = STORE.write().unwrap();
+    let mut guard = store_write();
     let entry = guard.peers.entry(*peer).or_default();
     entry.handshake_failures = entry.handshake_failures.saturating_add(1);
     entry.last_updated = now();
@@ -63,7 +74,7 @@ pub(super) fn record_handshake_failure(peer: &[u8; 32]) {
 }
 
 pub(super) fn record_endpoint_reuse(peer: &[u8; 32]) {
-    let mut guard = STORE.write().unwrap();
+    let mut guard = store_write();
     let entry = guard.peers.entry(*peer).or_default();
     entry.endpoint_reuse = entry.endpoint_reuse.saturating_add(1);
     entry.last_updated = now();
@@ -71,7 +82,7 @@ pub(super) fn record_endpoint_reuse(peer: &[u8; 32]) {
 }
 
 pub(super) fn record_address(peer: &[u8; 32], addr: SocketAddr) {
-    let mut guard = STORE.write().unwrap();
+    let mut guard = store_write();
     let entry = guard.peers.entry(*peer).or_default();
     entry.address = Some(addr);
     entry.last_updated = now();
@@ -79,7 +90,7 @@ pub(super) fn record_address(peer: &[u8; 32], addr: SocketAddr) {
 }
 
 pub(super) fn snapshot() -> Vec<super::QuicStatsEntry> {
-    let mut guard = STORE.write().unwrap();
+    let mut guard = store_write();
     let expired = guard
         .cache
         .last_refresh

@@ -68,7 +68,7 @@ fn rpc_reports_handshake_failures() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign handshake");
         peers.handle_message(msg, None, &bc);
 
         // simulate failure and expose via RPC

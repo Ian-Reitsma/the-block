@@ -9,7 +9,7 @@ use the_block::p2p::handshake::Transport;
 #[test]
 fn turbine_fanout_reaches_all() {
     let sk = SigningKey::from_bytes(&[3u8; 32]);
-    let msg = Message::new(Payload::Hello(vec![]), &sk);
+    let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
     let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..31)
         .map(|i| {
             (

@@ -12,6 +12,8 @@ use concurrency::{Bytes, MutexExt, MutexGuard};
 use crypto_suite::hashing::blake3::hash;
 #[cfg(feature = "telemetry")]
 use diagnostics::log;
+#[cfg(test)]
+use diagnostics::tracing;
 use foundation_serialization::Serialize;
 use ledger::address::ShardId;
 use rand::seq::SliceRandom;
@@ -110,7 +112,7 @@ impl ShardStore {
                 Self::with_factory(&path_str, &SimpleDb::open_named)
             }
             Err(err) => {
-                log::warn!("gossip_shard_tempdir_fallback: {err}");
+                tracing::warn!(reason = %err, "gossip_shard_tempdir_fallback");
                 let mut fallback = std::env::temp_dir();
                 fallback.push(format!(
                     "the-block-gossip-shard-{}-{}",
@@ -127,8 +129,9 @@ impl ShardStore {
                         Self::with_factory(&path_str, &SimpleDb::open_named)
                     }
                     Err(create_err) => {
-                        log::error!(
-                            "gossip_shard_tempdir_fallback_failed: {create_err}; using in-memory store"
+                        tracing::error!(
+                            reason = %create_err,
+                            "gossip_shard_tempdir_fallback_failed"
                         );
                         let db = SimpleDb::default();
                         let cache = Mutex::new(Self::load(&db));
@@ -711,7 +714,7 @@ mod tests {
     fn relay_dedup_respects_ttl() {
         let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[1u8; 32]);
-        let msg = Message::new(Payload::Hello(vec![]), &sk);
+        let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
         let now = Instant::now();
         assert!(relay.should_process_at(&msg, now));
         assert!(!relay.should_process_at(&msg, now));
@@ -723,7 +726,7 @@ mod tests {
     fn relay_respects_fanout_bounds() {
         let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[2u8; 32]);
-        let msg = Message::new(Payload::Hello(vec![]), &sk);
+        let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
         let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..16)
             .map(|i| {
                 let port = match u16::try_from(10000 + i) {
@@ -754,7 +757,7 @@ mod tests {
     fn relay_shuffle_prevents_bias() {
         let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[3u8; 32]);
-        let msg = Message::new(Payload::Hello(vec![]), &sk);
+        let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
         let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..8)
             .map(|i| {
                 let port = match u16::try_from(12000 + i) {

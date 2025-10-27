@@ -1,5 +1,16 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-26 update (mixed-provider chaos & runtime stubs):** Overlay chaos
+> scenarios now declare weighted `ChaosSite` entries inside `sim/src/chaos.rs`,
+> and the metrics aggregator surfaces those arrays via
+> `chaos_site_readiness{module,scenario,site}` while sorting and logging
+> `chaos_status_tracker_poisoned_recovering` when recovering from a poisoned
+> mutex—no third-party metrics or JSON crates were introduced. The mobile sync
+> suite now ships a `measure_sync_latency` stub compiled whenever the
+> `runtime-wrapper` feature is disabled, keeping CI/test builds entirely on
+> first-party runtime helpers instead of depending on external clients, and the
+> new `node/tests/net_start_bind.rs` integration test captures gossip warnings
+> through the existing `diagnostics` subscriber without adding logging deps.
 > **2025-12-14 update (WAN chaos attestations & aggregator gating):** The new
 > `ChaosHarness` lives entirely in `sim/src/chaos.rs` and signs readiness drafts
 > via the first-party `monitoring` crate—`monitoring/src/chaos.rs` defines the

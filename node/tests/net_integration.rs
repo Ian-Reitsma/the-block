@@ -51,7 +51,7 @@ impl TestNode {
         std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
         let node = Node::new(addr, peers.to_vec(), bc);
         let flag = ShutdownFlag::new();
-        let handle = node.start_with_flag(&flag);
+        let handle = node.start_with_flag(&flag).expect("start gossip node");
         node.discover_peers();
         Self {
             addr,

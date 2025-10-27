@@ -1,6 +1,6 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::{did_view, DidDocumentView, Explorer, MetricPoint};
-use foundation_serialization::json;
+use foundation_serialization::json::{self, Map, Value};
 use rand::{rngs::StdRng, seq::SliceRandom};
 use std::convert::TryInto;
 use std::fs;
@@ -90,12 +90,14 @@ fn main() {
             .expect("simulation accounts populated");
         account.nonce += 1;
         let nonce = account.nonce;
-        let document_value = foundation_serialization::json!({
-            "id": format!("did:tb:{}", account.address),
-            "sequence": nonce,
-            "updated": base_ts + step as i64,
-        });
-        let document = json::to_string_value(&document_value);
+        let mut document_fields = Map::new();
+        document_fields.insert(
+            "id".into(),
+            Value::String(format!("did:tb:{}", account.address)),
+        );
+        document_fields.insert("sequence".into(), Value::from(nonce));
+        document_fields.insert("updated".into(), Value::from(base_ts + step as i64));
+        let document = json::to_string_value(&Value::Object(document_fields));
 
         let tx = build_anchor(account, document, nonce);
         match registry.anchor(&tx, Some(&gov)) {

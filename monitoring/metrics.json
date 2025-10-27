@@ -1629,6 +1629,17 @@
         "depth"
       ],
       "name": "dependency_policy_violation"
+    },
+    {
+      "deprecated": false,
+      "description": "Chaos readiness grouped by module, scenario, and site",
+      "labels": [
+        "module",
+        "scenario",
+        "site"
+      ],
+      "name": "chaos_site_readiness",
+      "unit": "ratio"
     }
   ]
 }

@@ -667,9 +667,19 @@ impl PeerSet {
                         new_chain.push(block.clone());
                         if bc.import_chain(new_chain.clone()).is_ok() {
                             drop(bc);
-                            let msg = Message::new(Payload::Chain(new_chain), &load_net_key());
-                            for p in self.list() {
-                                let _ = send_msg(p, &msg);
+                            match Message::new(Payload::Chain(new_chain), &load_net_key()) {
+                                Ok(msg) => {
+                                    for p in self.list() {
+                                        let _ = send_msg(p, &msg);
+                                    }
+                                }
+                                Err(err) => {
+                                    diagnostics::tracing::error!(
+                                        target = "net",
+                                        reason = %err,
+                                        "failed_to_sign_chain_payload"
+                                    );
+                                }
                             }
                             return;
                         }

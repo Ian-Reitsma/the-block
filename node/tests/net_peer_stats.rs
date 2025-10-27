@@ -84,7 +84,7 @@ fn peer_stats_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
         simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
         simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
@@ -148,8 +148,8 @@ fn peer_stats_all_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg1 = Message::new(Payload::Handshake(hello.clone()), &sk1);
-        let msg2 = Message::new(Payload::Handshake(hello), &sk2);
+        let msg1 = Message::new(Payload::Handshake(hello.clone()), &sk1).expect("sign message");
+        let msg2 = Message::new(Payload::Handshake(hello), &sk2).expect("sign message");
         peers.handle_message(msg1, None, &bc);
         peers.handle_message(msg2, None, &bc);
 
@@ -211,7 +211,7 @@ fn peer_stats_reset_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -278,7 +278,7 @@ fn peer_stats_export_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -338,7 +338,7 @@ fn peer_stats_export_invalid_path() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
     peers.handle_message(msg, None, &bc);
 
     let err = the_block::net::export_peer_stats(&pk, "../evil.json").unwrap_err();
@@ -373,7 +373,7 @@ fn peer_stats_export_concurrent() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
     peers.handle_message(msg, None, &bc);
 
     let barrier = Arc::new(Barrier::new(2));
@@ -423,7 +423,7 @@ fn peer_stats_export_all_rpc_map() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -474,7 +474,7 @@ fn peer_stats_export_all_rpc_dir() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -534,7 +534,7 @@ fn peer_stats_export_all_quota() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
     peers.handle_message(msg, None, &bc);
 
     the_block::net::set_peer_metrics_export_quota(1);
@@ -574,7 +574,7 @@ fn peer_stats_export_all_filter_reputation() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello1), &sk1);
+    let msg = Message::new(Payload::Handshake(hello1), &sk1).expect("sign message");
     peers.handle_message(msg, None, &bc);
 
     let (sk2, pk2_vec) = generate_keypair();
@@ -596,7 +596,7 @@ fn peer_stats_export_all_filter_reputation() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
+    let msg2 = Message::new(Payload::Handshake(hello2), &sk2).expect("sign message");
     peers.handle_message(msg2, None, &bc);
     for _ in 0..5 {
         simulate_handshake_fail(pk2, HandshakeError::Tls);
@@ -639,7 +639,7 @@ fn peer_stats_export_all_filter_activity() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg = Message::new(Payload::Handshake(hello1), &sk1);
+    let msg = Message::new(Payload::Handshake(hello1), &sk1).expect("sign message");
     peers.handle_message(msg, None, &bc);
     std::thread::sleep(Duration::from_secs(2));
 
@@ -662,7 +662,7 @@ fn peer_stats_export_all_filter_activity() {
 
         quic_capabilities: Vec::new(),
     };
-    let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
+    let msg2 = Message::new(Payload::Handshake(hello2), &sk2).expect("sign message");
     peers.handle_message(msg2, None, &bc);
 
     the_block::net::export_all_peer_stats("dump", None, Some(1)).unwrap();
@@ -718,7 +718,7 @@ fn peer_stats_cli_show_and_reputation() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
         peers.handle_message(msg, Some(addr_map), &bc);
 
@@ -811,7 +811,7 @@ fn peer_stats_cli_show_table_snapshot() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
         peers.handle_message(msg, Some(addr_map), &bc);
 
@@ -882,7 +882,7 @@ fn peer_stats_cli_show_json_snapshot() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
         peers.handle_message(msg, Some(addr_map), &bc);
 
@@ -965,7 +965,7 @@ fn peer_stats_cli_sort_filter_snapshot() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg1 = Message::new(Payload::Handshake(hello1), &sk1);
+        let msg1 = Message::new(Payload::Handshake(hello1), &sk1).expect("sign message");
         peers.handle_message(msg1, None, &bc);
         simulate_handshake_fail(pk1.clone().try_into().unwrap(), HandshakeError::Tls);
 
@@ -988,7 +988,7 @@ fn peer_stats_cli_sort_filter_snapshot() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
+        let msg2 = Message::new(Payload::Handshake(hello2), &sk2).expect("sign message");
         peers.handle_message(msg2, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -1195,10 +1195,10 @@ fn peer_stats_drop_counter_rpc() {
         };
         std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
         the_block::net::set_p2p_max_per_sec(10);
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, Some(addr), &bc);
         for _ in 0..20 {
-            let m = Message::new(Payload::Hello(vec![]), &sk);
+            let m = Message::new(Payload::Hello(vec![]), &sk).expect("sign message");
             peers.handle_message(m, Some(addr), &bc);
         }
 
@@ -1260,7 +1260,7 @@ fn peer_stats_cli_reset() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         let mining = Arc::new(AtomicBool::new(false));
@@ -1321,7 +1321,7 @@ fn peer_stats_all_pagination_rpc() {
 
                 quic_capabilities: Vec::new(),
             };
-            let msg = Message::new(Payload::Handshake(hello), &sk);
+            let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
             peers.handle_message(msg, None, &bc);
             pks.push(crypto_suite::hex::encode(pk));
         }
@@ -1381,7 +1381,7 @@ fn peer_stats_persist_restart() {
 
             quic_capabilities: Vec::new(),
         };
-        let msg = Message::new(Payload::Handshake(hello), &sk);
+        let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
 
         the_block::net::persist_peer_metrics().unwrap();

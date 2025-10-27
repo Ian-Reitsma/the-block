@@ -42,7 +42,7 @@ fn shard_rate_limiting() {
     };
     let chain = Arc::new(Mutex::new(Blockchain::default()));
     peers.handle_message(
-        Message::new(Payload::Handshake(hello), &sk),
+        Message::new(Payload::Handshake(hello), &sk).expect("sign handshake"),
         Some(addr),
         &chain,
     );
@@ -54,7 +54,7 @@ fn shard_rate_limiting() {
         data: Bytes::from(vec![0; 256]),
     };
     peers.handle_message(
-        Message::new(Payload::BlobChunk(chunk.clone()), &sk),
+        Message::new(Payload::BlobChunk(chunk.clone()), &sk).expect("sign blob chunk"),
         Some(addr),
         &chain,
     );
@@ -68,7 +68,7 @@ fn shard_rate_limiting() {
         data: Bytes::from(vec![0; 400]),
     };
     peers.handle_message(
-        Message::new(Payload::BlobChunk(chunk2), &sk),
+        Message::new(Payload::BlobChunk(chunk2), &sk).expect("sign blob chunk"),
         Some(addr),
         &chain,
     );

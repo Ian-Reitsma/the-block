@@ -18,7 +18,7 @@ use the_block::{
 use util::fork::inject_fork;
 
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
-    let msg = Message::new(body, sk);
+    let msg = Message::new(body, sk).expect("sign payload");
     let mut stream = TcpStream::connect(addr).unwrap();
     let bytes = binary::encode(&msg).unwrap();
     stream.write_all(&bytes).unwrap();
@@ -120,9 +120,9 @@ fn gossip_converges_to_longest_chain() {
         let flag1 = ShutdownFlag::new();
         let flag2 = ShutdownFlag::new();
         let flag3 = ShutdownFlag::new();
-        let jh1 = node1.start_with_flag(&flag1);
-        let jh2 = node2.start_with_flag(&flag2);
-        let jh3 = node3.start_with_flag(&flag3);
+        let jh1 = node1.start_with_flag(&flag1).expect("start gossip node");
+        let jh2 = node2.start_with_flag(&flag2).expect("start gossip node");
+        let jh3 = node3.start_with_flag(&flag3).expect("start gossip node");
 
         // Wait for listeners to bind before peer discovery.
         the_block::sleep(Duration::from_millis(500)).await;
@@ -203,8 +203,8 @@ fn partition_rejoins_longest_chain() {
 
         let flag1 = ShutdownFlag::new();
         let flag2 = ShutdownFlag::new();
-        let jh1 = node1.start_with_flag(&flag1);
-        let jh2 = node2.start_with_flag(&flag2);
+        let jh1 = node1.start_with_flag(&flag1).expect("start gossip node");
+        let jh2 = node2.start_with_flag(&flag2).expect("start gossip node");
 
         node1.discover_peers();
         node2.discover_peers();
@@ -219,7 +219,7 @@ fn partition_rejoins_longest_chain() {
         // Third node mines a longer chain while isolated
         let node3 = make_node(&dir, 3, addr3, vec![addr1, addr2], Blockchain::default());
         let flag3 = ShutdownFlag::new();
-        let jh3 = node3.start_with_flag(&flag3);
+        let jh3 = node3.start_with_flag(&flag3).expect("start gossip node");
         inject_fork(&node3, "miner3", ts, 3);
         node3.discover_peers();
         node3.broadcast_chain();
@@ -249,7 +249,7 @@ fn invalid_gossip_tx_rejected() {
     let addr = free_addr();
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
-    let jh = node.start_with_flag(&flag);
+    let jh = node.start_with_flag(&flag).expect("start gossip node");
     let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
@@ -297,7 +297,7 @@ fn invalid_gossip_block_rejected() {
     let addr = free_addr();
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
-    let jh = node.start_with_flag(&flag);
+    let jh = node.start_with_flag(&flag).expect("start gossip node");
     let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
@@ -341,7 +341,7 @@ fn forged_identity_rejected() {
     let addr = free_addr();
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
-    let jh = node.start_with_flag(&flag);
+    let jh = node.start_with_flag(&flag).expect("start gossip node");
 
     // Forge a block with an unauthorized key and no handshake
     let mut rng = OsRng::default();
@@ -368,7 +368,7 @@ fn handshake_version_mismatch_rejected() {
     let addr = free_addr();
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
-    let jh = node.start_with_flag(&flag);
+    let jh = node.start_with_flag(&flag).expect("start gossip node");
 
     let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
@@ -417,7 +417,7 @@ fn handshake_feature_mismatch_rejected() {
     let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
-    let _h = node.start();
+    let _h = node.start().expect("start gossip node");
 
     let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
@@ -467,7 +467,7 @@ fn discover_peers_from_file_loads_seeds() {
     let node1 = make_node(&dir, 1, addr1, vec![], Blockchain::default());
     let node2 = make_node(&dir, 2, addr2, vec![], Blockchain::default());
     let flag2 = ShutdownFlag::new();
-    let jh2 = node2.start_with_flag(&flag2);
+    let jh2 = node2.start_with_flag(&flag2).expect("start gossip node");
     let cfg = dir.path().join("seeds.txt");
     fs::write(&cfg, format!("{}\n", addr2)).unwrap();
     node1.discover_peers_from_file(&cfg);
@@ -488,7 +488,7 @@ fn peer_rate_limit_and_ban() {
     bc.add_account("bob".into(), 0, 0).unwrap();
     let node = make_node(&dir, 1, addr, vec![], bc);
     let flag = ShutdownFlag::new();
-    let jh = node.start_with_flag(&flag);
+    let jh = node.start_with_flag(&flag).expect("start gossip node");
     let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
@@ -557,8 +557,8 @@ fn partition_state_replay() {
 
         let flag1 = ShutdownFlag::new();
         let flag2 = ShutdownFlag::new();
-        let jh1 = node1.start_with_flag(&flag1);
-        let jh2 = node2.start_with_flag(&flag2);
+        let jh1 = node1.start_with_flag(&flag1).expect("start gossip node");
+        let jh2 = node2.start_with_flag(&flag2).expect("start gossip node");
 
         let mut ts = 1;
         let (sk, _pk) = generate_keypair();

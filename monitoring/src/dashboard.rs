@@ -198,6 +198,17 @@ const BRIDGE_ANOMALY_EXPR: &str = "increase(bridge_anomaly_total[5m])";
 const BRIDGE_METRIC_DELTA_PANEL_TITLE: &str = "bridge_metric_delta";
 const BRIDGE_METRIC_DELTA_EXPR: &str = "sum by (metric)(bridge_metric_delta)";
 const BRIDGE_METRIC_DELTA_DESCRIPTION: &str = "Per-scrape bridge counter deltas grouped by metric";
+const CHAOS_ROW_TITLE: &str = "Chaos Readiness";
+const CHAOS_READINESS_PANEL_TITLE: &str = "Chaos readiness";
+const CHAOS_READINESS_EXPR: &str = "chaos_readiness";
+const CHAOS_READINESS_LEGEND: &str = "{{module}} · {{scenario}}";
+const CHAOS_SITE_READINESS_PANEL_TITLE: &str = "Chaos site readiness";
+const CHAOS_SITE_READINESS_EXPR: &str = "chaos_site_readiness";
+const CHAOS_SITE_READINESS_LEGEND: &str = "{{module}} · {{scenario}} · {{site}}";
+const CHAOS_BREACH_PANEL_TITLE: &str = "Chaos SLA breaches (5m delta)";
+const CHAOS_BREACH_DELTA_EXPR: &str =
+    "sum by (module, scenario)(increase(chaos_sla_breach_total[5m]))";
+const CHAOS_BREACH_LEGEND: &str = "{{module}} · {{scenario}}";
 const BRIDGE_METRIC_RATE_PANEL_TITLE: &str = "bridge_metric_rate_per_second";
 const BRIDGE_METRIC_RATE_EXPR: &str = "sum by (metric)(bridge_metric_rate_per_second)";
 const BRIDGE_METRIC_RATE_DESCRIPTION: &str = "Per-second bridge counter growth grouped by metric";
@@ -304,6 +315,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut payouts = Vec::new();
     let mut bridge = Vec::new();
     let mut gossip = Vec::new();
+    let mut chaos = Vec::new();
     let mut tls = Vec::new();
     let mut dependency = Vec::new();
     let mut other = Vec::new();
@@ -361,6 +373,33 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             treasury.push(build_treasury_scalar_panel(
                 TREASURY_NEXT_EPOCH_PANEL_TITLE,
                 TREASURY_NEXT_EPOCH_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == CHAOS_READINESS_EXPR {
+            chaos.push(build_grouped_delta_panel(
+                CHAOS_READINESS_PANEL_TITLE,
+                CHAOS_READINESS_EXPR,
+                CHAOS_READINESS_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == CHAOS_SITE_READINESS_EXPR {
+            chaos.push(build_grouped_delta_panel(
+                CHAOS_SITE_READINESS_PANEL_TITLE,
+                CHAOS_SITE_READINESS_EXPR,
+                CHAOS_SITE_READINESS_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "chaos_sla_breach_total" {
+            chaos.push(build_grouped_delta_panel(
+                CHAOS_BREACH_PANEL_TITLE,
+                CHAOS_BREACH_DELTA_EXPR,
+                CHAOS_BREACH_LEGEND,
                 metric,
             ));
             continue;
@@ -658,6 +697,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("Treasury", treasury),
         (PAYOUT_ROW_TITLE, payouts),
         ("Bridge", bridge),
+        (CHAOS_ROW_TITLE, chaos),
         ("Gossip", gossip),
         ("TLS", tls),
         ("Dependencies", dependency),

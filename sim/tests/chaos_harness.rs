@@ -1,5 +1,5 @@
-use rand::{rngs::StdRng, SeedableRng};
-use tb_sim::chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario};
+use rand::rngs::StdRng;
+use tb_sim::chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario, ChaosSite};
 
 #[test]
 fn records_breach_and_generates_attestations() {
@@ -37,4 +37,48 @@ fn records_breach_and_generates_attestations() {
             assert!(draft.breaches >= 1);
         }
     }
+}
+
+#[test]
+fn distributed_sites_reflect_weighted_penalties() {
+    let mut harness = ChaosHarness::new();
+    harness.register(
+        ChaosScenario::new("compute-grid", ChaosModule::Compute, 0.8, 0.05).add_event(
+            ChaosEvent::new(
+                1,
+                2,
+                0.6,
+                ChaosFault::ComputeBackpressure {
+                    throttle_ratio: 0.5,
+                },
+            ),
+        ),
+    );
+    harness.configure_sites(
+        ChaosModule::Compute,
+        vec![
+            ChaosSite::new("us-east", 0.6, 0.1),
+            ChaosSite::new("eu-west", 0.4, 0.2),
+        ],
+    );
+    let mut rng = StdRng::seed_from_u64(4242);
+    harness.step(0, &mut rng);
+    let report = harness.step(1, &mut rng);
+    assert_eq!(report.compute.site_readiness.len(), 2);
+    let east = report
+        .compute
+        .site_readiness
+        .get("us-east")
+        .copied()
+        .expect("east site tracked");
+    let west = report
+        .compute
+        .site_readiness
+        .get("eu-west")
+        .copied()
+        .expect("west site tracked");
+    assert!(report.compute.readiness <= east);
+    assert!(report.compute.readiness <= west);
+    assert!(report.compute.readiness >= 0.0);
+    assert!(report.compute.readiness <= 1.0);
 }

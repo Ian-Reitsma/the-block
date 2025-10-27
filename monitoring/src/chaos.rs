@@ -39,6 +39,13 @@ impl fmt::Display for ChaosModule {
     }
 }
 
+/// Per-site readiness information tracked alongside module readiness.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChaosSiteReadiness {
+    pub site: String,
+    pub readiness: f64,
+}
+
 /// Unsigned readiness snapshot produced by the chaos harness.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChaosAttestationDraft {
@@ -50,12 +57,18 @@ pub struct ChaosAttestationDraft {
     pub window_start: u64,
     pub window_end: u64,
     pub issued_at: u64,
+    #[serde(default)]
+    pub site_readiness: Vec<ChaosSiteReadiness>,
 }
 
 impl ChaosAttestationDraft {
     pub fn normalize(mut self) -> Self {
         self.readiness = self.readiness.clamp(0.0, 1.0);
         self.sla_threshold = self.sla_threshold.clamp(0.0, 1.0);
+        for site in &mut self.site_readiness {
+            site.readiness = site.readiness.clamp(0.0, 1.0);
+        }
+        self.site_readiness.sort_by(|a, b| a.site.cmp(&b.site));
         self
     }
 
@@ -69,6 +82,13 @@ impl ChaosAttestationDraft {
         hasher.update(&self.window_start.to_le_bytes());
         hasher.update(&self.window_end.to_le_bytes());
         hasher.update(&self.issued_at.to_le_bytes());
+        hasher.update(&(self.site_readiness.len() as u64).to_le_bytes());
+        for entry in &self.site_readiness {
+            let name_bytes = entry.site.as_bytes();
+            hasher.update(&(name_bytes.len() as u64).to_le_bytes());
+            hasher.update(name_bytes);
+            hasher.update(&entry.readiness.to_le_bytes());
+        }
         *hasher.finalize().as_bytes()
     }
 }
@@ -87,6 +107,8 @@ pub struct ChaosAttestation {
     pub signer: [u8; 32],
     pub signature: [u8; SIGNATURE_LENGTH],
     pub digest: [u8; 32],
+    #[serde(default)]
+    pub site_readiness: Vec<ChaosSiteReadiness>,
 }
 
 impl ChaosAttestation {
@@ -100,6 +122,7 @@ impl ChaosAttestation {
             window_start: self.window_start,
             window_end: self.window_end,
             issued_at: self.issued_at,
+            site_readiness: self.site_readiness.clone(),
         }
     }
 
@@ -128,6 +151,19 @@ impl ChaosAttestation {
             "digest".into(),
             Value::Array(self.digest.iter().map(|b| Value::from(*b)).collect()),
         );
+        if !self.site_readiness.is_empty() {
+            let sites: Vec<Value> = self
+                .site_readiness
+                .iter()
+                .map(|entry| {
+                    let mut site_map = Map::new();
+                    site_map.insert("site".into(), Value::String(entry.site.clone()));
+                    site_map.insert("readiness".into(), Value::from(entry.readiness));
+                    Value::Object(site_map)
+                })
+                .collect();
+            map.insert("site_readiness".into(), Value::Array(sites));
+        }
         Value::Object(map)
     }
 
@@ -203,6 +239,29 @@ impl ChaosAttestation {
         let signer = read_bytes::<32>(field(&map, "signer")?, "signer")?;
         let signature = read_bytes::<SIGNATURE_LENGTH>(field(&map, "signature")?, "signature")?;
         let digest = read_bytes::<32>(field(&map, "digest")?, "digest")?;
+        let site_readiness = match map.get("site_readiness") {
+            Some(Value::Array(entries)) => {
+                let mut sites = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let Value::Object(site_map) = entry else {
+                        return Err(ChaosAttestationDecodeError::InvalidType("site_readiness"));
+                    };
+                    let site = site_map.get("site").and_then(Value::as_str).ok_or(
+                        ChaosAttestationDecodeError::MissingField("site_readiness.site"),
+                    )?;
+                    let readiness = site_map.get("readiness").and_then(Value::as_f64).ok_or(
+                        ChaosAttestationDecodeError::MissingField("site_readiness.readiness"),
+                    )?;
+                    sites.push(ChaosSiteReadiness {
+                        site: site.to_string(),
+                        readiness,
+                    });
+                }
+                sites
+            }
+            Some(_) => return Err(ChaosAttestationDecodeError::InvalidType("site_readiness")),
+            None => Vec::new(),
+        };
 
         Ok(ChaosAttestation {
             scenario,
@@ -216,6 +275,7 @@ impl ChaosAttestation {
             signer,
             signature,
             digest,
+            site_readiness,
         })
     }
 }
@@ -293,6 +353,7 @@ pub fn sign_attestation(draft: ChaosAttestationDraft, key: &SigningKey) -> Chaos
         signer: key.verifying_key().to_bytes(),
         signature: signature.to_bytes(),
         digest,
+        site_readiness: normalized.site_readiness,
     }
 }
 
@@ -303,6 +364,13 @@ pub fn verify_attestation(attestation: &ChaosAttestation) -> Result<(), ChaosAtt
     }
     if !(0.0..=1.0).contains(&attestation.readiness)
         || !(0.0..=1.0).contains(&attestation.sla_threshold)
+    {
+        return Err(ChaosAttestationError::InvalidReadiness);
+    }
+    if attestation
+        .site_readiness
+        .iter()
+        .any(|entry| !(0.0..=1.0).contains(&entry.readiness))
     {
         return Err(ChaosAttestationError::InvalidReadiness);
     }
@@ -331,6 +399,7 @@ pub struct ChaosReadinessSnapshot {
     pub issued_at: u64,
     pub signer: [u8; 32],
     pub digest: [u8; 32],
+    pub site_readiness: Vec<ChaosSiteReadiness>,
 }
 
 impl From<&ChaosAttestation> for ChaosReadinessSnapshot {
@@ -346,6 +415,7 @@ impl From<&ChaosAttestation> for ChaosReadinessSnapshot {
             issued_at: attestation.issued_at,
             signer: attestation.signer,
             digest: attestation.digest,
+            site_readiness: attestation.site_readiness.clone(),
         }
     }
 }
@@ -376,6 +446,19 @@ impl ChaosReadinessSnapshot {
             "digest".into(),
             Value::Array(self.digest.iter().map(|b| Value::from(*b)).collect()),
         );
+        if !self.site_readiness.is_empty() {
+            let entries: Vec<Value> = self
+                .site_readiness
+                .iter()
+                .map(|entry| {
+                    let mut site = Map::new();
+                    site.insert("site".into(), Value::String(entry.site.clone()));
+                    site.insert("readiness".into(), Value::from(entry.readiness));
+                    Value::Object(site)
+                })
+                .collect();
+            map.insert("site_readiness".into(), Value::Array(entries));
+        }
         Value::Object(map)
     }
 }
@@ -384,6 +467,7 @@ impl ChaosReadinessSnapshot {
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::SigningKey;
+    use foundation_serialization::json::Value;
 
     fn signing_key() -> SigningKey {
         // Deterministic signing key for reproducible tests.
@@ -401,10 +485,16 @@ mod tests {
             window_start: 1,
             window_end: 2,
             issued_at: 3,
+            site_readiness: vec![ChaosSiteReadiness {
+                site: "primary".into(),
+                readiness: 1.5,
+            }],
         };
         let attestation = sign_attestation(draft, &signing_key());
         assert!((0.0..=1.0).contains(&attestation.readiness));
         assert!((0.0..=1.0).contains(&attestation.sla_threshold));
+        assert_eq!(attestation.site_readiness.len(), 1);
+        assert!((0.0..=1.0).contains(&attestation.site_readiness[0].readiness));
     }
 
     #[test]
@@ -418,6 +508,7 @@ mod tests {
             window_start: 5,
             window_end: 4,
             issued_at: 5,
+            site_readiness: Vec::new(),
         };
         let attestation = sign_attestation(draft, &signing_key());
         assert!(matches!(
@@ -437,6 +528,7 @@ mod tests {
             window_start: 1,
             window_end: 2,
             issued_at: 3,
+            site_readiness: Vec::new(),
         };
         let mut attestation = sign_attestation(draft, &signing_key());
         attestation.digest[0] ^= 0xFF;
@@ -444,5 +536,89 @@ mod tests {
             verify_attestation(&attestation),
             Err(ChaosAttestationError::DigestMismatch)
         ));
+    }
+
+    #[test]
+    fn decode_rejects_unknown_module() {
+        let draft = ChaosAttestationDraft {
+            scenario: "module".into(),
+            module: ChaosModule::Overlay,
+            readiness: 0.7,
+            sla_threshold: 0.6,
+            breaches: 1,
+            window_start: 10,
+            window_end: 20,
+            issued_at: 30,
+            site_readiness: Vec::new(),
+        };
+        let attestation = sign_attestation(draft, &signing_key());
+        let mut value = attestation.to_value();
+        if let Value::Object(ref mut map) = value {
+            map.insert("module".into(), Value::from("mystery"));
+        }
+        match ChaosAttestation::from_value(value) {
+            Err(ChaosAttestationDecodeError::InvalidModule(name)) => {
+                assert_eq!(name, "mystery")
+            }
+            other => panic!("expected invalid module error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_malformed_signer_array() {
+        let draft = ChaosAttestationDraft {
+            scenario: "array".into(),
+            module: ChaosModule::Compute,
+            readiness: 0.9,
+            sla_threshold: 0.8,
+            breaches: 0,
+            window_start: 1,
+            window_end: 2,
+            issued_at: 3,
+            site_readiness: Vec::new(),
+        };
+        let attestation = sign_attestation(draft, &signing_key());
+        let mut value = attestation.to_value();
+        if let Value::Object(ref mut map) = value {
+            map.insert("signer".into(), Value::Array(vec![Value::from(1)]));
+        }
+        match ChaosAttestation::from_value(value) {
+            Err(ChaosAttestationDecodeError::InvalidLength(field)) => {
+                assert_eq!(field, "signer");
+            }
+            other => panic!("expected invalid signer length, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_malformed_site_readiness() {
+        let draft = ChaosAttestationDraft {
+            scenario: "site".into(),
+            module: ChaosModule::Overlay,
+            readiness: 0.8,
+            sla_threshold: 0.7,
+            breaches: 0,
+            window_start: 1,
+            window_end: 5,
+            issued_at: 6,
+            site_readiness: vec![ChaosSiteReadiness {
+                site: "east".into(),
+                readiness: 0.5,
+            }],
+        };
+        let attestation = sign_attestation(draft, &signing_key());
+        let mut value = attestation.to_value();
+        if let Value::Object(ref mut map) = value {
+            map.insert(
+                "site_readiness".into(),
+                Value::Array(vec![Value::from("invalid")]),
+            );
+        }
+        match ChaosAttestation::from_value(value) {
+            Err(ChaosAttestationDecodeError::InvalidType(field)) => {
+                assert_eq!(field, "site_readiness");
+            }
+            other => panic!("expected invalid site readiness type, got {other:?}"),
+        }
     }
 }

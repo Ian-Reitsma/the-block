@@ -211,6 +211,19 @@ entry; writes are sorted to keep diffs deterministic. When the node starts
 `PeerSet::new` reads this file and merges it with any peers supplied on the
 command line.
 
+The minimal gossip node (`Node::start` in [`node/src/net/mod.rs`](../node/src/net/mod.rs)) now
+returns an `io::Result<JoinHandle>` instead of panicking when the TCP listener
+cannot bind or enter nonblocking mode. Callers must propagate or log the error
+explicitly; tests have been updated to unwrap the result. Persistent network
+keys are written lazily via `load_net_key()`, which now reports directory and
+fsync failures through `diagnostics::tracing` rather than aborting the
+process—operators see `net_key_dir_create_failed` or
+`net_key_persist_failed` warnings if scratch disks disappear mid-startup. A new
+integration regression (`node/tests/net_start_bind.rs`) binds an ephemeral port
+before invoking `Node::start()` to assert the
+`gossip_listener_bind_failed` warning appears whenever sockets are unavailable,
+locking in the fallible startup behaviour across CI suites.
+
 Chunk gossip uses a separate `SimpleDb` instance. The location defaults to
 `~/.the_block/chunks/` and may be changed with `TB_CHUNK_DB_PATH`. Both
 directories are created automatically if missing. See
