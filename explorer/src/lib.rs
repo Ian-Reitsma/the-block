@@ -735,12 +735,19 @@ pub struct ProviderSettlementRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RolePayoutBreakdown {
     pub total_ct: u64,
+    pub total_it: u64,
     pub viewer_ct: u64,
+    pub viewer_it: u64,
     pub host_ct: u64,
+    pub host_it: u64,
     pub hardware_ct: u64,
+    pub hardware_it: u64,
     pub verifier_ct: u64,
+    pub verifier_it: u64,
     pub liquidity_ct: u64,
+    pub liquidity_it: u64,
     pub miner_ct: u64,
+    pub miner_it: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -749,6 +756,10 @@ pub struct BlockPayoutBreakdown {
     pub height: u64,
     pub read_subsidy: RolePayoutBreakdown,
     pub advertising: RolePayoutBreakdown,
+    pub total_usd_micros: u64,
+    pub settlement_count: u64,
+    pub ct_price_usd_micros: u64,
+    pub it_price_usd_micros: u64,
 }
 
 impl BlockPayoutBreakdown {
@@ -767,12 +778,19 @@ impl BlockPayoutBreakdown {
         let read_miner = read_total.saturating_sub(read_roles_sum);
         let read_breakdown = RolePayoutBreakdown {
             total_ct: read_total,
+            total_it: 0,
             viewer_ct: read_viewer,
+            viewer_it: 0,
             host_ct: read_host,
+            host_it: 0,
             hardware_ct: read_hardware,
+            hardware_it: 0,
             verifier_ct: read_verifier,
+            verifier_it: 0,
             liquidity_ct: read_liquidity,
+            liquidity_it: 0,
             miner_ct: read_miner,
+            miner_it: 0,
         };
 
         let ad_viewer = block.ad_viewer_ct.get();
@@ -787,14 +805,31 @@ impl BlockPayoutBreakdown {
             .saturating_add(ad_verifier)
             .saturating_add(ad_liquidity)
             .saturating_add(ad_miner);
+        let ad_host_it = block.ad_host_it.get();
+        let ad_hardware_it = block.ad_hardware_it.get();
+        let ad_verifier_it = block.ad_verifier_it.get();
+        let ad_liquidity_it = block.ad_liquidity_it.get();
+        let ad_miner_it = block.ad_miner_it.get();
+        let ad_total_it = ad_host_it
+            .saturating_add(ad_hardware_it)
+            .saturating_add(ad_verifier_it)
+            .saturating_add(ad_liquidity_it)
+            .saturating_add(ad_miner_it);
         let ad_breakdown = RolePayoutBreakdown {
             total_ct: ad_total,
             viewer_ct: ad_viewer,
+            total_it: ad_total_it,
+            viewer_it: 0,
             host_ct: ad_host,
+            host_it: ad_host_it,
             hardware_ct: ad_hardware,
+            hardware_it: ad_hardware_it,
             verifier_ct: ad_verifier,
+            verifier_it: ad_verifier_it,
             liquidity_ct: ad_liquidity,
+            liquidity_it: ad_liquidity_it,
             miner_ct: ad_miner,
+            miner_it: ad_miner_it,
         };
 
         Self {
@@ -802,6 +837,10 @@ impl BlockPayoutBreakdown {
             height: block.index,
             read_subsidy: read_breakdown,
             advertising: ad_breakdown,
+            total_usd_micros: block.ad_total_usd_micros,
+            settlement_count: block.ad_settlement_count,
+            ct_price_usd_micros: block.ad_oracle_ct_price_usd_micros,
+            it_price_usd_micros: block.ad_oracle_it_price_usd_micros,
         }
     }
 
@@ -839,12 +878,19 @@ impl BlockPayoutBreakdown {
         let read_miner = read_total.saturating_sub(read_roles_sum);
         let read_breakdown = RolePayoutBreakdown {
             total_ct: read_total,
+            total_it: Self::field_u64(map, "read_sub_it"),
             viewer_ct: read_viewer,
+            viewer_it: 0,
             host_ct: read_host,
+            host_it: 0,
             hardware_ct: read_hardware,
+            hardware_it: 0,
             verifier_ct: read_verifier,
+            verifier_it: 0,
             liquidity_ct: read_liquidity,
+            liquidity_it: 0,
             miner_ct: read_miner,
+            miner_it: 0,
         };
 
         let ad_viewer = Self::field_u64(map, "ad_viewer_ct");
@@ -859,21 +905,51 @@ impl BlockPayoutBreakdown {
             .saturating_add(ad_verifier)
             .saturating_add(ad_liquidity)
             .saturating_add(ad_miner);
+        let ad_host_it = Self::field_u64(map, "ad_host_it");
+        let ad_hardware_it = Self::field_u64(map, "ad_hardware_it");
+        let ad_verifier_it = Self::field_u64(map, "ad_verifier_it");
+        let ad_liquidity_it = Self::field_u64(map, "ad_liquidity_it");
+        let ad_miner_it = Self::field_u64(map, "ad_miner_it");
+        let ad_total_it = ad_host_it
+            .saturating_add(ad_hardware_it)
+            .saturating_add(ad_verifier_it)
+            .saturating_add(ad_liquidity_it)
+            .saturating_add(ad_miner_it);
         let ad_breakdown = RolePayoutBreakdown {
             total_ct: ad_total,
             viewer_ct: ad_viewer,
+            total_it: ad_total_it,
+            viewer_it: 0,
             host_ct: ad_host,
+            host_it: ad_host_it,
             hardware_ct: ad_hardware,
+            hardware_it: ad_hardware_it,
             verifier_ct: ad_verifier,
+            verifier_it: ad_verifier_it,
             liquidity_ct: ad_liquidity,
+            liquidity_it: ad_liquidity_it,
             miner_ct: ad_miner,
+            miner_it: ad_miner_it,
         };
+
+        let total_usd = Self::field_u64(map, "total_usd_micros")
+            .max(Self::field_u64(map, "ad_total_usd_micros"));
+        let settlement_count = Self::field_u64(map, "settlement_count")
+            .max(Self::field_u64(map, "ad_settlement_count"));
+        let ct_price = Self::field_u64(map, "ct_price_usd_micros")
+            .max(Self::field_u64(map, "ad_oracle_ct_price_usd_micros"));
+        let it_price = Self::field_u64(map, "it_price_usd_micros")
+            .max(Self::field_u64(map, "ad_oracle_it_price_usd_micros"));
 
         Some(Self {
             hash,
             height,
             read_subsidy: read_breakdown,
             advertising: ad_breakdown,
+            total_usd_micros: total_usd,
+            settlement_count,
+            ct_price_usd_micros: ct_price,
+            it_price_usd_micros: it_price,
         })
     }
 
@@ -895,6 +971,10 @@ impl BlockPayoutBreakdown {
                 height,
                 read_subsidy,
                 advertising,
+                total_usd_micros: Self::field_u64(map, "total_usd_micros"),
+                settlement_count: Self::field_u64(map, "settlement_count"),
+                ct_price_usd_micros: Self::field_u64(map, "ct_price_usd_micros"),
+                it_price_usd_micros: Self::field_u64(map, "it_price_usd_micros"),
             });
         }
 
@@ -907,6 +987,22 @@ impl BlockPayoutBreakdown {
         map.insert("height".into(), Self::number(self.height));
         map.insert("read_subsidy".into(), self.read_subsidy.to_json_value());
         map.insert("advertising".into(), self.advertising.to_json_value());
+        map.insert(
+            "total_usd_micros".into(),
+            Self::number(self.total_usd_micros),
+        );
+        map.insert(
+            "settlement_count".into(),
+            Self::number(self.settlement_count),
+        );
+        map.insert(
+            "ct_price_usd_micros".into(),
+            Self::number(self.ct_price_usd_micros),
+        );
+        map.insert(
+            "it_price_usd_micros".into(),
+            Self::number(self.it_price_usd_micros),
+        );
         json::Value::Object(map)
     }
 }
@@ -919,25 +1015,50 @@ impl RolePayoutBreakdown {
             BlockPayoutBreakdown::number(self.total_ct),
         );
         map.insert(
+            "total_it".into(),
+            BlockPayoutBreakdown::number(self.total_it),
+        );
+        map.insert(
             "viewer_ct".into(),
             BlockPayoutBreakdown::number(self.viewer_ct),
         );
+        map.insert(
+            "viewer_it".into(),
+            BlockPayoutBreakdown::number(self.viewer_it),
+        );
         map.insert("host_ct".into(), BlockPayoutBreakdown::number(self.host_ct));
+        map.insert("host_it".into(), BlockPayoutBreakdown::number(self.host_it));
         map.insert(
             "hardware_ct".into(),
             BlockPayoutBreakdown::number(self.hardware_ct),
+        );
+        map.insert(
+            "hardware_it".into(),
+            BlockPayoutBreakdown::number(self.hardware_it),
         );
         map.insert(
             "verifier_ct".into(),
             BlockPayoutBreakdown::number(self.verifier_ct),
         );
         map.insert(
+            "verifier_it".into(),
+            BlockPayoutBreakdown::number(self.verifier_it),
+        );
+        map.insert(
             "liquidity_ct".into(),
             BlockPayoutBreakdown::number(self.liquidity_ct),
         );
         map.insert(
+            "liquidity_it".into(),
+            BlockPayoutBreakdown::number(self.liquidity_it),
+        );
+        map.insert(
             "miner_ct".into(),
             BlockPayoutBreakdown::number(self.miner_ct),
+        );
+        map.insert(
+            "miner_it".into(),
+            BlockPayoutBreakdown::number(self.miner_it),
         );
         json::Value::Object(map)
     }
@@ -945,12 +1066,19 @@ impl RolePayoutBreakdown {
     fn from_json_value(map: &json::Value) -> Option<Self> {
         Some(Self {
             total_ct: BlockPayoutBreakdown::field_u64(map, "total_ct"),
+            total_it: BlockPayoutBreakdown::field_u64(map, "total_it"),
             viewer_ct: BlockPayoutBreakdown::field_u64(map, "viewer_ct"),
+            viewer_it: BlockPayoutBreakdown::field_u64(map, "viewer_it"),
             host_ct: BlockPayoutBreakdown::field_u64(map, "host_ct"),
+            host_it: BlockPayoutBreakdown::field_u64(map, "host_it"),
             hardware_ct: BlockPayoutBreakdown::field_u64(map, "hardware_ct"),
+            hardware_it: BlockPayoutBreakdown::field_u64(map, "hardware_it"),
             verifier_ct: BlockPayoutBreakdown::field_u64(map, "verifier_ct"),
+            verifier_it: BlockPayoutBreakdown::field_u64(map, "verifier_it"),
             liquidity_ct: BlockPayoutBreakdown::field_u64(map, "liquidity_ct"),
+            liquidity_it: BlockPayoutBreakdown::field_u64(map, "liquidity_it"),
             miner_ct: BlockPayoutBreakdown::field_u64(map, "miner_ct"),
+            miner_it: BlockPayoutBreakdown::field_u64(map, "miner_it"),
         })
     }
 }

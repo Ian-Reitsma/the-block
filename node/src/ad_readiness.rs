@@ -99,6 +99,14 @@ pub struct AdReadinessSnapshot {
     pub last_updated: u64,
     #[serde(default)]
     pub zk_proof: Option<ReadinessPrivacyProof>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub total_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub settlement_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub ct_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub it_price_usd_micros: u64,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -115,6 +123,10 @@ impl Default for AdReadinessSnapshot {
             blockers: Vec::new(),
             last_updated: 0,
             zk_proof: None,
+            total_usd_micros: 0,
+            settlement_count: 0,
+            ct_price_usd_micros: 0,
+            it_price_usd_micros: 0,
         }
     }
 }
@@ -189,6 +201,17 @@ impl AdReadinessHandle {
         self.inner.record_ack(ts, viewer, host, provider);
     }
 
+    pub fn record_settlement(
+        &self,
+        ts: u64,
+        usd_micros: u64,
+        ct_price_usd_micros: u64,
+        it_price_usd_micros: u64,
+    ) {
+        self.inner
+            .record_settlement(ts, usd_micros, ct_price_usd_micros, it_price_usd_micros);
+    }
+
     pub fn decision(&self) -> ReadinessDecision {
         ReadinessDecision {
             snapshot: self.inner.snapshot(),
@@ -254,6 +277,31 @@ impl AdReadinessInner {
         self.persist_events(&snapshot);
     }
 
+    fn record_settlement(
+        &self,
+        ts: u64,
+        usd_micros: u64,
+        ct_price_usd_micros: u64,
+        it_price_usd_micros: u64,
+    ) {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let config = self
+            .config
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        guard.record_settlement(
+            ts,
+            usd_micros,
+            ct_price_usd_micros,
+            it_price_usd_micros,
+            &config,
+        );
+    }
+
     fn snapshot(&self) -> AdReadinessSnapshot {
         let mut guard = self
             .state
@@ -285,6 +333,9 @@ struct AdReadinessState {
     provider_counts: HashMap<String, u64>,
     last_updated: u64,
     privacy_seed: [u8; 32],
+    settlements: VecDeque<SettlementObservation>,
+    last_ct_price_usd_micros: u64,
+    last_it_price_usd_micros: u64,
 }
 
 impl Default for AdReadinessState {
@@ -296,6 +347,9 @@ impl Default for AdReadinessState {
             provider_counts: HashMap::new(),
             last_updated: 0,
             privacy_seed: new_privacy_seed(),
+            settlements: VecDeque::new(),
+            last_ct_price_usd_micros: 0,
+            last_it_price_usd_micros: 0,
         }
     }
 }
@@ -343,6 +397,25 @@ impl AdReadinessState {
         self.ingest(event);
     }
 
+    fn record_settlement(
+        &mut self,
+        ts: u64,
+        usd_micros: u64,
+        ct_price_usd_micros: u64,
+        it_price_usd_micros: u64,
+        config: &AdReadinessConfig,
+    ) {
+        self.prune(ts, config.window_secs);
+        self.last_ct_price_usd_micros = ct_price_usd_micros;
+        self.last_it_price_usd_micros = it_price_usd_micros;
+        self.settlements.push_back(SettlementObservation {
+            ts,
+            usd_micros,
+            ct_price_usd_micros,
+            it_price_usd_micros,
+        });
+    }
+
     fn prune(&mut self, now: u64, window_secs: u64) {
         let cutoff = now.saturating_sub(window_secs.max(1));
         while let Some(front) = self.events.front() {
@@ -351,6 +424,12 @@ impl AdReadinessState {
             }
             let front = self.events.pop_front().expect("front element");
             self.decrement(front);
+        }
+        while let Some(front) = self.settlements.front() {
+            if front.ts >= cutoff {
+                break;
+            }
+            self.settlements.pop_front();
         }
         self.compact_maps();
     }
@@ -412,6 +491,10 @@ impl AdReadinessState {
                 blockers,
                 last_updated: 0,
                 zk_proof: None,
+                total_usd_micros: 0,
+                settlement_count: 0,
+                ct_price_usd_micros: self.last_ct_price_usd_micros,
+                it_price_usd_micros: self.last_it_price_usd_micros,
             };
             let statement = snapshot.to_statement();
             let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -434,6 +517,19 @@ impl AdReadinessState {
             blockers.push("insufficient_provider_diversity".to_string());
         }
         let ready = blockers.is_empty();
+        let total_usd_micros: u64 = self.settlements.iter().map(|obs| obs.usd_micros).sum();
+        let settlement_count = self.settlements.len() as u64;
+        let ct_price = self
+            .settlements
+            .back()
+            .map(|obs| obs.ct_price_usd_micros)
+            .unwrap_or(self.last_ct_price_usd_micros);
+        let it_price = self
+            .settlements
+            .back()
+            .map(|obs| obs.it_price_usd_micros)
+            .unwrap_or(self.last_it_price_usd_micros);
+
         let mut snapshot = AdReadinessSnapshot {
             window_secs: config.window_secs,
             min_unique_viewers: config.min_unique_viewers,
@@ -446,6 +542,10 @@ impl AdReadinessState {
             blockers,
             last_updated: self.last_updated,
             zk_proof: None,
+            total_usd_micros,
+            settlement_count,
+            ct_price_usd_micros: ct_price,
+            it_price_usd_micros: it_price,
         };
         let statement = snapshot.to_statement();
         let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -460,6 +560,14 @@ struct ReadinessEvent {
     viewer: [u8; 32],
     host: String,
     provider: Option<String>,
+}
+
+#[derive(Clone)]
+struct SettlementObservation {
+    ts: u64,
+    usd_micros: u64,
+    ct_price_usd_micros: u64,
+    it_price_usd_micros: u64,
 }
 
 fn current_timestamp() -> u64 {
@@ -535,6 +643,19 @@ pub fn global_snapshot() -> Option<AdReadinessSnapshot> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().map(|handle| handle.snapshot()))
+}
+
+pub fn record_settlement(
+    ts: u64,
+    usd_micros: u64,
+    ct_price_usd_micros: u64,
+    it_price_usd_micros: u64,
+) {
+    if let Ok(guard) = GLOBAL_HANDLE.read() {
+        if let Some(handle) = guard.as_ref() {
+            handle.record_settlement(ts, usd_micros, ct_price_usd_micros, it_price_usd_micros);
+        }
+    }
 }
 
 #[cfg(test)]

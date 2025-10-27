@@ -340,11 +340,29 @@ fn signing_artifacts(
         .map(|(name, _)| name.as_str())
         .collect::<Vec<_>>()
         .join(";");
-
-    let canonical_request = format!(
-        "PUT\n{}\n\n{}{}\n{}",
-        canonical_uri, canonical_headers, signed_headers, payload_hash
+    let mut canonical_request = String::with_capacity(
+        "PUT".len()
+            + 1
+            + canonical_uri.len()
+            + 2
+            + canonical_headers.len()
+            + 1
+            + signed_headers.len()
+            + 1
+            + payload_hash.len(),
     );
+    canonical_request.push_str("PUT\n");
+    canonical_request.push_str(&canonical_uri);
+    canonical_request.push('\n');
+    canonical_request.push('\n');
+    canonical_request.push_str(&canonical_headers);
+    if !canonical_headers.ends_with('\n') {
+        canonical_request.push('\n');
+    }
+    canonical_request.push('\n');
+    canonical_request.push_str(&signed_headers);
+    canonical_request.push('\n');
+    canonical_request.push_str(&payload_hash);
 
     let credential_scope = format!("{}/{}/s3/aws4_request", date_stamp, config.region);
     let canonical_request_hash = hex(&sha256_digest(canonical_request.as_bytes()));
@@ -435,6 +453,11 @@ pub enum UploadError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpd::BlockingClient;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
 
     #[test]
     fn canonical_request_matches_known_example() {
@@ -467,13 +490,28 @@ mod tests {
             prepared.payload_sha256,
             "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072"
         );
-        let canonical_request = format!(
-            "PUT\n{}\n\n{}{}\n{}",
-            config.endpoint.canonical_uri("examplebucket", "test.txt"),
-            "content-length:21\nhost:s3.amazonaws.com\nx-amz-content-sha256:44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072\nx-amz-date:20130524T000000Z\n",
-            "content-length;host;x-amz-content-sha256;x-amz-date",
-            "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072"
-        );
+        let canonical_uri = config.endpoint.canonical_uri("examplebucket", "test.txt");
+        let canonical_headers = prepared
+            .headers
+            .iter()
+            .map(|(name, value)| format!("{}:{}\n", name, value.trim()))
+            .collect::<String>();
+        let signed_headers = prepared
+            .headers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(";");
+        let mut canonical_request = String::new();
+        canonical_request.push_str("PUT\n");
+        canonical_request.push_str(&canonical_uri);
+        canonical_request.push('\n');
+        canonical_request.push('\n');
+        canonical_request.push_str(&canonical_headers);
+        canonical_request.push('\n');
+        canonical_request.push_str(&signed_headers);
+        canonical_request.push('\n');
+        canonical_request.push_str(&prepared.payload_sha256);
         assert_eq!(canonical_request, expected_canonical);
     }
 
@@ -482,5 +520,111 @@ mod tests {
         assert_eq!(percent_encode("hello world"), "hello%20world");
         assert_eq!(percent_encode("a/b"), "a%2Fb");
         assert_eq!(percent_encode("~user"), "~user");
+    }
+
+    #[test]
+    fn blocking_put_object_emits_signed_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let (tx, rx) = mpsc::channel();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 1024];
+            let mut header_end = None;
+            let mut content_length = 0usize;
+            loop {
+                let read = stream.read(&mut chunk).expect("read");
+                if read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..read]);
+                if header_end.is_none() {
+                    if let Some(pos) = find_header_end(&buffer) {
+                        header_end = Some(pos);
+                        content_length = parse_content_length(&buffer[..pos]);
+                    }
+                }
+                if let Some(pos) = header_end {
+                    if buffer.len() >= pos + 4 + content_length {
+                        break;
+                    }
+                }
+            }
+            let header_end = header_end.expect("header end");
+            let request = String::from_utf8(buffer[..header_end].to_vec()).expect("utf8 header");
+            let body = buffer[header_end + 4..header_end + 4 + content_length].to_vec();
+            tx.send((request, body)).expect("send");
+            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream.write_all(response).expect("write response");
+        });
+
+        let config = S3Config {
+            endpoint: Endpoint::parse(&format!("http://{}", addr)).unwrap(),
+            region: "us-east-1".to_string(),
+            access_key: "AKIDEXAMPLE".to_string(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+            session_token: None,
+        };
+        let body = b"signed-body".to_vec();
+        let now = UtcDateTime::from_unix_timestamp(1_369_353_600).unwrap();
+        let expected = signing_artifacts(&config, "bucket", "path/file.txt", &body, now).unwrap();
+
+        let client = S3Client::from_config(config);
+        let receipt = client
+            .put_object_blocking_at(
+                &BlockingClient::default(),
+                "bucket",
+                "path/file.txt",
+                body.clone(),
+                now,
+            )
+            .expect("upload succeeds");
+        assert_eq!(receipt.payload_sha256, expected.payload_sha256);
+
+        let (request, request_body) = rx.recv().expect("request");
+        server.join().expect("server thread");
+
+        assert_eq!(request_body, body);
+        let mut lines = request.split("\r\n");
+        let first = lines.next().expect("request line");
+        assert_eq!(first, "PUT /bucket/path/file.txt HTTP/1.1");
+        let mut authorization = None;
+        let mut content_sha = None;
+        for line in lines {
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                let name = name.trim().to_ascii_lowercase();
+                let value = value.trim();
+                if name == "authorization" {
+                    authorization = Some(value.to_string());
+                } else if name == "x-amz-content-sha256" {
+                    content_sha = Some(value.to_string());
+                }
+            }
+        }
+
+        assert_eq!(authorization, Some(expected.authorization));
+        assert_eq!(content_sha, Some(expected.payload_sha256));
+    }
+
+    fn find_header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn parse_content_length(header: &[u8]) -> usize {
+        let text = String::from_utf8_lossy(header);
+        for line in text.split("\r\n") {
+            if let Some(value) = line.strip_prefix("Content-Length:") {
+                return value.trim().parse::<usize>().expect("content length");
+            }
+            if let Some(value) = line.strip_prefix("content-length:") {
+                return value.trim().parse::<usize>().expect("content length");
+            }
+        }
+        0
     }
 }

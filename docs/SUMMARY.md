@@ -6,16 +6,21 @@
 > diff, overlay, and provider-failover file, and bundles the set into a
 > `run_id.zip` archive. Optional `--publish-dir`, `--publish-bucket`, and
 > `--publish-prefix` flags mirror the manifests and bundle into downstream
-> directories or S3-compatible object stores through the new
-> `foundation_object_store` crate, keeping uploads on first-party HTTP/TLS
-> clients. `tools/xtask` now consumes the manifests via manual
-> `foundation_serialization::json::Value` decoding, surfaces publish targets, and
-> honours the new flags so release automation and dashboards see identical
-> artefact inventories. `scripts/release_provenance.sh` refuses to continue unless
+> directories or S3-compatible object stores through the
+> first-party `foundation_object_store` client, which now ships a
+> canonical-request regression and blocking upload harness proving AWS Signature
+> V4 headers match the published examples while honouring
+> `TB_CHAOS_ARCHIVE_RETRIES` (minimum 1) and optional
+> `TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps. `tools/xtask` consumes the manifests via
+> manual `foundation_serialization::json::Value` decoding, surfaces publish
+> targets, logs the manifest/bundle BLAKE3 digests and byte sizes, and honours the
+> new flags so release automation and dashboards see identical artefact
+> inventories. `scripts/release_provenance.sh` refuses to continue unless
 > `chaos/archive/latest.json` and the referenced run manifest exist, while
 > `scripts/verify_release.sh` parses the manifest to ensure every archived file is
-> present and that the recorded bundle size matches the on-disk `run_id.zip`,
-> closing the loop without third-party tooling.
+> present, that bundle sizes match on-disk artefacts, and that mirrored paths
+> referenced by `cargo xtask chaos` resolve, closing the loop without third-party
+> tooling.
 > **Review (2025-10-27, afternoon):** `/chaos/status` baselines now flow entirely
 > through first-party tooling. `sim/chaos_lab.rs` pulls snapshots with
 > `httpd::BlockingClient`, decodes them manually via
@@ -106,7 +111,7 @@
 > retain their first-party queries.
 > **Review (2025-10-31, late evening):** Bridge remediation regressions promote the `RemediationSpoolSandbox` helper to cover every `TB_REMEDIATION_*_DIRS` target (page, throttle, quarantine, escalate) and ship an explicit environment-restoration test so retry suites can assert the guards cleanly unwind. Explorer payout coverage now stacks a peer-isolation scenario—`explorer_payout_counters_are_peer_scoped` proves per-peer caches remain monotonic while alternating read/advertising labels—and the churn regression still locks in the mixed-role baseline behaviour without negative deltas.
 > **Review (2025-10-31, afternoon):** Bridge remediation integration suites now allocate a per-test `RemediationSpoolSandbox` so spool hooks write into isolated, auto-cleaned directories with environment guards restoring `TB_REMEDIATION_*_DIRS`/`*_URLS` after each run. Explorer payout ingestion learned to treat alternating read/advertising role sets as monotonic—the aggregator clamps regressions to the previous high with trace-only diagnostics—and the new `explorer_payout_counters_remain_monotonic_with_role_churn` regression keeps cache baselines hermetic when peers churn across scrapes.
-> **Review (2025-10-24, early afternoon):** Explorer integration tests now combine binary headers with JSON fallbacks so `/blocks/:hash/payouts` always decodes per-role totals, and the metrics aggregator updates `explorer_block_payout_*_total` counters directly through cached handles. The Prometheus regression scrapes twice to ensure the Grafana payout panels chart live explorer data, and documentation now captures CLI automation snippets for hash- and height-driven payout queries so operators can script reconciliation without leaving the first-party stack.
+> **Review (2025-11-06, afternoon):** Dual-token advertising payouts now surface everywhere the ledger reports settlements. Genesis, block, and ledger codecs persist CT totals, IT totals, USD micros, settlement counts, and oracle snapshots, while explorer/CLI payloads render the expanded fields with integration tests across binary and JSON codecs. The metrics aggregator introduced `explorer_block_payout_ad_it_total{role}` plus readiness gauges for USD spend, settlement counts, and oracle prices, and `ad_market.readiness` exposes the archived snapshot alongside live oracle values under a single `oracle` map. Dashboards, CI artefacts, and Prometheus scrape regressions consume the same gauges so operators can audit conversion inputs without digging into raw JSON.
 > **Review (2025-10-30, morning):** Explorer payout lookups now cover legacy snapshots that omit the per-role headers, with unit tests exercising the JSON fallback so FIRST_PARTY_ONLY runs never lose visibility. The CLI’s `explorer block-payouts` command surfaces clear errors when hashes or heights are missing/mismatched, and the monitoring stack picked up a dedicated “Block Payouts” row charting the read-subsidy and advertising role splits from Prometheus. These additions keep the payout trail hermetic—from historic blocks through the CLI to Grafana—without leaning on third-party codecs or dashboards.
 > **Review (2025-10-27, late afternoon):** Bridge remediation spool artefacts now
 > persist across acknowledgement retries, drain automatically once hooks close

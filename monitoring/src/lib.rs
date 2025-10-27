@@ -1,5 +1,3 @@
-extern crate foundation_serialization as serde;
-
 mod alert_validator;
 mod chaos;
 mod dashboard;

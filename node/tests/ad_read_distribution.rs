@@ -66,6 +66,9 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         campaign_id: "cmp-1".into(),
         creative_id: "creative-1".into(),
         bytes: 450,
+        price_per_mib_usd_micros: 80,
+        total_usd_micros: 80,
+        demand_usd_micros: 80,
         total_ct: 80,
         viewer_ct: 30,
         host_ct: 20,
@@ -73,6 +76,14 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         verifier_ct: 5,
         liquidity_ct: 5,
         miner_ct: 10,
+        host_it: 0,
+        hardware_it: 0,
+        verifier_it: 0,
+        liquidity_it: 0,
+        miner_it: 0,
+        unsettled_usd_micros: 0,
+        ct_price_usd_micros: 1,
+        it_price_usd_micros: 1,
     };
     bc.record_ad_settlement(&ack, settlement);
 

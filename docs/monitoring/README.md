@@ -18,9 +18,10 @@ ready to import once the foundation telemetry stack is running.
   the fresh `invalid_privacy` label is visible without digging through raw
   PromQL.
 - The explorer block-payout row pulls straight from
-  `explorer_block_payout_read_total{role}` and
-  `explorer_block_payout_ad_total{role}`. The metrics aggregator now caches the
-  most recent role totals per explorer peer and only increments the counter
+  `explorer_block_payout_read_total{role}`,
+  `explorer_block_payout_ad_total{role}`, and
+  `explorer_block_payout_ad_it_total{role}`. The metrics aggregator now caches
+  the most recent role totals per explorer peer and only increments the counter
   handles when a higher value arrives, so the Prometheus/Grafana panels chart
   live deltas without double counting. Complementary gauges
   `explorer_block_payout_read_last_seen_timestamp{role}` and
@@ -28,9 +29,17 @@ ready to import once the foundation telemetry stack is running.
   of the latest increment, enabling the
   `ExplorerReadPayoutStalled`/`ExplorerAdPayoutStalled` alerts to fire when a
   role stays flat for thirty minutes after producing non-zero totals. Integration
-  tests ingest successive payloads and verify both the counters and gauges
-  advance on the second scrape, matching the `increase()` queries baked into the
-  dashboard.
+  tests ingest successive payloads and verify all three counter families and
+  gauges advance on the second scrape, matching the `increase()` queries baked
+  into the dashboard.
+- An "Ad Readiness" row accompanies the payout panels and charts
+  `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
+  `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
+  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`, and
+  `ad_readiness_it_price_usd_micros` alongside the configured minimums and
+  blocker list returned by `ad_market.readiness`. The same gauges flow into CI
+  artefacts and HTML snapshots so automation, operators, and dashboards consume
+  an identical oracle snapshot and settlement view before enabling new cohorts.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,
@@ -130,8 +139,15 @@ ready to import once the foundation telemetry stack is running.
   `<run_id>.zip`, each populated through the handwritten
   `foundation_serialization::json::Value` helpers. Optional
   `--publish-dir`/`--publish-bucket` flags mirror the manifest and bundle via the
-  in-tree `foundation_object_store` crate so operators can surface artefacts in
-  dashboards or pipelines without AWS/GCP SDKs. Release packaging shells out to
+  in-tree `foundation_object_store` client, which now includes a
+  canonical-request regression and blocking upload harness to prove AWS Signature
+  V4 headers match the public examples while honouring `TB_CHAOS_ARCHIVE_RETRIES`
+  (minimum 1) and optional `TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps for
+  reproducible signatures. The manifest records every file’s BLAKE3 digest and
+  byte length, and `cargo xtask chaos` prints those digests alongside local
+  directories, mirrored publish roots, and derived S3 object keys so operators and
+  CI logs can audit the archive without opening the JSON artefacts. Release
+  packaging shells out to
   `cargo xtask chaos --out-dir releases/<tag>/chaos` inside
   `scripts/release_provenance.sh`, refusing to tag when the snapshot/diff/overlay/
   provider failover artefacts or manifests are missing or fail the gating

@@ -959,6 +959,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "cli_core",
+ "crypto_suite",
  "dependency_guard",
  "diagnostics",
  "foundation_serialization",

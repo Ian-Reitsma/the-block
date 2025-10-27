@@ -3,11 +3,10 @@
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey, SIGNATURE_LENGTH};
 use foundation_serialization::json::{Map, Value};
-use foundation_serialization::{Deserialize, Serialize};
 use std::fmt;
 
 /// Modules orchestrated by the WAN chaos harness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChaosModule {
     Overlay,
     Storage,
@@ -40,7 +39,7 @@ impl fmt::Display for ChaosModule {
 }
 
 /// Provider classifications used by the WAN chaos harness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ChaosProviderKind {
     /// Catch-all classification when the provider kind is not specified.
     #[default]
@@ -85,16 +84,15 @@ impl fmt::Display for ChaosProviderKind {
 }
 
 /// Per-site readiness information tracked alongside module readiness.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChaosSiteReadiness {
     pub site: String,
     pub readiness: f64,
-    #[serde(default)]
     pub provider_kind: ChaosProviderKind,
 }
 
 /// Unsigned readiness snapshot produced by the chaos harness.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChaosAttestationDraft {
     pub scenario: String,
     pub module: ChaosModule,
@@ -104,7 +102,6 @@ pub struct ChaosAttestationDraft {
     pub window_start: u64,
     pub window_end: u64,
     pub issued_at: u64,
-    #[serde(default)]
     pub site_readiness: Vec<ChaosSiteReadiness>,
 }
 
@@ -142,7 +139,7 @@ impl ChaosAttestationDraft {
 }
 
 /// Cryptographically signed readiness attestation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChaosAttestation {
     pub scenario: String,
     pub module: ChaosModule,
@@ -155,7 +152,6 @@ pub struct ChaosAttestation {
     pub signer: [u8; 32],
     pub signature: [u8; SIGNATURE_LENGTH],
     pub digest: [u8; 32],
-    #[serde(default)]
     pub site_readiness: Vec<ChaosSiteReadiness>,
 }
 
@@ -458,7 +454,7 @@ pub fn verify_attestation(attestation: &ChaosAttestation) -> Result<(), ChaosAtt
 }
 
 /// Aggregated readiness snapshot used by dashboards and operator tooling.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChaosReadinessSnapshot {
     pub scenario: String,
     pub module: ChaosModule,

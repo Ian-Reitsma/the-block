@@ -231,10 +231,13 @@ const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_a
 const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL: &str = "explorer_block_payout_ad_it_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN: &str =
     "explorer_block_payout_read_last_seen_timestamp";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
     "explorer_block_payout_ad_last_seen_timestamp";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN: &str =
+    "explorer_block_payout_ad_it_last_seen_timestamp";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -442,6 +445,7 @@ pub struct AppState {
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     explorer_read_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     explorer_ad_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
+    explorer_ad_it_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     bridge_hooks: BridgeRemediationHooks,
@@ -525,6 +529,7 @@ impl AppState {
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_read_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_ad_payout_counters: Arc::new(Mutex::new(HashMap::new())),
+            explorer_ad_it_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             bridge_hooks: BridgeRemediationHooks::from_env(),
@@ -1593,6 +1598,14 @@ impl AppState {
             &registry.explorer_block_payout_ad_total,
             &registry.explorer_block_payout_ad_last_seen,
         );
+        self.record_explorer_payout_metric(
+            peer_id,
+            metrics,
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
+            &self.explorer_ad_it_payout_counters,
+            &registry.explorer_block_payout_ad_it_total,
+            &registry.explorer_block_payout_ad_it_last_seen,
+        );
     }
 
     fn record_explorer_payout_metric(
@@ -1729,8 +1742,10 @@ struct AggregatorMetrics {
     bridge_remediation_spool_artifacts: Gauge,
     explorer_block_payout_read_total: CounterVec,
     explorer_block_payout_ad_total: CounterVec,
+    explorer_block_payout_ad_it_total: CounterVec,
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
+    explorer_block_payout_ad_it_last_seen: GaugeVec,
     ad_readiness_ready: Gauge,
     ad_readiness_unique_viewers: Gauge,
     ad_readiness_host_count: Gauge,
@@ -1739,6 +1754,10 @@ struct AggregatorMetrics {
     ad_readiness_min_unique_viewers: Gauge,
     ad_readiness_min_host_count: Gauge,
     ad_readiness_min_provider_count: Gauge,
+    ad_readiness_total_usd_micros: Gauge,
+    ad_readiness_settlement_count: Gauge,
+    ad_readiness_ct_price_usd_micros: Gauge,
+    ad_readiness_it_price_usd_micros: Gauge,
     chaos_readiness: GaugeVec,
     chaos_site_readiness: GaugeVec,
     chaos_breach_total: Counter,
@@ -2069,6 +2088,22 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
         let host_count = readiness_obj.get("host_count")?.as_u64()?;
         let provider_count = readiness_obj.get("provider_count")?.as_u64()?;
         let last_updated = readiness_obj.get("last_updated")?.as_u64()?;
+        let total_usd_micros = readiness_obj
+            .get("total_usd_micros")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let settlement_count = readiness_obj
+            .get("settlement_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let ct_price_usd_micros = readiness_obj
+            .get("ct_price_usd_micros")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let it_price_usd_micros = readiness_obj
+            .get("it_price_usd_micros")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let blockers = readiness_obj
             .get("blockers")
             .and_then(Value::as_array)
@@ -2090,6 +2125,10 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
             provider_count,
             blockers,
             last_updated,
+            total_usd_micros,
+            settlement_count,
+            ct_price_usd_micros,
+            it_price_usd_micros,
         })
     });
 
@@ -2219,6 +2258,14 @@ impl AggregatorMetrics {
                     .set(snapshot.min_host_count as f64);
                 self.ad_readiness_min_provider_count
                     .set(snapshot.min_provider_count as f64);
+                self.ad_readiness_total_usd_micros
+                    .set(snapshot.total_usd_micros as f64);
+                self.ad_readiness_settlement_count
+                    .set(snapshot.settlement_count as f64);
+                self.ad_readiness_ct_price_usd_micros
+                    .set(snapshot.ct_price_usd_micros as f64);
+                self.ad_readiness_it_price_usd_micros
+                    .set(snapshot.it_price_usd_micros as f64);
             }
             None => {
                 self.ad_readiness_ready.set(0.0);
@@ -2229,6 +2276,10 @@ impl AggregatorMetrics {
                 self.ad_readiness_min_unique_viewers.set(0.0);
                 self.ad_readiness_min_host_count.set(0.0);
                 self.ad_readiness_min_provider_count.set(0.0);
+                self.ad_readiness_total_usd_micros.set(0.0);
+                self.ad_readiness_settlement_count.set(0.0);
+                self.ad_readiness_ct_price_usd_micros.set(0.0);
+                self.ad_readiness_it_price_usd_micros.set(0.0);
             }
         }
     }
@@ -3053,6 +3104,21 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &explorer_block_payout_ad_total,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
     );
+    let explorer_block_payout_ad_it_total = CounterVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
+            "Advertising IT routed to each role from finalized blocks",
+        ),
+        &LABEL_ROLE,
+    )
+    .expect("build explorer_block_payout_ad_it_total counter vec");
+    registry
+        .register(Box::new(explorer_block_payout_ad_it_total.clone()))
+        .expect("register explorer_block_payout_ad_it_total");
+    seed_role_counter(
+        &explorer_block_payout_ad_it_total,
+        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
+    );
     let explorer_block_payout_read_last_seen = GaugeVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
@@ -3080,6 +3146,20 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     seed_role_gauge(
         &explorer_block_payout_ad_last_seen,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
+    );
+    let explorer_block_payout_ad_it_last_seen = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
+            "Unix timestamp of the most recent advertising IT payout per role",
+        ),
+        &LABEL_ROLE,
+    );
+    registry
+        .register(Box::new(explorer_block_payout_ad_it_last_seen.clone()))
+        .expect("register explorer_block_payout_ad_it_last_seen");
+    seed_role_gauge(
+        &explorer_block_payout_ad_it_last_seen,
+        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
     );
     let ad_readiness_ready = registry
         .register_gauge(
@@ -3137,6 +3217,34 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         )
         .expect("register ad_readiness_min_provider_count");
     ad_readiness_min_provider_count.set(0.0);
+    let ad_readiness_total_usd_micros = registry
+        .register_gauge(
+            "ad_readiness_total_usd_micros",
+            "Total USD micros billed from advertising settlements within the readiness window",
+        )
+        .expect("register ad_readiness_total_usd_micros");
+    ad_readiness_total_usd_micros.set(0.0);
+    let ad_readiness_settlement_count = registry
+        .register_gauge(
+            "ad_readiness_settlement_count",
+            "Number of advertising settlements observed within the readiness window",
+        )
+        .expect("register ad_readiness_settlement_count");
+    ad_readiness_settlement_count.set(0.0);
+    let ad_readiness_ct_price_usd_micros = registry
+        .register_gauge(
+            "ad_readiness_ct_price_usd_micros",
+            "Most recent consumer-token oracle price used for advertising settlements",
+        )
+        .expect("register ad_readiness_ct_price_usd_micros");
+    ad_readiness_ct_price_usd_micros.set(0.0);
+    let ad_readiness_it_price_usd_micros = registry
+        .register_gauge(
+            "ad_readiness_it_price_usd_micros",
+            "Most recent industrial-token oracle price used for advertising settlements",
+        )
+        .expect("register ad_readiness_it_price_usd_micros");
+    ad_readiness_it_price_usd_micros.set(0.0);
     let chaos_readiness = GaugeVec::new(
         Opts::new(
             METRIC_CHAOS_READINESS,
@@ -3208,8 +3316,10 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_spool_artifacts,
         explorer_block_payout_read_total,
         explorer_block_payout_ad_total,
+        explorer_block_payout_ad_it_total,
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
+        explorer_block_payout_ad_it_last_seen,
         ad_readiness_ready,
         ad_readiness_unique_viewers,
         ad_readiness_host_count,
@@ -3218,6 +3328,10 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         ad_readiness_min_unique_viewers,
         ad_readiness_min_host_count,
         ad_readiness_min_provider_count,
+        ad_readiness_total_usd_micros,
+        ad_readiness_settlement_count,
+        ad_readiness_ct_price_usd_micros,
+        ad_readiness_it_price_usd_micros,
         chaos_readiness,
         chaos_site_readiness,
         chaos_breach_total,
@@ -8965,6 +9079,10 @@ mod tests {
     fn telemetry_summary_updates_readiness_gauges() {
         let metrics = aggregator_metrics();
         metrics.record_ad_readiness(None);
+        assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("tok".into(), dir.path().join("ad_ready.json"), 60);
         let readiness = AdReadinessTelemetry {
@@ -8978,6 +9096,10 @@ mod tests {
             provider_count: 2,
             blockers: Vec::new(),
             last_updated: 77,
+            total_usd_micros: 1_500,
+            settlement_count: 4,
+            ct_price_usd_micros: 2_500,
+            it_price_usd_micros: 5_000,
         };
         let summary = TelemetrySummary {
             node_id: "node-ready".to_string(),
@@ -8998,6 +9120,10 @@ mod tests {
         assert_eq!(metrics.ad_readiness_min_unique_viewers.get(), 2.0);
         assert_eq!(metrics.ad_readiness_min_host_count.get(), 1.0);
         assert_eq!(metrics.ad_readiness_min_provider_count.get(), 1.0);
+        assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 1_500.0);
+        assert_eq!(metrics.ad_readiness_settlement_count.get(), 4.0);
+        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 2_500.0);
+        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 5_000.0);
 
         let mut cleared = summary;
         cleared.seq = 11;
@@ -9012,6 +9138,10 @@ mod tests {
         assert_eq!(metrics.ad_readiness_min_unique_viewers.get(), 0.0);
         assert_eq!(metrics.ad_readiness_min_host_count.get(), 0.0);
         assert_eq!(metrics.ad_readiness_min_provider_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
     }
 
     #[test]

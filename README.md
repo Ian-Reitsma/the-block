@@ -731,7 +731,15 @@ utility emits provider-aware diff artefacts plus `chaos_provider_failover.json`
 so long-running overlay soaks can alert on churn and simulated outages without
 leaving first-party tooling. `cargo xtask chaos` consumes those artefacts to
 block releases when overlays regress (readiness drops, removed sites, or missing
-failover diffs). `scripts/release_provenance.sh` runs `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing binaries and fails when the gate trips, and `scripts/verify_release.sh` rejects archives that omit the snapshot/diff/overlay/provider failover JSON payloads, keeping the release process on the same first-party guardrails. Node listeners now share a
+failover diffs), and now prints the manifest/bundle BLAKE3 digests alongside
+local paths and S3 object keys so dashboards and CI logs can audit archives
+without fetching JSON. `foundation_object_store` handles uploads with a
+canonical-request regression and blocking harness proving AWS Signature V4
+headers match the published examples while honouring
+`TB_CHAOS_ARCHIVE_RETRIES` (minimum 1) and optional
+`TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps for reproducible signatures.
+`scripts/release_provenance.sh` runs `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing binaries and fails when the gate trips, and `scripts/verify_release.sh` rejects archives that omit the snapshot/diff/overlay/provider failover JSON payloads or whose manifest digests do not match the on-disk files, keeping the release process on the same first-party guardrails.
+Node listeners now share a
 `gossip_listener_bind_failed`/`rpc_listener_bind_failed`/`status_listener_bind_failed`/
 `explorer_listener_bind_failed`
 warning family, ensuring occupied sockets surface in telemetry while the process

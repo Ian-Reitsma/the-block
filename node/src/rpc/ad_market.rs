@@ -17,9 +17,20 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
     };
     let campaigns = handle.list_campaigns();
     let distribution = handle.distribution();
+    let oracle = handle.oracle();
     let mut root = Map::new();
     root.insert("status".into(), Value::String("ok".into()));
     root.insert("distribution".into(), distribution_to_value(distribution));
+    let mut oracle_map = Map::new();
+    oracle_map.insert(
+        "ct_price_usd_micros".into(),
+        Value::Number(Number::from(oracle.ct_price_usd_micros)),
+    );
+    oracle_map.insert(
+        "it_price_usd_micros".into(),
+        Value::Number(Number::from(oracle.it_price_usd_micros)),
+    );
+    root.insert("oracle".into(), Value::Object(oracle_map));
     let items: Vec<Value> = campaigns
         .into_iter()
         .map(|campaign| {
@@ -30,8 +41,8 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
                 Value::String(campaign.advertiser_account),
             );
             entry.insert(
-                "remaining_budget_ct".into(),
-                Value::Number(Number::from(campaign.remaining_budget_ct)),
+                "remaining_budget_usd_micros".into(),
+                Value::Number(Number::from(campaign.remaining_budget_usd_micros)),
             );
             entry.insert(
                 "creatives".into(),
@@ -41,6 +52,31 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
         })
         .collect();
     root.insert("campaigns".into(), Value::Array(items));
+    let pricing: Vec<Value> = handle
+        .cohort_prices()
+        .into_iter()
+        .map(|snapshot| {
+            let mut entry = Map::new();
+            entry.insert("domain".into(), Value::String(snapshot.domain));
+            if let Some(provider) = snapshot.provider {
+                entry.insert("provider".into(), Value::String(provider));
+            }
+            entry.insert(
+                "badges".into(),
+                Value::Array(snapshot.badges.into_iter().map(Value::String).collect()),
+            );
+            entry.insert(
+                "price_per_mib_usd_micros".into(),
+                Value::Number(Number::from(snapshot.price_per_mib_usd_micros)),
+            );
+            entry.insert(
+                "target_utilization_ppm".into(),
+                Value::Number(Number::from(snapshot.target_utilization_ppm)),
+            );
+            Value::Object(entry)
+        })
+        .collect();
+    root.insert("cohort_prices".into(), Value::Array(pricing));
     Value::Object(root)
 }
 
@@ -102,14 +138,49 @@ pub fn readiness(
         "last_updated".into(),
         Value::Number(Number::from(snapshot.last_updated)),
     );
+    root.insert(
+        "total_usd_micros".into(),
+        Value::Number(Number::from(snapshot.total_usd_micros)),
+    );
+    root.insert(
+        "settlement_count".into(),
+        Value::Number(Number::from(snapshot.settlement_count)),
+    );
+    root.insert(
+        "ct_price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.ct_price_usd_micros)),
+    );
+    root.insert(
+        "it_price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.it_price_usd_micros)),
+    );
     let blockers: Vec<Value> = snapshot.blockers.into_iter().map(Value::String).collect();
     root.insert("blockers".into(), Value::Array(blockers));
+    let mut oracle_map = Map::new();
+    oracle_map.insert(
+        "snapshot_ct_price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.ct_price_usd_micros)),
+    );
+    oracle_map.insert(
+        "snapshot_it_price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.it_price_usd_micros)),
+    );
     if let Some(handle) = market {
+        let oracle = handle.oracle();
+        oracle_map.insert(
+            "market_ct_price_usd_micros".into(),
+            Value::Number(Number::from(oracle.ct_price_usd_micros)),
+        );
+        oracle_map.insert(
+            "market_it_price_usd_micros".into(),
+            Value::Number(Number::from(oracle.it_price_usd_micros)),
+        );
         root.insert(
             "distribution".into(),
             distribution_to_value(handle.distribution()),
         );
     }
+    root.insert("oracle".into(), Value::Object(oracle_map));
     Value::Object(root)
 }
 
@@ -159,6 +230,10 @@ fn distribution_to_value(policy: DistributionPolicy) -> Value {
     map.insert(
         "liquidity_percent".into(),
         Value::Number(Number::from(policy.liquidity_percent)),
+    );
+    map.insert(
+        "liquidity_split_ct_ppm".into(),
+        Value::Number(Number::from(policy.liquidity_split_ct_ppm)),
     );
     Value::Object(map)
 }

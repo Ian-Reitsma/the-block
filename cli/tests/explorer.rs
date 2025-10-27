@@ -23,6 +23,15 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
     let ad_verifier = 5u64;
     let ad_liquidity = 5u64;
     let ad_miner = 10u64;
+    let ad_host_it = 9u64;
+    let ad_hardware_it = 6u64;
+    let ad_verifier_it = 4u64;
+    let ad_liquidity_it = 3u64;
+    let ad_miner_it = 2u64;
+    let ad_total_usd_micros = 88_000u64;
+    let ad_settlement_count = 5u64;
+    let ad_ct_price = 1_250_000u64;
+    let ad_it_price = 970_000u64;
     let zeros = format!("{:?}", [0u8; 32]);
 
     let block_json = format!(
@@ -50,6 +59,15 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
             "ad_verifier_ct": {ad_verifier},
             "ad_liquidity_ct": {ad_liquidity},
             "ad_miner_ct": {ad_miner},
+            "ad_host_it": {ad_host_it},
+            "ad_hardware_it": {ad_hardware_it},
+            "ad_verifier_it": {ad_verifier_it},
+            "ad_liquidity_it": {ad_liquidity_it},
+            "ad_miner_it": {ad_miner_it},
+            "ad_total_usd_micros": {ad_total_usd_micros},
+            "ad_settlement_count": {ad_settlement_count},
+            "ad_oracle_ct_price_usd_micros": {ad_ct_price},
+            "ad_oracle_it_price_usd_micros": {ad_it_price},
             "compute_sub_ct": 0,
             "proof_rebate_ct": 0,
             "storage_sub_it": 0,
@@ -100,8 +118,21 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
         breakdown.advertising.total_ct,
         ad_viewer + ad_host + ad_hardware + ad_verifier + ad_liquidity + ad_miner
     );
+    assert_eq!(
+        breakdown.advertising.total_it,
+        ad_host_it + ad_hardware_it + ad_verifier_it + ad_liquidity_it + ad_miner_it
+    );
     assert_eq!(breakdown.advertising.viewer_ct, ad_viewer);
     assert_eq!(breakdown.advertising.miner_ct, ad_miner);
+    assert_eq!(breakdown.advertising.host_it, ad_host_it);
+    assert_eq!(breakdown.advertising.hardware_it, ad_hardware_it);
+    assert_eq!(breakdown.advertising.verifier_it, ad_verifier_it);
+    assert_eq!(breakdown.advertising.liquidity_it, ad_liquidity_it);
+    assert_eq!(breakdown.advertising.miner_it, ad_miner_it);
+    assert_eq!(breakdown.total_usd_micros, ad_total_usd_micros);
+    assert_eq!(breakdown.settlement_count, ad_settlement_count);
+    assert_eq!(breakdown.ct_price_usd_micros, ad_ct_price);
+    assert_eq!(breakdown.it_price_usd_micros, ad_it_price);
 
     let mut height_output = Vec::new();
     handle_with_writer(
@@ -120,6 +151,7 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
         .expect("payout breakdown by height");
     assert_eq!(height_breakdown.read_subsidy.liquidity_ct, read_liquidity);
     assert_eq!(height_breakdown.advertising.liquidity_ct, ad_liquidity);
+    assert_eq!(height_breakdown.advertising.liquidity_it, ad_liquidity_it);
 }
 
 #[test]
@@ -220,6 +252,15 @@ fn block_payouts_supports_table_and_prometheus_formats() {
         "ad_verifier_ct": 30,
         "ad_liquidity_ct": 15,
         "ad_miner_ct": 12,
+        "ad_host_it": 33,
+        "ad_hardware_it": 21,
+        "ad_verifier_it": 12,
+        "ad_liquidity_it": 6,
+        "ad_miner_it": 3,
+        "ad_total_usd_micros": 64000,
+        "ad_settlement_count": 4,
+        "ad_oracle_ct_price_usd_micros": 1100000,
+        "ad_oracle_it_price_usd_micros": 930000,
         "compute_sub_ct": 0,
         "proof_rebate_ct": 0,
         "storage_sub_it": 0,
@@ -258,6 +299,8 @@ fn block_payouts_supports_table_and_prometheus_formats() {
     assert!(rendered_table.contains("viewer"));
     assert!(rendered_table.contains("600"));
     assert!(rendered_table.contains("252"));
+    assert!(rendered_table.contains("33"));
+    assert!(rendered_table.contains("ad_total_usd_micros: 64000"));
 
     let mut prom_output = Vec::new();
     handle_with_writer(
@@ -273,4 +316,6 @@ fn block_payouts_supports_table_and_prometheus_formats() {
     let rendered_prom = String::from_utf8(prom_output).expect("utf8 prom");
     assert!(rendered_prom.contains("explorer_block_payout_read_total{role=\"viewer\"} 200"));
     assert!(rendered_prom.contains("explorer_block_payout_ad_total{role=\"miner\"} 12"));
+    assert!(rendered_prom.contains("explorer_block_payout_ad_it_total{role=\"host\"} 33"));
+    assert!(rendered_prom.contains("explorer_block_payout_ad_usd_total 64000"));
 }

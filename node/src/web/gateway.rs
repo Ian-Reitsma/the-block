@@ -595,6 +595,7 @@ mod tests {
     use crate::storage::pipeline;
     use ad_market::{
         Campaign, CampaignTargeting, Creative, DistributionPolicy, InMemoryMarketplace,
+        MarketplaceConfig, MICROS_PER_DOLLAR,
     };
     use httpd::{Method, Router, StatusCode};
     use runtime::sync::mpsc;
@@ -779,15 +780,21 @@ mod tests {
     #[test]
     fn static_read_attaches_campaign_metadata() {
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
-        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig {
+            distribution,
+            ..MarketplaceConfig::default()
+        }));
         market
             .register_campaign(Campaign {
                 id: "cmp1".to_string(),
                 advertiser_account: "adv1".to_string(),
-                budget_ct: 10_000,
+                budget_usd_micros: 10 * MICROS_PER_DOLLAR,
                 creatives: vec![Creative {
                     id: "creative1".to_string(),
-                    price_per_mib_ct: 120,
+                    action_rate_ppm: 500_000,
+                    margin_ppm: 800_000,
+                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
@@ -858,15 +865,21 @@ mod tests {
         pipeline::clear_test_static_blobs();
 
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
-        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig {
+            distribution,
+            ..MarketplaceConfig::default()
+        }));
         market
             .register_campaign(Campaign {
                 id: "cmp-ready".to_string(),
                 advertiser_account: "adv-ready".to_string(),
-                budget_ct: 8_000,
+                budget_usd_micros: 6 * MICROS_PER_DOLLAR,
                 creatives: vec![Creative {
                     id: "creative-ready".to_string(),
-                    price_per_mib_ct: 128,
+                    action_rate_ppm: 450_000,
+                    margin_ppm: 800_000,
+                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR),
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
@@ -984,15 +997,21 @@ mod tests {
         service_badge::set_physical_presence("gateway-ldn-01", true);
 
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
-        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(distribution));
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig {
+            distribution,
+            ..MarketplaceConfig::default()
+        }));
         market
             .register_campaign(Campaign {
                 id: "cmp-badge".to_string(),
                 advertiser_account: "adv-badge".to_string(),
-                budget_ct: 5_000,
+                budget_usd_micros: 4 * MICROS_PER_DOLLAR,
                 creatives: vec![Creative {
                     id: "creative-badge".to_string(),
-                    price_per_mib_ct: 64,
+                    action_rate_ppm: 300_000,
+                    margin_ppm: 900_000,
+                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),

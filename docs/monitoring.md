@@ -118,7 +118,14 @@ and the provider failover matrix with pure `std` collections. The command now
 enforces release gating by failing when overlay readiness drops, sites disappear,
 or provider failover drills do not register diffs, printing the captured diff
 count alongside per-scenario readiness transitions so release managers can review
-everything without external dashboards.
+everything without external dashboards. It also prints the BLAKE3 digest and byte
+length for the manifest and bundle plus the mirrored filesystem paths or derived
+S3 object keys so operators and CI logs can audit archives without opening JSON
+blobs. Uploads ride the bespoke `foundation_object_store` client, which now ships
+a canonical-request regression and blocking upload harness that prove AWS Signature
+V4 headers match the published examples while honouring `TB_CHAOS_ARCHIVE_RETRIES`
+(minimum 1) and optional `TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps for reproducible
+signatures.
 
 The release tooling now bakes this gate into the provenance workflow.  Before
 hashing build artefacts, `scripts/release_provenance.sh` shells out to
@@ -148,22 +155,26 @@ flushes while logging clock rollback warnings. Operators still get readiness
 updates, but no panic escapes into CI or long-running chaos rehearsals.
 
 The dashboard generator now inserts a “Block Payouts” row ahead of the bridge
-section. Panels chart `sum by (role)(increase(explorer_block_payout_read_total[5m]))`
-and `sum by (role)(increase(explorer_block_payout_ad_total[5m]))`, rendering the
-per-role read-subsidy and advertising totals mined from block headers so
-operations can compare viewer/host/hardware/verifier/liquidity/miner splits
-without scraping SQLite directly. Legends remain enabled by default, letting
-operators focus on specific roles or compare read versus advertising flows in
-the same pane.
+section. Panels chart `sum by (role)(increase(explorer_block_payout_read_total[5m]))`,
+`sum by (role)(increase(explorer_block_payout_ad_total[5m]))`, and
+`sum by (role)(increase(explorer_block_payout_ad_it_total[5m]))`, rendering the
+per-role read-subsidy, consumer-token advertising, and industrial-token
+advertising totals mined from block headers so operations can compare
+viewer/host/hardware/verifier/liquidity/miner splits without scraping SQLite
+directly. Legends remain enabled by default, letting operators focus on
+specific roles or compare read versus dual-token advertising flows in the same
+pane.
 
 An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
-`ad_readiness_provider_count`, and configured minimums, while a table lists the
-active blockers surfaced by `ad_market.readiness`. A counter panel charts
-`increase(ad_readiness_skipped_total[5m])` by reason so operators can spot
-insufficient viewer/host/provider diversity before enabling the ad rail. The
-HTML snapshot renders the same panels, keeping FIRST_PARTY_ONLY monitoring in
-sync with the Grafana templates.
+`ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
+`ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`,
+`ad_readiness_it_price_usd_micros`, and the configured minimums, while a table
+lists the active blockers surfaced by `ad_market.readiness`. A counter panel
+charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
+spot insufficient viewer/host/provider diversity before enabling the ad rail.
+The HTML snapshot renders the same panels, keeping FIRST_PARTY_ONLY monitoring
+in sync with the Grafana templates.
 
 The metrics aggregator now persists the explorer payout counters per peer and
 role so deltas remain monotonic across scrapes.
@@ -174,14 +185,14 @@ Unix timestamp to
 `explorer_block_payout_{read,ad}_last_seen_timestamp{role}` whenever a role
 advances, giving Prometheus a direct way to measure staleness via
 `time() - gauge`. The integration suite ingests two payloads and asserts that
-`explorer_block_payout_read_total`/`_ad_total` report the latest totals on the
-second `/metrics` scrape and that the last-seen gauges bump alongside the
-deltas, guaranteeing the Grafana row and Prometheus assertions continue to plot
-live data end-to-end. A churn-focused regression alternates viewer/host/hardware
-and viewer/miner/liquidity samples so the cache proves it ignores regressions
-even when peers rotate advertised roles between scrapes, while the new
-`ExplorerReadPayoutStalled`/`ExplorerAdPayoutStalled` alerts warn when any role
-stays flat for thirty minutes after reporting non-zero totals.
+`explorer_block_payout_read_total`, `_ad_total`, and `_ad_it_total` report the
+latest totals on the second `/metrics` scrape and that the last-seen gauges bump
+alongside the deltas, guaranteeing the Grafana row and Prometheus assertions
+continue to plot live data end-to-end. A churn-focused regression alternates
+viewer/host/hardware and viewer/miner/liquidity samples so the cache proves it
+ignores regressions even when peers rotate advertised roles between scrapes,
+while the new `ExplorerReadPayoutStalled`/`ExplorerAdPayoutStalled` alerts warn
+when any role stays flat for thirty minutes after reporting non-zero totals.
 
 The Grafana templates under `monitoring/grafana/` now dedicate a "Bridge" row to
 the newly instrumented counters. Panels plot five-minute deltas for

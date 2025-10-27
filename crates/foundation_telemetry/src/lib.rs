@@ -27,6 +27,14 @@ pub struct AdReadinessTelemetry {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub blockers: Vec<String>,
     pub last_updated: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub total_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub settlement_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub ct_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub it_price_usd_micros: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -176,6 +184,10 @@ impl TelemetrySummary {
                     "host_count",
                     "provider_count",
                     "last_updated",
+                    "total_usd_micros",
+                    "settlement_count",
+                    "ct_price_usd_micros",
+                    "it_price_usd_micros",
                 ] {
                     let field_path = child_path(&readiness_path, field);
                     expect_u64_field(readiness, field, &field_path)?;
