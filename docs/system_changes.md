@@ -1,4 +1,15 @@
 # System-Wide Economic Changes
+> **Review (2025-10-27, afternoon):** The chaos pipeline now fetches
+> `/chaos/status` baselines and overlays entirely via first-party helpers.
+> `sim/chaos_lab.rs` issues HTTP requests through `httpd::BlockingClient`,
+> decodes the payload with `foundation_serialization::json::Value`, and persists
+> both status diffs and overlay readiness rows so soak automation can diff
+> provider-aware regressions without serde derives or external clients. The same
+> JSON feeds `cargo xtask chaos`, which summarises module totals, scenario
+> readiness, provider churn, readiness improvements/regressions, and duplicate
+> site detection using only `std` collections. Existing provider-labelled gauges,
+> signed attestations, and bind-warning unification remain intact, keeping the
+> end-to-end WAN chaos workflow wholly first party.
 > **Review (2025-10-27, early morning):** Chaos readiness snapshots now carry
 > provider labels end-to-end. `SiteReadinessState` stores provider kind
 > alongside readiness, `ChaosHarness` emits mixed-provider attestations, and the
@@ -9,9 +20,59 @@
 > on regressions, and `metrics-aggregator::tests::chaos_site_updates_remove_stale_entries`
 > plus `sim/tests/chaos_harness.rs::reconfiguring_sites_replaces_previous_entries`
 > guard topology churn. Listener startup is now standardised through
-> `node/src/net/listener.rs`, which wraps gossip, RPC, gateway, and status
-> servers with uniform `*_listener_bind_failed` warnings and returns `io::Result`
-> so tests like `node/tests/rpc_bind.rs` can assert bind failures no longer panic.
+> `node/src/net/listener.rs`, which wraps gossip, RPC, gateway, status, and
+> explorer servers with uniform `*_listener_bind_failed` warnings and returns
+> `io::Result` so tests like `node/tests/rpc_bind.rs` can assert bind failures no
+> longer panic while the explorer HTTP listener emits the same warning signal.
+
+## Chaos Failover Release Gating (2025-10-27)
+
+### Rationale
+
+- **Detect multi-provider outages automatically:** Long-running soak jobs need
+  a deterministic way to prove that overlay provider failures trigger
+  `/chaos/status` diffs before releases advance.
+- **Keep release gating first party:** Prior guardrails still required manual
+  dashboard review; the gating path now has to fail closed without leaving the
+  repository.
+- **Preserve CLI ban tooling guarantees:** The expanded failure harness needed
+  complementary success coverage so operators retain warning-free flows while
+  storage errors still surface.
+
+### Implementation Summary
+
+- Added `provider_failover_reports` to `sim/chaos_lab.rs`, emitting
+  `chaos_provider_failover.json` and returning errors when any provider outage
+  fails to drop readiness or register a `/chaos/status` diff. The helper
+  synthesises per-provider snapshots, recomputes readiness, and persists
+  scenario-level summaries for automation.
+- Taught `cargo xtask chaos` to parse the status diff and provider failover
+  artefacts, print per-scenario readiness transitions, and gate releases on
+  overlay regressions (readiness drops, removed sites, or missing failover
+  diffs). The command now exports actionable logs while keeping all processing
+  on `std` collections.
+- Wired `scripts/release_provenance.sh` to call
+  `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing build
+  artefacts, fail the release when the chaos gate trips, and store the captured
+  snapshot/diff/overlay/provider failover JSON files inside the release
+  directory. `scripts/verify_release.sh` now refuses archives that omit those
+  artefacts, so downstream consumers inherit the same guardrails.
+- Extended the ban CLI harness with positive-path smoke tests covering
+  `ban`, `unban`, and `list` so the new failure injections are balanced by
+  success regressions that guard metrics updates and warning-free output.
+
+### Operational Impact
+
+- **Release gating** halts automatically when mixed-provider overlays regress,
+  ensuring tags never land with undetected readiness drops or missing failover
+  telemetry; the provenance script now fails closed if the chaos harness trips,
+  and the verifier rejects archives that omit the `chaos/` artefacts.
+- **Soak automation** can feed `chaos_provider_failover.json` into the WAN lab,
+  diff `/chaos/status` artefacts, and archive provider/site deltas without
+  stitching together external tools.
+- **CLI operators** gain confidence that successful ban flows continue to update
+  sled-backed metrics without emitting new warnings, complementing the existing
+  failure-path coverage.
 > **Review (2025-10-26, late night):** The WAN chaos lab is now baked into the
 > simulation harness (`sim/src/chaos.rs`) with weighted `ChaosSite` entries and
 > exposed via the `chaos_lab` binary. Signed readiness attestations feed the

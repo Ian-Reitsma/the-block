@@ -20,6 +20,7 @@ use foundation_metrics::{self, Recorder as MetricsRecorder};
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 use httpd::{BlockingClient, Method};
+#[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
     self, Encoder, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec, IntCounter,
@@ -5693,7 +5694,6 @@ impl Drop for MetricsServer {
 
 pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServer)> {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::sync::{atomic::AtomicBool, Arc};
     use std::time::Duration;
 

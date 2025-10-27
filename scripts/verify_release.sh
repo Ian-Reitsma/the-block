@@ -86,3 +86,29 @@ if [ -n "$vendor_hash" ]; then
 else
   echo "warning: vendor hash missing from $CHECKS" >&2
 fi
+
+chaos_dir="$(dirname "$ARCHIVE")/chaos"
+if [ -d "$chaos_dir" ]; then
+  echo "Chaos verification artifacts present:"
+  missing=0
+  for artifact in \
+    "status.snapshot.json" \
+    "status.diff.json" \
+    "overlay.readiness.json" \
+    "provider.failover.json"
+  do
+    path="$chaos_dir/$artifact"
+    if [ -s "$path" ]; then
+      echo "  $(basename "$path")"
+    else
+      echo "  missing or empty: $artifact" >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    exit 1
+  fi
+else
+  echo "warning: chaos verification artifacts missing (expected directory $chaos_dir)" >&2
+  exit 1
+fi

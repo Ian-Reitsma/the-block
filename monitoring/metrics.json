@@ -1632,11 +1632,12 @@
     },
     {
       "deprecated": false,
-      "description": "Chaos readiness grouped by module, scenario, and site",
+      "description": "Chaos readiness grouped by module, scenario, site, and provider",
       "labels": [
         "module",
         "scenario",
-        "site"
+        "site",
+        "provider"
       ],
       "name": "chaos_site_readiness",
       "unit": "ratio"

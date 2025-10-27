@@ -781,6 +781,7 @@ dependencies = [
  "foundation_serde",
  "foundation_serialization",
  "foundation_time",
+ "httpd",
  "ledger",
  "light-client",
  "monitoring-build",
@@ -947,6 +948,7 @@ dependencies = [
  "dependency_guard",
  "diagnostics",
  "foundation_serialization",
+ "monitoring-build",
  "sys",
 ]
 

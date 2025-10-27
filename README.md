@@ -727,9 +727,13 @@ The compute marketplace's cancellation API integrates with telemetry: calling
 `scheduler_cancel_total{reason}` and the node refunds any locked bonds.
 Chaos automation now exports provider-labelled readiness snapshots through
 `chaos_site_readiness{module,scenario,site,provider}`, and the `chaos_lab`
-utility emits provider-aware diff artefacts so long-running overlay soaks can
-alert on churn without leaving first-party tooling. Node listeners now share a
-`gossip_listener_bind_failed`/`rpc_listener_bind_failed`/`status_listener_bind_failed`
+utility emits provider-aware diff artefacts plus `chaos_provider_failover.json`
+so long-running overlay soaks can alert on churn and simulated outages without
+leaving first-party tooling. `cargo xtask chaos` consumes those artefacts to
+block releases when overlays regress (readiness drops, removed sites, or missing
+failover diffs). `scripts/release_provenance.sh` runs `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing binaries and fails when the gate trips, and `scripts/verify_release.sh` rejects archives that omit the snapshot/diff/overlay/provider failover JSON payloads, keeping the release process on the same first-party guardrails. Node listeners now share a
+`gossip_listener_bind_failed`/`rpc_listener_bind_failed`/`status_listener_bind_failed`/
+`explorer_listener_bind_failed`
 warning family, ensuring occupied sockets surface in telemetry while the process
 continues running.
 

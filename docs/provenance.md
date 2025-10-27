@@ -38,6 +38,14 @@ the vendored source tree before any binaries are built:
   `vendor-sha256.txt` and the provenance record. Consumers can compare the
   digest against a locally generated vendor tree to confirm there were no
   supply-chain substitutions between the policy check and the final build.
+- Before hashing binaries, the release script shells out to
+  `cargo xtask chaos --out-dir releases/<tag>/chaos`, ensuring the chaos harness
+  runs with the same first-party tooling, provider failover drills, and
+  readiness diff checks that gate CI. The script refuses to continue when the
+  gate fails or when any of the snapshot/diff/overlay/provider failover JSON
+  artefacts are missing, and the companion verifier aborts when a published
+  archive omits them, keeping provenance evidence aligned with readiness
+  automation.
 - `tools/vendor_sync` streamlines updates to the committed `vendor/` directory
   and supports a `--check` mode used by CI to guarantee that the workspace is
   already in sync before the release job starts. This keeps reproducible builds

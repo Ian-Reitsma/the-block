@@ -1,5 +1,21 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-27 update (chaos failover gating & CLI smoke tests):**
+> `sim/chaos_lab.rs::provider_failover_reports` synthesises provider outages, writes `chaos_provider_failover.json`, and errors when a failover fails to drop readiness or produce a `/chaos/status` diff. `cargo xtask chaos` loads the diff and failover artefacts, blocks releases on overlay regressions (readiness drops, removed sites, or missing failover diffs), and logs per-scenario readiness transitions. `scripts/release_provenance.sh` now shells out to `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing build artefacts and refuses to continue when the gate fails, while `scripts/verify_release.sh` rejects archives missing the `chaos/` snapshot/diff/overlay/provider failover JSON quartet, keeping provenance checks first party. The ban CLI harness now includes success-path smoke tests for `ban`, `unban`, and `list` alongside the existing failure injections so first-party telemetry stays covered.
+
+> **2025-10-27 update (chaos/status fetch & xtask overlay analytics):**
+> `sim/chaos_lab.rs` now downloads `/chaos/status` baselines with the in-house
+> `httpd::BlockingClient` and manually decodes the payload using
+> `foundation_serialization::json::Value`, mapping fields through
+> `SnapshotDecodeError` helpers so no serde derives or third-party HTTP stacks
+> sneak back in. Baseline arrays and overlay readiness rows persist via `std::fs`
+> and `foundation_serialization` writers, and the new decode path converts
+> provider/site readiness records entirely with first-party enums. The emitted
+> overlay JSON feeds `cargo xtask chaos`, which now parses it through the same
+> facade and summarises modules, scenario readiness, provider churn, readiness
+> regressions, and duplicate site detection using only `std` collections—no
+> external CLIs or telemetry toolkits were introduced.
+
 > **2025-10-27 update (provider-aware chaos & listener helper):** Provider
 > metadata now lives entirely in `sim/src/chaos.rs` via the first-party
 > `ChaosProviderKind` enum, and `SiteReadinessState` stores readiness plus
@@ -11,10 +27,14 @@
 > `metrics-aggregator` deletes outdated label handles with the in-house
 > `GaugeVec` wrapper. Listener startup now routes through
 > `node/src/net/listener.rs`, which simply wraps `std::net::TcpListener`/`UdpSocket`
-> and the existing `diagnostics` logging; RPC, gateway, and status servers emit
-> `*_listener_bind_failed` warnings without introducing async runtimes or third-
-> party bind helpers. The new `node/tests/rpc_bind.rs` regression uses only the
-> shipped test harness to assert the warning surfaces when ports are occupied.
+> and the existing `diagnostics` logging; RPC, gateway, status, and explorer
+> servers emit `*_listener_bind_failed` warnings without introducing async
+> runtimes or third-party bind helpers. The new `node/tests/rpc_bind.rs` and
+> `explorer/tests/explorer_bind.rs` regressions use only the shipped test harness
+> to assert the warnings surface when ports are occupied. The ban CLI now tests
+> storage/list failures through the shared `BanStore` trait so negative paths
+> keep bubbling errors via first-party logging instead of silently mutating
+> metrics.
 
 > **2025-10-26 update (mixed-provider chaos & runtime stubs):** Overlay chaos
 > scenarios now declare weighted `ChaosSite` entries inside `sim/src/chaos.rs`,

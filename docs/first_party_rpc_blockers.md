@@ -19,9 +19,22 @@ RPC client.
   module rollups. The aggregator prunes stale label handles with its in-house
   Prometheus facade and continues to log `chaos_status_tracker_poisoned_recovering`
   via the shared `diagnostics` sink. Listener unification lives in
-  `node/src/net/listener.rs`, wrapping `std::net` types so RPC, gateway, and
-  status servers emit `*_listener_bind_failed` warnings instead of panicking—no
-  new transport crates or async runtimes were required.
+  `node/src/net/listener.rs`, wrapping `std::net` types so RPC, gateway, status,
+  and explorer servers emit `*_listener_bind_failed` warnings instead of
+  panicking—no new transport crates or async runtimes were required. The ban CLI
+  now ships both negative tests (storage/list failures) and positive smoke tests
+  for `ban`, `unban`, and `list`, ensuring telemetry updates stay on the
+  first-party tracing/CLI path.
+- `sim/chaos_lab.rs` fetches `/chaos/status` baselines through the first-party
+  `httpd::BlockingClient` and manually decodes the payload with
+  `foundation_serialization::json::Value`, keeping serde stubs out of the
+  automation path. The binary persists overlay readiness rows for soak pipelines,
+  emits `chaos_provider_failover.json`, and fails when simulated outages do not
+  drop readiness or register `/chaos/status` diffs. `cargo xtask chaos` consumes
+  the emitted JSON via the same facade, reports module counts, readiness
+  regressions/improvements, provider churn, duplicate site detection, and the
+  provider failover matrix, and now blocks releases when overlays regress—no
+  external HTTP clients, CLI frameworks, or analytics toolkits involved. `scripts/release_provenance.sh` runs `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing artefacts and fails when the chaos gate trips, and `scripts/verify_release.sh` rejects archives that omit the snapshot/diff/overlay/provider failover JSON files so downstream RPC surfaces inherit the same guardrail.
 
 ## Recent progress (2025-10-26)
 

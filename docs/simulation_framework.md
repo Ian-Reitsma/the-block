@@ -142,6 +142,31 @@ on payloads.  Operators can feed the generated attestations directly into the
 metrics aggregator `/chaos/attest` endpoint (see
 [`docs/monitoring.md`](monitoring.md)).
 
+Set `TB_CHAOS_STATUS_ENDPOINT` to fetch a live `/chaos/status` baseline before
+the harness runs. `chaos_lab` issues the HTTP request with the in-house
+`httpd::BlockingClient`, enforces a 10-second timeout, and decodes the response
+manually through `foundation_serialization::json::Value`, mapping fields via
+`SnapshotDecodeError` helpers so no serde derives or third-party HTTP stacks are
+required. The decoded snapshots are written to
+`TB_CHAOS_STATUS_BASELINE` (if provided) and diffed against the freshly emitted
+attestations, with the resulting diff persisted to
+`TB_CHAOS_STATUS_DIFF` (defaulting to `chaos_status_diff.json`). Setting
+`TB_CHAOS_REQUIRE_DIFF=1` forces the run to fail when no changes are detected,
+making it safe to gate overlay soaks on fresh regressions.
+When no baseline is supplied the harness now writes an explicit empty diff file,
+ensuring downstream tooling still captures a deterministically formatted JSON
+artefact for auditing and release packaging.
+
+`TB_CHAOS_OVERLAY_READINESS` controls where the per-site readiness rows land.
+Each row captures the scenario, module, site, provider, current readiness,
+scenario readiness, prior readiness/provider (if a baseline was available), and
+window metadata. These rows feed automation (and `cargo xtask chaos`) without
+leaving first-party tooling, giving soak harnesses a JSON artefact they can sort
+or diff alongside the status snapshot. Set `TB_CHAOS_PROVIDER_FAILOVER` to emit
+`chaos_provider_failover.json`; `provider_failover_reports` synthesises
+per-provider outages, recomputes readiness, and aborts the run when a simulated
+outage fails to drop readiness or register a `/chaos/status` diff entry.
+
 Site-specific readiness can be orchestrated through the
 `TB_CHAOS_SITE_TOPOLOGY` environment variable.  Setting
 
@@ -181,7 +206,14 @@ bytes to ensure forged payloads never reach the readiness cache.
 CI and release workflows wire the harness into both `just chaos-suite` and
 `cargo xtask chaos`.  The recipes allocate `target/chaos/attestations.json`, run
 the `chaos_lab` binary, and surface readiness failures as hard gate blockers
-before governance tags advance.
+before governance tags advance. `cargo xtask chaos` now fails the gate when
+overlay readiness drops, sites disappear, or provider failover drills lack diff
+entries, printing per-scenario readiness transitions alongside module totals so
+releases stay on first-party guardrails.  `scripts/release_provenance.sh` shells
+out to `cargo xtask chaos --out-dir releases/<tag>/chaos` before hashing build
+artefacts, and `scripts/verify_release.sh` aborts when the published archive
+omits the resulting snapshot/diff/overlay/provider failover JSON files, keeping
+release provenance aligned with the automation harness.
 
 ## Deterministic Replay
 

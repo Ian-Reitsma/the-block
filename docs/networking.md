@@ -222,7 +222,13 @@ process—operators see `net_key_dir_create_failed` or
 integration regression (`node/tests/net_start_bind.rs`) binds an ephemeral port
 before invoking `Node::start()` to assert the
 `gossip_listener_bind_failed` warning appears whenever sockets are unavailable,
-locking in the fallible startup behaviour across CI suites.
+locking in the fallible startup behaviour across CI suites. The shared
+`net::listener` helper also backs RPC, gateway, status, and explorer HTTP
+surfaces so `rpc_listener_bind_failed`, `status_listener_bind_failed`,
+`gateway_listener_bind_failed`, and the new `explorer_listener_bind_failed`
+warnings all ride the same tracing path; `explorer/tests/explorer_bind.rs`
+captures the public HTTP warning when a port is occupied to keep the automation
+feed consistent.
 
 Chunk gossip uses a separate `SimpleDb` instance. The location defaults to
 `~/.the_block/chunks/` and may be changed with `TB_CHUNK_DB_PATH`. Both

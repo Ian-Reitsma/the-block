@@ -5,8 +5,8 @@ use diagnostics::{
 use explorer::{router, Explorer, ExplorerHttpState};
 use http_env::server_tls_from_env;
 use httpd::{serve, serve_tls, ServerConfig};
-use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::Path, sync::Arc};
+use the_block::net::listener;
 
 fn main() -> Result<()> {
     runtime::block_on(async {
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
             .unwrap_or_else(|_| "0.0.0.0:3001".into())
             .parse()
             .context("parse EXPLORER_ADDR")?;
-        let listener = TcpListener::bind(addr)
+        let listener = listener::bind_runtime("explorer", "explorer_listener_bind_failed", addr)
             .await
             .with_context(|| format!("bind explorer listener at {addr}"))?;
         let state = ExplorerHttpState::new(explorer);

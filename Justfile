@@ -79,4 +79,8 @@ check-windows:
 chaos-suite:
     mkdir -p target/chaos
     TB_CHAOS_ATTESTATIONS=target/chaos/attestations.json \
+    TB_CHAOS_STATUS_SNAPSHOT=target/chaos/status.snapshot.json \
+    TB_CHAOS_STATUS_DIFF=target/chaos/status.diff.json \
+    TB_CHAOS_OVERLAY_READINESS=target/chaos/overlay.readiness.json \
+    TB_CHAOS_PROVIDER_FAILOVER=target/chaos/provider.failover.json \
         cargo run -p tb-sim --bin chaos_lab --quiet
