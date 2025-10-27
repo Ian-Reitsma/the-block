@@ -1,6 +1,6 @@
 # Dependency Inventory
 
-_Last refreshed: 2025-10-27._  The workspace `Cargo.lock` no longer references
+_Last refreshed: 2025-11-07._  The workspace `Cargo.lock` no longer references
 any crates from crates.io; every dependency in the graph is now first-party.
 The final external cluster—the optional `legacy-format` sled importer—has been
 replaced with an in-house manifest shim so the lockfile resolves solely to
@@ -13,6 +13,13 @@ cells while trimming runtime.
 | _none_ | — | — | — | — | The workspace has zero third-party crates. |
 
 ## Highlights
+
+- ✅ Ad marketplace dual-currency settlements reuse existing helpers. The new
+  USD→CT/IT conversions live entirely inside `crates/ad_market`, rely solely on
+  `std` arithmetic plus the existing oracle/distribution structs, and emit the
+  richer `SettlementBreakdown` without introducing serde/json dependencies or
+  additional crates. Unit coverage locks the rounding behaviour so future ledger
+  migrations remain first party.
 
 - ✅ Chaos archive manifests and publish hooks remain first party. `sim/chaos_lab.rs`
   now writes `archive/latest.json`, per-run `manifest.json`, and zipped bundles

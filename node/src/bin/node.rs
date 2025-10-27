@@ -26,7 +26,9 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
 use sys::process;
 
-use ad_market::{DistributionPolicy, MarketplaceHandle, ReservationKey, SledMarketplace};
+use ad_market::{
+    DistributionPolicy, MarketplaceConfig, MarketplaceHandle, ReservationKey, SledMarketplace,
+};
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -1351,7 +1353,14 @@ async fn async_main() -> std::process::ExitCode {
             )));
             let market_path = format!("{data_dir}/ad_market");
             let market: MarketplaceHandle = Arc::new(
-                SledMarketplace::open(&market_path, distribution).unwrap_or_else(|err| {
+                SledMarketplace::open(
+                    &market_path,
+                    MarketplaceConfig {
+                        distribution,
+                        ..MarketplaceConfig::default()
+                    },
+                )
+                .unwrap_or_else(|err| {
                     panic!("failed to open ad marketplace at {market_path}: {err}")
                 }),
             );

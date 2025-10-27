@@ -9,8 +9,22 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-11-07)
+
+- Ad market settlements now expose USD totals, CT, and IT token counts without
+  altering the RPC envelope. `ad_market.inventory` and `ad_market.distribution`
+  continue to serialise through the existing `foundation_serialization` helpers,
+  while the richer `SettlementBreakdown` is consumed directly by the node and
+  test harnesses—no additional RPC shims or serde fallbacks were required.
+
 ## Recent progress (2025-10-27)
 
+- `foundation_object_store` now carries a canonical-request regression and a
+  blocking upload harness that prove AWS Signature V4 headers match the public
+  AWS examples without leaning on third-party SDKs. `sim/chaos_lab.rs` routes
+  uploads through a retry helper that honours `TB_CHAOS_ARCHIVE_RETRIES` (min 1)
+  and optional `TB_CHAOS_ARCHIVE_FIXED_TIME`, so chaos publishing remains fully
+  deterministic and first party.
 - Chaos archive publishing now persists `archive/latest.json`, per-run
   `manifest.json`, and zipped bundles using the handwritten
   `foundation_serialization::json::Value` helpers in
@@ -92,6 +106,17 @@ RPC client.
   ledger batches without glue code. CLI coverage (`gateway domain stake-*`,
   `cancel`) reuses the same builders, and integration tests exercise stake
   deposits, withdrawals, and cancellation without spawning mock servers.
+
+## Recent progress (2025-11-06)
+
+- Explorer, CLI, and readiness RPC surfaces now expose industrial-token
+  advertising payouts, USD totals, settlement counts, and oracle snapshots using
+  the same handwritten codec path. `ad_market.readiness` returns both the
+  persisted snapshot and the live marketplace oracle under a single `oracle`
+  object, letting automation diff conversion inputs without touching
+  third-party tooling. The metrics aggregator and dashboards consume the same
+  gauges, keeping CI artefacts first party while removing the last CT-only
+  assumptions from RPC callers.
 
 ## Recent progress (2025-11-05)
 

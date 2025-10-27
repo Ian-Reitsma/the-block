@@ -616,6 +616,33 @@ pub struct Block {
     /// Consumer tokens routed to the miner from advertising campaigns
     pub ad_miner_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
+    /// Industrial tokens paid out from advertising campaigns to hosts
+    pub ad_host_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Industrial tokens paid out from advertising campaigns to hardware providers
+    pub ad_hardware_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Industrial tokens paid out from advertising campaigns to verifiers
+    pub ad_verifier_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Industrial tokens routed to the liquidity pool from advertising campaigns
+    pub ad_liquidity_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Industrial tokens routed to the miner from advertising campaigns
+    pub ad_miner_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Total USD billed across advertising settlements included in this block
+    pub ad_total_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Number of advertising settlements applied in this block
+    pub ad_settlement_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Oracle price snapshot (CT) used for advertising settlements in this block
+    pub ad_oracle_ct_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Oracle price snapshot (IT) used for advertising settlements in this block
+    pub ad_oracle_it_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for compute in this block
     pub compute_sub_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -696,6 +723,15 @@ impl Default for Block {
             ad_verifier_ct: TokenAmount::new(0),
             ad_liquidity_ct: TokenAmount::new(0),
             ad_miner_ct: TokenAmount::new(0),
+            ad_host_it: TokenAmount::new(0),
+            ad_hardware_it: TokenAmount::new(0),
+            ad_verifier_it: TokenAmount::new(0),
+            ad_liquidity_it: TokenAmount::new(0),
+            ad_miner_it: TokenAmount::new(0),
+            ad_total_usd_micros: 0,
+            ad_settlement_count: 0,
+            ad_oracle_ct_price_usd_micros: 0,
+            ad_oracle_it_price_usd_micros: 0,
             compute_sub_ct: TokenAmount::new(0),
             proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
@@ -1423,8 +1459,23 @@ impl Blockchain {
             liquidity_ct: settlement.liquidity_ct,
             miner_ct: settlement.miner_ct,
             total_ct: settlement.total_ct,
+            host_it: settlement.host_it,
+            hardware_it: settlement.hardware_it,
+            verifier_it: settlement.verifier_it,
+            liquidity_it: settlement.liquidity_it,
+            miner_it: settlement.miner_it,
+            total_usd_micros: settlement.total_usd_micros,
+            ct_price_usd_micros: settlement.ct_price_usd_micros,
+            it_price_usd_micros: settlement.it_price_usd_micros,
         };
         self.pending_ad_settlements.push(record);
+
+        crate::ad_readiness::record_settlement(
+            ack.ts,
+            settlement.total_usd_micros,
+            settlement.ct_price_usd_micros,
+            settlement.it_price_usd_micros,
+        );
     }
 }
 
@@ -1464,6 +1515,14 @@ pub struct AdSettlementRecord {
     pub liquidity_ct: u64,
     pub miner_ct: u64,
     pub total_ct: u64,
+    pub host_it: u64,
+    pub hardware_it: u64,
+    pub verifier_it: u64,
+    pub liquidity_it: u64,
+    pub miner_it: u64,
+    pub total_usd_micros: u64,
+    pub ct_price_usd_micros: u64,
+    pub it_price_usd_micros: u64,
 }
 
 fn distribute_scalar(total: u64, weights: &[(usize, u64)]) -> Vec<u64> {
@@ -1620,6 +1679,15 @@ impl Blockchain {
                                 b.ad_verifier_ct,
                                 b.ad_liquidity_ct,
                                 b.ad_miner_ct,
+                                b.ad_host_it,
+                                b.ad_hardware_it,
+                                b.ad_verifier_it,
+                                b.ad_liquidity_it,
+                                b.ad_miner_it,
+                                b.ad_total_usd_micros,
+                                b.ad_settlement_count,
+                                b.ad_oracle_ct_price_usd_micros,
+                                b.ad_oracle_it_price_usd_micros,
                                 b.compute_sub_ct,
                                 b.proof_rebate_ct,
                                 b.storage_sub_it,
@@ -1759,6 +1827,15 @@ impl Blockchain {
                                     b.ad_verifier_ct,
                                     b.ad_liquidity_ct,
                                     b.ad_miner_ct,
+                                    b.ad_host_it,
+                                    b.ad_hardware_it,
+                                    b.ad_verifier_it,
+                                    b.ad_liquidity_it,
+                                    b.ad_miner_it,
+                                    b.ad_total_usd_micros,
+                                    b.ad_settlement_count,
+                                    b.ad_oracle_ct_price_usd_micros,
+                                    b.ad_oracle_it_price_usd_micros,
                                     b.compute_sub_ct,
                                     b.proof_rebate_ct,
                                     b.storage_sub_it,
@@ -1919,6 +1996,15 @@ impl Blockchain {
                             b.ad_verifier_ct,
                             b.ad_liquidity_ct,
                             b.ad_miner_ct,
+                            b.ad_host_it,
+                            b.ad_hardware_it,
+                            b.ad_verifier_it,
+                            b.ad_liquidity_it,
+                            b.ad_miner_it,
+                            b.ad_total_usd_micros,
+                            b.ad_settlement_count,
+                            b.ad_oracle_ct_price_usd_micros,
+                            b.ad_oracle_it_price_usd_micros,
                             b.compute_sub_ct,
                             b.proof_rebate_ct,
                             b.storage_sub_it,
@@ -2516,21 +2602,11 @@ impl Blockchain {
             ad_verifier_ct: TokenAmount::new(0),
             ad_liquidity_ct: TokenAmount::new(0),
             ad_miner_ct: TokenAmount::new(0),
-            compute_sub_ct: TokenAmount::new(0),
-            proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
             base_fee: self.base_fee,
-            read_root: [0u8; 32],
-            l2_roots: Vec::new(),
-            l2_sizes: Vec::new(),
-            vdf_commit: [0u8; 32],
-            vdf_output: [0u8; 32],
-            vdf_proof: Vec::new(),
+            ..Block::default()
         };
         self.chain.push(g);
         self.recent_timestamps.push_back(0);
@@ -3985,6 +4061,18 @@ impl Blockchain {
         let mut ad_verifier_total = 0u64;
         let mut ad_liquidity_total = 0u64;
         let mut ad_miner_total = 0u64;
+        let mut ad_host_it_total = 0u64;
+        let mut ad_hardware_it_total = 0u64;
+        let mut ad_verifier_it_total = 0u64;
+        let mut ad_liquidity_it_total = 0u64;
+        let mut ad_miner_it_total = 0u64;
+        let mut ad_total_usd_micros = 0u64;
+        let mut ad_last_ct_price_usd_micros = 0u64;
+        let mut ad_last_it_price_usd_micros = 0u64;
+        let mut ad_settlement_count = 0u64;
+        let mut host_it_payouts: Vec<(String, u64)> = Vec::new();
+        let mut hardware_it_payouts: Vec<(String, u64)> = Vec::new();
+        let mut verifier_it_payouts: Vec<(String, u64)> = Vec::new();
         for record in &ad_settlements {
             if record.viewer_ct > 0 {
                 viewer_payouts.push((record.viewer_addr.clone(), record.viewer_ct));
@@ -4004,6 +4092,24 @@ impl Blockchain {
             }
             ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity_ct);
             ad_miner_total = ad_miner_total.saturating_add(record.miner_ct);
+            if record.host_it > 0 {
+                host_it_payouts.push((record.host_addr.clone(), record.host_it));
+                ad_host_it_total = ad_host_it_total.saturating_add(record.host_it);
+            }
+            if record.hardware_it > 0 {
+                hardware_it_payouts.push((record.hardware_addr.clone(), record.hardware_it));
+                ad_hardware_it_total = ad_hardware_it_total.saturating_add(record.hardware_it);
+            }
+            if record.verifier_it > 0 {
+                verifier_it_payouts.push((record.verifier_addr.clone(), record.verifier_it));
+                ad_verifier_it_total = ad_verifier_it_total.saturating_add(record.verifier_it);
+            }
+            ad_liquidity_it_total = ad_liquidity_it_total.saturating_add(record.liquidity_it);
+            ad_miner_it_total = ad_miner_it_total.saturating_add(record.miner_it);
+            ad_total_usd_micros = ad_total_usd_micros.saturating_add(record.total_usd_micros);
+            ad_last_ct_price_usd_micros = record.ct_price_usd_micros;
+            ad_last_it_price_usd_micros = record.it_price_usd_micros;
+            ad_settlement_count = ad_settlement_count.saturating_add(1);
         }
         liquidity_paid = liquidity_paid.saturating_add(ad_liquidity_total);
         miner_share_total = miner_share_total.saturating_add(ad_miner_total);
@@ -4014,6 +4120,11 @@ impl Blockchain {
         let ad_verifier_token = TokenAmount::new(ad_verifier_total);
         let ad_liquidity_token = TokenAmount::new(ad_liquidity_total);
         let ad_miner_token = TokenAmount::new(ad_miner_total);
+        let ad_host_it_token = TokenAmount::new(ad_host_it_total);
+        let ad_hardware_it_token = TokenAmount::new(ad_hardware_it_total);
+        let ad_verifier_it_token = TokenAmount::new(ad_verifier_it_total);
+        let ad_liquidity_it_token = TokenAmount::new(ad_liquidity_it_total);
+        let ad_miner_it_token = TokenAmount::new(ad_miner_it_total);
 
         self.settled_read_bytes = self.settled_read_bytes.saturating_add(delta_read_bytes);
         for (addr, total) in &self.epoch_viewer_bytes {
@@ -4042,6 +4153,11 @@ impl Blockchain {
         } else {
             Vec::new()
         };
+        let liquidity_it_payouts = if ad_liquidity_it_total > 0 {
+            vec![(liquidity_address().to_string(), ad_liquidity_it_total)]
+        } else {
+            Vec::new()
+        };
 
         if miner_share_total > 0 {
             base_coinbase_consumer = base_coinbase_consumer
@@ -4060,10 +4176,16 @@ impl Blockchain {
                 base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
             }
         }
-        let coinbase_industrial_total = reward_industrial
+        let mut coinbase_industrial_total = reward_industrial
             .0
             .checked_add(fee_industrial_u64)
             .ok_or_else(|| py_value_err("Fee overflow"))?;
+
+        if ad_miner_it_total > 0 {
+            coinbase_industrial_total = coinbase_industrial_total
+                .checked_add(ad_miner_it_total)
+                .ok_or_else(|| py_value_err("Fee overflow"))?;
+        }
 
         let rebate_ct = self.proof_tracker.claim_all(index);
         let coinbase_consumer_total = base_coinbase_consumer
@@ -4206,6 +4328,35 @@ impl Blockchain {
                 .ok_or_else(|| py_value_err("read subsidy overflow"))?;
         }
 
+        for (addr, amount) in host_it_payouts
+            .iter()
+            .chain(hardware_it_payouts.iter())
+            .chain(verifier_it_payouts.iter())
+            .chain(liquidity_it_payouts.iter())
+        {
+            if *amount == 0 {
+                continue;
+            }
+            let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
+                address: addr.clone(),
+                balance: TokenBalance {
+                    consumer: 0,
+                    industrial: 0,
+                },
+                nonce: 0,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
+            });
+            entry.balance.industrial = entry
+                .balance
+                .industrial
+                .checked_add(*amount)
+                .ok_or_else(|| py_value_err("industrial payout overflow"))?;
+        }
+
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
@@ -4253,6 +4404,15 @@ impl Blockchain {
             ad_verifier_ct: ad_verifier_token,
             ad_liquidity_ct: ad_liquidity_token,
             ad_miner_ct: ad_miner_token,
+            ad_host_it: ad_host_it_token,
+            ad_hardware_it: ad_hardware_it_token,
+            ad_verifier_it: ad_verifier_it_token,
+            ad_liquidity_it: ad_liquidity_it_token,
+            ad_miner_it: ad_miner_it_token,
+            ad_total_usd_micros,
+            ad_settlement_count,
+            ad_oracle_ct_price_usd_micros: ad_last_ct_price_usd_micros,
+            ad_oracle_it_price_usd_micros: ad_last_it_price_usd_micros,
             compute_sub_ct: compute_sub_token,
             proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
@@ -4295,6 +4455,15 @@ impl Blockchain {
                 block.ad_verifier_ct,
                 block.ad_liquidity_ct,
                 block.ad_miner_ct,
+                block.ad_host_it,
+                block.ad_hardware_it,
+                block.ad_verifier_it,
+                block.ad_liquidity_it,
+                block.ad_miner_it,
+                block.ad_total_usd_micros,
+                block.ad_settlement_count,
+                block.ad_oracle_ct_price_usd_micros,
+                block.ad_oracle_it_price_usd_micros,
                 block.compute_sub_ct,
                 block.proof_rebate_ct,
                 block.storage_sub_it,
@@ -4729,6 +4898,15 @@ impl Blockchain {
             block.ad_verifier_ct,
             block.ad_liquidity_ct,
             block.ad_miner_ct,
+            block.ad_host_it,
+            block.ad_hardware_it,
+            block.ad_verifier_it,
+            block.ad_liquidity_it,
+            block.ad_miner_it,
+            block.ad_total_usd_micros,
+            block.ad_settlement_count,
+            block.ad_oracle_ct_price_usd_micros,
+            block.ad_oracle_it_price_usd_micros,
             block.compute_sub_ct,
             block.proof_rebate_ct,
             block.storage_sub_it,
@@ -5105,6 +5283,15 @@ impl Blockchain {
                 b.ad_verifier_ct,
                 b.ad_liquidity_ct,
                 b.ad_miner_ct,
+                b.ad_host_it,
+                b.ad_hardware_it,
+                b.ad_verifier_it,
+                b.ad_liquidity_it,
+                b.ad_miner_it,
+                b.ad_total_usd_micros,
+                b.ad_settlement_count,
+                b.ad_oracle_ct_price_usd_micros,
+                b.ad_oracle_it_price_usd_micros,
                 b.compute_sub_ct,
                 b.proof_rebate_ct,
                 b.storage_sub_it,
@@ -5666,6 +5853,15 @@ fn calculate_hash(
     ad_verifier: TokenAmount,
     ad_liquidity: TokenAmount,
     ad_miner: TokenAmount,
+    ad_host_it: TokenAmount,
+    ad_hardware_it: TokenAmount,
+    ad_verifier_it: TokenAmount,
+    ad_liquidity_it: TokenAmount,
+    ad_miner_it: TokenAmount,
+    ad_total_usd_micros: u64,
+    ad_settlement_count: u64,
+    ad_oracle_ct_price_usd_micros: u64,
+    ad_oracle_it_price_usd_micros: u64,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
     storage_sub_it: TokenAmount,
@@ -5707,6 +5903,15 @@ fn calculate_hash(
         ad_verifier: ad_verifier.0,
         ad_liquidity: ad_liquidity.0,
         ad_miner: ad_miner.0,
+        ad_host_it: ad_host_it.0,
+        ad_hardware_it: ad_hardware_it.0,
+        ad_verifier_it: ad_verifier_it.0,
+        ad_liquidity_it: ad_liquidity_it.0,
+        ad_miner_it: ad_miner_it.0,
+        ad_total_usd_micros,
+        ad_settlement_count,
+        ad_oracle_ct_price_usd_micros,
+        ad_oracle_it_price_usd_micros,
         compute_sub: compute_sub.0,
         proof_rebate: proof_rebate.0,
         storage_sub_it: storage_sub_it.0,

@@ -9,6 +9,7 @@ cli_core = { path = "../../crates/cli_core" }
 diagnostics = { path = "../../crates/diagnostics" }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
 monitoring-build = { path = "../../monitoring" }
+crypto_suite = { path = "../../crates/crypto_suite" }
 
 [[bin]]
 name = "refcheck"

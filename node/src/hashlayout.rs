@@ -27,6 +27,15 @@ pub struct BlockEncoder<'a> {
     pub ad_verifier: u64,
     pub ad_liquidity: u64,
     pub ad_miner: u64,
+    pub ad_host_it: u64,
+    pub ad_hardware_it: u64,
+    pub ad_verifier_it: u64,
+    pub ad_liquidity_it: u64,
+    pub ad_miner_it: u64,
+    pub ad_total_usd_micros: u64,
+    pub ad_settlement_count: u64,
+    pub ad_oracle_ct_price_usd_micros: u64,
+    pub ad_oracle_it_price_usd_micros: u64,
     pub compute_sub: u64,
     pub proof_rebate: u64,
     pub storage_sub_it: u64,
@@ -67,6 +76,15 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.ad_verifier.to_le_bytes());
         h.update(&self.ad_liquidity.to_le_bytes());
         h.update(&self.ad_miner.to_le_bytes());
+        h.update(&self.ad_host_it.to_le_bytes());
+        h.update(&self.ad_hardware_it.to_le_bytes());
+        h.update(&self.ad_verifier_it.to_le_bytes());
+        h.update(&self.ad_liquidity_it.to_le_bytes());
+        h.update(&self.ad_miner_it.to_le_bytes());
+        h.update(&self.ad_total_usd_micros.to_le_bytes());
+        h.update(&self.ad_settlement_count.to_le_bytes());
+        h.update(&self.ad_oracle_ct_price_usd_micros.to_le_bytes());
+        h.update(&self.ad_oracle_it_price_usd_micros.to_le_bytes());
         h.update(&self.compute_sub.to_le_bytes());
         h.update(&self.proof_rebate.to_le_bytes());
         h.update(&self.storage_sub_it.to_le_bytes());

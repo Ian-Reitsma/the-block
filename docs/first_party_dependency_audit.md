@@ -1,5 +1,23 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-07 update (ad market dual-token settlement):** The
+> `ad_market` crate now computes USD→CT/IT token splits entirely with existing
+> arithmetic helpers and sled/state locks; no new crates were introduced while
+> extending `SettlementBreakdown` to expose oracle snapshots, CT totals, mirrored
+> IT quantities, and residual USD. Unit coverage exercises the new conversions so
+> future migrations can rely on the first-party logic.
+> **2025-10-27 update (object-store signing & monitoring codecs):** The
+> `foundation_object_store` crate now ships a canonical-request regression and a
+> blocking upload harness that verify AWS Signature V4 headers without ever
+> shelling out to third-party SDKs. `sim/chaos_lab.rs` routes uploads through a
+> retry helper that honours `TB_CHAOS_ARCHIVE_RETRIES` (min 1) and optional
+> `TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps so deterministic runs never leak into
+> external tooling, and the new tests prove the signed headers match AWS’
+> published example canonical request. Monitoring dropped the last serde derives
+> in `monitoring/src/chaos.rs`, decoding readiness snapshots solely through
+> handwritten `foundation_serialization::json::Value` walkers so the
+> `foundation_serde` stub stays dormant during CI and production builds.
+
 > **2025-10-27 update (chaos archive manifests & object-store crate):**
 > `sim/chaos_lab.rs` now emits a run-scoped `manifest.json`, a `latest.json` pointer, and a deterministic `run_id.zip` bundle for every chaos rehearsal, recording byte lengths and BLAKE3 digests without leaning on serde derives or external archivers. Optional `--publish-dir`, `--publish-bucket`, and `--publish-prefix` flags mirror the manifests and bundle through the new `foundation_object_store` crate, which wraps the existing first-party HTTP/TLS client so uploads never depend on third-party SDKs. `tools/xtask chaos` consumes the manifests via manual `foundation_serialization::json::Value` helpers, surfaces publish targets alongside readiness analytics, and continues to gate releases on overlay regressions entirely within the in-tree tooling. `scripts/release_provenance.sh` refuses to continue unless `chaos/archive/latest.json` and the referenced manifest exist, and `scripts/verify_release.sh` parses the manifest to ensure every archived file is present and that the recorded bundle size matches the on-disk `run_id.zip`, keeping release provenance hermetic.
 
@@ -135,6 +153,16 @@
 > binary writers in a dedicated sled namespace; startup replay and pruning run
 > through the same in-house helpers, keeping readiness thresholds durable across
 > restarts without adding databases or async runtimes.
+> **2025-11-06 update (dual-token explorer & readiness telemetry):** Explorer,
+> CLI, metrics aggregator, and readiness RPC surfaces now expose industrial-token
+> splits, USD totals, settlement counts, and oracle snapshots entirely through
+> the existing manual codecs. The ledger/genesis writers gained CT+IT fields via
+> handwritten binary cursors, explorer/CLI JSON builders render the same data
+> without serde, the aggregator registers additional Prometheus families using
+> the in-house registry wrappers, and `ad_market.readiness` reuses the
+> foundation JSON helpers to embed both snapshot and live oracle data. No third
+> party crates were linked to support the conversion math; CI artefacts and
+> dashboards consume the same first-party gauges.
 > **2025-11-03 update (ad readiness gating & domain auctions):** Readiness
 > thresholds live entirely inside the existing node crates—`ad_readiness`
 > exposes manual cursor codecs and shared handles, the gateway consults the

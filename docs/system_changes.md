@@ -1,4 +1,12 @@
 # System-Wide Economic Changes
+> **Review (2025-11-07, afternoon):** Advertising settlements now capture the
+> posted USD price, oracle snapshot, and role-level CT/IT token quantities.
+> `SettlementBreakdown` continues to populate the legacy CT fields used by the
+> ledger while also exposing mirrored IT totals and residual USD so dashboards
+> and future ledger work can audit both currencies from the same record. New
+> unit coverage in `crates/ad_market` asserts the USD→CT/IT conversions and
+> rounding behaviour, and the sled/in-memory implementations share the same
+> helper so RPC/gateway flows return consistent JSON across backends.
 > **Review (2025-10-27, evening):** Chaos artefacts now include explicit
 > manifests and bundles, and publishing stays first party. `sim/chaos_lab.rs`
 > persists a run-specific `manifest.json` (referenced by `archive/latest.json`)
@@ -6,16 +14,21 @@
 > diff, overlay readiness table, and provider failover report. Each run also
 > emits a deterministic `run_id.zip` bundle, and optional `--publish-dir`,
 > `--publish-bucket`, and `--publish-prefix` flags mirror both manifests and the
-> bundle into long-lived directories or S3-compatible buckets via the new
-> `foundation_object_store` crate. The crate wraps the existing first-party HTTP
-> client so uploads never rely on external SDKs. `tools/xtask` decodes the
-> manifests through manual `foundation_serialization::json::Value` helpers,
-> prints publish locations, and honours the new flags so automation can surface
-> preserved artefacts alongside readiness summaries. `scripts/release_provenance.sh`
-> now fails immediately when `chaos/archive/latest.json` or the referenced run
-> manifest is missing, while `scripts/verify_release.sh` parses the manifest to
-> confirm every archived file exists and that the recorded bundle size matches
-> the on-disk `run_id.zip`, blocking tags when artefacts drift.
+> bundle into long-lived directories or S3-compatible buckets via the
+> first-party `foundation_object_store` client. The crate now ships a
+> canonical-request regression and a blocking upload harness that prove AWS
+> Signature V4 headers match the published examples, while the runtime helper
+> honours `TB_CHAOS_ARCHIVE_RETRIES` (clamped to at least one attempt) and
+> optional `TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps so reproducible pipelines can
+> sign identical requests across retries. `tools/xtask` decodes the manifests
+> through manual `foundation_serialization::json::Value` helpers, prints publish
+> locations, logs the computed BLAKE3 digests and sizes, and honours the new flags
+> so automation can surface preserved artefacts alongside readiness summaries.
+> `scripts/release_provenance.sh` now fails immediately when
+> `chaos/archive/latest.json` or the referenced run manifest is missing, while
+> `scripts/verify_release.sh` parses the manifest to confirm every archived file
+> exists and that the recorded bundle size matches the on-disk `run_id.zip`,
+> blocking tags when artefacts drift.
 > **Review (2025-10-27, afternoon):** The chaos pipeline now fetches
 > `/chaos/status` baselines and overlays entirely via first-party helpers.
 > `sim/chaos_lab.rs` issues HTTP requests through `httpd::BlockingClient`,
@@ -41,6 +54,46 @@
 > explorer servers with uniform `*_listener_bind_failed` warnings and returns
 > `io::Result` so tests like `node/tests/rpc_bind.rs` can assert bind failures no
 > longer panic while the explorer HTTP listener emits the same warning signal.
+
+## Advertising USD Pricing & Dual Settlement (2025-11-07)
+
+### Rationale
+
+- **Expose USD economics directly to operators:** Campaign budgets and clearing
+  prices are denominated in USD, but the legacy settlement surface only exposed
+  CT totals, forcing dashboards to reconstruct exchange rates offline.
+- **Prepare the ledger for dual-token payouts:** Governance wants to route host,
+  hardware, verifier, and part of the liquidity rewards through IT while
+  preserving CT for viewers; we need both currencies in the settlement record
+  before the ledger can switch.
+- **Keep compatibility with the existing CT ledger:** Nodes still mint CT until
+  the ledger migration lands, so the new fields must coexist with the old
+  settlement totals without double counting.
+
+### Implementation Summary
+
+- Taught both the in-memory and sled marketplaces to compute USD shares per
+  role, convert them to CT using the current oracle price, and accumulate a
+  single `total_ct` that matches the existing ledger flow. Liquidity continues to
+  settle fully in CT for now so legacy blocks stay consistent.
+- Added mirrored IT conversions for host, hardware, verifier, liquidity, and the
+  miner remainder, storing the oracle snapshot alongside the new token counts and
+  `unsettled_usd_micros` residual so downstream tooling can reconcile rounding.
+- Updated the ad market unit suite to assert CT/IT totals, oracle snapshots, and
+  rounding limits under deterministic oracles, and refreshed the RPC integration
+  tests so the richer JSON schema remains stable.
+
+### Operational Impact
+
+- **Ledger compatibility:** Existing nodes still consume the CT fields so no on-
+  chain change is required; governance can stage the ledger migration once the
+  downstream consumers finish wiring the IT counters.
+- **Observability:** Dashboards and release tooling can now inspect `total_usd_micros`,
+  CT/IT token totals, and the oracle snapshot directly from the settlement logs
+  instead of inferring exchange rates.
+- **Testing posture:** The new deterministic unit test guards the dual-currency
+  split, and the RPC harness runs unchanged against the enriched schema,
+  preventing regressions in gateway and explorer flows.
 
 ## Chaos Failover Release Gating (2025-10-27)
 
@@ -149,6 +202,20 @@
 > CLI coverage mirrors the new RPCs with `gateway domain stake-register`,
 > `stake-withdraw`, `stake-status`, and `cancel`, and integration tests exercise
 > the stake flows alongside the existing ledger-settlement harness.
+> **Review (2025-11-06, afternoon):** Advertising settlements now flow end to
+> end with dual-token metadata. Block, ledger, and genesis codecs persist the
+> industrial-token splits, USD totals, settlement counts, and oracle snapshots
+> alongside the existing consumer-token values so explorers, the CLI, and
+> downstream automation can reconcile every payout without guessing. Explorer
+> HTTP/JSON payloads and CLI views render the CT and IT amounts together with
+> the oracle snapshot used for conversion, while the metrics aggregator gained a
+> dedicated `explorer_block_payout_ad_it_total{role}` counter family plus
+> readiness gauges for settlement USD micros, observed oracle prices, and
+> settlement counts. `ad_market.readiness` now embeds the live market oracle and
+> the archived snapshot, letting operators verify utilisation, pricing inputs,
+> and governance thresholds straight from a single RPC. Prometheus scrapes and
+> CI artefacts surface the new gauges so dashboards and release automation track
+> the same CT/IT picture as the ledger.
 > **Review (2025-11-05, afternoon):** Premium domain auctions now settle with
 > full ledger backing. `dns.complete_sale` debits the winning bidder, refunds
 > locked seller stake, and routes protocol and royalty fees to the treasury or

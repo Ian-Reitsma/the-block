@@ -102,7 +102,10 @@ Security considerations are catalogued under
   increments `ad_readiness_skipped_total{reason}` until rolling unique-viewer,
   host, and provider counts clear the configured floor. The
   `ad_market.readiness` RPC and Prometheus gauges (`ad_readiness_ready`,
-  `ad_readiness_unique_viewers`, etc.) expose current counters and blockers.
+  `ad_readiness_unique_viewers`, `ad_readiness_total_usd_micros`,
+  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`, and
+  `ad_readiness_it_price_usd_micros`) expose current counters, oracle snapshots,
+  and blockers.
 - Readiness events persist to a sled namespace keyed by
   `SimpleDb::names::GATEWAY_AD_READINESS`; startup replays the surviving window
   before installing the global handle so readiness decisions survive restarts
@@ -118,9 +121,10 @@ Security considerations are catalogued under
   registration and invalid payload paths hermetic under the
   `integration-tests` feature.
 - Reservations include a per-mebibyte CT price; when the acknowledgement is
-  accepted the node commits the settlement, carves up the CT based on the active
-  distribution policy, and publishes per-role totals (`ad_viewer_ct`,
-  `ad_host_ct`, etc.) in the block header.
+  accepted the node commits the settlement, carves up the CT/IT based on the
+  active distribution policy, records the USD micros plus oracle snapshot, and
+  publishes per-role totals (`ad_viewer_ct`, `ad_host_it`, etc.) in the block
+  header for explorer/CLI consumption.
 - Pending settlements surface through the explorer and RPC snapshots so
   advertisers can reconcile impressions against debits without replaying the raw
   receipt files.

@@ -6,7 +6,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ad_market::{DistributionPolicy, MarketplaceHandle, SledMarketplace};
+use ad_market::{
+    DistributionPolicy, MarketplaceConfig, MarketplaceHandle, SledMarketplace, MICROS_PER_DOLLAR,
+};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use the_block::{
@@ -95,7 +97,14 @@ fn ad_market_rpc_endpoints_round_trip() {
 
     let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
     let market_dir = dir.path().join("market");
-    let sled = SledMarketplace::open(&market_dir, distribution).expect("market opened");
+    let sled = SledMarketplace::open(
+        &market_dir,
+        MarketplaceConfig {
+            distribution,
+            ..MarketplaceConfig::default()
+        },
+    )
+    .expect("market opened");
     let market: MarketplaceHandle = Arc::new(sled);
     let readiness = AdReadinessHandle::new(AdReadinessConfig {
         window_secs: 300,
@@ -120,11 +129,14 @@ fn ad_market_rpc_endpoints_round_trip() {
         r#"{
             "id": "cmp-1",
             "advertiser_account": "adv-1",
-            "budget_ct": 5000,
+            "budget_usd_micros": 5000000,
             "creatives": [
                 {
                     "id": "creative-1",
-                    "price_per_mib_ct": 128,
+                    "action_rate_ppm": 500000,
+                    "margin_ppm": 800000,
+                    "value_per_action_usd_micros": 1000000,
+                    "max_cpi_usd_micros": 1500000,
                     "badges": ["physical_presence"],
                     "domains": ["example.test"],
                     "metadata": {}
@@ -149,10 +161,25 @@ fn ad_market_rpc_endpoints_round_trip() {
     let entry = &campaigns[0];
     assert_eq!(entry["id"].as_str(), Some("cmp-1"));
     assert_eq!(entry["advertiser_account"].as_str(), Some("adv-1"));
-    assert_eq!(entry["remaining_budget_ct"].as_u64(), Some(5_000));
+    assert_eq!(
+        entry["remaining_budget_usd_micros"].as_u64(),
+        Some(5_000_000)
+    );
     let creative_ids = entry["creatives"].as_array().expect("creatives array");
     assert_eq!(creative_ids.len(), 1);
     assert_eq!(creative_ids[0].as_str(), Some("creative-1"));
+    assert_eq!(
+        inventory["oracle"]["ct_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    assert_eq!(
+        inventory["oracle"]["it_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    let cohorts = inventory["cohort_prices"]
+        .as_array()
+        .expect("cohort prices");
+    assert_eq!(cohorts.len(), 1);
 
     let distribution_resp = expect_ok(harness.call("ad_market.distribution", Value::Null));
     assert_eq!(distribution_resp["status"].as_str(), Some("ok"));
@@ -162,6 +189,10 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(dist["hardware_percent"].as_u64(), Some(20));
     assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
     assert_eq!(dist["liquidity_percent"].as_u64(), Some(5));
+    assert_eq!(
+        dist["liquidity_split_ct_ppm"].as_u64(),
+        Some(DistributionPolicy::default().liquidity_split_ct_ppm as u64)
+    );
 
     let readiness_initial = expect_ok(harness.call("ad_market.readiness", Value::Null));
     assert_eq!(readiness_initial["status"].as_str(), Some("ok"));
@@ -193,6 +224,31 @@ fn ad_market_rpc_endpoints_round_trip() {
             .len(),
         0
     );
+    assert_eq!(
+        readiness_ready["ct_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    assert_eq!(
+        readiness_ready["it_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    let oracle = readiness_ready["oracle"].as_object().expect("oracle map");
+    assert_eq!(
+        oracle["snapshot_ct_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    assert_eq!(
+        oracle["snapshot_it_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    assert_eq!(
+        oracle["market_ct_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    assert_eq!(
+        oracle["market_it_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
 
     let duplicate = expect_error(harness.call(
         "ad_market.register_campaign",
@@ -200,11 +256,14 @@ fn ad_market_rpc_endpoints_round_trip() {
             r#"{
                 "id": "cmp-1",
                 "advertiser_account": "adv-1",
-                "budget_ct": 1000,
+                "budget_usd_micros": 1000000,
                 "creatives": [
                     {
                         "id": "creative-dup",
-                        "price_per_mib_ct": 64,
+                        "action_rate_ppm": 300000,
+                        "margin_ppm": 700000,
+                        "value_per_action_usd_micros": 500000,
+                        "max_cpi_usd_micros": 600000,
                         "badges": [],
                         "domains": ["example.test"],
                         "metadata": {}
@@ -241,11 +300,14 @@ fn ad_market_rpc_endpoints_round_trip() {
         r#"{
             "id": "cmp-concurrent",
             "advertiser_account": "adv-2",
-            "budget_ct": 2500,
+            "budget_usd_micros": 2500000,
             "creatives": [
                 {
                     "id": "creative-concurrent",
-                    "price_per_mib_ct": 256,
+                    "action_rate_ppm": 600000,
+                    "margin_ppm": 750000,
+                    "value_per_action_usd_micros": 800000,
+                    "max_cpi_usd_micros": 900000,
                     "badges": [],
                     "domains": ["concurrent.test"],
                     "metadata": {}

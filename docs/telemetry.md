@@ -150,13 +150,21 @@ cluster-wide gauges when compiled with `--features telemetry`:
 - `cluster_peer_active_total{node_id}` – number of active peers per reporting node (cardinality ≈ node count).
 - `aggregator_ingest_total{node_id,result}` – ingestion attempts by node and result (`ok` or `error`), cardinality ≤ node count × 2.
 - `log_correlation_fail_total{metric}` – correlation lookups that returned no rows; paired automation triggers `metrics-aggregator` log dumps into `$TB_LOG_DUMP_DIR` when counts spike.
-- `explorer_block_payout_read_total{role}` / `explorer_block_payout_ad_total{role}` – explorer-reported per-role read subsidy and advertising payouts cached per peer; the aggregator only advances the counters when a role’s total increases, keeping Prometheus deltas monotonic for Grafana’s block-payout panels.
+- `explorer_block_payout_read_total{role}` /
+  `explorer_block_payout_ad_total{role}` /
+  `explorer_block_payout_ad_it_total{role}` – explorer-reported per-role read
+  subsidy and dual-token advertising payouts cached per peer; the aggregator only
+  advances the counters when a role’s total increases, keeping Prometheus deltas
+  monotonic for Grafana’s block-payout panels.
 - `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
   `ad_readiness_provider_count`, `ad_readiness_window_secs`,
-  `ad_readiness_min_*` – readiness snapshot gauges derived from the node’s
-  telemetry summaries. Values reset to `0` when no readiness data is available;
-  otherwise the gauges mirror the latest rolling counts and configured
-  thresholds so dashboards can track activation progress.
+  `ad_readiness_min_*`, `ad_readiness_total_usd_micros`,
+  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`, and
+  `ad_readiness_it_price_usd_micros` – readiness snapshot gauges derived from the
+  node’s telemetry summaries. Values reset to `0` when no readiness data is
+  available; otherwise the gauges mirror the latest rolling counts, conversion
+  prices, and configured thresholds so dashboards and automation can track
+  activation progress alongside oracle inputs.
 - `chaos_readiness{module,scenario}`,
   `chaos_site_readiness{module,scenario,site,provider}`, and
   `chaos_sla_breach_total` – readiness snapshots and breach counts derived from

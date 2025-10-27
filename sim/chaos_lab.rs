@@ -3,7 +3,7 @@
 use crypto_suite::hashing::blake3;
 use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::{SigningKey, SECRET_KEY_LENGTH};
-use foundation_object_store::S3Client;
+use foundation_object_store::{S3Client, UploadError, UploadReceipt};
 use foundation_serialization::json::{self, Map, Number, Value};
 use foundation_time::UtcDateTime;
 use http_env::blocking_client as env_blocking_client;
@@ -17,7 +17,7 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use sys::archive::zip::ZipBuilder;
 use tb_sim::chaos::{ChaosModule, ChaosProviderKind, ChaosSite};
 use tb_sim::Simulation;
@@ -517,6 +517,101 @@ fn publish_to_directory(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+struct ArchiveUploadReceipts {
+    manifest_key: String,
+    manifest: UploadReceipt,
+    latest_key: String,
+    latest: UploadReceipt,
+    bundle: Option<(String, UploadReceipt)>,
+}
+
+fn upload_archive_objects(
+    client: &S3Client,
+    http: &BlockingClient,
+    bucket: &str,
+    prefix: &str,
+    run_id: &str,
+    manifest_bytes: &[u8],
+    latest_bytes: &[u8],
+    bundle_bytes: Option<&[u8]>,
+    bundle_file: Option<&str>,
+    retry_limit: usize,
+    fixed_timestamp: Option<i64>,
+) -> Result<ArchiveUploadReceipts, UploadError> {
+    upload_archive_objects_with(
+        bucket,
+        prefix,
+        run_id,
+        manifest_bytes,
+        latest_bytes,
+        bundle_bytes,
+        bundle_file,
+        retry_limit,
+        fixed_timestamp,
+        |bucket, key, bytes, label, retry, fixed| {
+            upload_with_retries(client, http, bucket, key, bytes, label, retry, fixed)
+        },
+    )
+}
+
+fn upload_archive_objects_with<F>(
+    bucket: &str,
+    prefix: &str,
+    run_id: &str,
+    manifest_bytes: &[u8],
+    latest_bytes: &[u8],
+    bundle_bytes: Option<&[u8]>,
+    bundle_file: Option<&str>,
+    retry_limit: usize,
+    fixed_timestamp: Option<i64>,
+    mut uploader: F,
+) -> Result<ArchiveUploadReceipts, UploadError>
+where
+    F: FnMut(&str, &str, &[u8], &str, usize, Option<i64>) -> Result<UploadReceipt, UploadError>,
+{
+    let manifest_key = join_object_key(prefix, &format!("{}/manifest.json", run_id));
+    let latest_key = join_object_key(prefix, "latest.json");
+
+    let manifest = uploader(
+        bucket,
+        &manifest_key,
+        manifest_bytes,
+        "manifest",
+        retry_limit,
+        fixed_timestamp,
+    )?;
+
+    let latest = uploader(
+        bucket,
+        &latest_key,
+        latest_bytes,
+        "latest",
+        retry_limit,
+        fixed_timestamp,
+    )?;
+
+    let bundle = match bundle_bytes {
+        Some(bytes) => {
+            let file_name = bundle_file
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| format!("{run_id}.zip"));
+            let key = join_object_key(prefix, &file_name);
+            let receipt = uploader(bucket, &key, bytes, "bundle", retry_limit, fixed_timestamp)?;
+            Some((key, receipt))
+        }
+        None => None,
+    };
+
+    Ok(ArchiveUploadReceipts {
+        manifest_key,
+        manifest,
+        latest_key,
+        latest,
+        bundle,
+    })
+}
+
 fn publish_to_object_store(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn Error>> {
     let bucket = match env::var("TB_CHAOS_ARCHIVE_BUCKET")
         .ok()
@@ -528,42 +623,166 @@ fn publish_to_object_store(outcome: &ChaosArchiveOutcome) -> Result<(), Box<dyn 
 
     let prefix = env::var("TB_CHAOS_ARCHIVE_PREFIX").unwrap_or_else(|_| "chaos".to_string());
     let prefix = prefix.trim_matches('/').to_string();
-    let manifest_key = join_object_key(&prefix, &format!("{}/manifest.json", outcome.run_id));
-    let latest_key = join_object_key(&prefix, "latest.json");
+
+    let retry_limit = archive_retry_limit()?;
+    let fixed_timestamp = archive_fixed_time()?;
 
     let client = S3Client::from_env()?;
     let http = env_blocking_client(&["TB_CHAOS_ARCHIVE_TLS", "TB_HTTP_TLS"], "chaos-archive");
 
     let manifest_bytes = fs::read(&outcome.manifest_path)?;
-    client.put_object_blocking(&http, &bucket, &manifest_key, manifest_bytes)?;
-
     let latest_bytes = fs::read(&outcome.latest_path)?;
-    client.put_object_blocking(&http, &bucket, &latest_key, latest_bytes)?;
+    let bundle_bytes = match &outcome.bundle_path {
+        Some(path) => Some(fs::read(path)?),
+        None => None,
+    };
 
-    if let Some(bundle_path) = &outcome.bundle_path {
-        let bundle_file = outcome
-            .bundle_file
-            .clone()
-            .unwrap_or_else(|| format!("{}.zip", outcome.run_id));
-        let bundle_key = join_object_key(&prefix, &bundle_file);
-        let bundle_bytes = fs::read(bundle_path)?;
-        client.put_object_blocking(&http, &bucket, &bundle_key, bundle_bytes)?;
+    let receipts = upload_archive_objects(
+        &client,
+        &http,
+        &bucket,
+        &prefix,
+        &outcome.run_id,
+        &manifest_bytes,
+        &latest_bytes,
+        bundle_bytes.as_deref(),
+        outcome.bundle_file.as_deref(),
+        retry_limit,
+        fixed_timestamp,
+    )
+    .map_err(|err| -> Box<dyn Error> { Box::new(err) })?;
+
+    if let Some((bundle_key, bundle_receipt)) = receipts.bundle {
         if let Some(digest) = &outcome.bundle_digest {
             eprintln!(
-                "[chaos-lab] uploaded bundle s3://{}/{} (blake3={})",
-                bucket, bundle_key, digest
+                "[chaos-lab] uploaded bundle s3://{}/{} (sha256={} blake3={})",
+                bucket, bundle_key, bundle_receipt.payload_sha256, digest
             );
         } else {
-            eprintln!("[chaos-lab] uploaded bundle s3://{}/{}", bucket, bundle_key);
+            eprintln!(
+                "[chaos-lab] uploaded bundle s3://{}/{} (sha256={})",
+                bucket, bundle_key, bundle_receipt.payload_sha256
+            );
         }
     } else {
-        eprintln!(
-            "[chaos-lab] uploaded chaos manifest s3://{}/{}",
-            bucket, manifest_key
-        );
+        eprintln!("[chaos-lab] bundle upload skipped (no bundle generated)");
     }
 
+    eprintln!(
+        "[chaos-lab] uploaded manifest s3://{}/{} (sha256={})",
+        bucket, receipts.manifest_key, receipts.manifest.payload_sha256
+    );
+    eprintln!(
+        "[chaos-lab] uploaded latest pointer s3://{}/{} (sha256={})",
+        bucket, receipts.latest_key, receipts.latest.payload_sha256
+    );
+
     Ok(())
+}
+
+fn archive_retry_limit() -> Result<usize, Box<dyn Error>> {
+    match env::var("TB_CHAOS_ARCHIVE_RETRIES") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(3);
+            }
+            let parsed: usize = trimmed
+                .parse()
+                .map_err(|_| format!("invalid TB_CHAOS_ARCHIVE_RETRIES value: {value}"))?;
+            if parsed == 0 {
+                Ok(1)
+            } else {
+                Ok(parsed)
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(3),
+        Err(err) => Err(format!("failed to read TB_CHAOS_ARCHIVE_RETRIES: {err}").into()),
+    }
+}
+
+fn archive_fixed_time() -> Result<Option<i64>, Box<dyn Error>> {
+    match env::var("TB_CHAOS_ARCHIVE_FIXED_TIME") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let timestamp: i64 = trimmed
+                .parse()
+                .map_err(|_| format!("invalid TB_CHAOS_ARCHIVE_FIXED_TIME value: {value}"))?;
+            UtcDateTime::from_unix_timestamp(timestamp)
+                .map_err(|_| format!("TB_CHAOS_ARCHIVE_FIXED_TIME out of range: {value}"))?;
+            Ok(Some(timestamp))
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(format!("failed to read TB_CHAOS_ARCHIVE_FIXED_TIME: {err}").into()),
+    }
+}
+
+fn upload_with_retries(
+    client: &S3Client,
+    http: &BlockingClient,
+    bucket: &str,
+    key: &str,
+    payload: &[u8],
+    label: &str,
+    retry_limit: usize,
+    fixed_timestamp: Option<i64>,
+) -> Result<UploadReceipt, UploadError> {
+    upload_with_retries_with(
+        label,
+        retry_limit,
+        fixed_timestamp,
+        |attempt, total, now| {
+            let result = client.put_object_blocking_at(http, bucket, key, payload.to_vec(), now);
+            match &result {
+                Ok(_) if attempt > 1 => {
+                    eprintln!(
+                        "[chaos-lab] upload {label} to s3://{bucket}/{key} succeeded after attempt {}",
+                        attempt
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[chaos-lab] upload {label} to s3://{bucket}/{key} attempt {}/{} failed: {err}",
+                        attempt, total
+                    );
+                }
+                _ => {}
+            }
+            result
+        },
+    )
+}
+
+fn upload_with_retries_with<F>(
+    _label: &str,
+    retry_limit: usize,
+    fixed_timestamp: Option<i64>,
+    mut attempt: F,
+) -> Result<UploadReceipt, UploadError>
+where
+    F: FnMut(usize, usize, UtcDateTime) -> Result<UploadReceipt, UploadError>,
+{
+    let attempts = retry_limit.max(1);
+    for attempt_index in 1..=attempts {
+        let now = fixed_timestamp
+            .map(|ts| {
+                UtcDateTime::from_unix_timestamp(ts)
+                    .expect("archive_fixed_time validated timestamp bounds")
+            })
+            .unwrap_or_else(|| UtcDateTime::from(SystemTime::now()));
+        match attempt(attempt_index, attempts, now) {
+            Ok(receipt) => return Ok(receipt),
+            Err(err) => {
+                if attempt_index == attempts {
+                    return Err(err);
+                }
+            }
+        }
+    }
+    unreachable!("retry loop must return before exhaustion");
 }
 
 fn join_object_key(prefix: &str, suffix: &str) -> String {
@@ -590,6 +809,158 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), Box<dyn Error>> {
     file.write_all(&bytes)?;
     file.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use sys::tempfile::tempdir;
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(ref value) = self.previous {
+                env::set_var(&self.key, value);
+            } else {
+                env::remove_var(&self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn publish_to_directory_copies_bundle_and_manifest() {
+        let archive_dir = tempdir().expect("archive dir");
+        let run_dir = archive_dir.path().join("run-1234");
+        fs::create_dir_all(&run_dir).expect("run dir");
+        let manifest_path = run_dir.join("manifest.json");
+        let latest_path = archive_dir.path().join("latest.json");
+        let bundle_path = run_dir.join("run-1234.zip");
+        fs::write(&manifest_path, b"{\"manifest\":true}").expect("manifest write");
+        fs::write(&latest_path, b"{\"latest\":true}").expect("latest write");
+        fs::write(&bundle_path, b"bundle-bytes").expect("bundle write");
+
+        let outcome = ChaosArchiveOutcome {
+            run_id: "run-1234".to_string(),
+            manifest_path: manifest_path.clone(),
+            latest_path: latest_path.clone(),
+            bundle_path: Some(bundle_path.clone()),
+            bundle_file: Some("run-1234.zip".to_string()),
+            bundle_digest: Some("abcd".to_string()),
+        };
+
+        let publish_dir = tempdir().expect("publish dir");
+        let _guard = EnvGuard::set(
+            "TB_CHAOS_ARCHIVE_PUBLISH_DIR",
+            publish_dir.path().to_string_lossy().as_ref(),
+        );
+
+        publish_to_directory(&outcome).expect("directory publish");
+
+        let copied_manifest = publish_dir.path().join("run-1234").join("manifest.json");
+        assert_eq!(
+            fs::read(&copied_manifest).expect("copied manifest"),
+            fs::read(&manifest_path).expect("source manifest")
+        );
+        let copied_latest = publish_dir.path().join("latest.json");
+        assert_eq!(
+            fs::read(&copied_latest).expect("copied latest"),
+            fs::read(&latest_path).expect("source latest")
+        );
+        let copied_bundle = publish_dir.path().join("run-1234.zip");
+        assert_eq!(
+            fs::read(&copied_bundle).expect("copied bundle"),
+            fs::read(&bundle_path).expect("source bundle")
+        );
+    }
+
+    #[test]
+    fn upload_archive_objects_with_builds_expected_keys() {
+        let mut calls = Vec::new();
+        let receipts = upload_archive_objects_with(
+            "audit",
+            "providers",
+            "run-20251027T190600Z",
+            b"manifest-bytes",
+            b"latest-bytes",
+            Some(b"bundle-bytes"),
+            Some("run-20251027T190600Z.zip"),
+            3,
+            Some(1_700_000_000),
+            |bucket, key, payload, label, retries, fixed| {
+                calls.push((
+                    bucket.to_string(),
+                    key.to_string(),
+                    payload.to_vec(),
+                    label.to_string(),
+                    retries,
+                    fixed,
+                ));
+                Ok(UploadReceipt {
+                    payload_sha256: format!("digest-{label}"),
+                })
+            },
+        )
+        .expect("upload succeeds");
+
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].0, "audit");
+        assert_eq!(calls[0].1, "providers/run-20251027T190600Z/manifest.json");
+        assert_eq!(calls[0].3, "manifest");
+        assert_eq!(calls[1].1, "providers/latest.json");
+        assert_eq!(calls[2].1, "providers/run-20251027T190600Z.zip");
+        assert_eq!(calls[2].3, "bundle");
+        assert!(calls.iter().all(|call| call.4 == 3));
+        assert!(calls.iter().all(|call| call.5 == Some(1_700_000_000)));
+
+        assert_eq!(receipts.manifest.payload_sha256, "digest-manifest");
+        assert_eq!(receipts.latest.payload_sha256, "digest-latest");
+        let bundle = receipts.bundle.expect("bundle receipt");
+        assert_eq!(bundle.0, "providers/run-20251027T190600Z.zip");
+        assert_eq!(bundle.1.payload_sha256, "digest-bundle");
+    }
+
+    #[test]
+    fn upload_with_retries_with_handles_retry_limit() {
+        let mut attempts = Vec::new();
+        let result =
+            upload_with_retries_with("manifest", 3, Some(1_700_000_000), |attempt, total, now| {
+                attempts.push((attempt, total, now.unix_timestamp().unwrap()));
+                if attempt < 2 {
+                    Err(UploadError::UnexpectedResponse {
+                        status: 500,
+                        body: "error".to_string(),
+                    })
+                } else {
+                    Ok(UploadReceipt {
+                        payload_sha256: "success".to_string(),
+                    })
+                }
+            })
+            .expect("retry succeeds");
+
+        assert_eq!(result.payload_sha256, "success");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].0, 1);
+        assert_eq!(attempts[0].1, 3);
+        assert_eq!(attempts[1].0, 2);
+        assert_eq!(attempts[1].1, 3);
+        assert!(attempts.iter().all(|entry| entry.2 == 1_700_000_000));
+    }
 }
 
 #[derive(Clone)]

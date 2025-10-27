@@ -167,6 +167,19 @@ or diff alongside the status snapshot. Set `TB_CHAOS_PROVIDER_FAILOVER` to emit
 per-provider outages, recomputes readiness, and aborts the run when a simulated
 outage fails to drop readiness or register a `/chaos/status` diff entry.
 
+Publishing hooks stay in the first-party stack. `TB_CHAOS_ARCHIVE_RETRIES`
+controls how many times each manifest, latest pointer, or bundle upload is
+attempted (values below one clamp to a single attempt), while
+`TB_CHAOS_ARCHIVE_FIXED_TIME` accepts a Unix timestamp for deterministic signing
+runs during integration tests. Uploads flow through the bespoke
+`foundation_object_store` client, which now ships a canonical-request regression
+and blocking upload harness that prove AWS Signature V4 headers match AWS’
+published examples. `chaos_lab` records the BLAKE3 digest and byte length for
+every manifest entry, writes `archive/<run_id>/manifest.json` plus
+`archive/latest.json`, and, when requested, mirrors the artefacts to filesystem
+directories or S3 prefixes so downstream automation ingests the same inventory
+that release packaging enforces.
+
 Site-specific readiness can be orchestrated through the
 `TB_CHAOS_SITE_TOPOLOGY` environment variable.  Setting
 

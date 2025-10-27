@@ -20,7 +20,10 @@ byte length, and BLAKE3 digest for every artefact, and a deterministic
 `run_id.zip` bundle. Optional `--publish-dir`, `--publish-bucket`, and
 `--publish-prefix` flags mirror the manifests and bundle into operator-owned
 directories or S3-compatible buckets through the first-party
-`foundation_object_store` client. `scripts/release_provenance.sh` shells out to
+`foundation_object_store` client, which now carries a canonical-request regression
+and blocking upload harness proving AWS Signature V4 headers match the published
+examples while honouring `TB_CHAOS_ARCHIVE_RETRIES` (minimum 1) and optional
+`TB_CHAOS_ARCHIVE_FIXED_TIME` timestamps for reproducible signatures. `scripts/release_provenance.sh` shells out to
 `cargo xtask chaos --out-dir releases/v0.1.0/chaos` before hashing artefacts and
 fails when the chaos gate trips or when any of those files (including the
 archive manifests) are missing so every release proves it passed the provider
@@ -43,8 +46,9 @@ so operators can scrutinise the policy changes before upgrading. The script also
 reports the vendor-tree digest captured in `checksums.txt` for out-of-band
 monitoring, fails immediately when the `chaos/` artefacts are missing or empty,
 and parses `chaos/archive/latest.json` plus the referenced manifest to ensure
-every archived file exists and that the recorded bundle size matches the
-on-disk `run_id.zip`, guaranteeing downstream consumers inherit the same
-readiness evidence enforced during release creation.
+every archived file exists, that the recorded bundle size matches the
+on-disk `run_id.zip`, and that the manifest’s BLAKE3 digests align with the
+files mirrored locally or uploaded to object storage, guaranteeing downstream
+consumers inherit the same readiness evidence enforced during release creation.
 
 Run with `cosign` and either `cargo-bom` or `cargo auditable` on your PATH to reproduce SBOMs deterministically (timestamps are fixed via `SOURCE_DATE_EPOCH`).

@@ -6,7 +6,7 @@ The explorer exposes a lightweight REST service for querying on-chain data and a
 
 ### Block payout breakdowns
 
-Blocks indexed after the governance split now store per-role CT distributions for both read subsidies and advertising settlements. The `/blocks/:hash/payouts` endpoint surfaces those totals without requiring callers to decode the full binary block image; the explorer falls back to the JSON payload written to SQLite when the binary codec is unavailable (e.g., the stubbed test harness). Responses include the block hash, height, and two role maps (`read_subsidy`, `advertising`) with totals for viewers, hosts, hardware vendors, verifiers, the liquidity pool, and the residual miner share. The CLI mirrors this endpoint via `contract-cli explorer block-payouts`, accepting either a block hash or height and exposing three output formats: raw JSON (default), a pretty table, or Prometheus text via `--format json|table|prom`.
+Blocks indexed after the governance split now store per-role CT distributions for read subsidies and dual-token advertising settlements. The `/blocks/:hash/payouts` endpoint surfaces those totals—consumer-token and industrial-token—alongside USD micros, settlement counts, and the oracle snapshot used for conversion without requiring callers to decode the full binary block image; the explorer falls back to the JSON payload written to SQLite when the binary codec is unavailable (e.g., the stubbed test harness). Responses include the block hash, height, a `read_subsidy` role map, an `advertising` CT role map, an `advertising_it` role map, and top-level fields `ad_total_usd_micros`, `ad_settlement_count`, plus an `ad_oracle` object (snapshot and market CT/IT prices). The CLI mirrors this endpoint via `contract-cli explorer block-payouts`, accepting either a block hash or height and exposing three output formats: raw JSON (default), a pretty table, or Prometheus text via `--format json|table|prom`.
 
 Integration coverage now pairs the JSON snapshots with binary block headers so decoder fallbacks stay verified when explorers mix historic and modern payloads in the same sync window. Unit coverage still exercises the JSON fallback with legacy snapshots that omit the per-role fields entirely, guaranteeing FIRST_PARTY_ONLY builds continue to render historical payouts even as the header shape evolves. The CLI command also validates that exactly one of `--hash` or `--height` is supplied and reports a clear error when a block is missing, keeping automation flows hermetic without shell scripting or third-party JSON tooling.
 
@@ -45,7 +45,7 @@ curl -sS "http://explorer.local:8080/blocks/0xabc123.../payouts" | foundation-js
 ## Endpoints
 
 - `GET /blocks/:hash` – fetch a block by hash.
-- `GET /blocks/:hash/payouts` – return per-role CT totals for read subsidies and advertising flows persisted in the block header.
+- `GET /blocks/:hash/payouts` – return per-role CT totals for read subsidies and both CT/IT advertising flows plus the associated USD/oracle metadata persisted in the block header.
 - `GET /blocks/:hash/proof` – fetch the light-client proof for a block.
 - `GET /txs/:hash` – fetch a transaction by hash.
 - `GET /gov/proposals/:id` – fetch a governance proposal.

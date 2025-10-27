@@ -86,6 +86,10 @@ fn build_summary(seq: u64) -> TelemetrySummary {
                 provider_count: snapshot.provider_count,
                 blockers: snapshot.blockers,
                 last_updated: snapshot.last_updated,
+                total_usd_micros: snapshot.total_usd_micros,
+                settlement_count: snapshot.settlement_count,
+                ct_price_usd_micros: snapshot.ct_price_usd_micros,
+                it_price_usd_micros: snapshot.it_price_usd_micros,
             }
         }),
     }

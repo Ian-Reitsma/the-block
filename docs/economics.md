@@ -176,6 +176,47 @@ distribution policy and materializes in the block as `ad_viewer_ct`,
 `ad_miner_ct`. These fields settle reserved campaign budget against the
 acknowledged reads without diluting the inflation schedule.
 
+### Advertising price discovery and dual-token settlement
+
+Impression pricing is now quoted in USD and adapts to cohort utilisation. Each
+cohort maintains a posted price `p_{MiB,c}` that evolves according to a
+Walrasian tâtonnement step using the measured demand and supply over the most
+recent window:
+
+\[
+p_{MiB,c}(t + \Delta) = p_{MiB,c}(t) \cdot \exp\big(\eta \,[U_c - U_c^*]\big),
+\]
+
+where `U_c = min(1, demand_c / (supply_c * p_{MiB,c}))` and `U_c^*` is the
+governance-configured target utilisation. When demand exceeds supply the price
+nudges upward; slack capacity drives the rate down without imposing artificial
+caps. The in-memory and sled market implementations both record the price and
+demand deltas per reservation so historical utilisation feeds future updates.
+
+Campaign budgets remain denominated in USD micros. When an impression commits,
+the marketplace records both the USD total and the oracle snapshot inside the
+`SettlementBreakdown` structure:
+
+- `total_usd_micros` captures the billed amount before rounding losses.
+- `ct_price_usd_micros` and `it_price_usd_micros` store the CT/IT oracle
+  prices that were applied during conversion.
+- `viewer_ct`, `host_ct`, `hardware_ct`, `verifier_ct`, `liquidity_ct`, and
+  `miner_ct` represent the CT settlement that continues to feed the on-chain
+  ledger.
+- `host_it`, `hardware_it`, `verifier_it`, `liquidity_it`, and `miner_it`
+  expose the mirrored IT token quantities that now land in the ledger, explorer,
+  and CLI pipelines alongside the CT totals.
+- `unsettled_usd_micros` records the residual USD value that could not be
+  expressed as whole CT/IT tokens.
+
+Governance still controls the share allocated to each role through
+`DistributionPolicy`. The `liquidity_split_ct_ppm` knob determines what
+percentage of the liquidity allocation settles in CT versus IT. Ledgers now
+record both token flows plus the oracle snapshot per block, and downstream
+analytics (explorer, CLI, dashboards, and CI artefacts) read the CT/IT split and
+prices directly from those records so operators can audit both currencies in
+parallel without recomputing conversions.
+
 ```rust
 fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
     let s = state.ct_supply();

@@ -26,6 +26,15 @@ fn block_lookup_via_router() {
         let ad_verifier = 3u64;
         let ad_liquidity = 1u64;
         let ad_miner = 2u64;
+        let ad_host_it = 6u64;
+        let ad_hardware_it = 4u64;
+        let ad_verifier_it = 2u64;
+        let ad_liquidity_it = 1u64;
+        let ad_miner_it = 1u64;
+        let ad_total_usd_micros = 77_000u64;
+        let ad_settlement_count = 3u64;
+        let ad_ct_price = 1_100_000u64;
+        let ad_it_price = 950_000u64;
         let zero_array = format!("{:?}", [0u8; 32]);
 
         let block_json = format!(
@@ -53,6 +62,15 @@ fn block_lookup_via_router() {
                 "ad_verifier_ct": {ad_verifier},
                 "ad_liquidity_ct": {ad_liquidity},
                 "ad_miner_ct": {ad_miner},
+                "ad_host_it": {ad_host_it},
+                "ad_hardware_it": {ad_hardware_it},
+                "ad_verifier_it": {ad_verifier_it},
+                "ad_liquidity_it": {ad_liquidity_it},
+                "ad_miner_it": {ad_miner_it},
+                "ad_total_usd_micros": {ad_total_usd_micros},
+                "ad_settlement_count": {ad_settlement_count},
+                "ad_oracle_ct_price_usd_micros": {ad_ct_price},
+                "ad_oracle_it_price_usd_micros": {ad_it_price},
                 "compute_sub_ct": 0,
                 "proof_rebate_ct": 0,
                 "storage_sub_it": 0,
@@ -103,11 +121,25 @@ fn block_lookup_via_router() {
             payouts.advertising.total_ct,
             ad_viewer + ad_host + ad_hardware + ad_verifier + ad_liquidity + ad_miner
         );
+        assert_eq!(
+            payouts.advertising.total_it,
+            ad_host_it + ad_hardware_it + ad_verifier_it + ad_liquidity_it + ad_miner_it
+        );
         assert_eq!(payouts.advertising.viewer_ct, ad_viewer);
         assert_eq!(payouts.advertising.host_ct, ad_host);
         assert_eq!(payouts.advertising.hardware_ct, ad_hardware);
         assert_eq!(payouts.advertising.verifier_ct, ad_verifier);
         assert_eq!(payouts.advertising.liquidity_ct, ad_liquidity);
         assert_eq!(payouts.advertising.miner_ct, ad_miner);
+        assert_eq!(payouts.advertising.viewer_it, 0);
+        assert_eq!(payouts.advertising.host_it, ad_host_it);
+        assert_eq!(payouts.advertising.hardware_it, ad_hardware_it);
+        assert_eq!(payouts.advertising.verifier_it, ad_verifier_it);
+        assert_eq!(payouts.advertising.liquidity_it, ad_liquidity_it);
+        assert_eq!(payouts.advertising.miner_it, ad_miner_it);
+        assert_eq!(payouts.total_usd_micros, ad_total_usd_micros);
+        assert_eq!(payouts.settlement_count, ad_settlement_count);
+        assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
+        assert_eq!(payouts.it_price_usd_micros, ad_it_price);
     });
 }

@@ -1,4 +1,13 @@
 # Project Progress Snapshot
+> **Review (2025-11-07, afternoon):** Ad settlements now surface USD totals and
+> dual-currency token splits. `InMemoryMarketplace::commit` and
+> `SledMarketplace::commit` record the posted USD price, oracle snapshot, and
+> role-level CT plus IT token quantities inside `SettlementBreakdown`, keeping
+> the legacy CT ledger fields accurate while exposing mirrored IT payouts for the
+> upcoming dual-token migration. Unit coverage in `crates/ad_market` now exercises
+> the USD→CT/IT conversions, token totals, and rounding behaviour, and the RPC
+> harness continues to pass with the richer schema. Explorer/Gateway docs will
+> follow once the ledger consumes the IT fields.
 > **Review (2025-10-27, evening):** Chaos rehearsals now archive preserved manifests
 > and mirror bundles without leaving first-party tooling. `sim/chaos_lab.rs`
 > generates a run-scoped `manifest.json` under `chaos/archive/<run_id>/` and a
@@ -6,15 +15,21 @@
 > every snapshot, diff, overlay readiness table, and provider failover report,
 > then writes a deterministic `run_id.zip` bundle. Optional `--publish-dir`,
 > `--publish-bucket`, and `--publish-prefix` flags copy the manifests and bundle
-> into long-lived directories or S3-compatible buckets via the new
-> `foundation_object_store` crate so downstream dashboards and auditors ingest the
-> same artefacts release engineering enforces. `tools/xtask` manually decodes the
-> manifests with `foundation_serialization::json::Value`, reports publish targets,
-> and honours the new flags alongside existing readiness analytics. Release
-> automation now fails immediately when `chaos/archive/latest.json` or the
-> referenced manifest is missing, and the verifier parses the manifest to confirm
-> every archived file exists and that the recorded bundle size matches the on-disk
-> `run_id.zip`, preventing tags when artefacts drift or uploads truncate.
+> into long-lived directories or S3-compatible buckets via the first-party
+> `foundation_object_store` client, which now ships canonical-request tests and a
+> blocking upload regression that prove AWS Signature V4 headers match the
+> published examples. Upload retries respect the new
+> `TB_CHAOS_ARCHIVE_RETRIES` knob (minimum 1) and can pin timestamps with
+> `TB_CHAOS_ARCHIVE_FIXED_TIME` so reproducible runs emit the same signed requests
+> in integration environments. `tools/xtask` manually decodes the manifests with
+> `foundation_serialization::json::Value`, reports publish targets, logs the
+> computed BLAKE3 digests and byte sizes for the manifest/bundle pair, and honours
+> the new flags alongside existing readiness analytics. Release automation now
+> fails immediately when `chaos/archive/latest.json` or the referenced manifest is
+> missing, and the verifier parses the manifest to confirm every archived file
+> exists, that the recorded bundle size matches the on-disk `run_id.zip`, and that
+> object-store mirrors surfaced by `cargo xtask chaos` point at the same files,
+> preventing tags when artefacts drift or uploads truncate.
 > **Review (2025-10-27, afternoon):** Chaos automation now loops entirely through
 > first-party tooling. `sim/chaos_lab.rs` fetches `/chaos/status` baselines with
 > `httpd::BlockingClient`, decodes them manually via
@@ -105,6 +120,18 @@
 > logs `read_ack_processed_total{result="invalid_privacy"}` whenever proofs fail
 > under observe mode. New regression tests cover the proof round-trip and enforce
 > that identical reads no longer collide in the ad marketplace.
+> **Review (2025-11-06, afternoon):** Advertising settlements now show the full
+> dual-token story across the explorer, CLI, telemetry, and readiness RPC. The
+> ledger codecs persist CT totals, IT totals, USD micros, settlement counts, and
+> oracle snapshots so downstream tooling never has to infer conversion math, and
+> the explorer/CLI views render the new fields with regression coverage for
+> binary and JSON paths. The metrics aggregator seeds a dedicated
+> `explorer_block_payout_ad_it_total{role}` counter family and resets readiness
+> gauges for USD spend, oracle prices, and settlement counts, while
+> `ad_market.readiness` now embeds both the persisted snapshot and the live
+> marketplace oracle under a single `oracle` object. Dashboards and CI artefacts
+> pick up the same gauges, keeping readiness automation, explorer views, and
+> release checks aligned on the CT/IT split.
 > **Review (2025-10-25, evening):** Governance parameter activations now update
 > the live ad revenue split in lockstep with policy votes. The node runtime wires
 > the shared marketplace handle into the read-subsidy apply hooks, and the new

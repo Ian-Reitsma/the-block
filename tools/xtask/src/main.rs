@@ -4,6 +4,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use crypto_suite::hashing::blake3;
 use diagnostics::{anyhow, bail, Context, Result, TbError};
 use foundation_serialization::json::{self, Map, Value};
 use monitoring_build::ChaosReadinessSnapshot;
@@ -94,6 +95,26 @@ struct ProviderFailoverReport {
     provider: String,
     total_diff_entries: usize,
     scenarios: Vec<ProviderScenarioReport>,
+}
+
+struct ArchiveLatest {
+    run_id: String,
+    manifest: String,
+    bundle: Option<String>,
+    label: Option<String>,
+}
+
+struct ArchiveSummary {
+    run_id: String,
+    manifest_path: PathBuf,
+    manifest_rel: String,
+    manifest_digest: String,
+    manifest_size: u64,
+    bundle_path: Option<PathBuf>,
+    bundle_rel: Option<String>,
+    bundle_digest: Option<String>,
+    bundle_size: Option<u64>,
+    label: Option<String>,
 }
 
 impl OverlayReadinessRow {
@@ -784,25 +805,107 @@ fn run_chaos(matches: &cli_core::parse::Matches) -> Result<()> {
             baseline_path.display()
         );
     }
+    let mut archive_summary: Option<ArchiveSummary> = None;
     if let Some(archive_dir) = archive_dir_opt {
-        let latest = Path::new(&archive_dir).join("latest.json");
-        if latest.exists() {
-            println!("chaos archive latest manifest: {}", latest.display());
+        let latest_path = Path::new(&archive_dir).join("latest.json");
+        if latest_path.exists() {
+            println!("chaos archive latest manifest: {}", latest_path.display());
+            match load_archive_latest(&latest_path)? {
+                Some(latest) => match summarize_archive(Path::new(&archive_dir), &latest)? {
+                    Some(summary) => {
+                        if let Some(label) = &summary.label {
+                            println!("chaos archive run {} label {}", summary.run_id, label);
+                        } else {
+                            println!("chaos archive run {}", summary.run_id);
+                        }
+                        println!(
+                            "chaos archive manifest: {} (blake3={} bytes={})",
+                            summary.manifest_path.display(),
+                            summary.manifest_digest,
+                            summary.manifest_size
+                        );
+                        match (
+                            &summary.bundle_path,
+                            &summary.bundle_digest,
+                            summary.bundle_size,
+                        ) {
+                            (Some(path), Some(digest), Some(size)) => println!(
+                                "chaos archive bundle: {} (blake3={} bytes={})",
+                                path.display(),
+                                digest,
+                                size
+                            ),
+                            (Some(path), _, _) => println!(
+                                "warning: chaos archive bundle missing at {}",
+                                path.display()
+                            ),
+                            _ => println!("chaos archive bundle: none"),
+                        }
+                        archive_summary = Some(summary);
+                    }
+                    None => {
+                        let manifest_path = Path::new(&archive_dir).join(&latest.manifest);
+                        println!(
+                            "warning: chaos archive manifest missing at {}",
+                            manifest_path.display()
+                        );
+                    }
+                },
+                None => {
+                    println!("warning: chaos archive latest.json missing run_id/manifest entries");
+                }
+            }
         } else {
             println!(
                 "warning: chaos archive latest manifest missing at {}",
-                latest.display()
+                latest_path.display()
             );
         }
     }
     if let Some(dir) = publish_dir {
         println!("chaos archive mirrored to {}", dir);
+        if let Some(summary) = archive_summary.as_ref() {
+            let root = Path::new(&dir);
+            println!(
+                "chaos archive mirrored manifest path: {}",
+                root.join(&summary.manifest_rel).display()
+            );
+            if let Some(bundle_rel) = &summary.bundle_rel {
+                println!(
+                    "chaos archive mirrored bundle path: {}",
+                    root.join(bundle_rel).display()
+                );
+            }
+        }
     }
     if let Some(bucket) = publish_bucket {
         let prefix_trimmed = publish_prefix
             .as_deref()
             .map(|value| value.trim_matches('/'))
             .filter(|value| !value.is_empty());
+        if let Some(summary) = archive_summary.as_ref() {
+            let manifest_key = join_object_path(prefix_trimmed, &summary.manifest_rel);
+            println!(
+                "chaos archive manifest uploaded to s3://{bucket}/{manifest_key} (blake3={} bytes={})",
+                summary.manifest_digest,
+                summary.manifest_size
+            );
+            if let Some(bundle_rel) = summary.bundle_rel.as_ref() {
+                let bundle_key = join_object_path(prefix_trimmed, bundle_rel);
+                match (&summary.bundle_digest, summary.bundle_size) {
+                    (Some(digest), Some(size)) => println!(
+                        "chaos archive bundle uploaded to s3://{bucket}/{bundle_key} (blake3={} bytes={})",
+                        digest,
+                        size
+                    ),
+                    _ => println!(
+                        "warning: chaos archive bundle missing at s3://{bucket}/{bundle_key}"
+                    ),
+                }
+            } else {
+                println!("chaos archive bundle upload skipped (no bundle)");
+            }
+        }
         if let Some(prefix) = prefix_trimmed {
             println!("chaos archive uploaded to s3://{bucket}/{prefix}");
         } else {
@@ -860,6 +963,86 @@ fn load_status_diff(path: &Path) -> Result<Vec<StatusDiffEntry>> {
         diffs.push(StatusDiffEntry::from_value(entry)?);
     }
     Ok(diffs)
+}
+
+fn load_archive_latest(path: &Path) -> Result<Option<ArchiveLatest>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let value: Value =
+        json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
+    let map = value
+        .as_object()
+        .ok_or_else(|| anyhow!("latest manifest must be a JSON object"))?;
+    let run_id = read_string(map, "run_id")?;
+    let manifest = read_string(map, "manifest")?;
+    let bundle = map
+        .get("bundle")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    let label = map
+        .get("label")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    Ok(Some(ArchiveLatest {
+        run_id,
+        manifest,
+        bundle,
+        label,
+    }))
+}
+
+fn summarize_archive(dir: &Path, latest: &ArchiveLatest) -> Result<Option<ArchiveSummary>> {
+    let manifest_path = dir.join(&latest.manifest);
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    let manifest_bytes = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest_digest = blake3::hash(&manifest_bytes).to_hex().to_string();
+    let manifest_size = manifest_bytes.len() as u64;
+    let (bundle_path, bundle_rel, bundle_digest, bundle_size) = match &latest.bundle {
+        Some(rel) => {
+            let path = dir.join(rel);
+            if path.exists() {
+                let bundle_bytes = fs::read(&path)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                let digest = blake3::hash(&bundle_bytes).to_hex().to_string();
+                let size = bundle_bytes.len() as u64;
+                (Some(path), Some(rel.clone()), Some(digest), Some(size))
+            } else {
+                (Some(path), Some(rel.clone()), None, None)
+            }
+        }
+        None => (None, None, None, None),
+    };
+    Ok(Some(ArchiveSummary {
+        run_id: latest.run_id.clone(),
+        manifest_path,
+        manifest_rel: latest.manifest.clone(),
+        manifest_digest,
+        manifest_size,
+        bundle_path,
+        bundle_rel,
+        bundle_digest,
+        bundle_size,
+        label: latest.label.clone(),
+    }))
+}
+
+fn join_object_path(prefix: Option<&str>, suffix: &str) -> String {
+    let trimmed_suffix = suffix.trim_start_matches('/');
+    match prefix.filter(|value| !value.is_empty()) {
+        Some(prefix) if trimmed_suffix.is_empty() => prefix.to_string(),
+        Some(prefix) => format!("{}/{}", prefix, trimmed_suffix),
+        None => trimmed_suffix.to_string(),
+    }
 }
 
 fn load_provider_reports(path: &Path) -> Result<Vec<ProviderFailoverReport>> {

@@ -2,7 +2,7 @@
 
 use ad_market::{
     Campaign, CampaignTargeting, Creative, DistributionPolicy, ImpressionContext,
-    InMemoryMarketplace, Marketplace, ReservationKey,
+    InMemoryMarketplace, Marketplace, MarketplaceConfig, ReservationKey, MICROS_PER_DOLLAR,
 };
 use the_block::ReadAck;
 
@@ -26,15 +26,21 @@ fn stub_ack(seed: u8) -> ReadAck {
 
 #[test]
 fn identical_paths_yield_unique_reservations() {
-    let market = InMemoryMarketplace::new(DistributionPolicy::new(40, 30, 20, 5, 5));
+    let market = InMemoryMarketplace::new(MarketplaceConfig {
+        distribution: DistributionPolicy::new(40, 30, 20, 5, 5),
+        ..MarketplaceConfig::default()
+    });
     market
         .register_campaign(Campaign {
             id: "cmp-unique".into(),
             advertiser_account: "adv".into(),
-            budget_ct: 200,
+            budget_usd_micros: MICROS_PER_DOLLAR,
             creatives: vec![Creative {
                 id: "creative".into(),
-                price_per_mib_ct: 100,
+                action_rate_ppm: 400_000,
+                margin_ppm: 800_000,
+                value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
                 badges: Vec::new(),
                 domains: vec!["example.com".into()],
                 metadata: Default::default(),
