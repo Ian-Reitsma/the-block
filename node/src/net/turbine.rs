@@ -138,6 +138,7 @@ mod tests {
     use crate::net::message::Payload;
     use crate::net::peer::take_recorded_drops;
     use crate::p2p::handshake::{Hello, SUPPORTED_VERSION};
+    use std::net::SocketAddr;
 
     fn sample_message() -> Message {
         let sk = SigningKey::from_bytes(&[7u8; 32]);
@@ -162,7 +163,11 @@ mod tests {
 
     #[test]
     fn duplicate_broadcast_records_drop() {
-        let peers = vec![("127.0.0.1:9000".parse().unwrap(), Transport::Tcp, None)];
+        let peers = vec![(
+            SocketAddr::from(([127, 0, 0, 1], 9000)),
+            Transport::Tcp,
+            None,
+        )];
         let _ = take_recorded_drops();
 
         let msg = sample_message();

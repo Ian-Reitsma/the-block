@@ -39,7 +39,9 @@ pub mod token_model;
 pub mod dependency_fault_harness;
 
 use bridging::BridgeModel;
-use chaos::{ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosScenario, ChaosSite};
+use chaos::{
+    ChaosEvent, ChaosFault, ChaosHarness, ChaosModule, ChaosProviderKind, ChaosScenario, ChaosSite,
+};
 use dashboard::Snapshot;
 use demand::DemandModel;
 use inflation::InflationModel;
@@ -97,8 +99,8 @@ impl Simulation {
         chaos.configure_sites(
             ChaosModule::Overlay,
             vec![
-                ChaosSite::new("provider-a", 0.55, 0.1),
-                ChaosSite::new("provider-b", 0.45, 0.18),
+                ChaosSite::with_kind("provider-a", 0.55, 0.1, ChaosProviderKind::Foundation),
+                ChaosSite::with_kind("provider-b", 0.45, 0.18, ChaosProviderKind::Partner),
             ],
         );
         chaos.register(

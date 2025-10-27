@@ -14,7 +14,7 @@ use httpd::metrics as http_metrics;
 use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
 use monitoring_build::{
-    verify_attestation, ChaosAttestation, ChaosAttestationError, ChaosModule,
+    verify_attestation, ChaosAttestation, ChaosAttestationError, ChaosModule, ChaosProviderKind,
     ChaosReadinessSnapshot,
 };
 use runtime::telemetry::{
@@ -243,7 +243,7 @@ const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
 const LABEL_ROLE: [&str; 1] = ["role"];
-const LABEL_CHAOS_SITE: [&str; 3] = ["module", "scenario", "site"];
+const LABEL_CHAOS_SITE: [&str; 4] = ["module", "scenario", "site", "provider"];
 const EXPLORER_PAYOUT_ROLES: [&str; 6] = [
     "viewer",
     "host",
@@ -3137,7 +3137,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             METRIC_CHAOS_SITE_READINESS,
             "Chaos readiness scores grouped by module, scenario, and site",
         ),
-        &["module", "scenario", "site"],
+        &["module", "scenario", "site", "provider"],
     );
     registry
         .register(Box::new(chaos_site_readiness.clone()))
@@ -7715,7 +7715,7 @@ mod tests {
     use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
     use monitoring_build::{
-        sign_attestation, ChaosAttestationDraft, ChaosModule, ChaosSiteReadiness,
+        sign_attestation, ChaosAttestationDraft, ChaosModule, ChaosProviderKind, ChaosSiteReadiness,
     };
     use rand::rngs::OsRng;
     use std::collections::HashMap;
@@ -7760,6 +7760,7 @@ mod tests {
                 site_readiness: vec![ChaosSiteReadiness {
                     site: "provider-a".into(),
                     readiness: 0.81,
+                    provider_kind: ChaosProviderKind::Foundation,
                 }],
             };
             let attestation = sign_attestation(draft, &signing_key);
@@ -7797,6 +7798,10 @@ mod tests {
             assert_eq!(
                 site_entry.get("site").and_then(Value::as_str),
                 Some("provider-a")
+            );
+            assert_eq!(
+                site_entry.get("provider_kind").and_then(Value::as_str),
+                Some("foundation")
             );
         });
     }
@@ -7904,6 +7909,7 @@ mod tests {
                 site_readiness: vec![ChaosSiteReadiness {
                     site: "provider-a".into(),
                     readiness: 0.9,
+                    provider_kind: ChaosProviderKind::Foundation,
                 }],
             };
             let attestation = sign_attestation(draft, &signing_key);
@@ -8025,6 +8031,112 @@ mod tests {
 
             let snapshots = state.chaos_snapshots();
             assert!(snapshots.is_empty());
+        });
+    }
+
+    #[test]
+    fn chaos_site_updates_remove_stale_entries() {
+        run_async(async {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
+            let app = router(state.clone());
+            let mut rng = OsRng::default();
+            let signing_key = SigningKey::generate(&mut rng);
+
+            let base = ChaosAttestationDraft {
+                scenario: "overlay-soak".to_string(),
+                module: ChaosModule::Overlay,
+                readiness: 0.91,
+                sla_threshold: 0.95,
+                breaches: 0,
+                window_start: 0,
+                window_end: 10,
+                issued_at: 10,
+                site_readiness: vec![
+                    ChaosSiteReadiness {
+                        site: "provider-a".into(),
+                        readiness: 0.9,
+                        provider_kind: ChaosProviderKind::Foundation,
+                    },
+                    ChaosSiteReadiness {
+                        site: "provider-b".into(),
+                        readiness: 0.88,
+                        provider_kind: ChaosProviderKind::Partner,
+                    },
+                ],
+            };
+            let attestation = sign_attestation(base, &signing_key);
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&attestation.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+            let update = ChaosAttestationDraft {
+                scenario: "overlay-soak".to_string(),
+                module: ChaosModule::Overlay,
+                readiness: 0.93,
+                sla_threshold: 0.95,
+                breaches: 0,
+                window_start: 10,
+                window_end: 20,
+                issued_at: 20,
+                site_readiness: vec![ChaosSiteReadiness {
+                    site: "provider-b".into(),
+                    readiness: 0.9,
+                    provider_kind: ChaosProviderKind::Partner,
+                }],
+            };
+            let attestation = sign_attestation(update, &signing_key);
+            let req = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/chaos/attest")
+                .json(&attestation.to_value())
+                .unwrap()
+                .build();
+            let resp = app.handle(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+            let status_resp = app
+                .handle(app.request_builder().path("/chaos/status").build())
+                .await
+                .unwrap();
+            assert_eq!(status_resp.status(), StatusCode::OK);
+            let payload: Value = json::from_slice(status_resp.body()).unwrap();
+            let entries = payload.as_array().expect("status array");
+            assert_eq!(entries.len(), 1);
+            let entry = entries[0].as_object().expect("status entry");
+            let sites = entry
+                .get("site_readiness")
+                .and_then(Value::as_array)
+                .expect("site readiness");
+            assert_eq!(sites.len(), 1);
+            let site = sites[0].as_object().expect("site entry");
+            assert_eq!(site.get("site").and_then(Value::as_str), Some("provider-b"));
+            assert_eq!(
+                site.get("provider_kind").and_then(Value::as_str),
+                Some("partner")
+            );
+
+            let metrics_resp = app
+                .handle(app.request_builder().path("/metrics").build())
+                .await
+                .unwrap();
+            assert_eq!(metrics_resp.status(), StatusCode::OK);
+            let body = String::from_utf8(metrics_resp.body().to_vec()).expect("metrics body");
+            let overlay_provider_b =
+                "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-b\",provider=\"partner\"";
+            let overlay_provider_a =
+                "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-a\",provider=\"foundation\"";
+            assert!(body.contains(overlay_provider_b));
+            assert!(!body.contains(overlay_provider_a));
+            assert!(body.contains(overlay_provider_b));
+            assert!(!body.contains(overlay_provider_a));
         });
     }
 
@@ -8951,7 +9063,7 @@ impl AppState {
         attestation: ChaosAttestation,
     ) -> Result<ChaosReadinessSnapshot, ChaosAttestationError> {
         verify_attestation(&attestation)?;
-        let snapshot = {
+        let (snapshot, removed_sites) = {
             let mut guard = match self.chaos_status.lock() {
                 Ok(guard) => guard,
                 Err(poison) => {
@@ -8976,8 +9088,31 @@ impl AppState {
                 site.readiness,
                 "module" => attestation.module.as_str(),
                 "scenario" => attestation.scenario.as_str(),
-                "site" => site.site.as_str()
+                "site" => site.site.as_str(),
+                "provider" => site.provider_kind.as_str()
             );
+        }
+        if !removed_sites.is_empty() {
+            let metrics = aggregator_metrics();
+            for site in &removed_sites {
+                let labels = [
+                    attestation.module.as_str(),
+                    attestation.scenario.as_str(),
+                    site.site.as_str(),
+                    site.provider_kind.as_str(),
+                ];
+                let removed = metrics.chaos_site_readiness.remove_label_values(&labels);
+                if !removed {
+                    debug!(
+                        target: "aggregator",
+                        module = attestation.module.as_str(),
+                        scenario = attestation.scenario.as_str(),
+                        site = site.site.as_str(),
+                        provider = site.provider_kind.as_str(),
+                        "no existing chaos_site_readiness handle to remove"
+                    );
+                }
+            }
         }
         if attestation.breaches > 0 {
             increment_counter!(METRIC_CHAOS_BREACH_TOTAL, attestation.breaches as f64);
@@ -8999,12 +9134,42 @@ struct ChaosStatusTracker {
     snapshots: HashMap<(String, ChaosModule), ChaosReadinessSnapshot>,
 }
 
+#[derive(Clone, Debug)]
+struct RemovedSite {
+    site: String,
+    provider_kind: ChaosProviderKind,
+}
+
 impl ChaosStatusTracker {
-    fn record(&mut self, attestation: &ChaosAttestation) -> ChaosReadinessSnapshot {
+    fn record(
+        &mut self,
+        attestation: &ChaosAttestation,
+    ) -> (ChaosReadinessSnapshot, Vec<RemovedSite>) {
         let mut snapshot = ChaosReadinessSnapshot::from(attestation);
         snapshot.site_readiness.sort_by(|a, b| a.site.cmp(&b.site));
-        self.snapshots.insert(snapshot.key(), snapshot.clone());
-        snapshot
+        let key = snapshot.key();
+        let removed = if let Some(previous) = self.snapshots.get(&key) {
+            let current_sites: HashMap<&str, ChaosProviderKind> = snapshot
+                .site_readiness
+                .iter()
+                .map(|site| (site.site.as_str(), site.provider_kind))
+                .collect();
+            previous
+                .site_readiness
+                .iter()
+                .filter_map(|entry| match current_sites.get(entry.site.as_str()) {
+                    Some(kind) if *kind == entry.provider_kind => None,
+                    _ => Some(RemovedSite {
+                        site: entry.site.clone(),
+                        provider_kind: entry.provider_kind,
+                    }),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.snapshots.insert(key, snapshot.clone());
+        (snapshot, removed)
     }
 
     fn snapshots(&self) -> Vec<ChaosReadinessSnapshot> {

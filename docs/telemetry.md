@@ -64,6 +64,10 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_stats_export_all_total{result}` counts bulk snapshot exports (ok, error)
 - `gateway_dns_lookup_total{status}` counts verified versus rejected DNS entries
 - `peer_reputation_score{peer_id}` gauges the dynamic reputation used for rate limits
+- `gossip_listener_bind_failed`, `rpc_listener_bind_failed`, and
+  `status_listener_bind_failed` warn when the unified listener helper cannot bind
+  sockets during startup. These warnings replace the previous panic paths so
+  automation can detect occupied ports without crashing the node.
 - `quic_provider_connect_total{provider}` tracks successful QUIC dials per backend;
   pair with `quic_handshake_fail_total{peer,provider}`, `quic_endpoint_reuse_total{provider}`,
   and `quic_cert_rotation_total{provider}` to gauge provider health during the
@@ -153,7 +157,7 @@ cluster-wide gauges when compiled with `--features telemetry`:
   otherwise the gauges mirror the latest rolling counts and configured
   thresholds so dashboards can track activation progress.
 - `chaos_readiness{module,scenario}`,
-  `chaos_site_readiness{module,scenario,site}`, and
+  `chaos_site_readiness{module,scenario,site,provider}`, and
   `chaos_sla_breach_total` – readiness snapshots and breach counts derived from
   signed chaos attestations. The aggregator sorts site entries before exposing
   them via `/chaos/status` and logs `chaos_status_tracker_poisoned_recovering`

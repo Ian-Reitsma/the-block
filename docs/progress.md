@@ -1,8 +1,22 @@
 # Project Progress Snapshot
+> **Review (2025-10-27, early morning):** Chaos automation now diffs provider-
+> aware readiness snapshots straight from long-running overlay soaks. The
+> simulator records provider kinds in `SiteReadinessState`, the chaos harness
+> emits mixed-provider attestations, and the metrics aggregator mirrors the
+> provider label through `/chaos/status`, `chaos_site_readiness{module,scenario,site,provider}`,
+> and baseline diff artefacts while pruning stale labels when sites disappear.
+> The new `sim/tests/chaos_harness.rs::reconfiguring_sites_replaces_previous_entries`
+> and `metrics-aggregator::tests::chaos_site_updates_remove_stale_entries` guard
+> topology churn, and `sim/chaos_lab.rs` now persists provider-aware diff logs so
+> overlay soak automation can fail fast when readiness shifts. Listener binding
+> is also unified: `node/src/net/listener.rs` reports `*_listener_bind_failed`
+> warnings across RPC, gateway, and status servers, and the fresh
+> `node/tests/rpc_bind.rs` regression proves occupied sockets surface warnings
+> instead of panics.
 > **Review (2025-10-26, late night):** Chaos readiness now tracks mixed-provider
 > overlays end to end. The simulator seeds overlay scenarios with weighted
 > `ChaosSite` entries, the aggregator mirrors them through
-> `chaos_site_readiness{module,scenario,site}` and heals poisoned readiness locks
+> `chaos_site_readiness{module,scenario,site,provider}` and heals poisoned readiness locks
 > with a `chaos_status_tracker_poisoned_recovering` warning, and Grafana/JSON
 > snapshots remain sorted so automation can diff runs deterministically. The
 > mobile sync suite gained a first-party stub for builds without the

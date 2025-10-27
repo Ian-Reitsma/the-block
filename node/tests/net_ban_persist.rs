@@ -14,11 +14,11 @@ fn ban_persists_across_reopen() {
         .unwrap()
         .as_secs()
         + 60;
-    store.ban(&pk, until);
-    assert!(store.is_banned(&pk));
+    store.ban(&pk, until).expect("ban");
+    assert!(store.is_banned(&pk).expect("is banned"));
     drop(store);
     let store2 = BanStore::open(path.to_str().unwrap());
-    assert!(store2.is_banned(&pk));
+    assert!(store2.is_banned(&pk).expect("is banned"));
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn ban_expires() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    store.ban(&pk, until);
-    store.purge_expired();
-    assert!(!store.is_banned(&pk));
+    store.ban(&pk, until).expect("ban");
+    store.purge_expired().expect("purge");
+    assert!(!store.is_banned(&pk).expect("is banned"));
 }

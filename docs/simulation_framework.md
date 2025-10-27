@@ -153,10 +153,11 @@ overrides the default per-module site roster with named locations, weight
 targets, and optional wake-up delays.  The harness automatically normalises
 weights, exposes site-level readiness in each attestation draft, and persists
 the selected topology so dashboards and the metrics aggregator report identical
-module/site breakdowns.  The implementation lives in `ChaosSite::new` and
-`ChaosScenario::set_sites`, ensuring every scenario shares a common,
+module/site/provider breakdowns.  The implementation lives in `ChaosSite::new`
+and `ChaosScenario::set_sites`, ensuring every scenario shares a common,
 first-party representation that the attestation draft simply clones into its
-`site_readiness` vector.
+`site_readiness` vector, including each site’s `ChaosProviderKind` so the
+aggregator can emit `chaos_site_readiness{module,scenario,site,provider}`.
 
 Malformed attestation payloads are now rejected explicitly: monitoring-based
 tests cover unknown modules, truncated signature arrays, and invalid byte
@@ -166,9 +167,9 @@ entries, while the simulator exercises distributed site weighting through
 Harness configuration lives in `sim/src/chaos.rs`; extend the registered
 scenarios to model additional overlays, storage tiers, or compute pipelines and
 call `configure_sites` to seed per-scenario provider mixes. `Simulation::new`
-demonstrates the default overlay mix (`ChaosSite::new("provider-a", …)` and
-`ChaosSite::new("provider-b", …)`) so integration tests immediately exercise the
-site readiness export path.
+demonstrates the default overlay mix (`ChaosSite::with_kind("provider-a", …)` and
+`ChaosSite::with_kind("provider-b", …)`) so integration tests immediately
+exercise the provider-aware site readiness export path.
 Integration coverage in `sim/tests/chaos_harness.rs` exercises breach detection,
 recovery, and attestation draft generation. Downstream verification relies on
 `metrics-aggregator/tests::chaos_lab_attestations_flow_through_status`, which

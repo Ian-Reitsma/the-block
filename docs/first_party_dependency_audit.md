@@ -1,9 +1,25 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-27 update (provider-aware chaos & listener helper):** Provider
+> metadata now lives entirely in `sim/src/chaos.rs` via the first-party
+> `ChaosProviderKind` enum, and `SiteReadinessState` stores readiness plus
+> provider without reaching for serde or external maps. The attestation pipeline
+> threads that metadata through monitoring and the metrics aggregator, emitting
+> `chaos_site_readiness{module,scenario,site,provider}` while removing stale
+> handles with the existing Prometheus facade—no new metrics crates were added.
+> `sim/chaos_lab.rs` writes provider-aware diff artefacts using `std::fs`, and
+> `metrics-aggregator` deletes outdated label handles with the in-house
+> `GaugeVec` wrapper. Listener startup now routes through
+> `node/src/net/listener.rs`, which simply wraps `std::net::TcpListener`/`UdpSocket`
+> and the existing `diagnostics` logging; RPC, gateway, and status servers emit
+> `*_listener_bind_failed` warnings without introducing async runtimes or third-
+> party bind helpers. The new `node/tests/rpc_bind.rs` regression uses only the
+> shipped test harness to assert the warning surfaces when ports are occupied.
+
 > **2025-10-26 update (mixed-provider chaos & runtime stubs):** Overlay chaos
 > scenarios now declare weighted `ChaosSite` entries inside `sim/src/chaos.rs`,
 > and the metrics aggregator surfaces those arrays via
-> `chaos_site_readiness{module,scenario,site}` while sorting and logging
+> `chaos_site_readiness{module,scenario,site,provider}` while sorting and logging
 > `chaos_status_tracker_poisoned_recovering` when recovering from a poisoned
 > mutex—no third-party metrics or JSON crates were introduced. The mobile sync
 > suite now ships a `measure_sync_latency` stub compiled whenever the

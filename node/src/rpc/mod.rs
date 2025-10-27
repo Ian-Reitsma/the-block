@@ -33,7 +33,6 @@ use httpd::{
     form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
 };
-use runtime::net::TcpListener;
 use runtime::sync::{
     oneshot,
     semaphore::{OwnedSemaphorePermit, Semaphore},
@@ -2854,7 +2853,8 @@ pub async fn run_rpc_server_with_market(
             format!("invalid rpc bind address {addr}: {err}"),
         )
     })?;
-    let listener = TcpListener::bind(bind_addr).await?;
+    let listener =
+        net::listener::bind_runtime("rpc", "rpc_listener_bind_failed", bind_addr).await?;
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
 

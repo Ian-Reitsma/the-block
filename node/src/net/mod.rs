@@ -1,6 +1,7 @@
 pub mod a_star;
 pub mod ban_store;
 pub mod discovery;
+pub mod listener;
 mod message;
 pub mod peer;
 mod peer_metrics_binary;
@@ -1620,7 +1621,13 @@ impl Node {
             Some((addr, cert)) => (Some(addr), Some(cert)),
             None => (None, None),
         };
-        ban_store::store().guard().purge_expired();
+        if let Err(err) = ban_store::store().guard().purge_expired() {
+            diagnostics::tracing::warn!(
+                target: "net",
+                %err,
+                "failed to purge expired bans on startup"
+            );
+        }
         let relay = std::sync::Arc::new(Relay::default());
         set_gossip_relay(std::sync::Arc::clone(&relay));
         Self {
@@ -1874,18 +1881,7 @@ impl Node {
 }
 
 fn bind_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
-    match TcpListener::bind(addr) {
-        Ok(listener) => Ok(listener),
-        Err(err) => {
-            diagnostics::tracing::warn!(
-                target: "net",
-                error = %err,
-                %addr,
-                "gossip_listener_bind_failed"
-            );
-            Err(err)
-        }
-    }
+    listener::bind_sync("net", "gossip_listener_bind_failed", addr)
 }
 
 pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {

@@ -39,11 +39,58 @@ impl fmt::Display for ChaosModule {
     }
 }
 
+/// Provider classifications used by the WAN chaos harness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ChaosProviderKind {
+    /// Catch-all classification when the provider kind is not specified.
+    #[default]
+    Unknown,
+    /// Foundation-operated overlays.
+    Foundation,
+    /// Approved partner-operated overlays.
+    Partner,
+    /// Community-hosted overlays.
+    Community,
+    /// External or third-party overlays.
+    External,
+}
+
+impl ChaosProviderKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChaosProviderKind::Unknown => "unknown",
+            ChaosProviderKind::Foundation => "foundation",
+            ChaosProviderKind::Partner => "partner",
+            ChaosProviderKind::Community => "community",
+            ChaosProviderKind::External => "external",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "" | "unknown" => Some(ChaosProviderKind::Unknown),
+            "foundation" => Some(ChaosProviderKind::Foundation),
+            "partner" => Some(ChaosProviderKind::Partner),
+            "community" => Some(ChaosProviderKind::Community),
+            "external" => Some(ChaosProviderKind::External),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ChaosProviderKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Per-site readiness information tracked alongside module readiness.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChaosSiteReadiness {
     pub site: String,
     pub readiness: f64,
+    #[serde(default)]
+    pub provider_kind: ChaosProviderKind,
 }
 
 /// Unsigned readiness snapshot produced by the chaos harness.
@@ -88,6 +135,7 @@ impl ChaosAttestationDraft {
             hasher.update(&(name_bytes.len() as u64).to_le_bytes());
             hasher.update(name_bytes);
             hasher.update(&entry.readiness.to_le_bytes());
+            hasher.update(entry.provider_kind.as_str().as_bytes());
         }
         *hasher.finalize().as_bytes()
     }
@@ -159,6 +207,10 @@ impl ChaosAttestation {
                     let mut site_map = Map::new();
                     site_map.insert("site".into(), Value::String(entry.site.clone()));
                     site_map.insert("readiness".into(), Value::from(entry.readiness));
+                    site_map.insert(
+                        "provider_kind".into(),
+                        Value::String(entry.provider_kind.as_str().into()),
+                    );
                     Value::Object(site_map)
                 })
                 .collect();
@@ -252,9 +304,24 @@ impl ChaosAttestation {
                     let readiness = site_map.get("readiness").and_then(Value::as_f64).ok_or(
                         ChaosAttestationDecodeError::MissingField("site_readiness.readiness"),
                     )?;
+                    let provider_kind = match site_map.get("provider_kind") {
+                        Some(value) => {
+                            let text =
+                                value
+                                    .as_str()
+                                    .ok_or(ChaosAttestationDecodeError::InvalidType(
+                                        "site_readiness.provider_kind",
+                                    ))?;
+                            ChaosProviderKind::from_str(text).ok_or(
+                                ChaosAttestationDecodeError::InvalidProviderKind(text.to_string()),
+                            )?
+                        }
+                        None => ChaosProviderKind::Unknown,
+                    };
                     sites.push(ChaosSiteReadiness {
                         site: site.to_string(),
                         readiness,
+                        provider_kind,
                     });
                 }
                 sites
@@ -313,6 +380,7 @@ pub enum ChaosAttestationDecodeError {
     InvalidType(&'static str),
     InvalidModule(String),
     InvalidLength(&'static str),
+    InvalidProviderKind(String),
 }
 
 impl fmt::Display for ChaosAttestationDecodeError {
@@ -329,6 +397,9 @@ impl fmt::Display for ChaosAttestationDecodeError {
             }
             ChaosAttestationDecodeError::InvalidLength(field) => {
                 write!(f, "chaos attestation field '{field}' has invalid length")
+            }
+            ChaosAttestationDecodeError::InvalidProviderKind(value) => {
+                write!(f, "unknown chaos provider kind '{value}'")
             }
         }
     }
@@ -454,6 +525,10 @@ impl ChaosReadinessSnapshot {
                     let mut site = Map::new();
                     site.insert("site".into(), Value::String(entry.site.clone()));
                     site.insert("readiness".into(), Value::from(entry.readiness));
+                    site.insert(
+                        "provider_kind".into(),
+                        Value::String(entry.provider_kind.as_str().into()),
+                    );
                     Value::Object(site)
                 })
                 .collect();
@@ -488,6 +563,7 @@ mod tests {
             site_readiness: vec![ChaosSiteReadiness {
                 site: "primary".into(),
                 readiness: 1.5,
+                provider_kind: ChaosProviderKind::Unknown,
             }],
         };
         let attestation = sign_attestation(draft, &signing_key());
@@ -604,6 +680,7 @@ mod tests {
             site_readiness: vec![ChaosSiteReadiness {
                 site: "east".into(),
                 readiness: 0.5,
+                provider_kind: ChaosProviderKind::Unknown,
             }],
         };
         let attestation = sign_attestation(draft, &signing_key());

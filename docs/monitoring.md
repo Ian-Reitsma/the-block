@@ -77,11 +77,12 @@ The WAN chaos verifier now lives entirely inside the workspace:
   exposes `/chaos/status` for downstream tooling. Accepted payloads update the
   metrics `chaos_readiness{module,scenario}` and
   `chaos_sla_breach_total`, and now mirror per-site readiness via
-  `chaos_site_readiness{module,scenario,site}` so dashboards and automation can
-  distinguish provider-specific regressions. The handler sorts site entries and
-  emits a `chaos_status_tracker_poisoned_recovering` warning if it has to recover
-  from a poisoned readiness mutex, keeping JSON/Grafana snapshots stable even
-  when previous runs panicked mid-update.
+  `chaos_site_readiness{module,scenario,site,provider}` so dashboards and
+  automation can diff provider-specific regressions. The handler sorts site
+  entries, prunes stale label handles when scenarios drop a site/provider pair,
+  and emits a `chaos_status_tracker_poisoned_recovering` warning if it has to
+  recover from a poisoned readiness mutex, keeping JSON/Grafana snapshots stable
+  even when previous runs panicked mid-update.
 - A dedicated regression (`chaos_attestation_round_trip`) posts the `chaos_lab`
   output into `/chaos/attest`, verifies the `/chaos/status` response, and
   exercises out-of-range, digest-mismatch, malformed-module, and
@@ -96,12 +97,13 @@ The WAN chaos verifier now lives entirely inside the workspace:
   readiness metrics.
 
 The Grafana and HTML dashboards now include a dedicated **Chaos** row that
-charts `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,site}`,
+charts `chaos_readiness{module,scenario}`, `chaos_site_readiness{module,site,provider}`,
 and the five-minute delta of `chaos_sla_breach_total`. Automation runbooks
-continue to reference `/chaos/status` for human-readable snapshots. Signed
-attestation archives now live under `monitoring/output/chaos/` when operators
-set `TB_CHAOS_ATTESTATIONS` during `make monitor`, keeping the historical
-artefacts inside first-party storage.
+continue to reference `/chaos/status` for human-readable snapshots, and
+`chaos_lab` persists provider-aware diff artefacts so soak automation can alert
+on churn. Signed attestation archives now live under `monitoring/output/chaos/`
+when operators set `TB_CHAOS_ATTESTATIONS` during `make monitor`, keeping the
+historical artefacts inside first-party storage.
 
 When filesystem scratch space disappears mid-test, the gossip relay shard cache
 falls back to an in-memory store, and the peer metrics persistence layer skips

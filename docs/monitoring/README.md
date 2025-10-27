@@ -114,7 +114,7 @@ ready to import once the foundation telemetry stack is running.
   loop.
 - The WAN chaos dashboards ingest the new
   `chaos_readiness{module,scenario}`,
-  `chaos_site_readiness{module,scenario,site}` gauges, and the
+  `chaos_site_readiness{module,scenario,site,provider}` gauges, and the
   `chaos_sla_breach_total` counter emitted by the metrics aggregator after
   verifying `/chaos/attest` payloads. The handler sorts site readiness entries,
   forwards them through `/chaos/status`, and logs
