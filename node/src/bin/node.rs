@@ -1191,6 +1191,7 @@ fn spawn_read_ack_worker(
                             .ensure_handle_for_label_values(&[match err {
                                 ReadAckError::InvalidSignature => "invalid_signature",
                                 ReadAckError::PrivacyProofRejected => "invalid_privacy",
+                                ReadAckError::InvalidSelectionReceipt => "invalid_selection",
                             }])
                         {
                             handle.inc();

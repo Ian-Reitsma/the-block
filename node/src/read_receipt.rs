@@ -1,4 +1,5 @@
 use crate::ad_readiness::AdReadinessSnapshot;
+use ad_market::SelectionReceipt;
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
@@ -37,6 +38,9 @@ pub struct ReadAck {
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Optional creative identifier returned by the ad marketplace.
     pub creative_id: Option<String>,
+    #[serde(default)]
+    /// Optional selection receipt attesting to the on-device auction outcome.
+    pub selection_receipt: Option<SelectionReceipt>,
     #[serde(default)]
     /// Snapshot of readiness counters and proof bindings for this acknowledgement.
     pub readiness: Option<AdReadinessSnapshot>,

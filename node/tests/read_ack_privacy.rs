@@ -38,6 +38,7 @@ fn build_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
         provider: provider.to_string(),
         campaign_id: None,
         creative_id: None,
+        selection_receipt: None,
         readiness: None,
         zk_proof: None,
     }

@@ -11,6 +11,35 @@ fn unavailable() -> Value {
     Value::Object(map)
 }
 
+fn campaign_summary_to_value(summary: &ad_market::CampaignSummary) -> Value {
+    let mut entry = Map::new();
+    entry.insert("id".into(), Value::String(summary.id.clone()));
+    entry.insert(
+        "advertiser_account".into(),
+        Value::String(summary.advertiser_account.clone()),
+    );
+    entry.insert(
+        "remaining_budget_usd_micros".into(),
+        Value::Number(Number::from(summary.remaining_budget_usd_micros)),
+    );
+    entry.insert(
+        "reserved_budget_usd_micros".into(),
+        Value::Number(Number::from(summary.reserved_budget_usd_micros)),
+    );
+    entry.insert(
+        "creatives".into(),
+        Value::Array(
+            summary
+                .creatives
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    Value::Object(entry)
+}
+
 pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
     let Some(handle) = market else {
         return unavailable();
@@ -31,26 +60,7 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
         Value::Number(Number::from(oracle.it_price_usd_micros)),
     );
     root.insert("oracle".into(), Value::Object(oracle_map));
-    let items: Vec<Value> = campaigns
-        .into_iter()
-        .map(|campaign| {
-            let mut entry = Map::new();
-            entry.insert("id".into(), Value::String(campaign.id));
-            entry.insert(
-                "advertiser_account".into(),
-                Value::String(campaign.advertiser_account),
-            );
-            entry.insert(
-                "remaining_budget_usd_micros".into(),
-                Value::Number(Number::from(campaign.remaining_budget_usd_micros)),
-            );
-            entry.insert(
-                "creatives".into(),
-                Value::Array(campaign.creatives.into_iter().map(Value::String).collect()),
-            );
-            Value::Object(entry)
-        })
-        .collect();
+    let items: Vec<Value> = campaigns.iter().map(campaign_summary_to_value).collect();
     root.insert("campaigns".into(), Value::Array(items));
     let pricing: Vec<Value> = handle
         .cohort_prices()
@@ -81,6 +91,21 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
         })
         .collect();
     root.insert("cohort_prices".into(), Value::Array(pricing));
+    Value::Object(root)
+}
+
+pub fn list_campaigns(market: Option<&MarketplaceHandle>) -> Value {
+    let Some(handle) = market else {
+        return unavailable();
+    };
+    let mut root = Map::new();
+    root.insert("status".into(), Value::String("ok".into()));
+    let campaigns: Vec<Value> = handle
+        .list_campaigns()
+        .iter()
+        .map(campaign_summary_to_value)
+        .collect();
+    root.insert("campaigns".into(), Value::Array(campaigns));
     Value::Object(root)
 }
 

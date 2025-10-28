@@ -37,6 +37,10 @@ explicit hosting and campaign metadata:
 - `provider` – storage/hosting identifier inferred for the response.
 - `campaign_id`/`creative_id` – optional identifiers emitted by the advertising
   marketplace when an impression reserves budget for a campaign.
+- `selection_receipt` – optional proof of the on-device auction outcome. When
+  present, the node replays the receipt to ensure the clearing price matches
+  `max(runner_up_quality, resource_floor)` and that the attestation is
+  well-formed (SNARK preferred, TEE accepted while circuit proofs stabilize).
 - `readiness` – optional `AdReadinessSnapshot` captured when the gateway attaches
   campaign metadata. The snapshot commits to rolling viewer/host/provider
   counters and is accompanied by a zero-knowledge proof.
@@ -54,6 +58,16 @@ first-party `.bin` format exclusively.
 `ReadAck::reservation_discriminator()` derives a per-ack 32-byte key from the
 manifest, path hash, timestamp, client hash, and signature so concurrent fetches
 of the same asset never collide in the advertising marketplace.
+
+### Selection receipt attestation
+
+Wallets attach a `SelectionReceipt` whenever an impression spends campaign
+budget. Nodes verify the transcript by recomputing the composite resource floor,
+runner-up quality, and clearing price before accepting the acknowledgement.
+Attestations are preferred as SNARK proofs (non-empty circuit identifiers plus
+proof bytes) but TEE reports remain an accepted fallback while circuits roll
+out; missing or malformed attestations are counted explicitly so operators can
+chart wallet compliance.
 
 ## 1.1 Privacy commitments
 
@@ -146,10 +160,15 @@ if they wish to compare raw acknowledgement bytes with the pending payout map.
   finalized batches.
 - `analytics` – aggregates read counts and bytes for dashboards.
 - Runtime telemetry counters `subsidy_bytes_total{type="read"}`,
-  `read_denied_total{reason}`, and `read_ack_processed_total{result}` reflect
-  subsidy issuance, rate‑limit drops, and acknowledgement validation outcomes.
-  Sustained growth in `read_ack_processed_total{result="invalid_signature"}` or
-  `{result="invalid_privacy"}` should trigger the governance playbook described in
+  `read_denied_total{reason}`, `read_ack_processed_total{result}`,
+  `read_selection_proof_verified_total{attestation}`,
+  `read_selection_proof_invalid_total{attestation}`, and the
+  `read_selection_proof_latency_seconds{attestation}` histogram reflect subsidy
+  issuance, rate‑limit drops, acknowledgement validation outcomes, attestation
+  mix, and selection-proof verification latency. Sustained growth in
+  `read_ack_processed_total{result="invalid_signature"}`,
+  `{result="invalid_privacy"}`, or repeated `read_selection_proof_invalid_total`
+  spikes should trigger the governance playbook described in
   [governance.md](governance.md#read-acknowledgement-anomaly-response) and the monitoring response loop that correlates the spike with offending domains.
 
 ## 5. Subsidy distribution and advertising settlement

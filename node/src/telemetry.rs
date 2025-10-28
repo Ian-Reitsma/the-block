@@ -2688,6 +2688,51 @@ pub static READ_ACK_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static READ_SELECTION_PROOF_VERIFIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "read_selection_proof_verified_total",
+            "Validated selection proofs by attestation type",
+        ),
+        &["attestation"],
+    )
+    .unwrap_or_else(|e| panic!("counter read selection proof verified: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry read selection proof verified: {e}"));
+    c
+});
+
+pub static READ_SELECTION_PROOF_INVALID_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "read_selection_proof_invalid_total",
+            "Rejected selection proofs by attestation type",
+        ),
+        &["attestation"],
+    )
+    .unwrap_or_else(|e| panic!("counter read selection proof invalid: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry read selection proof invalid: {e}"));
+    c
+});
+
+pub static READ_SELECTION_PROOF_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    let buckets = telemetry::exponential_buckets(0.001, 2.0, 16);
+    let opts = HistogramOpts::new(
+        "read_selection_proof_latency_seconds",
+        "Selection proof verification latency by attestation",
+    )
+    .buckets(buckets);
+    let hv = HistogramVec::new(opts, &["attestation"])
+        .unwrap_or_else(|e| panic!("histogram read selection proof latency: {e}"));
+    REGISTRY
+        .register(Box::new(hv.clone()))
+        .unwrap_or_else(|e| panic!("registry read selection proof latency: {e}"));
+    hv
+});
+
 pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(

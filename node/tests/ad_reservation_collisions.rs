@@ -19,6 +19,7 @@ fn stub_ack(seed: u8) -> ReadAck {
         provider: "edge-provider".into(),
         campaign_id: None,
         creative_id: None,
+        selection_receipt: None,
         readiness: None,
         zk_proof: None,
     }
@@ -28,6 +29,9 @@ fn stub_ack(seed: u8) -> ReadAck {
 fn identical_paths_yield_unique_reservations() {
     let market = InMemoryMarketplace::new(MarketplaceConfig {
         distribution: DistributionPolicy::new(40, 30, 20, 5, 5),
+        default_price_per_mib_usd_micros: 200_000,
+        verifier_cost_usd_micros: 0,
+        host_fee_usd_micros: 0,
         ..MarketplaceConfig::default()
     });
     market
@@ -41,6 +45,7 @@ fn identical_paths_yield_unique_reservations() {
                 margin_ppm: 800_000,
                 value_per_action_usd_micros: MICROS_PER_DOLLAR,
                 max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
+                lift_ppm: 450_000,
                 badges: Vec::new(),
                 domains: vec!["example.com".into()],
                 metadata: Default::default(),

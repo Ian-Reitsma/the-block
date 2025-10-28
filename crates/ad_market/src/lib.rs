@@ -4,7 +4,7 @@ use foundation_serialization::{
     Deserialize, Serialize,
 };
 use sled::{Config as SledConfig, Db as SledDb, Tree as SledTree};
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -13,7 +13,7 @@ const TREE_CAMPAIGNS: &str = "campaigns";
 const TREE_METADATA: &str = "metadata";
 const KEY_DISTRIBUTION: &[u8] = b"distribution";
 
-const MICROS_PER_DOLLAR: u64 = 1_000_000;
+pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
 const BYTES_PER_MIB: u64 = 1_048_576;
 
@@ -204,11 +204,19 @@ pub struct MarketplaceConfig {
     pub distribution: DistributionPolicy,
     pub default_price_per_mib_usd_micros: u64,
     pub target_utilization_ppm: u32,
-    pub learning_rate_ppm: u32,
     pub smoothing_ppm: u32,
+    pub price_eta_p_ppm: i32,
+    pub price_eta_i_ppm: i32,
+    pub price_forgetting_ppm: u32,
     pub min_price_per_mib_usd_micros: u64,
     pub max_price_per_mib_usd_micros: u64,
     pub default_oracle: TokenOracle,
+    pub verifier_cost_usd_micros: u64,
+    pub expected_impressions_per_proof: u32,
+    pub host_fee_usd_micros: u64,
+    pub quality_alpha: f32,
+    pub quality_beta: f32,
+    pub quality_floor_ppm: u32,
 }
 
 impl MarketplaceConfig {
@@ -219,7 +227,42 @@ impl MarketplaceConfig {
                 normalized.min_price_per_mib_usd_micros,
                 normalized.max_price_per_mib_usd_micros,
             );
+        normalized.expected_impressions_per_proof =
+            normalized.expected_impressions_per_proof.max(1);
+        let eta_p_max = (PPM_SCALE as f64 * 0.25).round() as i32;
+        normalized.price_eta_p_ppm = normalized.price_eta_p_ppm.clamp(-eta_p_max, eta_p_max);
+        let abs_eta_p = normalized.price_eta_p_ppm.abs() as f64;
+        let max_eta_i = (abs_eta_p * 0.05).round() as i32;
+        normalized.price_eta_i_ppm = normalized.price_eta_i_ppm.clamp(-(max_eta_i), max_eta_i);
+        normalized.price_forgetting_ppm =
+            normalized.price_forgetting_ppm.clamp(0, PPM_SCALE as u32);
+        normalized.quality_beta = normalized
+            .quality_beta
+            .max(normalized.quality_alpha + f32::EPSILON);
+        normalized.quality_floor_ppm = normalized.quality_floor_ppm.clamp(1, PPM_SCALE as u32);
         normalized
+    }
+
+    fn composite_floor_usd(&self, price_per_mib_usd_micros: u64, bytes: u64) -> u64 {
+        let bandwidth = usd_cost_for_bytes(price_per_mib_usd_micros, bytes);
+        let verifier = self
+            .verifier_cost_usd_micros
+            .saturating_add(self.expected_impressions_per_proof as u64 - 1)
+            / self.expected_impressions_per_proof as u64;
+        bandwidth
+            .saturating_add(verifier)
+            .saturating_add(self.host_fee_usd_micros)
+    }
+
+    fn quality_multiplier(&self, response_ppm: u32, lift_ppm: u32) -> f64 {
+        let floor = (self.quality_floor_ppm as f64 / PPM_SCALE as f64).max(f64::EPSILON);
+        let response = (response_ppm as f64 / PPM_SCALE as f64).max(floor);
+        let lift = (lift_ppm as f64 / PPM_SCALE as f64)
+            .max(response)
+            .max(floor);
+        let phi = response.powf(self.quality_alpha.into());
+        let psi = lift.powf(self.quality_beta.into());
+        (phi * psi).max(1.0)
     }
 }
 
@@ -229,11 +272,19 @@ impl Default for MarketplaceConfig {
             distribution: DistributionPolicy::default(),
             default_price_per_mib_usd_micros: MICROS_PER_DOLLAR,
             target_utilization_ppm: 900_000,
-            learning_rate_ppm: 50_000,
             smoothing_ppm: 200_000,
+            price_eta_p_ppm: 150_000,
+            price_eta_i_ppm: 5_000,
+            price_forgetting_ppm: 950_000,
             min_price_per_mib_usd_micros: 10_000,
             max_price_per_mib_usd_micros: 1_000 * MICROS_PER_DOLLAR,
             default_oracle: TokenOracle::default(),
+            verifier_cost_usd_micros: 50_000,
+            expected_impressions_per_proof: 1_000,
+            host_fee_usd_micros: 10_000,
+            quality_alpha: 0.5,
+            quality_beta: 0.8,
+            quality_floor_ppm: 10_000,
         }
     }
 }
@@ -269,8 +320,12 @@ impl Hash for CohortKey {
 struct CohortPricingState {
     price_per_mib_usd_micros: u64,
     target_utilization_ppm: u32,
-    learning_rate_ppm: u32,
     smoothing_ppm: u32,
+    log_price_per_mib: f64,
+    eta_p: f64,
+    eta_i: f64,
+    forgetting: f64,
+    integral_error: f64,
     ema_supply_usd_micros: f64,
     ema_demand_usd_micros: f64,
     min_price_per_mib_usd_micros: u64,
@@ -283,8 +338,12 @@ impl CohortPricingState {
         Self {
             price_per_mib_usd_micros: config.default_price_per_mib_usd_micros,
             target_utilization_ppm: config.target_utilization_ppm,
-            learning_rate_ppm: config.learning_rate_ppm,
             smoothing_ppm: config.smoothing_ppm,
+            log_price_per_mib: (config.default_price_per_mib_usd_micros.max(1) as f64).ln(),
+            eta_p: config.price_eta_p_ppm as f64 / PPM_SCALE as f64,
+            eta_i: config.price_eta_i_ppm as f64 / PPM_SCALE as f64,
+            forgetting: config.price_forgetting_ppm as f64 / PPM_SCALE as f64,
+            integral_error: 0.0,
             ema_supply_usd_micros: 0.0,
             ema_demand_usd_micros: 0.0,
             min_price_per_mib_usd_micros: config.min_price_per_mib_usd_micros,
@@ -323,17 +382,26 @@ impl CohortPricingState {
             .max(0.0);
         self.observed_utilization_ppm =
             ((utilization * PPM_SCALE as f64).round() as u64).min(PPM_SCALE) as u32;
-        let target = (self.target_utilization_ppm as f64 / PPM_SCALE as f64).clamp(0.0, 1.0);
-        let delta = utilization - target;
-        let learning = self.learning_rate_ppm as f64 / PPM_SCALE as f64;
-        let factor = (learning * delta).exp();
-        let updated = (self.price_per_mib_usd_micros as f64 * factor).round() as u64;
+        let target =
+            (self.target_utilization_ppm as f64 / PPM_SCALE as f64).clamp(f64::EPSILON, 1.0);
+        let normalized = (utilization / target).max(0.0);
+        let error = normalized - 1.0;
+        let forgetting = self.forgetting.clamp(0.0, 1.0);
+        self.integral_error = self.integral_error * forgetting + error;
+        self.integral_error = self.integral_error.clamp(-10.0, 10.0);
+        let delta_log = self.eta_p * error + self.eta_i * self.integral_error;
+        self.log_price_per_mib = (self.log_price_per_mib + delta_log).clamp(
+            (self.min_price_per_mib_usd_micros.max(1) as f64).ln(),
+            (self.max_price_per_mib_usd_micros.max(1) as f64).ln(),
+        );
+        let updated = self.log_price_per_mib.exp().round() as u64;
         self.price_per_mib_usd_micros = updated
             .clamp(
                 self.min_price_per_mib_usd_micros,
                 self.max_price_per_mib_usd_micros,
             )
             .max(1);
+        self.log_price_per_mib = (self.price_per_mib_usd_micros.max(1) as f64).ln();
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -357,6 +425,10 @@ fn default_action_rate_ppm() -> u32 {
     0
 }
 
+fn default_lift_ppm() -> u32 {
+    0
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Creative {
     pub id: String,
@@ -367,6 +439,8 @@ pub struct Creative {
     pub value_per_action_usd_micros: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cpi_usd_micros: Option<u64>,
+    #[serde(default = "default_lift_ppm")]
+    pub lift_ppm: u32,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub badges: Vec<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -387,6 +461,57 @@ impl Creative {
             willingness = willingness.min(max_cpi as u128);
         }
         willingness as u64
+    }
+
+    fn effective_lift_ppm(&self) -> u32 {
+        if self.lift_ppm == 0 {
+            self.action_rate_ppm
+        } else {
+            self.lift_ppm
+        }
+    }
+
+    fn quality_multiplier(&self, config: &MarketplaceConfig) -> f64 {
+        config.quality_multiplier(self.action_rate_ppm, self.effective_lift_ppm())
+    }
+
+    pub fn quality_adjusted_bid(
+        &self,
+        config: &MarketplaceConfig,
+        available_budget_usd_micros: u64,
+    ) -> QualityBid {
+        let willingness = self.willingness_to_pay_usd_micros();
+        let base = available_budget_usd_micros.min(willingness);
+        if base == 0 {
+            return QualityBid::zero();
+        }
+        let multiplier = self.quality_multiplier(config);
+        let adjusted = (base as f64)
+            .mul_add(multiplier, 0.0)
+            .round()
+            .min(u64::MAX as f64) as u64;
+        QualityBid {
+            base_bid_usd_micros: base,
+            quality_adjusted_usd_micros: adjusted,
+            quality_multiplier: multiplier,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct QualityBid {
+    pub base_bid_usd_micros: u64,
+    pub quality_adjusted_usd_micros: u64,
+    pub quality_multiplier: f64,
+}
+
+impl QualityBid {
+    fn zero() -> Self {
+        Self {
+            base_bid_usd_micros: 0,
+            quality_adjusted_usd_micros: 0,
+            quality_multiplier: 0.0,
+        }
     }
 }
 
@@ -409,6 +534,7 @@ pub struct CampaignSummary {
     pub advertiser_account: String,
     pub remaining_budget_usd_micros: u64,
     pub creatives: Vec<String>,
+    pub reserved_budget_usd_micros: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -425,6 +551,10 @@ pub struct MatchOutcome {
     pub creative_id: String,
     pub price_per_mib_usd_micros: u64,
     pub total_usd_micros: u64,
+    pub resource_floor_usd_micros: u64,
+    pub runner_up_quality_bid_usd_micros: u64,
+    pub quality_adjusted_bid_usd_micros: u64,
+    pub selection_receipt: SelectionReceipt,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -435,6 +565,9 @@ pub struct SettlementBreakdown {
     pub price_per_mib_usd_micros: u64,
     pub total_usd_micros: u64,
     pub demand_usd_micros: u64,
+    pub resource_floor_usd_micros: u64,
+    pub runner_up_quality_bid_usd_micros: u64,
+    pub quality_adjusted_bid_usd_micros: u64,
     pub viewer_ct: u64,
     pub host_ct: u64,
     pub hardware_ct: u64,
@@ -450,6 +583,272 @@ pub struct SettlementBreakdown {
     pub unsettled_usd_micros: u64,
     pub ct_price_usd_micros: u64,
     pub it_price_usd_micros: u64,
+    pub selection_receipt: SelectionReceipt,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SelectionCohortTrace {
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub badges: Vec<String>,
+    pub bytes: u64,
+    pub price_per_mib_usd_micros: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SelectionCandidateTrace {
+    pub campaign_id: String,
+    pub creative_id: String,
+    pub base_bid_usd_micros: u64,
+    pub quality_adjusted_bid_usd_micros: u64,
+    pub available_budget_usd_micros: u64,
+    pub action_rate_ppm: u32,
+    pub lift_ppm: u32,
+    pub quality_multiplier: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SelectionAttestation {
+    Snark {
+        #[serde(with = "foundation_serialization::serde_bytes")]
+        proof: Vec<u8>,
+        circuit_id: String,
+    },
+    Tee {
+        #[serde(with = "foundation_serialization::serde_bytes")]
+        report: Vec<u8>,
+        #[serde(with = "foundation_serialization::serde_bytes")]
+        quote: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SelectionReceipt {
+    pub cohort: SelectionCohortTrace,
+    pub candidates: Vec<SelectionCandidateTrace>,
+    pub winner_index: usize,
+    pub resource_floor_usd_micros: u64,
+    pub runner_up_quality_bid_usd_micros: u64,
+    pub clearing_price_usd_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<SelectionAttestation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionAttestationKind {
+    Missing,
+    Snark,
+    Tee,
+}
+
+impl SelectionAttestationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SelectionAttestationKind::Missing => "missing",
+            SelectionAttestationKind::Snark => "snark",
+            SelectionAttestationKind::Tee => "tee",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionReceiptInsights {
+    pub winner_index: usize,
+    pub winner_quality_bid_usd_micros: u64,
+    pub runner_up_quality_bid_usd_micros: u64,
+    pub clearing_price_usd_micros: u64,
+    pub resource_floor_usd_micros: u64,
+    pub attestation_kind: SelectionAttestationKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectionReceiptError {
+    NoCandidates,
+    WinnerOutOfRange {
+        declared: usize,
+        total: usize,
+    },
+    WinnerBelowFloor {
+        winner: u64,
+        floor: u64,
+    },
+    BudgetBelowClearing {
+        available: u64,
+        clearing: u64,
+    },
+    RunnerUpMismatch {
+        declared: u64,
+        computed: u64,
+    },
+    ClearingPriceMismatch {
+        declared: u64,
+        expected: u64,
+    },
+    ClearingPriceAboveWinner {
+        clearing: u64,
+        winner: u64,
+    },
+    QualityOrderViolation {
+        candidate: u64,
+        winner: u64,
+    },
+    InvalidAttestation {
+        kind: SelectionAttestationKind,
+        reason: &'static str,
+    },
+}
+
+impl std::fmt::Display for SelectionReceiptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SelectionReceiptError::NoCandidates => write!(f, "selection receipt has no candidates"),
+            SelectionReceiptError::WinnerOutOfRange { declared, total } => write!(
+                f,
+                "winner index {declared} out of range for {total} candidates"
+            ),
+            SelectionReceiptError::WinnerBelowFloor { winner, floor } => {
+                write!(f, "winner quality {winner} below resource floor {floor}")
+            }
+            SelectionReceiptError::BudgetBelowClearing {
+                available,
+                clearing,
+            } => write!(
+                f,
+                "available budget {available} below clearing price {clearing}"
+            ),
+            SelectionReceiptError::RunnerUpMismatch { declared, computed } => write!(
+                f,
+                "runner-up quality mismatch: declared {declared}, computed {computed}"
+            ),
+            SelectionReceiptError::ClearingPriceMismatch { declared, expected } => write!(
+                f,
+                "clearing price mismatch: declared {declared}, expected {expected}"
+            ),
+            SelectionReceiptError::ClearingPriceAboveWinner { clearing, winner } => write!(
+                f,
+                "clearing price {clearing} exceeds winner quality {winner}"
+            ),
+            SelectionReceiptError::QualityOrderViolation { candidate, winner } => write!(
+                f,
+                "non-winning candidate quality {candidate} exceeds winner quality {winner}"
+            ),
+            SelectionReceiptError::InvalidAttestation { kind, reason } => {
+                write!(f, "invalid {:?} attestation: {reason}", kind)
+            }
+        }
+    }
+}
+
+impl std::error::Error for SelectionReceiptError {}
+
+impl SelectionReceipt {
+    pub fn attestation_kind(&self) -> SelectionAttestationKind {
+        match self.attestation {
+            Some(SelectionAttestation::Snark { .. }) => SelectionAttestationKind::Snark,
+            Some(SelectionAttestation::Tee { .. }) => SelectionAttestationKind::Tee,
+            None => SelectionAttestationKind::Missing,
+        }
+    }
+
+    pub fn validate(&self) -> Result<SelectionReceiptInsights, SelectionReceiptError> {
+        if self.candidates.is_empty() {
+            return Err(SelectionReceiptError::NoCandidates);
+        }
+        if self.winner_index >= self.candidates.len() {
+            return Err(SelectionReceiptError::WinnerOutOfRange {
+                declared: self.winner_index,
+                total: self.candidates.len(),
+            });
+        }
+        let winner = &self.candidates[self.winner_index];
+        if winner.quality_adjusted_bid_usd_micros < self.resource_floor_usd_micros {
+            return Err(SelectionReceiptError::WinnerBelowFloor {
+                winner: winner.quality_adjusted_bid_usd_micros,
+                floor: self.resource_floor_usd_micros,
+            });
+        }
+        if winner.available_budget_usd_micros < self.clearing_price_usd_micros {
+            return Err(SelectionReceiptError::BudgetBelowClearing {
+                available: winner.available_budget_usd_micros,
+                clearing: self.clearing_price_usd_micros,
+            });
+        }
+        let mut runner_up = 0u64;
+        for (idx, candidate) in self.candidates.iter().enumerate() {
+            if idx == self.winner_index {
+                continue;
+            }
+            if candidate.quality_adjusted_bid_usd_micros > winner.quality_adjusted_bid_usd_micros {
+                return Err(SelectionReceiptError::QualityOrderViolation {
+                    candidate: candidate.quality_adjusted_bid_usd_micros,
+                    winner: winner.quality_adjusted_bid_usd_micros,
+                });
+            }
+            runner_up = runner_up.max(candidate.quality_adjusted_bid_usd_micros);
+        }
+        if self.runner_up_quality_bid_usd_micros != runner_up {
+            return Err(SelectionReceiptError::RunnerUpMismatch {
+                declared: self.runner_up_quality_bid_usd_micros,
+                computed: runner_up,
+            });
+        }
+        let expected_clearing = self.resource_floor_usd_micros.max(runner_up);
+        if self.clearing_price_usd_micros != expected_clearing {
+            return Err(SelectionReceiptError::ClearingPriceMismatch {
+                declared: self.clearing_price_usd_micros,
+                expected: expected_clearing,
+            });
+        }
+        if self.clearing_price_usd_micros > winner.quality_adjusted_bid_usd_micros {
+            return Err(SelectionReceiptError::ClearingPriceAboveWinner {
+                clearing: self.clearing_price_usd_micros,
+                winner: winner.quality_adjusted_bid_usd_micros,
+            });
+        }
+        if let Some(attestation) = &self.attestation {
+            match attestation {
+                SelectionAttestation::Snark { proof, circuit_id } => {
+                    if proof.is_empty() {
+                        return Err(SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Snark,
+                            reason: "empty_proof",
+                        });
+                    }
+                    if circuit_id.trim().is_empty() {
+                        return Err(SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Snark,
+                            reason: "empty_circuit",
+                        });
+                    }
+                }
+                SelectionAttestation::Tee { report, quote } => {
+                    if report.is_empty() {
+                        return Err(SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Tee,
+                            reason: "empty_report",
+                        });
+                    }
+                    if quote.is_empty() {
+                        return Err(SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Tee,
+                            reason: "empty_quote",
+                        });
+                    }
+                }
+            }
+        }
+        Ok(SelectionReceiptInsights {
+            winner_index: self.winner_index,
+            winner_quality_bid_usd_micros: winner.quality_adjusted_bid_usd_micros,
+            runner_up_quality_bid_usd_micros: runner_up,
+            clearing_price_usd_micros: self.clearing_price_usd_micros,
+            resource_floor_usd_micros: self.resource_floor_usd_micros,
+            attestation_kind: self.attestation_kind(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -486,6 +885,8 @@ pub trait Marketplace: Send + Sync {
 struct CampaignState {
     campaign: Campaign,
     remaining_budget_usd_micros: u64,
+    #[serde(default)]
+    reserved_budget_usd_micros: u64,
 }
 
 struct ReservationState {
@@ -495,14 +896,18 @@ struct ReservationState {
     price_per_mib_usd_micros: u64,
     total_usd_micros: u64,
     demand_usd_micros: u64,
+    resource_floor_usd_micros: u64,
+    runner_up_quality_bid_usd_micros: u64,
+    quality_adjusted_bid_usd_micros: u64,
     cohort: CohortKey,
+    selection_receipt: SelectionReceipt,
 }
 
 pub struct InMemoryMarketplace {
     config: MarketplaceConfig,
     campaigns: RwLock<HashMap<String, CampaignState>>,
     reservations: RwLock<HashMap<ReservationKey, ReservationState>>,
-    pending: RwLock<HashMap<String, u64>>,
+    consumed_reservations: RwLock<HashSet<ReservationKey>>,
     distribution: RwLock<DistributionPolicy>,
     pricing: RwLock<HashMap<CohortKey, CohortPricingState>>,
     oracle: RwLock<TokenOracle>,
@@ -515,7 +920,7 @@ pub struct SledMarketplace {
     config: MarketplaceConfig,
     campaigns: RwLock<HashMap<String, CampaignState>>,
     reservations: RwLock<HashMap<ReservationKey, ReservationState>>,
-    pending: RwLock<HashMap<String, u64>>,
+    consumed_reservations: RwLock<HashSet<ReservationKey>>,
     distribution: RwLock<DistributionPolicy>,
     pricing: RwLock<HashMap<CohortKey, CohortPricingState>>,
     oracle: RwLock<TokenOracle>,
@@ -543,6 +948,10 @@ fn creative_to_value(creative: &Creative) -> JsonValue {
     map.insert(
         "margin_ppm".into(),
         JsonValue::Number(JsonNumber::from(creative.margin_ppm)),
+    );
+    map.insert(
+        "lift_ppm".into(),
+        JsonValue::Number(JsonNumber::from(creative.lift_ppm)),
     );
     map.insert(
         "value_per_action_usd_micros".into(),
@@ -605,6 +1014,11 @@ fn creative_from_value(value: &JsonValue) -> Result<Creative, PersistenceError> 
             .get("max_cpi_usd_micros")
             .map(|_| read_u64(obj, "max_cpi_usd_micros"))
             .transpose()?,
+        lift_ppm: obj
+            .get("lift_ppm")
+            .map(|_| read_u32(obj, "lift_ppm"))
+            .transpose()?
+            .unwrap_or_else(default_lift_ppm),
         badges: read_string_vec(obj, "badges")?,
         domains: read_string_vec(obj, "domains")?,
         metadata: read_string_map(obj, "metadata")?,
@@ -706,6 +1120,10 @@ fn campaign_state_to_value(state: &CampaignState) -> JsonValue {
         "remaining_budget_usd_micros".into(),
         JsonValue::Number(JsonNumber::from(state.remaining_budget_usd_micros)),
     );
+    map.insert(
+        "reserved_budget_usd_micros".into(),
+        JsonValue::Number(JsonNumber::from(state.reserved_budget_usd_micros)),
+    );
     JsonValue::Object(map)
 }
 
@@ -718,9 +1136,15 @@ fn campaign_state_from_value(value: &JsonValue) -> Result<CampaignState, Persist
         .ok_or_else(|| invalid("campaign state missing campaign"))?;
     let campaign = campaign_from_value(campaign_value)?;
     let remaining = read_u64(obj, "remaining_budget_usd_micros")?;
+    let reserved = obj
+        .get("reserved_budget_usd_micros")
+        .map(|_| read_u64(obj, "reserved_budget_usd_micros"))
+        .transpose()?
+        .unwrap_or(0);
     Ok(CampaignState {
         campaign,
         remaining_budget_usd_micros: remaining,
+        reserved_budget_usd_micros: reserved,
     })
 }
 
@@ -803,7 +1227,7 @@ impl InMemoryMarketplace {
             config: normalized.clone(),
             campaigns: RwLock::new(HashMap::new()),
             reservations: RwLock::new(HashMap::new()),
-            pending: RwLock::new(HashMap::new()),
+            consumed_reservations: RwLock::new(HashSet::new()),
             distribution: RwLock::new(normalized.distribution.normalize()),
             pricing: RwLock::new(HashMap::new()),
             oracle: RwLock::new(normalized.default_oracle),
@@ -867,6 +1291,7 @@ impl Marketplace for InMemoryMarketplace {
         }
         let state = CampaignState {
             remaining_budget_usd_micros: campaign.budget_usd_micros,
+            reserved_budget_usd_micros: 0,
             campaign,
         };
         guard.insert(state.campaign.id.clone(), state);
@@ -887,6 +1312,7 @@ impl Marketplace for InMemoryMarketplace {
                     .iter()
                     .map(|c| c.id.clone())
                     .collect(),
+                reserved_budget_usd_micros: state.reserved_budget_usd_micros,
             })
             .collect()
     }
@@ -896,92 +1322,153 @@ impl Marketplace for InMemoryMarketplace {
         key: ReservationKey,
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
+        if self.consumed_reservations.read().unwrap().contains(&key) {
+            return None;
+        }
         let cohort = InMemoryMarketplace::cohort_key(&ctx);
         let price_per_mib = {
             let mut pricing = self.pricing.write().unwrap();
             InMemoryMarketplace::get_price_and_state(&mut pricing, &cohort, &self.config)
                 .price_per_mib_usd_micros()
         };
-        let cost = usd_cost_for_bytes(price_per_mib, ctx.bytes);
-        if cost == 0 {
+        let resource_floor = self.config.composite_floor_usd(price_per_mib, ctx.bytes);
+        if resource_floor == 0 {
             return None;
         }
+
+        struct Candidate {
+            trace: SelectionCandidateTrace,
+        }
+
         let campaigns = self.campaigns.read().unwrap();
-        let pending = self.pending.read().unwrap();
-        let mut best: Option<(MatchOutcome, String, u64, u64)> = None;
-        for (campaign_id, state) in campaigns.iter() {
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let mut best_index: Option<usize> = None;
+        for state in campaigns.values() {
             if !InMemoryMarketplace::matches_targeting(&state.campaign.targeting, &ctx) {
                 continue;
             }
-            let reserved = pending.get(campaign_id).copied().unwrap_or(0);
-            let available_budget = state.remaining_budget_usd_micros.saturating_sub(reserved);
-            if available_budget < cost {
+            let available_budget = state.remaining_budget_usd_micros;
+            if available_budget < resource_floor {
                 continue;
             }
             for creative in &state.campaign.creatives {
                 if !InMemoryMarketplace::matches_creative(creative, &ctx) {
                     continue;
                 }
-                let willingness = creative.willingness_to_pay_usd_micros();
-                let demand = willingness.min(available_budget);
-                if demand < cost {
+                let quality = creative.quality_adjusted_bid(&self.config, available_budget);
+                if quality.base_bid_usd_micros < resource_floor
+                    || quality.quality_adjusted_usd_micros < resource_floor
+                {
                     continue;
                 }
-                let outcome = MatchOutcome {
+                let trace = SelectionCandidateTrace {
                     campaign_id: state.campaign.id.clone(),
                     creative_id: creative.id.clone(),
-                    price_per_mib_usd_micros: price_per_mib,
-                    total_usd_micros: cost,
+                    base_bid_usd_micros: quality.base_bid_usd_micros,
+                    quality_adjusted_bid_usd_micros: quality.quality_adjusted_usd_micros,
+                    available_budget_usd_micros: available_budget,
+                    action_rate_ppm: creative.action_rate_ppm,
+                    lift_ppm: creative.effective_lift_ppm(),
+                    quality_multiplier: quality.quality_multiplier,
                 };
-                match &mut best {
-                    Some((current, _, current_cost, current_demand)) => {
-                        if demand > *current_demand
-                            || (demand == *current_demand && available_budget > *current_cost)
-                        {
-                            *current = outcome;
-                            *current_cost = available_budget;
-                            *current_demand = demand;
-                        }
+                let idx = candidates.len();
+                if let Some(best) = best_index {
+                    let best_trace = &candidates[best].trace;
+                    if trace.quality_adjusted_bid_usd_micros
+                        > best_trace.quality_adjusted_bid_usd_micros
+                        || (trace.quality_adjusted_bid_usd_micros
+                            == best_trace.quality_adjusted_bid_usd_micros
+                            && trace.available_budget_usd_micros
+                                > best_trace.available_budget_usd_micros)
+                    {
+                        best_index = Some(idx);
                     }
-                    None => {
-                        best = Some((outcome, campaign_id.clone(), available_budget, demand));
-                    }
+                } else {
+                    best_index = Some(idx);
                 }
+                candidates.push(Candidate { trace });
             }
         }
-        drop(pending);
         drop(campaigns);
-        let Some((outcome, campaign_id, _, demand)) = best else {
+
+        let Some(winner_index) = best_index else {
             return None;
         };
+        let runner_up_quality = candidates
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx != winner_index)
+            .map(|(_, candidate)| candidate.trace.quality_adjusted_bid_usd_micros)
+            .max()
+            .unwrap_or(0);
+        let receipt_candidates: Vec<SelectionCandidateTrace> = candidates
+            .iter()
+            .map(|candidate| candidate.trace.clone())
+            .collect();
+        let winner_trace = receipt_candidates[winner_index].clone();
+        let clearing_price = resource_floor
+            .max(runner_up_quality)
+            .min(winner_trace.quality_adjusted_bid_usd_micros);
+        if clearing_price == 0 {
+            return None;
+        }
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: ctx.domain.clone(),
+                provider: ctx.provider.clone(),
+                badges: ctx.badges.clone(),
+                bytes: ctx.bytes,
+                price_per_mib_usd_micros: price_per_mib,
+            },
+            candidates: receipt_candidates,
+            winner_index,
+            resource_floor_usd_micros: resource_floor,
+            runner_up_quality_bid_usd_micros: runner_up_quality,
+            clearing_price_usd_micros: clearing_price,
+            attestation: None,
+        };
+
         let mut reservations = self.reservations.write().unwrap();
         if reservations.contains_key(&key) {
             return None;
         }
-        let mut pending = self.pending.write().unwrap();
-        let campaigns = self.campaigns.read().unwrap();
-        let Some(state) = campaigns.get(&campaign_id) else {
+        let mut campaigns = self.campaigns.write().unwrap();
+        let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
             return None;
         };
-        let reserved = pending.get(&campaign_id).copied().unwrap_or(0);
-        if state.remaining_budget_usd_micros.saturating_sub(reserved) < outcome.total_usd_micros {
+        if state.remaining_budget_usd_micros < clearing_price {
             return None;
         }
+        state.remaining_budget_usd_micros -= clearing_price;
+        state.reserved_budget_usd_micros = state
+            .reserved_budget_usd_micros
+            .saturating_add(clearing_price);
         reservations.insert(
             key,
             ReservationState {
-                campaign_id: campaign_id.clone(),
-                creative_id: outcome.creative_id.clone(),
+                campaign_id: winner_trace.campaign_id.clone(),
+                creative_id: winner_trace.creative_id.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
-                total_usd_micros: outcome.total_usd_micros,
-                demand_usd_micros: demand,
+                total_usd_micros: clearing_price,
+                demand_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
+                resource_floor_usd_micros: resource_floor,
+                runner_up_quality_bid_usd_micros: runner_up_quality,
+                quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
                 cohort,
+                selection_receipt: receipt.clone(),
             },
         );
-        let entry = pending.entry(campaign_id).or_insert(0);
-        *entry = entry.saturating_add(outcome.total_usd_micros);
-        Some(outcome)
+        Some(MatchOutcome {
+            campaign_id: winner_trace.campaign_id,
+            creative_id: winner_trace.creative_id,
+            price_per_mib_usd_micros: price_per_mib,
+            total_usd_micros: clearing_price,
+            resource_floor_usd_micros: resource_floor,
+            runner_up_quality_bid_usd_micros: runner_up_quality,
+            quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
+            selection_receipt: receipt,
+        })
     }
 
     fn commit(&self, key: &ReservationKey) -> Option<SettlementBreakdown> {
@@ -990,23 +1477,17 @@ impl Marketplace for InMemoryMarketplace {
             guard.remove(key)?
         };
         let mut campaigns = self.campaigns.write().unwrap();
-        let mut pending = self.pending.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
-        if state.remaining_budget_usd_micros < reservation.total_usd_micros {
+        if state.reserved_budget_usd_micros < reservation.total_usd_micros {
             return None;
         }
-        state.remaining_budget_usd_micros -= reservation.total_usd_micros;
-        match pending.entry(reservation.campaign_id.clone()) {
-            Entry::Occupied(mut entry) => {
-                let value = entry.get_mut();
-                *value = value.saturating_sub(reservation.total_usd_micros);
-                if *value == 0 {
-                    entry.remove();
-                }
-            }
-            Entry::Vacant(_) => {}
+        state.reserved_budget_usd_micros = state
+            .reserved_budget_usd_micros
+            .saturating_sub(reservation.total_usd_micros);
+        {
+            let mut consumed = self.consumed_reservations.write().unwrap();
+            consumed.insert(*key);
         }
-        drop(pending);
         drop(campaigns);
         {
             let mut pricing = self.pricing.write().unwrap();
@@ -1025,6 +1506,9 @@ impl Marketplace for InMemoryMarketplace {
             price_per_mib_usd_micros: reservation.price_per_mib_usd_micros,
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
+            resource_floor_usd_micros: reservation.resource_floor_usd_micros,
+            runner_up_quality_bid_usd_micros: reservation.runner_up_quality_bid_usd_micros,
+            quality_adjusted_bid_usd_micros: reservation.quality_adjusted_bid_usd_micros,
             viewer_ct: tokens.viewer_ct,
             host_ct: tokens.host_ct,
             hardware_ct: tokens.hardware_ct,
@@ -1040,6 +1524,7 @@ impl Marketplace for InMemoryMarketplace {
             unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
+            selection_receipt: reservation.selection_receipt,
         })
     }
 
@@ -1049,13 +1534,14 @@ impl Marketplace for InMemoryMarketplace {
             guard.remove(key)
         };
         if let Some(res) = reservation {
-            let mut pending = self.pending.write().unwrap();
-            if let Entry::Occupied(mut entry) = pending.entry(res.campaign_id) {
-                let value = entry.get_mut();
-                *value = value.saturating_sub(res.total_usd_micros);
-                if *value == 0 {
-                    entry.remove();
-                }
+            let mut campaigns = self.campaigns.write().unwrap();
+            if let Some(state) = campaigns.get_mut(&res.campaign_id) {
+                state.remaining_budget_usd_micros = state
+                    .remaining_budget_usd_micros
+                    .saturating_add(res.total_usd_micros);
+                state.reserved_budget_usd_micros = state
+                    .reserved_budget_usd_micros
+                    .saturating_sub(res.total_usd_micros);
             }
         }
     }
@@ -1129,7 +1615,7 @@ impl SledMarketplace {
             config: normalized.clone(),
             campaigns: RwLock::new(campaigns),
             reservations: RwLock::new(HashMap::new()),
-            pending: RwLock::new(HashMap::new()),
+            consumed_reservations: RwLock::new(HashSet::new()),
             distribution: RwLock::new(distribution),
             pricing: RwLock::new(HashMap::new()),
             oracle: RwLock::new(normalized.default_oracle),
@@ -1160,6 +1646,7 @@ impl Marketplace for SledMarketplace {
         }
         let state = CampaignState {
             remaining_budget_usd_micros: campaign.budget_usd_micros,
+            reserved_budget_usd_micros: 0,
             campaign,
         };
         guard.insert(state.campaign.id.clone(), state.clone());
@@ -1186,6 +1673,7 @@ impl Marketplace for SledMarketplace {
                     .iter()
                     .map(|c| c.id.clone())
                     .collect(),
+                reserved_budget_usd_micros: state.reserved_budget_usd_micros,
             })
             .collect()
     }
@@ -1195,92 +1683,162 @@ impl Marketplace for SledMarketplace {
         key: ReservationKey,
         ctx: ImpressionContext,
     ) -> Option<MatchOutcome> {
+        if self.consumed_reservations.read().unwrap().contains(&key) {
+            return None;
+        }
         let cohort = InMemoryMarketplace::cohort_key(&ctx);
         let price_per_mib = {
             let mut pricing = self.pricing.write().unwrap();
             InMemoryMarketplace::get_price_and_state(&mut pricing, &cohort, &self.config)
                 .price_per_mib_usd_micros()
         };
-        let cost = usd_cost_for_bytes(price_per_mib, ctx.bytes);
-        if cost == 0 {
+        let resource_floor = self.config.composite_floor_usd(price_per_mib, ctx.bytes);
+        if resource_floor == 0 {
             return None;
         }
+
+        struct Candidate {
+            trace: SelectionCandidateTrace,
+        }
+
         let campaigns = self.campaigns.read().unwrap();
-        let pending = self.pending.read().unwrap();
-        let mut best: Option<(MatchOutcome, String, u64, u64)> = None;
-        for (campaign_id, state) in campaigns.iter() {
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let mut best_index: Option<usize> = None;
+        for state in campaigns.values() {
             if !InMemoryMarketplace::matches_targeting(&state.campaign.targeting, &ctx) {
                 continue;
             }
-            let reserved = pending.get(campaign_id).copied().unwrap_or(0);
-            let available_budget = state.remaining_budget_usd_micros.saturating_sub(reserved);
-            if available_budget < cost {
+            let available_budget = state.remaining_budget_usd_micros;
+            if available_budget < resource_floor {
                 continue;
             }
             for creative in &state.campaign.creatives {
                 if !InMemoryMarketplace::matches_creative(creative, &ctx) {
                     continue;
                 }
-                let willingness = creative.willingness_to_pay_usd_micros();
-                let demand = willingness.min(available_budget);
-                if demand < cost {
+                let quality = creative.quality_adjusted_bid(&self.config, available_budget);
+                if quality.base_bid_usd_micros < resource_floor
+                    || quality.quality_adjusted_usd_micros < resource_floor
+                {
                     continue;
                 }
-                let outcome = MatchOutcome {
+                let trace = SelectionCandidateTrace {
                     campaign_id: state.campaign.id.clone(),
                     creative_id: creative.id.clone(),
-                    price_per_mib_usd_micros: price_per_mib,
-                    total_usd_micros: cost,
+                    base_bid_usd_micros: quality.base_bid_usd_micros,
+                    quality_adjusted_bid_usd_micros: quality.quality_adjusted_usd_micros,
+                    available_budget_usd_micros: available_budget,
+                    action_rate_ppm: creative.action_rate_ppm,
+                    lift_ppm: creative.effective_lift_ppm(),
+                    quality_multiplier: quality.quality_multiplier,
                 };
-                match &mut best {
-                    Some((current, _, current_budget, current_demand)) => {
-                        if demand > *current_demand
-                            || (demand == *current_demand && available_budget > *current_budget)
-                        {
-                            *current = outcome;
-                            *current_budget = available_budget;
-                            *current_demand = demand;
-                        }
+                let idx = candidates.len();
+                if let Some(best) = best_index {
+                    let best_trace = &candidates[best].trace;
+                    if trace.quality_adjusted_bid_usd_micros
+                        > best_trace.quality_adjusted_bid_usd_micros
+                        || (trace.quality_adjusted_bid_usd_micros
+                            == best_trace.quality_adjusted_bid_usd_micros
+                            && trace.available_budget_usd_micros
+                                > best_trace.available_budget_usd_micros)
+                    {
+                        best_index = Some(idx);
                     }
-                    None => {
-                        best = Some((outcome, campaign_id.clone(), available_budget, demand));
-                    }
+                } else {
+                    best_index = Some(idx);
                 }
+                candidates.push(Candidate { trace });
             }
         }
-        drop(pending);
         drop(campaigns);
-        let Some((outcome, campaign_id, _, demand)) = best else {
+
+        let Some(winner_index) = best_index else {
             return None;
         };
+        let runner_up_quality = candidates
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx != winner_index)
+            .map(|(_, candidate)| candidate.trace.quality_adjusted_bid_usd_micros)
+            .max()
+            .unwrap_or(0);
+        let receipt_candidates: Vec<SelectionCandidateTrace> = candidates
+            .iter()
+            .map(|candidate| candidate.trace.clone())
+            .collect();
+        let winner_trace = receipt_candidates[winner_index].clone();
+        let clearing_price = resource_floor
+            .max(runner_up_quality)
+            .min(winner_trace.base_bid_usd_micros)
+            .max(resource_floor);
+        if clearing_price == 0 {
+            return None;
+        }
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: ctx.domain.clone(),
+                provider: ctx.provider.clone(),
+                badges: ctx.badges.clone(),
+                bytes: ctx.bytes,
+                price_per_mib_usd_micros: price_per_mib,
+            },
+            candidates: receipt_candidates,
+            winner_index,
+            resource_floor_usd_micros: resource_floor,
+            runner_up_quality_bid_usd_micros: runner_up_quality,
+            clearing_price_usd_micros: clearing_price,
+            attestation: None,
+        };
+
         let mut reservations = self.reservations.write().unwrap();
         if reservations.contains_key(&key) {
             return None;
         }
-        let mut pending = self.pending.write().unwrap();
-        let campaigns = self.campaigns.read().unwrap();
-        let Some(state) = campaigns.get(&campaign_id) else {
+        let mut campaigns = self.campaigns.write().unwrap();
+        let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
             return None;
         };
-        let reserved = pending.get(&campaign_id).copied().unwrap_or(0);
-        if state.remaining_budget_usd_micros.saturating_sub(reserved) < outcome.total_usd_micros {
+        if state.remaining_budget_usd_micros < clearing_price {
             return None;
+        }
+        let prev_state = state.clone();
+        state.remaining_budget_usd_micros -= clearing_price;
+        state.reserved_budget_usd_micros = state
+            .reserved_budget_usd_micros
+            .saturating_add(clearing_price);
+        if let Err(err) = self.persist_campaign(state) {
+            *state = prev_state;
+            panic!(
+                "failed to persist campaign {} after reservation: {err}",
+                state.campaign.id
+            );
         }
         reservations.insert(
             key,
             ReservationState {
-                campaign_id: campaign_id.clone(),
-                creative_id: outcome.creative_id.clone(),
+                campaign_id: winner_trace.campaign_id.clone(),
+                creative_id: winner_trace.creative_id.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
-                total_usd_micros: outcome.total_usd_micros,
-                demand_usd_micros: demand,
+                total_usd_micros: clearing_price,
+                demand_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
+                resource_floor_usd_micros: resource_floor,
+                runner_up_quality_bid_usd_micros: runner_up_quality,
+                quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
                 cohort,
+                selection_receipt: receipt.clone(),
             },
         );
-        let entry = pending.entry(campaign_id).or_insert(0);
-        *entry = entry.saturating_add(outcome.total_usd_micros);
-        Some(outcome)
+        Some(MatchOutcome {
+            campaign_id: winner_trace.campaign_id,
+            creative_id: winner_trace.creative_id,
+            price_per_mib_usd_micros: price_per_mib,
+            total_usd_micros: clearing_price,
+            resource_floor_usd_micros: resource_floor,
+            runner_up_quality_bid_usd_micros: runner_up_quality,
+            quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
+            selection_receipt: receipt,
+        })
     }
 
     fn commit(&self, key: &ReservationKey) -> Option<SettlementBreakdown> {
@@ -1289,30 +1847,24 @@ impl Marketplace for SledMarketplace {
             guard.remove(key)?
         };
         let mut campaigns = self.campaigns.write().unwrap();
-        let mut pending = self.pending.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
-        if state.remaining_budget_usd_micros < reservation.total_usd_micros {
+        if state.reserved_budget_usd_micros < reservation.total_usd_micros {
             return None;
         }
-        state.remaining_budget_usd_micros -= reservation.total_usd_micros;
-        match pending.entry(reservation.campaign_id.clone()) {
-            Entry::Occupied(mut entry) => {
-                let value = entry.get_mut();
-                *value = value.saturating_sub(reservation.total_usd_micros);
-                if *value == 0 {
-                    entry.remove();
-                }
-            }
-            Entry::Vacant(_) => {}
+        state.reserved_budget_usd_micros = state
+            .reserved_budget_usd_micros
+            .saturating_sub(reservation.total_usd_micros);
+        {
+            let mut consumed = self.consumed_reservations.write().unwrap();
+            consumed.insert(*key);
         }
         let snapshot = state.clone();
-        drop(pending);
         drop(campaigns);
         if let Err(err) = self.persist_campaign(&snapshot) {
             let mut campaigns = self.campaigns.write().unwrap();
             if let Some(state) = campaigns.get_mut(&snapshot.campaign.id) {
-                state.remaining_budget_usd_micros = state
-                    .remaining_budget_usd_micros
+                state.reserved_budget_usd_micros = state
+                    .reserved_budget_usd_micros
                     .saturating_add(reservation.total_usd_micros);
             }
             panic!(
@@ -1337,6 +1889,9 @@ impl Marketplace for SledMarketplace {
             price_per_mib_usd_micros: reservation.price_per_mib_usd_micros,
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
+            resource_floor_usd_micros: reservation.resource_floor_usd_micros,
+            runner_up_quality_bid_usd_micros: reservation.runner_up_quality_bid_usd_micros,
+            quality_adjusted_bid_usd_micros: reservation.quality_adjusted_bid_usd_micros,
             viewer_ct: tokens.viewer_ct,
             host_ct: tokens.host_ct,
             hardware_ct: tokens.hardware_ct,
@@ -1352,6 +1907,7 @@ impl Marketplace for SledMarketplace {
             unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
+            selection_receipt: reservation.selection_receipt,
         })
     }
 
@@ -1361,13 +1917,20 @@ impl Marketplace for SledMarketplace {
             guard.remove(key)
         };
         if let Some(res) = reservation {
-            let mut pending = self.pending.write().unwrap();
-            if let Entry::Occupied(mut entry) = pending.entry(res.campaign_id) {
-                let value = entry.get_mut();
-                *value = value.saturating_sub(res.total_usd_micros);
-                if *value == 0 {
-                    entry.remove();
+            let mut campaigns = self.campaigns.write().unwrap();
+            if let Some(state) = campaigns.get_mut(&res.campaign_id) {
+                state.remaining_budget_usd_micros = state
+                    .remaining_budget_usd_micros
+                    .saturating_add(res.total_usd_micros);
+                state.reserved_budget_usd_micros = state
+                    .reserved_budget_usd_micros
+                    .saturating_sub(res.total_usd_micros);
+                let snapshot = state.clone();
+                drop(campaigns);
+                if let Err(err) = self.persist_campaign(&snapshot) {
+                    panic!("failed to persist campaign after cancel: {err}");
                 }
+                return;
             }
         }
     }
@@ -1667,6 +2230,7 @@ mod tests {
                 margin_ppm: 700_000,
                 value_per_action_usd_micros: 5 * MICROS_PER_DOLLAR,
                 max_cpi_usd_micros: None,
+                lift_ppm: 550_000,
                 badges: Vec::new(),
                 domains: vec!["example.test".to_string()],
                 metadata: HashMap::new(),
@@ -1703,6 +2267,15 @@ mod tests {
             .reserve_impression(key, ctx.clone())
             .expect("reservation succeeded");
         assert!(outcome.total_usd_micros > 0);
+        assert!(outcome.resource_floor_usd_micros > 0);
+        assert_eq!(
+            outcome.total_usd_micros,
+            outcome.selection_receipt.clearing_price_usd_micros
+        );
+        assert!(
+            outcome.selection_receipt.clearing_price_usd_micros
+                >= outcome.resource_floor_usd_micros
+        );
         let settlement = market.commit(&key).expect("commit succeeds");
         assert_eq!(settlement.bytes, BYTES_PER_MIB);
         assert_eq!(settlement.total_usd_micros, outcome.total_usd_micros);
@@ -1749,6 +2322,7 @@ mod tests {
             summary[0].remaining_budget_usd_micros,
             5 * MICROS_PER_DOLLAR - settlement.total_usd_micros
         );
+        assert_eq!(summary[0].reserved_budget_usd_micros, 0);
     }
 
     #[test]
@@ -1909,13 +2483,23 @@ mod tests {
             path_hash: [8u8; 32],
             discriminator: [7u8; 32],
         };
-        market.reserve_impression(key, ctx).expect("reserved");
+        let outcome = market.reserve_impression(key, ctx).expect("reserved");
+        let summary_reserved = market.list_campaigns();
+        assert_eq!(
+            summary_reserved[0].remaining_budget_usd_micros,
+            2 * MICROS_PER_DOLLAR - outcome.total_usd_micros
+        );
+        assert_eq!(
+            summary_reserved[0].reserved_budget_usd_micros,
+            outcome.total_usd_micros
+        );
         market.cancel(&key);
         let summary = market.list_campaigns();
         assert_eq!(
             summary[0].remaining_budget_usd_micros,
             2 * MICROS_PER_DOLLAR
         );
+        assert_eq!(summary[0].reserved_budget_usd_micros, 0);
     }
 
     #[test]
@@ -1938,8 +2522,10 @@ mod tests {
     fn adaptive_pricing_increases_under_excess_demand() {
         let market = InMemoryMarketplace::new(MarketplaceConfig {
             default_price_per_mib_usd_micros: 50_000,
-            learning_rate_ppm: 200_000,
             smoothing_ppm: 500_000,
+            price_eta_p_ppm: 220_000,
+            price_eta_i_ppm: 9_000,
+            price_forgetting_ppm: 930_000,
             ..MarketplaceConfig::default()
         });
         market
@@ -2006,5 +2592,98 @@ mod tests {
             handle.join().expect("thread join");
         }
         assert!(successes.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn selection_receipt_validation_passes_for_consistent_receipt() {
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "example.com".into(),
+                provider: Some("edge".into()),
+                badges: vec!["a".into()],
+                bytes: 1_024,
+                price_per_mib_usd_micros: 120,
+            },
+            candidates: vec![
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-1".into(),
+                    creative_id: "creative-1".into(),
+                    base_bid_usd_micros: 170,
+                    quality_adjusted_bid_usd_micros: 180,
+                    available_budget_usd_micros: 5_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-2".into(),
+                    creative_id: "creative-2".into(),
+                    base_bid_usd_micros: 110,
+                    quality_adjusted_bid_usd_micros: 110,
+                    available_budget_usd_micros: 5_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+            ],
+            winner_index: 0,
+            resource_floor_usd_micros: 100,
+            runner_up_quality_bid_usd_micros: 110,
+            clearing_price_usd_micros: 110,
+            attestation: None,
+        };
+        let insights = receipt.validate().expect("receipt valid");
+        assert_eq!(insights.winner_index, 0);
+        assert_eq!(insights.runner_up_quality_bid_usd_micros, 110);
+        assert_eq!(insights.clearing_price_usd_micros, 110);
+        assert_eq!(insights.attestation_kind, SelectionAttestationKind::Missing);
+    }
+
+    #[test]
+    fn selection_receipt_validation_rejects_runner_up_mismatch() {
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "example.com".into(),
+                provider: None,
+                badges: Vec::new(),
+                bytes: 512,
+                price_per_mib_usd_micros: 90,
+            },
+            candidates: vec![
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-1".into(),
+                    creative_id: "creative-1".into(),
+                    base_bid_usd_micros: 150,
+                    quality_adjusted_bid_usd_micros: 160,
+                    available_budget_usd_micros: 2_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-2".into(),
+                    creative_id: "creative-2".into(),
+                    base_bid_usd_micros: 120,
+                    quality_adjusted_bid_usd_micros: 120,
+                    available_budget_usd_micros: 2_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+            ],
+            winner_index: 0,
+            resource_floor_usd_micros: 90,
+            runner_up_quality_bid_usd_micros: 90,
+            clearing_price_usd_micros: 120,
+            attestation: None,
+        };
+        let err = receipt.validate().expect_err("receipt invalid");
+        assert!(matches!(
+            err,
+            SelectionReceiptError::RunnerUpMismatch {
+                declared: 90,
+                computed: 120
+            }
+        ));
     }
 }

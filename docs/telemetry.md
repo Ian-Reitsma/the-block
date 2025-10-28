@@ -111,6 +111,12 @@ Additional subsystem counters include:
   subsidy payouts. The compute-market dashboard plots a "Read Ack Outcomes"
   panel summarising `increase(read_ack_processed_total[5m])` by result so the
   new `invalid_privacy` series is visible alongside signature failures.
+- `read_selection_proof_verified_total{attestation}`,
+  `read_selection_proof_invalid_total{attestation}`, and the
+  `read_selection_proof_latency_seconds{attestation}` histogram expose proof
+  of-selection attestation mix and verification latency. Tie these into the
+  read-ops dashboard so SNARK fallbacks or repeated TEE failures surface before
+  wallets violate campaign contracts.
 - `PROOF_REBATES_PENDING_TOTAL`/`PROOF_REBATES_CLAIMED_TOTAL` track light-client rebate balances and payouts; alert when the pending gauge grows faster than block production.
 - `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` track governance-backed payout flows, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` records settlement submissions, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` captures duty resolution outcomes alongside the `bridge_pending_withdrawals` gauges of outstanding releases per asset.
 

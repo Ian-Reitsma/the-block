@@ -53,6 +53,8 @@ use std::sync::{
     Arc, Mutex, MutexGuard,
 };
 use std::thread;
+#[cfg(feature = "telemetry")]
+use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod ad_readiness;
@@ -68,6 +70,7 @@ pub use read_receipt::{ReadAck, ReadBatcher};
 pub enum ReadAckError {
     InvalidSignature,
     PrivacyProofRejected,
+    InvalidSelectionReceipt,
 }
 pub use runtime;
 pub use runtime::{
@@ -1424,6 +1427,47 @@ impl Blockchain {
             return Err(ReadAckError::InvalidSignature);
         }
         crate::blockchain::privacy::verify_ack(self.config.read_ack_privacy, &ack)?;
+        if let Some(receipt) = ack.selection_receipt.as_ref() {
+            #[cfg(feature = "telemetry")]
+            let started = Instant::now();
+            match receipt.validate() {
+                Ok(summary) => {
+                    let attestation_kind = summary.attestation_kind;
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = attestation_kind;
+                    #[cfg(feature = "telemetry")]
+                    {
+                        let labels = [attestation_kind.as_str()];
+                        crate::telemetry::READ_SELECTION_PROOF_VERIFIED_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                            .inc();
+                        crate::telemetry::sampled_observe_vec(
+                            &crate::telemetry::READ_SELECTION_PROOF_LATENCY_SECONDS,
+                            &labels,
+                            started.elapsed().as_secs_f64(),
+                        );
+                    }
+                }
+                Err(err) => {
+                    #[cfg(feature = "telemetry")]
+                    {
+                        let labels = [receipt.attestation_kind().as_str()];
+                        crate::telemetry::READ_SELECTION_PROOF_INVALID_TOTAL
+                            .ensure_handle_for_label_values(&labels)
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                            .inc();
+                        crate::telemetry::sampled_observe_vec(
+                            &crate::telemetry::READ_SELECTION_PROOF_LATENCY_SECONDS,
+                            &labels,
+                            started.elapsed().as_secs_f64(),
+                        );
+                    }
+                    diagnostics::log::warn!(format!("selection_receipt_invalid: {err}"));
+                    return Err(ReadAckError::InvalidSelectionReceipt);
+                }
+            }
+        }
         self.epoch_read_bytes = self.epoch_read_bytes.saturating_add(ack.bytes);
         let viewer_addr = viewer_address_from_pk(&ack.pk);
         let viewer_entry = self.epoch_viewer_bytes.entry(viewer_addr).or_insert(0);
@@ -5796,6 +5840,7 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ad_market::{SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt};
     use crypto_suite::hashing::blake3::Hasher;
     use crypto_suite::signatures::ed25519::SigningKey;
 
@@ -5813,6 +5858,7 @@ mod tests {
             provider: provider.to_string(),
             campaign_id: None,
             creative_id: None,
+            selection_receipt: None,
             readiness: None,
             zk_proof: None,
         };
@@ -5912,6 +5958,53 @@ mod tests {
             .map(|a| a.balance.consumer)
             .unwrap_or(0);
         assert_eq!(miner_balance, 0);
+    }
+
+    #[test]
+    fn reject_ack_with_invalid_selection_receipt() {
+        let mut bc = Blockchain::default();
+        bc.block_reward_consumer = TokenAmount::new(0);
+        bc.block_reward_industrial = TokenAmount::new(0);
+        let signing = SigningKey::from_bytes(&[11u8; 32]);
+        let mut ack = signed_ack(&signing, 100, "viewer.test", "provider-1");
+        ack.selection_receipt = Some(SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "viewer.test".into(),
+                provider: Some("provider-1".into()),
+                badges: Vec::new(),
+                bytes: 1_024,
+                price_per_mib_usd_micros: 80,
+            },
+            candidates: vec![
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-1".into(),
+                    creative_id: "creative-1".into(),
+                    base_bid_usd_micros: 120,
+                    quality_adjusted_bid_usd_micros: 120,
+                    available_budget_usd_micros: 400,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-2".into(),
+                    creative_id: "creative-2".into(),
+                    base_bid_usd_micros: 100,
+                    quality_adjusted_bid_usd_micros: 100,
+                    available_budget_usd_micros: 400,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                },
+            ],
+            winner_index: 0,
+            resource_floor_usd_micros: 90,
+            runner_up_quality_bid_usd_micros: 80,
+            clearing_price_usd_micros: 100,
+            attestation: None,
+        });
+        let err = bc.submit_read_ack(ack).expect_err("ack rejected");
+        assert_eq!(err, ReadAckError::InvalidSelectionReceipt);
     }
 }
 

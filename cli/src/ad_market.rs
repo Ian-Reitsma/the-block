@@ -13,6 +13,11 @@ pub enum AdMarketCmd {
         auth: Option<String>,
         pretty: bool,
     },
+    List {
+        url: String,
+        auth: Option<String>,
+        pretty: bool,
+    },
     Distribution {
         url: String,
         auth: Option<String>,
@@ -33,6 +38,7 @@ impl AdMarketCmd {
             "Ad marketplace operations",
         )
         .subcommand(Self::inventory_command())
+        .subcommand(Self::list_command())
         .subcommand(Self::distribution_command())
         .subcommand(Self::register_command())
         .build()
@@ -43,6 +49,28 @@ impl AdMarketCmd {
             CommandId("ad_market.inventory"),
             "inventory",
             "Show registered campaigns and remaining budgets",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "auth",
+            "auth",
+            "Bearer token or basic auth",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "pretty",
+            "pretty",
+            "Pretty-print JSON response",
+        )))
+        .build()
+    }
+
+    fn list_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.list_campaigns"),
+            "list",
+            "List registered advertising campaigns",
         )
         .arg(ArgSpec::Option(
             OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
@@ -113,6 +141,12 @@ impl AdMarketCmd {
                 auth: take_string(sub_matches, "auth"),
                 pretty: sub_matches.get_flag("pretty"),
             }),
+            "list" => Ok(Self::List {
+                url: take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                auth: take_string(sub_matches, "auth"),
+                pretty: sub_matches.get_flag("pretty"),
+            }),
             "distribution" => Ok(Self::Distribution {
                 url: take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string()),
@@ -136,6 +170,11 @@ pub fn handle(cmd: AdMarketCmd) {
         AdMarketCmd::Inventory { url, auth, pretty } => {
             let client = RpcClient::from_env();
             let payload = json_rpc_request("ad_market.inventory", Value::Null);
+            print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
+        }
+        AdMarketCmd::List { url, auth, pretty } => {
+            let client = RpcClient::from_env();
+            let payload = json_rpc_request("ad_market.list_campaigns", Value::Null);
             print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
         }
         AdMarketCmd::Distribution { url, auth, pretty } => {
