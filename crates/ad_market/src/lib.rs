@@ -266,6 +266,7 @@ struct CohortPricingState {
     ema_demand_usd_micros: f64,
     min_price_per_mib_usd_micros: u64,
     max_price_per_mib_usd_micros: u64,
+    observed_utilization_ppm: u32,
 }
 
 impl CohortPricingState {
@@ -279,11 +280,16 @@ impl CohortPricingState {
             ema_demand_usd_micros: 0.0,
             min_price_per_mib_usd_micros: config.min_price_per_mib_usd_micros,
             max_price_per_mib_usd_micros: config.max_price_per_mib_usd_micros,
+            observed_utilization_ppm: 0,
         }
     }
 
     fn price_per_mib_usd_micros(&self) -> u64 {
         self.price_per_mib_usd_micros
+    }
+
+    fn observed_utilization_ppm(&self) -> u32 {
+        self.observed_utilization_ppm
     }
 
     fn record(&mut self, demand_usd_micros: u64, supply_usd_micros: u64) {
@@ -306,6 +312,8 @@ impl CohortPricingState {
         let utilization = (self.ema_demand_usd_micros / self.ema_supply_usd_micros)
             .min(1.0)
             .max(0.0);
+        self.observed_utilization_ppm =
+            ((utilization * PPM_SCALE as f64).round() as u64).min(PPM_SCALE) as u32;
         let target = (self.target_utilization_ppm as f64 / PPM_SCALE as f64).clamp(0.0, 1.0);
         let delta = utilization - target;
         let learning = self.learning_rate_ppm as f64 / PPM_SCALE as f64;
@@ -444,6 +452,8 @@ pub struct CohortPriceSnapshot {
     pub badges: Vec<String>,
     pub price_per_mib_usd_micros: u64,
     pub target_utilization_ppm: u32,
+    #[serde(default)]
+    pub observed_utilization_ppm: u32,
 }
 
 pub trait Marketplace: Send + Sync {
@@ -991,7 +1001,7 @@ impl Marketplace for InMemoryMarketplace {
         let policy = *self.distribution.read().unwrap();
         let oracle = *self.oracle.read().unwrap();
         let parts = allocate_usd(reservation.total_usd_micros, &policy);
-        let (_liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
+        let (liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
         let (viewer_ct, viewer_ct_rem) = usd_to_tokens(parts.viewer, oracle.ct_price_usd_micros);
         let (host_ct, host_ct_rem) = usd_to_tokens(parts.host, oracle.ct_price_usd_micros);
         let (hardware_ct, hardware_ct_rem) =
@@ -999,7 +1009,7 @@ impl Marketplace for InMemoryMarketplace {
         let (verifier_ct, verifier_ct_rem) =
             usd_to_tokens(parts.verifier, oracle.ct_price_usd_micros);
         let (liquidity_ct, liquidity_ct_rem) =
-            usd_to_tokens(parts.liquidity, oracle.ct_price_usd_micros);
+            usd_to_tokens(liquidity_ct_usd, oracle.ct_price_usd_micros);
         let mut ct_remainder_usd = parts
             .remainder
             .saturating_add(viewer_ct_rem)
@@ -1094,6 +1104,7 @@ impl Marketplace for InMemoryMarketplace {
                 badges: key.badges.clone(),
                 price_per_mib_usd_micros: state.price_per_mib_usd_micros(),
                 target_utilization_ppm: state.target_utilization_ppm,
+                observed_utilization_ppm: state.observed_utilization_ppm(),
             })
             .collect()
     }
@@ -1334,7 +1345,7 @@ impl Marketplace for SledMarketplace {
         let policy = *self.distribution.read().unwrap();
         let oracle = *self.oracle.read().unwrap();
         let parts = allocate_usd(reservation.total_usd_micros, &policy);
-        let (_liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
+        let (liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
         let (viewer_ct, viewer_ct_rem) = usd_to_tokens(parts.viewer, oracle.ct_price_usd_micros);
         let (host_ct, host_ct_rem) = usd_to_tokens(parts.host, oracle.ct_price_usd_micros);
         let (hardware_ct, hardware_ct_rem) =
@@ -1342,7 +1353,7 @@ impl Marketplace for SledMarketplace {
         let (verifier_ct, verifier_ct_rem) =
             usd_to_tokens(parts.verifier, oracle.ct_price_usd_micros);
         let (liquidity_ct, liquidity_ct_rem) =
-            usd_to_tokens(parts.liquidity, oracle.ct_price_usd_micros);
+            usd_to_tokens(liquidity_ct_usd, oracle.ct_price_usd_micros);
         let mut ct_remainder_usd = parts
             .remainder
             .saturating_add(viewer_ct_rem)
@@ -1440,6 +1451,7 @@ impl Marketplace for SledMarketplace {
                 badges: key.badges.clone(),
                 price_per_mib_usd_micros: state.price_per_mib_usd_micros(),
                 target_utilization_ppm: state.target_utilization_ppm,
+                observed_utilization_ppm: state.observed_utilization_ppm(),
             })
             .collect()
     }
@@ -1617,7 +1629,17 @@ mod tests {
         assert!(settlement.host_ct > 0);
         assert!(settlement.hardware_ct > 0);
         assert!(settlement.verifier_ct > 0);
-        assert!(settlement.liquidity_ct > 0);
+        let policy = market.distribution();
+        let parts = allocate_usd(settlement.total_usd_micros, &policy);
+        let (expected_liquidity_ct_usd, expected_liquidity_it_usd) =
+            split_liquidity_usd(parts.liquidity, policy);
+        let (expected_liquidity_ct, _) =
+            usd_to_tokens(expected_liquidity_ct_usd, settlement.ct_price_usd_micros);
+        let (expected_liquidity_it, _) =
+            usd_to_tokens(expected_liquidity_it_usd, settlement.it_price_usd_micros);
+        assert_eq!(settlement.liquidity_ct, expected_liquidity_ct);
+        assert_eq!(settlement.liquidity_it, expected_liquidity_it);
+        assert!(settlement.liquidity_it > 0);
         assert_eq!(
             settlement.total_ct,
             settlement

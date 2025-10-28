@@ -180,6 +180,8 @@ fn ad_market_rpc_endpoints_round_trip() {
         .as_array()
         .expect("cohort prices");
     assert_eq!(cohorts.len(), 1);
+    let cohort_entry = cohorts[0].as_object().expect("cohort entry");
+    assert_eq!(cohort_entry["observed_utilization_ppm"].as_u64(), Some(0));
 
     let distribution_resp = expect_ok(harness.call("ad_market.distribution", Value::Null));
     assert_eq!(distribution_resp["status"].as_str(), Some("ok"));
@@ -207,6 +209,18 @@ fn ad_market_rpc_endpoints_round_trip() {
         readiness_initial["distribution"]["viewer_percent"].as_u64(),
         Some(40)
     );
+    let utilization_initial = readiness_initial["utilization"]
+        .as_object()
+        .expect("utilization map");
+    assert_eq!(utilization_initial["mean_ppm"].as_u64(), Some(0));
+    assert_eq!(utilization_initial["max_ppm"].as_u64(), Some(0));
+    let util_cohorts = utilization_initial["cohorts"]
+        .as_array()
+        .expect("cohort util");
+    assert_eq!(util_cohorts.len(), 1);
+    let util_entry = util_cohorts[0].as_object().expect("util entry");
+    assert_eq!(util_entry["domain"].as_str(), Some("example.test"));
+    assert_eq!(util_entry["observed_utilization_ppm"].as_u64(), Some(0));
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -249,6 +263,16 @@ fn ad_market_rpc_endpoints_round_trip() {
         oracle["market_it_price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
+    let utilization_ready = readiness_ready["utilization"]
+        .as_object()
+        .expect("utilization map");
+    assert_eq!(utilization_ready["cohort_count"].as_u64(), Some(1));
+    let ready_cohorts = utilization_ready["cohorts"]
+        .as_array()
+        .expect("ready cohorts");
+    assert_eq!(ready_cohorts.len(), 1);
+    let ready_entry = ready_cohorts[0].as_object().expect("ready entry");
+    assert_eq!(ready_entry["observed_utilization_ppm"].as_u64(), Some(0));
 
     let duplicate = expect_error(harness.call(
         "ad_market.register_campaign",

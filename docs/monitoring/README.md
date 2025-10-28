@@ -31,7 +31,10 @@ ready to import once the foundation telemetry stack is running.
   role stays flat for thirty minutes after producing non-zero totals. Integration
   tests ingest successive payloads and verify all three counter families and
   gauges advance on the second scrape, matching the `increase()` queries baked
-  into the dashboard.
+  into the dashboard. Single-stat panels pull
+  `explorer_block_payout_ad_usd_total{peer}`,
+  `explorer_block_payout_ad_settlement_count{peer}`, and the CT/IT oracle gauges
+  so CI and dashboards trend the USD conversions alongside the role deltas.
 - An "Ad Readiness" row accompanies the payout panels and charts
   `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
   `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
@@ -40,6 +43,9 @@ ready to import once the foundation telemetry stack is running.
   blocker list returned by `ad_market.readiness`. The same gauges flow into CI
   artefacts and HTML snapshots so automation, operators, and dashboards consume
   an identical oracle snapshot and settlement view before enabling new cohorts.
+  The readiness table now also renders the RPC’s `utilization` summary (mean,
+  min, max, and per-cohort breakdowns) so pricing pressure is visible beside the
+  activation counters.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,

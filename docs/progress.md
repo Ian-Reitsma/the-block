@@ -1,4 +1,12 @@
 # Project Progress Snapshot
+> **Review (2025-11-08, evening):** Liquidity payouts now honour the
+> `liquidity_split_ct_ppm` governance knob end to end. Both ad-marketplace
+> backends convert the CT portion of the liquidity share before minting tokens,
+> preventing the IT allocation from being double counted in CT totals, and the
+> updated unit test asserts the expected split against deterministic oracle
+> prices. Explorer, ledger, and dashboard pipelines pick up the corrected
+> `SettlementBreakdown` values so USD totals, CT counts, and IT counts now stay in
+> lockstep across CI artefacts.
 > **Review (2025-11-07, afternoon):** Ad settlements now surface USD totals and
 > dual-currency token splits. `InMemoryMarketplace::commit` and
 > `SledMarketplace::commit` record the posted USD price, oracle snapshot, and
@@ -126,12 +134,14 @@
 > oracle snapshots so downstream tooling never has to infer conversion math, and
 > the explorer/CLI views render the new fields with regression coverage for
 > binary and JSON paths. The metrics aggregator seeds a dedicated
-> `explorer_block_payout_ad_it_total{role}` counter family and resets readiness
-> gauges for USD spend, oracle prices, and settlement counts, while
-> `ad_market.readiness` now embeds both the persisted snapshot and the live
-> marketplace oracle under a single `oracle` object. Dashboards and CI artefacts
-> pick up the same gauges, keeping readiness automation, explorer views, and
-> release checks aligned on the CT/IT split.
+> `explorer_block_payout_ad_it_total{role}` counter family and publishes peer-
+> scoped gauges for `explorer_block_payout_ad_usd_total`,
+> `explorer_block_payout_ad_settlement_count`, and the CT/IT oracle prices each
+> block consumed, while `ad_market.readiness` now embeds both the persisted
+> snapshot and the live marketplace oracle under a single `oracle` object plus a
+> `utilization` summary. Dashboards and CI artefacts pick up the same gauges so
+> readiness automation, explorer views, and release checks stay aligned on the
+> CT/IT split and the utilisation driving price updates.
 > **Review (2025-10-25, evening):** Governance parameter activations now update
 > the live ad revenue split in lockstep with policy votes. The node runtime wires
 > the shared marketplace handle into the read-subsidy apply hooks, and the new

@@ -4,8 +4,10 @@
 > `ad_market` crate now computes USD→CT/IT token splits entirely with existing
 > arithmetic helpers and sled/state locks; no new crates were introduced while
 > extending `SettlementBreakdown` to expose oracle snapshots, CT totals, mirrored
-> IT quantities, and residual USD. Unit coverage exercises the new conversions so
-> future migrations can rely on the first-party logic.
+> IT quantities, and residual USD. The follow-up liquidity fix reuses the same
+> helpers to apply `liquidity_split_ct_ppm` before minting CT, and the refreshed
+> unit coverage asserts the split so future migrations can rely on the first-party
+> logic.
 > **2025-10-27 update (object-store signing & monitoring codecs):** The
 > `foundation_object_store` crate now ships a canonical-request regression and a
 > blocking upload harness that verify AWS Signature V4 headers without ever

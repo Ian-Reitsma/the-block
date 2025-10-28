@@ -217,6 +217,12 @@ analytics (explorer, CLI, dashboards, and CI artefacts) read the CT/IT split and
 prices directly from those records so operators can audit both currencies in
 parallel without recomputing conversions.
 
+The marketplace applies the split before minting tokens: the CT conversion uses
+only the `liquidity_split_ct_ppm` share, while the remaining USD routes to the
+IT conversion path. This avoids double counting liquidity budgets and ensures CT
+totals stay consistent with the legacy ledger while IT payouts surface for
+governance and observability.
+
 ```rust
 fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
     let s = state.ct_supply();

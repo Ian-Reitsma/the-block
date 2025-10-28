@@ -18,8 +18,10 @@ cells while trimming runtime.
   USD→CT/IT conversions live entirely inside `crates/ad_market`, rely solely on
   `std` arithmetic plus the existing oracle/distribution structs, and emit the
   richer `SettlementBreakdown` without introducing serde/json dependencies or
-  additional crates. Unit coverage locks the rounding behaviour so future ledger
-  migrations remain first party.
+  additional crates. Liquidity conversions now honour
+  `liquidity_split_ct_ppm` before minting CT so IT allocations are not double
+  counted, and unit coverage locks both the rounding behaviour and the split so
+  future ledger migrations remain first party.
 
 - ✅ Chaos archive manifests and publish hooks remain first party. `sim/chaos_lab.rs`
   now writes `archive/latest.json`, per-run `manifest.json`, and zipped bundles

@@ -20,5 +20,32 @@
             <li><strong>telemetry sampling rate</strong> – adaptive sampling auto-tunes based on exporter lag.</li>
         </ul>
     </section>
+    <section>
+        <h2>Advertising Settlement Snapshot</h2>
+        <p>
+            Explorer ingests now stream the USD totals and oracle prices that back each advertising block.
+            Scraped Prometheus metrics expose the latest conversion inputs so dashboards and CI artefacts can
+            graph the dual-token flows without parsing JSON payloads.
+        </p>
+        <ul>
+            <li>
+                <code>explorer_block_payout_ad_usd_total&#123;peer=&quot;&lt;explorer&gt;&quot;&#125;</code> – most recent
+                advertising spend in micro USD reported by that explorer instance.
+            </li>
+            <li>
+                <code>explorer_block_payout_ad_settlement_count&#123;peer=&quot;&lt;explorer&gt;&quot;&#125;</code> – number of
+                settlements folded into the USD tally, enabling rate panels in CI.
+            </li>
+            <li>
+                <code>explorer_block_payout_ad_ct_price_usd_micros</code> / <code>..._ad_it_price_usd_micros</code>
+                – the CT and IT oracle snapshots that priced the block.
+            </li>
+        </ul>
+        <p>
+            Pair these metrics with <code>ad_readiness_total_usd_micros</code>, <code>ad_readiness_settlement_count</code>,
+            and the readiness <code>utilization</code> payload from <code>ad_market.readiness</code> to audit demand,
+            supply, and pricing inputs end to end.
+        </p>
+    </section>
 </body>
 </html>
