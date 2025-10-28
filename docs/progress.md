@@ -1,11 +1,29 @@
 # Project Progress Snapshot
+> **Review (2025-10-28, late morning):** Dual-token settlement now rides a
+> governance gate wired end to end. The new
+> `DualTokenSettlementEnabled` parameter flows from the governance runtime to the
+> node, flipping ad-marketplace distribution policies so CT-only clusters stay on
+> legacy payouts while mixed deployments expose the CT/IT split. Block assembly
+> now emits a per-block treasury execution timeline—reconciling executed
+> disbursements against included transactions—and the explorer/CLI surfaces the
+> same history so auditors can trace dual-token settlements alongside downstream
+> treasury flows. Telemetry exporters push the richer readiness map (including
+> `delta_utilization_ppm` and cohort summaries) through the metrics aggregator,
+> and Prometheus gained an `AdReadinessUtilizationDelta` alert to page when
+> cohorts drift from their targets despite steady demand.
 > **Review (2025-11-08, evening):** Liquidity payouts now honour the
 > `liquidity_split_ct_ppm` governance knob end to end. Both ad-marketplace
 > backends convert the CT portion of the liquidity share before minting tokens,
 > preventing the IT allocation from being double counted in CT totals, and the
 > updated unit test asserts the expected split against deterministic oracle
-> prices. The conversion logic lives in a shared helper consumed by the sled and
-> in-memory marketplaces, while new ledger/explorer regressions replay mixed
+> prices. The conversion helper now destructures the per-role USD map so the CT
+> path never sees the unsplit liquidity bucket, and debug assertions enforce that
+> each tokenised slice recombines with its rounding remainder to match the
+> original USD split. A complementary rounding regression keeps the uneven-price
+> case honest, exercising a pure-liquidity settlement where both CT and IT
+> receive non-zero shares without ever exceeding their configured USD budgets.
+> The conversion logic lives in a shared helper consumed by the sled and in-
+> memory marketplaces, while new ledger/explorer regressions replay mixed
 > settlements to prove CT/IT totals, USD sums, and oracle snapshots remain aligned
 > without depending on a mined block. Explorer, ledger, and dashboard pipelines
 > pick up the corrected `SettlementBreakdown` values so USD totals, CT counts, and

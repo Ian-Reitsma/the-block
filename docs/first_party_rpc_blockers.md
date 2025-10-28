@@ -9,6 +9,26 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-11-09)
+
+- Governance and node RPC paths now expose the `DualTokenSettlementEnabled`
+  parameter entirely through the existing codecs. `governance.params` JSON and
+  binary stores persist the new flag without adding schema generators, and the
+  node runtime forwards toggles directly into the ad-market distribution handle
+  so RPC consumers observe CT-only payouts when the flag is disabled and CT+IT
+  splits when enabled—no new endpoints or third-party glue required.
+- Block RPC responses include a `treasury_events` timeline populated during block
+  production. Explorer and CLI projections reuse the current SQLite + JSON
+  builders to render each disbursement (height, beneficiary, currency, USD amount,
+  transaction hash) alongside settlements, keeping the RPC envelopes unchanged
+  while exposing the richer data through first-party codecs.
+- `metrics-aggregator` telemetry exports now embed the readiness
+  `delta_utilization_ppm` map inside `telemetry.summary`, and the monitoring
+  ruleset gained an `AdReadinessUtilizationDelta` alert that pages when cohorts
+  drift beyond thresholds despite steady demand. Both changes extend the existing
+  first-party JSON and Prometheus helpers—no external alert managers or serde
+  adapters were added.
+
 ## Recent progress (2025-11-07)
 
 - Ad market settlements now expose USD totals, CT, and IT token counts without
@@ -16,8 +36,10 @@ RPC client.
   continue to serialise through the existing `foundation_serialization` helpers,
   while the richer `SettlementBreakdown` is consumed directly by the node and
   test harnesses—no additional RPC shims or serde fallbacks were required. The
-  liquidity split now applies before CT conversion, so RPC consumers see CT and IT
-  totals that match the governance `liquidity_split_ct_ppm` policy.
+  liquidity split now applies before CT conversion, the helper enforces the CT/IT
+  slices with debug assertions, and the new rounding regression keeps the
+  uneven-oracle case honest so RPC consumers see CT and IT totals that match the
+  governance `liquidity_split_ct_ppm` policy.
 - Explorer and ledger tests now replay dual settlements with mismatched
   liquidity splits, ensuring the JSON/RPC pipeline exports the same CT/IT totals
   that governance configured, and guarding the readiness map + oracle snapshots

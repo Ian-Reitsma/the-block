@@ -1990,6 +1990,115 @@ fn wrappers_map_to_value(map: &HashMap<String, WrapperSummaryEntry>) -> Value {
     Value::Object(object)
 }
 
+fn readiness_summary_to_value(summary: &AdReadinessUtilizationSummary) -> Value {
+    let mut map = Map::new();
+    map.insert("cohort_count".into(), Value::from(summary.cohort_count));
+    map.insert("mean_ppm".into(), Value::from(summary.mean_ppm));
+    map.insert("min_ppm".into(), Value::from(summary.min_ppm));
+    map.insert("max_ppm".into(), Value::from(summary.max_ppm));
+    map.insert("last_updated".into(), Value::from(summary.last_updated));
+    Value::Object(map)
+}
+
+fn readiness_cohort_to_value(entry: &AdReadinessCohortTelemetry) -> Value {
+    let mut map = Map::new();
+    map.insert("domain".into(), Value::String(entry.domain.clone()));
+    if let Some(provider) = &entry.provider {
+        map.insert("provider".into(), Value::String(provider.clone()));
+    }
+    let badges: Vec<Value> = entry.badges.iter().cloned().map(Value::String).collect();
+    map.insert("badges".into(), Value::Array(badges));
+    map.insert(
+        "price_per_mib_usd_micros".into(),
+        Value::from(entry.price_per_mib_usd_micros),
+    );
+    map.insert(
+        "target_utilization_ppm".into(),
+        Value::from(entry.target_utilization_ppm),
+    );
+    map.insert(
+        "observed_utilization_ppm".into(),
+        Value::from(entry.observed_utilization_ppm),
+    );
+    map.insert(
+        "delta_utilization_ppm".into(),
+        Value::Number(Number::from(entry.delta_utilization_ppm)),
+    );
+    Value::Object(map)
+}
+
+fn ad_readiness_to_value(readiness: &AdReadinessTelemetry) -> Value {
+    let mut map = Map::new();
+    map.insert("ready".into(), Value::Bool(readiness.ready));
+    map.insert("window_secs".into(), Value::from(readiness.window_secs));
+    map.insert(
+        "min_unique_viewers".into(),
+        Value::from(readiness.min_unique_viewers),
+    );
+    map.insert(
+        "min_host_count".into(),
+        Value::from(readiness.min_host_count),
+    );
+    map.insert(
+        "min_provider_count".into(),
+        Value::from(readiness.min_provider_count),
+    );
+    map.insert(
+        "unique_viewers".into(),
+        Value::from(readiness.unique_viewers),
+    );
+    map.insert("host_count".into(), Value::from(readiness.host_count));
+    map.insert(
+        "provider_count".into(),
+        Value::from(readiness.provider_count),
+    );
+    let blockers: Vec<Value> = readiness
+        .blockers
+        .iter()
+        .cloned()
+        .map(Value::String)
+        .collect();
+    map.insert("blockers".into(), Value::Array(blockers));
+    map.insert("last_updated".into(), Value::from(readiness.last_updated));
+    map.insert(
+        "total_usd_micros".into(),
+        Value::from(readiness.total_usd_micros),
+    );
+    map.insert(
+        "settlement_count".into(),
+        Value::from(readiness.settlement_count),
+    );
+    map.insert(
+        "ct_price_usd_micros".into(),
+        Value::from(readiness.ct_price_usd_micros),
+    );
+    map.insert(
+        "it_price_usd_micros".into(),
+        Value::from(readiness.it_price_usd_micros),
+    );
+    map.insert(
+        "market_ct_price_usd_micros".into(),
+        Value::from(readiness.market_ct_price_usd_micros),
+    );
+    map.insert(
+        "market_it_price_usd_micros".into(),
+        Value::from(readiness.market_it_price_usd_micros),
+    );
+    let cohorts: Vec<Value> = readiness
+        .cohort_utilization
+        .iter()
+        .map(readiness_cohort_to_value)
+        .collect();
+    map.insert("cohort_utilization".into(), Value::Array(cohorts));
+    let summary_value = readiness
+        .utilization_summary
+        .as_ref()
+        .map(readiness_summary_to_value)
+        .unwrap_or(Value::Null);
+    map.insert("utilization_summary".into(), summary_value);
+    Value::Object(map)
+}
+
 fn telemetry_summary_to_value(summary: &TelemetrySummary) -> Value {
     let mut map = Map::new();
     map.insert(
@@ -2018,6 +2127,14 @@ fn telemetry_summary_to_value(summary: &TelemetrySummary) -> Value {
     map.insert(
         "wrappers".to_string(),
         wrapper_summary_to_value(&summary.wrappers),
+    );
+    map.insert(
+        "ad_readiness".to_string(),
+        summary
+            .ad_readiness
+            .as_ref()
+            .map(ad_readiness_to_value)
+            .unwrap_or(Value::Null),
     );
     Value::Object(map)
 }

@@ -221,7 +221,10 @@ The marketplace applies the split before minting tokens: the CT conversion uses
 only the `liquidity_split_ct_ppm` share, while the remaining USD routes to the
 IT conversion path. This avoids double counting liquidity budgets and ensures CT
 totals stay consistent with the legacy ledger while IT payouts surface for
-governance and observability.
+governance and observability. Debug assertions guard the conversion helper so the
+minted tokens (plus their rounding remainder) recombine to the original USD
+allocation, and a rounding regression covers uneven oracle prices to prove the
+split holds even when liquidity contributes only partial token units.
 
 ```rust
 fn retune_multipliers(state: &ChainState, stats: &UtilStats) {

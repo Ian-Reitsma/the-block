@@ -166,7 +166,18 @@ directly. Additional single-stat panels surface `explorer_block_payout_ad_usd_to
 each explorer peer so CI and dashboards trend the USD spend and conversion rates
 alongside the token totals. Legends remain enabled by default, letting operators
 focus on specific roles or compare read versus dual-token advertising flows in the
-same pane.
+same pane. The shared conversion helper now carries debug assertions and an
+uneven-price regression to guarantee these CT/IT totals stay within their
+governance budgets, preventing dashboards from ever reflecting double-counted
+liquidity.
+
+A neighbouring **Treasury Execution Timeline** panel renders the new
+`Block::treasury_events` vector. Each disbursement lists the execution height,
+beneficiary, currency, USD amount, and originating transaction hash, giving
+operators an at-a-glance ledger of treasury activity without scraping explorer
+SQL. The CLI and explorer surfaces expose the same events via first-party codecs,
+and the monitoring bundle mirrors them so treasury, governance, and settlement
+audits all reference identical data.
 
 An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
@@ -184,6 +195,12 @@ aggregate gauges, and the HTML snapshot mirrors the same layout to keep
 FIRST_PARTY_ONLY monitoring aligned with the Grafana templates. A counter panel
 charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
 spot insufficient viewer/host/provider diversity before enabling the ad rail.
+
+Prometheus now fires `AdReadinessUtilizationDelta` whenever
+`abs(delta_utilization_ppm)` breaches the configured threshold despite steady
+request volume. The alert routes to the existing CI/on-call channels, tying the
+governance utilisation targets to telemetry and paging operators before cohort
+drift forces emergency settlement overrides.
 
 The metrics aggregator now persists the explorer payout counters per peer and
 role so deltas remain monotonic across scrapes.

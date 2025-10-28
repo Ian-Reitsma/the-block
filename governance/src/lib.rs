@@ -64,6 +64,7 @@ pub enum ParamKey {
     ReadSubsidyHardwarePercent,
     ReadSubsidyVerifierPercent,
     ReadSubsidyLiquidityPercent,
+    DualTokenSettlementEnabled,
     TreasuryPercentCt,
     ProofRebateLimitCt,
     RentRateCtPerByte,

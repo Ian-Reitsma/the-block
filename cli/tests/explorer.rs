@@ -81,7 +81,18 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
             "l2_sizes": [],
             "vdf_commit": {zeros},
             "vdf_output": {zeros},
-            "vdf_proof": []
+            "vdf_proof": [],
+            "treasury_events": [
+                {{
+                    "disbursement_id": 7,
+                    "destination": "treasury-dest",
+                    "amount_ct": 12345,
+                    "memo": "dual token audit",
+                    "scheduled_epoch": 99,
+                    "tx_hash": "0xdeadbeef",
+                    "executed_at": 170000
+                }}
+            ]
         }}"#
     );
 
@@ -133,6 +144,15 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
     assert_eq!(breakdown.settlement_count, ad_settlement_count);
     assert_eq!(breakdown.ct_price_usd_micros, ad_ct_price);
     assert_eq!(breakdown.it_price_usd_micros, ad_it_price);
+    assert_eq!(breakdown.treasury_events.len(), 1);
+    let timeline = &breakdown.treasury_events[0];
+    assert_eq!(timeline.disbursement_id, 7);
+    assert_eq!(timeline.destination, "treasury-dest");
+    assert_eq!(timeline.amount_ct, 12_345);
+    assert_eq!(timeline.memo, "dual token audit");
+    assert_eq!(timeline.scheduled_epoch, 99);
+    assert_eq!(timeline.tx_hash, "0xdeadbeef");
+    assert_eq!(timeline.executed_at, 170000);
 
     let mut height_output = Vec::new();
     handle_with_writer(

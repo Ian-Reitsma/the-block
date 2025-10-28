@@ -5,7 +5,7 @@ use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
-use crate::{Block, SignedTransaction, TokenAmount};
+use crate::{Block, BlockTreasuryEvent, SignedTransaction, TokenAmount};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -59,6 +59,13 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         struct_writer.field_u64("ad_verifier_it", block.ad_verifier_it.get());
         struct_writer.field_u64("ad_liquidity_it", block.ad_liquidity_it.get());
         struct_writer.field_u64("ad_miner_it", block.ad_miner_it.get());
+        struct_writer.field_with("treasury_events", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_treasury_events(field_writer, &block.treasury_events) {
+                    result = Err(err);
+                }
+            }
+        });
         struct_writer.field_u64("ad_total_usd_micros", block.ad_total_usd_micros);
         struct_writer.field_u64("ad_settlement_count", block.ad_settlement_count);
         struct_writer.field_u64(
@@ -161,6 +168,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut ad_verifier_it = None;
     let mut ad_liquidity_it = None;
     let mut ad_miner_it = None;
+    let mut treasury_events: Option<Vec<BlockTreasuryEvent>> = None;
     let mut ad_total_usd_micros = None;
     let mut ad_settlement_count = None;
     let mut ad_oracle_ct_price_usd_micros = None;
@@ -253,6 +261,11 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
             assign_once(&mut ad_liquidity_it, reader.read_u64()?, "ad_liquidity_it")
         }
         "ad_miner_it" => assign_once(&mut ad_miner_it, reader.read_u64()?, "ad_miner_it"),
+        "treasury_events" => assign_once(
+            &mut treasury_events,
+            read_treasury_events(reader)?,
+            "treasury_events",
+        ),
         "ad_total_usd_micros" => assign_once(
             &mut ad_total_usd_micros,
             reader.read_u64()?,
@@ -329,6 +342,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         ad_verifier_it: TokenAmount::new(ad_verifier_it.unwrap_or_default()),
         ad_liquidity_it: TokenAmount::new(ad_liquidity_it.unwrap_or_default()),
         ad_miner_it: TokenAmount::new(ad_miner_it.unwrap_or_default()),
+        treasury_events: treasury_events.unwrap_or_default(),
         ad_total_usd_micros: ad_total_usd_micros.unwrap_or_default(),
         ad_settlement_count: ad_settlement_count.unwrap_or_default(),
         ad_oracle_ct_price_usd_micros: ad_oracle_ct_price_usd_micros.unwrap_or_default(),
@@ -362,6 +376,56 @@ fn write_transactions(writer: &mut Writer, txs: &[SignedTransaction]) -> EncodeR
 
 fn read_transactions(reader: &mut Reader<'_>) -> Result<Vec<SignedTransaction>, DecodeError> {
     read_vec(reader, |reader| tx_binary::read_signed_transaction(reader))
+}
+
+fn write_treasury_events(writer: &mut Writer, events: &[BlockTreasuryEvent]) -> EncodeResult<()> {
+    write_vec(writer, events, "treasury_events", |writer, event| {
+        writer.write_struct(|struct_writer| {
+            struct_writer.field_u64("disbursement_id", event.disbursement_id);
+            struct_writer.field_string("destination", &event.destination);
+            struct_writer.field_u64("amount_ct", event.amount_ct);
+            struct_writer.field_string("memo", &event.memo);
+            struct_writer.field_u64("scheduled_epoch", event.scheduled_epoch);
+            struct_writer.field_string("tx_hash", &event.tx_hash);
+            struct_writer.field_u64("executed_at", event.executed_at);
+        });
+        Ok(())
+    })
+}
+
+fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEvent>, DecodeError> {
+    read_vec(reader, |reader| {
+        let mut disbursement_id = None;
+        let mut destination = None;
+        let mut amount_ct = None;
+        let mut memo = None;
+        let mut scheduled_epoch = None;
+        let mut tx_hash = None;
+        let mut executed_at = None;
+        decode_struct(reader, Some(7), |key, reader| match key {
+            "disbursement_id" => {
+                assign_once(&mut disbursement_id, reader.read_u64()?, "disbursement_id")
+            }
+            "destination" => assign_once(&mut destination, reader.read_string()?, "destination"),
+            "amount_ct" => assign_once(&mut amount_ct, reader.read_u64()?, "amount_ct"),
+            "memo" => assign_once(&mut memo, reader.read_string()?, "memo"),
+            "scheduled_epoch" => {
+                assign_once(&mut scheduled_epoch, reader.read_u64()?, "scheduled_epoch")
+            }
+            "tx_hash" => assign_once(&mut tx_hash, reader.read_string()?, "tx_hash"),
+            "executed_at" => assign_once(&mut executed_at, reader.read_u64()?, "executed_at"),
+            other => Err(DecodeError::UnknownField(other.to_string())),
+        })?;
+        Ok(BlockTreasuryEvent {
+            disbursement_id: disbursement_id.unwrap_or_default(),
+            destination: destination.unwrap_or_default(),
+            amount_ct: amount_ct.unwrap_or_default(),
+            memo: memo.unwrap_or_default(),
+            scheduled_epoch: scheduled_epoch.unwrap_or_default(),
+            tx_hash: tx_hash.unwrap_or_default(),
+            executed_at: executed_at.unwrap_or_default(),
+        })
+    })
 }
 
 fn write_root_vec(writer: &mut Writer, roots: &[[u8; 32]]) -> EncodeResult<()> {

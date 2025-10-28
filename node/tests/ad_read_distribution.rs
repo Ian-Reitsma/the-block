@@ -274,3 +274,61 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
     );
     assert_eq!(totals.12, settlement_a.total_ct + settlement_b.total_ct);
 }
+
+#[test]
+fn dual_token_feature_flag_suppresses_it_when_disabled() {
+    let dir = tempdir().expect("temp dir");
+    let chain_path = dir.path().join("chain");
+    let mut bc = Blockchain::new(chain_path.to_str().expect("path"));
+    bc.difficulty = 0;
+    bc.gamma_read_sub_ct_raw = 1;
+    bc.params.dual_token_settlement_enabled = 0;
+    bc.recompute_difficulty();
+    bc.add_account("miner".into(), 0, 0).expect("miner account");
+
+    let ack = build_signed_ack(128, "example.com", "edge-disabled");
+    bc.submit_read_ack(ack.clone()).expect("ack accepted");
+
+    let settlement = SettlementBreakdown {
+        campaign_id: "cmp-flag".into(),
+        creative_id: "creative-flag".into(),
+        bytes: 128,
+        price_per_mib_usd_micros: 90,
+        total_usd_micros: 90,
+        demand_usd_micros: 90,
+        total_ct: 45,
+        viewer_ct: 15,
+        host_ct: 12,
+        hardware_ct: 8,
+        verifier_ct: 5,
+        liquidity_ct: 3,
+        miner_ct: 2,
+        host_it: 9,
+        hardware_it: 7,
+        verifier_it: 5,
+        liquidity_it: 4,
+        miner_it: 6,
+        unsettled_usd_micros: 0,
+        ct_price_usd_micros: 1,
+        it_price_usd_micros: 1,
+    };
+    bc.record_ad_settlement(&ack, settlement.clone());
+
+    let block = bc.mine_block_at("miner", 1).expect("mined block");
+    assert_eq!(block.ad_host_it.value(), 0);
+    assert_eq!(block.ad_hardware_it.value(), 0);
+    assert_eq!(block.ad_verifier_it.value(), 0);
+    assert_eq!(block.ad_liquidity_it.value(), 0);
+    assert_eq!(block.ad_miner_it.value(), 0);
+
+    bc.params.dual_token_settlement_enabled = 1;
+    bc.submit_read_ack(ack.clone())
+        .expect("ack replay accepted");
+    bc.record_ad_settlement(&ack, settlement);
+    let enabled_block = bc.mine_block_at("miner", 2).expect("second block");
+    assert_eq!(enabled_block.ad_host_it.value(), 9);
+    assert_eq!(enabled_block.ad_hardware_it.value(), 7);
+    assert_eq!(enabled_block.ad_verifier_it.value(), 5);
+    assert_eq!(enabled_block.ad_liquidity_it.value(), 4);
+    assert_eq!(enabled_block.ad_miner_it.value(), 6);
+}

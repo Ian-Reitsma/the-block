@@ -1,5 +1,17 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-09 update (dual-token governance gate & treasury timelines):** The
+> new `DualTokenSettlementEnabled` parameter flows through governance and node
+> codecs/stores via handwritten cursor helpers; no schema generators or serde
+> derives were introduced while adding the toggle to sled-backed registries.
+> Block codecs in `node/src/block_binary.rs` continue to rely on the in-house
+> binary facade when persisting `treasury_events`, and explorer/CLI surfaces reuse
+> the existing SQLite models plus manual JSON builders to expose the timelines.
+> Metrics aggregator telemetry simply extends `telemetry_summary_to_value` with
+> readiness deltas and adds the `AdReadinessUtilizationDelta` rule to the
+> first-party Prometheus configuration, keeping CI/dashboards entirely on the
+> in-house stack.
+
 > **2025-11-08 update (readiness telemetry utilisation maps):** The node persists
 > both the archived oracle snapshot and the live marketplace oracle in
 > `AdReadinessSnapshot`, records per-cohort target/observed/delta utilisation, and
@@ -15,8 +27,11 @@
 > arithmetic helpers and sled/state locks; no new crates were introduced while
 > extending `SettlementBreakdown` to expose oracle snapshots, CT totals, mirrored
 > IT quantities, and residual USD. The follow-up liquidity fix reuses the same
-> helpers to apply `liquidity_split_ct_ppm` before minting CT, and the refreshed
-> unit coverage asserts the split so future migrations can rely on the first-party
+> helpers to apply `liquidity_split_ct_ppm` before minting CT, destructures the
+> per-role map so the CT path never sees the unsplit liquidity bucket, and layers
+> debug assertions that validate each minted slice against its USD budget. The
+> refreshed unit coverage asserts the split and now includes an uneven-price,
+> pure-liquidity regression so future migrations can rely on the first-party
 > logic.
 > **2025-10-27 update (object-store signing & monitoring codecs):** The
 > `foundation_object_store` crate now ships a canonical-request regression and a

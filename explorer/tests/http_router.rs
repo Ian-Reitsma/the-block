@@ -141,5 +141,6 @@ fn block_lookup_via_router() {
         assert_eq!(payouts.settlement_count, ad_settlement_count);
         assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
         assert_eq!(payouts.it_price_usd_micros, ad_it_price);
+        assert!(payouts.treasury_events.is_empty());
     });
 }

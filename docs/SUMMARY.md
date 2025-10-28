@@ -1,9 +1,24 @@
 # Summary
+> **Review (2025-11-09, morning):** Dual-token settlements now ship behind a
+> governance flag and publish treasury execution timelines end to end. The
+> `DualTokenSettlementEnabled` parameter flows from governance codecs/stores into
+> the node runtime, flipping the ad-market distribution policy live so operators
+> can stage CT-only or CT+IT payouts without restarting validators. Blocks record
+> `treasury_events` for every executed disbursement, including execution height,
+> beneficiary, USD amount, currency, and linked transaction hash; explorer, CLI,
+> and SQLite indexing expose the same timelines for audit. Metrics aggregator
+> exports now forward cohort utilisation deltas in the readiness summaries, and a
+> new `AdReadinessUtilizationDelta` Prometheus alert pages when cohorts drift past
+> thresholds under steady demand, keeping governance toggles, treasury releases,
+> and pricing inputs observable from CI to dashboards.
 > **Review (2025-11-08, evening):** Ad settlements now honour the
 > `liquidity_split_ct_ppm` governance knob. The marketplace converts the CT slice
 > of liquidity before minting tokens, preventing the IT allocation from being
 > double counted, and refreshed tests assert the split alongside the USD→CT/IT
-> conversions. Explorer and ledger pipelines consume the corrected
+> conversions. The shared helper now destructures the per-role USD map, adds
+> debug assertions that recombine each minted slice with its rounding remainder,
+> and ships a rounding regression that drives an uneven-price, pure-liquidity
+> settlement so odd oracles cannot reintroduce CT inflation. Explorer and ledger pipelines consume the corrected
 > `SettlementBreakdown` directly, so dashboards and CI artefacts display matching
 > USD, CT, and IT totals. Readiness telemetry mirrors the same inputs: snapshots
 > persist both the archived and live marketplace oracles, expose per-cohort

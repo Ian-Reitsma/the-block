@@ -123,6 +123,7 @@ pub trait RuntimeAdapter {
     fn set_badge_revoke_uptime(&mut self, _v: u64) {}
     fn set_jurisdiction_region(&mut self, _v: i64) {}
     fn set_ai_diagnostics_enabled(&mut self, _v: bool) {}
+    fn set_dual_token_settlement_enabled(&mut self, _v: bool) {}
     fn set_scheduler_weight(&mut self, _class: ServiceClass, _weight: u64) {}
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
@@ -209,6 +210,9 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.adapter.set_ai_diagnostics_enabled(v);
+    }
+    pub fn set_dual_token_settlement_enabled(&mut self, v: bool) {
+        self.adapter.set_dual_token_settlement_enabled(v);
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         self.adapter.set_scheduler_weight(class, weight);
@@ -343,6 +347,8 @@ pub struct Params {
     #[serde(default = "default_read_subsidy_liquidity_percent")]
     pub read_subsidy_liquidity_percent: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
+    pub dual_token_settlement_enabled: i64,
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub treasury_percent_ct: i64,
     #[serde(default = "default_proof_rebate_limit_ct")]
     pub proof_rebate_limit_ct: i64,
@@ -401,6 +407,7 @@ impl Default for Params {
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
+            dual_token_settlement_enabled: 0,
             treasury_percent_ct: 0,
             proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
@@ -505,6 +512,10 @@ impl Params {
         map.insert(
             "read_subsidy_liquidity_percent".into(),
             Value::Number(self.read_subsidy_liquidity_percent.into()),
+        );
+        map.insert(
+            "dual_token_settlement_enabled".into(),
+            Value::Number(self.dual_token_settlement_enabled.into()),
         );
         map.insert(
             "treasury_percent_ct".into(),
@@ -659,6 +670,10 @@ impl Params {
             read_subsidy_hardware_percent: take_i64("read_subsidy_hardware_percent")?,
             read_subsidy_verifier_percent: take_i64("read_subsidy_verifier_percent")?,
             read_subsidy_liquidity_percent: take_i64("read_subsidy_liquidity_percent")?,
+            dual_token_settlement_enabled: obj
+                .get("dual_token_settlement_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
             treasury_percent_ct: take_i64("treasury_percent_ct")?,
             proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
             rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
@@ -843,6 +858,11 @@ fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()
     Ok(())
 }
 
+fn apply_dual_token_settlement(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.dual_token_settlement_enabled = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     p.kappa_cpu_sub_ct = v;
     Ok(())
@@ -1024,7 +1044,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 43] = [
+    static REGS: [ParamSpec; 44] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1208,6 +1228,19 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_read_subsidy_liquidity_percent,
             apply_runtime: |_v, rt| {
                 rt.sync_ad_distribution();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::DualTokenSettlementEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_dual_token_settlement,
+            apply_runtime: |v, rt| {
+                rt.set_dual_token_settlement_enabled(v != 0);
                 Ok(())
             },
         },

@@ -380,6 +380,31 @@ fn write_payout_table(
         breakdown.it_price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
+    if breakdown.treasury_events.is_empty() {
+        writeln!(writer, "treasury executions: none")
+            .map_err(|err| format!("failed to write output: {err}"))?;
+    } else {
+        writeln!(writer, "treasury executions:")
+            .map_err(|err| format!("failed to write output: {err}"))?;
+        writeln!(
+            writer,
+            "{:<14} {:<34} {:>16} {:<12} {}",
+            "disbursement", "destination", "amount_ct", "scheduled", "tx_hash",
+        )
+        .map_err(|err| format!("failed to write output: {err}"))?;
+        for event in &breakdown.treasury_events {
+            writeln!(
+                writer,
+                "{:<14} {:<34} {:>16} {:<12} {}",
+                event.disbursement_id,
+                event.destination,
+                event.amount_ct,
+                event.scheduled_epoch,
+                event.tx_hash,
+            )
+            .map_err(|err| format!("failed to write output: {err}"))?;
+        }
+    }
     Ok(())
 }
 

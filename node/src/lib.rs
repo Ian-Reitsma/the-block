@@ -16,7 +16,7 @@ use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, proc
 use crate::consensus::constants::DIFFICULTY_WINDOW;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
-use crate::governance::NODE_GOV_STORE;
+use crate::governance::{DisbursementStatus, NODE_GOV_STORE};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
@@ -553,6 +553,18 @@ impl<'a> ReservationGuard<'a> {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct BlockTreasuryEvent {
+    pub disbursement_id: u64,
+    pub destination: String,
+    pub amount_ct: u64,
+    pub memo: String,
+    pub scheduled_epoch: u64,
+    pub tx_hash: String,
+    pub executed_at: u64,
+}
+
 /// Per-block ledger entry. `coinbase_*` mirrors the first transaction
 /// but is the canonical source for light clients.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -630,6 +642,9 @@ pub struct Block {
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Industrial tokens routed to the miner from advertising campaigns
     pub ad_miner_it: TokenAmount,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Executed treasury disbursements surfaced alongside settlement payouts
+    pub treasury_events: Vec<BlockTreasuryEvent>,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Total USD billed across advertising settlements included in this block
     pub ad_total_usd_micros: u64,
@@ -728,6 +743,7 @@ impl Default for Block {
             ad_verifier_it: TokenAmount::new(0),
             ad_liquidity_it: TokenAmount::new(0),
             ad_miner_it: TokenAmount::new(0),
+            treasury_events: Vec::new(),
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
             ad_oracle_ct_price_usd_micros: 0,
@@ -4054,6 +4070,7 @@ impl Blockchain {
             .saturating_sub(verifier_read_paid)
             .saturating_sub(liquidity_paid);
 
+        let dual_token_enabled = self.params.dual_token_settlement_enabled > 0;
         let ad_settlements = std::mem::take(&mut self.pending_ad_settlements);
         let mut ad_viewer_total = 0u64;
         let mut ad_host_total = 0u64;
@@ -4092,20 +4109,22 @@ impl Blockchain {
             }
             ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity_ct);
             ad_miner_total = ad_miner_total.saturating_add(record.miner_ct);
-            if record.host_it > 0 {
-                host_it_payouts.push((record.host_addr.clone(), record.host_it));
-                ad_host_it_total = ad_host_it_total.saturating_add(record.host_it);
+            if dual_token_enabled {
+                if record.host_it > 0 {
+                    host_it_payouts.push((record.host_addr.clone(), record.host_it));
+                    ad_host_it_total = ad_host_it_total.saturating_add(record.host_it);
+                }
+                if record.hardware_it > 0 {
+                    hardware_it_payouts.push((record.hardware_addr.clone(), record.hardware_it));
+                    ad_hardware_it_total = ad_hardware_it_total.saturating_add(record.hardware_it);
+                }
+                if record.verifier_it > 0 {
+                    verifier_it_payouts.push((record.verifier_addr.clone(), record.verifier_it));
+                    ad_verifier_it_total = ad_verifier_it_total.saturating_add(record.verifier_it);
+                }
+                ad_liquidity_it_total = ad_liquidity_it_total.saturating_add(record.liquidity_it);
+                ad_miner_it_total = ad_miner_it_total.saturating_add(record.miner_it);
             }
-            if record.hardware_it > 0 {
-                hardware_it_payouts.push((record.hardware_addr.clone(), record.hardware_it));
-                ad_hardware_it_total = ad_hardware_it_total.saturating_add(record.hardware_it);
-            }
-            if record.verifier_it > 0 {
-                verifier_it_payouts.push((record.verifier_addr.clone(), record.verifier_it));
-                ad_verifier_it_total = ad_verifier_it_total.saturating_add(record.verifier_it);
-            }
-            ad_liquidity_it_total = ad_liquidity_it_total.saturating_add(record.liquidity_it);
-            ad_miner_it_total = ad_miner_it_total.saturating_add(record.miner_it);
             ad_total_usd_micros = ad_total_usd_micros.saturating_add(record.total_usd_micros);
             ad_last_ct_price_usd_micros = record.ct_price_usd_micros;
             ad_last_it_price_usd_micros = record.it_price_usd_micros;
@@ -4153,7 +4172,7 @@ impl Blockchain {
         } else {
             Vec::new()
         };
-        let liquidity_it_payouts = if ad_liquidity_it_total > 0 {
+        let liquidity_it_payouts = if dual_token_enabled && ad_liquidity_it_total > 0 {
             vec![(liquidity_address().to_string(), ad_liquidity_it_total)]
         } else {
             Vec::new()
@@ -4181,7 +4200,7 @@ impl Blockchain {
             .checked_add(fee_industrial_u64)
             .ok_or_else(|| py_value_err("Fee overflow"))?;
 
-        if ad_miner_it_total > 0 {
+        if dual_token_enabled && ad_miner_it_total > 0 {
             coinbase_industrial_total = coinbase_industrial_total
                 .checked_add(ad_miner_it_total)
                 .ok_or_else(|| py_value_err("Fee overflow"))?;
@@ -4235,6 +4254,40 @@ impl Blockchain {
         txs.extend(included.clone());
 
         let block_base_fee = self.base_fee;
+
+        let mut treasury_events = Vec::new();
+        let mut tx_hashes: HashSet<String> = HashSet::with_capacity(txs.len());
+        for tx in &txs {
+            tx_hashes.insert(crypto_suite::hex::encode(tx.id()));
+        }
+        match NODE_GOV_STORE.disbursements() {
+            Ok(records) => {
+                treasury_events = records
+                    .into_iter()
+                    .filter_map(|record| match record.status {
+                        DisbursementStatus::Executed {
+                            ref tx_hash,
+                            executed_at,
+                        } if tx_hashes.contains(tx_hash) => Some(BlockTreasuryEvent {
+                            disbursement_id: record.id,
+                            destination: record.destination,
+                            amount_ct: record.amount_ct,
+                            memo: record.memo,
+                            scheduled_epoch: record.scheduled_epoch,
+                            tx_hash: tx_hash.clone(),
+                            executed_at,
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                treasury_events.sort_by_key(|event| event.disbursement_id);
+            }
+            Err(err) => {
+                diagnostics::log::warn!(format!(
+                    "failed to load treasury disbursements for timeline: {err}"
+                ));
+            }
+        }
 
         // Pre-compute state root using a shadow copy of accounts
         let mut shadow_accounts = self.accounts.clone();
@@ -4409,6 +4462,7 @@ impl Blockchain {
             ad_verifier_it: ad_verifier_it_token,
             ad_liquidity_it: ad_liquidity_it_token,
             ad_miner_it: ad_miner_it_token,
+            treasury_events,
             ad_total_usd_micros,
             ad_settlement_count,
             ad_oracle_ct_price_usd_micros: ad_last_ct_price_usd_micros,
@@ -4769,6 +4823,38 @@ impl Blockchain {
                         .ok_or_else(|| py_value_err("read subsidy overflow"))?;
                     changed.insert(addr.clone());
                 }
+                if dual_token_enabled {
+                    for (addr, amount) in host_it_payouts
+                        .iter()
+                        .chain(hardware_it_payouts.iter())
+                        .chain(verifier_it_payouts.iter())
+                        .chain(liquidity_it_payouts.iter())
+                    {
+                        if *amount == 0 {
+                            continue;
+                        }
+                        let entry = self.accounts.entry(addr.clone()).or_insert(Account {
+                            address: addr.clone(),
+                            balance: TokenBalance {
+                                consumer: 0,
+                                industrial: 0,
+                            },
+                            nonce: 0,
+                            pending_consumer: 0,
+                            pending_industrial: 0,
+                            pending_nonce: 0,
+                            pending_nonces: HashSet::new(),
+                            sessions: Vec::new(),
+                        });
+                        entry.balance.industrial = entry
+                            .balance
+                            .industrial
+                            .checked_add(*amount)
+                            .ok_or_else(|| py_value_err("industrial payout overflow"))?;
+                        changed.insert(addr.clone());
+                    }
+                }
+
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
                 for addr in &changed {
                     touched_shards.insert(address::shard_id(addr));

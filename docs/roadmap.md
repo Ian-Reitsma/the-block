@@ -1,4 +1,12 @@
 # Status & Roadmap
+> **Review (2025-10-28, late morning):** Dual-token settlement is now guarded by a
+> governance flag that flows through governance, node, explorer, and CLI
+> surfaces. Turning on `DualTokenSettlementEnabled` flips marketplace distribution
+> policies, lets block production emit executed treasury disbursements alongside
+> settlement data, and unlocks explorer/CLI timelines so treasury payouts stay
+> auditable end to end. Metrics exporters forward readiness utilisation deltas and
+> cohort summaries, and a new Prometheus rule alerts whenever cohorts drift away
+> from their targets despite steady demand.
 > **Review (2025-11-07, afternoon):** The ad marketplace now reports USD-priced
 > settlements with both CT and IT token breakdowns. Campaign commits capture the
 > posted price, oracle snapshot, and per-role token totals inside
@@ -6,8 +14,10 @@
 > mirrored IT quantities for the forthcoming dual-token rollout. Liquidity
 > conversions now draw only from the CT share dictated by
 > `liquidity_split_ct_ppm`, so IT allocations are no longer double counted in the
-> CT totals. Fresh unit tests in `crates/ad_market` lock the USD→CT/IT conversions
-> and rounding semantics, and the sled/RPC harness continues to pass against the
+> CT totals. The helper now asserts each minted slice against its USD budget and
+> ships an uneven-price rounding regression, keeping the split honest even when
+> oracle prices leave remainders. Fresh unit tests in `crates/ad_market` lock the
+> USD→CT/IT conversions
 > enriched schema so gateway and explorer surfaces inherit the new metadata
 > immediately. Ledger/explorer regressions replay contrasting liquidity splits to
 > ensure RPC/CLI/CI consumers observe the same CT/IT totals and oracle snapshots

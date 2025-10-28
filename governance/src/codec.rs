@@ -288,6 +288,7 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::BridgeFailureSlash => 40,
         ParamKey::BridgeChallengeSlash => 41,
         ParamKey::BridgeDutyWindowSecs => 42,
+        ParamKey::DualTokenSettlementEnabled => 43,
     }
 }
 
@@ -336,6 +337,7 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         40 => ParamKey::BridgeFailureSlash,
         41 => ParamKey::BridgeChallengeSlash,
         42 => ParamKey::BridgeDutyWindowSecs,
+        43 => ParamKey::DualTokenSettlementEnabled,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -966,6 +968,7 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::ReadSubsidyHardwarePercent => "ReadSubsidyHardwarePercent",
         ParamKey::ReadSubsidyVerifierPercent => "ReadSubsidyVerifierPercent",
         ParamKey::ReadSubsidyLiquidityPercent => "ReadSubsidyLiquidityPercent",
+        ParamKey::DualTokenSettlementEnabled => "DualTokenSettlementEnabled",
         ParamKey::TreasuryPercentCt => "TreasuryPercentCt",
         ParamKey::ProofRebateLimitCt => "ProofRebateLimitCt",
         ParamKey::RentRateCtPerByte => "RentRateCtPerByte",
@@ -1014,6 +1017,7 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "ReadSubsidyHardwarePercent" => Ok(ParamKey::ReadSubsidyHardwarePercent),
         "ReadSubsidyVerifierPercent" => Ok(ParamKey::ReadSubsidyVerifierPercent),
         "ReadSubsidyLiquidityPercent" => Ok(ParamKey::ReadSubsidyLiquidityPercent),
+        "DualTokenSettlementEnabled" => Ok(ParamKey::DualTokenSettlementEnabled),
         "TreasuryPercentCt" => Ok(ParamKey::TreasuryPercentCt),
         "ProofRebateLimitCt" => Ok(ParamKey::ProofRebateLimitCt),
         "RentRateCtPerByte" => Ok(ParamKey::RentRateCtPerByte),

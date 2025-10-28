@@ -85,7 +85,8 @@ impl<'a> Runtime<'a> {
             self.bc.params.read_subsidy_hardware_percent.max(0) as u64,
             self.bc.params.read_subsidy_verifier_percent.max(0) as u64,
             self.bc.params.read_subsidy_liquidity_percent.max(0) as u64,
-        );
+        )
+        .with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
         market.update_distribution(policy);
     }
 
@@ -155,6 +156,10 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.bc.params.ai_diagnostics_enabled = v as i64;
+    }
+    pub fn set_dual_token_settlement_enabled(&mut self, v: bool) {
+        self.bc.params.dual_token_settlement_enabled = if v { 1 } else { 0 };
+        self.sync_read_subsidy_distribution();
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         scheduler::set_weight(class, weight as u32);
@@ -243,6 +248,8 @@ pub struct Params {
     pub read_subsidy_verifier_percent: i64,
     #[serde(default = "default_read_subsidy_liquidity_percent")]
     pub read_subsidy_liquidity_percent: i64,
+    #[serde(default = "default_dual_token_settlement_enabled")]
+    pub dual_token_settlement_enabled: i64,
     #[serde(default = "default_ad_readiness_window_secs")]
     pub ad_readiness_window_secs: i64,
     #[serde(default = "default_ad_readiness_min_unique_viewers")]
@@ -310,6 +317,7 @@ impl Default for Params {
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
+            dual_token_settlement_enabled: default_dual_token_settlement_enabled(),
             ad_readiness_window_secs: default_ad_readiness_window_secs(),
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
@@ -418,6 +426,10 @@ impl Params {
         map.insert(
             "read_subsidy_liquidity_percent".into(),
             Value::Number(self.read_subsidy_liquidity_percent.into()),
+        );
+        map.insert(
+            "dual_token_settlement_enabled".into(),
+            Value::Number(self.dual_token_settlement_enabled.into()),
         );
         map.insert(
             "ad_readiness_window_secs".into(),
@@ -603,6 +615,10 @@ impl Params {
                 .get("read_subsidy_liquidity_percent")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_read_subsidy_liquidity_percent),
+            dual_token_settlement_enabled: obj
+                .get("dual_token_settlement_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_dual_token_settlement_enabled),
             ad_readiness_window_secs: obj
                 .get("ad_readiness_window_secs")
                 .and_then(Value::as_i64)
@@ -679,6 +695,10 @@ const fn default_read_subsidy_verifier_percent() -> i64 {
 
 const fn default_read_subsidy_liquidity_percent() -> i64 {
     5
+}
+
+const fn default_dual_token_settlement_enabled() -> i64 {
+    0
 }
 
 const fn default_ad_readiness_window_secs() -> i64 {
@@ -836,6 +856,11 @@ fn apply_read_subsidy_verifier_percent(v: i64, p: &mut Params) -> Result<(), ()>
 
 fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()> {
     p.read_subsidy_liquidity_percent = v;
+    Ok(())
+}
+
+fn apply_dual_token_settlement_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.dual_token_settlement_enabled = if v > 0 { 1 } else { 0 };
     Ok(())
 }
 
@@ -1054,7 +1079,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 47] = [
+    static REGS: [ParamSpec; 48] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1235,6 +1260,19 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |v, rt| {
                 rt.bc.params.read_subsidy_liquidity_percent = v;
                 rt.sync_read_subsidy_distribution();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::DualTokenSettlementEnabled,
+            default: default_dual_token_settlement_enabled(),
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_dual_token_settlement_enabled,
+            apply_runtime: |v, rt| {
+                rt.set_dual_token_settlement_enabled(v != 0);
                 Ok(())
             },
         },

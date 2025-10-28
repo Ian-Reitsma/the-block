@@ -670,6 +670,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::ReadSubsidyHardwarePercent => "read_subsidy_hardware_percent",
         ParamKey::ReadSubsidyVerifierPercent => "read_subsidy_verifier_percent",
         ParamKey::ReadSubsidyLiquidityPercent => "read_subsidy_liquidity_percent",
+        ParamKey::DualTokenSettlementEnabled => "dual_token_settlement_enabled",
         ParamKey::AdReadinessWindowSecs => "ad_readiness_window_secs",
         ParamKey::AdReadinessMinUniqueViewers => "ad_readiness_min_unique_viewers",
         ParamKey::AdReadinessMinHostCount => "ad_readiness_min_host_count",
@@ -1819,6 +1820,9 @@ impl GovStore {
                                 ParamKey::ReadSubsidyLiquidityPercent => {
                                     params.read_subsidy_liquidity_percent
                                 }
+                                ParamKey::DualTokenSettlementEnabled => {
+                                    params.dual_token_settlement_enabled
+                                }
                                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                                 ParamKey::AdReadinessMinUniqueViewers => {
                                     params.ad_readiness_min_unique_viewers
@@ -2046,6 +2050,7 @@ impl GovStore {
                 ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
                 ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
                 ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
+                ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                 ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
                 ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
@@ -2099,6 +2104,7 @@ impl GovStore {
             ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
             ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
             ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
+            ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
             ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
             ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
             ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,

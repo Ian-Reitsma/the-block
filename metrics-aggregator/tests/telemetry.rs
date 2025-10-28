@@ -27,6 +27,42 @@ fn telemetry_round_trip() {
                     "mempool": {"latest": 1024, "p50": 800, "p90": 900, "p99": 1000},
                     "storage": {"latest": 2048, "p50": 1500, "p90": 1800, "p99": 1900},
                     "compute": {"latest": 512, "p50": 400, "p90": 450, "p99": 500}
+                },
+                "ad_readiness": {
+                    "ready": true,
+                    "window_secs": 90,
+                    "min_unique_viewers": 3,
+                    "min_host_count": 2,
+                    "min_provider_count": 1,
+                    "unique_viewers": 8,
+                    "host_count": 5,
+                    "provider_count": 2,
+                    "blockers": [],
+                    "last_updated": 1700000001,
+                    "total_usd_micros": 250000,
+                    "settlement_count": 6,
+                    "ct_price_usd_micros": 1250000,
+                    "it_price_usd_micros": 990000,
+                    "market_ct_price_usd_micros": 1300000,
+                    "market_it_price_usd_micros": 995000,
+                    "cohort_utilization": [
+                        {
+                            "domain": "example.test",
+                            "provider": "edge-a",
+                            "badges": ["premium"],
+                            "price_per_mib_usd_micros": 120000,
+                            "target_utilization_ppm": 900000,
+                            "observed_utilization_ppm": 820000,
+                            "delta_utilization_ppm": -80000
+                        }
+                    ],
+                    "utilization_summary": {
+                        "cohort_count": 1,
+                        "mean_ppm": 820000,
+                        "min_ppm": 820000,
+                        "max_ppm": 820000,
+                        "last_updated": 1700000002
+                    }
                 }
             }"#,
         )
@@ -49,7 +85,19 @@ fn telemetry_round_trip() {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let map: Value = json::from_slice(resp.body()).unwrap();
-        assert!(map.as_object().unwrap().get("node-a").is_some());
+        let summary = map.as_object().unwrap().get("node-a").unwrap();
+        let readiness = summary.get("ad_readiness").unwrap();
+        let cohorts = readiness
+            .get("cohort_utilization")
+            .unwrap()
+            .as_array()
+            .expect("cohort array");
+        assert_eq!(
+            cohorts[0]
+                .get("delta_utilization_ppm")
+                .and_then(Value::as_i64),
+            Some(-80_000)
+        );
 
         let resp = app
             .handle(app.request_builder().path("/telemetry/node-a").build())
