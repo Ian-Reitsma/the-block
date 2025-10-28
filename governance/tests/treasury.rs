@@ -10,21 +10,36 @@ fn treasury_disbursements_roundtrip() {
     assert_eq!(store.treasury_balance().expect("initial balance"), 0);
 
     let accrual = store
-        .record_treasury_accrual(100)
+        .record_treasury_accrual(100, 40)
         .expect("accrue treasury balance");
     assert_eq!(accrual.balance_ct, 100);
+    assert_eq!(accrual.balance_it, 40);
     assert!(matches!(accrual.event, TreasuryBalanceEventKind::Accrual));
     assert_eq!(
         store.treasury_balance().expect("balance after accrual"),
         100
     );
+    assert_eq!(
+        store
+            .treasury_balances()
+            .expect("dual balance after accrual")
+            .industrial,
+        40
+    );
 
     let scheduled = store
-        .queue_disbursement("dest-1", 42, "initial memo", 100)
+        .queue_disbursement("dest-1", 42, 12, "initial memo", 100)
         .expect("queue disbursement");
     assert_eq!(scheduled.id, 1);
     assert!(matches!(scheduled.status, DisbursementStatus::Scheduled));
     assert_eq!(store.treasury_balance().expect("balance after queue"), 100);
+    assert_eq!(
+        store
+            .treasury_balances()
+            .expect("dual balance after queue")
+            .industrial,
+        40
+    );
 
     let list = store.disbursements().expect("list disbursements");
     assert_eq!(list.len(), 1);
@@ -40,6 +55,13 @@ fn treasury_disbursements_roundtrip() {
         other => panic!("unexpected status after execute: {other:?}"),
     }
     assert_eq!(store.treasury_balance().expect("post execute"), 58);
+    assert_eq!(
+        store
+            .treasury_balances()
+            .expect("dual balance post execute")
+            .industrial,
+        28
+    );
 
     // ensure persistence across reopen
     drop(store);
@@ -51,9 +73,16 @@ fn treasury_disbursements_roundtrip() {
         DisbursementStatus::Executed { .. }
     ));
     assert_eq!(store.treasury_balance().expect("reopened balance"), 58);
+    assert_eq!(
+        store
+            .treasury_balances()
+            .expect("reopened dual balance")
+            .industrial,
+        28
+    );
 
     let scheduled_two = store
-        .queue_disbursement("dest-2", 7, "", 200)
+        .queue_disbursement("dest-2", 7, 0, "", 200)
         .expect("queue second");
     assert_eq!(scheduled_two.id, 2);
     assert_eq!(store.treasury_balance().expect("after second queue"), 58);
@@ -77,6 +106,7 @@ fn treasury_disbursements_roundtrip() {
 
     let history = store.treasury_balance_history().expect("balance history");
     assert_eq!(history.last().map(|snap| snap.balance_ct), Some(58));
+    assert_eq!(history.last().map(|snap| snap.balance_it), Some(28));
     assert!(history
         .iter()
         .any(|snap| matches!(snap.event, TreasuryBalanceEventKind::Executed)));
@@ -88,7 +118,9 @@ fn execute_requires_balance() {
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
 
-    let scheduled = store.queue_disbursement("dest-1", 5, "", 0).expect("queue");
+    let scheduled = store
+        .queue_disbursement("dest-1", 5, 0, "", 0)
+        .expect("queue");
     let result = store.execute_disbursement(scheduled.id, "0xbeef");
     assert!(result.is_err(), "expected insufficient balance error");
 }

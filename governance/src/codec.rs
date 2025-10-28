@@ -664,6 +664,7 @@ impl BinaryCodec for TreasuryDisbursement {
         self.scheduled_epoch.encode(writer);
         self.created_at.encode(writer);
         self.status.encode(writer);
+        self.amount_it.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
@@ -675,6 +676,11 @@ impl BinaryCodec for TreasuryDisbursement {
             scheduled_epoch: u64::decode(reader)?,
             created_at: u64::decode(reader)?,
             status: DisbursementStatus::decode(reader)?,
+            amount_it: if reader.remaining() >= 8 {
+                u64::decode(reader)?
+            } else {
+                0
+            },
         })
     }
 }
@@ -687,6 +693,8 @@ impl BinaryCodec for TreasuryBalanceSnapshot {
         self.recorded_at.encode(writer);
         self.event.encode(writer);
         self.disbursement_id.encode(writer);
+        self.balance_it.encode(writer);
+        self.delta_it.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
@@ -697,6 +705,16 @@ impl BinaryCodec for TreasuryBalanceSnapshot {
             recorded_at: u64::decode(reader)?,
             event: TreasuryBalanceEventKind::decode(reader)?,
             disbursement_id: Option::<u64>::decode(reader)?,
+            balance_it: if reader.remaining() >= 16 {
+                u64::decode(reader)?
+            } else {
+                0
+            },
+            delta_it: if reader.remaining() >= 8 {
+                i64::decode(reader)?
+            } else {
+                0
+            },
         })
     }
 }
@@ -773,6 +791,12 @@ pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
         "amount_ct".into(),
         Value::Number(disbursement.amount_ct.into()),
     );
+    if disbursement.amount_it > 0 {
+        map.insert(
+            "amount_it".into(),
+            Value::Number(disbursement.amount_it.into()),
+        );
+    }
     map.insert("memo".into(), Value::String(disbursement.memo.clone()));
     map.insert(
         "scheduled_epoch".into(),
@@ -810,6 +834,7 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         .get("amount_ct")
         .and_then(Value::as_u64)
         .ok_or_else(|| codec_error("treasury JSON: missing amount_ct"))?;
+    let amount_it = obj.get("amount_it").and_then(Value::as_u64).unwrap_or(0);
     let memo = obj
         .get("memo")
         .and_then(Value::as_str)
@@ -839,6 +864,7 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         id,
         destination,
         amount_ct,
+        amount_it,
         memo,
         scheduled_epoch,
         created_at,
@@ -854,6 +880,11 @@ pub fn balance_snapshot_to_json(snapshot: &TreasuryBalanceSnapshot) -> Value {
         Value::Number(snapshot.balance_ct.into()),
     );
     map.insert("delta_ct".into(), Value::Number(snapshot.delta_ct.into()));
+    map.insert(
+        "balance_it".into(),
+        Value::Number(snapshot.balance_it.into()),
+    );
+    map.insert("delta_it".into(), Value::Number(snapshot.delta_it.into()));
     map.insert(
         "recorded_at".into(),
         Value::Number(snapshot.recorded_at.into()),
@@ -887,6 +918,8 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
         .get("delta_ct")
         .and_then(Value::as_i64)
         .ok_or_else(|| codec_error("treasury balance JSON: missing delta_ct"))?;
+    let balance_it = obj.get("balance_it").and_then(Value::as_u64).unwrap_or(0);
+    let delta_it = obj.get("delta_it").and_then(Value::as_i64).unwrap_or(0);
     let recorded_at = obj
         .get("recorded_at")
         .and_then(Value::as_u64)
@@ -911,6 +944,8 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
         id,
         balance_ct,
         delta_ct,
+        balance_it,
+        delta_it,
         recorded_at,
         event,
         disbursement_id,

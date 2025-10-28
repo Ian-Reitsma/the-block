@@ -25,6 +25,7 @@ use governance_spec::{
 };
 use sled::Config;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::env;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,35 @@ const PARAM_HISTORY_LIMIT: usize = 512;
 const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
 const TREASURY_HISTORY_LIMIT: usize = 1024;
 const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TreasuryBalances {
+    pub consumer: u64,
+    pub industrial: u64,
+}
+
+impl TreasuryBalances {
+    pub const fn new(consumer: u64, industrial: u64) -> Self {
+        Self {
+            consumer,
+            industrial,
+        }
+    }
+
+    pub fn checked_add(self, delta_ct: i64, delta_it: i64) -> Result<Self, sled::Error> {
+        let updated_consumer = i128::from(self.consumer) + i128::from(delta_ct);
+        let updated_industrial = i128::from(self.industrial) + i128::from(delta_it);
+        if updated_consumer < 0 || updated_industrial < 0 {
+            return Err(sled::Error::Unsupported(
+                "treasury balance underflow".into(),
+            ));
+        }
+        Ok(Self {
+            consumer: updated_consumer as u64,
+            industrial: updated_industrial as u64,
+        })
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -912,9 +942,11 @@ impl GovStore {
         let state = self.treasury_balance_tree();
         if let Some(last) = trimmed.last() {
             state.insert(b"current", ser(&last.balance_ct)?)?;
+            state.insert(b"current_it", ser(&last.balance_it)?)?;
             state.insert(b"next_snapshot_id", ser(&(last.id.saturating_add(1)))?)?;
         } else {
             state.insert(b"current", ser(&0u64)?)?;
+            state.insert(b"current_it", ser(&0u64)?)?;
             state.insert(b"next_snapshot_id", ser(&1u64)?)?;
         }
         Ok(())
@@ -936,17 +968,20 @@ impl GovStore {
         event: TreasuryBalanceEventKind,
         disbursement_id: Option<u64>,
         delta_ct: i64,
+        delta_it: i64,
     ) -> sled::Result<TreasuryBalanceSnapshot> {
-        let current = self.treasury_balance()? as i128;
-        let updated = current + i128::from(delta_ct);
-        if updated < 0 {
-            return Err(sled::Error::Unsupported(
-                "treasury balance underflow".into(),
-            ));
-        }
+        let balances = self.treasury_balances()?;
+        let updated = balances.checked_add(delta_ct, delta_it)?;
         let id = self.next_balance_snapshot_id()?;
-        let snapshot =
-            TreasuryBalanceSnapshot::new(id, updated as u64, delta_ct, event, disbursement_id);
+        let snapshot = TreasuryBalanceSnapshot::new(
+            id,
+            updated.consumer,
+            delta_ct,
+            updated.industrial,
+            delta_it,
+            event,
+            disbursement_id,
+        );
         let mut history = self.load_balance_history()?;
         history.push(snapshot.clone());
         self.persist_balance_history(&history)?;
@@ -1652,35 +1687,60 @@ impl GovStore {
         Ok(installs)
     }
 
-    pub fn treasury_balance(&self) -> sled::Result<u64> {
+    pub fn treasury_balances(&self) -> sled::Result<TreasuryBalances> {
         let state = self.treasury_balance_tree();
-        if let Some(raw) = state.get(b"current")? {
-            return de(&raw);
+        let current_ct = state
+            .get(b"current")?
+            .map(|raw| de::<u64>(&raw))
+            .transpose()?;
+        let current_it = state
+            .get(b"current_it")?
+            .map(|raw| de::<u64>(&raw))
+            .transpose()?;
+        if let (Some(ct), Some(it)) = (current_ct, current_it) {
+            return Ok(TreasuryBalances::new(ct, it));
         }
         let history = self.load_balance_history()?;
-        let balance = history.last().map(|snap| snap.balance_ct).unwrap_or(0);
-        state.insert(b"current", ser(&balance)?)?;
+        let balances = history
+            .last()
+            .map(|snap| TreasuryBalances::new(snap.balance_ct, snap.balance_it))
+            .unwrap_or_default();
+        state.insert(b"current", ser(&balances.consumer)?)?;
+        state.insert(b"current_it", ser(&balances.industrial)?)?;
         if state.get(b"next_snapshot_id")?.is_none() {
             state.insert(b"next_snapshot_id", ser(&1u64)?)?;
         }
-        Ok(balance)
+        Ok(balances)
+    }
+
+    pub fn treasury_balance(&self) -> sled::Result<u64> {
+        self.treasury_balances().map(|b| b.consumer)
     }
 
     pub fn treasury_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {
         self.load_balance_history()
     }
 
-    pub fn record_treasury_accrual(&self, amount_ct: u64) -> sled::Result<TreasuryBalanceSnapshot> {
-        if amount_ct == 0 {
-            return self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, 0);
+    pub fn record_treasury_accrual(
+        &self,
+        amount_ct: u64,
+        amount_it: u64,
+    ) -> sled::Result<TreasuryBalanceSnapshot> {
+        if amount_ct == 0 && amount_it == 0 {
+            return self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, 0, 0);
         }
-        self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, amount_ct as i64)
+        let delta_ct = i64::try_from(amount_ct)
+            .map_err(|_| sled::Error::Unsupported("treasury accrual exceeds i64".into()))?;
+        let delta_it = i64::try_from(amount_it)
+            .map_err(|_| sled::Error::Unsupported("treasury accrual exceeds i64".into()))?;
+        self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, delta_ct, delta_it)
     }
 
     pub fn queue_disbursement(
         &self,
         destination: &str,
         amount_ct: u64,
+        amount_it: u64,
         memo: &str,
         scheduled_epoch: u64,
     ) -> sled::Result<TreasuryDisbursement> {
@@ -1695,12 +1755,13 @@ impl GovStore {
             next_id,
             destination.to_string(),
             amount_ct,
+            amount_it,
             memo.to_string(),
             scheduled_epoch,
         );
         records.push(record.clone());
         self.persist_disbursements(&records)?;
-        self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0)?;
+        self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0, 0)?;
         Ok(record)
     }
 
@@ -1717,8 +1778,8 @@ impl GovStore {
         let mut record = None;
         for entry in records.iter_mut() {
             if entry.id == id {
-                let balance = self.treasury_balance()?;
-                if balance < entry.amount_ct {
+                let balances = self.treasury_balances()?;
+                if balances.consumer < entry.amount_ct || balances.industrial < entry.amount_it {
                     return Err(sled::Error::Unsupported(
                         format!("treasury balance insufficient for disbursement {id}").into(),
                     ));
@@ -1733,7 +1794,12 @@ impl GovStore {
             self.record_balance_event(
                 TreasuryBalanceEventKind::Executed,
                 Some(updated.id),
-                -(updated.amount_ct as i64),
+                -(i64::try_from(updated.amount_ct).map_err(|_| {
+                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
+                })?),
+                -(i64::try_from(updated.amount_it).map_err(|_| {
+                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
+                })?),
             )?;
             Ok(updated)
         } else {
@@ -1755,7 +1821,7 @@ impl GovStore {
         }
         if let Some(updated) = record.clone() {
             self.persist_disbursements(&records)?;
-            self.record_balance_event(TreasuryBalanceEventKind::Cancelled, Some(updated.id), 0)?;
+            self.record_balance_event(TreasuryBalanceEventKind::Cancelled, Some(updated.id), 0, 0)?;
             Ok(updated)
         } else {
             Err(sled::Error::Unsupported(

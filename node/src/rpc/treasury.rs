@@ -12,10 +12,34 @@ const MAX_LIMIT: u64 = 200;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryDisbursementsRequest {
-    #[serde(default)]
+    #[serde(default, alias = "after_id")]
     pub cursor: Option<u64>,
     #[serde(default = "default_limit")]
     pub limit: u64,
+    #[serde(default)]
+    pub status: Option<TreasuryDisbursementStatusFilter>,
+    #[serde(default)]
+    pub destination: Option<String>,
+    #[serde(default)]
+    pub min_epoch: Option<u64>,
+    #[serde(default)]
+    pub max_epoch: Option<u64>,
+    #[serde(default)]
+    pub min_amount_ct: Option<u64>,
+    #[serde(default)]
+    pub max_amount_ct: Option<u64>,
+    #[serde(default)]
+    pub min_amount_it: Option<u64>,
+    #[serde(default)]
+    pub max_amount_it: Option<u64>,
+    #[serde(default)]
+    pub min_created_at: Option<u64>,
+    #[serde(default)]
+    pub max_created_at: Option<u64>,
+    #[serde(default)]
+    pub min_status_ts: Option<u64>,
+    #[serde(default)]
+    pub max_status_ts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,6 +57,7 @@ pub struct TreasuryDisbursementRecord {
     pub id: u64,
     pub destination: String,
     pub amount_ct: u64,
+    pub amount_it: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub created_at: u64,
@@ -51,6 +76,7 @@ pub struct TreasuryDisbursementsResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryBalanceResponse {
     pub balance_ct: u64,
+    pub balance_it: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
 }
@@ -62,6 +88,7 @@ pub struct TreasuryBalanceHistoryResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<u64>,
     pub current_balance_ct: u64,
+    pub current_balance_it: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,12 +100,34 @@ pub enum TreasuryDisbursementStatus {
     Cancelled { reason: String, cancelled_at: u64 },
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+#[serde(rename_all = "snake_case")]
+pub enum TreasuryDisbursementStatusFilter {
+    Scheduled,
+    Executed,
+    Cancelled,
+}
+
+impl TreasuryDisbursementStatusFilter {
+    fn matches(&self, status: &GovDisbursementStatus) -> bool {
+        match (self, status) {
+            (Self::Scheduled, GovDisbursementStatus::Scheduled) => true,
+            (Self::Executed, GovDisbursementStatus::Executed { .. }) => true,
+            (Self::Cancelled, GovDisbursementStatus::Cancelled { .. }) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryBalanceSnapshot {
     pub id: u64,
     pub balance_ct: u64,
     pub delta_ct: i64,
+    pub balance_it: u64,
+    pub delta_it: i64,
     pub recorded_at: u64,
     pub event: TreasuryBalanceEventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,26 +153,27 @@ pub fn disbursements(
     if let Some(cursor) = request.cursor {
         records.retain(|record| record.id < cursor);
     }
+    records.retain(|record| matches_request(record, &request));
     let limit = normalize_limit(request.limit);
-    let total_records = records.len();
-    let mut page: Vec<TreasuryDisbursementRecord> = records
-        .into_iter()
-        .take(limit)
-        .map(TreasuryDisbursementRecord::from)
-        .collect();
-    let next_cursor = if total_records > page.len() {
-        page.last().map(|entry| entry.id)
+    let has_more = records.len() > limit;
+    records.truncate(limit);
+    let next_cursor = if has_more {
+        records.last().map(|entry| entry.id)
     } else {
         None
     };
+    let disbursements = records
+        .into_iter()
+        .map(TreasuryDisbursementRecord::from)
+        .collect();
     Ok(TreasuryDisbursementsResponse {
-        disbursements: page.drain(..).collect(),
+        disbursements,
         next_cursor,
     })
 }
 
 pub fn balance(store: &GovStore) -> Result<TreasuryBalanceResponse, RpcError> {
-    let balance_ct = store.treasury_balance().map_err(storage_error)?;
+    let balances = store.treasury_balances().map_err(storage_error)?;
     let mut history = store.treasury_balance_history().map_err(storage_error)?;
     history.sort_by(|a, b| b.id.cmp(&a.id));
     let last_snapshot = history
@@ -131,7 +181,8 @@ pub fn balance(store: &GovStore) -> Result<TreasuryBalanceResponse, RpcError> {
         .next()
         .map(TreasuryBalanceSnapshot::from);
     Ok(TreasuryBalanceResponse {
-        balance_ct,
+        balance_ct: balances.consumer,
+        balance_it: balances.industrial,
         last_snapshot,
     })
 }
@@ -140,7 +191,7 @@ pub fn balance_history(
     store: &GovStore,
     request: TreasuryBalanceHistoryRequest,
 ) -> Result<TreasuryBalanceHistoryResponse, RpcError> {
-    let balance_ct = store.treasury_balance().map_err(storage_error)?;
+    let balances = store.treasury_balances().map_err(storage_error)?;
     let mut history = store.treasury_balance_history().map_err(storage_error)?;
     history.sort_by(|a, b| b.id.cmp(&a.id));
     if let Some(cursor) = request.cursor {
@@ -161,7 +212,8 @@ pub fn balance_history(
     Ok(TreasuryBalanceHistoryResponse {
         snapshots: page.drain(..).collect(),
         next_cursor,
-        current_balance_ct: balance_ct,
+        current_balance_ct: balances.consumer,
+        current_balance_it: balances.industrial,
     })
 }
 
@@ -171,6 +223,7 @@ impl From<GovDisbursement> for TreasuryDisbursementRecord {
             id: value.id,
             destination: value.destination,
             amount_ct: value.amount_ct,
+            amount_it: value.amount_it,
             memo: value.memo,
             scheduled_epoch: value.scheduled_epoch,
             created_at: value.created_at,
@@ -207,6 +260,8 @@ impl From<GovBalanceSnapshot> for TreasuryBalanceSnapshot {
             id: value.id,
             balance_ct: value.balance_ct,
             delta_ct: value.delta_ct,
+            balance_it: value.balance_it,
+            delta_it: value.delta_it,
             recorded_at: value.recorded_at,
             event: value.event.into(),
             disbursement_id: value.disbursement_id,
@@ -223,6 +278,75 @@ impl From<GovBalanceEventKind> for TreasuryBalanceEventKind {
             GovBalanceEventKind::Cancelled => TreasuryBalanceEventKind::Cancelled,
         }
     }
+}
+
+fn matches_request(record: &GovDisbursement, request: &TreasuryDisbursementsRequest) -> bool {
+    if let Some(filter) = &request.status {
+        if !filter.matches(&record.status) {
+            return false;
+        }
+    }
+    if let Some(destination) = &request.destination {
+        if !record.destination.eq_ignore_ascii_case(destination) {
+            return false;
+        }
+    }
+    if let Some(min_epoch) = request.min_epoch {
+        if record.scheduled_epoch < min_epoch {
+            return false;
+        }
+    }
+    if let Some(max_epoch) = request.max_epoch {
+        if record.scheduled_epoch > max_epoch {
+            return false;
+        }
+    }
+    if let Some(min_amount_ct) = request.min_amount_ct {
+        if record.amount_ct < min_amount_ct {
+            return false;
+        }
+    }
+    if let Some(max_amount_ct) = request.max_amount_ct {
+        if record.amount_ct > max_amount_ct {
+            return false;
+        }
+    }
+    if let Some(min_amount_it) = request.min_amount_it {
+        if record.amount_it < min_amount_it {
+            return false;
+        }
+    }
+    if let Some(max_amount_it) = request.max_amount_it {
+        if record.amount_it > max_amount_it {
+            return false;
+        }
+    }
+    if let Some(min_created_at) = request.min_created_at {
+        if record.created_at < min_created_at {
+            return false;
+        }
+    }
+    if let Some(max_created_at) = request.max_created_at {
+        if record.created_at > max_created_at {
+            return false;
+        }
+    }
+    let status_timestamp = match &record.status {
+        GovDisbursementStatus::Scheduled => record.created_at,
+        GovDisbursementStatus::Executed { executed_at, .. } => *executed_at,
+        GovDisbursementStatus::Cancelled { cancelled_at, .. } => *cancelled_at,
+    };
+    if let Some(min_status_ts) = request.min_status_ts {
+        if status_timestamp < min_status_ts {
+            return false;
+        }
+    }
+    if let Some(max_status_ts) = request.max_status_ts {
+        if status_timestamp > max_status_ts {
+            return false;
+        }
+    }
+    true
 }
 
 fn storage_error(_: sled::Error) -> RpcError {

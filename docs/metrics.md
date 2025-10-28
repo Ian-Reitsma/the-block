@@ -57,6 +57,17 @@ The exporter currently tracks:
   `explorer_block_payout_ad_it_total{role}` – explorer-reported per-role read
   subsidy and dual-token advertising payouts cached by the metrics aggregator,
   updated whenever ingest observes a higher total for a given role
+- `treasury_disbursement_count` – total staged or executed treasury disbursements
+  observed by the aggregator (monotonic across restarts)
+- `treasury_disbursement_amount_ct` /
+  `treasury_disbursement_amount_it` – cumulative CT and IT amounts released by
+  governance disbursements
+- `treasury_balance_current_ct` /
+  `treasury_balance_current_it` – latest CT/IT balances pulled from the
+  governance store or legacy JSON snapshot
+- `treasury_balance_last_delta_ct` /
+  `treasury_balance_last_delta_it` – most recent CT/IT balance change recorded in
+  the history feed (positive for accruals, negative for executions)
 - `ad_readiness_total_usd_micros` / `ad_readiness_settlement_count` /
   `ad_readiness_ct_price_usd_micros` / `ad_readiness_it_price_usd_micros` –
   readiness-window USD totals, settlement counts, and oracle prices published by

@@ -31,8 +31,8 @@ pub use release::{
 pub use reward::{approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval};
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
-    QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryBalances,
+    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use treasury::{
     DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,

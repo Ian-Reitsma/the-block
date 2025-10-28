@@ -22,6 +22,18 @@
 > registry wrappers while pruning stale label handles with a `HashSet`. Alerting
 > and CI artefacts now consume the richer readiness map without importing third-
 > party metrics crates or HTTP clients.
+> **2025-10-28 update (treasury dual-token telemetry & audit filters):** The
+> governance, node, explorer, CLI, and metrics-aggregator crates gained
+> `amount_it`, `balance_it`, and `delta_it` coverage entirely through the
+> existing handwritten cursor and JSON builders. Treasury disbursement filters for
+> amount/timestamp bounds extend the same request structs without pulling a query
+> DSL, and CLI flags simply map to the manual JSON envelope. The aggregator’s new
+> `treasury_disbursement_amount_{ct,it}` and
+> `treasury_balance_{current,last_delta}_{ct,it}` gauges reuse the in-house
+> Prometheus facade and reset helpers, while the alert validator’s expanded
+> dataset keeps the readiness delta rules hermetic. No third-party schedulers,
+> query builders, or metrics crates were introduced while wiring the dual-token
+> path end to end.
 > **2025-11-07 update (ad market dual-token settlement):** The
 > `ad_market` crate now computes USD→CT/IT token splits entirely with existing
 > arithmetic helpers and sled/state locks; no new crates were introduced while

@@ -75,6 +75,31 @@ curl -sS "http://explorer.local:8080/blocks/0xabc123.../payouts" | foundation-js
 - `GET /wasm/disasm?code=<hex>` – disassemble uploaded WASM bytecode.
 - `GET /trace/:tx` – fetch opcode-level execution traces when available.
 
+### Treasury disbursement history
+
+`GET /governance/treasury/disbursements` mirrors the governance RPC and exposes
+the staged/settled treasury queue for dashboards and auditors. The endpoint
+accepts the following query parameters:
+
+- `status` – `scheduled`, `executed`, or `cancelled`.
+- `destination` – case-insensitive account string.
+- `min_epoch` / `max_epoch` – scheduled epoch bounds.
+- `min_amount_ct` / `max_amount_ct` – CT range (integer micro-CT).
+- `min_amount_it` / `max_amount_it` – IT range (integer micro-IT).
+- `min_created_at` / `max_created_at` – creation timestamp bounds (seconds).
+- `min_status_ts` / `max_status_ts` – executed/cancelled timestamp bounds.
+- `after_id` – pagination cursor (exclusive ID).
+- `limit` – page size (defaults to 50, capped at 500).
+
+Responses include `disbursements` with CT/IT amounts, status metadata, memo,
+and timestamps, plus a `next_cursor` when additional pages exist. Companion
+endpoints `GET /governance/treasury/balance` and
+`GET /governance/treasury/history` surface the latest CT/IT balances, deltas, and
+historical snapshots so dashboards can render full balance timelines without
+touching sled. CLI invocations forward the same filters via
+`contract gov treasury fetch` and expose JSON/table/Prometheus output modes for
+audit automation.
+
 ## Running with Docker Compose
 
 `deploy/docker-compose.yml` includes an explorer service wired to a local node. Launch the stack with:

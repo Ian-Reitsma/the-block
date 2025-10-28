@@ -1,4 +1,11 @@
 # Summary
+> **Review (2025-10-28, evening):** Treasury telemetry, explorer history, and
+> monitoring alerts now honour CT and IT balances end to end. The metrics
+> aggregator registers dual-token disbursement totals, current balances, and last
+> deltas with hardened reset paths, explorer/CLI surfaces expose amount/timestamp
+> filters plus paginated balance/history feeds, and the alert validator’s updated
+> fixtures wire `ad_readiness_utilization_delta_ppm` into CI/runbooks so the
+> activation rehearsal can page on cohort drift before governance flips the gate.
 > **Review (2025-11-09, morning):** Dual-token settlements now ship behind a
 > governance flag and publish treasury execution timelines end to end. The
 > `DualTokenSettlementEnabled` parameter flows from governance codecs/stores into

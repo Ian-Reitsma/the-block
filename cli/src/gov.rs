@@ -173,6 +173,8 @@ pub struct RpcTreasuryDisbursementsResult {
 pub struct RpcTreasuryBalanceResult {
     pub balance_ct: u64,
     #[serde(default)]
+    pub balance_it: u64,
+    #[serde(default)]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
 }
 
@@ -184,6 +186,9 @@ pub struct RpcTreasuryHistoryResult {
     pub next_cursor: Option<u64>,
     #[allow(dead_code)]
     pub current_balance_ct: u64,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub current_balance_it: u64,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -193,6 +198,7 @@ pub struct TreasuryFetchOutput {
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next_cursor: Option<u64>,
     pub balance_ct: u64,
+    pub balance_it: u64,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -207,20 +213,70 @@ struct DisbursementList<'a> {
     disbursements: &'a [TreasuryDisbursement],
 }
 
-pub fn treasury_disbursement_params(
-    status: Option<RemoteTreasuryStatus>,
-    after_id: Option<u64>,
-    limit: Option<usize>,
-) -> json::Value {
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TreasuryDisbursementQuery {
+    pub status: Option<RemoteTreasuryStatus>,
+    pub after_id: Option<u64>,
+    pub limit: Option<usize>,
+    pub destination: Option<String>,
+    pub min_epoch: Option<u64>,
+    pub max_epoch: Option<u64>,
+    pub min_amount_ct: Option<u64>,
+    pub max_amount_ct: Option<u64>,
+    pub min_amount_it: Option<u64>,
+    pub max_amount_it: Option<u64>,
+    pub min_created_at: Option<u64>,
+    pub max_created_at: Option<u64>,
+    pub min_status_ts: Option<u64>,
+    pub max_status_ts: Option<u64>,
+}
+
+pub fn treasury_disbursement_params(query: &TreasuryDisbursementQuery) -> json::Value {
     let mut params = json::Map::new();
-    if let Some(filter) = status {
+    if let Some(filter) = query.status {
         params.insert("status".into(), json::Value::String(filter.as_str().into()));
     }
-    if let Some(cursor) = after_id {
+    if let Some(cursor) = query.after_id {
         params.insert("after_id".into(), json::Value::from(cursor));
     }
-    if let Some(max) = limit {
+    if let Some(max) = query.limit {
         params.insert("limit".into(), json::Value::from(max as u64));
+    }
+    if let Some(destination) = &query.destination {
+        params.insert(
+            "destination".into(),
+            json::Value::String(destination.clone()),
+        );
+    }
+    if let Some(min_epoch) = query.min_epoch {
+        params.insert("min_epoch".into(), json::Value::from(min_epoch));
+    }
+    if let Some(max_epoch) = query.max_epoch {
+        params.insert("max_epoch".into(), json::Value::from(max_epoch));
+    }
+    if let Some(min_amount_ct) = query.min_amount_ct {
+        params.insert("min_amount_ct".into(), json::Value::from(min_amount_ct));
+    }
+    if let Some(max_amount_ct) = query.max_amount_ct {
+        params.insert("max_amount_ct".into(), json::Value::from(max_amount_ct));
+    }
+    if let Some(min_amount_it) = query.min_amount_it {
+        params.insert("min_amount_it".into(), json::Value::from(min_amount_it));
+    }
+    if let Some(max_amount_it) = query.max_amount_it {
+        params.insert("max_amount_it".into(), json::Value::from(max_amount_it));
+    }
+    if let Some(min_created_at) = query.min_created_at {
+        params.insert("min_created_at".into(), json::Value::from(min_created_at));
+    }
+    if let Some(max_created_at) = query.max_created_at {
+        params.insert("max_created_at".into(), json::Value::from(max_created_at));
+    }
+    if let Some(min_status_ts) = query.min_status_ts {
+        params.insert("min_status_ts".into(), json::Value::from(min_status_ts));
+    }
+    if let Some(max_status_ts) = query.max_status_ts {
+        params.insert("max_status_ts".into(), json::Value::from(max_status_ts));
     }
     json::Value::Object(params)
 }
@@ -245,6 +301,7 @@ pub fn combine_treasury_fetch_results(
         disbursements: disbursement.disbursements,
         next_cursor: disbursement.next_cursor,
         balance_ct: balance.balance_ct,
+        balance_it: balance.balance_it,
         last_snapshot: balance.last_snapshot,
         balance_history: None,
         balance_next_cursor: None,
@@ -323,6 +380,7 @@ pub enum GovTreasuryCmd {
     Schedule {
         destination: String,
         amount: u64,
+        amount_it: u64,
         memo: Option<String>,
         epoch: u64,
         state: String,
@@ -342,9 +400,7 @@ pub enum GovTreasuryCmd {
     },
     Fetch {
         rpc: String,
-        status: Option<RemoteTreasuryStatus>,
-        after_id: Option<u64>,
-        limit: Option<usize>,
+        query: TreasuryDisbursementQuery,
         include_history: bool,
         history_after_id: Option<u64>,
         history_limit: Option<usize>,
@@ -641,6 +697,14 @@ impl GovTreasuryCmd {
                 "amount",
                 "Amount (in CT) to disburse",
             )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new(
+                    "amount-it",
+                    "amount-it",
+                    "Industrial-token amount to disburse",
+                )
+                .default("0"),
+            ))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "memo",
                 "memo",
@@ -732,6 +796,61 @@ impl GovTreasuryCmd {
                 "limit",
                 "Maximum number of disbursements to return",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "destination",
+                "destination",
+                "Filter by destination account",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "min-epoch",
+                "min-epoch",
+                "Only include disbursements scheduled at or after this epoch",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "max-epoch",
+                "max-epoch",
+                "Only include disbursements scheduled at or before this epoch",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "min-amount-ct",
+                "min-amount-ct",
+                "Minimum CT amount",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "max-amount-ct",
+                "max-amount-ct",
+                "Maximum CT amount",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "min-amount-it",
+                "min-amount-it",
+                "Minimum IT amount",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "max-amount-it",
+                "max-amount-it",
+                "Maximum IT amount",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "min-created-at",
+                "min-created-at",
+                "Only include disbursements created at or after this timestamp",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "max-created-at",
+                "max-created-at",
+                "Only include disbursements created at or before this timestamp",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "min-status-ts",
+                "min-status-ts",
+                "Filter by minimum status timestamp (executed/cancelled)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "max-status-ts",
+                "max-status-ts",
+                "Filter by maximum status timestamp (executed/cancelled)",
+            )))
             .arg(ArgSpec::Flag(FlagSpec::new(
                 "history",
                 "history",
@@ -761,6 +880,8 @@ impl GovTreasuryCmd {
             "schedule" => {
                 let destination = require_positional(sub_matches, "destination")?;
                 let amount = parse_positional_u64(sub_matches, "amount")?;
+                let amount_it =
+                    parse_u64(take_string(sub_matches, "amount-it"), "amount-it")?.unwrap_or(0);
                 let memo = take_string(sub_matches, "memo");
                 let epoch = parse_u64_required(take_string(sub_matches, "epoch"), "epoch")?;
                 let state =
@@ -768,6 +889,7 @@ impl GovTreasuryCmd {
                 Ok(GovTreasuryCmd::Schedule {
                     destination,
                     amount,
+                    amount_it,
                     memo,
                     epoch,
                     state,
@@ -795,20 +917,39 @@ impl GovTreasuryCmd {
             "fetch" => {
                 let rpc = take_string(sub_matches, "rpc")
                     .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
-                let status = match take_string(sub_matches, "status") {
-                    Some(raw) => Some(
+                let mut query = TreasuryDisbursementQuery::default();
+                if let Some(raw) = take_string(sub_matches, "status") {
+                    query.status = Some(
                         RemoteTreasuryStatus::parse(&raw)
                             .ok_or_else(|| format!("invalid status filter: {raw}"))?,
-                    ),
-                    None => None,
-                };
-                let after_id = parse_u64(take_string(sub_matches, "after-id"), "after-id")?;
-                let limit = parse_u64(take_string(sub_matches, "limit"), "limit")?
+                    );
+                }
+                query.after_id = parse_u64(take_string(sub_matches, "after-id"), "after-id")?;
+                query.limit = parse_u64(take_string(sub_matches, "limit"), "limit")?
                     .map(|value| {
                         usize::try_from(value)
                             .map_err(|_| format!("limit {value} exceeds usize range"))
                     })
                     .transpose()?;
+                query.destination = take_string(sub_matches, "destination");
+                query.min_epoch = parse_u64(take_string(sub_matches, "min-epoch"), "min-epoch")?;
+                query.max_epoch = parse_u64(take_string(sub_matches, "max-epoch"), "max-epoch")?;
+                query.min_amount_ct =
+                    parse_u64(take_string(sub_matches, "min-amount-ct"), "min-amount-ct")?;
+                query.max_amount_ct =
+                    parse_u64(take_string(sub_matches, "max-amount-ct"), "max-amount-ct")?;
+                query.min_amount_it =
+                    parse_u64(take_string(sub_matches, "min-amount-it"), "min-amount-it")?;
+                query.max_amount_it =
+                    parse_u64(take_string(sub_matches, "max-amount-it"), "max-amount-it")?;
+                query.min_created_at =
+                    parse_u64(take_string(sub_matches, "min-created-at"), "min-created-at")?;
+                query.max_created_at =
+                    parse_u64(take_string(sub_matches, "max-created-at"), "max-created-at")?;
+                query.min_status_ts =
+                    parse_u64(take_string(sub_matches, "min-status-ts"), "min-status-ts")?;
+                query.max_status_ts =
+                    parse_u64(take_string(sub_matches, "max-status-ts"), "max-status-ts")?;
                 let include_history = sub_matches.get_flag("history");
                 let history_after_id = parse_u64(
                     take_string(sub_matches, "history-after-id"),
@@ -823,9 +964,7 @@ impl GovTreasuryCmd {
                         .transpose()?;
                 Ok(GovTreasuryCmd::Fetch {
                     rpc,
-                    status,
-                    after_id,
-                    limit,
+                    query,
                     include_history,
                     history_after_id,
                     history_limit,
@@ -1112,13 +1251,14 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
         GovTreasuryCmd::Schedule {
             destination,
             amount,
+            amount_it,
             memo,
             epoch,
             state,
         } => {
             let store = GovStore::open(state);
             let memo_value = memo.unwrap_or_default();
-            match store.queue_disbursement(&destination, amount, &memo_value, epoch) {
+            match store.queue_disbursement(&destination, amount, amount_it, &memo_value, epoch) {
                 Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
                     Ok(serialized) => writeln!(out, "{serialized}")?,
                     Err(_) => writeln!(out, "queued disbursement {}", record.id)?,
@@ -1162,15 +1302,13 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
         }
         GovTreasuryCmd::Fetch {
             rpc,
-            status,
-            after_id,
-            limit,
+            query,
             include_history,
             history_after_id,
             history_limit,
         } => {
             let client = RpcClient::from_env();
-            let disb_params = treasury_disbursement_params(status, after_id, limit);
+            let disb_params = treasury_disbursement_params(&query);
             let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
                 &client,
                 &rpc,

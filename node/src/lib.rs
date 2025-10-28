@@ -4187,7 +4187,7 @@ impl Blockchain {
         let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
         let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
         if treasury_cut > 0 {
-            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
+            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut, 0) {
                 diagnostics::log::warn!(format!(
                     "failed to accrue treasury disbursement share: {err}"
                 ));
