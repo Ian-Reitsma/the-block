@@ -5,7 +5,7 @@
 Settlement auditing now spans two complementary feeds:
 
 1. **Consensus checkpoints** – Receipts written under `state/receipts/pending/<epoch>` prior to finalization. These remain documented by the `settlement.audit` RPC and the optional `tools/indexer` pipeline.
-2. **Compute-market ledger** – The CT settlement ledger persists an append-only JSON log via `state::append_audit` and exposes the same information over `compute_market.audit`; legacy `*_it` fields remain for compatibility but stay zero in production.
+2. **Compute-market ledger** – The dual-currency ledger persists an append-only JSON log via `state::append_audit` and exposes the same information over `compute_market.audit`. Each record now carries CT and IT token totals, the oracle snapshot that priced the conversion, and the residual USD that could not be expressed as whole tokens. Explorer jobs, dashboards, and CI artefacts consume both sets of fields directly, so the legacy CT-only ledger path keeps working while automation gains end-to-end visibility into the infrastructure-token side.
 
 Both surfaces must agree. Operators should stream each endpoint, archive the JSON, and compare anchor hashes to detect tampering.
 
@@ -34,6 +34,8 @@ Each audit record mirrors the `AuditRecord` struct:
   "anchor": null
 }
 ```
+
+Liquidity records now honour the governance `liquidity_split_ct_ppm` knob. When the split assigns only a fraction of the liquidity share to CT, the ledger records the complementary USD as IT before producing the miner remainder. Auditors should use the oracle snapshot captured alongside the record to verify that `delta_ct` and `delta_it` align with the configured split and the recorded `total_usd_micros`.
 
 Anchors appear with `entity == "__anchor__"` and include the BLAKE3 hash of the submitted receipt bundle. Explorer jobs should persist these markers and render continuity timelines alongside the Merkle roots returned by `compute_market.recent_roots`.
 

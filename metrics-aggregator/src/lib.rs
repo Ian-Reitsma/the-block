@@ -232,6 +232,13 @@ const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spoo
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL: &str = "explorer_block_payout_ad_it_total";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL: &str = "explorer_block_payout_ad_usd_total";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_SETTLEMENT_COUNT: &str =
+    "explorer_block_payout_ad_settlement_count";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS: &str =
+    "explorer_block_payout_ad_ct_price_usd_micros";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS: &str =
+    "explorer_block_payout_ad_it_price_usd_micros";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN: &str =
     "explorer_block_payout_read_last_seen_timestamp";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
@@ -261,6 +268,7 @@ const LABEL_REMEDIATION_DISPATCH: [&str; 4] = ["action", "playbook", "target", "
 const LABEL_REMEDIATION_ACK: [&str; 4] = ["action", "playbook", "target", "state"];
 const LABEL_REMEDIATION_ACK_TARGET: [&str; 2] = ["playbook", "phase"];
 const LABEL_ROLE: [&str; 1] = ["role"];
+const LABEL_PEER: [&str; 1] = ["peer"];
 const LABEL_CHAOS_SITE: [&str; 4] = ["module", "scenario", "site", "provider"];
 const EXPLORER_PAYOUT_ROLES: [&str; 6] = [
     "viewer",
@@ -1606,6 +1614,7 @@ impl AppState {
             &registry.explorer_block_payout_ad_it_total,
             &registry.explorer_block_payout_ad_it_last_seen,
         );
+        self.record_explorer_payout_summary(peer_id, metrics);
     }
 
     fn record_explorer_payout_metric(
@@ -1695,6 +1704,50 @@ impl AppState {
             }
         }
     }
+
+    fn record_explorer_payout_summary(&self, peer_id: &str, metrics: &Value) {
+        let registry = aggregator_metrics();
+        if let Some(value) =
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL)
+        {
+            if value.is_finite() {
+                registry
+                    .explorer_block_payout_ad_usd_total
+                    .with_label_values(&[peer_id])
+                    .set(value);
+            }
+        }
+        if let Some(value) =
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_SETTLEMENT_COUNT)
+        {
+            if value.is_finite() {
+                registry
+                    .explorer_block_payout_ad_settlement_count
+                    .with_label_values(&[peer_id])
+                    .set(value);
+            }
+        }
+        if let Some(value) =
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS)
+        {
+            if value.is_finite() {
+                registry
+                    .explorer_block_payout_ad_ct_price_usd_micros
+                    .with_label_values(&[peer_id])
+                    .set(value);
+            }
+        }
+        if let Some(value) =
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS)
+        {
+            if value.is_finite() {
+                registry
+                    .explorer_block_payout_ad_it_price_usd_micros
+                    .with_label_values(&[peer_id])
+                    .set(value);
+            }
+        }
+    }
 }
 
 struct AggregatorMetrics {
@@ -1743,6 +1796,10 @@ struct AggregatorMetrics {
     explorer_block_payout_read_total: CounterVec,
     explorer_block_payout_ad_total: CounterVec,
     explorer_block_payout_ad_it_total: CounterVec,
+    explorer_block_payout_ad_usd_total: GaugeVec,
+    explorer_block_payout_ad_settlement_count: GaugeVec,
+    explorer_block_payout_ad_ct_price_usd_micros: GaugeVec,
+    explorer_block_payout_ad_it_price_usd_micros: GaugeVec,
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
     explorer_block_payout_ad_it_last_seen: GaugeVec,
@@ -3119,6 +3176,50 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &explorer_block_payout_ad_it_total,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
     );
+    let explorer_block_payout_ad_usd_total = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL,
+            "Explorer-reported advertising USD totals per peer",
+        ),
+        &LABEL_PEER,
+    );
+    registry
+        .register(Box::new(explorer_block_payout_ad_usd_total.clone()))
+        .expect("register explorer_block_payout_ad_usd_total");
+    let explorer_block_payout_ad_settlement_count = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_SETTLEMENT_COUNT,
+            "Explorer-reported advertising settlement counts per peer",
+        ),
+        &LABEL_PEER,
+    );
+    registry
+        .register(Box::new(explorer_block_payout_ad_settlement_count.clone()))
+        .expect("register explorer_block_payout_ad_settlement_count");
+    let explorer_block_payout_ad_ct_price_usd_micros = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS,
+            "Explorer-reported CT oracle price used for advertising settlements",
+        ),
+        &LABEL_PEER,
+    );
+    registry
+        .register(Box::new(
+            explorer_block_payout_ad_ct_price_usd_micros.clone(),
+        ))
+        .expect("register explorer_block_payout_ad_ct_price_usd_micros");
+    let explorer_block_payout_ad_it_price_usd_micros = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS,
+            "Explorer-reported IT oracle price used for advertising settlements",
+        ),
+        &LABEL_PEER,
+    );
+    registry
+        .register(Box::new(
+            explorer_block_payout_ad_it_price_usd_micros.clone(),
+        ))
+        .expect("register explorer_block_payout_ad_it_price_usd_micros");
     let explorer_block_payout_read_last_seen = GaugeVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
@@ -3317,6 +3418,10 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         explorer_block_payout_read_total,
         explorer_block_payout_ad_total,
         explorer_block_payout_ad_it_total,
+        explorer_block_payout_ad_usd_total,
+        explorer_block_payout_ad_settlement_count,
+        explorer_block_payout_ad_ct_price_usd_micros,
+        explorer_block_payout_ad_it_price_usd_micros,
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
         explorer_block_payout_ad_it_last_seen,
@@ -6858,6 +6963,57 @@ fn collect_role_counter_samples(value: &Value, out: &mut Vec<(String, f64)>) {
             }
         }
         _ => {}
+    }
+}
+
+fn extract_scalar_metric(metrics: &Value, key: &str) -> Option<f64> {
+    let root = match metrics {
+        Value::Object(map) => map.get(key)?,
+        _ => return None,
+    };
+    extract_scalar_value(root)
+}
+
+fn extract_scalar_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(num) => Some(num.as_f64()),
+        Value::Array(items) => {
+            for item in items {
+                if let Some(sample) = extract_scalar_value(item) {
+                    return Some(sample);
+                }
+            }
+            None
+        }
+        Value::Object(map) => {
+            if let Some(sample) = map.get("value").and_then(Value::as_f64) {
+                return Some(sample);
+            }
+            if let Some(sample) = map.get("gauge").and_then(Value::as_f64) {
+                return Some(sample);
+            }
+            if let Some(sample) = map.get("counter").and_then(Value::as_f64) {
+                return Some(sample);
+            }
+            if let Some(samples) = map.get("samples") {
+                if let Some(sample) = extract_scalar_value(samples) {
+                    return Some(sample);
+                }
+            }
+            for (key, child) in map {
+                if matches!(
+                    key.as_str(),
+                    "labels" | "metric" | "help" | "name" | "unit" | "type"
+                ) {
+                    continue;
+                }
+                if let Some(sample) = extract_scalar_value(child) {
+                    return Some(sample);
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

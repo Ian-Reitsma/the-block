@@ -15,7 +15,9 @@ RPC client.
   altering the RPC envelope. `ad_market.inventory` and `ad_market.distribution`
   continue to serialise through the existing `foundation_serialization` helpers,
   while the richer `SettlementBreakdown` is consumed directly by the node and
-  test harnesses—no additional RPC shims or serde fallbacks were required.
+  test harnesses—no additional RPC shims or serde fallbacks were required. The
+  liquidity split now applies before CT conversion, so RPC consumers see CT and IT
+  totals that match the governance `liquidity_split_ct_ppm` policy.
 
 ## Recent progress (2025-10-27)
 
@@ -110,13 +112,16 @@ RPC client.
 ## Recent progress (2025-11-06)
 
 - Explorer, CLI, and readiness RPC surfaces now expose industrial-token
-  advertising payouts, USD totals, settlement counts, and oracle snapshots using
-  the same handwritten codec path. `ad_market.readiness` returns both the
-  persisted snapshot and the live marketplace oracle under a single `oracle`
-  object, letting automation diff conversion inputs without touching
-  third-party tooling. The metrics aggregator and dashboards consume the same
-  gauges, keeping CI artefacts first party while removing the last CT-only
-  assumptions from RPC callers.
+  advertising payouts, USD totals, settlement counts, oracle snapshots, and the
+  per-cohort utilisation summary using the same handwritten codec path.
+  `ad_market.readiness` returns both the persisted snapshot, the live
+  marketplace oracle, and a `utilization` map so automation diff conversion
+  inputs without touching third-party tooling. The metrics aggregator and
+  dashboards consume the same gauges (including
+  `explorer_block_payout_ad_usd_total`,
+  `explorer_block_payout_ad_settlement_count`, and the CT/IT oracle prices),
+  keeping CI artefacts first party while removing the last CT-only assumptions
+  from RPC callers.
 
 ## Recent progress (2025-11-05)
 

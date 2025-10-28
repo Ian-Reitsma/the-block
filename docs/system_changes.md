@@ -1,12 +1,15 @@
 # System-Wide Economic Changes
 > **Review (2025-11-07, afternoon):** Advertising settlements now capture the
-> posted USD price, oracle snapshot, and role-level CT/IT token quantities.
-> `SettlementBreakdown` continues to populate the legacy CT fields used by the
-> ledger while also exposing mirrored IT totals and residual USD so dashboards
-> and future ledger work can audit both currencies from the same record. New
-> unit coverage in `crates/ad_market` asserts the USD→CT/IT conversions and
-> rounding behaviour, and the sled/in-memory implementations share the same
-> helper so RPC/gateway flows return consistent JSON across backends.
+> posted USD price, oracle snapshot, and role-level CT/IT token quantities while
+> honouring the governance liquidity split. `SettlementBreakdown` continues to
+> populate the legacy CT fields used by the ledger, but liquidity conversions now
+> draw exclusively from the CT slice returned by `liquidity_split_ct_ppm` so the
+> IT share is no longer double counted. Residual USD stays explicit, letting
+> dashboards and future ledger work audit both currencies from the same record.
+> Fresh unit coverage in `crates/ad_market` asserts the USD→CT/IT conversions,
+> the liquidity split, and the rounding behaviour, and the sled/in-memory
+> implementations share the same helper so RPC/gateway flows return consistent
+> JSON across backends.
 > **Review (2025-10-27, evening):** Chaos artefacts now include explicit
 > manifests and bundles, and publishing stays first party. `sim/chaos_lab.rs`
 > persists a run-specific `manifest.json` (referenced by `archive/latest.json`)
@@ -73,15 +76,15 @@
 ### Implementation Summary
 
 - Taught both the in-memory and sled marketplaces to compute USD shares per
-  role, convert them to CT using the current oracle price, and accumulate a
-  single `total_ct` that matches the existing ledger flow. Liquidity continues to
-  settle fully in CT for now so legacy blocks stay consistent.
+  role, convert the CT portion (including liquidity via `split_liquidity_usd`)
+  with the current oracle price, and accumulate a single `total_ct` that matches
+  the existing ledger flow without double counting the IT allocation.
 - Added mirrored IT conversions for host, hardware, verifier, liquidity, and the
   miner remainder, storing the oracle snapshot alongside the new token counts and
   `unsettled_usd_micros` residual so downstream tooling can reconcile rounding.
-- Updated the ad market unit suite to assert CT/IT totals, oracle snapshots, and
-  rounding limits under deterministic oracles, and refreshed the RPC integration
-  tests so the richer JSON schema remains stable.
+- Updated the ad market unit suite to assert CT/IT totals, the liquidity split,
+  oracle snapshots, and rounding limits under deterministic oracles, and
+  refreshed the RPC integration tests so the richer JSON schema remains stable.
 
 ### Operational Impact
 
@@ -209,13 +212,15 @@
 > downstream automation can reconcile every payout without guessing. Explorer
 > HTTP/JSON payloads and CLI views render the CT and IT amounts together with
 > the oracle snapshot used for conversion, while the metrics aggregator gained a
-> dedicated `explorer_block_payout_ad_it_total{role}` counter family plus
-> readiness gauges for settlement USD micros, observed oracle prices, and
-> settlement counts. `ad_market.readiness` now embeds the live market oracle and
-> the archived snapshot, letting operators verify utilisation, pricing inputs,
-> and governance thresholds straight from a single RPC. Prometheus scrapes and
-> CI artefacts surface the new gauges so dashboards and release automation track
-> the same CT/IT picture as the ledger.
+> dedicated `explorer_block_payout_ad_it_total{role}` counter family plus peer-
+> labelled gauges for `explorer_block_payout_ad_usd_total`,
+> `explorer_block_payout_ad_settlement_count`, and the CT/IT oracle prices the
+> block used. `ad_market.readiness` now embeds the live market oracle, the
+> archived snapshot, and a `utilization` map that summarises mean/min/max cohort
+> utilisation alongside per-cohort price/target pairs so operators can verify
+> demand, pricing inputs, and governance thresholds from a single RPC. Prometheus
+> scrapes and CI artefacts surface the new gauges so dashboards and release
+> automation track the same CT/IT picture as the ledger.
 > **Review (2025-11-05, afternoon):** Premium domain auctions now settle with
 > full ledger backing. `dns.complete_sale` debits the winning bidder, refunds
 > locked seller stake, and routes protocol and royalty fees to the treasury or

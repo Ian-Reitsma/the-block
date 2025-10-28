@@ -73,6 +73,10 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
                 "target_utilization_ppm".into(),
                 Value::Number(Number::from(snapshot.target_utilization_ppm)),
             );
+            entry.insert(
+                "observed_utilization_ppm".into(),
+                Value::Number(Number::from(snapshot.observed_utilization_ppm)),
+            );
             Value::Object(entry)
         })
         .collect();
@@ -165,6 +169,7 @@ pub fn readiness(
         "snapshot_it_price_usd_micros".into(),
         Value::Number(Number::from(snapshot.it_price_usd_micros)),
     );
+    let mut utilization_summary = None;
     if let Some(handle) = market {
         let oracle = handle.oracle();
         oracle_map.insert(
@@ -175,12 +180,62 @@ pub fn readiness(
             "market_it_price_usd_micros".into(),
             Value::Number(Number::from(oracle.it_price_usd_micros)),
         );
+        let snapshots = handle.cohort_prices();
+        if !snapshots.is_empty() {
+            let mut utilization = Map::new();
+            let mut cohorts = Vec::with_capacity(snapshots.len());
+            let mut sum: u64 = 0;
+            let mut min = u32::MAX;
+            let mut max = 0u32;
+            for snapshot in snapshots {
+                let mut cohort = Map::new();
+                cohort.insert("domain".into(), Value::String(snapshot.domain));
+                if let Some(provider) = snapshot.provider {
+                    cohort.insert("provider".into(), Value::String(provider));
+                }
+                cohort.insert(
+                    "badges".into(),
+                    Value::Array(snapshot.badges.into_iter().map(Value::String).collect()),
+                );
+                cohort.insert(
+                    "price_per_mib_usd_micros".into(),
+                    Value::Number(Number::from(snapshot.price_per_mib_usd_micros)),
+                );
+                cohort.insert(
+                    "target_utilization_ppm".into(),
+                    Value::Number(Number::from(snapshot.target_utilization_ppm)),
+                );
+                cohort.insert(
+                    "observed_utilization_ppm".into(),
+                    Value::Number(Number::from(snapshot.observed_utilization_ppm)),
+                );
+                sum = sum.saturating_add(snapshot.observed_utilization_ppm as u64);
+                min = min.min(snapshot.observed_utilization_ppm);
+                max = max.max(snapshot.observed_utilization_ppm);
+                cohorts.push(Value::Object(cohort));
+            }
+            let count = cohorts.len() as u64;
+            let mean = if count == 0 {
+                0
+            } else {
+                ((sum as f64) / (count as f64)).round() as u64
+            };
+            utilization.insert("cohort_count".into(), Value::Number(Number::from(count)));
+            utilization.insert("mean_ppm".into(), Value::Number(Number::from(mean)));
+            utilization.insert("min_ppm".into(), Value::Number(Number::from(min as u64)));
+            utilization.insert("max_ppm".into(), Value::Number(Number::from(max as u64)));
+            utilization.insert("cohorts".into(), Value::Array(cohorts));
+            utilization_summary = Some(Value::Object(utilization));
+        }
         root.insert(
             "distribution".into(),
             distribution_to_value(handle.distribution()),
         );
     }
     root.insert("oracle".into(), Value::Object(oracle_map));
+    if let Some(utilization) = utilization_summary {
+        root.insert("utilization".into(), utilization);
+    }
     Value::Object(root)
 }
 

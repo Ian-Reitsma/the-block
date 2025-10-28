@@ -161,16 +161,21 @@ section. Panels chart `sum by (role)(increase(explorer_block_payout_read_total[5
 per-role read-subsidy, consumer-token advertising, and industrial-token
 advertising totals mined from block headers so operations can compare
 viewer/host/hardware/verifier/liquidity/miner splits without scraping SQLite
-directly. Legends remain enabled by default, letting operators focus on
-specific roles or compare read versus dual-token advertising flows in the same
-pane.
+directly. Additional single-stat panels surface `explorer_block_payout_ad_usd_total`,
+`explorer_block_payout_ad_settlement_count`, and the CT/IT oracle gauges reported by
+each explorer peer so CI and dashboards trend the USD spend and conversion rates
+alongside the token totals. Legends remain enabled by default, letting operators
+focus on specific roles or compare read versus dual-token advertising flows in the
+same pane.
 
 An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
 `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
 `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`,
 `ad_readiness_it_price_usd_micros`, and the configured minimums, while a table
-lists the active blockers surfaced by `ad_market.readiness`. A counter panel
+lists the active blockers surfaced by `ad_market.readiness`. A companion table now
+renders the `utilization` map returned by the same RPC so operators see per-cohort
+targets, observed utilisation, and prices next to the readiness counters. A counter panel
 charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
 spot insufficient viewer/host/provider diversity before enabling the ad rail.
 The HTML snapshot renders the same panels, keeping FIRST_PARTY_ONLY monitoring

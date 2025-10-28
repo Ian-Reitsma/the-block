@@ -15,6 +15,12 @@ fn payout_sample(role: &str, value: f64) -> Value {
     Value::Object(sample)
 }
 
+fn scalar_metric(value: f64) -> Value {
+    let mut sample = Map::new();
+    sample.insert("value".to_string(), Value::from(value));
+    Value::Object(sample)
+}
+
 fn build_payload(read: &[(&str, f64)], ad: &[(&str, f64)]) -> Value {
     build_payload_inner(
         read.iter()
@@ -85,6 +91,16 @@ fn scrape_metric(body: &str, metric: &str, role: &str) -> Option<f64> {
     let role_label = format!("role=\"{role}\"");
     body.lines().find_map(|line| {
         if !line.starts_with(metric) || !line.contains(&role_label) {
+            return None;
+        }
+        line.split_whitespace().nth(1)?.parse::<f64>().ok()
+    })
+}
+
+fn scrape_peer_metric(body: &str, metric: &str, peer: &str) -> Option<f64> {
+    let peer_label = format!("peer=\"{peer}\"");
+    body.lines().find_map(|line| {
+        if !line.starts_with(metric) || !line.contains(&peer_label) {
             return None;
         }
         line.split_whitespace().nth(1)?.parse::<f64>().ok()
@@ -252,6 +268,93 @@ fn explorer_payout_counters_increment_on_ingest() {
         assert!(updated_read_last_seen >= first_read_last_seen);
         assert!(updated_ad_last_seen >= first_ad_last_seen);
     });
+}
+
+#[test]
+fn explorer_payout_summary_metrics_exposed() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("metrics.db");
+        let state = AppState::new("token".into(), &db_path, 60);
+        let app = router(state);
+
+        let mut metrics = Map::new();
+        metrics.insert(
+            "explorer_block_payout_read_total".to_string(),
+            Value::Array(vec![payout_sample("viewer", 5.0)]),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_total".to_string(),
+            Value::Array(vec![payout_sample("viewer", 7.0)]),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_it_total".to_string(),
+            Value::Array(vec![payout_sample("host", 3.0)]),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_usd_total".to_string(),
+            scalar_metric(64_000.0),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_settlement_count".to_string(),
+            scalar_metric(8.0),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_ct_price_usd_micros".to_string(),
+            scalar_metric(25_000.0),
+        );
+        metrics.insert(
+            "explorer_block_payout_ad_it_price_usd_micros".to_string(),
+            scalar_metric(50_000.0),
+        );
+        let mut entry = Map::new();
+        entry.insert("peer_id".to_string(), Value::String("explorer-node".into()));
+        entry.insert("metrics".to_string(), Value::Object(metrics));
+        let payload = Value::Array(vec![Value::Object(entry)]);
+
+        let ingest_req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
+            .header("x-auth-token", "token")
+            .json(&payload)
+            .expect("serialize payload")
+            .build();
+        let ingest_resp = app.handle(ingest_req).await.expect("ingest ok");
+        assert_eq!(ingest_resp.status(), StatusCode::OK);
+
+        let metrics_resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .expect("metrics scrape");
+        let body = String::from_utf8(metrics_resp.body().to_vec()).expect("metrics body");
+
+        let usd_total =
+            scrape_peer_metric(&body, "explorer_block_payout_ad_usd_total", "explorer-node")
+                .expect("usd total metric");
+        assert_eq!(usd_total, 64_000.0);
+        let settlement_count = scrape_peer_metric(
+            &body,
+            "explorer_block_payout_ad_settlement_count",
+            "explorer-node",
+        )
+        .expect("settlement count metric");
+        assert_eq!(settlement_count, 8.0);
+        let ct_price = scrape_peer_metric(
+            &body,
+            "explorer_block_payout_ad_ct_price_usd_micros",
+            "explorer-node",
+        )
+        .expect("ct price metric");
+        assert_eq!(ct_price, 25_000.0);
+        let it_price = scrape_peer_metric(
+            &body,
+            "explorer_block_payout_ad_it_price_usd_micros",
+            "explorer-node",
+        )
+        .expect("it price metric");
+        assert_eq!(it_price, 50_000.0);
+    })
 }
 
 #[test]

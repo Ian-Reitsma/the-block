@@ -3,10 +3,13 @@
 > settlements with both CT and IT token breakdowns. Campaign commits capture the
 > posted price, oracle snapshot, and per-role token totals inside
 > `SettlementBreakdown`, keeping the legacy CT ledger path intact while exposing
-> mirrored IT quantities for the forthcoming dual-token rollout. Fresh unit tests
-> in `crates/ad_market` lock the USD→CT/IT conversions and rounding semantics, and
-> the sled/RPC harness continues to pass against the enriched schema so gateway
-> and explorer surfaces inherit the new metadata immediately.
+> mirrored IT quantities for the forthcoming dual-token rollout. Liquidity
+> conversions now draw only from the CT share dictated by
+> `liquidity_split_ct_ppm`, so IT allocations are no longer double counted in the
+> CT totals. Fresh unit tests in `crates/ad_market` lock the USD→CT/IT conversions
+> and rounding semantics, and the sled/RPC harness continues to pass against the
+> enriched schema so gateway and explorer surfaces inherit the new metadata
+> immediately.
 > **Review (2025-10-26, late morning):** Liquidity router coverage now mirrors
 > production sequencing guarantees. Slack-aware trust routing prioritises the
 > widest residual-capacity path while still exposing a shortest-path fallback
@@ -98,11 +101,13 @@
 > CLI commands, dashboards, and CI artefacts share the same conversion inputs.
 > Explorer payloads and CLI outputs render the CT/IT mix with integration tests
 > for binary and JSON codecs, the metrics aggregator introduced
-> `explorer_block_payout_ad_it_total{role}` plus readiness gauges for USD spend
-> and oracle prices, and `ad_market.readiness` publishes the archived snapshot
-> alongside live market oracle values. Grafana rows and release automation now
-> chart those gauges so governance can flip the CT→CT+IT transition with full
-> visibility.
+> `explorer_block_payout_ad_it_total{role}` plus peer-labelled gauges for
+> `explorer_block_payout_ad_usd_total`,
+> `explorer_block_payout_ad_settlement_count`, and the CT/IT oracle prices, and
+> `ad_market.readiness` publishes the archived snapshot, live market oracle
+> values, and a `utilization` map. Grafana rows and release automation now chart
+> those gauges so governance can flip the CT→CT+IT transition with full
+> visibility into pricing inputs and utilisation.
 > **Review (2025-10-24, late night):** The sled-backed ad marketplace now powers
 > governance audits and RPC/CLI automation. Campaign registration, distribution
 > policy reads, and inventory listings flow through first-party handlers, while
@@ -110,9 +115,9 @@
 > Gateway matching threads provider identities and physical-presence badges from
 > the refreshed `ServiceBadgeTracker`, and the metrics stack adds
 > `explorer_block_payout_{read,ad}_last_seen_timestamp{role}` gauges plus the new
-> `explorer_block_payout_ad_it_total{role}` counter family keep dashboards and
-> paging aware of both consumer- and industrial-token flows, catching silent payout regressions
-> without third-party tooling.
+> `explorer_block_payout_ad_it_total{role}` counter family and USD/oracle gauges
+> keep dashboards and paging aware of both consumer- and industrial-token flows,
+> catching silent payout regressions without third-party tooling.
 > **Review (2025-10-24, early afternoon):** Explorer integration coverage now mixes binary payloads with JSON fallbacks so `/blocks/:hash/payouts` keeps decoding modern headers even when older snapshots resurface. The metrics aggregator increments the new role-labelled counters directly through cached `CounterVec` handles, and the Prometheus integration test confirms the Grafana payout panels track live explorer ingests. Documentation adds CLI automation snippets for both hash- and height-driven payout queries so operators can script reconciliation end to end.
 > **Review (2025-10-30, morning):** Explorer payout lookups now defend the JSON fallback path so legacy blocks without the new per-role fields still render viewer/host/hardware/verifier/liquidity/miner totals. CLI coverage exercises the exclusive hash/height arguments and missing-block errors, while the monitoring generator adds a “Block Payouts” row that charts the read-subsidy and advertising role counters from Prometheus. Operators can now reconcile historical blocks, CLI automation, and dashboards without leaving the first-party toolchain.
 > **Review (2025-10-29, early morning):** Read subsidies now route through governance-
