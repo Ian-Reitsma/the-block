@@ -4,9 +4,18 @@
 > backends convert the CT portion of the liquidity share before minting tokens,
 > preventing the IT allocation from being double counted in CT totals, and the
 > updated unit test asserts the expected split against deterministic oracle
-> prices. Explorer, ledger, and dashboard pipelines pick up the corrected
-> `SettlementBreakdown` values so USD totals, CT counts, and IT counts now stay in
-> lockstep across CI artefacts.
+> prices. The conversion logic lives in a shared helper consumed by the sled and
+> in-memory marketplaces, while new ledger/explorer regressions replay mixed
+> settlements to prove CT/IT totals, USD sums, and oracle snapshots remain aligned
+> without depending on a mined block. Explorer, ledger, and dashboard pipelines
+> pick up the corrected `SettlementBreakdown` values so USD totals, CT counts, and
+> IT counts now stay in lockstep across CI artefacts. Readiness telemetry now
+> mirrors the same inputs: snapshots persist both the archived and live oracle
+> prices, per-cohort utilisation deltas, and ppm summaries, telemetry exporters
+> emit matching gauges, and the metrics aggregator forwards
+> `ad_readiness_utilization_{observed,target,delta}_ppm` while pruning stale
+> label sets, letting dashboards and CI alert whenever utilisation drifts from
+> the governance targets despite steady demand.
 > **Review (2025-11-07, afternoon):** Ad settlements now surface USD totals and
 > dual-currency token splits. `InMemoryMarketplace::commit` and
 > `SledMarketplace::commit` record the posted USD price, oracle snapshot, and

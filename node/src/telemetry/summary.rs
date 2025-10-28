@@ -90,6 +90,30 @@ fn build_summary(seq: u64) -> TelemetrySummary {
                 settlement_count: snapshot.settlement_count,
                 ct_price_usd_micros: snapshot.ct_price_usd_micros,
                 it_price_usd_micros: snapshot.it_price_usd_micros,
+                market_ct_price_usd_micros: snapshot.market_ct_price_usd_micros,
+                market_it_price_usd_micros: snapshot.market_it_price_usd_micros,
+                cohort_utilization: snapshot
+                    .cohort_utilization
+                    .iter()
+                    .map(|entry| foundation_telemetry::AdReadinessCohortTelemetry {
+                        domain: entry.domain.clone(),
+                        provider: entry.provider.clone(),
+                        badges: entry.badges.clone(),
+                        price_per_mib_usd_micros: entry.price_per_mib_usd_micros,
+                        target_utilization_ppm: entry.target_utilization_ppm,
+                        observed_utilization_ppm: entry.observed_utilization_ppm,
+                        delta_utilization_ppm: entry.delta_ppm,
+                    })
+                    .collect(),
+                utilization_summary: snapshot.utilization_summary.map(|summary| {
+                    foundation_telemetry::AdReadinessUtilizationSummary {
+                        cohort_count: summary.cohort_count,
+                        mean_ppm: summary.mean_ppm,
+                        min_ppm: summary.min_ppm,
+                        max_ppm: summary.max_ppm,
+                        last_updated: summary.last_updated,
+                    }
+                }),
             }
         }),
     }

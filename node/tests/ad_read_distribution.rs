@@ -147,3 +147,130 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         block.read_sub_liquidity_ct.value()
     );
 }
+
+#[test]
+fn dual_token_liquidity_splits_roll_into_block_totals() {
+    let dir = tempdir().expect("temp dir");
+    let chain_path = dir.path().join("chain");
+    let mut bc = Blockchain::new(chain_path.to_str().expect("path"));
+    bc.difficulty = 0;
+    bc.gamma_read_sub_ct_raw = 1;
+    bc.params.read_subsidy_viewer_percent = 40;
+    bc.params.read_subsidy_host_percent = 20;
+    bc.params.read_subsidy_hardware_percent = 10;
+    bc.params.read_subsidy_verifier_percent = 10;
+    bc.params.read_subsidy_liquidity_percent = 10;
+    bc.recompute_difficulty();
+    bc.add_account("miner".into(), 0, 0).expect("miner account");
+    bc.snapshot.set_interval(1);
+
+    let ack_a = build_signed_ack(256, "example.com", "edge-a");
+    let ack_b = build_signed_ack(512, "example.com", "edge-b");
+    bc.submit_read_ack(ack_a.clone()).expect("ack A accepted");
+    bc.submit_read_ack(ack_b.clone()).expect("ack B accepted");
+
+    let settlement_a = SettlementBreakdown {
+        campaign_id: "cmp-1".into(),
+        creative_id: "creative-1".into(),
+        bytes: 256,
+        price_per_mib_usd_micros: 120,
+        total_usd_micros: 120,
+        demand_usd_micros: 160,
+        total_ct: 35,
+        viewer_ct: 12,
+        host_ct: 8,
+        hardware_ct: 6,
+        verifier_ct: 4,
+        liquidity_ct: 2,
+        miner_ct: 3,
+        host_it: 5,
+        hardware_it: 7,
+        verifier_it: 9,
+        liquidity_it: 11,
+        miner_it: 13,
+        unsettled_usd_micros: 0,
+        ct_price_usd_micros: 1,
+        it_price_usd_micros: 1,
+    };
+    let settlement_b = SettlementBreakdown {
+        campaign_id: "cmp-2".into(),
+        creative_id: "creative-2".into(),
+        bytes: 512,
+        price_per_mib_usd_micros: 150,
+        total_usd_micros: 150,
+        demand_usd_micros: 180,
+        total_ct: 30,
+        viewer_ct: 7,
+        host_ct: 5,
+        hardware_ct: 4,
+        verifier_ct: 3,
+        liquidity_ct: 9,
+        miner_ct: 2,
+        host_it: 4,
+        hardware_it: 3,
+        verifier_it: 2,
+        liquidity_it: 1,
+        miner_it: 0,
+        unsettled_usd_micros: 0,
+        ct_price_usd_micros: 1,
+        it_price_usd_micros: 1,
+    };
+    bc.record_ad_settlement(&ack_a, settlement_a.clone());
+    bc.record_ad_settlement(&ack_b, settlement_b.clone());
+
+    let pending = bc.pending_ad_settlements.clone();
+    assert_eq!(pending.len(), 2);
+    let mut totals = (
+        0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64,
+    );
+    for record in pending {
+        totals.0 = totals.0.saturating_add(record.viewer_ct);
+        totals.1 = totals.1.saturating_add(record.host_ct);
+        totals.2 = totals.2.saturating_add(record.hardware_ct);
+        totals.3 = totals.3.saturating_add(record.verifier_ct);
+        totals.4 = totals.4.saturating_add(record.liquidity_ct);
+        totals.5 = totals.5.saturating_add(record.miner_ct);
+        totals.6 = totals.6.saturating_add(record.host_it);
+        totals.7 = totals.7.saturating_add(record.hardware_it);
+        totals.8 = totals.8.saturating_add(record.verifier_it);
+        totals.9 = totals.9.saturating_add(record.liquidity_it);
+        totals.10 = totals.10.saturating_add(record.miner_it);
+        totals.11 = totals.11.saturating_add(record.total_usd_micros);
+        totals.12 = totals.12.saturating_add(record.total_ct);
+    }
+
+    assert_eq!(totals.0, settlement_a.viewer_ct + settlement_b.viewer_ct);
+    assert_eq!(totals.1, settlement_a.host_ct + settlement_b.host_ct);
+    assert_eq!(
+        totals.2,
+        settlement_a.hardware_ct + settlement_b.hardware_ct
+    );
+    assert_eq!(
+        totals.3,
+        settlement_a.verifier_ct + settlement_b.verifier_ct
+    );
+    assert_eq!(
+        totals.4,
+        settlement_a.liquidity_ct + settlement_b.liquidity_ct
+    );
+    assert_eq!(totals.5, settlement_a.miner_ct + settlement_b.miner_ct);
+    assert_eq!(totals.6, settlement_a.host_it + settlement_b.host_it);
+    assert_eq!(
+        totals.7,
+        settlement_a.hardware_it + settlement_b.hardware_it
+    );
+    assert_eq!(
+        totals.8,
+        settlement_a.verifier_it + settlement_b.verifier_it
+    );
+    assert_eq!(
+        totals.9,
+        settlement_a.liquidity_it + settlement_b.liquidity_it
+    );
+    assert_eq!(totals.10, settlement_a.miner_it + settlement_b.miner_it);
+    assert_eq!(
+        totals.11,
+        settlement_a.total_usd_micros + settlement_b.total_usd_micros
+    );
+    assert_eq!(totals.12, settlement_a.total_ct + settlement_b.total_ct);
+}

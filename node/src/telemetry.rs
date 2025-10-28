@@ -27,7 +27,7 @@ use runtime::telemetry::{
     IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle, IntGaugeVec, Opts, Registry,
     TextEncoder,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(feature = "telemetry"))]
 use std::sync::Once;
@@ -2703,6 +2703,58 @@ pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+#[cfg(feature = "telemetry")]
+pub static AD_MARKET_UTILIZATION_OBSERVED: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_market_utilization_observed_ppm",
+            "Observed cohort utilization in parts-per-million",
+        ),
+        &["domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad market utilization observed: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad market utilization observed: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_MARKET_UTILIZATION_TARGET: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_market_utilization_target_ppm",
+            "Target cohort utilization in parts-per-million",
+        ),
+        &["domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad market utilization target: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad market utilization target: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_MARKET_UTILIZATION_DELTA: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_market_utilization_delta_ppm",
+            "Observed minus target utilization in parts-per-million",
+        ),
+        &["domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad market utilization delta: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad market utilization delta: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+static AD_MARKET_UTILIZATION_LABELS: Lazy<Mutex<HashSet<(String, String, String)>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",
@@ -3685,6 +3737,61 @@ pub fn governance_webhook(event: &str, proposal_id: u64) {
             .request(Method::Post, &url)
             .and_then(|req| req.json(&payload))
             .and_then(|req| req.send());
+    }
+}
+
+pub fn update_ad_market_utilization_metrics(
+    cohorts: &[crate::ad_readiness::AdReadinessCohortUtilization],
+) {
+    #[cfg(feature = "telemetry")]
+    {
+        let mut new_labels: HashSet<(String, String, String)> =
+            HashSet::with_capacity(cohorts.len());
+        for entry in cohorts {
+            let domain_label = entry.domain.clone();
+            let provider_label = entry.provider.clone().unwrap_or_else(|| "none".to_string());
+            let badges_label = if entry.badges.is_empty() {
+                "none".to_string()
+            } else {
+                entry.badges.join("|")
+            };
+            let labels = [
+                domain_label.as_str(),
+                provider_label.as_str(),
+                badges_label.as_str(),
+            ];
+            AD_MARKET_UTILIZATION_OBSERVED
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("ad market utilization observed labels: {e}"))
+                .set(i64::from(entry.observed_utilization_ppm));
+            AD_MARKET_UTILIZATION_TARGET
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("ad market utilization target labels: {e}"))
+                .set(i64::from(entry.target_utilization_ppm));
+            AD_MARKET_UTILIZATION_DELTA
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("ad market utilization delta labels: {e}"))
+                .set(entry.delta_ppm);
+            new_labels.insert((domain_label, provider_label, badges_label));
+        }
+        let mut active = AD_MARKET_UTILIZATION_LABELS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous: Vec<(String, String, String)> = active.iter().cloned().collect();
+        for label in previous {
+            if !new_labels.contains(&label) {
+                let values = [label.0.as_str(), label.1.as_str(), label.2.as_str()];
+                let _ = AD_MARKET_UTILIZATION_OBSERVED.remove_label_values(&values);
+                let _ = AD_MARKET_UTILIZATION_TARGET.remove_label_values(&values);
+                let _ = AD_MARKET_UTILIZATION_DELTA.remove_label_values(&values);
+            }
+        }
+        active.clear();
+        active.extend(new_labels);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = cohorts;
     }
 }
 

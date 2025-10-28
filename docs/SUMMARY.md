@@ -5,7 +5,11 @@
 > double counted, and refreshed tests assert the split alongside the USD→CT/IT
 > conversions. Explorer and ledger pipelines consume the corrected
 > `SettlementBreakdown` directly, so dashboards and CI artefacts display matching
-> USD, CT, and IT totals.
+> USD, CT, and IT totals. Readiness telemetry mirrors the same inputs: snapshots
+> persist both the archived and live marketplace oracles, expose per-cohort
+> utilisation deltas, and feed the Prometheus exporters plus metrics aggregator
+> (`ad_readiness_utilization_{observed,target,delta}_ppm`) so CI and dashboards can
+> page when utilisation drifts from the governance targets despite steady demand.
 > **Review (2025-10-27, evening):** Chaos artefacts now ship with preserved
 > manifests and first-party publishing hooks. `sim/chaos_lab.rs` writes a
 > run-scoped `manifest.json` alongside a `latest.json` pointer under

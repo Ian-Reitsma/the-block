@@ -2,10 +2,12 @@
 
 use crate::simple_db::{names, SimpleDb};
 use crate::util::binary_struct::{ensure_exhausted, DecodeError};
+use ad_market::CohortPriceSnapshot;
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3;
 use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 use foundation_serialization::{Deserialize, Serialize};
+use std::cmp;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -107,6 +109,14 @@ pub struct AdReadinessSnapshot {
     pub ct_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub it_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub market_ct_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub market_it_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub cohort_utilization: Vec<AdReadinessCohortUtilization>,
+    #[serde(default)]
+    pub utilization_summary: Option<AdReadinessUtilizationSummary>,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -127,8 +137,42 @@ impl Default for AdReadinessSnapshot {
             settlement_count: 0,
             ct_price_usd_micros: 0,
             it_price_usd_micros: 0,
+            market_ct_price_usd_micros: 0,
+            market_it_price_usd_micros: 0,
+            cohort_utilization: Vec::new(),
+            utilization_summary: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdReadinessCohortUtilization {
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub badges: Vec<String>,
+    pub price_per_mib_usd_micros: u64,
+    pub target_utilization_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub observed_utilization_ppm: u32,
+    pub delta_ppm: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdReadinessUtilizationSummary {
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub cohort_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub mean_ppm: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub min_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub max_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub last_updated: u64,
 }
 
 impl AdReadinessSnapshot {
@@ -210,6 +254,19 @@ impl AdReadinessHandle {
     ) {
         self.inner
             .record_settlement(ts, usd_micros, ct_price_usd_micros, it_price_usd_micros);
+    }
+
+    pub fn record_utilization(
+        &self,
+        cohorts: &[CohortPriceSnapshot],
+        market_ct_price_usd_micros: u64,
+        market_it_price_usd_micros: u64,
+    ) {
+        self.inner.record_utilization(
+            cohorts,
+            market_ct_price_usd_micros,
+            market_it_price_usd_micros,
+        );
     }
 
     pub fn decision(&self) -> ReadinessDecision {
@@ -302,6 +359,23 @@ impl AdReadinessInner {
         );
     }
 
+    fn record_utilization(
+        &self,
+        cohorts: &[CohortPriceSnapshot],
+        market_ct_price_usd_micros: u64,
+        market_it_price_usd_micros: u64,
+    ) {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.record_utilization(
+            cohorts,
+            market_ct_price_usd_micros,
+            market_it_price_usd_micros,
+        );
+    }
+
     fn snapshot(&self) -> AdReadinessSnapshot {
         let mut guard = self
             .state
@@ -336,6 +410,11 @@ struct AdReadinessState {
     settlements: VecDeque<SettlementObservation>,
     last_ct_price_usd_micros: u64,
     last_it_price_usd_micros: u64,
+    market_ct_price_usd_micros: u64,
+    market_it_price_usd_micros: u64,
+    cohort_utilization: Vec<AdReadinessCohortUtilization>,
+    utilization_summary: Option<AdReadinessUtilizationSummary>,
+    last_utilization_update: u64,
 }
 
 impl Default for AdReadinessState {
@@ -350,6 +429,11 @@ impl Default for AdReadinessState {
             settlements: VecDeque::new(),
             last_ct_price_usd_micros: 0,
             last_it_price_usd_micros: 0,
+            market_ct_price_usd_micros: 0,
+            market_it_price_usd_micros: 0,
+            cohort_utilization: Vec::new(),
+            utilization_summary: None,
+            last_utilization_update: 0,
         }
     }
 }
@@ -413,6 +497,64 @@ impl AdReadinessState {
             usd_micros,
             ct_price_usd_micros,
             it_price_usd_micros,
+        });
+    }
+
+    fn record_utilization(
+        &mut self,
+        cohorts: &[CohortPriceSnapshot],
+        market_ct_price_usd_micros: u64,
+        market_it_price_usd_micros: u64,
+    ) {
+        let now = current_timestamp();
+        self.market_ct_price_usd_micros = market_ct_price_usd_micros;
+        self.market_it_price_usd_micros = market_it_price_usd_micros;
+        self.last_utilization_update = now;
+        if cohorts.is_empty() {
+            self.cohort_utilization.clear();
+            self.utilization_summary = Some(AdReadinessUtilizationSummary {
+                cohort_count: 0,
+                mean_ppm: 0,
+                min_ppm: 0,
+                max_ppm: 0,
+                last_updated: now,
+            });
+            return;
+        }
+        let mut entries = Vec::with_capacity(cohorts.len());
+        let mut sum: u128 = 0;
+        let mut min = u32::MAX;
+        let mut max = 0u32;
+        for cohort in cohorts {
+            let observed = cohort.observed_utilization_ppm;
+            let target = cohort.target_utilization_ppm;
+            let delta = i64::from(observed) - i64::from(target);
+            sum = sum.saturating_add(u128::from(observed));
+            min = cmp::min(min, observed);
+            max = cmp::max(max, observed);
+            entries.push(AdReadinessCohortUtilization {
+                domain: cohort.domain.clone(),
+                provider: cohort.provider.clone(),
+                badges: cohort.badges.clone(),
+                price_per_mib_usd_micros: cohort.price_per_mib_usd_micros,
+                target_utilization_ppm: target,
+                observed_utilization_ppm: observed,
+                delta_ppm: delta,
+            });
+        }
+        let count = cohorts.len() as u64;
+        let mean = if count == 0 {
+            0
+        } else {
+            (sum / u128::from(count)) as u64
+        };
+        self.cohort_utilization = entries;
+        self.utilization_summary = Some(AdReadinessUtilizationSummary {
+            cohort_count: count,
+            mean_ppm: mean,
+            min_ppm: if min == u32::MAX { 0 } else { min },
+            max_ppm: max,
+            last_updated: now,
         });
     }
 
@@ -495,6 +637,10 @@ impl AdReadinessState {
                 settlement_count: 0,
                 ct_price_usd_micros: self.last_ct_price_usd_micros,
                 it_price_usd_micros: self.last_it_price_usd_micros,
+                market_ct_price_usd_micros: self.market_ct_price_usd_micros,
+                market_it_price_usd_micros: self.market_it_price_usd_micros,
+                cohort_utilization: self.cohort_utilization.clone(),
+                utilization_summary: self.utilization_summary.clone(),
             };
             let statement = snapshot.to_statement();
             let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -546,6 +692,10 @@ impl AdReadinessState {
             settlement_count,
             ct_price_usd_micros: ct_price,
             it_price_usd_micros: it_price,
+            market_ct_price_usd_micros: self.market_ct_price_usd_micros,
+            market_it_price_usd_micros: self.market_it_price_usd_micros,
+            cohort_utilization: self.cohort_utilization.clone(),
+            utilization_summary: self.utilization_summary.clone(),
         };
         let statement = snapshot.to_statement();
         let proof = zkp::readiness::prove(&statement, &self.readiness_witness());

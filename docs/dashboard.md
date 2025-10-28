@@ -22,6 +22,8 @@ The static dashboard now calls out the peer-level gauges emitted by the explorer
 pipeline—`explorer_block_payout_ad_usd_total`,
 `explorer_block_payout_ad_settlement_count`, and the CT/IT oracle snapshots—so
 operators can cross-check USD spend and conversion inputs without pivoting to
-Grafana. The readiness card links to the new `utilization` map returned by
-`ad_market.readiness`, showing mean/min/max cohort utilisation alongside the per-
-cohort targets and prices that informed the latest settlements.
+Grafana. The readiness card now renders both the archived and live marketplace
+oracles (`ad_readiness_market_{ct,it}_price_usd_micros`), the settlement totals,
+and the `utilization` map returned by `ad_market.readiness`, showing
+mean/min/max cohort utilisation plus per-cohort targets, observed ppm, deltas,
+and price-per-MiB inputs that informed the latest settlements.

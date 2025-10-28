@@ -1,5 +1,15 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-08 update (readiness telemetry utilisation maps):** The node persists
+> both the archived oracle snapshot and the live marketplace oracle in
+> `AdReadinessSnapshot`, records per-cohort target/observed/delta utilisation, and
+> publishes a ppm summary without introducing serde derives or external stores.
+> `telemetry::summary` exposes the same fields via the in-house Prometheus facade,
+> and `metrics-aggregator` registers
+> `ad_readiness_utilization_{observed,target,delta}_ppm` using the existing
+> registry wrappers while pruning stale label handles with a `HashSet`. Alerting
+> and CI artefacts now consume the richer readiness map without importing third-
+> party metrics crates or HTTP clients.
 > **2025-11-07 update (ad market dual-token settlement):** The
 > `ad_market` crate now computes USD→CT/IT token splits entirely with existing
 > arithmetic helpers and sled/state locks; no new crates were introduced while

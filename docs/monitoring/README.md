@@ -38,14 +38,16 @@ ready to import once the foundation telemetry stack is running.
 - An "Ad Readiness" row accompanies the payout panels and charts
   `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
   `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
-  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`, and
-  `ad_readiness_it_price_usd_micros` alongside the configured minimums and
-  blocker list returned by `ad_market.readiness`. The same gauges flow into CI
-  artefacts and HTML snapshots so automation, operators, and dashboards consume
-  an identical oracle snapshot and settlement view before enabling new cohorts.
-  The readiness table now also renders the RPC’s `utilization` summary (mean,
-  min, max, and per-cohort breakdowns) so pricing pressure is visible beside the
-  activation counters.
+  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`,
+  `ad_readiness_it_price_usd_micros`, and the mirrored marketplace oracles
+  (`ad_readiness_market_{ct,it}_price_usd_micros`) alongside the configured
+  minimums and blocker list returned by `ad_market.readiness`. Companion panels
+  render `ad_readiness_utilization_{observed,target,delta}_ppm` grouped by
+  domain/provider/badge so pricing pressure is visible next to the readiness
+  counters, and the aggregator prunes retired label handles to keep the panels
+  clean. The same gauges flow into CI artefacts and HTML snapshots so automation,
+  operators, and dashboards consume an identical oracle snapshot, utilisation
+  summary, and settlement view before enabling new cohorts.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,
