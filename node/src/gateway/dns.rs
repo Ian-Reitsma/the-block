@@ -552,7 +552,7 @@ fn record_treasury_fee(amount_ct: u64) {
         hook(amount_ct);
         return;
     }
-    if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(amount_ct) {
+    if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(amount_ct, 0) {
         #[cfg(feature = "telemetry")]
         warn!(
             amount_ct,

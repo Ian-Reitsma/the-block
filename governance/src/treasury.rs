@@ -22,6 +22,8 @@ pub struct TreasuryDisbursement {
     pub id: u64,
     pub destination: String,
     pub amount_ct: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub amount_it: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub created_at: u64,
@@ -33,6 +35,7 @@ impl TreasuryDisbursement {
         id: u64,
         destination: String,
         amount_ct: u64,
+        amount_it: u64,
         memo: String,
         scheduled_epoch: u64,
     ) -> Self {
@@ -40,6 +43,7 @@ impl TreasuryDisbursement {
             id,
             destination,
             amount_ct,
+            amount_it,
             memo,
             scheduled_epoch,
             created_at: now_ts(),
@@ -77,6 +81,10 @@ pub struct TreasuryBalanceSnapshot {
     pub id: u64,
     pub balance_ct: u64,
     pub delta_ct: i64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub balance_it: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub delta_it: i64,
     pub recorded_at: u64,
     pub event: TreasuryBalanceEventKind,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -88,6 +96,8 @@ impl TreasuryBalanceSnapshot {
         id: u64,
         balance_ct: u64,
         delta_ct: i64,
+        balance_it: u64,
+        delta_it: i64,
         event: TreasuryBalanceEventKind,
         disbursement_id: Option<u64>,
     ) -> Self {
@@ -95,6 +105,8 @@ impl TreasuryBalanceSnapshot {
             id,
             balance_ct,
             delta_ct,
+            balance_it,
+            delta_it,
             recorded_at: now_ts(),
             event,
             disbursement_id,

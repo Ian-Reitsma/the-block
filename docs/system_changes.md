@@ -26,6 +26,20 @@
 > whenever utilisation diverges from the governance targets despite steady
 > demand, keeping the Walrasian tâtonnement loop observable end to end.
 
+> **Review (2025-10-28, evening):** Treasury observability caught up with the
+> dual-token rollout. The metrics aggregator now publishes
+> `treasury_disbursement_amount_{ct,it}`,
+> `treasury_balance_current_{ct,it}`, and
+> `treasury_balance_last_delta_{ct,it}` alongside the existing disbursement
+> counts, and the reset paths were hardened so dashboards survive restarts
+> without dropping CT/IT coverage. Explorer and CLI surfaces expose the same data
+> through `/governance/treasury/{disbursements,balance,history}` with
+> pagination, amount/timestamp filters, and JSON/table/Prometheus outputs. The
+> monitoring alert validator now enforces the readiness delta map so dashboards,
+> runbooks, and CI artefacts all consume `ad_readiness_utilization_delta_ppm`
+> instead of the deprecated legacy summary, keeping activation rehearsals honest
+> ahead of the ledger cutover.
+
 > **Review (2025-11-09, morning):** Dual-token settlements now sit behind a
 > governance flag and every block publishes the treasury execution timeline used
 > to settle downstream disbursements. The governance crate and node runtime share

@@ -320,10 +320,13 @@ pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
 Known focus areas: harden the dependency guard by keeping CI and `tools/xtask`
-blocking on the new first-party inventory, publish dashboard alerts for drift, and
-document the runbook for downstream teams consuming the in-house crates. Expand
-coverage around treasury disbursement visuals in explorer dashboards, integrate
-compute-market SLA metrics with automated alerting, extend bridge docs with
+blocking on the new first-party inventory, document the runbook for downstream
+teams consuming the in-house crates, and finish flipping ledger consumers onto
+the IT-backed treasury fields once the governance activation window lands.
+Explorer dashboards and CLI treasuries now expose dual-token timelines with
+historical filters; remaining work focuses on retiring the legacy CT-only
+readers after the activation vote closes. Integrate compute-market SLA metrics
+with automated alerting, extend bridge docs with
 multisig signer-set walkthroughs plus release-verifier guides, add end-to-end
 coverage for the DEX cursor codecs (CLI/explorer flows, escrow regression
 fuzzing), stand up the dependency fault simulation harness, finish the multisig
@@ -486,7 +489,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Subsidy Economy** | **96.4 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, durable proof-rebate receipts, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. The shared `governance` crate exports first-party sled persistence, proposal DAG validation, and Kalman helpers for all downstream tooling. | Wire treasury disbursement timelines into explorer dashboards and publish dependency metadata before opening external submissions. |
+| **Governance & Subsidy Economy** | **96.4 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, durable proof-rebate receipts, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. Dual-token treasury timelines now land in explorer/CLI with amount/timestamp filters, node/RPC codecs surface CT+IT balances, and the metrics aggregator exports matching CT/IT gauges with readiness-delta alerts wired into CI/runbooks. | Retire the legacy CT-only ledger readers after the activation vote, document the flip-over runbook, and publish dependency metadata before opening external submissions. |
 | **Consensus & Core Execution** | 93.6 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, release rollback helpers, coinbase rebate integration, and the parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 87.5 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **94.1 %** | Receipt-only logging, hourly batching, L1 anchoring, `gateway.reads_since` analytics, crash-safe `SimpleDb` snapshot rewrites, a unified `storage_engine` crate that abstracts RocksDB/sled/memory providers, the shared `coding` crate with XOR parity and RLE compression fallbacks behind audited rollout policy plus telemetry/bench-harness validation, first-party sled codecs with randomized property suites and sparse-manifest repair integration coverage, a ChaCha20-Poly1305–encrypted mobile cache with TTL min-heap sweeping, restart replay, entry/queue guardrails, CLI/RPC observability, and invalidation hooks, and newly enforced signed `ReadAck` headers that verify client keys before receipts enter the batcher keep reads free yet auditable and durable across restarts. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
@@ -504,7 +507,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 - **Run fleet-scale QUIC chaos drills** – invoke `scripts/chaos.sh --quic-loss 0.15 --quic-dup 0.03` across multi-region clusters, harvest retransmit deltas via `sim/quic_chaos_summary.rs`, and extend `docs/networking.md` with mitigation guidance pulled from the new telemetry traces.
 - **Document multisig signer payloads and release verification** – extend `docs/dex.md` and `docs/bridges.md` with the expanded signer-set schema, add release-verifier walkthroughs, update explorer guides, and ensure CLI examples mirror the JSON payload emitted by the wallet.
-- **Publish treasury dashboard alerts** – explorer widgets remain pending; aggregator ingestion, warning surfaces, and documentation in `docs/governance.md` have landed alongside the new `gov.treasury.*` RPC coverage.
+- **Finalize treasury activation flipbooks** – explorer widgets and CLI filters now expose CT+IT timelines, and aggregator warnings ship with readiness-delta alerts; prep the ledger cutover runbook, validate dashboards during the activation dry run, and retire CT-only readers immediately after governance flips the gate.
 - **Automate release rollout alerting** – add explorer jobs that reconcile `release_history` installs against the signer threshold, publish Grafana panels for stale nodes, and raise alerts when `release_quorum_fail_total` moves without a corresponding signer update.
 - **Stand up anomaly heuristics in the aggregator** – feed correlation caches into preliminary anomaly scoring, auto-request log dumps on clustered `quic_handshake_fail_total{peer}` spikes, and document the response workflow in `docs/monitoring.md`.
 - **Ship operator rollback drills** – expand `docs/governance_release.md` with staged rollback exercises that rehearse `update::rollback_failed_startup`, including guidance for restoring prior binaries and verifying provenance signatures after a revert.

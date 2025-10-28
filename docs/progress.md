@@ -1,4 +1,17 @@
 # Project Progress Snapshot
+> **Review (2025-10-28, evening):** Treasury consumers are now dual-token aware
+> end to end. The metrics aggregator registers CT and IT gauges for disbursement
+> totals, current balances, and last deltas, healing the partial refactor and
+> wiring the new counters into reset paths so dashboards inherit accurate
+> telemetry once governance flips the activation gate. Explorer and CLI surfaces
+> expose matching history: the REST `/governance/treasury/disbursements`
+> endpoint accepts status, amount, and timestamp filters with pagination cursors,
+> and the CLI forwards `--min-amount-{ct,it}`, `--max-amount-{ct,it}`,
+> `--min-created-at`, and epoch constraints to mirror long-range audits.
+> Monitoring, CI artefacts, and dashboards now ingest the readiness delta map via
+> the refreshed alert validator and rule deck, replacing legacy summaries with
+> the new `ad_readiness_utilization_delta_ppm` series so runbooks page on cohort
+> drift before activation.
 > **Review (2025-10-28, late morning):** Dual-token settlement now rides a
 > governance gate wired end to end. The new
 > `DualTokenSettlementEnabled` parameter flows from the governance runtime to the

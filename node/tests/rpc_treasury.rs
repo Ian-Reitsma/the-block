@@ -63,12 +63,12 @@ fn rpc_treasury_endpoints_surface_history() {
             gov_path.to_string_lossy().to_string(),
         );
         let store = GovStore::open(&gov_path);
-        store.record_treasury_accrual(1_000).expect("accrual");
+        store.record_treasury_accrual(1_000, 0).expect("accrual");
         let cancelled = store
-            .queue_disbursement("dest-1", 120, "initial", 42)
+            .queue_disbursement("dest-1", 120, 0, "initial", 42)
             .expect("queue cancelled");
         let executed = store
-            .queue_disbursement("dest-2", 80, "payout", 55)
+            .queue_disbursement("dest-2", 80, 5, "payout", 55)
             .expect("queue executed");
         store
             .execute_disbursement(executed.id, "0xfeed")
@@ -76,7 +76,9 @@ fn rpc_treasury_endpoints_surface_history() {
         store
             .cancel_disbursement(cancelled.id, "duplicate")
             .expect("cancel disbursement");
-        store.record_treasury_accrual(275).expect("second accrual");
+        store
+            .record_treasury_accrual(275, 15)
+            .expect("second accrual");
 
         let chain_dir = dir.path().join("chain");
         let bc = Arc::new(Mutex::new(Blockchain::new(chain_dir.to_str().unwrap())));
@@ -135,7 +137,9 @@ fn rpc_treasury_endpoints_surface_history() {
         let balance: RpcSuccess<TreasuryBalancePayload> =
             json::from_value(balance).expect("balance payload");
         let balance_ct = balance.result.balance_ct;
+        let balance_it = balance.result.balance_it;
         assert!(balance_ct >= 1_155);
+        assert!(balance_it >= 20);
         let last_snapshot = balance
             .result
             .last_snapshot
@@ -184,6 +188,7 @@ struct TreasuryDisbursementRecord {
     id: u64,
     destination: String,
     amount_ct: u64,
+    amount_it: u64,
     memo: String,
     scheduled_epoch: u64,
     created_at: u64,
@@ -204,6 +209,8 @@ enum DisbursementStatus {
 struct TreasuryBalancePayload {
     balance_ct: u64,
     #[serde(default)]
+    balance_it: u64,
+    #[serde(default)]
     last_snapshot: Option<TreasuryBalanceSnapshot>,
 }
 
@@ -213,6 +220,10 @@ struct TreasuryBalanceSnapshot {
     id: u64,
     balance_ct: u64,
     delta_ct: i64,
+    #[serde(default)]
+    balance_it: u64,
+    #[serde(default)]
+    delta_it: i64,
     recorded_at: u64,
     event: BalanceEventKind,
     #[serde(default)]
@@ -236,4 +247,6 @@ struct TreasuryBalanceHistoryPayload {
     #[serde(default)]
     next_cursor: Option<u64>,
     current_balance_ct: u64,
+    #[serde(default)]
+    current_balance_it: u64,
 }

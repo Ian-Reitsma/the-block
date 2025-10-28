@@ -51,6 +51,24 @@ RPC client.
   gauges, enabling CI and alerting to page on utilisation drift without adding
   RPC adapters or third-party JSON tooling.
 
+## Recent progress (2025-10-28)
+
+- Treasury RPC methods now surface CT and IT balances end to end. The
+  `gov.treasury.disbursements` schema picked up amount, timestamp, and epoch
+  filters using the existing request structs, and the balance/balance_history
+  envelopes carry mirrored CT/IT totals without introducing optional serde
+  fields. CLI and explorer callers reuse the same manual JSON builders so
+  history, pagination, and filters stay first party.
+- Metrics aggregator RPC exports expose the new
+  `treasury_disbursement_amount_{ct,it}`, `treasury_balance_current_{ct,it}`, and
+  `treasury_balance_last_delta_{ct,it}` gauges while keeping reset logic inside
+  the existing registry wrappers, ensuring dashboards inherit dual-token
+  telemetry without extra glue.
+- The monitoring alert validator gained readiness-delta fixtures covering the
+  expanded utilisation map so rule edits and CI artefacts expect the new
+  `ad_readiness_utilization_delta_ppm` series; the validator still runs entirely
+  through first-party JSON walkers.
+
 ## Recent progress (2025-10-27)
 
 - `foundation_object_store` now carries a canonical-request regression and a

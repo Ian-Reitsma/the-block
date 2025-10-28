@@ -145,18 +145,19 @@ can manage queued payouts with the first-party commands:
 
 ```bash
 contract gov treasury schedule tb1q... 500000 --memo "grants" --epoch 2048
+contract gov treasury schedule tb1q... 100000 --amount-it 25000 --memo "hardware" --epoch 3072
 contract gov treasury execute 1 0xdeadbeef
 contract gov treasury cancel 2 "policy update"
 contract gov treasury list
 ```
 
 Each action emits structured JSON describing the disbursement ID, destination,
-amount, memo, scheduled epoch, and status (`Scheduled`, `Executed`, or
-`Cancelled`). Explorer timelines and dashboards should read the same JSON file
-to render pending payouts and historical execution trails. Execution helpers
-record the supplied transaction hash and timestamps so auditors can reconcile
-on-chain movements with governance approval. Every queue/execute/cancel event
-also appends a balance snapshot noting the delta, resulting balance, and any
+CT and IT amounts, memo, scheduled epoch, and status (`Scheduled`, `Executed`, or
+`Cancelled`). Explorer timelines and dashboards should read the same JSON file to
+render pending payouts and historical execution trails. Execution helpers record
+the supplied transaction hash and timestamps so auditors can reconcile on-chain
+movements with governance approval. Every queue/execute/cancel event also
+appends a balance snapshot noting the CT/IT deltas, resulting balances, and any
 associated disbursement ID, keeping historical accruals in lockstep with the
 legacy JSON snapshots.
 
@@ -176,17 +177,21 @@ These playbooks keep subsidy accounting intact while telemetry, explorer, and CL
 The node exposes the treasury state over first-party JSON-RPC endpoints:
 
 - `gov.treasury.disbursements` returns paginated disbursement records with
-  optional status filtering.
+  optional status, amount, destination, created-at, status-timestamp, and
+  epoch-range filtering so long-range audits can scope the feed without
+  replaying the full ledger.
 - `gov.treasury.balance` reports the latest balance plus the most recent
-  snapshot.
+  snapshot (including CT and IT totals/deltas).
 - `gov.treasury.balance_history` streams historical balance snapshots with
   cursor-based pagination.
 
 These methods back the `contract gov treasury fetch` command, which merges the
 three responses into a single JSON document for downstream automation. The CLI
-now wraps transport failures with actionable stderr hints (e.g. connection
-refused, timeout, malformed endpoint) so operators can diagnose connectivity
-issues without diving into logs.
+now forwards `--min-amount-ct`, `--max-amount-ct`, `--min-amount-it`,
+`--max-amount-it`, `--min-created-at`, `--max-created-at`, `--min-epoch`, and
+`--max-epoch` filters when present, and it wraps transport failures with
+actionable stderr hints (e.g. connection refused, timeout, malformed endpoint)
+so operators can diagnose connectivity issues without diving into logs.
 
 Integration coverage exercises the HTTP dispatcher end-to-end, verifying that
 `run_rpc_server` honours pagination, balance snapshots, and the cached
@@ -194,7 +199,10 @@ Integration coverage exercises the HTTP dispatcher end-to-end, verifying that
 falls back to legacy balance schemas that represented numbers as strings and
 emits warnings whenever disbursement history exists without accompanying
 balance snapshots, helping operators spot persistence regressions before they
-affect dashboards.
+affect dashboards. The refreshed aggregator wiring now registers dual-token
+gauges for disbursement totals, current balances, and last deltas so dashboards
+and alerting inherit CT and IT coverage as soon as governance enables the
+activation gate.
 
 ## Proposing an Upgrade
 

@@ -179,6 +179,15 @@ SQL. The CLI and explorer surfaces expose the same events via first-party codecs
 and the monitoring bundle mirrors them so treasury, governance, and settlement
 audits all reference identical data.
 
+Adjacent single-stat tiles now publish
+`treasury_disbursement_amount_{ct,it}`, `treasury_disbursement_count`,
+`treasury_balance_current_{ct,it}`, and
+`treasury_balance_last_delta_{ct,it}` directly from the metrics aggregator. The
+reset logic was updated alongside the dual-token gauges so dashboards, CI HTML
+snapshots, and runbooks inherit the CT/IT balance story without waiting for the
+governance activation. Alerts reuse the same counters to warn when balances or
+disbursement volumes drift across currencies.
+
 An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
 `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
@@ -201,6 +210,13 @@ Prometheus now fires `AdReadinessUtilizationDelta` whenever
 request volume. The alert routes to the existing CI/on-call channels, tying the
 governance utilisation targets to telemetry and paging operators before cohort
 drift forces emergency settlement overrides.
+
+Runbooks and CI artefacts have been updated to expect the delta map; the
+`monitoring/src/alert_validator.rs` dataset now covers the new readiness
+families so rule edits fail fast if the delta gauges disappear. Dashboard
+snapshots, JSON exports, and release checks consume the same
+`ad_readiness_utilization_delta_ppm` data, replacing the deprecated legacy
+summary panels.
 
 The metrics aggregator now persists the explorer payout counters per peer and
 role so deltas remain monotonic across scrapes.

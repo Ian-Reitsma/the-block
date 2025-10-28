@@ -13,10 +13,10 @@ fn node_treasury_accrual_flow() -> Result<()> {
     let store = GovStore::open(&db_path);
     assert_eq!(store.treasury_balance()?, 0);
 
-    store.record_treasury_accrual(64)?;
+    store.record_treasury_accrual(64, 16)?;
     assert_eq!(store.treasury_balance()?, 64);
 
-    let queued = store.queue_disbursement("dest", 10, "", 0)?;
+    let queued = store.queue_disbursement("dest", 10, 4, "", 0)?;
     assert_eq!(queued.id, 1);
     assert_eq!(store.treasury_balance()?, 64);
 
@@ -32,6 +32,13 @@ fn node_treasury_accrual_flow() -> Result<()> {
     assert!(history
         .iter()
         .any(|snap| matches!(snap.event, TreasuryBalanceEventKind::Executed)));
+    assert_eq!(
+        history
+            .last()
+            .map(|snap| (snap.balance_ct, snap.balance_it))
+            .unwrap(),
+        (54, 12)
+    );
     Ok(())
 }
 

@@ -25,6 +25,14 @@ cells while trimming runtime.
   `telemetry_summary_to_value` helper, extending the existing manual JSON map and
   Prometheus wrappers while the new `AdReadinessUtilizationDelta` alert rides the
   first-party ruleset.
+- ✅ Treasury filters, CT/IT balances, and readiness-delta dashboards remain on
+  first-party plumbing. Explorer and CLI disbursement queries add amount/time
+  filters by extending existing structs, the governance RPCs expose CT/IT totals
+  via the handwritten cursor helpers, and the metrics aggregator’s
+  `treasury_disbursement_amount_{ct,it}`/`treasury_balance_{current,last_delta}_{ct,it}`
+  gauges reuse in-house Prometheus wrappers. Monitoring’s alert validator gained
+  dual-token readiness fixtures so CI/runbooks consume the new delta map without
+  introducing query builders or serde fallbacks.
 - ✅ Ad marketplace dual-currency settlements reuse existing helpers. The new
   USD→CT/IT conversions live entirely inside `crates/ad_market`, rely solely on
   `std` arithmetic plus the existing oracle/distribution structs, and emit the

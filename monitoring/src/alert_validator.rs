@@ -8,6 +8,7 @@ const GROUP_BRIDGE: &str = "bridge";
 const GROUP_CHAIN_HEALTH: &str = "chain-health";
 const GROUP_DEPENDENCY_REGISTRY: &str = "dependency-registry";
 const GROUP_TREASURY: &str = "treasury";
+const GROUP_AD_READINESS: &str = "ad_readiness";
 
 const ALERT_DELTA: &str = "BridgeCounterDeltaSkew";
 const ALERT_RATE: &str = "BridgeCounterRateSkew";
@@ -35,6 +36,7 @@ const ALERT_DEP_VIOLATION_SPIKE: &str = "DependencyPolicyViolationSpike";
 
 const ALERT_TREASURY_SNAPSHOT: &str = "TreasuryDisbursementSnapshotStale";
 const ALERT_TREASURY_OVERDUE: &str = "TreasuryDisbursementScheduleOverdue";
+const ALERT_AD_READINESS_DELTA: &str = "AdReadinessUtilizationDelta";
 
 const EXPECTED_DELTA_EXPR: &str = "(bridge_metric_delta>avg_over_time(bridge_metric_delta[30m])*3)and(bridge_metric_delta>10)and(count_over_time(bridge_metric_delta[30m])>=6)";
 const EXPECTED_RATE_EXPR: &str = "(bridge_metric_rate_per_second>avg_over_time(bridge_metric_rate_per_second[30m])*3)and(bridge_metric_rate_per_second>0.5)and(count_over_time(bridge_metric_rate_per_second[30m])>=6)";
@@ -71,6 +73,8 @@ const EXPECTED_DEP_VIOLATION_SPIKE_EXPR: &str = "increase(dependency_policy_viol
 const EXPECTED_TREASURY_SNAPSHOT_EXPR: &str = "treasury_disbursement_snapshot_age_seconds>900";
 const EXPECTED_TREASURY_OVERDUE_EXPR: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds>7200";
+const EXPECTED_AD_READINESS_DELTA_EXPR: &str =
+    "max_over_time(abs(ad_readiness_utilization_delta_ppm)[15m])>100000";
 
 const METRIC_DELTA: &str = "bridge_metric_delta";
 const METRIC_RATE: &str = "bridge_metric_rate_per_second";
@@ -101,6 +105,7 @@ const EXPECTED_DEP_VIOLATION_SPIKE_SERIES: &[&str] = &["policy-violation-spike"]
 
 const EXPECTED_TREASURY_SNAPSHOT_SERIES: &[&str] = &["snapshot-stale"];
 const EXPECTED_TREASURY_OVERDUE_SERIES: &[&str] = &["schedule-overdue"];
+const EXPECTED_AD_READINESS_SERIES: &[&str] = &["cohort-drift"];
 
 #[derive(Debug)]
 pub enum ValidationError {
@@ -186,6 +191,14 @@ pub fn validate_treasury_alerts() -> Result<(), ValidationError> {
     validate_treasury_alerts_from_str(&content)
 }
 
+#[allow(dead_code)]
+pub fn validate_ad_readiness_alerts() -> Result<(), ValidationError> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir.join(ALERT_FILE);
+    let content = std::fs::read_to_string(&path).map_err(ValidationError::Io)?;
+    validate_ad_readiness_alerts_from_str(&content)
+}
+
 pub fn validate_all_alerts() -> Result<(), ValidationError> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir.join(ALERT_FILE);
@@ -193,7 +206,8 @@ pub fn validate_all_alerts() -> Result<(), ValidationError> {
     validate_bridge_alerts_from_str(&content)?;
     validate_chain_health_alerts_from_str(&content)?;
     validate_dependency_registry_alerts_from_str(&content)?;
-    validate_treasury_alerts_from_str(&content)
+    validate_treasury_alerts_from_str(&content)?;
+    validate_ad_readiness_alerts_from_str(&content)
 }
 
 fn validate_bridge_alerts_from_str(content: &str) -> Result<(), ValidationError> {
@@ -402,6 +416,24 @@ fn validate_treasury_alerts_from_str(content: &str) -> Result<(), ValidationErro
     Ok(())
 }
 
+fn validate_ad_readiness_alerts_from_str(content: &str) -> Result<(), ValidationError> {
+    let alerts = extract_group_alerts(content, GROUP_AD_READINESS);
+
+    validate_expression(
+        ALERT_AD_READINESS_DELTA,
+        EXPECTED_AD_READINESS_DELTA_EXPR,
+        &alerts,
+    )?;
+
+    let dataset = build_ad_readiness_dataset();
+
+    validate_results(
+        ALERT_AD_READINESS_DELTA,
+        EXPECTED_AD_READINESS_SERIES,
+        evaluate_ad_readiness_delta(&dataset, 100_000.0),
+    )
+}
+
 fn validate_expression(
     alert: &'static str,
     expected: &'static str,
@@ -602,6 +634,14 @@ fn evaluate_treasury_threshold(samples: &[TreasurySample], threshold: f64) -> BT
     samples
         .iter()
         .filter(|sample| sample.age_secs > threshold)
+        .map(|sample| sample.name.to_string())
+        .collect()
+}
+
+fn evaluate_ad_readiness_delta(samples: &[AdReadinessSample], threshold: f64) -> BTreeSet<String> {
+    samples
+        .iter()
+        .filter(|sample| sample.delta_ppm.abs() > threshold)
         .map(|sample| sample.name.to_string())
         .collect()
 }
@@ -1043,6 +1083,19 @@ fn build_treasury_dataset() -> TreasuryDataset {
     }
 }
 
+fn build_ad_readiness_dataset() -> Vec<AdReadinessSample> {
+    vec![
+        AdReadinessSample {
+            name: "cohort-drift",
+            delta_ppm: 125_000.0,
+        },
+        AdReadinessSample {
+            name: "cohort-normal",
+            delta_ppm: 45_000.0,
+        },
+    ]
+}
+
 fn build_series(base: f64, base_len: usize, spike: f64, spike_len: usize) -> Vec<f64> {
     let mut values = Vec::with_capacity(base_len + spike_len);
     values.extend(std::iter::repeat(base).take(base_len));
@@ -1192,6 +1245,11 @@ struct TreasuryDataset {
 struct TreasurySample {
     name: &'static str,
     age_secs: f64,
+}
+
+struct AdReadinessSample {
+    name: &'static str,
+    delta_ppm: f64,
 }
 
 #[cfg(test)]
