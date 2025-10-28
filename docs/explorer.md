@@ -10,6 +10,13 @@ Blocks indexed after the governance split now store per-role CT distributions fo
 
 Integration coverage now pairs the JSON snapshots with binary block headers so decoder fallbacks stay verified when explorers mix historic and modern payloads in the same sync window. Unit coverage still exercises the JSON fallback with legacy snapshots that omit the per-role fields entirely, guaranteeing FIRST_PARTY_ONLY builds continue to render historical payouts even as the header shape evolves. The CLI command also validates that exactly one of `--hash` or `--height` is supplied and reports a clear error when a block is missing, keeping automation flows hermetic without shell scripting or third-party JSON tooling.
 
+Blocks also project a `treasury_events` array that chronicles executed treasury
+disbursements for the block. Each entry includes the execution height, target
+account, USD amount, currency, and originating transaction hash, letting
+operators audit downstream payouts without scraping ledger state. The CLI renders
+the same timeline alongside settlement totals so runbooks and dashboards share a
+single source of truth for dual-token payouts and treasury execution.
+
 #### Automation examples
 
 Hash-driven payout lookup via the CLI:

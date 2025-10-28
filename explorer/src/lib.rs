@@ -17,7 +17,7 @@ use the_block::{
     governance::{DisbursementStatus, TreasuryDisbursement},
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
-    Block,
+    Block, BlockTreasuryEvent,
 };
 
 mod ai_summary;
@@ -751,6 +751,104 @@ pub struct RolePayoutBreakdown {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreasuryTimelineEvent {
+    pub disbursement_id: u64,
+    pub destination: String,
+    pub amount_ct: u64,
+    pub memo: String,
+    pub scheduled_epoch: u64,
+    pub tx_hash: String,
+    pub executed_at: u64,
+}
+
+impl TreasuryTimelineEvent {
+    fn from_event(event: &BlockTreasuryEvent) -> Self {
+        Self {
+            disbursement_id: event.disbursement_id,
+            destination: event.destination.clone(),
+            amount_ct: event.amount_ct,
+            memo: event.memo.clone(),
+            scheduled_epoch: event.scheduled_epoch,
+            tx_hash: event.tx_hash.clone(),
+            executed_at: event.executed_at,
+        }
+    }
+
+    fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert(
+            "disbursement_id".into(),
+            json::Value::Number(json::Number::from(self.disbursement_id)),
+        );
+        map.insert(
+            "destination".into(),
+            json::Value::String(self.destination.clone()),
+        );
+        map.insert(
+            "amount_ct".into(),
+            json::Value::Number(json::Number::from(self.amount_ct)),
+        );
+        map.insert("memo".into(), json::Value::String(self.memo.clone()));
+        map.insert(
+            "scheduled_epoch".into(),
+            json::Value::Number(json::Number::from(self.scheduled_epoch)),
+        );
+        map.insert("tx_hash".into(), json::Value::String(self.tx_hash.clone()));
+        map.insert(
+            "executed_at".into(),
+            json::Value::Number(json::Number::from(self.executed_at)),
+        );
+        json::Value::Object(map)
+    }
+
+    fn from_json_array(value: Option<&json::Value>) -> Vec<Self> {
+        let Some(value) = value else {
+            return Vec::new();
+        };
+        let Some(array) = value.as_array() else {
+            return Vec::new();
+        };
+        array
+            .iter()
+            .filter_map(|entry| entry.as_object())
+            .map(|map| Self {
+                disbursement_id: map
+                    .get("disbursement_id")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+                destination: map
+                    .get("destination")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                amount_ct: map
+                    .get("amount_ct")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+                memo: map
+                    .get("memo")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                scheduled_epoch: map
+                    .get("scheduled_epoch")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+                tx_hash: map
+                    .get("tx_hash")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                executed_at: map
+                    .get("executed_at")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockPayoutBreakdown {
     pub hash: String,
     pub height: u64,
@@ -760,6 +858,7 @@ pub struct BlockPayoutBreakdown {
     pub settlement_count: u64,
     pub ct_price_usd_micros: u64,
     pub it_price_usd_micros: u64,
+    pub treasury_events: Vec<TreasuryTimelineEvent>,
 }
 
 impl BlockPayoutBreakdown {
@@ -832,6 +931,12 @@ impl BlockPayoutBreakdown {
             miner_it: ad_miner_it,
         };
 
+        let treasury_events = block
+            .treasury_events
+            .iter()
+            .map(TreasuryTimelineEvent::from_event)
+            .collect();
+
         Self {
             hash: block.hash.clone(),
             height: block.index,
@@ -841,6 +946,7 @@ impl BlockPayoutBreakdown {
             settlement_count: block.ad_settlement_count,
             ct_price_usd_micros: block.ad_oracle_ct_price_usd_micros,
             it_price_usd_micros: block.ad_oracle_it_price_usd_micros,
+            treasury_events,
         }
     }
 
@@ -950,6 +1056,7 @@ impl BlockPayoutBreakdown {
             settlement_count,
             ct_price_usd_micros: ct_price,
             it_price_usd_micros: it_price,
+            treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
         })
     }
 
@@ -975,6 +1082,7 @@ impl BlockPayoutBreakdown {
                 settlement_count: Self::field_u64(map, "settlement_count"),
                 ct_price_usd_micros: Self::field_u64(map, "ct_price_usd_micros"),
                 it_price_usd_micros: Self::field_u64(map, "it_price_usd_micros"),
+                treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
             });
         }
 
@@ -1003,6 +1111,12 @@ impl BlockPayoutBreakdown {
             "it_price_usd_micros".into(),
             Self::number(self.it_price_usd_micros),
         );
+        let events = self
+            .treasury_events
+            .iter()
+            .map(TreasuryTimelineEvent::to_json_value)
+            .collect();
+        map.insert("treasury_events".into(), json::Value::Array(events));
         json::Value::Object(map)
     }
 }

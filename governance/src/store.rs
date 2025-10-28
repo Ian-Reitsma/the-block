@@ -1579,6 +1579,9 @@ impl GovStore {
                                 ParamKey::ReadSubsidyLiquidityPercent => {
                                     params.read_subsidy_liquidity_percent
                                 }
+                                ParamKey::DualTokenSettlementEnabled => {
+                                    params.dual_token_settlement_enabled
+                                }
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -1755,6 +1758,7 @@ impl GovStore {
                 ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
                 ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
                 ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
+                ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -1804,6 +1808,7 @@ impl GovStore {
             ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
             ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
             ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
+            ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
             ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
             ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
             ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,

@@ -25,6 +25,24 @@
 > artefacts, dashboards, and alerting pipelines ingest the summary map to page
 > whenever utilisation diverges from the governance targets despite steady
 > demand, keeping the Walrasian tâtonnement loop observable end to end.
+
+> **Review (2025-11-09, morning):** Dual-token settlements now sit behind a
+> governance flag and every block publishes the treasury execution timeline used
+> to settle downstream disbursements. The governance crate and node runtime share
+> the new `DualTokenSettlementEnabled` parameter, codecs, and persistent store
+> plumbing so toggling the flag flips the ad-market distribution policy without
+> restarting validators. When disabled, the marketplace collapses to CT-only
+> payouts; when enabled, IT conversions resume with the configured liquidity
+> splits. Blocks annotate each executed disbursement with execution height,
+> beneficiary, token, USD amount, and linked transaction so operators can replay
+> the treasury stream exactly as the runtime observed it. Explorer and CLI
+> surfaces render these events alongside per-block settlement totals, while the
+> SQLite indexer persists them for historical queries. Telemetry exports now
+> forward cohort utilisation deltas through the metrics aggregator’s JSON
+> payloads, and Prometheus fires `AdReadinessUtilizationDelta` when any cohort
+> drifts past thresholds under steady demand, giving CI artefacts and dashboards
+> end-to-end visibility into pricing inputs, treasury releases, and governance
+> toggles.
 > **Review (2025-10-27, evening):** Chaos artefacts now include explicit
 > manifests and bundles, and publishing stays first party. `sim/chaos_lab.rs`
 > persists a run-specific `manifest.json` (referenced by `archive/latest.json`)
@@ -97,6 +115,10 @@
   refactor funnels both backends through a shared
   `convert_parts_to_tokens` helper so future tweaks hit the in-memory and sled
   paths identically.
+- Instrumented the shared conversion helper with debug assertions that reconcile
+  each minted token slice and its rounding remainder with the original USD
+  allocation, ensuring the CT logic never sees the unsplit liquidity bucket and
+  catching double-counting regressions during debug builds.
 - Hardened `allocate_usd` so `RoleUsdParts` records liquidity as CT and IT
   slices up front; helpers that mint CT can no longer see the unsplit amount,
   closing the regression where future call sites might accidentally double
@@ -109,6 +131,10 @@
   ledger replay that sums mixed liquidity splits without mining, and extended
   the explorer block API test to cover all-IT and all-CT liquidity extremes so
   the JSON pipeline stays aligned with governance policy and oracle inputs.
+- Added a targeted rounding regression that exercises a pure-liquidity
+  settlement under uneven oracle prices, proving the CT and IT slices stay within
+  their USD budgets even when remainders spill into miner payouts and
+  `unsettled_usd_micros`.
 
 ### Operational Impact
 

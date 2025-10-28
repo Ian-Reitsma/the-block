@@ -288,10 +288,11 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::BridgeFailureSlash => 40,
         ParamKey::BridgeChallengeSlash => 41,
         ParamKey::BridgeDutyWindowSecs => 42,
-        ParamKey::AdReadinessWindowSecs => 43,
-        ParamKey::AdReadinessMinUniqueViewers => 44,
-        ParamKey::AdReadinessMinHostCount => 45,
-        ParamKey::AdReadinessMinProviderCount => 46,
+        ParamKey::DualTokenSettlementEnabled => 43,
+        ParamKey::AdReadinessWindowSecs => 44,
+        ParamKey::AdReadinessMinUniqueViewers => 45,
+        ParamKey::AdReadinessMinHostCount => 46,
+        ParamKey::AdReadinessMinProviderCount => 47,
     }
 }
 
@@ -340,10 +341,11 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         40 => ParamKey::BridgeFailureSlash,
         41 => ParamKey::BridgeChallengeSlash,
         42 => ParamKey::BridgeDutyWindowSecs,
-        43 => ParamKey::AdReadinessWindowSecs,
-        44 => ParamKey::AdReadinessMinUniqueViewers,
-        45 => ParamKey::AdReadinessMinHostCount,
-        46 => ParamKey::AdReadinessMinProviderCount,
+        43 => ParamKey::DualTokenSettlementEnabled,
+        44 => ParamKey::AdReadinessWindowSecs,
+        45 => ParamKey::AdReadinessMinUniqueViewers,
+        46 => ParamKey::AdReadinessMinHostCount,
+        47 => ParamKey::AdReadinessMinProviderCount,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -1003,6 +1005,7 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::BridgeFailureSlash => "BridgeFailureSlash",
         ParamKey::BridgeChallengeSlash => "BridgeChallengeSlash",
         ParamKey::BridgeDutyWindowSecs => "BridgeDutyWindowSecs",
+        ParamKey::DualTokenSettlementEnabled => "DualTokenSettlementEnabled",
         ParamKey::AdReadinessWindowSecs => "AdReadinessWindowSecs",
         ParamKey::AdReadinessMinUniqueViewers => "AdReadinessMinUniqueViewers",
         ParamKey::AdReadinessMinHostCount => "AdReadinessMinHostCount",
@@ -1055,6 +1058,7 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "BridgeFailureSlash" => Ok(ParamKey::BridgeFailureSlash),
         "BridgeChallengeSlash" => Ok(ParamKey::BridgeChallengeSlash),
         "BridgeDutyWindowSecs" => Ok(ParamKey::BridgeDutyWindowSecs),
+        "DualTokenSettlementEnabled" => Ok(ParamKey::DualTokenSettlementEnabled),
         "AdReadinessWindowSecs" => Ok(ParamKey::AdReadinessWindowSecs),
         "AdReadinessMinUniqueViewers" => Ok(ParamKey::AdReadinessMinUniqueViewers),
         "AdReadinessMinHostCount" => Ok(ParamKey::AdReadinessMinHostCount),

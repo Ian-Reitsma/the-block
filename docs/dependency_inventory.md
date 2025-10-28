@@ -14,13 +14,26 @@ cells while trimming runtime.
 
 ## Highlights
 
+- ✅ Dual-token settlement gating, treasury timelines, and readiness deltas stay
+  entirely first party. Governance and node crates share hand-written codecs,
+  stores, and runtime plumbing for the new `DualTokenSettlementEnabled`
+  parameter, keeping the toggle in sled-backed cursors without introducing
+  schema generators. Block codecs in `node/src/block_binary.rs` continue to use
+  the in-house cursor helpers, and explorer/CLI surfaces reuse the existing
+  SQLite + JSON builders to persist and render `treasury_events` timelines. The
+  metrics aggregator exports readiness deltas through the same
+  `telemetry_summary_to_value` helper, extending the existing manual JSON map and
+  Prometheus wrappers while the new `AdReadinessUtilizationDelta` alert rides the
+  first-party ruleset.
 - ✅ Ad marketplace dual-currency settlements reuse existing helpers. The new
   USD→CT/IT conversions live entirely inside `crates/ad_market`, rely solely on
   `std` arithmetic plus the existing oracle/distribution structs, and emit the
   richer `SettlementBreakdown` without introducing serde/json dependencies or
   additional crates. Liquidity conversions now honour
-  `liquidity_split_ct_ppm` before minting CT so IT allocations are not double
-  counted, and unit coverage locks both the rounding behaviour and the split so
+  `liquidity_split_ct_ppm` before minting CT, the helper enforces the split with
+  debug assertions, and a new uneven-price regression proves the CT/IT slices stay
+  within budgeted USD so IT allocations are not double counted. Unit coverage locks
+  both the rounding behaviour and the split so
   future ledger migrations remain first party. Ledger/explorer regressions sum
   pending settlements and replay CT-only/IT-heavy liquidity snapshots entirely
   through the existing node/explorer harnesses, confirming the pipeline stays

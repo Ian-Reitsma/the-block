@@ -35,6 +35,10 @@ ready to import once the foundation telemetry stack is running.
   `explorer_block_payout_ad_usd_total{peer}`,
   `explorer_block_payout_ad_settlement_count{peer}`, and the CT/IT oracle gauges
   so CI and dashboards trend the USD conversions alongside the role deltas.
+  A companion **Treasury Execution Timeline** panel renders
+  `Block::treasury_events`, displaying execution height, beneficiary, currency,
+  USD amount, and transaction hash so treasury releases appear next to the payout
+  counters without scraping explorer SQL.
 - An "Ad Readiness" row accompanies the payout panels and charts
   `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
   `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
@@ -48,6 +52,10 @@ ready to import once the foundation telemetry stack is running.
   clean. The same gauges flow into CI artefacts and HTML snapshots so automation,
   operators, and dashboards consume an identical oracle snapshot, utilisation
   summary, and settlement view before enabling new cohorts.
+  The new `AdReadinessUtilizationDelta` alert pages when
+  `abs(delta_utilization_ppm)` exceeds the configured threshold under steady
+  demand, anchoring the readiness row to the same Prometheus rule that protects
+  the dual-token treasury flow.
 - The consolidated bridge row now ships in every core dashboard. Panels chart
   five-minute deltas for `bridge_reward_claims_total`,
   `bridge_reward_approvals_consumed_total`,

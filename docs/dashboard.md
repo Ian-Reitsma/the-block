@@ -16,7 +16,9 @@ now consume `SettlementBreakdown` directly. With the liquidity CT conversion
 respecting `liquidity_split_ct_ppm`, the CT and IT totals rendered in the
 dashboard match the USD amounts and oracle snapshot captured during settlement,
 removing the temporary over-reporting that appeared while the IT share was
-double counted.
+double counted. Debug assertions in the shared helper and a new uneven-price
+regression keep the split anchored even when oracle prices produce non-zero
+remainders, so dashboards never drift from the configured budgets.
 
 The static dashboard now calls out the peer-level gauges emitted by the explorer
 pipeline—`explorer_block_payout_ad_usd_total`,
@@ -27,3 +29,12 @@ oracles (`ad_readiness_market_{ct,it}_price_usd_micros`), the settlement totals,
 and the `utilization` map returned by `ad_market.readiness`, showing
 mean/min/max cohort utilisation plus per-cohort targets, observed ppm, deltas,
 and price-per-MiB inputs that informed the latest settlements.
+
+The treasury section gained a **Dual-Token Disbursements** timeline sourced from
+the new `Block::treasury_events` payload. Each executed disbursement displays the
+beneficiary, token, USD amount, execution height, and the originating
+transaction hash so operators can audit payouts alongside the settlement cards.
+Dashboards colourise events whose cohorts triggered the
+`AdReadinessUtilizationDelta` alert, tying treasury releases back to the
+readiness deltas emitted by the metrics aggregator and confirming governance
+flags are aligned across runtime, explorer, and telemetry surfaces.

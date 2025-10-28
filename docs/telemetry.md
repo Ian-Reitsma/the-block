@@ -179,6 +179,10 @@ cluster-wide gauges when compiled with `--features telemetry`:
   the aggregator prunes retired label handles; pair them with the readiness RPC’s
   `utilization` summary (mean/min/max ppm plus per-cohort price/target pairs) to
   page when utilisation drifts from governance targets despite steady demand.
+  The aggregator now forwards the entire `ad_readiness` JSON map—including
+  `delta_utilization_ppm`—through `telemetry_summary_to_value`, so CI artefacts
+  and downstream automation consume the same per-cohort deltas that drive the new
+  Prometheus alerting rules.
 - `chaos_readiness{module,scenario}`,
   `chaos_site_readiness{module,scenario,site,provider}`, and
   `chaos_sla_breach_total` – readiness snapshots and breach counts derived from

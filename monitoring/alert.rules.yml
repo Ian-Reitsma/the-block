@@ -233,3 +233,13 @@ groups:
           severity: page
         annotations:
           summary: "Oldest scheduled treasury disbursement pending for {{ printf \"%.0f\" $value }} seconds"
+  - name: ad_readiness
+    rules:
+      - alert: AdReadinessUtilizationDelta
+        expr: |
+          max_over_time(abs(ad_readiness_utilization_delta_ppm)[15m]) > 100000
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Ad cohort utilization drift exceeds 10% for {{ $labels.domain }} (provider {{ $labels.provider }}, badges {{ $labels.badges }})"
