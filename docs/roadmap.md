@@ -9,7 +9,9 @@
 > CT totals. Fresh unit tests in `crates/ad_market` lock the USD→CT/IT conversions
 > and rounding semantics, and the sled/RPC harness continues to pass against the
 > enriched schema so gateway and explorer surfaces inherit the new metadata
-> immediately.
+> immediately. Ledger/explorer regressions replay contrasting liquidity splits to
+> ensure RPC/CLI/CI consumers observe the same CT/IT totals and oracle snapshots
+> regardless of backend.
 > **Review (2025-10-26, late morning):** Liquidity router coverage now mirrors
 > production sequencing guarantees. Slack-aware trust routing prioritises the
 > widest residual-capacity path while still exposing a shortest-path fallback
@@ -107,7 +109,12 @@
 > `ad_market.readiness` publishes the archived snapshot, live market oracle
 > values, and a `utilization` map. Grafana rows and release automation now chart
 > those gauges so governance can flip the CT→CT+IT transition with full
-> visibility into pricing inputs and utilisation.
+> visibility into pricing inputs and utilisation. The readiness RPC stores the
+> live market oracle alongside the archived price, emits per-cohort target vs.
+> observed utilisation deltas, and the telemetry/aggregator surfaces matching
+> gauges (`ad_readiness_utilization_{observed,target,delta}_ppm`) while pruning
+> stale label handles, letting CI alert when utilisation diverges from targets
+> even as demand stays flat.
 > **Review (2025-10-24, late night):** The sled-backed ad marketplace now powers
 > governance audits and RPC/CLI automation. Campaign registration, distribution
 > policy reads, and inventory listings flow through first-party handlers, while

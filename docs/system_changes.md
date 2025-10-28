@@ -10,6 +10,21 @@
 > the liquidity split, and the rounding behaviour, and the sled/in-memory
 > implementations share the same helper so RPC/gateway flows return consistent
 > JSON across backends.
+> **Review (2025-11-08, early morning):** Readiness telemetry now exposes the
+> utilisation signals that govern posted-price updates. The node persists the
+> archived oracle snapshot **and** the live marketplace oracle inside
+> `AdReadinessSnapshot`, records per-cohort target/observed/delta utilisation,
+> and computes a summary table with cohort counts and ppm extremes. The readiness
+> RPC surfaces these fields alongside blocker strings so automation can diff the
+> conversion inputs that produced the latest settlements. Telemetry wiring threads
+> the same snapshot into the Prometheus exporter: `telemetry::summary` now emits
+> gauges for market-oracle prices, settlement totals, and utilisation deltas, and
+> the metrics aggregator registers
+> `ad_readiness_utilization_{observed,target,delta}_ppm{domain,provider,badge}`
+> families while pruning label handles when cohorts fall out of rotation. CI
+> artefacts, dashboards, and alerting pipelines ingest the summary map to page
+> whenever utilisation diverges from the governance targets despite steady
+> demand, keeping the Walrasian tâtonnement loop observable end to end.
 > **Review (2025-10-27, evening):** Chaos artefacts now include explicit
 > manifests and bundles, and publishing stays first party. `sim/chaos_lab.rs`
 > persists a run-specific `manifest.json` (referenced by `archive/latest.json`)
@@ -78,13 +93,22 @@
 - Taught both the in-memory and sled marketplaces to compute USD shares per
   role, convert the CT portion (including liquidity via `split_liquidity_usd`)
   with the current oracle price, and accumulate a single `total_ct` that matches
-  the existing ledger flow without double counting the IT allocation.
+  the existing ledger flow without double counting the IT allocation. The
+  refactor funnels both backends through a shared
+  `convert_parts_to_tokens` helper so future tweaks hit the in-memory and sled
+  paths identically.
+- Hardened `allocate_usd` so `RoleUsdParts` records liquidity as CT and IT
+  slices up front; helpers that mint CT can no longer see the unsplit amount,
+  closing the regression where future call sites might accidentally double
+  convert the liquidity budget.
 - Added mirrored IT conversions for host, hardware, verifier, liquidity, and the
   miner remainder, storing the oracle snapshot alongside the new token counts and
   `unsettled_usd_micros` residual so downstream tooling can reconcile rounding.
 - Updated the ad market unit suite to assert CT/IT totals, the liquidity split,
-  oracle snapshots, and rounding limits under deterministic oracles, and
-  refreshed the RPC integration tests so the richer JSON schema remains stable.
+  oracle snapshots, and rounding limits under deterministic oracles, added a
+  ledger replay that sums mixed liquidity splits without mining, and extended
+  the explorer block API test to cover all-IT and all-CT liquidity extremes so
+  the JSON pipeline stays aligned with governance policy and oracle inputs.
 
 ### Operational Impact
 

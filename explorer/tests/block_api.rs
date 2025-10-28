@@ -137,6 +137,109 @@ fn block_lookup_and_payout_breakdown() {
 }
 
 #[test]
+fn block_lookup_handles_liquidity_split_extremes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("explorer.db");
+    let explorer = Explorer::open(&db_path).expect("open explorer");
+
+    let height = 22u64;
+    let ad_liquidity_ct = 0u64;
+    let ad_liquidity_it = 17u64;
+    let ad_host_ct = 9u64;
+    let ad_host_it = 4u64;
+    let ad_viewer = 11u64;
+    let ad_hardware_ct = 5u64;
+    let ad_verifier_ct = 3u64;
+    let ad_miner_ct = 2u64;
+    let ad_miner_it = 6u64;
+    let ad_total_usd_micros = 310_000u64;
+    let ad_ct_price = 950_000u64;
+    let ad_it_price = 1_050_000u64;
+    let zero_array = format!("{:?}", [0u8; 32]);
+
+    let block_json = format!(
+        r#"{{
+            "index": {height},
+            "previous_hash": "",
+            "timestamp_millis": 0,
+            "transactions": [],
+            "difficulty": 0,
+            "retune_hint": 0,
+            "nonce": 0,
+            "hash": "split-extreme",
+            "coinbase_consumer": 0,
+            "coinbase_industrial": 0,
+            "storage_sub_ct": 0,
+            "read_sub_ct": 0,
+            "read_sub_viewer_ct": 0,
+            "read_sub_host_ct": 0,
+            "read_sub_hardware_ct": 0,
+            "read_sub_verifier_ct": 0,
+            "read_sub_liquidity_ct": 0,
+            "ad_viewer_ct": {ad_viewer},
+            "ad_host_ct": {ad_host_ct},
+            "ad_hardware_ct": {ad_hardware_ct},
+            "ad_verifier_ct": {ad_verifier_ct},
+            "ad_liquidity_ct": {ad_liquidity_ct},
+            "ad_miner_ct": {ad_miner_ct},
+            "ad_host_it": {ad_host_it},
+            "ad_hardware_it": 0,
+            "ad_verifier_it": 0,
+            "ad_liquidity_it": {ad_liquidity_it},
+            "ad_miner_it": {ad_miner_it},
+            "ad_total_usd_micros": {ad_total_usd_micros},
+            "ad_settlement_count": 2,
+            "ad_oracle_ct_price_usd_micros": {ad_ct_price},
+            "ad_oracle_it_price_usd_micros": {ad_it_price},
+            "compute_sub_ct": 0,
+            "proof_rebate_ct": 0,
+            "storage_sub_it": 0,
+            "read_sub_it": 0,
+            "compute_sub_it": 0,
+            "read_root": {zero_array},
+            "fee_checksum": "",
+            "state_root": "",
+            "base_fee": 0,
+            "l2_roots": [],
+            "l2_sizes": [],
+            "vdf_commit": {zero_array},
+            "vdf_output": {zero_array},
+            "vdf_proof": []
+        }}"#
+    );
+
+    let conn = Connection::open(&db_path).expect("open sqlite");
+    conn.execute(
+        "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
+        params!["split-extreme", height as i64, block_json.as_bytes()],
+    )
+    .expect("insert block");
+
+    let payouts = explorer
+        .block_payouts("split-extreme")
+        .expect("payout query")
+        .expect("payout breakdown present");
+
+    assert_eq!(payouts.hash, "split-extreme");
+    assert_eq!(payouts.height, height);
+    assert_eq!(payouts.advertising.liquidity_ct, 0);
+    assert_eq!(payouts.advertising.liquidity_it, ad_liquidity_it);
+    assert_eq!(payouts.advertising.host_ct, ad_host_ct);
+    assert_eq!(payouts.advertising.host_it, ad_host_it);
+    assert_eq!(
+        payouts.advertising.total_ct,
+        ad_viewer + ad_host_ct + ad_hardware_ct + ad_verifier_ct + ad_miner_ct
+    );
+    assert_eq!(
+        payouts.advertising.total_it,
+        ad_host_it + ad_liquidity_it + ad_miner_it
+    );
+    assert_eq!(payouts.total_usd_micros, ad_total_usd_micros);
+    assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
+    assert_eq!(payouts.it_price_usd_micros, ad_it_price);
+}
+
+#[test]
 fn legacy_block_without_role_totals_uses_json_fallback() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("explorer.db");

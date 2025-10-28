@@ -18,6 +18,16 @@ RPC client.
   test harnesses—no additional RPC shims or serde fallbacks were required. The
   liquidity split now applies before CT conversion, so RPC consumers see CT and IT
   totals that match the governance `liquidity_split_ct_ppm` policy.
+- Explorer and ledger tests now replay dual settlements with mismatched
+  liquidity splits, ensuring the JSON/RPC pipeline exports the same CT/IT totals
+  that governance configured, and guarding the readiness map + oracle snapshots
+  rendered in dashboards and CI artefacts.
+- Readiness RPC responses now carry both the archived and live marketplace
+  oracles, per-cohort utilisation deltas, and a summary table without changing the
+  envelope structure. Telemetry exporters and the metrics aggregator reuse the
+  same snapshot to emit `ad_readiness_utilization_{observed,target,delta}_ppm`
+  gauges, enabling CI and alerting to page on utilisation drift without adding
+  RPC adapters or third-party JSON tooling.
 
 ## Recent progress (2025-10-27)
 

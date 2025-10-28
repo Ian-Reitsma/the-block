@@ -70,8 +70,9 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
 use foundation_serialization::json;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_telemetry::{
-    AdReadinessTelemetry, MemorySnapshotEntry, TelemetrySummary, ValidationError,
-    WrapperMetricEntry, WrapperSummaryEntry,
+    AdReadinessCohortTelemetry, AdReadinessTelemetry, AdReadinessUtilizationSummary,
+    MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry,
+    WrapperSummaryEntry,
 };
 use std::collections::{
     btree_map::Entry, hash_map::Entry as HashMapEntry, BTreeMap, HashMap, HashSet, VecDeque,
@@ -1815,6 +1816,12 @@ struct AggregatorMetrics {
     ad_readiness_settlement_count: Gauge,
     ad_readiness_ct_price_usd_micros: Gauge,
     ad_readiness_it_price_usd_micros: Gauge,
+    ad_readiness_market_ct_price_usd_micros: Gauge,
+    ad_readiness_market_it_price_usd_micros: Gauge,
+    ad_readiness_utilization_observed_ppm: GaugeVec,
+    ad_readiness_utilization_target_ppm: GaugeVec,
+    ad_readiness_utilization_delta_ppm: GaugeVec,
+    ad_readiness_utilization_labels: Mutex<HashSet<(String, String, String)>>,
     chaos_readiness: GaugeVec,
     chaos_site_readiness: GaugeVec,
     chaos_breach_total: Counter,
@@ -2161,6 +2168,14 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
             .get("it_price_usd_micros")
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let market_ct_price_usd_micros = readiness_obj
+            .get("market_ct_price_usd_micros")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let market_it_price_usd_micros = readiness_obj
+            .get("market_it_price_usd_micros")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let blockers = readiness_obj
             .get("blockers")
             .and_then(Value::as_array)
@@ -2171,6 +2186,70 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
                     .collect()
             })
             .unwrap_or_default();
+        let cohort_utilization = readiness_obj
+            .get("cohort_utilization")
+            .and_then(Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(Value::as_object)
+                    .map(|cohort| AdReadinessCohortTelemetry {
+                        domain: cohort
+                            .get("domain")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        provider: cohort
+                            .get("provider")
+                            .and_then(Value::as_str)
+                            .map(|s| s.to_string()),
+                        badges: cohort
+                            .get("badges")
+                            .and_then(Value::as_array)
+                            .map(|badges| {
+                                badges
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .map(|s| s.to_string())
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        price_per_mib_usd_micros: cohort
+                            .get("price_per_mib_usd_micros")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
+                        target_utilization_ppm: cohort
+                            .get("target_utilization_ppm")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as u32,
+                        observed_utilization_ppm: cohort
+                            .get("observed_utilization_ppm")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as u32,
+                        delta_utilization_ppm: cohort
+                            .get("delta_utilization_ppm")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(0),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let utilization_summary = readiness_obj
+            .get("utilization_summary")
+            .and_then(Value::as_object)
+            .map(|summary| AdReadinessUtilizationSummary {
+                cohort_count: summary
+                    .get("cohort_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                mean_ppm: summary.get("mean_ppm").and_then(Value::as_u64).unwrap_or(0),
+                min_ppm: summary.get("min_ppm").and_then(Value::as_u64).unwrap_or(0) as u32,
+                max_ppm: summary.get("max_ppm").and_then(Value::as_u64).unwrap_or(0) as u32,
+                last_updated: summary
+                    .get("last_updated")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            });
         Some(AdReadinessTelemetry {
             ready,
             window_secs,
@@ -2186,6 +2265,10 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
             settlement_count,
             ct_price_usd_micros,
             it_price_usd_micros,
+            market_ct_price_usd_micros,
+            market_it_price_usd_micros,
+            cohort_utilization,
+            utilization_summary,
         })
     });
 
@@ -2323,6 +2406,58 @@ impl AggregatorMetrics {
                     .set(snapshot.ct_price_usd_micros as f64);
                 self.ad_readiness_it_price_usd_micros
                     .set(snapshot.it_price_usd_micros as f64);
+                self.ad_readiness_market_ct_price_usd_micros
+                    .set(snapshot.market_ct_price_usd_micros as f64);
+                self.ad_readiness_market_it_price_usd_micros
+                    .set(snapshot.market_it_price_usd_micros as f64);
+                let mut new_labels: HashSet<(String, String, String)> =
+                    HashSet::with_capacity(snapshot.cohort_utilization.len());
+                for entry in &snapshot.cohort_utilization {
+                    let domain_label = entry.domain.clone();
+                    let provider_label =
+                        entry.provider.clone().unwrap_or_else(|| "none".to_string());
+                    let badges_label = if entry.badges.is_empty() {
+                        "none".to_string()
+                    } else {
+                        entry.badges.join("|")
+                    };
+                    let labels = [
+                        domain_label.as_str(),
+                        provider_label.as_str(),
+                        badges_label.as_str(),
+                    ];
+                    self.ad_readiness_utilization_observed_ppm
+                        .with_label_values(&labels)
+                        .set(entry.observed_utilization_ppm as f64);
+                    self.ad_readiness_utilization_target_ppm
+                        .with_label_values(&labels)
+                        .set(entry.target_utilization_ppm as f64);
+                    self.ad_readiness_utilization_delta_ppm
+                        .with_label_values(&labels)
+                        .set(entry.delta_utilization_ppm as f64);
+                    new_labels.insert((domain_label, provider_label, badges_label));
+                }
+                let mut active = self
+                    .ad_readiness_utilization_labels
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                let previous: Vec<(String, String, String)> = active.iter().cloned().collect();
+                for label in previous {
+                    if !new_labels.contains(&label) {
+                        let values = [label.0.as_str(), label.1.as_str(), label.2.as_str()];
+                        let _ = self
+                            .ad_readiness_utilization_observed_ppm
+                            .remove_label_values(&values);
+                        let _ = self
+                            .ad_readiness_utilization_target_ppm
+                            .remove_label_values(&values);
+                        let _ = self
+                            .ad_readiness_utilization_delta_ppm
+                            .remove_label_values(&values);
+                    }
+                }
+                active.clear();
+                active.extend(new_labels);
             }
             None => {
                 self.ad_readiness_ready.set(0.0);
@@ -2337,8 +2472,34 @@ impl AggregatorMetrics {
                 self.ad_readiness_settlement_count.set(0.0);
                 self.ad_readiness_ct_price_usd_micros.set(0.0);
                 self.ad_readiness_it_price_usd_micros.set(0.0);
+                self.ad_readiness_market_ct_price_usd_micros.set(0.0);
+                self.ad_readiness_market_it_price_usd_micros.set(0.0);
+                let mut active = self
+                    .ad_readiness_utilization_labels
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                for label in active.drain() {
+                    let values = [label.0.as_str(), label.1.as_str(), label.2.as_str()];
+                    let _ = self
+                        .ad_readiness_utilization_observed_ppm
+                        .remove_label_values(&values);
+                    let _ = self
+                        .ad_readiness_utilization_target_ppm
+                        .remove_label_values(&values);
+                    let _ = self
+                        .ad_readiness_utilization_delta_ppm
+                        .remove_label_values(&values);
+                }
             }
         }
+    }
+
+    #[cfg(test)]
+    fn utilization_label_count(&self) -> usize {
+        self.ad_readiness_utilization_labels
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .len()
     }
 }
 
@@ -3346,6 +3507,50 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         )
         .expect("register ad_readiness_it_price_usd_micros");
     ad_readiness_it_price_usd_micros.set(0.0);
+    let ad_readiness_market_ct_price_usd_micros = registry
+        .register_gauge(
+            "ad_readiness_market_ct_price_usd_micros",
+            "Current marketplace consumer-token oracle price",
+        )
+        .expect("register ad_readiness_market_ct_price_usd_micros");
+    ad_readiness_market_ct_price_usd_micros.set(0.0);
+    let ad_readiness_market_it_price_usd_micros = registry
+        .register_gauge(
+            "ad_readiness_market_it_price_usd_micros",
+            "Current marketplace industrial-token oracle price",
+        )
+        .expect("register ad_readiness_market_it_price_usd_micros");
+    ad_readiness_market_it_price_usd_micros.set(0.0);
+    let ad_readiness_utilization_observed_ppm = GaugeVec::new(
+        Opts::new(
+            "ad_readiness_utilization_observed_ppm",
+            "Observed cohort utilization (ppm) from readiness telemetry",
+        ),
+        &["domain", "provider", "badges"],
+    );
+    registry
+        .register(Box::new(ad_readiness_utilization_observed_ppm.clone()))
+        .expect("register ad_readiness_utilization_observed_ppm");
+    let ad_readiness_utilization_target_ppm = GaugeVec::new(
+        Opts::new(
+            "ad_readiness_utilization_target_ppm",
+            "Target cohort utilization (ppm) from readiness telemetry",
+        ),
+        &["domain", "provider", "badges"],
+    );
+    registry
+        .register(Box::new(ad_readiness_utilization_target_ppm.clone()))
+        .expect("register ad_readiness_utilization_target_ppm");
+    let ad_readiness_utilization_delta_ppm = GaugeVec::new(
+        Opts::new(
+            "ad_readiness_utilization_delta_ppm",
+            "Observed minus target utilization delta (ppm)",
+        ),
+        &["domain", "provider", "badges"],
+    );
+    registry
+        .register(Box::new(ad_readiness_utilization_delta_ppm.clone()))
+        .expect("register ad_readiness_utilization_delta_ppm");
     let chaos_readiness = GaugeVec::new(
         Opts::new(
             METRIC_CHAOS_READINESS,
@@ -3437,6 +3642,12 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         ad_readiness_settlement_count,
         ad_readiness_ct_price_usd_micros,
         ad_readiness_it_price_usd_micros,
+        ad_readiness_market_ct_price_usd_micros,
+        ad_readiness_market_it_price_usd_micros,
+        ad_readiness_utilization_observed_ppm,
+        ad_readiness_utilization_target_ppm,
+        ad_readiness_utilization_delta_ppm,
+        ad_readiness_utilization_labels: Mutex::new(HashSet::new()),
         chaos_readiness,
         chaos_site_readiness,
         chaos_breach_total,
@@ -7996,7 +8207,10 @@ mod tests {
     use crypto_suite::hashing::blake3;
     use crypto_suite::signatures::ed25519::SigningKey;
     use foundation_serialization::json::Value;
-    use foundation_telemetry::{AdReadinessTelemetry, WrapperMetricEntry, WrapperSummaryEntry};
+    use foundation_telemetry::{
+        AdReadinessCohortTelemetry, AdReadinessTelemetry, AdReadinessUtilizationSummary,
+        WrapperMetricEntry, WrapperSummaryEntry,
+    };
     use http_env::server_tls_from_env;
     use httpd::{Method, StatusCode};
     use monitoring_build::{
@@ -9239,6 +9453,9 @@ mod tests {
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
         assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_ct_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.utilization_label_count(), 0);
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("tok".into(), dir.path().join("ad_ready.json"), 60);
         let readiness = AdReadinessTelemetry {
@@ -9256,6 +9473,24 @@ mod tests {
             settlement_count: 4,
             ct_price_usd_micros: 2_500,
             it_price_usd_micros: 5_000,
+            market_ct_price_usd_micros: 2_750,
+            market_it_price_usd_micros: 5_500,
+            cohort_utilization: vec![AdReadinessCohortTelemetry {
+                domain: "example.test".into(),
+                provider: Some("provider-ready".into()),
+                badges: vec!["premium".into()],
+                price_per_mib_usd_micros: 120_000,
+                target_utilization_ppm: 900_000,
+                observed_utilization_ppm: 850_000,
+                delta_utilization_ppm: -50_000,
+            }],
+            utilization_summary: Some(AdReadinessUtilizationSummary {
+                cohort_count: 1,
+                mean_ppm: 850_000,
+                min_ppm: 850_000,
+                max_ppm: 850_000,
+                last_updated: 78,
+            }),
         };
         let summary = TelemetrySummary {
             node_id: "node-ready".to_string(),
@@ -9280,6 +9515,29 @@ mod tests {
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 4.0);
         assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 2_500.0);
         assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 5_000.0);
+        assert_eq!(
+            metrics.ad_readiness_market_ct_price_usd_micros.get(),
+            2_750.0
+        );
+        assert_eq!(
+            metrics.ad_readiness_market_it_price_usd_micros.get(),
+            5_500.0
+        );
+        let utilization_observed = metrics
+            .ad_readiness_utilization_observed_ppm
+            .with_label_values(&["example.test", "provider-ready", "premium"])
+            .get();
+        assert_eq!(utilization_observed, 850_000.0);
+        let utilization_target = metrics
+            .ad_readiness_utilization_target_ppm
+            .with_label_values(&["example.test", "provider-ready", "premium"])
+            .get();
+        assert_eq!(utilization_target, 900_000.0);
+        let utilization_delta = metrics
+            .ad_readiness_utilization_delta_ppm
+            .with_label_values(&["example.test", "provider-ready", "premium"])
+            .get();
+        assert_eq!(utilization_delta, -50_000.0);
 
         let mut cleared = summary;
         cleared.seq = 11;
@@ -9298,6 +9556,9 @@ mod tests {
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
         assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_ct_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.utilization_label_count(), 0);
     }
 
     #[test]

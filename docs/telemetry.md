@@ -165,14 +165,20 @@ cluster-wide gauges when compiled with `--features telemetry`:
 - `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
   `ad_readiness_provider_count`, `ad_readiness_window_secs`,
   `ad_readiness_min_*`, `ad_readiness_total_usd_micros`,
-  `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`, and
-  `ad_readiness_it_price_usd_micros` – readiness snapshot gauges derived from the
-  node’s telemetry summaries. Values reset to `0` when no readiness data is
-  available; otherwise the gauges mirror the latest rolling counts, conversion
-  prices, and configured thresholds so dashboards and automation can track
-  activation progress alongside oracle inputs. The associated RPC also returns a
-  `utilization` summary capturing mean/min/max cohort utilisation and the per-
-  cohort price/target pairs that drove the latest settlement window.
+  `ad_readiness_settlement_count`,
+  `ad_readiness_ct_price_usd_micros`, `ad_readiness_it_price_usd_micros`,
+  `ad_readiness_market_ct_price_usd_micros`, and
+  `ad_readiness_market_it_price_usd_micros` – readiness snapshot gauges derived
+  from the node’s telemetry summaries. Values reset to `0` when no readiness data
+  is available; otherwise the gauges mirror the latest rolling counts, archived
+  and live oracle prices, and configured thresholds so dashboards and automation
+  can track activation progress alongside conversion inputs. Companion gauge
+  families `ad_readiness_utilization_observed_ppm{domain,provider,badge}`,
+  `ad_readiness_utilization_target_ppm{…}`, and
+  `ad_readiness_utilization_delta_ppm{…}` expose per-cohort pricing pressure while
+  the aggregator prunes retired label handles; pair them with the readiness RPC’s
+  `utilization` summary (mean/min/max ppm plus per-cohort price/target pairs) to
+  page when utilisation drifts from governance targets despite steady demand.
 - `chaos_readiness{module,scenario}`,
   `chaos_site_readiness{module,scenario,site,provider}`, and
   `chaos_sla_breach_total` – readiness snapshots and breach counts derived from

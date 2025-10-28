@@ -35,6 +35,44 @@ pub struct AdReadinessTelemetry {
     pub ct_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub it_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub market_ct_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub market_it_price_usd_micros: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub cohort_utilization: Vec<AdReadinessCohortTelemetry>,
+    #[serde(default)]
+    pub utilization_summary: Option<AdReadinessUtilizationSummary>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdReadinessCohortTelemetry {
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub badges: Vec<String>,
+    pub price_per_mib_usd_micros: u64,
+    pub target_utilization_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub observed_utilization_ppm: u32,
+    pub delta_utilization_ppm: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdReadinessUtilizationSummary {
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub cohort_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub mean_ppm: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub min_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub max_ppm: u32,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub last_updated: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -188,6 +226,8 @@ impl TelemetrySummary {
                     "settlement_count",
                     "ct_price_usd_micros",
                     "it_price_usd_micros",
+                    "market_ct_price_usd_micros",
+                    "market_it_price_usd_micros",
                 ] {
                     let field_path = child_path(&readiness_path, field);
                     expect_u64_field(readiness, field, &field_path)?;
@@ -201,6 +241,76 @@ impl TelemetrySummary {
                         let path = format!("{}/{}", blockers_path, idx);
                         expect_string(blocker, &path, "blocker")?;
                     }
+                }
+                let cohorts_value = readiness.get("cohort_utilization").ok_or_else(|| {
+                    ValidationError::new(
+                        child_path(&readiness_path, "cohort_utilization"),
+                        "missing field",
+                    )
+                })?;
+                let cohorts_path = child_path(&readiness_path, "cohort_utilization");
+                let cohorts = cohorts_value.as_array().ok_or_else(|| {
+                    ValidationError::new(
+                        cohorts_path.clone(),
+                        "cohort_utilization must be an array",
+                    )
+                })?;
+                for (idx, cohort_value) in cohorts.iter().enumerate() {
+                    let cohort_path = format!("{cohorts_path}[{idx}]");
+                    let cohort =
+                        expect_object(cohort_value, &cohort_path, "cohort utilization entry")?;
+                    expect_string_field(cohort, "domain", &child_path(&cohort_path, "domain"))?;
+                    if let Some(provider_value) = cohort.get("provider") {
+                        expect_string(
+                            provider_value,
+                            &child_path(&cohort_path, "provider"),
+                            "provider",
+                        )?;
+                    }
+                    let badges_value = cohort.get("badges").ok_or_else(|| {
+                        ValidationError::new(child_path(&cohort_path, "badges"), "missing field")
+                    })?;
+                    let badges_path = child_path(&cohort_path, "badges");
+                    let badges = badges_value.as_array().ok_or_else(|| {
+                        ValidationError::new(badges_path.clone(), "badges must be an array")
+                    })?;
+                    for (badge_idx, badge) in badges.iter().enumerate() {
+                        let path = format!("{badges_path}[{badge_idx}]");
+                        expect_string(badge, &path, "badge")?;
+                    }
+                    for field in [
+                        "price_per_mib_usd_micros",
+                        "target_utilization_ppm",
+                        "observed_utilization_ppm",
+                    ] {
+                        let field_path = child_path(&cohort_path, field);
+                        expect_u64_field(cohort, field, &field_path)?;
+                    }
+                    let delta_path = child_path(&cohort_path, "delta_utilization_ppm");
+                    let delta_value = cohort
+                        .get("delta_utilization_ppm")
+                        .ok_or_else(|| ValidationError::new(delta_path.clone(), "missing field"))?;
+                    delta_value.as_i64().ok_or_else(|| {
+                        ValidationError::new(delta_path, "delta_utilization_ppm must be an integer")
+                    })?;
+                }
+                let summary_value = readiness.get("utilization_summary").ok_or_else(|| {
+                    ValidationError::new(
+                        child_path(&readiness_path, "utilization_summary"),
+                        "missing field",
+                    )
+                })?;
+                let summary_path = child_path(&readiness_path, "utilization_summary");
+                let summary = expect_object(summary_value, &summary_path, "utilization summary")?;
+                for field in [
+                    "cohort_count",
+                    "mean_ppm",
+                    "min_ppm",
+                    "max_ppm",
+                    "last_updated",
+                ] {
+                    let field_path = child_path(&summary_path, field);
+                    expect_u64_field(summary, field, &field_path)?;
                 }
             }
         }

@@ -209,9 +209,11 @@ fn ad_market_rpc_endpoints_round_trip() {
         readiness_initial["distribution"]["viewer_percent"].as_u64(),
         Some(40)
     );
-    let utilization_initial = readiness_initial["utilization"]
-        .as_object()
+    let utilization_initial = readiness_initial
+        .get("utilization")
+        .and_then(Value::as_object)
         .expect("utilization map");
+    assert_eq!(utilization_initial["cohort_count"].as_u64(), Some(1));
     assert_eq!(utilization_initial["mean_ppm"].as_u64(), Some(0));
     assert_eq!(utilization_initial["max_ppm"].as_u64(), Some(0));
     let util_cohorts = utilization_initial["cohorts"]
@@ -221,6 +223,7 @@ fn ad_market_rpc_endpoints_round_trip() {
     let util_entry = util_cohorts[0].as_object().expect("util entry");
     assert_eq!(util_entry["domain"].as_str(), Some("example.test"));
     assert_eq!(util_entry["observed_utilization_ppm"].as_u64(), Some(0));
+    assert_eq!(util_entry["delta_utilization_ppm"].as_i64(), Some(0));
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -247,24 +250,27 @@ fn ad_market_rpc_endpoints_round_trip() {
         Some(MICROS_PER_DOLLAR)
     );
     let oracle = readiness_ready["oracle"].as_object().expect("oracle map");
+    let snapshot_oracle = oracle["snapshot"].as_object().expect("snapshot oracle");
     assert_eq!(
-        oracle["snapshot_ct_price_usd_micros"].as_u64(),
+        snapshot_oracle["ct_price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
     assert_eq!(
-        oracle["snapshot_it_price_usd_micros"].as_u64(),
+        snapshot_oracle["it_price_usd_micros"].as_u64(),
+        Some(MICROS_PER_DOLLAR)
+    );
+    let market_oracle = oracle["market"].as_object().expect("market oracle");
+    assert_eq!(
+        market_oracle["ct_price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
     assert_eq!(
-        oracle["market_ct_price_usd_micros"].as_u64(),
+        market_oracle["it_price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
-    assert_eq!(
-        oracle["market_it_price_usd_micros"].as_u64(),
-        Some(MICROS_PER_DOLLAR)
-    );
-    let utilization_ready = readiness_ready["utilization"]
-        .as_object()
+    let utilization_ready = readiness_ready
+        .get("utilization")
+        .and_then(Value::as_object)
         .expect("utilization map");
     assert_eq!(utilization_ready["cohort_count"].as_u64(), Some(1));
     let ready_cohorts = utilization_ready["cohorts"]
@@ -273,6 +279,7 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(ready_cohorts.len(), 1);
     let ready_entry = ready_cohorts[0].as_object().expect("ready entry");
     assert_eq!(ready_entry["observed_utilization_ppm"].as_u64(), Some(0));
+    assert_eq!(ready_entry["delta_utilization_ppm"].as_i64(), Some(0));
 
     let duplicate = expect_error(harness.call(
         "ad_market.register_campaign",

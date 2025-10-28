@@ -1000,40 +1000,8 @@ impl Marketplace for InMemoryMarketplace {
         }
         let policy = *self.distribution.read().unwrap();
         let oracle = *self.oracle.read().unwrap();
-        let parts = allocate_usd(reservation.total_usd_micros, &policy);
-        let (liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
-        let (viewer_ct, viewer_ct_rem) = usd_to_tokens(parts.viewer, oracle.ct_price_usd_micros);
-        let (host_ct, host_ct_rem) = usd_to_tokens(parts.host, oracle.ct_price_usd_micros);
-        let (hardware_ct, hardware_ct_rem) =
-            usd_to_tokens(parts.hardware, oracle.ct_price_usd_micros);
-        let (verifier_ct, verifier_ct_rem) =
-            usd_to_tokens(parts.verifier, oracle.ct_price_usd_micros);
-        let (liquidity_ct, liquidity_ct_rem) =
-            usd_to_tokens(liquidity_ct_usd, oracle.ct_price_usd_micros);
-        let mut ct_remainder_usd = parts
-            .remainder
-            .saturating_add(viewer_ct_rem)
-            .saturating_add(host_ct_rem)
-            .saturating_add(hardware_ct_rem)
-            .saturating_add(verifier_ct_rem)
-            .saturating_add(liquidity_ct_rem);
-        let (miner_ct, miner_ct_rem) = usd_to_tokens(ct_remainder_usd, oracle.ct_price_usd_micros);
-        ct_remainder_usd = miner_ct_rem;
-
-        let total_ct = viewer_ct
-            .saturating_add(host_ct)
-            .saturating_add(hardware_ct)
-            .saturating_add(verifier_ct)
-            .saturating_add(liquidity_ct)
-            .saturating_add(miner_ct);
-
-        let (host_it, _) = usd_to_tokens(parts.host, oracle.it_price_usd_micros);
-        let (hardware_it, _) = usd_to_tokens(parts.hardware, oracle.it_price_usd_micros);
-        let (verifier_it, _) = usd_to_tokens(parts.verifier, oracle.it_price_usd_micros);
-        let (liquidity_it, _) = usd_to_tokens(liquidity_it_usd, oracle.it_price_usd_micros);
-        let (miner_it, unsettled_after_it) =
-            usd_to_tokens(ct_remainder_usd, oracle.it_price_usd_micros);
-        let remainder_usd = unsettled_after_it;
+        let parts = allocate_usd(reservation.total_usd_micros, policy);
+        let tokens = convert_parts_to_tokens(parts, oracle);
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -1041,19 +1009,19 @@ impl Marketplace for InMemoryMarketplace {
             price_per_mib_usd_micros: reservation.price_per_mib_usd_micros,
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
-            viewer_ct,
-            host_ct,
-            hardware_ct,
-            verifier_ct,
-            host_it,
-            hardware_it,
-            verifier_it,
-            liquidity_ct,
-            liquidity_it,
-            miner_ct,
-            miner_it,
-            total_ct,
-            unsettled_usd_micros: remainder_usd,
+            viewer_ct: tokens.viewer_ct,
+            host_ct: tokens.host_ct,
+            hardware_ct: tokens.hardware_ct,
+            verifier_ct: tokens.verifier_ct,
+            host_it: tokens.host_it,
+            hardware_it: tokens.hardware_it,
+            verifier_it: tokens.verifier_it,
+            liquidity_ct: tokens.liquidity_ct,
+            liquidity_it: tokens.liquidity_it,
+            miner_ct: tokens.miner_ct,
+            miner_it: tokens.miner_it,
+            total_ct: tokens.total_ct,
+            unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
         })
@@ -1344,40 +1312,8 @@ impl Marketplace for SledMarketplace {
         }
         let policy = *self.distribution.read().unwrap();
         let oracle = *self.oracle.read().unwrap();
-        let parts = allocate_usd(reservation.total_usd_micros, &policy);
-        let (liquidity_ct_usd, liquidity_it_usd) = split_liquidity_usd(parts.liquidity, policy);
-        let (viewer_ct, viewer_ct_rem) = usd_to_tokens(parts.viewer, oracle.ct_price_usd_micros);
-        let (host_ct, host_ct_rem) = usd_to_tokens(parts.host, oracle.ct_price_usd_micros);
-        let (hardware_ct, hardware_ct_rem) =
-            usd_to_tokens(parts.hardware, oracle.ct_price_usd_micros);
-        let (verifier_ct, verifier_ct_rem) =
-            usd_to_tokens(parts.verifier, oracle.ct_price_usd_micros);
-        let (liquidity_ct, liquidity_ct_rem) =
-            usd_to_tokens(liquidity_ct_usd, oracle.ct_price_usd_micros);
-        let mut ct_remainder_usd = parts
-            .remainder
-            .saturating_add(viewer_ct_rem)
-            .saturating_add(host_ct_rem)
-            .saturating_add(hardware_ct_rem)
-            .saturating_add(verifier_ct_rem)
-            .saturating_add(liquidity_ct_rem);
-        let (miner_ct, miner_ct_rem) = usd_to_tokens(ct_remainder_usd, oracle.ct_price_usd_micros);
-        ct_remainder_usd = miner_ct_rem;
-
-        let total_ct = viewer_ct
-            .saturating_add(host_ct)
-            .saturating_add(hardware_ct)
-            .saturating_add(verifier_ct)
-            .saturating_add(liquidity_ct)
-            .saturating_add(miner_ct);
-
-        let (host_it, _) = usd_to_tokens(parts.host, oracle.it_price_usd_micros);
-        let (hardware_it, _) = usd_to_tokens(parts.hardware, oracle.it_price_usd_micros);
-        let (verifier_it, _) = usd_to_tokens(parts.verifier, oracle.it_price_usd_micros);
-        let (liquidity_it, _) = usd_to_tokens(liquidity_it_usd, oracle.it_price_usd_micros);
-        let (miner_it, unsettled_after_it) =
-            usd_to_tokens(ct_remainder_usd, oracle.it_price_usd_micros);
-        let remainder_usd = unsettled_after_it;
+        let parts = allocate_usd(reservation.total_usd_micros, policy);
+        let tokens = convert_parts_to_tokens(parts, oracle);
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -1385,19 +1321,19 @@ impl Marketplace for SledMarketplace {
             price_per_mib_usd_micros: reservation.price_per_mib_usd_micros,
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
-            viewer_ct,
-            host_ct,
-            hardware_ct,
-            verifier_ct,
-            host_it,
-            hardware_it,
-            verifier_it,
-            liquidity_ct,
-            liquidity_it,
-            miner_ct,
-            miner_it,
-            total_ct,
-            unsettled_usd_micros: remainder_usd,
+            viewer_ct: tokens.viewer_ct,
+            host_ct: tokens.host_ct,
+            hardware_ct: tokens.hardware_ct,
+            verifier_ct: tokens.verifier_ct,
+            host_it: tokens.host_it,
+            hardware_it: tokens.hardware_it,
+            verifier_it: tokens.verifier_it,
+            liquidity_ct: tokens.liquidity_ct,
+            liquidity_it: tokens.liquidity_it,
+            miner_ct: tokens.miner_ct,
+            miner_it: tokens.miner_it,
+            total_ct: tokens.total_ct,
+            unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
         })
@@ -1461,18 +1397,37 @@ struct RoleUsdParts {
     host: u64,
     hardware: u64,
     verifier: u64,
-    liquidity: u64,
+    liquidity_ct: u64,
+    liquidity_it: u64,
     remainder: u64,
 }
 
-fn allocate_usd(total_usd_micros: u64, distribution: &DistributionPolicy) -> RoleUsdParts {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TokenizedPayouts {
+    viewer_ct: u64,
+    host_ct: u64,
+    hardware_ct: u64,
+    verifier_ct: u64,
+    liquidity_ct: u64,
+    miner_ct: u64,
+    total_ct: u64,
+    host_it: u64,
+    hardware_it: u64,
+    verifier_it: u64,
+    liquidity_it: u64,
+    miner_it: u64,
+    unsettled_usd_micros: u64,
+}
+
+fn allocate_usd(total_usd_micros: u64, distribution: DistributionPolicy) -> RoleUsdParts {
     if total_usd_micros == 0 {
         return RoleUsdParts {
             viewer: 0,
             host: 0,
             hardware: 0,
             verifier: 0,
-            liquidity: 0,
+            liquidity_ct: 0,
+            liquidity_it: 0,
             remainder: 0,
         };
     }
@@ -1484,13 +1439,17 @@ fn allocate_usd(total_usd_micros: u64, distribution: &DistributionPolicy) -> Rol
         (4, distribution.liquidity_percent),
     ];
     let allocations = distribute_scalar(total_usd_micros, &weights);
+    let liquidity_total = allocations.get(4).copied().unwrap_or(0);
+    let (liquidity_ct, liquidity_it) = split_liquidity_usd(liquidity_total, distribution);
+    let distributed_sum = allocations.iter().copied().sum::<u64>();
     RoleUsdParts {
         viewer: allocations.get(0).copied().unwrap_or(0),
         host: allocations.get(1).copied().unwrap_or(0),
         hardware: allocations.get(2).copied().unwrap_or(0),
         verifier: allocations.get(3).copied().unwrap_or(0),
-        liquidity: allocations.get(4).copied().unwrap_or(0),
-        remainder: total_usd_micros.saturating_sub(allocations.iter().copied().sum::<u64>()),
+        liquidity_ct,
+        liquidity_it,
+        remainder: total_usd_micros.saturating_sub(distributed_sum),
     }
 }
 
@@ -1503,6 +1462,61 @@ fn split_liquidity_usd(total_liquidity_usd: u64, policy: DistributionPolicy) -> 
     let ct_usd = ct_usd as u64;
     let it_usd = total_liquidity_usd.saturating_sub(ct_usd);
     (ct_usd, it_usd)
+}
+
+fn convert_parts_to_tokens(parts: RoleUsdParts, oracle: TokenOracle) -> TokenizedPayouts {
+    let (viewer_ct, viewer_ct_rem) = usd_to_tokens(parts.viewer, oracle.ct_price_usd_micros);
+    let (host_ct, host_ct_rem) = usd_to_tokens(parts.host, oracle.ct_price_usd_micros);
+    let (hardware_ct, hardware_ct_rem) = usd_to_tokens(parts.hardware, oracle.ct_price_usd_micros);
+    let (verifier_ct, verifier_ct_rem) = usd_to_tokens(parts.verifier, oracle.ct_price_usd_micros);
+    let (liquidity_ct, liquidity_ct_rem) =
+        usd_to_tokens(parts.liquidity_ct, oracle.ct_price_usd_micros);
+
+    let ct_remainder_usd = parts
+        .remainder
+        .saturating_add(viewer_ct_rem)
+        .saturating_add(host_ct_rem)
+        .saturating_add(hardware_ct_rem)
+        .saturating_add(verifier_ct_rem)
+        .saturating_add(liquidity_ct_rem);
+    let (miner_ct, ct_unconverted_usd) =
+        usd_to_tokens(ct_remainder_usd, oracle.ct_price_usd_micros);
+
+    let total_ct = viewer_ct
+        .saturating_add(host_ct)
+        .saturating_add(hardware_ct)
+        .saturating_add(verifier_ct)
+        .saturating_add(liquidity_ct)
+        .saturating_add(miner_ct);
+
+    let (host_it, host_it_rem) = usd_to_tokens(parts.host, oracle.it_price_usd_micros);
+    let (hardware_it, hardware_it_rem) = usd_to_tokens(parts.hardware, oracle.it_price_usd_micros);
+    let (verifier_it, verifier_it_rem) = usd_to_tokens(parts.verifier, oracle.it_price_usd_micros);
+    let (liquidity_it, liquidity_it_rem) =
+        usd_to_tokens(parts.liquidity_it, oracle.it_price_usd_micros);
+    let it_remainder_usd = host_it_rem
+        .saturating_add(hardware_it_rem)
+        .saturating_add(verifier_it_rem)
+        .saturating_add(liquidity_it_rem)
+        .saturating_add(ct_unconverted_usd);
+    let (miner_it, unsettled_after_it) =
+        usd_to_tokens(it_remainder_usd, oracle.it_price_usd_micros);
+
+    TokenizedPayouts {
+        viewer_ct,
+        host_ct,
+        hardware_ct,
+        verifier_ct,
+        liquidity_ct,
+        miner_ct,
+        total_ct,
+        host_it,
+        hardware_it,
+        verifier_it,
+        liquidity_it,
+        miner_it,
+        unsettled_usd_micros: unsettled_after_it,
+    }
 }
 
 fn usd_to_tokens(amount_usd_micros: u64, price_usd_micros: u64) -> (u64, u64) {
@@ -1630,9 +1644,9 @@ mod tests {
         assert!(settlement.hardware_ct > 0);
         assert!(settlement.verifier_ct > 0);
         let policy = market.distribution();
-        let parts = allocate_usd(settlement.total_usd_micros, &policy);
-        let (expected_liquidity_ct_usd, expected_liquidity_it_usd) =
-            split_liquidity_usd(parts.liquidity, policy);
+        let parts = allocate_usd(settlement.total_usd_micros, policy);
+        let expected_liquidity_ct_usd = parts.liquidity_ct;
+        let expected_liquidity_it_usd = parts.liquidity_it;
         let (expected_liquidity_ct, _) =
             usd_to_tokens(expected_liquidity_ct_usd, settlement.ct_price_usd_micros);
         let (expected_liquidity_it, _) =
@@ -1667,6 +1681,59 @@ mod tests {
         assert_eq!(
             summary[0].remaining_budget_usd_micros,
             5 * MICROS_PER_DOLLAR - settlement.total_usd_micros
+        );
+    }
+
+    #[test]
+    fn liquidity_split_controls_dual_token_liquidity() {
+        fn settle_with_split(split_ct_ppm: u32, seed: u8) -> SettlementBreakdown {
+            let mut config = MarketplaceConfig::default();
+            config.distribution = config.distribution.with_liquidity_split(split_ct_ppm);
+            config.default_oracle = TokenOracle::new(10_000, 20_000);
+            config.default_price_per_mib_usd_micros = 800_000;
+            let market = InMemoryMarketplace::new(config);
+            market
+                .register_campaign(sample_campaign("cmp", 20 * MICROS_PER_DOLLAR))
+                .expect("campaign registered");
+            let key = ReservationKey {
+                manifest: [seed; 32],
+                path_hash: [seed.wrapping_add(1); 32],
+                discriminator: [seed.wrapping_add(2); 32],
+            };
+            let ctx = ImpressionContext {
+                domain: "example.test".to_string(),
+                provider: Some("provider".to_string()),
+                badges: Vec::new(),
+                bytes: BYTES_PER_MIB,
+            };
+            market
+                .reserve_impression(key, ctx)
+                .expect("reservation succeeded");
+            market.commit(&key).expect("settlement produced")
+        }
+
+        let all_it = settle_with_split(0, 7);
+        assert_eq!(all_it.liquidity_ct, 0);
+        assert!(all_it.liquidity_it > 0);
+
+        let all_ct = settle_with_split(PPM_SCALE as u32, 13);
+        assert!(all_ct.liquidity_ct > 0);
+        assert_eq!(all_ct.liquidity_it, 0);
+
+        let half_split = settle_with_split((PPM_SCALE / 2) as u32, 23);
+        assert!(half_split.liquidity_ct > 0);
+        assert!(half_split.liquidity_it > 0);
+        let liquidity_value_ct = half_split
+            .liquidity_ct
+            .saturating_mul(half_split.ct_price_usd_micros);
+        let liquidity_value_it = half_split
+            .liquidity_it
+            .saturating_mul(half_split.it_price_usd_micros);
+        let total_liquidity_value = liquidity_value_ct + liquidity_value_it;
+        assert!(total_liquidity_value > 0);
+        assert!(
+            (liquidity_value_ct as i128 - liquidity_value_it as i128).abs()
+                <= total_liquidity_value as i128
         );
     }
 

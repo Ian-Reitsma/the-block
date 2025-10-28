@@ -21,7 +21,19 @@ cells while trimming runtime.
   additional crates. Liquidity conversions now honour
   `liquidity_split_ct_ppm` before minting CT so IT allocations are not double
   counted, and unit coverage locks both the rounding behaviour and the split so
-  future ledger migrations remain first party.
+  future ledger migrations remain first party. Ledger/explorer regressions sum
+  pending settlements and replay CT-only/IT-heavy liquidity snapshots entirely
+  through the existing node/explorer harnesses, confirming the pipeline stays
+  hermetic without pulling new dependencies.
+- ✅ Readiness telemetry and alerting stay within the workspace. The node records
+  both the archived and live market oracle inside `AdReadinessSnapshot`, stores
+  per-cohort utilisation (target/observed/delta), and persists ppm summaries via
+  the existing binary cursor helpers. `telemetry::summary` reuses the foundation
+  metrics facade to emit matching gauges, and `metrics-aggregator` registers the
+  new `ad_readiness_utilization_{observed,target,delta}_ppm{domain,provider,badge}`
+  families using the in-house Prometheus wrapper while pruning stale label
+  handles. CI artefacts, dashboards, and alerting now ingest the same map without
+  introducing HTTP clients, serde helpers, or third-party metrics crates.
 
 - ✅ Chaos archive manifests and publish hooks remain first party. `sim/chaos_lab.rs`
   now writes `archive/latest.json`, per-run `manifest.json`, and zipped bundles

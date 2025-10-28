@@ -172,14 +172,18 @@ An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the la
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
 `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
 `ad_readiness_settlement_count`, `ad_readiness_ct_price_usd_micros`,
-`ad_readiness_it_price_usd_micros`, and the configured minimums, while a table
-lists the active blockers surfaced by `ad_market.readiness`. A companion table now
-renders the `utilization` map returned by the same RPC so operators see per-cohort
-targets, observed utilisation, and prices next to the readiness counters. A counter panel
+`ad_readiness_it_price_usd_micros`, and the mirrored marketplace oracles
+(`ad_readiness_market_{ct,it}_price_usd_micros`) alongside the configured
+minimums, while a table lists the active blockers surfaced by
+`ad_market.readiness`. Companion panels render
+`ad_readiness_utilization_{observed,target,delta}_ppm` grouped by
+domain/provider/badge so operators can spot cohorts falling below their target
+utilisation even when demand stays constant. The readiness table also renders the
+RPC’s `utilization` map so per-cohort prices and ppm deltas sit next to the
+aggregate gauges, and the HTML snapshot mirrors the same layout to keep
+FIRST_PARTY_ONLY monitoring aligned with the Grafana templates. A counter panel
 charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
 spot insufficient viewer/host/provider diversity before enabling the ad rail.
-The HTML snapshot renders the same panels, keeping FIRST_PARTY_ONLY monitoring
-in sync with the Grafana templates.
 
 The metrics aggregator now persists the explorer payout counters per peer and
 role so deltas remain monotonic across scrapes.
