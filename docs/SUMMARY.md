@@ -131,6 +131,14 @@
 > hold their pending-budget locks through insertion so campaigns are never
 > oversubscribed, and the compute dashboard adds a "Read Ack Outcomes" panel to
 > surface the new `read_ack_processed_total{result="invalid_privacy"}` series.
+> **Review (2025-10-27, evening):** The ad market now uses a log-domain PI
+> controller with exponential forgetting (`|η_P|≤0.25`, `η_I≤0.05|η_P|`) so cohort
+> prices converge without oscillating. `SelectionReceipt::validate` enforces
+> composite resource floors, runner-up clearing, and attestation structure before
+> acknowledgements land, and telemetry exports
+> `read_selection_proof_{verified,invalid}_total{attestation}` plus
+> `read_selection_proof_latency_seconds{attestation}` for dashboards to track
+> SNARK versus TEE proof mixes.
 > **Review (2025-10-25, late evening):** Read acknowledgements now ship readiness
 > and identity proofs via the first-party `zkp` crate. Operators can toggle
 > enforcement with `--ack-privacy` or the `node.{get,set}_ack_privacy` RPCs, and

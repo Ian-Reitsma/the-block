@@ -252,6 +252,14 @@
 > panel charting `read_ack_processed_total{result}` so the
 > `result="invalid_privacy"` series rides alongside the existing
 > `ok`/`invalid_signature` counters.
+> **Review (2025-10-27, evening):** Ad pricing now runs a log-domain PI controller
+> with exponential forgetting (`|η_P|≤0.25`, `η_I≤0.05|η_P|`) so thin cohorts stop
+> oscillating while converging toward the governance utilisation target.
+> `SelectionReceipt::validate` guards composite resource floors, quality-adjusted
+> second-price clears, and attestation structure before the node accepts an ack,
+> and telemetry adds `read_selection_proof_{verified,invalid}_total{attestation}`
+> plus `read_selection_proof_latency_seconds{attestation}` so SNARK/TEE mixes and
+> proof lag appear in dashboards.
 > **Review (2025-10-24, early afternoon):** Explorer integration now mines blocks that mix binary headers with JSON fallbacks so payout decoding stays resilient across codec boundaries, and the metrics aggregator records the role-labelled counters directly via cached `CounterVec` handles. The `/metrics` integration asserts both `explorer_block_payout_read_total` and `_ad_total` advance on a second scrape, mirroring the Grafana PromQL so the dashboards stay backed by live data. Documentation now includes CLI automation snippets for hash and height payout queries, plus monitoring notes covering the new counter caching path so operators know where the deltas originate.
 > **Review (2025-10-30, morning):** Explorer payout queries now guard the JSON fallback so legacy snapshots lacking `read_sub_*` or `ad_*` fields still render per-role totals, and new unit tests pin that behaviour to FIRST_PARTY_ONLY runs. The CLI suite exercises the failure paths for unknown hashes/heights and the mutual-exclusion flag checks, while the Grafana generator adds a “Block Payouts” row that charts read-subsidy and advertising role counters. Operators can now move from database snapshots, through automation, to dashboards without leaving first-party surfaces.
 > **Review (2025-10-29, early morning):** Read acknowledgements now propagate through

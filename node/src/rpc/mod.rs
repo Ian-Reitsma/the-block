@@ -430,6 +430,7 @@ pub struct RpcRuntimeConfig {
 const PUBLIC_METHODS: &[&str] = &[
     "balance",
     "ad_market.inventory",
+    "ad_market.list_campaigns",
     "ad_market.distribution",
     "ad_market.readiness",
     "register_handle",
@@ -1025,6 +1026,7 @@ fn dispatch(
 
     Ok(match req.method.as_str() {
         "ad_market.inventory" => ad_market::inventory(market_ref),
+        "ad_market.list_campaigns" => ad_market::list_campaigns(market_ref),
         "ad_market.distribution" => ad_market::distribution(market_ref),
         "ad_market.readiness" => ad_market::readiness(market_ref, readiness_ref),
         "ad_market.register_campaign" => {

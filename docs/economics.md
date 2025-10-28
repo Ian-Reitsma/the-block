@@ -180,18 +180,27 @@ acknowledged reads without diluting the inflation schedule.
 
 Impression pricing is now quoted in USD and adapts to cohort utilisation. Each
 cohort maintains a posted price `p_{MiB,c}` that evolves according to a
-Walrasian tâtonnement step using the measured demand and supply over the most
-recent window:
+log-domain PI controller with exponential forgetting:
 
 \[
-p_{MiB,c}(t + \Delta) = p_{MiB,c}(t) \cdot \exp\big(\eta \,[U_c - U_c^*]\big),
+\ln p_{MiB,c}(t + \Delta) = \ln p_{MiB,c}(t) + \eta_P\,[\tilde{U}_c - 1]
+  + \eta_I\,I_c(t),
 \]
 
-where `U_c = min(1, demand_c / (supply_c * p_{MiB,c}))` and `U_c^*` is the
-governance-configured target utilisation. When demand exceeds supply the price
-nudges upward; slack capacity drives the rate down without imposing artificial
-caps. The in-memory and sled market implementations both record the price and
-demand deltas per reservation so historical utilisation feeds future updates.
+with the exponentially-weighted integral term
+
+\[
+I_c(t) = e^{-\rho \Delta} I_c(t-\Delta) + [\tilde{U}_c - 1],
+\]
+
+and `\tilde{U}_c = min(1, demand_c / (supply_c * p_{MiB,c})) / U_c^*`. The
+controller clamps `|\eta_P| \le 0.25` and `\eta_I \le 0.05 |\eta_P|` to keep
+updates well-damped even in thin cohorts while the forgetting factor `\rho`
+prevents integral windup during demand shocks. When demand exceeds supply the
+price nudges upward; slack capacity drives the rate down without imposing
+artificial caps. The in-memory and sled market implementations both record the
+price and demand deltas per reservation so historical utilisation feeds future
+updates.
 
 Campaign budgets remain denominated in USD micros. When an impression commits,
 the marketplace records both the USD total and the oracle snapshot inside the

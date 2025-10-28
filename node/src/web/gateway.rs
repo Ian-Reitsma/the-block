@@ -242,6 +242,7 @@ fn parse_signed_ack(
         provider,
         campaign_id: None,
         creative_id: None,
+        selection_receipt: None,
         readiness: None,
         zk_proof: None,
     };
@@ -296,6 +297,7 @@ fn build_read_ack(
             provider: infer_provider_for(&[0; 32], &path_hash).unwrap_or_default(),
             campaign_id: None,
             creative_id: None,
+            selection_receipt: None,
             readiness: None,
             zk_proof: None,
         }),
@@ -356,6 +358,7 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     if let Some(outcome) = market.reserve_impression(key, ctx) {
         ack.campaign_id = Some(outcome.campaign_id);
         ack.creative_id = Some(outcome.creative_id);
+        ack.selection_receipt = Some(outcome.selection_receipt);
     }
 }
 
@@ -795,6 +798,7 @@ mod tests {
                     margin_ppm: 800_000,
                     value_per_action_usd_micros: MICROS_PER_DOLLAR,
                     max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
+                    lift_ppm: 520_000,
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
@@ -880,6 +884,7 @@ mod tests {
                     margin_ppm: 800_000,
                     value_per_action_usd_micros: MICROS_PER_DOLLAR,
                     max_cpi_usd_micros: Some(MICROS_PER_DOLLAR),
+                    lift_ppm: 470_000,
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
@@ -1012,6 +1017,7 @@ mod tests {
                     margin_ppm: 900_000,
                     value_per_action_usd_micros: MICROS_PER_DOLLAR,
                     max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
+                    lift_ppm: 320_000,
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),

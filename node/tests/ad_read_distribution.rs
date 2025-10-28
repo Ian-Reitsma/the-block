@@ -1,6 +1,8 @@
 #![cfg(feature = "integration-tests")]
 
-use ad_market::SettlementBreakdown;
+use ad_market::{
+    SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt, SettlementBreakdown,
+};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::SigningKey;
@@ -39,8 +41,43 @@ fn build_signed_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
         provider: provider.to_string(),
         campaign_id: Some("cmp-1".into()),
         creative_id: Some("creative-1".into()),
+        selection_receipt: None,
         readiness: None,
         zk_proof: None,
+    }
+}
+
+fn dummy_receipt(
+    campaign_id: &str,
+    creative_id: &str,
+    clearing_price: u64,
+    resource_floor: u64,
+    runner_up: u64,
+    quality_bid: u64,
+) -> SelectionReceipt {
+    SelectionReceipt {
+        cohort: SelectionCohortTrace {
+            domain: "example.com".into(),
+            provider: Some("provider".into()),
+            badges: Vec::new(),
+            bytes: 0,
+            price_per_mib_usd_micros: 0,
+        },
+        candidates: vec![SelectionCandidateTrace {
+            campaign_id: campaign_id.into(),
+            creative_id: creative_id.into(),
+            base_bid_usd_micros: quality_bid,
+            quality_adjusted_bid_usd_micros: quality_bid,
+            available_budget_usd_micros: quality_bid,
+            action_rate_ppm: 0,
+            lift_ppm: 0,
+            quality_multiplier: 1.0,
+        }],
+        winner_index: 0,
+        resource_floor_usd_micros: resource_floor,
+        runner_up_quality_bid_usd_micros: runner_up,
+        clearing_price_usd_micros: clearing_price,
+        attestation: None,
     }
 }
 
@@ -69,6 +106,9 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         price_per_mib_usd_micros: 80,
         total_usd_micros: 80,
         demand_usd_micros: 80,
+        resource_floor_usd_micros: 80,
+        runner_up_quality_bid_usd_micros: 0,
+        quality_adjusted_bid_usd_micros: 80,
         total_ct: 80,
         viewer_ct: 30,
         host_ct: 20,
@@ -84,6 +124,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         unsettled_usd_micros: 0,
         ct_price_usd_micros: 1,
         it_price_usd_micros: 1,
+        selection_receipt: dummy_receipt("cmp-1", "creative-1", 80, 80, 0, 80),
     };
     bc.record_ad_settlement(&ack, settlement);
 
@@ -176,6 +217,9 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         price_per_mib_usd_micros: 120,
         total_usd_micros: 120,
         demand_usd_micros: 160,
+        resource_floor_usd_micros: 120,
+        runner_up_quality_bid_usd_micros: 0,
+        quality_adjusted_bid_usd_micros: 160,
         total_ct: 35,
         viewer_ct: 12,
         host_ct: 8,
@@ -191,6 +235,7 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         unsettled_usd_micros: 0,
         ct_price_usd_micros: 1,
         it_price_usd_micros: 1,
+        selection_receipt: dummy_receipt("cmp-1", "creative-1", 120, 120, 0, 160),
     };
     let settlement_b = SettlementBreakdown {
         campaign_id: "cmp-2".into(),
@@ -199,6 +244,9 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         price_per_mib_usd_micros: 150,
         total_usd_micros: 150,
         demand_usd_micros: 180,
+        resource_floor_usd_micros: 150,
+        runner_up_quality_bid_usd_micros: 0,
+        quality_adjusted_bid_usd_micros: 180,
         total_ct: 30,
         viewer_ct: 7,
         host_ct: 5,
@@ -214,6 +262,7 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         unsettled_usd_micros: 0,
         ct_price_usd_micros: 1,
         it_price_usd_micros: 1,
+        selection_receipt: dummy_receipt("cmp-2", "creative-2", 150, 150, 0, 180),
     };
     bc.record_ad_settlement(&ack_a, settlement_a.clone());
     bc.record_ad_settlement(&ack_b, settlement_b.clone());
@@ -296,6 +345,9 @@ fn dual_token_feature_flag_suppresses_it_when_disabled() {
         price_per_mib_usd_micros: 90,
         total_usd_micros: 90,
         demand_usd_micros: 90,
+        resource_floor_usd_micros: 90,
+        runner_up_quality_bid_usd_micros: 0,
+        quality_adjusted_bid_usd_micros: 90,
         total_ct: 45,
         viewer_ct: 15,
         host_ct: 12,
@@ -311,6 +363,7 @@ fn dual_token_feature_flag_suppresses_it_when_disabled() {
         unsettled_usd_micros: 0,
         ct_price_usd_micros: 1,
         it_price_usd_micros: 1,
+        selection_receipt: dummy_receipt("cmp-flag", "creative-flag", 90, 90, 0, 90),
     };
     bc.record_ad_settlement(&ack, settlement.clone());
 
