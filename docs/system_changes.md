@@ -11,6 +11,20 @@
 > micros) consumed by telemetry, and Prometheus exposes aggregated analytics via
 > `ad_budget_summary_value{metric}` alongside the existing campaign/cohort
 > gauges—dashboards can diff pacing drift without replaying wallet fixtures.
+> **Review (2025-10-29, midday):** Privacy-budget enforcement, uplift modelling,
+> and dual-token remainder accounting all ship with first-party plumbing. The
+> `PrivacyBudgetManager` enforces badge-family `(ε, δ)` limits with
+> deterministic cooldown and emits `ad_privacy_budget_{total,remaining}` so
+> auditors can watch accepted/cooling/revoked decisions in real time. Candidate
+> traces, reservations, and receipts now carry the doubly-robust uplift estimates
+> sourced from the new `UpliftEstimator`, wiring predicted lift, baseline action
+> rates, propensity, and ECE through pacing, RPC, and telemetry surfaces. Dual
+> settlements persist a sled-backed `TokenRemainderLedger` that tracks per-role
+> CT/IT USD remainders, includes TWAP window IDs in audit records, and exposes the
+> breakdown over RPC so CT/IT rounding never falls out of escrow reconciliation.
+> Integration tests cover ledger persistence and partial snapshot merges, while
+> telemetry gained dedicated privacy/uplift gauges and pacing-delta assertions to
+> keep the new control loops observable without third-party tooling.
 > **Review (2025-10-28, late night):** Budget pacing and selection proofs now
 > persist with first-party codecs. The `BudgetBroker` snapshot serialiser writes
 > κ shading, dual prices, and cohort spend into sled so restarts keep pacing

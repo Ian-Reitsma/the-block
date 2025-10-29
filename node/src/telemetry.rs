@@ -3945,9 +3945,25 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
             .unwrap_or_else(|e| panic!("budget config step size: {e}"))
             .set(config.step_size);
         AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["dual_step"])
+            .unwrap_or_else(|e| panic!("budget config dual step: {e}"))
+            .set(config.dual_step);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["dual_forgetting"])
+            .unwrap_or_else(|e| panic!("budget config dual forgetting: {e}"))
+            .set(config.dual_forgetting);
+        AD_BUDGET_CONFIG_VALUES
             .with_label_values(&["max_kappa"])
             .unwrap_or_else(|e| panic!("budget config max kappa: {e}"))
             .set(config.max_kappa);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["min_kappa"])
+            .unwrap_or_else(|e| panic!("budget config min kappa: {e}"))
+            .set(config.min_kappa);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["shadow_price_cap"])
+            .unwrap_or_else(|e| panic!("budget config shadow price cap: {e}"))
+            .set(config.shadow_price_cap);
         AD_BUDGET_CONFIG_VALUES
             .with_label_values(&["smoothing"])
             .unwrap_or_else(|e| panic!("budget config smoothing: {e}"))
@@ -4092,6 +4108,110 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
     #[cfg(not(feature = "telemetry"))]
     {
         let _ = snapshot;
+    }
+}
+
+#[cfg(all(test, feature = "telemetry"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ad_budget_summary_and_config_metrics_are_populated() {
+        AD_BUDGET_SUMMARY_VALUES.reset();
+        AD_BUDGET_CONFIG_VALUES.reset();
+        AD_BUDGET_COHORT_KAPPA.reset();
+        AD_BUDGET_COHORT_ERROR.reset();
+        AD_BUDGET_COHORT_REALIZED_USD.reset();
+        let mut config = ad_market::BudgetBrokerConfig::default();
+        config.epoch_impressions = 4;
+        config.step_size = 0.08;
+        config.dual_step = 0.03;
+        config.dual_forgetting = 0.5;
+        config.max_kappa = 1.5;
+        config.min_kappa = 0.4;
+        config.shadow_price_cap = 3.0;
+        config.smoothing = 0.2;
+        let snapshot = ad_market::BudgetBrokerSnapshot {
+            generated_at_micros: 42,
+            config: config.clone(),
+            campaigns: vec![ad_market::CampaignBudgetSnapshot {
+                campaign_id: "cmp-test".into(),
+                total_budget: 2_000_000,
+                remaining_budget: 1_000_000,
+                epoch_target: 500_000.0,
+                epoch_spend: 450_000.0,
+                epoch_impressions: 3,
+                dual_price: 0.75,
+                cohorts: vec![ad_market::CohortBudgetSnapshot {
+                    cohort: ad_market::CohortKeySnapshot {
+                        domain: "example.com".into(),
+                        provider: Some("wallet".into()),
+                        badges: vec!["badge-a".into()],
+                    },
+                    kappa: 0.85,
+                    smoothed_error: 0.12,
+                    realized_spend: 220_000.0,
+                }],
+            }],
+        };
+
+        update_ad_budget_metrics(&snapshot);
+
+        let campaign_count = AD_BUDGET_SUMMARY_VALUES
+            .get_metric_with_label_values(&["campaign_count"])
+            .expect("campaign_count gauge");
+        assert_eq!(campaign_count.get(), 1.0);
+
+        let cohort_count = AD_BUDGET_SUMMARY_VALUES
+            .get_metric_with_label_values(&["cohort_count"])
+            .expect("cohort_count gauge");
+        assert_eq!(cohort_count.get(), 1.0);
+
+        let mean_kappa = AD_BUDGET_SUMMARY_VALUES
+            .get_metric_with_label_values(&["mean_kappa"])
+            .expect("mean kappa gauge");
+        assert!((mean_kappa.get() - 0.85).abs() < f64::EPSILON);
+
+        let realized_total = AD_BUDGET_SUMMARY_VALUES
+            .get_metric_with_label_values(&["realized_spend_total_usd"])
+            .expect("realized spend total gauge");
+        assert!((realized_total.get() - 220_000.0).abs() < f64::EPSILON);
+
+        let dual_step = AD_BUDGET_CONFIG_VALUES
+            .get_metric_with_label_values(&["dual_step"])
+            .expect("dual_step gauge");
+        assert!((dual_step.get() - config.dual_step).abs() < f64::EPSILON);
+
+        let min_kappa = AD_BUDGET_CONFIG_VALUES
+            .get_metric_with_label_values(&["min_kappa"])
+            .expect("min_kappa gauge");
+        assert!((min_kappa.get() - config.min_kappa).abs() < f64::EPSILON);
+
+        let cohort_labels = ["cmp-test", "example.com", "wallet", "badge-a"];
+        let cohort_kappa = AD_BUDGET_COHORT_KAPPA
+            .get_metric_with_label_values(&cohort_labels)
+            .expect("cohort kappa gauge");
+        assert!((cohort_kappa.get() - 0.85).abs() < f64::EPSILON);
+
+        let cohort_realized = AD_BUDGET_COHORT_REALIZED_USD
+            .get_metric_with_label_values(&cohort_labels)
+            .expect("cohort realized spend gauge");
+        assert!((cohort_realized.get() - 220_000.0).abs() < f64::EPSILON);
+
+        let cohort_error = AD_BUDGET_COHORT_ERROR
+            .get_metric_with_label_values(&cohort_labels)
+            .expect("cohort error gauge");
+        assert!((cohort_error.get() - 0.12).abs() < f64::EPSILON);
+
+        let remaining_budget = AD_BUDGET_CAMPAIGN_REMAINING_USD
+            .get_metric_with_label_values(&["cmp-test"])
+            .expect("campaign remaining gauge");
+        assert!((remaining_budget.get() - 1_000_000.0).abs() < f64::EPSILON);
+
+        let dual_price = AD_BUDGET_CAMPAIGN_DUAL_PRICE
+            .get_metric_with_label_values(&["cmp-test"])
+            .expect("campaign dual price gauge");
+        assert!((dual_price.get() - 0.75).abs() < f64::EPSILON);
     }
 }
 

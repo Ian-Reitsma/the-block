@@ -205,6 +205,13 @@ FIRST_PARTY_ONLY monitoring aligned with the Grafana templates. A counter panel
 charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
 spot insufficient viewer/host/provider diversity before enabling the ad rail.
 
+The same row now links directly into the pacing cards. Selection receipts list
+the `resource_floor_breakdown` that cleared each auction, and the pacing panels
+plot `ad_budget_summary_value{metric}` alongside the deltas derived from
+`BudgetBrokerPacingDelta`, letting operators confirm partial snapshots merged
+correctly before telemetry exported the metrics—all while staying on the
+first-party Prometheus helpers.
+
 The Grafana bundle also dedicates a full **Advertising** row to proof integrity
 and pacing. Panels chart five-minute deltas of
 `ad_selection_attestation_total{kind,result,reason}`,
@@ -212,11 +219,24 @@ and pacing. Panels chart five-minute deltas of
 `ad_selection_attestation_commitment_bytes{kind}` so SNARK throughput,
 fallbacks, and commitment sizes stay observable. Companion graphs render
 `ad_budget_progress{campaign}`, `ad_budget_shadow_price{campaign}`, and
-`ad_budget_dual_price{campaign}` to expose κ shading and dual-price convergence,
-with the new alerts—`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
-and `AdBudgetProgressFlat`—annotated directly on the panels when proof supply
-degrades or pacing stalls. All panels flow through the helper builders in
+`ad_budget_kappa_gradient{campaign,...}` to expose κ shading, gradient pressure,
+and dual-price convergence. A dedicated panel breaks out
+`ad_resource_floor_component_usd{component}` so bandwidth, verifier, and host
+costs remain visible when demand clears near the floor. The alerts—
+`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+`AdBudgetProgressFlat`, and `AdResourceFloorVerifierDrift`—are annotated directly
+on the panels when proof supply degrades, pacing stalls, or verifier amortisation
+drifts. All panels flow through the helper builders in
 `monitoring/src/dashboard.rs`, keeping the JSON templates entirely first party.
+
+Privacy and uplift telemetry chart beside the pacing graphs. Counters
+`ad_privacy_budget_total{family,result}` and gauges
+`ad_privacy_budget_remaining{family,metric}` highlight badge families approaching
+their `(ε, δ)` ceilings or entering cooldown, while `ad_uplift_propensity{sample}`
+and `ad_uplift_lift_ppm{impressions}` plot the cross-fitted doubly-robust lift
+estimates so calibration drift is visible without replaying training logs. Alert
+rules fire when revoked/cooling totals spike or propensity deviates sharply,
+keeping privacy abuse and model regressions as observable as pacing stalls.
 
 Prometheus now fires `AdReadinessUtilizationDelta` whenever
 `abs(delta_utilization_ppm)` breaches the configured threshold despite steady

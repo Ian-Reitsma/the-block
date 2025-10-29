@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::ResourceFloorBreakdown;
 use crate::{
     SelectionAttestation, SelectionAttestationKind, SelectionProofMetadata, SelectionReceipt,
     SelectionReceiptError,
@@ -414,6 +416,7 @@ mod tests {
                     lift_ppm: 55_000,
                     quality_multiplier: 1.2,
                     pacing_kappa: 0.9,
+                    ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
                     campaign_id: "campaign-b".into(),
@@ -425,10 +428,17 @@ mod tests {
                     lift_ppm: 41_000,
                     quality_multiplier: 1.1,
                     pacing_kappa: 0.8,
+                    ..SelectionCandidateTrace::default()
                 },
             ],
             winner_index: 0,
             resource_floor_usd_micros: 1_200_000,
+            resource_floor_breakdown: ResourceFloorBreakdown {
+                bandwidth_usd_micros: 900_000,
+                verifier_usd_micros: 200_000,
+                host_usd_micros: 150_000,
+                qualified_impressions_per_proof: 600,
+            },
             runner_up_quality_bid_usd_micros: 1_800_000,
             clearing_price_usd_micros: 1_800_000,
             attestation: None,

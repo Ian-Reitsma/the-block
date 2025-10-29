@@ -8,10 +8,37 @@
 > proof envelope manually—no serde derives or external proof toolkits—and unit
 > tests cover proof-bytes and verifying-key mismatches. Ad-market budget snapshots
 > feed a first-party Prometheus bridge (`ad_budget_config_value`,
-> `ad_budget_campaign_*`, `ad_budget_cohort_*`, and the new
+> `ad_budget_campaign_*`, `ad_budget_cohort_*`, `ad_budget_kappa_gradient`,
+> `ad_budget_shadow_price`, `ad_resource_floor_component_usd`, and the
 > `ad_budget_summary_value{metric}` series) that store label lifetimes via
 > `HashSet` guards; the RPC handler records the snapshot once and telemetry fans
 > out gauges with zero third-party metrics crates.
+
+> **2025-10-29 update (privacy budgets, uplift, and dual-token ledger):** The new
+> `PrivacyBudgetManager` enforces badge-family `(ε, δ)` ceilings solely with `std`
+> collections and emits `ad_privacy_budget_{total,remaining}` via the existing
+> `foundation_metrics` facade—no external DP libraries or serde derives. The
+> cross-fitted `UpliftEstimator` drives `ad_uplift_propensity` and
+> `ad_uplift_lift_ppm` using the same macros, threads its predictions through
+> receipts/RPC helpers built on `foundation_serialization::json::Value`, and keeps
+> calibration math on the in-house numeric helpers. Dual-token settlements gained a
+> sled-backed `TokenRemainderLedger` serialised with manual JSON walkers; CT/IT
+> remainders, TWAP window IDs, and composite floor breakdowns now round-trip
+> without serde or third-party math crates, and persistence tests touch only
+> first-party storage adapters.
+
+> **2025-10-29 update (selection manifest determinism & pacing deltas):** Tests
+> now cover manifest hot-swaps and multi-entry manifests entirely through the
+> hand-rolled `parse_manifest_value`/`parse_artifacts_value` helpers, proving that
+> circuit listings and verifying-key digests stay deterministic even when JSON
+> order changes—no serde derives or external map iterators were introduced.
+> `SelectionReceipt` gained an inline `resource_floor_breakdown` structure that
+> serialises through the existing `foundation_serialization` facade and validates
+> purely with `std` arithmetic, so wallets prove the full composite floor without
+> relying on third-party math crates. The budget broker exposes
+> `BudgetBrokerPacingDelta`/`merge_budget_snapshots` with plain `HashMap`
+> bookkeeping; `node/src/rpc/ad_market.rs` and the telemetry tests assert the
+> deltas align with the summary gauges using only the in-house Prometheus wrappers.
 
 > **2025-10-28 update (selection proof metadata & broker snapshots):** Selection
 > commitments now render entirely through handwritten
@@ -37,9 +64,10 @@
 > third-party proof systems or logging crates were introduced. The pacing refactor
 > adds a first-party `BudgetBroker` that tracks κ shading, campaign spend, and
 > telemetry without pulling optimisation libraries, and the badge guard’s
-> k-anonymity relaxations use only `std` collections. `ad_budget_progress` and the
-> PI controller gauges extend the existing Prometheus macros so dashboards keep
-> consuming first-party telemetry. Missing attestations now respect
+> k-anonymity relaxations use only `std` collections. `ad_budget_progress`, the
+> shadow-price gauges, κ gradients, and resource-floor breakdowns extend the
+> existing Prometheus macros so dashboards keep consuming first-party telemetry.
+> Missing attestations now respect
 > `require_attestation` without panic instrumentation, keeping the matching path
 > hermetic.
 > **2025-11-09 update (dual-token governance gate & treasury timelines):** The

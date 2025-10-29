@@ -58,8 +58,24 @@ fn budget_config_to_value(config: &BudgetBrokerConfig) -> Value {
         Value::Number(number_from_f64(config.step_size)),
     );
     map.insert(
+        "dual_step".into(),
+        Value::Number(number_from_f64(config.dual_step)),
+    );
+    map.insert(
+        "dual_forgetting".into(),
+        Value::Number(number_from_f64(config.dual_forgetting)),
+    );
+    map.insert(
         "max_kappa".into(),
         Value::Number(number_from_f64(config.max_kappa)),
+    );
+    map.insert(
+        "min_kappa".into(),
+        Value::Number(number_from_f64(config.min_kappa)),
+    );
+    map.insert(
+        "shadow_price_cap".into(),
+        Value::Number(number_from_f64(config.shadow_price_cap)),
     );
     map.insert(
         "smoothing".into(),
@@ -234,8 +250,24 @@ fn budget_snapshot_summary_with_analytics(
         Value::Number(number_from_f64(config.step_size)),
     );
     map.insert(
+        "config_dual_step".into(),
+        Value::Number(number_from_f64(config.dual_step)),
+    );
+    map.insert(
+        "config_dual_forgetting".into(),
+        Value::Number(number_from_f64(config.dual_forgetting)),
+    );
+    map.insert(
         "config_max_kappa".into(),
         Value::Number(number_from_f64(config.max_kappa)),
+    );
+    map.insert(
+        "config_min_kappa".into(),
+        Value::Number(number_from_f64(config.min_kappa)),
+    );
+    map.insert(
+        "config_shadow_price_cap".into(),
+        Value::Number(number_from_f64(config.shadow_price_cap)),
     );
     map.insert(
         "config_smoothing".into(),
@@ -254,8 +286,24 @@ fn budget_snapshot_pacing(
         Value::Number(number_from_f64(snapshot.config.step_size)),
     );
     map.insert(
+        "dual_step".into(),
+        Value::Number(number_from_f64(snapshot.config.dual_step)),
+    );
+    map.insert(
+        "dual_forgetting".into(),
+        Value::Number(number_from_f64(snapshot.config.dual_forgetting)),
+    );
+    map.insert(
         "max_kappa_config".into(),
         Value::Number(number_from_f64(snapshot.config.max_kappa)),
+    );
+    map.insert(
+        "min_kappa_config".into(),
+        Value::Number(number_from_f64(snapshot.config.min_kappa)),
+    );
+    map.insert(
+        "shadow_price_cap_config".into(),
+        Value::Number(number_from_f64(snapshot.config.shadow_price_cap)),
     );
     map.insert(
         "smoothing".into(),
@@ -294,6 +342,108 @@ fn budget_snapshot_pacing(
         Value::Number(number_from_f64(analytics.dual_price_max)),
     );
     Value::Object(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cohort_snapshot(
+        domain: &str,
+        kappa: f64,
+        error: f64,
+        realized: f64,
+    ) -> ad_market::CohortBudgetSnapshot {
+        ad_market::CohortBudgetSnapshot {
+            cohort: ad_market::CohortKeySnapshot {
+                domain: domain.to_string(),
+                provider: Some("wallet".into()),
+                badges: vec!["badge".into()],
+            },
+            kappa,
+            smoothed_error: error,
+            realized_spend: realized,
+        }
+    }
+
+    fn campaign_snapshot(
+        campaign_id: &str,
+        epoch_target: f64,
+        epoch_spend: f64,
+        dual_price: f64,
+        cohort: ad_market::CohortBudgetSnapshot,
+    ) -> ad_market::CampaignBudgetSnapshot {
+        ad_market::CampaignBudgetSnapshot {
+            campaign_id: campaign_id.into(),
+            total_budget: 5_000_000,
+            remaining_budget: 4_000_000,
+            epoch_target,
+            epoch_spend,
+            epoch_impressions: 25,
+            dual_price,
+            cohorts: vec![cohort],
+        }
+    }
+
+    #[test]
+    fn pacing_delta_matches_partial_snapshot_merge() {
+        let config = ad_market::BudgetBrokerConfig::default();
+        let base = ad_market::BudgetBrokerSnapshot {
+            generated_at_micros: 50,
+            config: config.clone(),
+            campaigns: vec![
+                campaign_snapshot(
+                    "cmp-a",
+                    120_000.0,
+                    90_000.0,
+                    0.4,
+                    cohort_snapshot("example.com", 0.7, 0.08, 60_000.0),
+                ),
+                campaign_snapshot(
+                    "cmp-b",
+                    150_000.0,
+                    110_000.0,
+                    0.5,
+                    cohort_snapshot("news.example", 0.9, 0.05, 100_000.0),
+                ),
+            ],
+        };
+        let partial = ad_market::BudgetBrokerSnapshot {
+            generated_at_micros: 60,
+            config: config.clone(),
+            campaigns: vec![campaign_snapshot(
+                "cmp-a",
+                120_000.0,
+                105_000.0,
+                0.65,
+                cohort_snapshot("example.com", 0.8, 0.06, 75_000.0),
+            )],
+        };
+        let merged = ad_market::merge_budget_snapshots(&base, &partial);
+        let base_analytics = ad_market::budget_snapshot_analytics(&base);
+        let merged_analytics = ad_market::budget_snapshot_analytics(&merged);
+        let delta = ad_market::budget_snapshot_pacing_delta(&base, &merged);
+
+        assert!(
+            (delta.mean_kappa_delta - (merged_analytics.mean_kappa - base_analytics.mean_kappa))
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (delta.epoch_spend_total_delta
+                - (merged_analytics.epoch_spend_total - base_analytics.epoch_spend_total))
+                .abs()
+                < 1e-6
+        );
+        assert_eq!(delta.campaign_count_delta, 0);
+
+        let pacing_json = budget_snapshot_pacing(&merged, &merged_analytics);
+        let mean_kappa_json = pacing_json
+            .get("mean_kappa")
+            .and_then(Value::as_f64)
+            .expect("mean kappa json");
+        assert!((mean_kappa_json - merged_analytics.mean_kappa).abs() < 1e-9);
+    }
 }
 
 pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
