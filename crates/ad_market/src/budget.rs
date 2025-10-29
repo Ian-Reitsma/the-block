@@ -3,6 +3,7 @@ use crypto_suite::hashing::blake3;
 use foundation_metrics::{gauge, histogram, increment_counter};
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BudgetBrokerConfig {
@@ -56,6 +57,7 @@ impl BudgetBroker {
 
     pub fn snapshot(&self) -> BudgetBrokerSnapshot {
         BudgetBrokerSnapshot {
+            generated_at_micros: now_micros(),
             config: self.config.clone(),
             campaigns: self
                 .campaigns
@@ -326,8 +328,24 @@ struct CohortBudgetState {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BudgetBrokerSnapshot {
+    pub generated_at_micros: u64,
     pub config: BudgetBrokerConfig,
     pub campaigns: Vec<CampaignBudgetSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BudgetBrokerAnalytics {
+    pub campaign_count: u64,
+    pub cohort_count: u64,
+    pub mean_kappa: f64,
+    pub min_kappa: f64,
+    pub max_kappa: f64,
+    pub mean_smoothed_error: f64,
+    pub max_abs_smoothed_error: f64,
+    pub realized_spend_total: f64,
+    pub epoch_target_total: f64,
+    pub epoch_spend_total: f64,
+    pub dual_price_max: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -391,6 +409,54 @@ impl CohortBudgetState {
     }
 }
 
+pub fn compute_budget_analytics(snapshot: &BudgetBrokerSnapshot) -> BudgetBrokerAnalytics {
+    let mut cohort_count: u64 = 0;
+    let mut kappa_total = 0.0f64;
+    let mut error_total = 0.0f64;
+    let mut kappa_min = f64::INFINITY;
+    let mut kappa_max = 0.0f64;
+    let mut error_max = 0.0f64;
+    let mut realized_total = 0.0f64;
+    let mut epoch_target_total = 0.0f64;
+    let mut epoch_spend_total = 0.0f64;
+    let mut dual_price_max = 0.0f64;
+    for campaign in &snapshot.campaigns {
+        epoch_target_total += campaign.epoch_target;
+        epoch_spend_total += campaign.epoch_spend;
+        dual_price_max = dual_price_max.max(campaign.dual_price);
+        for cohort in &campaign.cohorts {
+            cohort_count += 1;
+            kappa_total += cohort.kappa;
+            error_total += cohort.smoothed_error;
+            kappa_min = kappa_min.min(cohort.kappa);
+            kappa_max = kappa_max.max(cohort.kappa);
+            error_max = error_max.max(cohort.smoothed_error.abs());
+            realized_total += cohort.realized_spend;
+        }
+    }
+    let campaign_count = snapshot.campaigns.len() as u64;
+    let cohort_count_f = cohort_count.max(1) as f64;
+    let mean_kappa = kappa_total / cohort_count_f;
+    let mean_smoothed_error = error_total / cohort_count_f;
+    BudgetBrokerAnalytics {
+        campaign_count,
+        cohort_count,
+        mean_kappa,
+        min_kappa: if kappa_min.is_finite() {
+            kappa_min
+        } else {
+            0.0
+        },
+        max_kappa: kappa_max,
+        mean_smoothed_error,
+        max_abs_smoothed_error: error_max,
+        realized_spend_total: realized_total,
+        epoch_target_total,
+        epoch_spend_total,
+        dual_price_max,
+    }
+}
+
 impl CohortKeySnapshot {
     pub(crate) fn from_key(key: &CohortKey) -> Self {
         Self {
@@ -412,6 +478,16 @@ fn compute_epoch_target(budget: u64, epochs_per_budget: u64) -> f64 {
         return budget as f64;
     }
     (budget as f64 / epochs_per_budget as f64).max(1.0)
+}
+
+fn now_micros() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration
+            .as_secs()
+            .saturating_mul(1_000_000)
+            .saturating_add(duration.subsec_micros() as u64),
+        Err(_) => 0,
+    }
 }
 
 #[cfg(test)]

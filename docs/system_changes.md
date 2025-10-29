@@ -1,4 +1,16 @@
 # System-Wide Economic Changes
+> **Review (2025-10-29, morning):** Selection receipts now recompute their
+> commitment hash, proof-bytes digest, verifying-key digest, and transcript using
+> the manifest-backed helpers in `zkp::selection`. The new
+> `extract_proof_body_digest` parser hashes the Groth16 payload itself (not the
+> JSON wrapper) so `SelectionReceipt::validate` rejects tampered proofs and maps
+> malformed blobs to `InvalidAttestation`. Metadata cross-checks the canonical
+> verifying-key digest from `selection_artifacts.json`, and unit tests assert
+> proof-bytes and verifying-key mismatches both fail fast. The ad marketplace’s
+> broker RPC now returns `summary` and `pacing` sections (including generated-at
+> micros) consumed by telemetry, and Prometheus exposes aggregated analytics via
+> `ad_budget_summary_value{metric}` alongside the existing campaign/cohort
+> gauges—dashboards can diff pacing drift without replaying wallet fixtures.
 > **Review (2025-10-28, late night):** Budget pacing and selection proofs now
 > persist with first-party codecs. The `BudgetBroker` snapshot serialiser writes
 > κ shading, dual prices, and cohort spend into sled so restarts keep pacing

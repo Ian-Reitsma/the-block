@@ -7,6 +7,9 @@ use std::convert::TryFrom;
 
 const PROOF_DIGEST_PREFIX_LEN: usize = 32;
 
+const MANIFEST_JSON: &str = include_str!("../data/selection_manifest.json");
+const ARTIFACTS_JSON: &str = include_str!("../data/selection_artifacts.json");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionProofError {
     InvalidProof,
@@ -51,7 +54,7 @@ impl Default for SelectionProofPublicInputs {
 }
 
 impl SelectionProofPublicInputs {
-    fn commitment_array(&self) -> Result<[u8; 32], SelectionProofError> {
+    pub fn commitment_array(&self) -> Result<[u8; 32], SelectionProofError> {
         if self.commitment.len() != 32 {
             return Err(SelectionProofError::Commitment);
         }
@@ -67,6 +70,13 @@ struct ProofBody {
     transcript_digest: [u8; 32],
     protocol: Option<String>,
     witness_commitments: Vec<[u8; 32]>,
+}
+
+#[derive(Clone, Debug)]
+struct CircuitArtifact {
+    circuit_id: &'static str,
+    verifying_key: &'static [u8],
+    verifying_key_digest: [u8; 32],
 }
 
 fn parse_u64(value: &json::Value) -> Result<u64, SelectionProofError> {
@@ -239,6 +249,7 @@ impl SelectionProofEnvelope {
 pub struct SelectionProofVerification {
     pub revision: u16,
     pub proof_digest: [u8; 32],
+    pub proof_bytes_digest: [u8; 32],
     pub proof_len: u32,
     pub protocol: Option<String>,
     pub witness_commitments: Vec<[u8; 32]>,
@@ -257,6 +268,8 @@ struct CircuitDescriptor {
     revision: u16,
     expected_version: u16,
     min_proof_len: usize,
+    protocol: Option<&'static str>,
+    expected_witness_commitments: Option<usize>,
 }
 
 impl CircuitDescriptor {
@@ -265,7 +278,7 @@ impl CircuitDescriptor {
         circuit_id: &str,
         envelope: &SelectionProofEnvelope,
         commitment: &[u8; 32],
-    ) -> Result<(), SelectionProofError> {
+    ) -> Result<[u8; 32], SelectionProofError> {
         if envelope.version != self.expected_version {
             return Err(SelectionProofError::RevisionMismatch);
         }
@@ -301,15 +314,27 @@ impl CircuitDescriptor {
         circuit_id: &str,
         inputs: &SelectionProofPublicInputs,
         proof: &ProofBody,
-    ) -> Result<(), SelectionProofError> {
+    ) -> Result<[u8; 32], SelectionProofError> {
         if proof.bytes.len() < self.min_proof_len {
             return Err(SelectionProofError::Length);
         }
-        let expected = transcript_digest(circuit_id, self.revision, inputs);
+        let proof_bytes_digest = compute_proof_bytes_digest(&proof.bytes);
+        let expected = transcript_digest(circuit_id, self.revision, inputs, &proof_bytes_digest);
         if proof.transcript_digest != expected {
             return Err(SelectionProofError::InvalidProof);
         }
-        Ok(())
+        if let Some(expected_protocol) = self.protocol {
+            match proof.protocol.as_deref() {
+                Some(protocol) if protocol == expected_protocol => {}
+                _ => return Err(SelectionProofError::Semantics),
+            }
+        }
+        if let Some(expected_commitments) = self.expected_witness_commitments {
+            if proof.witness_commitments.len() < expected_commitments {
+                return Err(SelectionProofError::Semantics);
+            }
+        }
+        Ok(proof_bytes_digest)
     }
 }
 
@@ -317,10 +342,15 @@ fn transcript_digest(
     circuit_id: &str,
     revision: u16,
     inputs: &SelectionProofPublicInputs,
+    proof_bytes_digest: &[u8; 32],
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(circuit_id.as_bytes());
     hasher.update(&revision.to_le_bytes());
+    if let Some(artifact) = CIRCUIT_ARTIFACTS.get(circuit_id) {
+        hasher.update(&artifact.verifying_key_digest);
+    }
+    hasher.update(proof_bytes_digest);
     hasher.update(&inputs.commitment);
     hasher.update(&inputs.winner_index.to_le_bytes());
     hasher.update(&inputs.winner_quality_bid_usd_micros.to_le_bytes());
@@ -331,18 +361,163 @@ fn transcript_digest(
     *hasher.finalize().as_bytes()
 }
 
-static CIRCUIT_REGISTRY: Lazy<HashMap<&'static str, CircuitDescriptor>> = Lazy::new(|| {
-    let mut map = HashMap::new();
-    map.insert(
-        "selection_argmax_v1",
-        CircuitDescriptor {
-            revision: 1,
-            expected_version: 1,
-            min_proof_len: 48,
-        },
-    );
-    map
-});
+fn compute_proof_bytes_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(bytes);
+    *hasher.finalize().as_bytes()
+}
+
+pub fn proof_bytes_digest(proof: &[u8]) -> [u8; 32] {
+    compute_proof_bytes_digest(proof)
+}
+
+pub fn extract_proof_body_digest(proof_payload: &[u8]) -> Result<[u8; 32], SelectionProofError> {
+    let value = json::from_slice(proof_payload).map_err(|_| SelectionProofError::Format)?;
+    let envelope = SelectionProofEnvelope::from_value(value)?;
+    Ok(compute_proof_bytes_digest(&envelope.proof.bytes))
+}
+
+pub fn expected_transcript_digest(
+    circuit_id: &str,
+    revision: u16,
+    proof_bytes_digest: &[u8; 32],
+    inputs: &SelectionProofPublicInputs,
+) -> Result<[u8; 32], SelectionProofError> {
+    let _ = inputs.commitment_array()?;
+    Ok(transcript_digest(
+        circuit_id,
+        revision,
+        inputs,
+        proof_bytes_digest,
+    ))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionCircuitInfo {
+    pub circuit_id: &'static str,
+    pub revision: u16,
+    pub version: u16,
+    pub min_proof_len: usize,
+    pub protocol: Option<&'static str>,
+    pub expected_witness_commitments: Option<usize>,
+}
+
+fn parse_manifest() -> HashMap<&'static str, CircuitDescriptor> {
+    let value = json::from_str::<json::Value>(MANIFEST_JSON)
+        .expect("selection manifest must be valid JSON");
+    let object = value
+        .as_object()
+        .expect("selection manifest must be a JSON object");
+    let mut registry = HashMap::with_capacity(object.len());
+    for (id, descriptor_value) in object {
+        let descriptor = descriptor_value
+            .as_object()
+            .expect("selection circuit descriptor must be an object");
+        let revision = descriptor
+            .get("revision")
+            .and_then(json::Value::as_u64)
+            .expect("selection circuit revision must be a number");
+        let version = descriptor
+            .get("version")
+            .and_then(json::Value::as_u64)
+            .expect("selection circuit version must be a number");
+        let min_proof_len = descriptor
+            .get("min_proof_len")
+            .and_then(json::Value::as_u64)
+            .expect("selection circuit min_proof_len must be a number");
+        let protocol = descriptor
+            .get("protocol")
+            .and_then(json::Value::as_str)
+            .map(|value| value.trim().to_lowercase())
+            .map(|value| {
+                let leaked = Box::leak(value.into_boxed_str());
+                &*leaked
+            });
+        let witness_commitments = descriptor
+            .get("witness_commitments")
+            .and_then(json::Value::as_u64)
+            .map(|value| value as usize);
+        let id_static: &'static str = Box::leak(id.clone().into_boxed_str());
+        registry.insert(
+            id_static,
+            CircuitDescriptor {
+                revision: revision as u16,
+                expected_version: version as u16,
+                min_proof_len: min_proof_len as usize,
+                protocol,
+                expected_witness_commitments: witness_commitments,
+            },
+        );
+    }
+    registry
+}
+
+static CIRCUIT_REGISTRY: Lazy<HashMap<&'static str, CircuitDescriptor>> = Lazy::new(parse_manifest);
+
+fn parse_artifacts() -> HashMap<&'static str, CircuitArtifact> {
+    let value = json::from_str::<json::Value>(ARTIFACTS_JSON)
+        .expect("selection artifacts manifest must be valid JSON");
+    let object = value
+        .as_object()
+        .expect("selection artifacts must be a JSON object");
+    let mut registry = HashMap::with_capacity(object.len());
+    for (circuit_id, descriptor) in object {
+        let descriptor = descriptor
+            .as_object()
+            .expect("selection artifact descriptor must be an object");
+        let verifying_key_b64 = descriptor
+            .get("verifying_key_b64")
+            .and_then(json::Value::as_str)
+            .expect("selection artifact must include verifying_key_b64");
+        let verifying_key = decode_standard(verifying_key_b64)
+            .expect("selection artifact verifying key must be valid base64");
+        let digest = blake3::hash(&verifying_key);
+        let leaked_key: &'static [u8] = Box::leak(verifying_key.into_boxed_slice());
+        let circuit_id_static: &'static str = Box::leak(circuit_id.clone().into_boxed_str());
+        registry.insert(
+            circuit_id_static,
+            CircuitArtifact {
+                circuit_id: circuit_id_static,
+                verifying_key: leaked_key,
+                verifying_key_digest: *digest.as_bytes(),
+            },
+        );
+    }
+    registry
+}
+
+static CIRCUIT_ARTIFACTS: Lazy<HashMap<&'static str, CircuitArtifact>> = Lazy::new(parse_artifacts);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionCircuitArtifactInfo {
+    pub circuit_id: &'static str,
+    pub verifying_key_digest: [u8; 32],
+    pub verifying_key: &'static [u8],
+}
+
+pub fn selection_circuit_artifact(circuit_id: &str) -> Option<SelectionCircuitArtifactInfo> {
+    CIRCUIT_ARTIFACTS
+        .get(circuit_id)
+        .map(|artifact| SelectionCircuitArtifactInfo {
+            circuit_id: artifact.circuit_id,
+            verifying_key_digest: artifact.verifying_key_digest,
+            verifying_key: artifact.verifying_key,
+        })
+}
+
+pub fn selection_circuits() -> Vec<SelectionCircuitInfo> {
+    CIRCUIT_REGISTRY
+        .iter()
+        .map(|(&circuit_id, descriptor)| SelectionCircuitInfo {
+            circuit_id,
+            revision: descriptor.revision,
+            version: descriptor.expected_version,
+            min_proof_len: descriptor.min_proof_len,
+            protocol: descriptor.protocol,
+            expected_witness_commitments: descriptor.expected_witness_commitments,
+        })
+        .collect()
+}
 
 pub fn verify_selection_proof(
     circuit_id: &str,
@@ -354,7 +529,7 @@ pub fn verify_selection_proof(
     let descriptor = CIRCUIT_REGISTRY
         .get(circuit_id)
         .ok_or(SelectionProofError::UnsupportedCircuit)?;
-    descriptor.validate(circuit_id, &envelope, commitment)?;
+    let proof_bytes_digest = descriptor.validate(circuit_id, &envelope, commitment)?;
     let SelectionProofEnvelope {
         public_inputs,
         proof,
@@ -368,6 +543,7 @@ pub fn verify_selection_proof(
     Ok(SelectionProofVerification {
         revision: descriptor.revision,
         proof_digest: proof.transcript_digest,
+        proof_bytes_digest,
         proof_len,
         protocol,
         witness_commitments: proof.witness_commitments,
@@ -378,6 +554,7 @@ pub fn verify_selection_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foundation_serialization::json;
 
     const CIRCUIT_ID: &str = "selection_argmax_v1";
 
@@ -406,6 +583,26 @@ mod tests {
         encoded
     }
 
+    fn extract_proof_bytes(payload: &[u8]) -> Vec<u8> {
+        let value = json::from_slice::<json::Value>(payload).expect("proof json");
+        let map = value.as_object().expect("proof object");
+        let proof = map.get("proof").expect("proof field");
+        let proof_map = proof.as_object().expect("proof map");
+        let bytes = proof_map.get("bytes").expect("bytes field");
+        match bytes {
+            json::Value::Array(entries) => entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .as_u64()
+                        .and_then(|value| u8::try_from(value).ok())
+                        .expect("byte value")
+                })
+                .collect(),
+            _ => panic!("bytes must be array"),
+        }
+    }
+
     fn build_proof_payload<F>(
         inputs: SelectionProofPublicInputs,
         revision: u16,
@@ -414,9 +611,14 @@ mod tests {
     where
         F: FnOnce(&mut Vec<u8>, &mut [u8; 32]),
     {
-        let mut transcript = transcript_digest(CIRCUIT_ID, revision, &inputs);
         let mut proof_bytes = vec![0xAB; 96];
-        proof_bytes[..transcript.len()].copy_from_slice(&transcript);
+        let mut transcript = expected_transcript_digest(
+            CIRCUIT_ID,
+            revision,
+            &proof_bytes_digest(&proof_bytes),
+            &inputs,
+        )
+        .expect("transcript digest");
         mutator(&mut proof_bytes, &mut transcript);
         let public_inputs = format!(
             "{{\"commitment\":{},\"winner_index\":{},\"winner_quality_bid_usd_micros\":{},\"runner_up_quality_bid_usd_micros\":{},\"resource_floor_usd_micros\":{},\"clearing_price_usd_micros\":{},\"candidate_count\":{}}}",
@@ -458,6 +660,19 @@ mod tests {
         assert_eq!(verification.protocol.as_deref(), Some("groth16"));
         assert_eq!(verification.witness_commitments.len(), 2);
         assert_eq!(verification.witness_commitments[0], [0x11; 32]);
+        let proof_bytes = extract_proof_bytes(&proof);
+        let expected_digest = proof_bytes_digest(&proof_bytes);
+        assert_eq!(verification.proof_bytes_digest, expected_digest);
+    }
+
+    #[test]
+    fn extracts_proof_body_digest() {
+        let commitment = [13u8; 32];
+        let inputs = make_inputs(commitment);
+        let proof = build_proof_payload(inputs, 1, |_, _| {});
+        let digest = extract_proof_body_digest(&proof).expect("digest extracted");
+        let proof_bytes = extract_proof_bytes(&proof);
+        assert_eq!(digest, proof_bytes_digest(&proof_bytes));
     }
 
     #[test]
@@ -491,5 +706,27 @@ mod tests {
         let err = verify_selection_proof(CIRCUIT_ID, &proof, &commitment)
             .expect_err("revision mismatch must fail");
         assert_eq!(err, SelectionProofError::RevisionMismatch);
+    }
+
+    #[test]
+    fn manifest_lists_argmax_circuit() {
+        let info = selection_circuits()
+            .into_iter()
+            .find(|entry| entry.circuit_id == CIRCUIT_ID)
+            .expect("selection manifest should expose argmax circuit");
+        assert_eq!(info.revision, 1);
+        assert_eq!(info.version, 1);
+        assert_eq!(info.protocol, Some("groth16"));
+        assert!(info.min_proof_len >= 48);
+    }
+
+    #[test]
+    fn exposes_selection_artifact() {
+        let artifact =
+            selection_circuit_artifact(CIRCUIT_ID).expect("artifact should exist for circuit");
+        assert_eq!(artifact.circuit_id, CIRCUIT_ID);
+        assert_eq!(artifact.verifying_key.len(), 256);
+        let digest = blake3::hash(artifact.verifying_key);
+        assert_eq!(artifact.verifying_key_digest, *digest.as_bytes());
     }
 }

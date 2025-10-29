@@ -1,4 +1,18 @@
 # Project Progress Snapshot
+> **Review (2025-10-29, afternoon):** Selection proofs now authenticate the
+> underlying Groth16 payload and verifying key—not just the wallet-supplied
+> wrapper. `zkp::selection::extract_proof_body_digest` parses the proof envelope
+> and hashes the raw bytes so `SelectionReceipt::validate` rejects mismatched
+> `proof_bytes_digest` entries, while the metadata path cross-checks the
+> manifest-backed verifying-key digest from `selection_artifacts.json`. Unit tests
+> cover valid SNARK receipts plus tampered proof-bytes and verifying-key digests,
+> and the attestation integration suite (`ad_market_attestation_budget_load`) now
+> exercises SNARK validation, broker commit, and telemetry updates through the
+> live RPC surface. Telemetry exports gained
+> `ad_budget_summary_value{metric=campaign_count|cohort_count|mean_kappa|…}` so
+> dashboards and governance tooling can track pacing analytics without
+> reconstituting snapshots, and `ad_market.broker_state` exposes the generated-at
+> micros plus the new `pacing` block alongside the existing campaign/cohort dump.
 > **Review (2025-10-28, late night):** Budget pacing and proof plumbing now
 > survive restarts. `BudgetBroker` snapshots serialise through first-party JSON
 > helpers, persist under sled’s `KEY_BUDGET`, and restore during marketplace
@@ -287,6 +301,14 @@
 > and telemetry adds `read_selection_proof_{verified,invalid}_total{attestation}`
 > plus `read_selection_proof_latency_seconds{attestation}` so SNARK/TEE mixes and
 > proof lag appear in dashboards.
+> **Review (2025-10-29, morning):** Selection receipts now recompute the SNARK
+> commitment and transcript digest via `zkp::selection`, rejecting receipts whose
+> metadata or witness digests diverge from the canonical circuit inputs. The ad
+> market budget RPC fans snapshots into the telemetry module, emitting
+> `ad_budget_config_value{parameter}`, `ad_budget_campaign_{remaining_usd,dual_price,epoch_target_usd}`
+> and cohort-level `ad_budget_cohort_{kappa,error,realized_usd}` gauges with
+> first-party label lifetimes so dashboards expose pacing pressure without
+> third-party metrics crates.
 > **Review (2025-10-24, early afternoon):** Explorer integration now mines blocks that mix binary headers with JSON fallbacks so payout decoding stays resilient across codec boundaries, and the metrics aggregator records the role-labelled counters directly via cached `CounterVec` handles. The `/metrics` integration asserts both `explorer_block_payout_read_total` and `_ad_total` advance on a second scrape, mirroring the Grafana PromQL so the dashboards stay backed by live data. Documentation now includes CLI automation snippets for hash and height payout queries, plus monitoring notes covering the new counter caching path so operators know where the deltas originate.
 > **Review (2025-10-30, morning):** Explorer payout queries now guard the JSON fallback so legacy snapshots lacking `read_sub_*` or `ad_*` fields still render per-role totals, and new unit tests pin that behaviour to FIRST_PARTY_ONLY runs. The CLI suite exercises the failure paths for unknown hashes/heights and the mutual-exclusion flag checks, while the Grafana generator adds a “Block Payouts” row that charts read-subsidy and advertising role counters. Operators can now move from database snapshots, through automation, to dashboards without leaving first-party surfaces.
 > **Review (2025-10-29, early morning):** Read acknowledgements now propagate through

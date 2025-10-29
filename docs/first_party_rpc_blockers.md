@@ -24,12 +24,15 @@ RPC client.
   state via first-party codecs, and sled persists broker snapshots under
   `KEY_BUDGET` to survive restarts without new stores or serde fallbacks.
 - Ad marketplace RPC handlers now attach first-party selection receipts with
-  BLAKE3 commitments and verify wallet-supplied SNARK proofs via
-  `zkp::selection`; TEE attestations only pass when governance enables the
-  fallback and missing proofs respect the `require_attestation` flag without
-  panicking. `ad_market.reserve_impression` reuses the existing telemetry + JSON
-  helpers, and new attestation counters surface through the same Prometheus
-  macros, keeping the RPC surface hermetic.
+  BLAKE3 commitments and verify wallet-supplied SNARK proofs via the manifest-
+  backed helpers in `zkp::selection`. `SelectionReceipt::validate` hashes the
+  Groth16 payload with `extract_proof_body_digest`, cross-checks the canonical
+  verifying-key digest, and maps malformed blobs to `InvalidAttestation`, while
+  unit tests cover proof-bytes and verifying-key mismatches. TEE attestations
+  only pass when governance enables the fallback and missing proofs respect the
+  `require_attestation` flag without panicking. `ad_market.reserve_impression`
+  reuses the existing telemetry + JSON helpers, and new attestation counters
+  surface through the same Prometheus macros, keeping the RPC surface hermetic.
 - SNARK verification latency and fallback counters land in
   `ad_selection_proof_verify_seconds`,
   `ad_selection_attestation_total{kind,result,reason}`, and
@@ -48,7 +51,11 @@ RPC client.
   ruleset gained an `AdReadinessUtilizationDelta` alert that pages when cohorts
   drift beyond thresholds despite steady demand. Both changes extend the existing
   first-party JSON and Prometheus helpers—no external alert managers or serde
-  adapters were added.
+  adapters were added. `ad_market.broker_state` returns `summary` and `pacing`
+  sections (plus generated-at micros) so dashboards and governance tooling can
+  inspect κ, dual prices, and error trends without replaying fixture payloads;
+  telemetry mirrors the snapshot via the new `ad_budget_summary_value{metric}`
+  gauge family.
 
 ## Recent progress (2025-11-07)
 

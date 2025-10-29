@@ -117,6 +117,25 @@ Additional subsystem counters include:
   of-selection attestation mix and verification latency. Tie these into the
   read-ops dashboard so SNARK fallbacks or repeated TEE failures surface before
   wallets violate campaign contracts.
+- `ad_budget_config_value{parameter}` captures live pacing parameters
+  (`epoch_impressions`, `step_size`, `max_kappa`, `smoothing`, `epochs_per_budget`).
+  `ad_budget_campaign_remaining_usd{campaign}`,
+  `ad_budget_campaign_dual_price{campaign}`, and
+  `ad_budget_campaign_epoch_target_usd{campaign}` surface per-campaign budget
+  headroom, shadow price, and epoch target. Cohort metrics—
+  `ad_budget_cohort_kappa{campaign,domain,provider,badges}`,
+  `ad_budget_cohort_error{...}`, and `ad_budget_cohort_realized_usd{...}`—track
+  pacing multipliers, smoothed error, and realised spend for each cohort. The
+  telemetry module removes stale label values when snapshots change, so the
+  Gauges remain first-party without leaking historical labels.
+  `ad_budget_summary_value{metric}` aggregates snapshot analytics
+  (`campaign_count`, `cohort_count`, `mean_kappa`, `max_kappa`,
+  `mean_smoothed_error`, `max_abs_smoothed_error`, `realized_spend_total`,
+  `epoch_target_total`, `epoch_spend_total`, `dual_price_max`,
+  `config_step_size`, `config_max_kappa`, `config_smoothing`) so dashboards can
+  alert on pacing drift without rebuilding summaries. `ad_budget_snapshot_generated_at_micros`
+  marks the most recent snapshot timestamp so dashboards can alert when pacing
+  exports stall.
 - `PROOF_REBATES_PENDING_TOTAL`/`PROOF_REBATES_CLAIMED_TOTAL` track light-client rebate balances and payouts; alert when the pending gauge grows faster than block production.
 - `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` track governance-backed payout flows, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` records settlement submissions, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` captures duty resolution outcomes alongside the `bridge_pending_withdrawals` gauges of outstanding releases per asset.
 

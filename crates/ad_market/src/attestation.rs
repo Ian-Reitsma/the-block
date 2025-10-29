@@ -2,12 +2,7 @@ use crate::{
     SelectionAttestation, SelectionAttestationKind, SelectionProofMetadata, SelectionReceipt,
     SelectionReceiptError,
 };
-use crypto_suite::hashing::blake3;
 use foundation_metrics::{gauge, histogram, increment_counter};
-use foundation_serialization::{
-    self as serialization,
-    json::{self, Map as JsonMap, Value as JsonValue},
-};
 use std::collections::HashSet;
 use std::time::Instant;
 use zkp::selection::SelectionProofVerification;
@@ -72,7 +67,7 @@ impl SelectionAttestationManager {
         AttestationSatisfaction,
         Option<SelectionProofMetadata>,
     ) {
-        let commitment = match compute_commitment(receipt) {
+        let commitment = match receipt.commitment_bytes_raw() {
             Ok(value) => value,
             Err(err) => {
                 eprintln!("failed to compute selection commitment for attestation: {err}");
@@ -215,7 +210,7 @@ impl SelectionAttestationManager {
                             reason: "metadata",
                         },
                     )?;
-                    let commitment = compute_commitment(receipt).map_err(|_| {
+                    let commitment = receipt.commitment_bytes_raw().map_err(|_| {
                         SelectionReceiptError::InvalidAttestation {
                             kind: SelectionAttestationKind::Snark,
                             reason: "commitment",
@@ -329,93 +324,6 @@ fn commitments_consistent(
     }
 }
 
-fn compute_commitment(receipt: &SelectionReceipt) -> Result<[u8; 32], serialization::Error> {
-    let mut candidates_values = Vec::with_capacity(receipt.candidates.len());
-    for candidate in &receipt.candidates {
-        let mut candidate_map = JsonMap::new();
-        candidate_map.insert(
-            "campaign_id".into(),
-            JsonValue::String(candidate.campaign_id.clone()),
-        );
-        candidate_map.insert(
-            "creative_id".into(),
-            JsonValue::String(candidate.creative_id.clone()),
-        );
-        candidate_map.insert(
-            "base_bid_usd_micros".into(),
-            JsonValue::from(candidate.base_bid_usd_micros),
-        );
-        candidate_map.insert(
-            "quality_adjusted_bid_usd_micros".into(),
-            JsonValue::from(candidate.quality_adjusted_bid_usd_micros),
-        );
-        candidate_map.insert(
-            "available_budget_usd_micros".into(),
-            JsonValue::from(candidate.available_budget_usd_micros),
-        );
-        candidate_map.insert(
-            "action_rate_ppm".into(),
-            JsonValue::from(candidate.action_rate_ppm),
-        );
-        candidate_map.insert("lift_ppm".into(), JsonValue::from(candidate.lift_ppm));
-        candidate_map.insert(
-            "quality_multiplier".into(),
-            JsonValue::from(candidate.quality_multiplier),
-        );
-        candidate_map.insert(
-            "pacing_kappa".into(),
-            JsonValue::from(candidate.pacing_kappa),
-        );
-        candidates_values.push(JsonValue::Object(candidate_map));
-    }
-    let mut commitment_map = JsonMap::new();
-    commitment_map.insert(
-        "domain".into(),
-        JsonValue::String(receipt.cohort.domain.clone()),
-    );
-    commitment_map.insert(
-        "provider".into(),
-        receipt
-            .cohort
-            .provider
-            .as_ref()
-            .map(|value| JsonValue::String(value.clone()))
-            .unwrap_or(JsonValue::Null),
-    );
-    let badge_values = receipt
-        .cohort
-        .badges
-        .iter()
-        .cloned()
-        .map(JsonValue::String)
-        .collect();
-    commitment_map.insert("badges".into(), JsonValue::Array(badge_values));
-    commitment_map.insert("bytes".into(), JsonValue::from(receipt.cohort.bytes));
-    commitment_map.insert(
-        "price_per_mib_usd_micros".into(),
-        JsonValue::from(receipt.cohort.price_per_mib_usd_micros),
-    );
-    commitment_map.insert(
-        "winner_index".into(),
-        JsonValue::from(receipt.winner_index as u64),
-    );
-    commitment_map.insert(
-        "runner_up_quality_bid_usd_micros".into(),
-        JsonValue::from(receipt.runner_up_quality_bid_usd_micros),
-    );
-    commitment_map.insert(
-        "clearing_price_usd_micros".into(),
-        JsonValue::from(receipt.clearing_price_usd_micros),
-    );
-    commitment_map.insert(
-        "resource_floor_usd_micros".into(),
-        JsonValue::from(receipt.resource_floor_usd_micros),
-    );
-    commitment_map.insert("candidates".into(), JsonValue::Array(candidates_values));
-    let serialized = json::to_vec_value(&JsonValue::Object(commitment_map));
-    Ok(*blake3::hash(&serialized).as_bytes())
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionProofError {
     Invalid,
@@ -463,22 +371,14 @@ mod tests {
     use crate::test_support::TestMetricsRecorder;
     use crate::{SelectionCandidateTrace, SelectionCohortTrace};
     use std::collections::HashSet;
-    use zkp::selection::{SelectionProofPublicInputs, SelectionProofVerification};
+    use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
     const CIRCUIT_ID: &str = "selection_argmax_v1";
 
-    fn transcript_digest(inputs: &SelectionProofPublicInputs) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(CIRCUIT_ID.as_bytes());
-        hasher.update(&1u16.to_le_bytes());
-        hasher.update(&inputs.commitment);
-        hasher.update(&inputs.winner_index.to_le_bytes());
-        hasher.update(&inputs.winner_quality_bid_usd_micros.to_le_bytes());
-        hasher.update(&inputs.runner_up_quality_bid_usd_micros.to_le_bytes());
-        hasher.update(&inputs.resource_floor_usd_micros.to_le_bytes());
-        hasher.update(&inputs.clearing_price_usd_micros.to_le_bytes());
-        hasher.update(&inputs.candidate_count.to_le_bytes());
-        *hasher.finalize().as_bytes()
+    fn transcript_digest(inputs: &SelectionProofPublicInputs, proof_bytes: &[u8]) -> [u8; 32] {
+        let proof_digest = selection::proof_bytes_digest(proof_bytes);
+        selection::expected_transcript_digest(CIRCUIT_ID, 1, &proof_digest, inputs)
+            .expect("expected transcript digest")
     }
 
     fn encode_bytes(bytes: &[u8]) -> String {
@@ -534,7 +434,7 @@ mod tests {
             attestation: None,
             proof_metadata: None,
         };
-        let commitment = compute_commitment(&receipt).expect("commitment");
+        let commitment = receipt.commitment_bytes_raw().expect("commitment");
         let inputs = SelectionProofPublicInputs {
             commitment: commitment.to_vec(),
             winner_index: receipt.winner_index as u16,
@@ -544,9 +444,8 @@ mod tests {
             clearing_price_usd_micros: receipt.clearing_price_usd_micros,
             candidate_count: receipt.candidates.len() as u16,
         };
-        let transcript = transcript_digest(&inputs);
-        let mut proof_bytes = vec![0xCC; 96];
-        proof_bytes[..transcript.len()].copy_from_slice(&transcript);
+        let proof_bytes = vec![0xCC; 96];
+        let transcript = transcript_digest(&inputs, &proof_bytes);
         let witness_commitments = vec![[0x55; 32], [0x99; 32]];
         let public_inputs = format!(
             "{{\"commitment\":{},\"winner_index\":{},\"winner_quality_bid_usd_micros\":{},\"runner_up_quality_bid_usd_micros\":{},\"resource_floor_usd_micros\":{},\"clearing_price_usd_micros\":{},\"candidate_count\":{}}}",

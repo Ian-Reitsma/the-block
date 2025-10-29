@@ -11,6 +11,18 @@
 > (`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
 > `AdBudgetProgressFlat`). Tests cover snapshot round-trips, proof semantics, and
 > metadata validation so the restart and attestation paths remain first party.
+> **Review (2025-10-29, morning):** Selection receipts now cross-check the circuit
+> commitment, proof-bytes digest, and verifying-key digest via the
+> manifest-backed helpers in `zkp::selection`, so tampered Groth16 payloads or
+> stale keys never reach settlement. `SelectionReceipt::validate` hashes the proof
+> body with `extract_proof_body_digest` and maps malformed blobs to
+> `InvalidAttestation`, while fresh unit tests cover proof-digest and verifying-key
+> mismatches. `update_ad_budget_metrics` fans broker snapshots into telemetry,
+> emitting `ad_budget_summary_value{metric=*}` for campaign/cohort counts,
+> κ/extrema, spend totals, and dual-price maxima alongside the existing
+> config/campaign/cohort gauges. The refreshed `ad_market.broker_state` RPC returns
+> `summary`, `pacing`, and generated-at micros so dashboards and governance tooling
+> can diff pacing without replaying wallet fixtures.
 > **Review (2025-10-28, evening+):** Selection receipts now emit a first-party
 > BLAKE3 commitment and the wallet must attach either a SNARK proof (preferred)
 > or a TEE attestation before settlement. The ad marketplace normalises circuit

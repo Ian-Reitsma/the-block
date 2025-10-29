@@ -2800,6 +2800,152 @@ pub static AD_MARKET_UTILIZATION_DELTA: Lazy<IntGaugeVec> = Lazy::new(|| {
 static AD_MARKET_UTILIZATION_LABELS: Lazy<Mutex<HashSet<(String, String, String)>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_CONFIG_VALUES: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_config_value",
+            "Budget broker configuration parameters exposed for pacing inspection",
+        ),
+        &["parameter"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget config value: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget config value: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_CAMPAIGN_REMAINING_USD: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_campaign_remaining_usd",
+            "Remaining campaign budget tracked by the broker (USD micros)",
+        ),
+        &["campaign"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign remaining: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget campaign remaining: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_CAMPAIGN_DUAL_PRICE: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_campaign_dual_price",
+            "Current dual price for campaign pacing",
+        ),
+        &["campaign"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign dual price: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget campaign dual price: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_CAMPAIGN_EPOCH_TARGET_USD: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_campaign_epoch_target_usd",
+            "Per-epoch spend target for campaigns (USD micros)",
+        ),
+        &["campaign"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign epoch target: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget campaign epoch target: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_COHORT_KAPPA: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_cohort_kappa",
+            "Cohort-level pacing multiplier (kappa)",
+        ),
+        &["campaign", "domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort kappa: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget cohort kappa: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_COHORT_ERROR: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new("ad_budget_cohort_error", "Smoothed pacing error per cohort"),
+        &["campaign", "domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort error: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget cohort error: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_COHORT_REALIZED_USD: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_cohort_realized_usd",
+            "Realized spend per cohort (USD micros)",
+        ),
+        &["campaign", "domain", "provider", "badges"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort realized: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget cohort realized: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_SUMMARY_VALUES: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_budget_summary_value",
+            "Aggregated budget broker analytics for pacing diagnostics",
+        ),
+        &["metric"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec ad budget summary value: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget summary value: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+static AD_BUDGET_CAMPAIGN_LABELS: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+#[cfg(feature = "telemetry")]
+static AD_BUDGET_COHORT_LABELS: Lazy<Mutex<HashSet<(String, String, String, String)>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+#[cfg(feature = "telemetry")]
+pub static AD_BUDGET_SNAPSHOT_GENERATED_AT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let gauge = IntGauge::new(
+        "ad_budget_snapshot_generated_at_micros",
+        "Timestamp of the most recent budget snapshot in microseconds",
+    )
+    .unwrap_or_else(|e| panic!("gauge ad budget snapshot generated at: {e}"));
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry ad budget snapshot generated at: {e}"));
+    gauge.handle()
+});
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<HistogramHandle> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",
@@ -3782,6 +3928,170 @@ pub fn governance_webhook(event: &str, proposal_id: u64) {
             .request(Method::Post, &url)
             .and_then(|req| req.json(&payload))
             .and_then(|req| req.send());
+    }
+}
+
+pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
+    #[cfg(feature = "telemetry")]
+    {
+        let config = &snapshot.config;
+        let analytics = ad_market::budget_snapshot_analytics(snapshot);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["epoch_impressions"])
+            .unwrap_or_else(|e| panic!("budget config epoch impressions: {e}"))
+            .set(config.epoch_impressions as f64);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["step_size"])
+            .unwrap_or_else(|e| panic!("budget config step size: {e}"))
+            .set(config.step_size);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["max_kappa"])
+            .unwrap_or_else(|e| panic!("budget config max kappa: {e}"))
+            .set(config.max_kappa);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["smoothing"])
+            .unwrap_or_else(|e| panic!("budget config smoothing: {e}"))
+            .set(config.smoothing);
+        AD_BUDGET_CONFIG_VALUES
+            .with_label_values(&["epochs_per_budget"])
+            .unwrap_or_else(|e| panic!("budget config epochs per budget: {e}"))
+            .set(config.epochs_per_budget as f64);
+
+        AD_BUDGET_SNAPSHOT_GENERATED_AT
+            .set(snapshot.generated_at_micros.min(i64::MAX as u64) as i64);
+
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["campaign_count"])
+            .unwrap_or_else(|e| panic!("budget summary campaign count: {e}"))
+            .set(analytics.campaign_count as f64);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["cohort_count"])
+            .unwrap_or_else(|e| panic!("budget summary cohort count: {e}"))
+            .set(analytics.cohort_count as f64);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["mean_kappa"])
+            .unwrap_or_else(|e| panic!("budget summary mean kappa: {e}"))
+            .set(analytics.mean_kappa);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["max_kappa"])
+            .unwrap_or_else(|e| panic!("budget summary max kappa: {e}"))
+            .set(analytics.max_kappa);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["mean_smoothed_error"])
+            .unwrap_or_else(|e| panic!("budget summary mean error: {e}"))
+            .set(analytics.mean_smoothed_error);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["max_abs_smoothed_error"])
+            .unwrap_or_else(|e| panic!("budget summary max abs error: {e}"))
+            .set(analytics.max_abs_smoothed_error);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["realized_spend_total_usd"])
+            .unwrap_or_else(|e| panic!("budget summary realized spend: {e}"))
+            .set(analytics.realized_spend_total);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["epoch_target_total_usd"])
+            .unwrap_or_else(|e| panic!("budget summary epoch target: {e}"))
+            .set(analytics.epoch_target_total);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["epoch_spend_total_usd"])
+            .unwrap_or_else(|e| panic!("budget summary epoch spend: {e}"))
+            .set(analytics.epoch_spend_total);
+        AD_BUDGET_SUMMARY_VALUES
+            .with_label_values(&["dual_price_max"])
+            .unwrap_or_else(|e| panic!("budget summary dual price max: {e}"))
+            .set(analytics.dual_price_max);
+
+        let mut new_campaigns = HashSet::with_capacity(snapshot.campaigns.len());
+        let mut new_cohorts = HashSet::new();
+        for campaign in &snapshot.campaigns {
+            new_campaigns.insert(campaign.campaign_id.clone());
+            let labels = [campaign.campaign_id.as_str()];
+            AD_BUDGET_CAMPAIGN_REMAINING_USD
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("budget remaining labels: {e}"))
+                .set(campaign.remaining_budget as f64);
+            AD_BUDGET_CAMPAIGN_DUAL_PRICE
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("budget dual price labels: {e}"))
+                .set(campaign.dual_price);
+            AD_BUDGET_CAMPAIGN_EPOCH_TARGET_USD
+                .with_label_values(&labels)
+                .unwrap_or_else(|e| panic!("budget epoch target labels: {e}"))
+                .set(campaign.epoch_target);
+
+            for cohort in &campaign.cohorts {
+                let domain = cohort.cohort.domain.clone();
+                let provider = cohort
+                    .cohort
+                    .provider
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string());
+                let badges = if cohort.cohort.badges.is_empty() {
+                    "none".to_string()
+                } else {
+                    cohort.cohort.badges.join("|")
+                };
+                let labels = [
+                    campaign.campaign_id.as_str(),
+                    domain.as_str(),
+                    provider.as_str(),
+                    badges.as_str(),
+                ];
+                AD_BUDGET_COHORT_KAPPA
+                    .with_label_values(&labels)
+                    .unwrap_or_else(|e| panic!("budget cohort kappa labels: {e}"))
+                    .set(cohort.kappa);
+                AD_BUDGET_COHORT_ERROR
+                    .with_label_values(&labels)
+                    .unwrap_or_else(|e| panic!("budget cohort error labels: {e}"))
+                    .set(cohort.smoothed_error);
+                AD_BUDGET_COHORT_REALIZED_USD
+                    .with_label_values(&labels)
+                    .unwrap_or_else(|e| panic!("budget cohort realized labels: {e}"))
+                    .set(cohort.realized_spend);
+                new_cohorts.insert((campaign.campaign_id.clone(), domain, provider, badges));
+            }
+        }
+
+        let mut active_campaigns = AD_BUDGET_CAMPAIGN_LABELS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous_campaigns: Vec<String> = active_campaigns.iter().cloned().collect();
+        for campaign in &previous_campaigns {
+            if !new_campaigns.contains(campaign) {
+                let labels = [campaign.as_str()];
+                let _ = AD_BUDGET_CAMPAIGN_REMAINING_USD.remove_label_values(&labels);
+                let _ = AD_BUDGET_CAMPAIGN_DUAL_PRICE.remove_label_values(&labels);
+                let _ = AD_BUDGET_CAMPAIGN_EPOCH_TARGET_USD.remove_label_values(&labels);
+            }
+        }
+        active_campaigns.clear();
+        active_campaigns.extend(new_campaigns);
+
+        let mut active_cohorts = AD_BUDGET_COHORT_LABELS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous_cohorts: Vec<(String, String, String, String)> =
+            active_cohorts.iter().cloned().collect();
+        for cohort in &previous_cohorts {
+            if !new_cohorts.contains(cohort) {
+                let labels = [
+                    cohort.0.as_str(),
+                    cohort.1.as_str(),
+                    cohort.2.as_str(),
+                    cohort.3.as_str(),
+                ];
+                let _ = AD_BUDGET_COHORT_KAPPA.remove_label_values(&labels);
+                let _ = AD_BUDGET_COHORT_ERROR.remove_label_values(&labels);
+                let _ = AD_BUDGET_COHORT_REALIZED_USD.remove_label_values(&labels);
+            }
+        }
+        active_cohorts.clear();
+        active_cohorts.extend(new_cohorts);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = snapshot;
     }
 }
 
