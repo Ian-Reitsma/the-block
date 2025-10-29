@@ -1,5 +1,21 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-29 update (VRF committee guard, ANN proofs, pacing guidance):** The
+> new `verifier_selection` crate implements VRF-backed committee sampling on top
+> of the in-house `crypto_suite::vrf` module—VRF keys, outputs, and proofs are
+> encoded with BLAKE3 transcripts and Ed25519 signatures so no external crypto
+> crates are required. Selection receipts embed stake snapshots and committee
+> receipts via the same first-party BLAKE3 hashing path, and the attestation
+> manager’s guard validates them with manual transcript comparisons before any
+> wallet proof is accepted. Soft-intent ANN proofs derive encrypted buckets with
+> `crypto_suite::encryption::symmetric` plus BLAKE3 keys, keeping badge
+> enforcement hermetic while the new tests exercise receipt tampering entirely in
+> tree. Budget shading guidance extends the existing `BudgetBroker` with
+> dual-price telemetry and multipliers exposed through
+> `foundation_metrics`—all JSON serialization rides the handwritten
+> `foundation_serialization` helpers, so pacing analytics and receipt traces stay
+> free of serde or third-party math crates.
+
 > **2025-10-29 update (selection digest enforcement & pacing telemetry):**
 > `SelectionReceipt::validate` now recomputes the commitment hash, proof-bytes
 > digest, and verifying-key digest entirely through the manifest-backed

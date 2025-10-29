@@ -7,9 +7,11 @@ edition = "2021"
 foundation_serialization = { path = "../foundation_serialization" }
 foundation_metrics = { path = "../foundation_metrics" }
 crypto_suite = { path = "../crypto_suite" }
+verifier_selection = { path = "../verifier_selection" }
 zkp = { path = "../zkp" }
 serde = { workspace = true }
 sled = { path = "../../sled" }
 
 [dev-dependencies]
 sys = { path = "../sys" }
+rand = { path = "../rand" }

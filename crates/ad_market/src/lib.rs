@@ -1,3 +1,7 @@
+use crate::budget::{
+    BidShadingApplication as BudgetBidShadingApplication,
+    BidShadingGuidance as BudgetBidShadingGuidance,
+};
 use crypto_suite::hashing::blake3;
 use foundation_metrics::{gauge, histogram, increment_counter};
 use foundation_serialization::{
@@ -21,10 +25,11 @@ mod uplift;
 pub use attestation::{
     AttestationSatisfaction, SelectionAttestationConfig, SelectionAttestationManager,
 };
-pub use badge::{BadgeDecision, BadgeGuard, BadgeGuardConfig};
+pub use badge::{ann, BadgeDecision, BadgeGuard, BadgeGuardConfig, BadgeSoftIntentContext};
 pub use budget::{
-    BudgetBroker, BudgetBrokerAnalytics, BudgetBrokerConfig, BudgetBrokerPacingDelta,
-    BudgetBrokerSnapshot, CampaignBudgetSnapshot, CohortBudgetSnapshot, CohortKeySnapshot,
+    BidShadingApplication, BidShadingGuidance, BudgetBroker, BudgetBrokerAnalytics,
+    BudgetBrokerConfig, BudgetBrokerPacingDelta, BudgetBrokerSnapshot, CampaignBudgetSnapshot,
+    CohortBudgetSnapshot, CohortKeySnapshot,
 };
 pub use privacy::{
     PrivacyBudgetConfig, PrivacyBudgetDecision, PrivacyBudgetManager, PrivacyBudgetSnapshot,
@@ -759,34 +764,58 @@ impl QualityBid {
         }
     }
 
-    fn shade(self, kappa: f64, available_budget_usd_micros: u64) -> (Self, f64) {
-        let clamped = kappa.clamp(0.0, 10.0);
-        if clamped <= f64::EPSILON {
+    fn shade(
+        self,
+        guidance: BudgetBidShadingGuidance,
+        available_budget_usd_micros: u64,
+    ) -> (Self, BudgetBidShadingApplication) {
+        let requested = guidance.kappa.clamp(0.0, 10.0);
+        let multiplier = guidance.scaling_factor();
+        if multiplier <= f64::EPSILON {
             return (
                 Self {
                     base_bid_usd_micros: 0,
                     quality_adjusted_usd_micros: 0,
                     quality_multiplier: self.quality_multiplier,
                 },
-                clamped,
+                BudgetBidShadingApplication {
+                    requested_kappa: requested,
+                    applied_multiplier: multiplier,
+                    shadow_price: guidance.shadow_price,
+                    dual_price: guidance.dual_price,
+                },
             );
         }
-        if (clamped - 1.0).abs() < f64::EPSILON {
-            return (self, clamped);
+        if (multiplier - 1.0).abs() < f64::EPSILON {
+            return (
+                self,
+                BudgetBidShadingApplication {
+                    requested_kappa: requested,
+                    applied_multiplier: multiplier,
+                    shadow_price: guidance.shadow_price,
+                    dual_price: guidance.dual_price,
+                },
+            );
         }
-        let base = (self.base_bid_usd_micros as f64 * clamped)
+        let budget = available_budget_usd_micros as f64;
+        let base = (self.base_bid_usd_micros as f64 * multiplier)
             .round()
-            .clamp(0.0, available_budget_usd_micros as f64) as u64;
-        let adjusted = (self.quality_adjusted_usd_micros as f64 * clamped)
+            .clamp(0.0, budget) as u64;
+        let adjusted = (self.quality_adjusted_usd_micros as f64 * multiplier)
             .round()
-            .clamp(0.0, available_budget_usd_micros as f64) as u64;
+            .clamp(0.0, budget) as u64;
         (
             QualityBid {
                 base_bid_usd_micros: base,
                 quality_adjusted_usd_micros: adjusted,
                 quality_multiplier: self.quality_multiplier,
             },
-            clamped,
+            BudgetBidShadingApplication {
+                requested_kappa: requested,
+                applied_multiplier: multiplier,
+                shadow_price: guidance.shadow_price,
+                dual_price: guidance.dual_price,
+            },
         )
     }
 }
@@ -813,7 +842,7 @@ pub struct CampaignSummary {
     pub reserved_budget_usd_micros: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ImpressionContext {
     pub domain: String,
     pub provider: Option<String>,
@@ -821,6 +850,18 @@ pub struct ImpressionContext {
     pub bytes: u64,
     pub attestations: Vec<SelectionAttestation>,
     pub population_estimate: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_intent: Option<BadgeSoftIntentContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_stake_snapshot: Option<verifier_selection::StakeSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_committee: Option<verifier_selection::SelectionReceipt>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "foundation_serialization::serde_bytes"
+    )]
+    pub verifier_transcript: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -900,6 +941,14 @@ pub struct SelectionCandidateTrace {
     #[serde(default)]
     pub pacing_kappa: f64,
     #[serde(default)]
+    pub requested_kappa: f64,
+    #[serde(default)]
+    pub shading_multiplier: f64,
+    #[serde(default)]
+    pub shadow_price: f64,
+    #[serde(default)]
+    pub dual_price: f64,
+    #[serde(default)]
     pub predicted_lift_ppm: u32,
     #[serde(default)]
     pub baseline_action_rate_ppm: u32,
@@ -923,6 +972,10 @@ impl Default for SelectionCandidateTrace {
             lift_ppm: 0,
             quality_multiplier: 1.0,
             pacing_kappa: 0.0,
+            requested_kappa: 0.0,
+            shading_multiplier: 0.0,
+            shadow_price: 0.0,
+            dual_price: 0.0,
             predicted_lift_ppm: 0,
             baseline_action_rate_ppm: 0,
             predicted_propensity: 0.0,
@@ -948,7 +1001,7 @@ pub enum SelectionAttestation {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SelectionProofMetadata {
     pub circuit_id: String,
     pub circuit_revision: u16,
@@ -969,6 +1022,8 @@ pub struct SelectionProofMetadata {
     )]
     pub witness_commitments: Vec<Vec<u8>>,
     pub public_inputs: SelectionProofPublicInputs,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_committee: Option<verifier_selection::SelectionReceipt>,
 }
 
 impl SelectionProofMetadata {
@@ -1001,7 +1056,16 @@ impl SelectionProofMetadata {
                 .map(|bytes| bytes.to_vec())
                 .collect(),
             public_inputs: verification.public_inputs,
+            verifier_committee: None,
         }
+    }
+
+    fn with_verifier_committee(
+        mut self,
+        committee: Option<verifier_selection::SelectionReceipt>,
+    ) -> Self {
+        self.verifier_committee = committee;
+        self
     }
 
     fn proof_digest_array(&self) -> Option<[u8; 32]> {
@@ -1102,6 +1166,20 @@ pub struct SelectionReceipt {
     pub attestation: Option<SelectionAttestation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof_metadata: Option<SelectionProofMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_committee: Option<verifier_selection::SelectionReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_stake_snapshot: Option<verifier_selection::StakeSnapshot>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "foundation_serialization::serde_bytes"
+    )]
+    pub verifier_transcript: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge_soft_intent: Option<badge::ann::SoftIntentReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge_soft_intent_snapshot: Option<badge::ann::WalletAnnIndexSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1175,6 +1253,12 @@ pub enum SelectionReceiptError {
         kind: SelectionAttestationKind,
         reason: &'static str,
     },
+    BadgeSoftIntentMissingSnapshot,
+    BadgeSoftIntentInvalid,
+    VerifierCommitteeMissing,
+    VerifierCommitteeInvalid {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for SelectionReceiptError {
@@ -1230,6 +1314,18 @@ impl std::fmt::Display for SelectionReceiptError {
             SelectionReceiptError::InvalidAttestation { kind, reason } => {
                 write!(f, "invalid {:?} attestation: {reason}", kind)
             }
+            SelectionReceiptError::BadgeSoftIntentMissingSnapshot => {
+                write!(f, "badge soft intent snapshot missing")
+            }
+            SelectionReceiptError::BadgeSoftIntentInvalid => {
+                write!(f, "badge soft intent proof invalid")
+            }
+            SelectionReceiptError::VerifierCommitteeMissing => {
+                write!(f, "verifier committee receipt missing")
+            }
+            SelectionReceiptError::VerifierCommitteeInvalid { reason } => {
+                write!(f, "verifier committee invalid: {reason}")
+            }
         }
     }
 }
@@ -1274,6 +1370,19 @@ impl SelectionReceipt {
                 "pacing_kappa".into(),
                 JsonValue::from(candidate.pacing_kappa),
             );
+            candidate_map.insert(
+                "requested_kappa".into(),
+                JsonValue::from(candidate.requested_kappa),
+            );
+            candidate_map.insert(
+                "shading_multiplier".into(),
+                JsonValue::from(candidate.shading_multiplier),
+            );
+            candidate_map.insert(
+                "shadow_price".into(),
+                JsonValue::from(candidate.shadow_price),
+            );
+            candidate_map.insert("dual_price".into(), JsonValue::from(candidate.dual_price));
             candidate_map.insert(
                 "predicted_lift_ppm".into(),
                 JsonValue::from(candidate.predicted_lift_ppm),
@@ -1551,6 +1660,11 @@ impl SelectionReceipt {
                             field: "proof_digest",
                         });
                     }
+                    if metadata.verifier_committee.as_ref() != self.verifier_committee.as_ref() {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "verifier_committee",
+                        });
+                    }
                 }
                 SelectionAttestation::Tee { report, quote } => {
                     if report.is_empty() {
@@ -1568,6 +1682,15 @@ impl SelectionReceipt {
                 }
             }
         }
+        if let Some(proof) = &self.badge_soft_intent {
+            let snapshot = self
+                .badge_soft_intent_snapshot
+                .as_ref()
+                .ok_or(SelectionReceiptError::BadgeSoftIntentMissingSnapshot)?;
+            if !badge::ann::verify_receipt(snapshot, proof, &self.cohort.badges) {
+                return Err(SelectionReceiptError::BadgeSoftIntentInvalid);
+            }
+        }
         Ok(SelectionReceiptInsights {
             winner_index: self.winner_index,
             winner_quality_bid_usd_micros: winner.quality_adjusted_bid_usd_micros,
@@ -1577,6 +1700,30 @@ impl SelectionReceipt {
             attestation_kind: self.attestation_kind(),
         })
     }
+}
+
+fn soft_intent_artifacts(
+    badges: &[String],
+    context: &Option<BadgeSoftIntentContext>,
+) -> (
+    Option<badge::ann::SoftIntentReceipt>,
+    Option<badge::ann::WalletAnnIndexSnapshot>,
+) {
+    if let Some(ctx) = context {
+        if let Some(snapshot) = ctx.wallet_index.as_ref() {
+            if let Some(proof) = ctx.proof.as_ref() {
+                if badge::ann::verify_receipt(snapshot, proof, badges) {
+                    return (Some(proof.clone()), Some(snapshot.clone()));
+                }
+                return (None, Some(snapshot.clone()));
+            }
+            if let Some(proof) = badge::ann::build_proof(snapshot, badges) {
+                return (Some(proof), Some(snapshot.clone()));
+            }
+            return (None, Some(snapshot.clone()));
+        }
+    }
+    (None, None)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2453,9 +2600,12 @@ impl InMemoryMarketplace {
             return false;
         }
         if !targeting.badges.is_empty() {
-            let required = match self.badge_guard.evaluate(&targeting.badges) {
+            let required = match self
+                .badge_guard
+                .evaluate(&targeting.badges, ctx.soft_intent.as_ref())
+            {
                 BadgeDecision::Blocked => return false,
-                BadgeDecision::Allowed(required) => {
+                BadgeDecision::Allowed { required, .. } => {
                     if required.len() < targeting.badges.len() {
                         increment_counter!(
                             "ad_badge_relax_total",
@@ -2482,9 +2632,12 @@ impl InMemoryMarketplace {
             return false;
         }
         if !creative.badges.is_empty() {
-            let required = match self.badge_guard.evaluate(&creative.badges) {
+            let required = match self
+                .badge_guard
+                .evaluate(&creative.badges, ctx.soft_intent.as_ref())
+            {
                 BadgeDecision::Blocked => return false,
-                BadgeDecision::Allowed(required) => required,
+                BadgeDecision::Allowed { required, .. } => required,
             };
             let ctx_badges: HashSet<&str> = ctx.badges.iter().map(String::as_str).collect();
             if required
@@ -2630,11 +2783,11 @@ impl Marketplace for InMemoryMarketplace {
                     available_budget,
                     Some(uplift_estimate.lift_ppm),
                 );
-                let kappa = {
+                let guidance = {
                     let mut broker = self.budget_broker.write().unwrap();
-                    broker.kappa_for(&state.campaign.id, &cohort)
+                    broker.guidance_for(&state.campaign.id, &cohort)
                 };
-                let (quality, applied_kappa) = quality.shade(kappa, available_budget);
+                let (quality, shading) = quality.shade(guidance, available_budget);
                 if quality.base_bid_usd_micros < resource_floor
                     || quality.quality_adjusted_usd_micros < resource_floor
                 {
@@ -2649,7 +2802,11 @@ impl Marketplace for InMemoryMarketplace {
                     action_rate_ppm: creative.action_rate_ppm,
                     lift_ppm: creative.effective_lift_ppm(),
                     quality_multiplier: quality.quality_multiplier,
-                    pacing_kappa: applied_kappa,
+                    pacing_kappa: shading.applied_multiplier,
+                    requested_kappa: shading.requested_kappa,
+                    shading_multiplier: shading.applied_multiplier,
+                    shadow_price: shading.shadow_price,
+                    dual_price: shading.dual_price,
                     predicted_lift_ppm: uplift_estimate.lift_ppm,
                     baseline_action_rate_ppm: uplift_estimate.baseline_action_rate_ppm,
                     predicted_propensity: uplift_estimate.propensity,
@@ -2702,6 +2859,8 @@ impl Marketplace for InMemoryMarketplace {
         if clearing_price == 0 {
             return None;
         }
+        let (soft_intent_receipt, soft_intent_snapshot) =
+            soft_intent_artifacts(&ctx.badges, &ctx.soft_intent);
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: ctx.domain.clone(),
@@ -2718,6 +2877,11 @@ impl Marketplace for InMemoryMarketplace {
             clearing_price_usd_micros: clearing_price,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: ctx.verifier_committee.clone(),
+            verifier_stake_snapshot: ctx.verifier_stake_snapshot.clone(),
+            verifier_transcript: ctx.verifier_transcript.clone(),
+            badge_soft_intent: soft_intent_receipt,
+            badge_soft_intent_snapshot: soft_intent_snapshot,
         };
         let (attestation, satisfaction, metadata) = self
             .attestation
@@ -3032,9 +3196,12 @@ impl SledMarketplace {
             return false;
         }
         if !targeting.badges.is_empty() {
-            let required = match self.badge_guard.evaluate(&targeting.badges) {
+            let required = match self
+                .badge_guard
+                .evaluate(&targeting.badges, ctx.soft_intent.as_ref())
+            {
                 BadgeDecision::Blocked => return false,
-                BadgeDecision::Allowed(required) => {
+                BadgeDecision::Allowed { required, .. } => {
                     if required.len() < targeting.badges.len() {
                         increment_counter!(
                             "ad_badge_relax_total",
@@ -3061,9 +3228,12 @@ impl SledMarketplace {
             return false;
         }
         if !creative.badges.is_empty() {
-            let required = match self.badge_guard.evaluate(&creative.badges) {
+            let required = match self
+                .badge_guard
+                .evaluate(&creative.badges, ctx.soft_intent.as_ref())
+            {
                 BadgeDecision::Blocked => return false,
-                BadgeDecision::Allowed(required) => required,
+                BadgeDecision::Allowed { required, .. } => required,
             };
             let ctx_badges: HashSet<&str> = ctx.badges.iter().map(String::as_str).collect();
             if required
@@ -3202,11 +3372,11 @@ impl Marketplace for SledMarketplace {
                     available_budget,
                     Some(uplift_estimate.lift_ppm),
                 );
-                let kappa = {
+                let guidance = {
                     let mut broker = self.budget_broker.write().unwrap();
-                    broker.kappa_for(&state.campaign.id, &cohort)
+                    broker.guidance_for(&state.campaign.id, &cohort)
                 };
-                let (quality, applied_kappa) = quality.shade(kappa, available_budget);
+                let (quality, shading) = quality.shade(guidance, available_budget);
                 if quality.base_bid_usd_micros < resource_floor
                     || quality.quality_adjusted_usd_micros < resource_floor
                 {
@@ -3221,7 +3391,11 @@ impl Marketplace for SledMarketplace {
                     action_rate_ppm: creative.action_rate_ppm,
                     lift_ppm: creative.effective_lift_ppm(),
                     quality_multiplier: quality.quality_multiplier,
-                    pacing_kappa: applied_kappa,
+                    pacing_kappa: shading.applied_multiplier,
+                    requested_kappa: shading.requested_kappa,
+                    shading_multiplier: shading.applied_multiplier,
+                    shadow_price: shading.shadow_price,
+                    dual_price: shading.dual_price,
                     predicted_lift_ppm: uplift_estimate.lift_ppm,
                     baseline_action_rate_ppm: uplift_estimate.baseline_action_rate_ppm,
                     predicted_propensity: uplift_estimate.propensity,
@@ -3274,6 +3448,8 @@ impl Marketplace for SledMarketplace {
         if clearing_price == 0 {
             return None;
         }
+        let (soft_intent_receipt, soft_intent_snapshot) =
+            soft_intent_artifacts(&ctx.badges, &ctx.soft_intent);
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: ctx.domain.clone(),
@@ -3290,6 +3466,11 @@ impl Marketplace for SledMarketplace {
             clearing_price_usd_micros: clearing_price,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: ctx.verifier_committee.clone(),
+            verifier_stake_snapshot: ctx.verifier_stake_snapshot.clone(),
+            verifier_transcript: ctx.verifier_transcript.clone(),
+            badge_soft_intent: soft_intent_receipt,
+            badge_soft_intent_snapshot: soft_intent_snapshot,
         };
         let (attestation, satisfaction, metadata) = self
             .attestation
@@ -3919,6 +4100,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
@@ -3931,6 +4116,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
             ],
@@ -3946,6 +4135,11 @@ mod tests {
             clearing_price_usd_micros: 140,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
         };
         let commitment = receipt
             .commitment_bytes_raw()
@@ -4051,6 +4245,7 @@ mod tests {
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
             population_estimate: Some(1_000),
+            ..ImpressionContext::default()
         };
         market.update_oracle(TokenOracle::new(50_000, 25_000));
         let outcome = market
@@ -4141,6 +4336,7 @@ mod tests {
                 bytes: BYTES_PER_MIB,
                 attestations: Vec::new(),
                 population_estimate: Some(1_000),
+                ..ImpressionContext::default()
             };
             market
                 .reserve_impression(key, ctx)
@@ -4275,6 +4471,7 @@ mod tests {
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
             population_estimate: Some(1_000),
+            ..ImpressionContext::default()
         };
         let key = ReservationKey {
             manifest: [9u8; 32],
@@ -4336,6 +4533,7 @@ mod tests {
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
             population_estimate: Some(1_000),
+            ..ImpressionContext::default()
         };
         let mut last_price = 0;
         for idx in 0..10 {
@@ -4370,6 +4568,7 @@ mod tests {
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
             population_estimate: Some(1_000),
+            ..ImpressionContext::default()
         };
         let handles: Vec<_> = (0u8..4u8)
             .map(|idx| {
@@ -4417,6 +4616,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
@@ -4429,6 +4632,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
             ],
@@ -4444,6 +4651,11 @@ mod tests {
             clearing_price_usd_micros: 110,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
         };
         let insights = receipt.validate().expect("receipt valid");
         assert_eq!(insights.winner_index, 0);
@@ -4473,6 +4685,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
@@ -4485,6 +4701,10 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
             ],
@@ -4500,6 +4720,11 @@ mod tests {
             clearing_price_usd_micros: 120,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
         };
         let err = receipt.validate().expect_err("receipt invalid");
         assert!(matches!(
@@ -4545,6 +4770,11 @@ mod tests {
             clearing_price_usd_micros: 100,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
         };
         let err = receipt.validate().expect_err("breakdown mismatch");
         assert!(matches!(

@@ -1,4 +1,13 @@
 # Status & Roadmap
+> **Review (2025-10-29, night):** Verifier committees now flow end to end through
+> first-party VRF sampling. `verifier_selection` builds stake snapshots, derives
+> committees with `crypto_suite::vrf`, and stores transcripts on selection
+> receipts; the attestation manager validates snapshots/transcripts before
+> settlement, closing the loop without external crypto. Badge soft intents gained
+> encrypted ANN receipts via `crypto_suite::encryption::symmetric`, and the badge
+> guard verifies proofs before matching. `BudgetBroker` now publishes κ requests,
+> multipliers, shadow prices, and dual prices via the existing JSON/telemetry
+> helpers so pacing analytics stay hermetic.
 > **Review (2025-10-29, evening):** Selection manifests gained regression coverage
 > for hot swaps and multi-entry ordering via the manual
 > `parse_manifest_value`/`parse_artifacts_value` helpers, proving verifying-key

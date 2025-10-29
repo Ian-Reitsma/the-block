@@ -1,0 +1,20 @@
+[package]
+name = "verifier_selection"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["The Block Engineering Team"]
+
+[dependencies]
+crypto_suite = { path = "../crypto_suite" }
+foundation_serialization = { path = "../foundation_serialization" }
+foundation_metrics = { path = "../foundation_metrics", optional = true }
+thiserror = { path = "../thiserror" }
+serde = { workspace = true }
+
+[features]
+default = []
+telemetry = ["foundation_metrics"]
+
+[dev-dependencies]
+rand = { path = "../rand" }

@@ -4,16 +4,21 @@ use crate::{
     SelectionAttestation, SelectionAttestationKind, SelectionProofMetadata, SelectionReceipt,
     SelectionReceiptError,
 };
+use crypto_suite::{encoding::hex, vrf};
 use foundation_metrics::{gauge, histogram, increment_counter};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::Instant;
+use verifier_selection::{self, SelectionError as VerifierSelectionError};
 use zkp::selection::SelectionProofVerification;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelectionAttestationConfig {
     pub preferred_circuit_ids: HashSet<String>,
     pub allow_tee_fallback: bool,
     pub require_attestation: bool,
+    #[serde(default)]
+    pub verifier_committee: Option<VerifierCommitteeConfig>,
 }
 
 impl SelectionAttestationConfig {
@@ -24,6 +29,7 @@ impl SelectionAttestationConfig {
             .map(|id| id.trim().to_lowercase())
             .filter(|id| !id.is_empty())
             .collect();
+        self.verifier_committee = self.verifier_committee.map(|config| config.normalized());
         self
     }
 }
@@ -34,7 +40,33 @@ impl Default for SelectionAttestationConfig {
             preferred_circuit_ids: HashSet::new(),
             allow_tee_fallback: true,
             require_attestation: false,
+            verifier_committee: None,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VerifierCommitteeConfig {
+    pub vrf_public_key_hex: String,
+    pub committee_size: u16,
+    pub minimum_total_stake: u128,
+    #[serde(default)]
+    pub stake_threshold_ppm: u32,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub require_snapshot: bool,
+}
+
+impl VerifierCommitteeConfig {
+    pub fn normalized(mut self) -> Self {
+        self.vrf_public_key_hex = self.vrf_public_key_hex.trim().to_lowercase();
+        if self.label.trim().is_empty() {
+            self.label = "verifier-selection".into();
+        }
+        self.committee_size = self.committee_size.max(1);
+        self.minimum_total_stake = self.minimum_total_stake.max(1);
+        self
     }
 }
 
@@ -47,12 +79,19 @@ pub enum AttestationSatisfaction {
 #[derive(Clone, Debug)]
 pub struct SelectionAttestationManager {
     config: SelectionAttestationConfig,
+    committee_guard: Option<VerifierCommitteeGuard>,
 }
 
 impl SelectionAttestationManager {
     pub fn new(config: SelectionAttestationConfig) -> Self {
+        let normalized = config.normalized();
+        let committee_guard = normalized
+            .verifier_committee
+            .as_ref()
+            .and_then(VerifierCommitteeGuard::from_config);
         Self {
-            config: config.normalized(),
+            config: normalized,
+            committee_guard,
         }
     }
 
@@ -127,10 +166,22 @@ impl SelectionAttestationManager {
                                 proof.len() as f64,
                                 "kind" => "snark"
                             );
+                            if let Some(guard) = &self.committee_guard {
+                                if let Err(err) = guard.validate(receipt) {
+                                    increment_counter!(
+                                        "ad_selection_attestation_total",
+                                        "kind" => "snark",
+                                        "result" => "rejected",
+                                        "reason" => err.reason()
+                                    );
+                                    continue;
+                                }
+                            }
                             let metadata = SelectionProofMetadata::from_verification(
                                 circuit_id.clone(),
                                 verification,
-                            );
+                            )
+                            .with_verifier_committee(receipt.verifier_committee.clone());
                             return (
                                 Some(SelectionAttestation::Snark {
                                     proof: proof.clone(),
@@ -261,6 +312,11 @@ impl SelectionAttestationManager {
                             reason: "metadata",
                         });
                     }
+                    if let Some(guard) = &self.committee_guard {
+                        guard
+                            .validate(receipt)
+                            .map_err(SelectionReceiptError::from)?;
+                    }
                     Ok(())
                 } else {
                     Err(SelectionReceiptError::InvalidAttestation {
@@ -293,6 +349,134 @@ impl SelectionAttestationManager {
                     })
                 } else {
                     Ok(())
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct VerifierCommitteeGuard {
+    policy: verifier_selection::CommitteeConfig,
+    public_key: vrf::PublicKey,
+    require_snapshot: bool,
+}
+
+impl VerifierCommitteeGuard {
+    fn from_config(config: &VerifierCommitteeConfig) -> Option<Self> {
+        if config.vrf_public_key_hex.is_empty() {
+            return None;
+        }
+        let bytes = match hex::decode(&config.vrf_public_key_hex) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                eprintln!("invalid verifier VRF key hex: {err}");
+                return None;
+            }
+        };
+        if bytes.len() != vrf::PUBLIC_KEY_LENGTH {
+            eprintln!(
+                "invalid verifier VRF key length: expected {} got {}",
+                vrf::PUBLIC_KEY_LENGTH,
+                bytes.len()
+            );
+            return None;
+        }
+        let mut key_bytes = [0u8; vrf::PUBLIC_KEY_LENGTH];
+        key_bytes.copy_from_slice(&bytes);
+        let public_key = match vrf::PublicKey::from_bytes(&key_bytes) {
+            Ok(key) => key,
+            Err(err) => {
+                eprintln!("failed to parse verifier VRF key: {err}");
+                return None;
+            }
+        };
+        let policy = verifier_selection::CommitteeConfig {
+            label: config.label.clone(),
+            committee_size: config.committee_size,
+            minimum_total_stake: config.minimum_total_stake,
+            stake_threshold_ppm: config.stake_threshold_ppm,
+        }
+        .normalized();
+        Some(Self {
+            policy,
+            public_key,
+            require_snapshot: config.require_snapshot,
+        })
+    }
+
+    fn validate(&self, receipt: &SelectionReceipt) -> Result<(), CommitteeValidationError> {
+        let Some(committee) = receipt.verifier_committee.as_ref() else {
+            return Err(CommitteeValidationError::MissingReceipt);
+        };
+        if self.require_snapshot && receipt.verifier_stake_snapshot.is_none() {
+            return Err(CommitteeValidationError::MissingSnapshot);
+        }
+        let Some(snapshot) = receipt.verifier_stake_snapshot.as_ref() else {
+            return Ok(());
+        };
+        let transcript = receipt.verifier_transcript.as_slice();
+        verifier_selection::validate_committee(
+            &self.public_key,
+            &self.policy,
+            snapshot,
+            transcript,
+            committee,
+        )
+        .map_err(CommitteeValidationError::Invalid)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum CommitteeValidationError {
+    MissingReceipt,
+    MissingSnapshot,
+    Invalid(VerifierSelectionError),
+}
+
+impl CommitteeValidationError {
+    fn reason(&self) -> &'static str {
+        match self {
+            CommitteeValidationError::MissingReceipt => "committee_missing",
+            CommitteeValidationError::MissingSnapshot => "snapshot_missing",
+            CommitteeValidationError::Invalid(VerifierSelectionError::EmptySnapshot) => {
+                "snapshot_empty"
+            }
+            CommitteeValidationError::Invalid(VerifierSelectionError::InsufficientStake(_)) => {
+                "stake"
+            }
+            CommitteeValidationError::Invalid(VerifierSelectionError::InvalidProof) => "proof",
+            CommitteeValidationError::Invalid(VerifierSelectionError::CommitteeSizeMismatch {
+                ..
+            }) => "size",
+            CommitteeValidationError::Invalid(
+                VerifierSelectionError::CommitteeMemberMismatch { .. },
+            ) => "member",
+            CommitteeValidationError::Invalid(VerifierSelectionError::SnapshotHashMismatch) => {
+                "hash"
+            }
+            CommitteeValidationError::Invalid(
+                VerifierSelectionError::StakeThresholdViolation { .. },
+            ) => "threshold",
+        }
+    }
+}
+
+impl From<CommitteeValidationError> for SelectionReceiptError {
+    fn from(err: CommitteeValidationError) -> Self {
+        match err {
+            CommitteeValidationError::MissingReceipt => {
+                SelectionReceiptError::VerifierCommitteeMissing
+            }
+            CommitteeValidationError::MissingSnapshot => {
+                SelectionReceiptError::VerifierCommitteeInvalid {
+                    reason: "missing_snapshot".into(),
+                }
+            }
+            CommitteeValidationError::Invalid(inner) => {
+                SelectionReceiptError::VerifierCommitteeInvalid {
+                    reason: inner.to_string(),
                 }
             }
         }
@@ -373,6 +557,7 @@ mod tests {
     use crate::test_support::TestMetricsRecorder;
     use crate::{SelectionCandidateTrace, SelectionCohortTrace};
     use std::collections::HashSet;
+    use verifier_selection::{self, CommitteeConfig as CommitteePolicy};
     use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
     const CIRCUIT_ID: &str = "selection_argmax_v1";
@@ -416,6 +601,10 @@ mod tests {
                     lift_ppm: 55_000,
                     quality_multiplier: 1.2,
                     pacing_kappa: 0.9,
+                    requested_kappa: 0.9,
+                    shading_multiplier: 0.9,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
@@ -428,6 +617,10 @@ mod tests {
                     lift_ppm: 41_000,
                     quality_multiplier: 1.1,
                     pacing_kappa: 0.8,
+                    requested_kappa: 0.8,
+                    shading_multiplier: 0.8,
+                    shadow_price: 0.0,
+                    dual_price: 0.0,
                     ..SelectionCandidateTrace::default()
                 },
             ],
@@ -443,6 +636,11 @@ mod tests {
             clearing_price_usd_micros: 1_800_000,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
         };
         let commitment = receipt.commitment_bytes_raw().expect("commitment");
         let inputs = SelectionProofPublicInputs {
@@ -501,6 +699,7 @@ mod tests {
             preferred_circuit_ids: preferred,
             allow_tee_fallback: false,
             require_attestation: true,
+            verifier_committee: None,
         });
         let (receipt, _, verification) = build_receipt();
         let metadata = receipt.proof_metadata.as_ref().expect("metadata present");
@@ -518,6 +717,7 @@ mod tests {
             preferred_circuit_ids: preferred,
             allow_tee_fallback: false,
             require_attestation: true,
+            verifier_committee: None,
         });
         let (mut receipt, _, verification) = build_receipt();
         let mut metadata =
@@ -543,6 +743,7 @@ mod tests {
             preferred_circuit_ids: preferred,
             allow_tee_fallback: false,
             require_attestation: true,
+            verifier_committee: None,
         });
         let (mut receipt, _, verification) = build_receipt();
         let mut metadata =
@@ -560,6 +761,97 @@ mod tests {
         }
     }
 
+    fn sample_snapshot() -> verifier_selection::StakeSnapshot {
+        verifier_selection::StakeSnapshot {
+            staking_epoch: 9,
+            verifiers: vec![
+                verifier_selection::StakeEntry {
+                    verifier_id: "alpha".into(),
+                    stake_units: 1_000,
+                },
+                verifier_selection::StakeEntry {
+                    verifier_id: "beta".into(),
+                    stake_units: 2_000,
+                },
+                verifier_selection::StakeEntry {
+                    verifier_id: "gamma".into(),
+                    stake_units: 3_000,
+                },
+            ],
+        }
+    }
+
+    fn committee_manager() -> (
+        SelectionAttestationManager,
+        SelectionReceipt,
+        verifier_selection::StakeSnapshot,
+        Vec<u8>,
+    ) {
+        let mut preferred = HashSet::new();
+        preferred.insert(CIRCUIT_ID.into());
+        let mut rng = rand::rngs::StdRng::seed_from_u64(41);
+        let (secret, public) = vrf::SecretKey::generate(&mut rng);
+        let snapshot = sample_snapshot();
+        let transcript = b"selection-transcript".to_vec();
+        let policy = CommitteePolicy {
+            label: "verifier-selection".into(),
+            committee_size: 2,
+            minimum_total_stake: 1,
+            stake_threshold_ppm: 0,
+        };
+        let selection =
+            verifier_selection::select_committee(&secret, &policy, &snapshot, &transcript)
+                .expect("committee selected");
+        let public_hex = hex::encode(public.to_bytes());
+        let manager = SelectionAttestationManager::new(SelectionAttestationConfig {
+            preferred_circuit_ids: preferred,
+            allow_tee_fallback: false,
+            require_attestation: true,
+            verifier_committee: Some(VerifierCommitteeConfig {
+                vrf_public_key_hex: public_hex,
+                committee_size: policy.committee_size,
+                minimum_total_stake: 1,
+                stake_threshold_ppm: 0,
+                label: "verifier-selection".into(),
+                require_snapshot: true,
+            }),
+        });
+        let (mut receipt, _, _) = build_receipt();
+        receipt.verifier_committee = Some(selection.receipt.clone());
+        receipt.verifier_stake_snapshot = Some(snapshot.clone());
+        receipt.verifier_transcript = transcript.clone();
+        if let Some(metadata) = receipt.proof_metadata.as_mut() {
+            metadata.verifier_committee = Some(selection.receipt.clone());
+        }
+        (manager, receipt, snapshot, transcript)
+    }
+
+    #[test]
+    fn committee_guard_accepts_valid_receipt() {
+        let (manager, receipt, _, _) = committee_manager();
+        manager
+            .validate_receipt(&receipt)
+            .expect("committee receipt valid");
+    }
+
+    #[test]
+    fn committee_guard_rejects_missing_committee() {
+        let (manager, mut receipt, snapshot, transcript) = committee_manager();
+        receipt.verifier_committee = None;
+        receipt.verifier_stake_snapshot = Some(snapshot);
+        receipt.verifier_transcript = transcript;
+        if let Some(metadata) = receipt.proof_metadata.as_mut() {
+            metadata.verifier_committee = None;
+        }
+        let err = manager
+            .validate_receipt(&receipt)
+            .expect_err("missing committee should fail");
+        assert!(matches!(
+            err,
+            SelectionReceiptError::VerifierCommitteeMissing
+        ));
+    }
+
     #[test]
     fn attestation_metrics_recorded_under_load() {
         let Some(recorder) = TestMetricsRecorder::install() else {
@@ -573,6 +865,7 @@ mod tests {
             preferred_circuit_ids: preferred,
             allow_tee_fallback: true,
             require_attestation: true,
+            verifier_committee: None,
         });
         let (receipt, proof, _) = build_receipt();
         let attestation = SelectionAttestation::Snark {

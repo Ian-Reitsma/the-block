@@ -56,6 +56,7 @@ members = [
   "tools/dependency_registry",
   "crates/codec",
   "crates/crypto_suite",
+  "crates/verifier_selection",
   "crates/pqcrypto_dilithium",
   "crates/pqcrypto_kyber",
   "crates/httpd",

@@ -5988,6 +5988,9 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    ..SelectionCandidateTrace::default()
                 },
                 SelectionCandidateTrace {
                     campaign_id: "cmp-2".into(),
@@ -5999,6 +6002,9 @@ mod tests {
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
                     pacing_kappa: 1.0,
+                    requested_kappa: 1.0,
+                    shading_multiplier: 1.0,
+                    ..SelectionCandidateTrace::default()
                 },
             ],
             winner_index: 0,
