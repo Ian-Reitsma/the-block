@@ -38,6 +38,16 @@ Each audit record mirrors the `AuditRecord` struct:
 Liquidity records now honour the governance `liquidity_split_ct_ppm` knob. When the split assigns only a fraction of the liquidity share to CT, the ledger records the complementary USD as IT before producing the miner remainder. Auditors should use the oracle snapshot captured alongside the record to verify that `delta_ct` and `delta_it` align with the configured split and the recorded `total_usd_micros`.
 Debug assertions in the shared conversion helper now fail fast whenever the minted CT or IT tokens (plus their rounding remainder) drift from the configured USD slices, and a dedicated rounding regression exercises uneven oracle prices to prove that liquidity never exceeds its budget even when remainders spill into miner payouts and `unsettled_usd_micros`.
 
+`TokenRemainderLedger` persists per-role CT/IT USD leftovers together with the
+oracle TWAP window identifiers used during conversion. When reviewing a
+`SettlementBreakdown`, auditors should confirm that the sum of `role_ct` × CT
+price plus `role_it` × IT price does not exceed the declared USD share and that
+the `*_remainders_usd_micros` fields remain below one token’s worth; once the
+remainder crosses the price threshold it will appear in the next ledger entry.
+Because the ledger serialises through the same `foundation_serialization`
+helpers as the rest of the marketplace, sled snapshots and RPC outputs expose the
+exact same values, keeping offline reconciliation aligned with live telemetry.
+
 Anchors appear with `entity == "__anchor__"` and include the BLAKE3 hash of the submitted receipt bundle. Explorer jobs should persist these markers and render continuity timelines alongside the Merkle roots returned by `compute_market.recent_roots`.
 
 The CLI forwards the same data when compiled with settlement support:

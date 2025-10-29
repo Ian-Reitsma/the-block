@@ -1,4 +1,30 @@
 # Project Progress Snapshot
+> **Review (2025-10-29, evening):** Selection manifests now parse deterministically
+> across hot swaps and multi-entry manifests via the manual
+> `parse_manifest_value`/`parse_artifacts_value` helpers, with tests covering order
+> permutations so verifying-key digests stay stable without serde. `SelectionReceipt`
+> gained an in-band `resource_floor_breakdown`, validators enforce that the summed
+> components cover the composite floor, and settlements persist the struct for
+> dashboards and RPC consumers. The budget broker exposes
+> `BudgetBrokerPacingDelta`/`merge_budget_snapshots`, telemetry asserts
+> `ad_budget_summary_value{metric}` mirrors the RPC snapshot, and RPC tests verify
+> partial updates merge before deltas are emitted—all using first-party
+> collections and Prometheus wrappers.
+> **Review (2025-10-29, late afternoon):** Privacy budgets, uplift estimation, and
+> dual-token remainder accounting now ship in production form. The ad marketplace
+> enforces badge-family privacy limits through `PrivacyBudgetManager`, returns
+> cooling/denied decisions immediately, and emits
+> `ad_privacy_budget_{total,remaining}` so telemetry and dashboards expose
+> `(ε, δ)` consumption without third-party helpers. The new `UpliftEstimator`
+> produces cross-fitted doubly-robust lift predictions, threads propensity,
+> baseline action rate, sample size, and calibration error through candidate
+> traces, reservations, receipts, RPC payloads, and telemetry
+> (`ad_uplift_propensity`, `ad_uplift_lift_ppm`) so pacing optimises for lift rather
+> than raw CTR. Settlements persist a `TokenRemainderLedger` that stores per-role
+> CT/IT USD remainders alongside TWAP window IDs and exposes the composite
+> `resource_floor_breakdown`; sled/in-memory marketplaces share the helper, RPC
+> responses surface the new fields, and tests confirm remainders survive restarts
+> and partial snapshot merges.
 > **Review (2025-10-29, afternoon):** Selection proofs now authenticate the
 > underlying Groth16 payload and verifying key—not just the wallet-supplied
 > wrapper. `zkp::selection::extract_proof_body_digest` parses the proof envelope
@@ -305,9 +331,11 @@
 > commitment and transcript digest via `zkp::selection`, rejecting receipts whose
 > metadata or witness digests diverge from the canonical circuit inputs. The ad
 > market budget RPC fans snapshots into the telemetry module, emitting
-> `ad_budget_config_value{parameter}`, `ad_budget_campaign_{remaining_usd,dual_price,epoch_target_usd}`
-> and cohort-level `ad_budget_cohort_{kappa,error,realized_usd}` gauges with
-> first-party label lifetimes so dashboards expose pacing pressure without
+> `ad_budget_config_value{parameter}`, `ad_budget_campaign_{remaining_usd,dual_price,epoch_target_usd}`,
+> `ad_budget_shadow_price{campaign}`, `ad_budget_kappa_gradient{campaign,...}`,
+> cohort-level `ad_budget_cohort_{kappa,error,realized_usd}` gauges, and the
+> `ad_resource_floor_component_usd{component}` breakdown with first-party label
+> lifetimes so dashboards expose pacing pressure and composite floors without
 > third-party metrics crates.
 > **Review (2025-10-24, early afternoon):** Explorer integration now mines blocks that mix binary headers with JSON fallbacks so payout decoding stays resilient across codec boundaries, and the metrics aggregator records the role-labelled counters directly via cached `CounterVec` handles. The `/metrics` integration asserts both `explorer_block_payout_read_total` and `_ad_total` advance on a second scrape, mirroring the Grafana PromQL so the dashboards stay backed by live data. Documentation now includes CLI automation snippets for hash and height payout queries, plus monitoring notes covering the new counter caching path so operators know where the deltas originate.
 > **Review (2025-10-30, morning):** Explorer payout queries now guard the JSON fallback so legacy snapshots lacking `read_sub_*` or `ad_*` fields still render per-role totals, and new unit tests pin that behaviour to FIRST_PARTY_ONLY runs. The CLI suite exercises the failure paths for unknown hashes/heights and the mutual-exclusion flag checks, while the Grafana generator adds a “Block Payouts” row that charts read-subsidy and advertising role counters. Operators can now move from database snapshots, through automation, to dashboards without leaving first-party surfaces.

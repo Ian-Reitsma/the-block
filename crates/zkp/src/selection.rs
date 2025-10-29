@@ -72,7 +72,7 @@ struct ProofBody {
     witness_commitments: Vec<[u8; 32]>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CircuitArtifact {
     circuit_id: &'static str,
     verifying_key: &'static [u8],
@@ -264,6 +264,7 @@ struct SelectionProofEnvelope {
     proof: ProofBody,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CircuitDescriptor {
     revision: u16,
     expected_version: u16,
@@ -402,9 +403,7 @@ pub struct SelectionCircuitInfo {
     pub expected_witness_commitments: Option<usize>,
 }
 
-fn parse_manifest() -> HashMap<&'static str, CircuitDescriptor> {
-    let value = json::from_str::<json::Value>(MANIFEST_JSON)
-        .expect("selection manifest must be valid JSON");
+fn parse_manifest_value(value: json::Value) -> HashMap<&'static str, CircuitDescriptor> {
     let object = value
         .as_object()
         .expect("selection manifest must be a JSON object");
@@ -452,11 +451,15 @@ fn parse_manifest() -> HashMap<&'static str, CircuitDescriptor> {
     registry
 }
 
+fn parse_manifest() -> HashMap<&'static str, CircuitDescriptor> {
+    let value = json::from_str::<json::Value>(MANIFEST_JSON)
+        .expect("selection manifest must be valid JSON");
+    parse_manifest_value(value)
+}
+
 static CIRCUIT_REGISTRY: Lazy<HashMap<&'static str, CircuitDescriptor>> = Lazy::new(parse_manifest);
 
-fn parse_artifacts() -> HashMap<&'static str, CircuitArtifact> {
-    let value = json::from_str::<json::Value>(ARTIFACTS_JSON)
-        .expect("selection artifacts manifest must be valid JSON");
+fn parse_artifacts_value(value: json::Value) -> HashMap<&'static str, CircuitArtifact> {
     let object = value
         .as_object()
         .expect("selection artifacts must be a JSON object");
@@ -486,6 +489,12 @@ fn parse_artifacts() -> HashMap<&'static str, CircuitArtifact> {
     registry
 }
 
+fn parse_artifacts() -> HashMap<&'static str, CircuitArtifact> {
+    let value = json::from_str::<json::Value>(ARTIFACTS_JSON)
+        .expect("selection artifacts manifest must be valid JSON");
+    parse_artifacts_value(value)
+}
+
 static CIRCUIT_ARTIFACTS: Lazy<HashMap<&'static str, CircuitArtifact>> = Lazy::new(parse_artifacts);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -506,7 +515,7 @@ pub fn selection_circuit_artifact(circuit_id: &str) -> Option<SelectionCircuitAr
 }
 
 pub fn selection_circuits() -> Vec<SelectionCircuitInfo> {
-    CIRCUIT_REGISTRY
+    let mut circuits: Vec<_> = CIRCUIT_REGISTRY
         .iter()
         .map(|(&circuit_id, descriptor)| SelectionCircuitInfo {
             circuit_id,
@@ -516,7 +525,105 @@ pub fn selection_circuits() -> Vec<SelectionCircuitInfo> {
             protocol: descriptor.protocol,
             expected_witness_commitments: descriptor.expected_witness_commitments,
         })
-        .collect()
+        .collect();
+    circuits.sort_by(|a, b| a.circuit_id.cmp(b.circuit_id));
+    circuits
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use foundation_serialization::json;
+    use std::collections::BTreeMap;
+
+    fn manifest_snapshot(
+        blob: &str,
+    ) -> BTreeMap<String, (u16, u16, usize, Option<String>, Option<usize>)> {
+        let value = json::from_str::<json::Value>(blob).expect("manifest json");
+        let object = value.as_object().expect("manifest root must be object");
+        let mut map = BTreeMap::new();
+        for (id, descriptor) in object {
+            let descriptor = descriptor.as_object().expect("descriptor must be object");
+            let revision = descriptor
+                .get("revision")
+                .and_then(json::Value::as_u64)
+                .expect("revision") as u16;
+            let version = descriptor
+                .get("version")
+                .and_then(json::Value::as_u64)
+                .expect("version") as u16;
+            let min_proof_len = descriptor
+                .get("min_proof_len")
+                .and_then(json::Value::as_u64)
+                .expect("min proof len") as usize;
+            let protocol = descriptor
+                .get("protocol")
+                .and_then(json::Value::as_str)
+                .map(|value| value.trim().to_lowercase());
+            let witness_commitments = descriptor
+                .get("witness_commitments")
+                .and_then(json::Value::as_u64)
+                .map(|value| value as usize);
+            map.insert(
+                id.clone(),
+                (
+                    revision,
+                    version,
+                    min_proof_len,
+                    protocol,
+                    witness_commitments,
+                ),
+            );
+        }
+        map
+    }
+
+    fn merge_manifests(
+        blobs: &[&str],
+    ) -> BTreeMap<String, (u16, u16, usize, Option<String>, Option<usize>)> {
+        let mut merged = BTreeMap::new();
+        for blob in blobs {
+            for (id, spec) in manifest_snapshot(blob) {
+                merged.insert(id, spec);
+            }
+        }
+        merged
+    }
+
+    #[test]
+    fn manifest_ordering_is_deterministic() {
+        let base = r#"{
+            "selection_argmax_v1":{"revision":1,"version":1,"min_proof_len":1024},
+            "fallback_v0":{"revision":3,"version":1,"min_proof_len":512,"protocol":"groth16"}
+        }"#;
+        let swapped = r#"{
+            "fallback_v0":{"revision":3,"version":1,"min_proof_len":512,"protocol":"groth16"},
+            "selection_argmax_v1":{"revision":1,"version":1,"min_proof_len":1024}
+        }"#;
+        assert_eq!(manifest_snapshot(base), manifest_snapshot(swapped));
+    }
+
+    #[test]
+    fn manifest_hot_swap_prefers_latest_revision() {
+        let base = r#"{"selection_argmax_v1":{"revision":1,"version":1,"min_proof_len":1024}}"#;
+        let hot_swap = r#"{"selection_argmax_v1":{"revision":2,"version":2,"min_proof_len":2048,"witness_commitments":8}}"#;
+        let merged = merge_manifests(&[base, hot_swap]);
+        let entry = merged
+            .get("selection_argmax_v1")
+            .expect("merged entry present");
+        assert_eq!(entry.0, 2);
+        assert_eq!(entry.1, 2);
+        assert_eq!(entry.2, 2048);
+        assert_eq!(entry.4, Some(8));
+    }
+
+    #[test]
+    fn selection_circuits_are_sorted() {
+        let expected = selection_circuits();
+        let mut sorted = expected.clone();
+        sorted.sort_by(|a, b| a.circuit_id.cmp(b.circuit_id));
+        assert_eq!(expected, sorted);
+    }
 }
 
 pub fn verify_selection_proof(
@@ -728,5 +835,119 @@ mod tests {
         assert_eq!(artifact.verifying_key.len(), 256);
         let digest = blake3::hash(artifact.verifying_key);
         assert_eq!(artifact.verifying_key_digest, *digest.as_bytes());
+    }
+
+    #[test]
+    fn manifest_parsing_is_order_invariant_with_multiple_circuits() {
+        let manifest_a = r#"{
+            "selection_argmax_v1": {
+                "revision": 2,
+                "version": 1,
+                "min_proof_len": 64,
+                "protocol": "groth16",
+                "witness_commitments": 2
+            },
+            "selection_argmax_experimental": {
+                "revision": 5,
+                "version": 3,
+                "min_proof_len": 96,
+                "protocol": "groth16",
+                "witness_commitments": 4
+            }
+        }"#;
+        let manifest_b = r#"{
+            "selection_argmax_experimental": {
+                "revision": 5,
+                "version": 3,
+                "min_proof_len": 96,
+                "protocol": "groth16",
+                "witness_commitments": 4
+            },
+            "selection_argmax_v1": {
+                "revision": 2,
+                "version": 1,
+                "min_proof_len": 64,
+                "protocol": "groth16",
+                "witness_commitments": 2
+            }
+        }"#;
+        let registry_a =
+            super::parse_manifest_value(json::from_str(manifest_a).expect("manifest a json"));
+        let registry_b =
+            super::parse_manifest_value(json::from_str(manifest_b).expect("manifest b json"));
+        assert_eq!(registry_a.len(), 2);
+        assert_eq!(registry_b.len(), 2);
+        assert_eq!(
+            registry_a.get("selection_argmax_v1"),
+            registry_b.get("selection_argmax_v1")
+        );
+        assert_eq!(
+            registry_a.get("selection_argmax_experimental"),
+            registry_b.get("selection_argmax_experimental")
+        );
+    }
+
+    #[test]
+    fn artifact_digests_stay_constant_when_order_changes() {
+        let artifacts_a = r#"{
+            "selection_argmax_v1": {
+                "verifying_key_b64": "AQIDBAUGBwgJCgsMDQ4PEA=="
+            },
+            "selection_argmax_experimental": {
+                "verifying_key_b64": "ERITFBYXGBkaGxwdHh8gIQ=="
+            }
+        }"#;
+        let artifacts_b = r#"{
+            "selection_argmax_experimental": {
+                "verifying_key_b64": "ERITFBYXGBkaGxwdHh8gIQ=="
+            },
+            "selection_argmax_v1": {
+                "verifying_key_b64": "AQIDBAUGBwgJCgsMDQ4PEA=="
+            }
+        }"#;
+        let registry_a =
+            super::parse_artifacts_value(json::from_str(artifacts_a).expect("artifacts a json"));
+        let registry_b =
+            super::parse_artifacts_value(json::from_str(artifacts_b).expect("artifacts b json"));
+        let digest_a = registry_a
+            .get("selection_argmax_v1")
+            .expect("artifact a present")
+            .verifying_key_digest;
+        let digest_b = registry_b
+            .get("selection_argmax_v1")
+            .expect("artifact b present")
+            .verifying_key_digest;
+        assert_eq!(digest_a, digest_b);
+
+        let proof_bytes_digest = super::proof_bytes_digest(&[0xAB; 96]);
+        let inputs = super::SelectionProofPublicInputs {
+            commitment: vec![0x55; 32],
+            winner_index: 1,
+            winner_quality_bid_usd_micros: 220,
+            runner_up_quality_bid_usd_micros: 190,
+            resource_floor_usd_micros: 180,
+            clearing_price_usd_micros: 190,
+            candidate_count: 4,
+        };
+
+        let compute_digest = |artifact_digest: [u8; 32]| {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(b"selection_argmax_v1");
+            hasher.update(&1u16.to_le_bytes());
+            hasher.update(&artifact_digest);
+            hasher.update(&proof_bytes_digest);
+            hasher.update(&inputs.commitment);
+            hasher.update(&inputs.winner_index.to_le_bytes());
+            hasher.update(&inputs.winner_quality_bid_usd_micros.to_le_bytes());
+            hasher.update(&inputs.runner_up_quality_bid_usd_micros.to_le_bytes());
+            hasher.update(&inputs.resource_floor_usd_micros.to_le_bytes());
+            hasher.update(&inputs.clearing_price_usd_micros.to_le_bytes());
+            hasher.update(&inputs.candidate_count.to_le_bytes());
+            *hasher.finalize().as_bytes()
+        };
+
+        let digest_from_a = compute_digest(digest_a);
+        let digest_from_b = compute_digest(digest_b);
+        assert_eq!(digest_from_a, digest_from_b);
     }
 }

@@ -42,11 +42,25 @@ flags are aligned across runtime, explorer, and telemetry surfaces.
 The SPA now includes attestation and pacing cards. Selection receipts display the
 latest `ad_selection_attestation_total{kind,result}` breakdown with tooltips
 linking to the SNARK circuit identifiers, and the campaign panel renders
-`ad_budget_progress` alongside the broker’s κ value so operators can confirm the
-optimal-control pacing stays within governance bounds. Cohort tiles overlay the
-PI controller state (`ad_price_pi_error`, `ad_price_pi_integral`,
-`ad_price_pi_forgetting`) so damping, saturation, and badge scoping remain
-auditable from the inline dashboard without opening Grafana.
+`ad_budget_progress`, the live shadow price, and the κ gradient so operators can
+confirm the optimal-control pacing stays within governance bounds. Cohort tiles
+overlay the PI controller state (`ad_price_pi_error`, `ad_price_pi_integral`,
+`ad_price_pi_forgetting`) alongside the latest `ad_resource_floor_component_usd`
+values so damping, saturation, badge scoping, and floor composition remain
+auditable from the inline dashboard without opening Grafana. `SettlementBreakdown`
+payloads now surface the composite `resource_floor_breakdown` directly in the
+inline cards, so operators can verify the bandwidth, verifier, and host
+contributions that cleared the floor without opening the RPC inspector. The
+selection receipt modal mirrors the new structure, showing per-component USD
+contributions and the qualified-impressions amortization factor the wallet
+proved in its attestation.
+
+Privacy budgets and uplift diagnostics sit alongside the pacing card. The badge
+family table colours entries whose `ad_privacy_budget_total{result="cooling"|"revoked"}`
+counters move, while inline gauges render the remaining `(ε, δ)` allowance per
+family. The uplift panel graphs `ad_uplift_propensity{sample}` and
+`ad_uplift_lift_ppm{impressions}` so operators can spot calibration drift without
+leaving the dashboard.
 
 Grafana gained a dedicated **Advertising** row to complement the inline cards.
 Panels chart five-minute deltas of `ad_selection_attestation_total` by kind and
@@ -54,9 +68,20 @@ reason, the SNARK verification latency histogram
 `ad_selection_proof_verify_seconds{circuit}`, commitment sizes via
 `ad_selection_attestation_commitment_bytes{kind}`, and the campaign pacing trio:
 `ad_budget_progress{campaign}`, `ad_budget_shadow_price{campaign}`, and
-`ad_budget_dual_price{campaign}`. Alert annotations surface directly on the
-panels when `SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`, or
-`AdBudgetProgressFlat` fire, keeping proof-mix regressions and stalled pacing
+`ad_budget_kappa_gradient{campaign,...}`. A companion panel breaks out the floor
+components using `ad_resource_floor_component_usd{component}` so bandwidth,
+verifier, and host costs are obvious when bids clear near the floor. Alert
+annotations surface directly on the panels when
+`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+`AdBudgetProgressFlat`, or `AdResourceFloorVerifierDrift` fire, keeping
+proof-mix regressions, stalled pacing, and verifier amortisation anomalies
 visible without digging through PromQL. The row reuses the in-house panel
 builders introduced for the explorer/treasury sections, so no third-party
 templates or SDKs were required.
+
+Grafana’s pacing row now also charts the broker deltas derived from
+`ad_budget_summary_value{metric}` and the new `BudgetBrokerPacingDelta`
+aggregate. Operators can correlate the JSON pacing feed with the Prometheus
+gauges—`mean_kappa`, `epoch_spend_total_usd`, and `dual_price_max`—to confirm
+partial snapshot streams merge deterministically before deltas are exported to
+the dashboard.

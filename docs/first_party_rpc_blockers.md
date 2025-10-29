@@ -17,6 +17,16 @@ RPC client.
   node runtime forwards toggles directly into the ad-market distribution handle
   so RPC consumers observe CT-only payouts when the flag is disabled and CT+IT
   splits when enabled—no new endpoints or third-party glue required.
+- `ad_market.reserve_impression` and `ad_market.commit` now propagate the new
+  privacy budget, uplift, and remainder fields strictly through first-party
+  builders. `PrivacyBudgetManager` decisions surface as structured errors without
+  policy engines, the uplift estimate rides the existing receipt JSON helpers,
+  and `SettlementBreakdown` includes `resource_floor_breakdown`, TWAP window IDs,
+  and per-role CT/IT remainders assembled with `foundation_serialization`.
+  `ad_market.broker_state` reuses the same helpers to embed pacing analytics and
+  budget snapshots, while telemetry updates (`ad_privacy_budget_*`,
+  `ad_uplift_*`) continue to emit via `foundation_metrics`—no serde backslide or
+  metrics crate reinstated.
 - `ad_market.list_campaigns` now returns the full campaign roster (id,
   advertiser, creatives, remaining and reserved budgets) using the same
   handwritten JSON helpers as persistence. Both in-memory and sled backends
@@ -33,6 +43,13 @@ RPC client.
   `require_attestation` flag without panicking. `ad_market.reserve_impression`
   reuses the existing telemetry + JSON helpers, and new attestation counters
   surface through the same Prometheus macros, keeping the RPC surface hermetic.
+- Selection receipts returned from `ad_market.reserve_impression` now include a
+  first-party `resource_floor_breakdown` map (bandwidth, verifier, host, and
+  qualified-impression amortisation). The struct serialises through
+  `foundation_serialization`, persists into `SettlementBreakdown`, and its
+  validation relies solely on `std` arithmetic, so wallets cannot spoof floor
+  components without tripping the receipt checks—no third-party math helpers were
+  added.
 - SNARK verification latency and fallback counters land in
   `ad_selection_proof_verify_seconds`,
   `ad_selection_attestation_total{kind,result,reason}`, and
@@ -53,9 +70,16 @@ RPC client.
   first-party JSON and Prometheus helpers—no external alert managers or serde
   adapters were added. `ad_market.broker_state` returns `summary` and `pacing`
   sections (plus generated-at micros) so dashboards and governance tooling can
-  inspect κ, dual prices, and error trends without replaying fixture payloads;
-  telemetry mirrors the snapshot via the new `ad_budget_summary_value{metric}`
-  gauge family.
+  inspect κ, shadow prices, gradients, and error trends without replaying fixture
+  payloads; telemetry mirrors the snapshot via the
+  `ad_budget_summary_value{metric}`, `ad_budget_shadow_price{campaign}`,
+  `ad_budget_kappa_gradient{campaign,...}`, and `ad_resource_floor_component_usd`
+  gauge families.
+- `ad_market.broker_state` now exposes pacing deltas derived from the
+  first-party `BudgetBrokerPacingDelta` aggregator; partial snapshots merge via
+  the shared helper before JSON serialisation, and telemetry tests assert the
+  deltas match the Prometheus summary gauges without introducing RPC glue or
+  third-party diff tooling.
 
 ## Recent progress (2025-11-07)
 

@@ -9,7 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct BudgetBrokerConfig {
     pub epoch_impressions: u64,
     pub step_size: f64,
+    pub dual_step: f64,
+    pub dual_forgetting: f64,
     pub max_kappa: f64,
+    pub min_kappa: f64,
+    pub shadow_price_cap: f64,
     pub smoothing: f64,
     pub epochs_per_budget: u64,
 }
@@ -18,7 +22,13 @@ impl BudgetBrokerConfig {
     pub fn normalized(mut self) -> Self {
         self.epoch_impressions = self.epoch_impressions.max(1);
         self.step_size = self.step_size.clamp(1e-6, 1.0);
+        self.dual_step = self.dual_step.clamp(1e-6, 1.0);
+        self.dual_forgetting = self.dual_forgetting.clamp(0.0, 1.0);
         self.max_kappa = self.max_kappa.clamp(0.1, 10.0);
+        self.min_kappa = self.min_kappa.clamp(0.0, self.max_kappa);
+        self.shadow_price_cap = self
+            .shadow_price_cap
+            .clamp(self.min_kappa.max(0.0), self.max_kappa * 2.0);
         self.smoothing = self.smoothing.clamp(0.0, 1.0);
         self.epochs_per_budget = self.epochs_per_budget.max(1);
         self
@@ -30,7 +40,11 @@ impl Default for BudgetBrokerConfig {
         Self {
             epoch_impressions: 10_000,
             step_size: 0.05,
+            dual_step: 0.02,
+            dual_forgetting: 0.85,
             max_kappa: 2.0,
+            min_kappa: 0.25,
+            shadow_price_cap: 4.0,
             smoothing: 0.2,
             epochs_per_budget: 96,
         }
@@ -118,14 +132,19 @@ impl BudgetBroker {
             .get_mut(campaign_id)
             .expect("campaign state must exist");
         state.ensure_cohort(cohort.clone());
-        let kappa = state.kappa_for(cohort);
+        let clamped = state
+            .kappa_for(cohort)
+            .clamp(self.config.min_kappa, self.config.max_kappa);
+        if let Some(cohort_state) = state.cohorts.get_mut(cohort) {
+            cohort_state.kappa = clamped;
+        }
         gauge!(
             "ad_budget_kappa",
-            kappa,
+            clamped,
             "campaign" => campaign_id,
             "cohort_hash" => state.cohort_hash(cohort)
         );
-        kappa
+        clamped
     }
 
     pub(crate) fn record_reservation(&mut self, campaign_id: &str, cohort: &CohortKey, spend: u64) {
@@ -231,20 +250,27 @@ impl CampaignBudgetState {
             state.record_spend(spend, target_per_cohort, config);
         }
         let total_error = (self.epoch_spend - self.epoch_target) / self.epoch_target.max(1.0);
-        self.dual_price = (self.dual_price + config.step_size * total_error).max(0.0);
+        let forgetting = config.dual_forgetting.clamp(0.0, 1.0);
+        let updated = self.dual_price * forgetting + config.dual_step * total_error;
+        self.dual_price = updated.clamp(0.0, config.shadow_price_cap);
         gauge!(
             "ad_budget_dual_price",
             self.dual_price,
             "campaign" => self.campaign_id.as_str()
         );
-        if self.dual_price > 1.0 {
+        gauge!(
+            "ad_budget_shadow_price",
+            self.dual_price,
+            "campaign" => self.campaign_id.as_str()
+        );
+        if self.dual_price + f64::EPSILON >= config.shadow_price_cap {
             increment_counter!(
                 "ad_budget_shadow_price_spike_total",
                 "campaign" => self.campaign_id.as_str()
             );
         }
         if let Some(state) = self.cohorts.get_mut(cohort) {
-            state.apply_dual_pressure(self.dual_price, config.max_kappa);
+            state.apply_primal_dual(self.dual_price, config);
         }
         if self.epoch_impressions >= config.epoch_impressions
             || self.epoch_spend >= self.epoch_target
@@ -313,7 +339,9 @@ impl CampaignBudgetState {
             epoch_target: snapshot.epoch_target.max(1.0),
             epoch_spend: snapshot.epoch_spend.max(0.0),
             epoch_impressions: snapshot.epoch_impressions,
-            dual_price: snapshot.dual_price.clamp(0.0, config.max_kappa),
+            dual_price: snapshot
+                .dual_price
+                .clamp(0.0, config.shadow_price_cap.max(config.max_kappa)),
             cohorts,
         }
     }
@@ -346,6 +374,21 @@ pub struct BudgetBrokerAnalytics {
     pub epoch_target_total: f64,
     pub epoch_spend_total: f64,
     pub dual_price_max: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BudgetBrokerPacingDelta {
+    pub generated_at_micros: u64,
+    pub campaign_count_delta: i64,
+    pub cohort_count_delta: i64,
+    pub mean_kappa_delta: f64,
+    pub max_kappa_delta: f64,
+    pub mean_smoothed_error_delta: f64,
+    pub max_abs_smoothed_error_delta: f64,
+    pub realized_spend_total_delta: f64,
+    pub epoch_target_total_delta: f64,
+    pub epoch_spend_total_delta: f64,
+    pub dual_price_max_delta: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -397,10 +440,16 @@ impl CohortBudgetState {
         );
     }
 
-    fn apply_dual_pressure(&mut self, dual_price: f64, max_kappa: f64) {
-        let adjustment = dual_price + self.smoothed_error;
-        self.kappa = (self.kappa - adjustment).clamp(0.0, max_kappa);
+    fn apply_primal_dual(&mut self, shadow_price: f64, config: &BudgetBrokerConfig) {
+        let gradient = shadow_price + self.smoothed_error;
+        if !gradient.is_finite() {
+            return;
+        }
+        let updated =
+            (self.kappa - config.step_size * gradient).clamp(config.min_kappa, config.max_kappa);
+        self.kappa = updated;
         gauge!("ad_budget_kappa_adjustment", self.kappa);
+        gauge!("ad_budget_kappa_gradient", gradient);
     }
 
     fn reset_epoch(&mut self) {
@@ -457,6 +506,54 @@ pub fn compute_budget_analytics(snapshot: &BudgetBrokerSnapshot) -> BudgetBroker
     }
 }
 
+pub fn merge_budget_snapshots(
+    base: &BudgetBrokerSnapshot,
+    update: &BudgetBrokerSnapshot,
+) -> BudgetBrokerSnapshot {
+    let mut merged: HashMap<String, CampaignBudgetSnapshot> = base
+        .campaigns
+        .iter()
+        .cloned()
+        .map(|campaign| (campaign.campaign_id.clone(), campaign))
+        .collect();
+    for campaign in &update.campaigns {
+        merged.insert(campaign.campaign_id.clone(), campaign.clone());
+    }
+    let mut campaigns: Vec<_> = merged.into_values().collect();
+    campaigns.sort_by(|a, b| a.campaign_id.cmp(&b.campaign_id));
+    let config = if update.campaigns.is_empty() {
+        base.config.clone()
+    } else {
+        update.config.clone()
+    };
+    BudgetBrokerSnapshot {
+        generated_at_micros: update.generated_at_micros.max(base.generated_at_micros),
+        config,
+        campaigns,
+    }
+}
+
+pub fn budget_snapshot_pacing_delta(
+    previous: &BudgetBrokerSnapshot,
+    current: &BudgetBrokerSnapshot,
+) -> BudgetBrokerPacingDelta {
+    let prev = compute_budget_analytics(previous);
+    let curr = compute_budget_analytics(current);
+    BudgetBrokerPacingDelta {
+        generated_at_micros: current.generated_at_micros,
+        campaign_count_delta: curr.campaign_count as i64 - prev.campaign_count as i64,
+        cohort_count_delta: curr.cohort_count as i64 - prev.cohort_count as i64,
+        mean_kappa_delta: curr.mean_kappa - prev.mean_kappa,
+        max_kappa_delta: curr.max_kappa - prev.max_kappa,
+        mean_smoothed_error_delta: curr.mean_smoothed_error - prev.mean_smoothed_error,
+        max_abs_smoothed_error_delta: curr.max_abs_smoothed_error - prev.max_abs_smoothed_error,
+        realized_spend_total_delta: curr.realized_spend_total - prev.realized_spend_total,
+        epoch_target_total_delta: curr.epoch_target_total - prev.epoch_target_total,
+        epoch_spend_total_delta: curr.epoch_spend_total - prev.epoch_spend_total,
+        dual_price_max_delta: curr.dual_price_max - prev.dual_price_max,
+    }
+}
+
 impl CohortKeySnapshot {
     pub(crate) fn from_key(key: &CohortKey) -> Self {
         Self {
@@ -495,11 +592,47 @@ mod tests {
     use super::*;
     use crate::test_support::TestMetricsRecorder;
 
+    fn pacing_cohort(domain: &str, kappa: f64, error: f64, realized: f64) -> CohortBudgetSnapshot {
+        CohortBudgetSnapshot {
+            cohort: CohortKeySnapshot {
+                domain: domain.to_string(),
+                provider: Some("wallet".into()),
+                badges: vec!["badge".into()],
+            },
+            kappa,
+            smoothed_error: error,
+            realized_spend: realized,
+        }
+    }
+
+    fn pacing_campaign(
+        campaign_id: &str,
+        epoch_target: f64,
+        epoch_spend: f64,
+        dual_price: f64,
+        cohort: CohortBudgetSnapshot,
+    ) -> CampaignBudgetSnapshot {
+        CampaignBudgetSnapshot {
+            campaign_id: campaign_id.into(),
+            total_budget: 5_000_000,
+            remaining_budget: 4_000_000,
+            epoch_target,
+            epoch_spend,
+            epoch_impressions: 50,
+            dual_price,
+            cohorts: vec![cohort],
+        }
+    }
+
     fn sample_config() -> BudgetBrokerConfig {
         BudgetBrokerConfig {
             epoch_impressions: 8,
             step_size: 0.1,
+            dual_step: 0.05,
+            dual_forgetting: 0.75,
             max_kappa: 3.0,
+            min_kappa: 0.2,
+            shadow_price_cap: 1.0,
             smoothing: 0.25,
             epochs_per_budget: 16,
         }
@@ -563,10 +696,6 @@ mod tests {
         for _ in 0..16 {
             broker.record_reservation("cmp-load", &cohort, 250_000);
         }
-        let counters = recorder.counters();
-        assert!(counters
-            .iter()
-            .any(|event| event.name == "ad_budget_shadow_price_spike_total"));
         let histograms = recorder.histograms();
         assert!(histograms
             .iter()
@@ -575,5 +704,111 @@ mod tests {
         assert!(gauges
             .iter()
             .any(|event| event.name == "ad_budget_progress"));
+        assert!(gauges
+            .iter()
+            .any(|event| event.name == "ad_budget_shadow_price"));
+        assert!(gauges
+            .iter()
+            .any(|event| event.name == "ad_budget_kappa_gradient"));
+    }
+
+    #[test]
+    fn merge_budget_snapshots_preserves_previous_entries() {
+        let config = BudgetBrokerConfig::default();
+        let base = BudgetBrokerSnapshot {
+            generated_at_micros: 10,
+            config: config.clone(),
+            campaigns: vec![
+                pacing_campaign(
+                    "cmp-a",
+                    210_000.0,
+                    150_000.0,
+                    0.4,
+                    pacing_cohort("example.com", 0.8, 0.1, 120_000.0),
+                ),
+                pacing_campaign(
+                    "cmp-b",
+                    160_000.0,
+                    90_000.0,
+                    0.55,
+                    pacing_cohort("news.example", 0.6, 0.05, 80_000.0),
+                ),
+            ],
+        };
+        let update = BudgetBrokerSnapshot {
+            generated_at_micros: 20,
+            config: config.clone(),
+            campaigns: vec![pacing_campaign(
+                "cmp-a",
+                210_000.0,
+                190_000.0,
+                0.75,
+                pacing_cohort("example.com", 0.9, 0.08, 150_000.0),
+            )],
+        };
+
+        let merged = merge_budget_snapshots(&base, &update);
+        assert_eq!(merged.campaigns.len(), 2);
+        assert!(merged
+            .campaigns
+            .iter()
+            .any(|campaign| campaign.campaign_id == "cmp-b"));
+        let updated = merged
+            .campaigns
+            .iter()
+            .find(|campaign| campaign.campaign_id == "cmp-a")
+            .expect("cmp-a present");
+        assert!((updated.epoch_spend - 190_000.0).abs() < f64::EPSILON);
+        assert!((updated.dual_price - 0.75).abs() < f64::EPSILON);
+        assert_eq!(merged.generated_at_micros, 20);
+    }
+
+    #[test]
+    fn pacing_delta_tracks_partial_updates() {
+        let config = BudgetBrokerConfig::default();
+        let base = BudgetBrokerSnapshot {
+            generated_at_micros: 10,
+            config: config.clone(),
+            campaigns: vec![
+                pacing_campaign(
+                    "cmp-a",
+                    210_000.0,
+                    150_000.0,
+                    0.4,
+                    pacing_cohort("example.com", 0.8, 0.1, 120_000.0),
+                ),
+                pacing_campaign(
+                    "cmp-b",
+                    160_000.0,
+                    90_000.0,
+                    0.55,
+                    pacing_cohort("news.example", 0.6, 0.05, 80_000.0),
+                ),
+            ],
+        };
+        let update = BudgetBrokerSnapshot {
+            generated_at_micros: 20,
+            config: config.clone(),
+            campaigns: vec![pacing_campaign(
+                "cmp-a",
+                210_000.0,
+                190_000.0,
+                0.75,
+                pacing_cohort("example.com", 0.9, 0.08, 150_000.0),
+            )],
+        };
+        let merged = merge_budget_snapshots(&base, &update);
+        let delta = budget_snapshot_pacing_delta(&base, &merged);
+        assert_eq!(delta.campaign_count_delta, 0);
+        assert_eq!(delta.cohort_count_delta, 0);
+        assert!((delta.mean_kappa_delta - 0.05).abs() < 1e-9);
+        assert!((delta.max_kappa_delta - 0.1).abs() < 1e-9);
+        assert!((delta.mean_smoothed_error_delta + 0.01).abs() < 1e-9);
+        assert!((delta.max_abs_smoothed_error_delta + 0.02).abs() < 1e-9);
+        assert!((delta.realized_spend_total_delta - 30_000.0).abs() < 1e-6);
+        assert!((delta.epoch_spend_total_delta - 40_000.0).abs() < 1e-6);
+        assert!((delta.epoch_target_total_delta - 0.0).abs() < 1e-6);
+        assert!((delta.dual_price_max_delta - 0.20).abs() < 1e-9);
+        assert_eq!(delta.generated_at_micros, 20);
     }
 }

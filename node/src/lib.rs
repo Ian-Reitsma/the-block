@@ -5840,7 +5840,9 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ad_market::{SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt};
+    use ad_market::{
+        ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt,
+    };
     use crypto_suite::hashing::blake3::Hasher;
     use crypto_suite::signatures::ed25519::SigningKey;
 
@@ -5985,6 +5987,7 @@ mod tests {
                     action_rate_ppm: 0,
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
+                    pacing_kappa: 1.0,
                 },
                 SelectionCandidateTrace {
                     campaign_id: "cmp-2".into(),
@@ -5995,10 +5998,17 @@ mod tests {
                     action_rate_ppm: 0,
                     lift_ppm: 0,
                     quality_multiplier: 1.0,
+                    pacing_kappa: 1.0,
                 },
             ],
             winner_index: 0,
             resource_floor_usd_micros: 90,
+            resource_floor_breakdown: ResourceFloorBreakdown {
+                bandwidth_usd_micros: 70,
+                verifier_usd_micros: 12,
+                host_usd_micros: 10,
+                qualified_impressions_per_proof: 320,
+            },
             runner_up_quality_bid_usd_micros: 80,
             clearing_price_usd_micros: 100,
             attestation: None,

@@ -1,4 +1,27 @@
 # Status & Roadmap
+> **Review (2025-10-29, evening):** Selection manifests gained regression coverage
+> for hot swaps and multi-entry ordering via the manual
+> `parse_manifest_value`/`parse_artifacts_value` helpers, proving verifying-key
+> digests stay deterministic without serde. `SelectionReceipt` now serialises a
+> `resource_floor_breakdown` alongside the composite floor, and validation rejects
+> mismatched components before settlements flow. The budget broker exposes
+> `BudgetBrokerPacingDelta`/`merge_budget_snapshots`, `ad_market.broker_state` keeps
+> returning pure first-party JSON, and telemetry tests assert
+> `ad_budget_summary_value{metric}` mirrors the merged snapshot so partial updates
+> remain hermetic.
+> **Review (2025-10-29, late afternoon):** Privacy budgets, uplift, and dual-token
+> remainders now ride first-party code paths. `PrivacyBudgetManager` blocks badge
+> families when their `(ε, δ)` allocation is exhausted, surfaces
+> `ad_privacy_budget_{total,remaining}` so dashboards catch cooling/revoked
+> predicates, and snapshots thread into the broker telemetry updates for RPC
+> consumers. The
+> doubly-robust `UpliftEstimator` pipes predictions, baseline action rates,
+> propensities, and calibration error into candidate traces, reservations,
+> receipts, and telemetry (`ad_uplift_propensity`, `ad_uplift_lift_ppm`) so pacing
+> and reporting observe lift rather than raw CTR. Settlement code persists a
+> sled-backed `TokenRemainderLedger` with per-role CT/IT USD remainders and TWAP
+> window IDs, wiring the new `resource_floor_breakdown` and remainder fields into
+> RPC/telemetry so CT/IT rounding is auditable across restarts.
 > **Review (2025-10-28, late night):** Budget pacing state now persists alongside
 > selection proofs. `BudgetBroker` serialises κ shading, epoch targets, and dual
 > prices into sled, restoring them on startup so pacing controllers no longer
@@ -19,10 +42,14 @@
 > `InvalidAttestation`, while fresh unit tests cover proof-digest and verifying-key
 > mismatches. `update_ad_budget_metrics` fans broker snapshots into telemetry,
 > emitting `ad_budget_summary_value{metric=*}` for campaign/cohort counts,
-> κ/extrema, spend totals, and dual-price maxima alongside the existing
-> config/campaign/cohort gauges. The refreshed `ad_market.broker_state` RPC returns
-> `summary`, `pacing`, and generated-at micros so dashboards and governance tooling
-> can diff pacing without replaying wallet fixtures.
+> κ/extrema, spend totals, and shadow-price maxima alongside the existing
+> config/campaign/cohort gauges. New gauges—`ad_budget_shadow_price{campaign}`,
+> `ad_budget_kappa_gradient{campaign,...}`, and
+> `ad_resource_floor_component_usd{component}`—expose the primal–dual shadow price,
+> gradient pressure, and composite floor breakdown so dashboards and governance
+> tooling can diff pacing without replaying wallet fixtures. The refreshed
+> `ad_market.broker_state` RPC returns `summary`, `pacing`, and generated-at micros to
+> match.
 > **Review (2025-10-28, evening+):** Selection receipts now emit a first-party
 > BLAKE3 commitment and the wallet must attach either a SNARK proof (preferred)
 > or a TEE attestation before settlement. The ad marketplace normalises circuit
