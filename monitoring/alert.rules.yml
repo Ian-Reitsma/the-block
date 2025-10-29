@@ -96,6 +96,29 @@ groups:
           severity: warn
         annotations:
           summary: "TLS warning snapshots stale beyond retention ({{ printf \"%.0f\" $value }} affected)"
+      - alert: SelectionProofSnarkFallback
+        expr: increase(ad_selection_attestation_total{kind="tee",result="fallback"}[10m]) > 0
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Selection proof falling back to TEE for {{ $value }} attestations"
+      - alert: SelectionProofRejectionSpike
+        expr: increase(ad_selection_attestation_total{result="rejected"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Selection proof attestation rejected for {{ $value }} proofs"
+      - alert: AdBudgetProgressFlat
+        expr: |
+          (max_over_time(ad_budget_progress[1h]) - min_over_time(ad_budget_progress[1h])) < 0.01
+            and on (campaign) (max_over_time(ad_budget_progress[1h]) > 0.05)
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Budget progress stalled for campaign {{ $labels.campaign }}"
   - name: dependency-registry
     rules:
       - alert: DependencyRegistryDriftDetected

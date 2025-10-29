@@ -6,5 +6,7 @@ edition = "2021"
 [dependencies]
 crypto_suite = { path = "../crypto_suite" }
 foundation_serialization = { path = "../foundation_serialization" }
+foundation_lazy = { path = "../foundation_lazy" }
 serde = { workspace = true }
+base64_fp = { path = "../base64_fp" }
 

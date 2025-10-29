@@ -1,0 +1,503 @@
+use crate::CohortKey;
+use crypto_suite::hashing::blake3;
+use foundation_metrics::{gauge, histogram, increment_counter};
+use foundation_serialization::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BudgetBrokerConfig {
+    pub epoch_impressions: u64,
+    pub step_size: f64,
+    pub max_kappa: f64,
+    pub smoothing: f64,
+    pub epochs_per_budget: u64,
+}
+
+impl BudgetBrokerConfig {
+    pub fn normalized(mut self) -> Self {
+        self.epoch_impressions = self.epoch_impressions.max(1);
+        self.step_size = self.step_size.clamp(1e-6, 1.0);
+        self.max_kappa = self.max_kappa.clamp(0.1, 10.0);
+        self.smoothing = self.smoothing.clamp(0.0, 1.0);
+        self.epochs_per_budget = self.epochs_per_budget.max(1);
+        self
+    }
+}
+
+impl Default for BudgetBrokerConfig {
+    fn default() -> Self {
+        Self {
+            epoch_impressions: 10_000,
+            step_size: 0.05,
+            max_kappa: 2.0,
+            smoothing: 0.2,
+            epochs_per_budget: 96,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BudgetBroker {
+    config: BudgetBrokerConfig,
+    campaigns: HashMap<String, CampaignBudgetState>,
+}
+
+impl BudgetBroker {
+    pub fn new(config: BudgetBrokerConfig) -> Self {
+        Self {
+            config: config.normalized(),
+            campaigns: HashMap::new(),
+        }
+    }
+
+    pub fn config(&self) -> &BudgetBrokerConfig {
+        &self.config
+    }
+
+    pub fn snapshot(&self) -> BudgetBrokerSnapshot {
+        BudgetBrokerSnapshot {
+            config: self.config.clone(),
+            campaigns: self
+                .campaigns
+                .values()
+                .map(CampaignBudgetState::snapshot)
+                .collect(),
+        }
+    }
+
+    pub fn restore(config: BudgetBrokerConfig, snapshot: &BudgetBrokerSnapshot) -> Self {
+        let mut broker = BudgetBroker::new(config);
+        let normalized = broker.config.clone();
+        for campaign in &snapshot.campaigns {
+            broker.campaigns.insert(
+                campaign.campaign_id.clone(),
+                CampaignBudgetState::from_snapshot(campaign, &normalized),
+            );
+        }
+        broker
+    }
+
+    pub fn ensure_registered(&mut self, campaign_id: &str, budget_usd_micros: u64) {
+        if let Some(state) = self.campaigns.get_mut(campaign_id) {
+            state.reconcile_budget(budget_usd_micros, &self.config);
+        } else {
+            self.register_campaign(campaign_id, budget_usd_micros);
+        }
+    }
+
+    pub fn register_campaign(&mut self, campaign_id: &str, budget_usd_micros: u64) {
+        if self.campaigns.contains_key(campaign_id) {
+            self.update_budget(campaign_id, budget_usd_micros);
+            return;
+        }
+        let config = self.config.clone();
+        self.campaigns.insert(
+            campaign_id.to_string(),
+            CampaignBudgetState::new(campaign_id.to_string(), budget_usd_micros, config.clone()),
+        );
+    }
+
+    pub fn update_budget(&mut self, campaign_id: &str, budget_usd_micros: u64) {
+        if let Some(state) = self.campaigns.get_mut(campaign_id) {
+            state.set_budget(budget_usd_micros, &self.config);
+        } else {
+            self.register_campaign(campaign_id, budget_usd_micros);
+        }
+    }
+
+    pub fn remove_campaign(&mut self, campaign_id: &str) {
+        self.campaigns.remove(campaign_id);
+    }
+
+    pub(crate) fn kappa_for(&mut self, campaign_id: &str, cohort: &CohortKey) -> f64 {
+        self.ensure_campaign(campaign_id);
+        let state = self
+            .campaigns
+            .get_mut(campaign_id)
+            .expect("campaign state must exist");
+        state.ensure_cohort(cohort.clone());
+        let kappa = state.kappa_for(cohort);
+        gauge!(
+            "ad_budget_kappa",
+            kappa,
+            "campaign" => campaign_id,
+            "cohort_hash" => state.cohort_hash(cohort)
+        );
+        kappa
+    }
+
+    pub(crate) fn record_reservation(&mut self, campaign_id: &str, cohort: &CohortKey, spend: u64) {
+        if let Some(state) = self.campaigns.get_mut(campaign_id) {
+            state.record_spend(cohort, spend, &self.config);
+        }
+    }
+
+    fn ensure_campaign(&mut self, campaign_id: &str) {
+        if !self.campaigns.contains_key(campaign_id) {
+            self.register_campaign(campaign_id, 0);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CampaignBudgetState {
+    campaign_id: String,
+    total_budget: u64,
+    remaining_budget: u64,
+    epoch_target: f64,
+    epoch_spend: f64,
+    epoch_impressions: u64,
+    dual_price: f64,
+    cohorts: HashMap<CohortKey, CohortBudgetState>,
+}
+
+impl CampaignBudgetState {
+    fn new(campaign_id: String, budget_usd_micros: u64, config: BudgetBrokerConfig) -> Self {
+        let epoch_target = compute_epoch_target(budget_usd_micros, config.epochs_per_budget);
+        Self {
+            campaign_id,
+            total_budget: budget_usd_micros,
+            remaining_budget: budget_usd_micros,
+            epoch_target,
+            epoch_spend: 0.0,
+            epoch_impressions: 0,
+            dual_price: 0.0,
+            cohorts: HashMap::new(),
+        }
+    }
+
+    fn set_budget(&mut self, budget_usd_micros: u64, config: &BudgetBrokerConfig) {
+        self.total_budget = budget_usd_micros;
+        self.remaining_budget = budget_usd_micros;
+        self.epoch_target = compute_epoch_target(budget_usd_micros, config.epochs_per_budget);
+        self.epoch_spend = 0.0;
+        self.epoch_impressions = 0;
+        self.dual_price = 0.0;
+        for cohort in self.cohorts.values_mut() {
+            cohort.reset_epoch();
+        }
+    }
+
+    fn ensure_cohort(&mut self, cohort: CohortKey) {
+        self.cohorts
+            .entry(cohort)
+            .or_insert_with(CohortBudgetState::new);
+    }
+
+    fn kappa_for(&self, cohort: &CohortKey) -> f64 {
+        self.cohorts
+            .get(cohort)
+            .map(|state| state.kappa)
+            .unwrap_or(1.0)
+    }
+
+    fn cohort_hash(&self, cohort: &CohortKey) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.campaign_id.as_bytes());
+        hasher.update(cohort.domain.as_bytes());
+        if let Some(provider) = &cohort.provider {
+            hasher.update(provider.as_bytes());
+        }
+        for badge in &cohort.badges {
+            hasher.update(badge.as_bytes());
+        }
+        hasher.finalize().to_hex().to_hex_string()
+    }
+
+    fn record_spend(&mut self, cohort: &CohortKey, spend: u64, config: &BudgetBrokerConfig) {
+        let spend = spend as f64;
+        if spend <= 0.0 {
+            return;
+        }
+        if self.remaining_budget > 0 {
+            self.remaining_budget = self.remaining_budget.saturating_sub(spend as u64);
+        }
+        if self.total_budget > 0 {
+            let spent = self.total_budget.saturating_sub(self.remaining_budget);
+            let progress = spent as f64 / self.total_budget as f64;
+            gauge!(
+                "ad_budget_progress",
+                progress,
+                "campaign" => self.campaign_id.as_str()
+            );
+        }
+        self.epoch_spend += spend;
+        self.epoch_impressions = self.epoch_impressions.saturating_add(1);
+        let active_cohorts = self.cohorts.len().max(1) as f64;
+        let target_per_cohort = (self.epoch_target / active_cohorts).max(1.0);
+        if let Some(state) = self.cohorts.get_mut(cohort) {
+            state.record_spend(spend, target_per_cohort, config);
+        }
+        let total_error = (self.epoch_spend - self.epoch_target) / self.epoch_target.max(1.0);
+        self.dual_price = (self.dual_price + config.step_size * total_error).max(0.0);
+        gauge!(
+            "ad_budget_dual_price",
+            self.dual_price,
+            "campaign" => self.campaign_id.as_str()
+        );
+        if self.dual_price > 1.0 {
+            increment_counter!(
+                "ad_budget_shadow_price_spike_total",
+                "campaign" => self.campaign_id.as_str()
+            );
+        }
+        if let Some(state) = self.cohorts.get_mut(cohort) {
+            state.apply_dual_pressure(self.dual_price, config.max_kappa);
+        }
+        if self.epoch_impressions >= config.epoch_impressions
+            || self.epoch_spend >= self.epoch_target
+        {
+            self.reset_epoch(config);
+        }
+    }
+
+    fn reset_epoch(&mut self, config: &BudgetBrokerConfig) {
+        self.epoch_impressions = 0;
+        self.epoch_spend = 0.0;
+        self.epoch_target = compute_epoch_target(self.remaining_budget, config.epochs_per_budget);
+        for cohort in self.cohorts.values_mut() {
+            cohort.reset_epoch();
+        }
+    }
+
+    fn reconcile_budget(&mut self, budget_usd_micros: u64, config: &BudgetBrokerConfig) {
+        if self.total_budget != budget_usd_micros {
+            self.total_budget = budget_usd_micros;
+        }
+        if self.remaining_budget > budget_usd_micros {
+            self.remaining_budget = budget_usd_micros;
+        }
+        self.epoch_target = compute_epoch_target(self.total_budget, config.epochs_per_budget);
+    }
+
+    fn snapshot(&self) -> CampaignBudgetSnapshot {
+        CampaignBudgetSnapshot {
+            campaign_id: self.campaign_id.clone(),
+            total_budget: self.total_budget,
+            remaining_budget: self.remaining_budget,
+            epoch_target: self.epoch_target,
+            epoch_spend: self.epoch_spend,
+            epoch_impressions: self.epoch_impressions,
+            dual_price: self.dual_price,
+            cohorts: self
+                .cohorts
+                .iter()
+                .map(|(key, state)| CohortBudgetSnapshot {
+                    cohort: CohortKeySnapshot::from_key(key),
+                    kappa: state.kappa,
+                    smoothed_error: state.smoothed_error,
+                    realized_spend: state.realized_spend,
+                })
+                .collect(),
+        }
+    }
+
+    fn from_snapshot(snapshot: &CampaignBudgetSnapshot, config: &BudgetBrokerConfig) -> Self {
+        let mut cohorts = HashMap::new();
+        for entry in &snapshot.cohorts {
+            cohorts.insert(
+                entry.cohort.clone().into_key(),
+                CohortBudgetState {
+                    kappa: entry.kappa.clamp(0.0, config.max_kappa),
+                    smoothed_error: entry.smoothed_error,
+                    realized_spend: entry.realized_spend.max(0.0),
+                },
+            );
+        }
+        Self {
+            campaign_id: snapshot.campaign_id.clone(),
+            total_budget: snapshot.total_budget,
+            remaining_budget: snapshot.remaining_budget.min(snapshot.total_budget),
+            epoch_target: snapshot.epoch_target.max(1.0),
+            epoch_spend: snapshot.epoch_spend.max(0.0),
+            epoch_impressions: snapshot.epoch_impressions,
+            dual_price: snapshot.dual_price.clamp(0.0, config.max_kappa),
+            cohorts,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CohortBudgetState {
+    kappa: f64,
+    smoothed_error: f64,
+    realized_spend: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BudgetBrokerSnapshot {
+    pub config: BudgetBrokerConfig,
+    pub campaigns: Vec<CampaignBudgetSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CampaignBudgetSnapshot {
+    pub campaign_id: String,
+    pub total_budget: u64,
+    pub remaining_budget: u64,
+    pub epoch_target: f64,
+    pub epoch_spend: f64,
+    pub epoch_impressions: u64,
+    pub dual_price: f64,
+    pub cohorts: Vec<CohortBudgetSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CohortBudgetSnapshot {
+    pub cohort: CohortKeySnapshot,
+    pub kappa: f64,
+    pub smoothed_error: f64,
+    pub realized_spend: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CohortKeySnapshot {
+    pub domain: String,
+    pub provider: Option<String>,
+    pub badges: Vec<String>,
+}
+
+impl CohortBudgetState {
+    fn new() -> Self {
+        Self {
+            kappa: 1.0,
+            smoothed_error: 0.0,
+            realized_spend: 0.0,
+        }
+    }
+
+    fn record_spend(&mut self, spend: f64, target: f64, config: &BudgetBrokerConfig) {
+        self.realized_spend += spend;
+        let error = (self.realized_spend - target) / target.max(1.0);
+        self.smoothed_error = config
+            .smoothing
+            .mul_add(error, (1.0 - config.smoothing) * self.smoothed_error);
+        histogram!(
+            "ad_budget_epoch_error",
+            self.smoothed_error,
+            "target_usd" => format!("{target:.0}")
+        );
+    }
+
+    fn apply_dual_pressure(&mut self, dual_price: f64, max_kappa: f64) {
+        let adjustment = dual_price + self.smoothed_error;
+        self.kappa = (self.kappa - adjustment).clamp(0.0, max_kappa);
+        gauge!("ad_budget_kappa_adjustment", self.kappa);
+    }
+
+    fn reset_epoch(&mut self) {
+        self.realized_spend = 0.0;
+        self.smoothed_error = 0.0;
+    }
+}
+
+impl CohortKeySnapshot {
+    pub(crate) fn from_key(key: &CohortKey) -> Self {
+        Self {
+            domain: key.domain.clone(),
+            provider: key.provider.clone(),
+            badges: key.badges.clone(),
+        }
+    }
+
+    pub(crate) fn into_key(mut self) -> CohortKey {
+        self.badges.sort();
+        self.badges.dedup();
+        CohortKey::new(self.domain, self.provider, self.badges)
+    }
+}
+
+fn compute_epoch_target(budget: u64, epochs_per_budget: u64) -> f64 {
+    if epochs_per_budget == 0 {
+        return budget as f64;
+    }
+    (budget as f64 / epochs_per_budget as f64).max(1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestMetricsRecorder;
+
+    fn sample_config() -> BudgetBrokerConfig {
+        BudgetBrokerConfig {
+            epoch_impressions: 8,
+            step_size: 0.1,
+            max_kappa: 3.0,
+            smoothing: 0.25,
+            epochs_per_budget: 16,
+        }
+    }
+
+    fn sample_cohort() -> CohortKey {
+        CohortKey::new(
+            "example.com".into(),
+            Some("wallet".into()),
+            vec!["badge-1".into(), "badge-2".into()],
+        )
+    }
+
+    #[test]
+    fn snapshot_round_trips_budget_state() {
+        let config = sample_config();
+        let cohort = sample_cohort();
+        let mut broker = BudgetBroker::new(config.clone());
+        broker.ensure_registered("campaign-a", 2_000_000);
+        broker.record_reservation("campaign-a", &cohort, 500_000);
+
+        let snapshot = broker.snapshot();
+        assert_eq!(snapshot.campaigns.len(), 1);
+        let original = snapshot.campaigns.first().expect("campaign snapshot");
+        assert!(original.remaining_budget < original.total_budget);
+
+        let mut restored = BudgetBroker::restore(config.clone(), &snapshot);
+        let kappa = restored.kappa_for("campaign-a", &cohort);
+        assert!(kappa >= 0.0);
+        restored.record_reservation("campaign-a", &cohort, 100_000);
+        let restored_snapshot = restored.snapshot();
+        let restored_campaign = restored_snapshot
+            .campaigns
+            .first()
+            .expect("restored campaign snapshot");
+        assert_eq!(restored_campaign.total_budget, original.total_budget);
+        assert_eq!(
+            restored_campaign.remaining_budget,
+            original.remaining_budget.saturating_sub(100_000)
+        );
+        assert_eq!(
+            restored_campaign
+                .cohorts
+                .first()
+                .map(|c| c.cohort.domain.clone()),
+            Some(cohort.domain.clone())
+        );
+    }
+
+    #[test]
+    fn budget_metrics_recorded_under_load() {
+        let Some(recorder) = TestMetricsRecorder::install() else {
+            eprintln!("skipping metrics assertion; recorder already installed elsewhere");
+            return;
+        };
+        recorder.reset();
+        let mut broker = BudgetBroker::new(sample_config());
+        let cohort = sample_cohort();
+        broker.ensure_registered("cmp-load", 5_000_000);
+        broker.kappa_for("cmp-load", &cohort);
+        for _ in 0..16 {
+            broker.record_reservation("cmp-load", &cohort, 250_000);
+        }
+        let counters = recorder.counters();
+        assert!(counters
+            .iter()
+            .any(|event| event.name == "ad_budget_shadow_price_spike_total"));
+        let histograms = recorder.histograms();
+        assert!(histograms
+            .iter()
+            .any(|event| event.name == "ad_budget_epoch_error"));
+        let gauges = recorder.gauges();
+        assert!(gauges
+            .iter()
+            .any(|event| event.name == "ad_budget_progress"));
+    }
+}

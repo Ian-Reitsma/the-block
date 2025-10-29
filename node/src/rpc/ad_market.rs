@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
 use crate::ad_readiness::AdReadinessHandle;
-use ad_market::{CohortPriceSnapshot, DistributionPolicy, MarketplaceHandle};
+use ad_market::{
+    BudgetBrokerConfig, BudgetBrokerSnapshot, CampaignBudgetSnapshot, CohortBudgetSnapshot,
+    CohortPriceSnapshot, DistributionPolicy, MarketplaceHandle,
+};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
 
@@ -9,6 +12,10 @@ fn unavailable() -> Value {
     let mut map = Map::new();
     map.insert("status".into(), Value::String("unavailable".into()));
     Value::Object(map)
+}
+
+fn number_from_f64(value: f64) -> Number {
+    Number::from_f64(value).unwrap_or_else(|| Number::from(0))
 }
 
 fn campaign_summary_to_value(summary: &ad_market::CampaignSummary) -> Value {
@@ -38,6 +45,126 @@ fn campaign_summary_to_value(summary: &ad_market::CampaignSummary) -> Value {
         ),
     );
     Value::Object(entry)
+}
+
+fn budget_config_to_value(config: &BudgetBrokerConfig) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "epoch_impressions".into(),
+        Value::Number(Number::from(config.epoch_impressions)),
+    );
+    map.insert(
+        "step_size".into(),
+        Value::Number(number_from_f64(config.step_size)),
+    );
+    map.insert(
+        "max_kappa".into(),
+        Value::Number(number_from_f64(config.max_kappa)),
+    );
+    map.insert(
+        "smoothing".into(),
+        Value::Number(number_from_f64(config.smoothing)),
+    );
+    map.insert(
+        "epochs_per_budget".into(),
+        Value::Number(Number::from(config.epochs_per_budget)),
+    );
+    Value::Object(map)
+}
+
+fn cohort_budget_snapshot_to_value(snapshot: &CohortBudgetSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "domain".into(),
+        Value::String(snapshot.cohort.domain.clone()),
+    );
+    if let Some(provider) = &snapshot.cohort.provider {
+        map.insert("provider".into(), Value::String(provider.clone()));
+    }
+    map.insert(
+        "badges".into(),
+        Value::Array(
+            snapshot
+                .cohort
+                .badges
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    map.insert(
+        "kappa".into(),
+        Value::Number(number_from_f64(snapshot.kappa)),
+    );
+    map.insert(
+        "smoothed_error".into(),
+        Value::Number(number_from_f64(snapshot.smoothed_error)),
+    );
+    map.insert(
+        "realized_spend".into(),
+        Value::Number(number_from_f64(snapshot.realized_spend)),
+    );
+    Value::Object(map)
+}
+
+fn campaign_budget_snapshot_to_value(snapshot: &CampaignBudgetSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "campaign_id".into(),
+        Value::String(snapshot.campaign_id.clone()),
+    );
+    map.insert(
+        "total_budget".into(),
+        Value::Number(Number::from(snapshot.total_budget)),
+    );
+    map.insert(
+        "remaining_budget".into(),
+        Value::Number(Number::from(snapshot.remaining_budget)),
+    );
+    map.insert(
+        "epoch_target".into(),
+        Value::Number(number_from_f64(snapshot.epoch_target)),
+    );
+    map.insert(
+        "epoch_spend".into(),
+        Value::Number(number_from_f64(snapshot.epoch_spend)),
+    );
+    map.insert(
+        "epoch_impressions".into(),
+        Value::Number(Number::from(snapshot.epoch_impressions)),
+    );
+    map.insert(
+        "dual_price".into(),
+        Value::Number(number_from_f64(snapshot.dual_price)),
+    );
+    map.insert(
+        "cohorts".into(),
+        Value::Array(
+            snapshot
+                .cohorts
+                .iter()
+                .map(cohort_budget_snapshot_to_value)
+                .collect(),
+        ),
+    );
+    Value::Object(map)
+}
+
+fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert("config".into(), budget_config_to_value(&snapshot.config));
+    map.insert(
+        "campaigns".into(),
+        Value::Array(
+            snapshot
+                .campaigns
+                .iter()
+                .map(campaign_budget_snapshot_to_value)
+                .collect(),
+        ),
+    );
+    Value::Object(map)
 }
 
 pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
@@ -106,6 +233,21 @@ pub fn list_campaigns(market: Option<&MarketplaceHandle>) -> Value {
         .map(campaign_summary_to_value)
         .collect();
     root.insert("campaigns".into(), Value::Array(campaigns));
+    Value::Object(root)
+}
+
+pub fn budget(market: Option<&MarketplaceHandle>) -> Value {
+    let Some(handle) = market else {
+        return unavailable();
+    };
+    let snapshot = handle.budget_snapshot();
+    let mut root = Map::new();
+    root.insert("status".into(), Value::String("ok".into()));
+    if let Value::Object(map) = budget_snapshot_to_value(&snapshot) {
+        for (key, value) in map {
+            root.insert(key, value);
+        }
+    }
     Value::Object(root)
 }
 

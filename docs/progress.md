@@ -1,4 +1,20 @@
 # Project Progress Snapshot
+> **Review (2025-10-28, late night):** Budget pacing and proof plumbing now
+> survive restarts. `BudgetBroker` snapshots serialise through first-party JSON
+> helpers, persist under sled’s `KEY_BUDGET`, and restore during marketplace
+> initialisation so κ shading, dual prices, and cohort spend carry across
+> deployments. The crate now re-exports broker config and snapshot structs so the
+> node RPC/CLI can surface pacing state without private-module shims. Selection
+> receipts embed SNARK metadata (circuit id, revision,
+> digest, public inputs) derived from the new `zkp::selection` verifier, and the
+> attestation manager recomputes commitments through manual
+> `foundation_serialization::json::Value` builders before hashing with BLAKE3.
+> Verification now surfaces `ad_selection_proof_verify_seconds` latency and
+> commitment gauges, while Grafana gained the advertising row plus
+> `SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`, and
+> `AdBudgetProgressFlat` alerts. Unit tests cover budget snapshot round-trips,
+> proof validation success/failure, and receipt metadata enforcement so the
+> restart path stays hermetic.
 > **Review (2025-10-28, evening):** Treasury consumers are now dual-token aware
 > end to end. The metrics aggregator registers CT and IT gauges for disbursement
 > totals, current balances, and last deltas, healing the partial refactor and
@@ -204,6 +220,17 @@
 > preserves its error code, and the Justfile’s `test-gateway` recipe scopes the
 > web suite directly to `web::gateway::tests::` so CI keeps the feature-gated
 > server green.
+> **Review (2025-10-28, evening+):** Selection receipts now bundle a
+> BLAKE3-committed candidate trace, and the marketplace validates wallet-supplied
+> SNARK proofs through the new `zkp::selection` module while tolerating TEE
+> fallbacks only when governance allows them. Missing attestations now respect
+> `require_attestation` without aborting reservations, and telemetry records the
+> accepted/rejected mix per attestation kind. The cohort PI controller exports its
+> error, integral term, forgetting factor, and saturation counters so Grafana can
+> chart price damping, while the `ad_budget_progress` gauge reports how much of a
+> campaign’s USD allocation is reserved. Badge guard scaffolding now logs
+> per-cohort populations and auto-relaxes predicates when active populations fall
+> below `k_min`, keeping targeting honest without removing the first-party guard.
 > **Review (2025-10-25, mid-morning):** Gateway provider inference now resolves
 > operators from storage manifests (falling back to deterministic hashing when
 > multiple providers are eligible) and the test harness exposes override hooks

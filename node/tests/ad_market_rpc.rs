@@ -183,6 +183,11 @@ fn ad_market_rpc_endpoints_round_trip() {
     let cohort_entry = cohorts[0].as_object().expect("cohort entry");
     assert_eq!(cohort_entry["observed_utilization_ppm"].as_u64(), Some(0));
 
+    let budget_value = expect_ok(harness.call("ad_market.budget", Value::Null));
+    assert_eq!(budget_value["status"].as_str(), Some("ok"));
+    assert!(budget_value["config"].is_object());
+    assert!(budget_value["campaigns"].is_array());
+
     let distribution_resp = expect_ok(harness.call("ad_market.distribution", Value::Null));
     assert_eq!(distribution_resp["status"].as_str(), Some("ok"));
     let dist = &distribution_resp["distribution"];

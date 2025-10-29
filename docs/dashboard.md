@@ -38,3 +38,25 @@ Dashboards colourise events whose cohorts triggered the
 `AdReadinessUtilizationDelta` alert, tying treasury releases back to the
 readiness deltas emitted by the metrics aggregator and confirming governance
 flags are aligned across runtime, explorer, and telemetry surfaces.
+
+The SPA now includes attestation and pacing cards. Selection receipts display the
+latest `ad_selection_attestation_total{kind,result}` breakdown with tooltips
+linking to the SNARK circuit identifiers, and the campaign panel renders
+`ad_budget_progress` alongside the broker’s κ value so operators can confirm the
+optimal-control pacing stays within governance bounds. Cohort tiles overlay the
+PI controller state (`ad_price_pi_error`, `ad_price_pi_integral`,
+`ad_price_pi_forgetting`) so damping, saturation, and badge scoping remain
+auditable from the inline dashboard without opening Grafana.
+
+Grafana gained a dedicated **Advertising** row to complement the inline cards.
+Panels chart five-minute deltas of `ad_selection_attestation_total` by kind and
+reason, the SNARK verification latency histogram
+`ad_selection_proof_verify_seconds{circuit}`, commitment sizes via
+`ad_selection_attestation_commitment_bytes{kind}`, and the campaign pacing trio:
+`ad_budget_progress{campaign}`, `ad_budget_shadow_price{campaign}`, and
+`ad_budget_dual_price{campaign}`. Alert annotations surface directly on the
+panels when `SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`, or
+`AdBudgetProgressFlat` fire, keeping proof-mix regressions and stalled pacing
+visible without digging through PromQL. The row reuses the in-house panel
+builders introduced for the explorer/treasury sections, so no third-party
+templates or SDKs were required.

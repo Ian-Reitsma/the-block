@@ -78,6 +78,7 @@ fn dummy_receipt(
         runner_up_quality_bid_usd_micros: runner_up,
         clearing_price_usd_micros: clearing_price,
         attestation: None,
+        proof_metadata: None,
     }
 }
 

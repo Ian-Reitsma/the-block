@@ -1,4 +1,9 @@
 # Summary
+> **Review (2025-10-28, late night):** Budget broker state now persists through
+> sled alongside SNARK metadata, keeping pacing and selection proofs first party
+> end to end. Manual JSON builders hash receipts via BLAKE3, the `zkp::selection`
+> verifier parses envelopes without serde, and Grafana gained the advertising row
+> plus alerts covering SNARK fallbacks, rejection spikes, and stalled κ updates.
 > **Review (2025-10-28, evening):** Treasury telemetry, explorer history, and
 > monitoring alerts now honour CT and IT balances end to end. The metrics
 > aggregator registers dual-token disbursement totals, current balances, and last
@@ -124,6 +129,15 @@
 > honour the router’s ordering so cross-chain FX stays MEV-resistant. Runtime’s
 > integration suites gained explicit `clippy::unwrap_used`/`expect_used`
 > allowances and NaN guards, clearing the longstanding full-workspace lint debt.
+> **Review (2025-10-28, evening+):** Selection receipts now hash their candidate
+> sets with BLAKE3, wallets attach SNARK proofs verified by the new
+> `zkp::selection` hook, and TEE attestations only pass when governance allows a
+> fallback. Missing proofs respect the attestation policy without panics, and the
+> telemetry row charts acceptance/miss counters alongside the PI controller’s
+> error/integral/forgetting gauges so price damping stays observable. The
+> multi-cohort budget broker exposes κ shading plus an `ad_budget_progress` gauge,
+> and the badge guard tracks cohort populations to auto-relax predicates when
+> `k_min` governance thresholds would otherwise block delivery.
 > **Review (2025-10-26, evening):** Read-ack integration tests reuse a shared
 > fixture through the first-party `concurrency::Lazy` helper, trimming duplicate
 > RNG/proof setup while keeping `invalid_privacy` detection coverage intact.

@@ -6,10 +6,13 @@ version = 4
 name = "ad_market"
 version = "0.1.0"
 dependencies = [
+ "crypto_suite",
+ "foundation_metrics",
  "foundation_serde",
  "foundation_serialization",
  "sled",
  "sys",
+ "zkp",
 ]
 
 [[package]]
@@ -971,7 +974,9 @@ dependencies = [
 name = "zkp"
 version = "0.1.0"
 dependencies = [
+ "base64_fp",
  "crypto_suite",
+ "foundation_lazy",
  "foundation_serde",
  "foundation_serialization",
 ]

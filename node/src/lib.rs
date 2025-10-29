@@ -6002,6 +6002,7 @@ mod tests {
             runner_up_quality_bid_usd_micros: 80,
             clearing_price_usd_micros: 100,
             attestation: None,
+            proof_metadata: None,
         });
         let err = bc.submit_read_ack(ack).expect_err("ack rejected");
         assert_eq!(err, ReadAckError::InvalidSelectionReceipt);
