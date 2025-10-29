@@ -23,6 +23,11 @@ pub enum AdMarketCmd {
         auth: Option<String>,
         pretty: bool,
     },
+    Budget {
+        url: String,
+        auth: Option<String>,
+        pretty: bool,
+    },
     Register {
         url: String,
         auth: Option<String>,
@@ -40,6 +45,7 @@ impl AdMarketCmd {
         .subcommand(Self::inventory_command())
         .subcommand(Self::list_command())
         .subcommand(Self::distribution_command())
+        .subcommand(Self::budget_command())
         .subcommand(Self::register_command())
         .build()
     }
@@ -110,6 +116,28 @@ impl AdMarketCmd {
         .build()
     }
 
+    fn budget_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.budget"),
+            "budget",
+            "Show budget broker snapshot",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "auth",
+            "auth",
+            "Bearer token or basic auth",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "pretty",
+            "pretty",
+            "Pretty-print JSON response",
+        )))
+        .build()
+    }
+
     fn register_command() -> Command {
         CommandBuilder::new(
             CommandId("ad_market.register"),
@@ -153,6 +181,12 @@ impl AdMarketCmd {
                 auth: take_string(sub_matches, "auth"),
                 pretty: sub_matches.get_flag("pretty"),
             }),
+            "budget" => Ok(Self::Budget {
+                url: take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                auth: take_string(sub_matches, "auth"),
+                pretty: sub_matches.get_flag("pretty"),
+            }),
             "register" => Ok(Self::Register {
                 url: take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string()),
@@ -180,6 +214,11 @@ pub fn handle(cmd: AdMarketCmd) {
         AdMarketCmd::Distribution { url, auth, pretty } => {
             let client = RpcClient::from_env();
             let payload = json_rpc_request("ad_market.distribution", Value::Null);
+            print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
+        }
+        AdMarketCmd::Budget { url, auth, pretty } => {
+            let client = RpcClient::from_env();
+            let payload = json_rpc_request("ad_market.budget", Value::Null);
             print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
         }
         AdMarketCmd::Register {

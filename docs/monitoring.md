@@ -205,6 +205,19 @@ FIRST_PARTY_ONLY monitoring aligned with the Grafana templates. A counter panel
 charts `increase(ad_readiness_skipped_total[5m])` by reason so operators can
 spot insufficient viewer/host/provider diversity before enabling the ad rail.
 
+The Grafana bundle also dedicates a full **Advertising** row to proof integrity
+and pacing. Panels chart five-minute deltas of
+`ad_selection_attestation_total{kind,result,reason}`,
+`ad_selection_proof_verify_seconds{circuit}`, and
+`ad_selection_attestation_commitment_bytes{kind}` so SNARK throughput,
+fallbacks, and commitment sizes stay observable. Companion graphs render
+`ad_budget_progress{campaign}`, `ad_budget_shadow_price{campaign}`, and
+`ad_budget_dual_price{campaign}` to expose κ shading and dual-price convergence,
+with the new alerts—`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+and `AdBudgetProgressFlat`—annotated directly on the panels when proof supply
+degrades or pacing stalls. All panels flow through the helper builders in
+`monitoring/src/dashboard.rs`, keeping the JSON templates entirely first party.
+
 Prometheus now fires `AdReadinessUtilizationDelta` whenever
 `abs(delta_utilization_ppm)` breaches the configured threshold despite steady
 request volume. The alert routes to the existing CI/on-call channels, tying the

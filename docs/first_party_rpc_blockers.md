@@ -17,6 +17,27 @@ RPC client.
   node runtime forwards toggles directly into the ad-market distribution handle
   so RPC consumers observe CT-only payouts when the flag is disabled and CT+IT
   splits when enabled—no new endpoints or third-party glue required.
+- `ad_market.list_campaigns` now returns the full campaign roster (id,
+  advertiser, creatives, remaining and reserved budgets) using the same
+  handwritten JSON helpers as persistence. Both in-memory and sled backends
+  expose the shared `BudgetBroker` lock so the RPC surface can stream κ shading
+  state via first-party codecs, and sled persists broker snapshots under
+  `KEY_BUDGET` to survive restarts without new stores or serde fallbacks.
+- Ad marketplace RPC handlers now attach first-party selection receipts with
+  BLAKE3 commitments and verify wallet-supplied SNARK proofs via
+  `zkp::selection`; TEE attestations only pass when governance enables the
+  fallback and missing proofs respect the `require_attestation` flag without
+  panicking. `ad_market.reserve_impression` reuses the existing telemetry + JSON
+  helpers, and new attestation counters surface through the same Prometheus
+  macros, keeping the RPC surface hermetic.
+- SNARK verification latency and fallback counters land in
+  `ad_selection_proof_verify_seconds`,
+  `ad_selection_attestation_total{kind,result,reason}`, and
+  `ad_selection_attestation_commitment_bytes{kind}`. Grafana/Prometheus alerts
+  (`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+  `AdBudgetProgressFlat`) reuse the first-party ruleset so RPC consumers, CI,
+  and dashboards all observe proof mix, verification health, and pacing stalls
+  without external alert managers.
 - Block RPC responses include a `treasury_events` timeline populated during block
   production. Explorer and CLI projections reuse the current SQLite + JSON
   builders to render each disbursement (height, beneficiary, currency, USD amount,

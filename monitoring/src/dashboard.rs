@@ -120,6 +120,25 @@ const DEP_VIOLATION_TOTAL_PANEL_TITLE: &str = "Dependency policy violations (tot
 const DEP_VIOLATION_TOTAL_EXPR: &str = "dependency_policy_violation_total";
 const DEP_VIOLATION_PANEL_TITLE: &str = "Dependency policy violations by crate";
 const DEP_VIOLATION_EXPR: &str = "dependency_policy_violation";
+const AD_ROW_TITLE: &str = "Advertising";
+const AD_ATTESTATION_PANEL_TITLE: &str = "Selection attestations (5m delta)";
+const AD_ATTESTATION_EXPR: &str =
+    "sum by (kind, result)(increase(ad_selection_attestation_total[5m]))";
+const AD_ATTESTATION_LEGEND: &str = "{{kind}} · {{result}}";
+const AD_PROOF_LATENCY_PANEL_TITLE: &str = "Selection proof verification latency p95";
+const AD_PROOF_LATENCY_EXPR: &str =
+    "histogram_quantile(0.95, sum by (le, circuit)(rate(ad_selection_proof_verify_seconds_bucket[5m])))";
+const AD_PROOF_LATENCY_LEGEND: &str = "{{circuit}}";
+const AD_BUDGET_PROGRESS_PANEL_TITLE: &str = "Budget progress by campaign";
+const AD_BUDGET_PROGRESS_EXPR: &str = "ad_budget_progress";
+const AD_BUDGET_PROGRESS_LEGEND: &str = "{{campaign}}";
+const AD_BUDGET_SHADOW_PANEL_TITLE: &str = "Budget shadow price spikes (5m delta)";
+const AD_BUDGET_SHADOW_EXPR: &str =
+    "sum by (campaign)(increase(ad_budget_shadow_price_spike_total[5m]))";
+const AD_BUDGET_SHADOW_LEGEND: &str = "{{campaign}}";
+const AD_DUAL_PRICE_PANEL_TITLE: &str = "Budget dual price";
+const AD_DUAL_PRICE_EXPR: &str = "ad_budget_dual_price";
+const AD_DUAL_PRICE_LEGEND: &str = "{{campaign}}";
 const TREASURY_COUNT_PANEL_TITLE: &str = "Treasury disbursements (count by status)";
 const TREASURY_COUNT_EXPR: &str = "treasury_disbursement_count";
 const TREASURY_AMOUNT_PANEL_TITLE: &str = "Treasury disbursement CT by status";
@@ -313,6 +332,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut compute = Vec::new();
     let mut treasury = Vec::new();
     let mut payouts = Vec::new();
+    let mut advertising = Vec::new();
     let mut bridge = Vec::new();
     let mut gossip = Vec::new();
     let mut chaos = Vec::new();
@@ -335,6 +355,51 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         }
         if metric.name == DEP_VIOLATION_EXPR {
             dependency.push(build_dependency_violation_panel(metric));
+            continue;
+        }
+        if metric.name == "ad_selection_attestation_total" {
+            advertising.push(build_grouped_delta_panel(
+                AD_ATTESTATION_PANEL_TITLE,
+                AD_ATTESTATION_EXPR,
+                AD_ATTESTATION_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "ad_selection_proof_verify_seconds" {
+            advertising.push(build_histogram_panel(
+                AD_PROOF_LATENCY_PANEL_TITLE,
+                AD_PROOF_LATENCY_EXPR,
+                AD_PROOF_LATENCY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "ad_budget_progress" {
+            advertising.push(build_ad_timeseries_panel(
+                AD_BUDGET_PROGRESS_PANEL_TITLE,
+                AD_BUDGET_PROGRESS_EXPR,
+                AD_BUDGET_PROGRESS_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "ad_budget_shadow_price_spike_total" {
+            advertising.push(build_grouped_delta_panel(
+                AD_BUDGET_SHADOW_PANEL_TITLE,
+                AD_BUDGET_SHADOW_EXPR,
+                AD_BUDGET_SHADOW_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "ad_budget_dual_price" {
+            advertising.push(build_ad_timeseries_panel(
+                AD_DUAL_PRICE_PANEL_TITLE,
+                AD_DUAL_PRICE_EXPR,
+                AD_DUAL_PRICE_LEGEND,
+                metric,
+            ));
             continue;
         }
         if metric.name == TREASURY_COUNT_EXPR {
@@ -696,6 +761,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("Compute", compute),
         ("Treasury", treasury),
         (PAYOUT_ROW_TITLE, payouts),
+        (AD_ROW_TITLE, advertising),
         ("Bridge", bridge),
         (CHAOS_ROW_TITLE, chaos),
         ("Gossip", gossip),
@@ -775,6 +841,73 @@ fn build_bridge_metric_panel(title: &str, expr: &str, description: &str) -> Valu
 
     let mut target = Map::new();
     target.insert("expr".into(), Value::from(expr));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_histogram_panel(title: &str, expr: &str, legend_format: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from(legend_format));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(true));
+    legend.insert("displayMode".into(), Value::from("table"));
+    legend.insert("placement".into(), Value::from("right"));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_ad_timeseries_panel(
+    title: &str,
+    expr: &str,
+    legend_format: &str,
+    metric: &Metric,
+) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    target.insert("legendFormat".into(), Value::from(legend_format));
     panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
 
     let mut legend = Map::new();

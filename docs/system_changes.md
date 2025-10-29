@@ -1,4 +1,29 @@
 # System-Wide Economic Changes
+> **Review (2025-10-28, late night):** Budget pacing and selection proofs now
+> persist with first-party codecs. The `BudgetBroker` snapshot serialiser writes
+> κ shading, dual prices, and cohort spend into sled so restarts keep pacing
+> stable, while both marketplaces expose the shared lock for governance to audit
+> via RPC. The crate now re-exports broker config/snapshot structs so node/CLI
+> surfaces consume the pacing state without reaching into private modules.
+> `SelectionReceipt` commitments assemble with manual
+> `foundation_serialization::json::Value` builders before hashing through BLAKE3,
+> embedded proof metadata records circuit revision/digest/public inputs, and the
+> SNARK verifier parses envelopes by hand using the new `base64_fp` helper. New
+> metrics (`ad_selection_proof_verify_seconds`,
+> `ad_selection_attestation_commitment_bytes`) and alerts
+> (`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+> `AdBudgetProgressFlat`) keep proof adoption and pacing health observable without
+> third-party dashboards.
+> **Review (2025-10-28, evening+):** Selection attestation moved entirely onto the
+> first-party stack. `SelectionReceipt` now hashes its cohort/candidate state via
+> BLAKE3, wallets submit SNARK proofs checked by `zkp::selection`, and the
+> marketplace only accepts TEE attestations when governance enables the fallback.
+> Missing proofs honour the `require_attestation` flag without aborting the
+> reservation thread, and telemetry records acceptance/miss counters plus
+> commitment sizes for audit. The composite resource floor feeds the new
+> multi-cohort budget broker, which shades bids via κ and exposes campaign spend
+> progress (`ad_budget_progress`) so pacing stays observable while badge guards
+> auto-relax predicates when cohorts fall under `k_min`.
 > **Review (2025-11-07, afternoon):** Advertising settlements now capture the
 > posted USD price, oracle snapshot, and role-level CT/IT token quantities while
 > honouring the governance liquidity split. `SettlementBreakdown` continues to

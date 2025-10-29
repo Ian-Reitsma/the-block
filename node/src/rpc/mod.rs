@@ -432,6 +432,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "ad_market.inventory",
     "ad_market.list_campaigns",
     "ad_market.distribution",
+    "ad_market.budget",
     "ad_market.readiness",
     "register_handle",
     "resolve_handle",
@@ -1028,6 +1029,7 @@ fn dispatch(
         "ad_market.inventory" => ad_market::inventory(market_ref),
         "ad_market.list_campaigns" => ad_market::list_campaigns(market_ref),
         "ad_market.distribution" => ad_market::distribution(market_ref),
+        "ad_market.budget" => ad_market::budget(market_ref),
         "ad_market.readiness" => ad_market::readiness(market_ref, readiness_ref),
         "ad_market.register_campaign" => {
             let params = req.params.as_value().clone();

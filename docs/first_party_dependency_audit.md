@@ -1,5 +1,34 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-28 update (selection proof metadata & broker snapshots):** Selection
+> commitments now render entirely through handwritten
+> `foundation_serialization::json::Value` maps—wallet receipts hash the raw
+> commitment bytes with BLAKE3 and the attestation manager no longer relies on
+> serde derives or macro helpers. The SNARK verifier gained manual envelope
+> parsing, base64 decoding through the in-house `base64_fp` crate, and a
+> registry of circuit descriptors behind `foundation_lazy::Lazy`, keeping proof
+> validation hermetic while surfacing structured error reasons. Budget-broker
+> snapshots serialise via bespoke JSON helpers shared by both marketplaces,
+> persist to sled under `KEY_BUDGET`, and restore through the same path on
+> startup, so κ shading, epoch spend, and dual-price state survive restarts
+> without third-party storage or serde stubs. Selection receipts now embed
+> proof metadata (circuit id, revision, digest, public inputs) assembled from
+> the first-party verifier, and node/tests cover round-trips without pulling in
+> external JSON tooling.
+
+> **2025-10-28 update (selection attestation, budget broker, badge guard):** The
+> ad marketplace now computes selection commitments with
+> `foundation_serialization::json::to_vec` + BLAKE3 and verifies wallet proofs
+> via the new `zkp::selection` module; SNARK verification, TEE fallbacks, and
+> attestation metrics all ride through the in-house crypto + metrics facades—no
+> third-party proof systems or logging crates were introduced. The pacing refactor
+> adds a first-party `BudgetBroker` that tracks κ shading, campaign spend, and
+> telemetry without pulling optimisation libraries, and the badge guard’s
+> k-anonymity relaxations use only `std` collections. `ad_budget_progress` and the
+> PI controller gauges extend the existing Prometheus macros so dashboards keep
+> consuming first-party telemetry. Missing attestations now respect
+> `require_attestation` without panic instrumentation, keeping the matching path
+> hermetic.
 > **2025-11-09 update (dual-token governance gate & treasury timelines):** The
 > new `DualTokenSettlementEnabled` parameter flows through governance and node
 > codecs/stores via handwritten cursor helpers; no schema generators or serde

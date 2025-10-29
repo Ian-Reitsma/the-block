@@ -1,4 +1,28 @@
 # Status & Roadmap
+> **Review (2025-10-28, late night):** Budget pacing state now persists alongside
+> selection proofs. `BudgetBroker` serialises κ shading, epoch targets, and dual
+> prices into sled, restoring them on startup so pacing controllers no longer
+> reset during deployments. Broker config/snapshot structs are re-exported from
+> `ad_market` so RPC/CLI layers ingest pacing state without private-module
+> imports. Selection receipts embed SNARK metadata produced by
+> the in-house verifier, commitment hashing runs through handwritten JSON
+> builders plus BLAKE3, and Grafana exposes proof acceptance, verification
+> latency, and campaign pacing via the new advertising row with matching alerts
+> (`SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`,
+> `AdBudgetProgressFlat`). Tests cover snapshot round-trips, proof semantics, and
+> metadata validation so the restart and attestation paths remain first party.
+> **Review (2025-10-28, evening+):** Selection receipts now emit a first-party
+> BLAKE3 commitment and the wallet must attach either a SNARK proof (preferred)
+> or a TEE attestation before settlement. The ad marketplace normalises circuit
+> identifiers, verifies proofs via the new `zkp::selection` helper, falls back to
+> TEE only when governance enables it, and records per-kind acceptance metrics so
+> missing attestations respect the `require_attestation` flag without panicking.
+> The cohort PI controller surfaces its error, integral, forgetting factor, and
+> saturation counters directly into telemetry, and `ad_budget_progress` now
+> charts reservation progress against each campaign’s declared budget. A
+> first-party budget broker tracks cohort-level κ shading alongside badge-pop
+> estimates while the badge guard relaxes predicates when a cohort slips under
+> `k_min`, wiring the k-anonymity guardrails into both matching and dashboards.
 > **Review (2025-10-28, late morning):** Dual-token settlement is now guarded by a
 > governance flag that flows through governance, node, explorer, and CLI
 > surfaces. Turning on `DualTokenSettlementEnabled` flips marketplace distribution

@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 foundation_serialization = { path = "../foundation_serialization" }
+foundation_metrics = { path = "../foundation_metrics" }
+crypto_suite = { path = "../crypto_suite" }
+zkp = { path = "../zkp" }
 serde = { workspace = true }
 sled = { path = "../../sled" }
 

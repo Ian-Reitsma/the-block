@@ -1,5 +1,7 @@
 # Monitoring Dashboards
-> **Review (2025-09-25):** Synced Monitoring Dashboards guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-28):** Added the advertising observability row, SNARK alert
+> coverage, and broker pacing panels while keeping the bundle first party and
+> readiness/token hygiene confirmed.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This directory contains subsystem-specific Grafana dashboards that complement
@@ -52,6 +54,26 @@ ready to import once the foundation telemetry stack is running.
   clean. The same gauges flow into CI artefacts and HTML snapshots so automation,
   operators, and dashboards consume an identical oracle snapshot, utilisation
   summary, and settlement view before enabling new cohorts.
+- A new **Advertising** row tracks proof integrity and pacing. Histograms chart
+  `ad_selection_proof_verify_seconds{circuit}`, stacked counters display
+  `ad_selection_attestation_total{kind,result,reason}`, and gauges plot
+  commitment sizes via `ad_selection_attestation_commitment_bytes{kind}` plus
+  pacing state via `ad_budget_progress{campaign}`, `ad_budget_shadow_price`, and
+  `ad_budget_dual_price`. Alert banners highlight
+  `SelectionProofSnarkFallback`, `SelectionProofRejectionSpike`, and
+  `AdBudgetProgressFlat` firings so operators see SNARK adoption, rejection
+  spikes, and stalled κ updates without leaving Grafana. All panels are emitted
+  through the new helper builders in `monitoring/src/dashboard.rs`, keeping the
+  JSON templates entirely first party.
+  Adjacent panels chart the PI controller state—`ad_price_pi_error`,
+  `ad_price_pi_integral`, `ad_price_pi_forgetting`, `ad_price_pi_delta_log`, and
+  the saturation counter `ad_price_pi_saturation_total{bound}`—with the new
+  `badges` label exposing cohort badge hashes alongside domain/provider labels.
+  A "Campaign Budget" panel visualises `ad_budget_progress{campaign}` so pacing
+  controllers and κ shading stay observable, and the attestation tiles chart
+  `ad_selection_attestation_total{kind,result,reason}` plus
+  `ad_selection_attestation_commitment_bytes{kind}` to show SNARK acceptance,
+  TEE fallbacks, and commitment sizes without leaving first-party tooling.
   The new `AdReadinessUtilizationDelta` alert pages when
   `abs(delta_utilization_ppm)` exceeds the configured threshold under steady
   demand, anchoring the readiness row to the same Prometheus rule that protects
