@@ -1,5 +1,24 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-29 update (selection manifest registry & pacing guard rails):** The
+> `zkp` crate still ships an embedded manifest but now installs descriptors into a
+> runtime registry guarded by `foundation_lazy::Lazy`. Updates flow through
+> `install_selection_manifest`, which walks JSON with
+> `foundation_serialization::json::Value`, refuses revision regressions, and only
+> bumps the manifest epoch when the descriptor set is monotonic so wallets cannot
+> downgrade circuits. `selection_manifest_version`, `selection_manifest_tag`, and
+> `selection_circuit_summaries` expose the active descriptors without pulling a
+> parser, while `SelectionProofMetadata` captures the manifest epoch/tag,
+> transcript domain separator, expected witness commitments, and committee
+> transcript digests so settlement receipts prove both SNARK honesty and committee
+> co-signature via first-party code. `ad_market.inventory` and
+> `ad_market.budget`/`list_campaigns` still publish PI gains/forgetting factors but
+> now include a `status`/`reason` pair that flags controller out-of-bounds (ηₚ,
+> ηᵢ, forgetting) using the same handwritten JSON helpers. The synthetic load test
+> (`node/tests/ad_market_synthetic.rs`) exercises manifest summaries, attestation
+> transcripts, pacing status, and broker rollovers end to end using only the
+> in-process harness, keeping coverage hermetic.
+
 > **2025-10-28 update (selection proof metadata & broker snapshots):** Selection
 > commitments now render entirely through handwritten
 > `foundation_serialization::json::Value` maps—wallet receipts hash the raw

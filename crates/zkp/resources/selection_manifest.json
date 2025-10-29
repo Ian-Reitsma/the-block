@@ -1,0 +1,10 @@
+{
+  "selection_argmax_v1": {
+    "revision": 1,
+    "expected_version": 1,
+    "min_proof_len": 96,
+    "transcript_domain_separator": "the-block:selection:argmax:v1",
+    "expected_witness_commitments": 2,
+    "expected_protocol": "groth16"
+  }
+}

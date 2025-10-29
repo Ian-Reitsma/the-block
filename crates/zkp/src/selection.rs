@@ -4,6 +4,9 @@ use foundation_lazy::sync::Lazy;
 use foundation_serialization::{json, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
+#[cfg(test)]
+use std::sync::Mutex;
+use std::sync::{Arc, RwLock};
 
 const PROOF_DIGEST_PREFIX_LEN: usize = 32;
 
@@ -242,6 +245,8 @@ pub struct SelectionProofVerification {
     pub proof_len: u32,
     pub protocol: Option<String>,
     pub witness_commitments: Vec<[u8; 32]>,
+    pub transcript_domain_separator: String,
+    pub expected_witness_commitments: Option<u16>,
     pub public_inputs: SelectionProofPublicInputs,
 }
 
@@ -253,13 +258,71 @@ struct SelectionProofEnvelope {
     proof: ProofBody,
 }
 
-struct CircuitDescriptor {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectionManifestError {
+    Format(String),
+    Empty,
+    DuplicateCircuit(String),
+    MissingField {
+        circuit: String,
+        field: &'static str,
+    },
+    RevisionRegression {
+        circuit: String,
+        current: u16,
+        new_revision: u16,
+    },
+    EpochRegression {
+        current: u64,
+        proposed: u64,
+    },
+}
+
+impl std::fmt::Display for SelectionManifestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SelectionManifestError::Format(msg) => write!(f, "manifest format error: {msg}"),
+            SelectionManifestError::Empty => {
+                write!(f, "manifest must describe at least one circuit")
+            }
+            SelectionManifestError::DuplicateCircuit(id) => {
+                write!(f, "manifest defines circuit '{id}' more than once")
+            }
+            SelectionManifestError::MissingField { circuit, field } => {
+                write!(
+                    f,
+                    "manifest entry '{circuit}' missing required field '{field}'"
+                )
+            }
+            SelectionManifestError::RevisionRegression {
+                circuit,
+                current,
+                new_revision,
+            } => write!(
+                f,
+                "manifest entry '{circuit}' regressed revision from {current} to {new_revision}",
+            ),
+            SelectionManifestError::EpochRegression { current, proposed } => write!(
+                f,
+                "manifest epoch regression from {current} to {proposed} is not allowed",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SelectionManifestError {}
+
+#[derive(Clone, Debug)]
+pub struct SelectionCircuitDescriptor {
     revision: u16,
     expected_version: u16,
     min_proof_len: usize,
+    domain_separator: Option<String>,
+    expected_witness_commitments: Option<usize>,
+    expected_protocol: Option<String>,
 }
 
-impl CircuitDescriptor {
+impl SelectionCircuitDescriptor {
     fn validate(
         &self,
         circuit_id: &str,
@@ -305,7 +368,18 @@ impl CircuitDescriptor {
         if proof.bytes.len() < self.min_proof_len {
             return Err(SelectionProofError::Length);
         }
-        let expected = transcript_digest(circuit_id, self.revision, inputs);
+        if let Some(expected) = &self.expected_protocol {
+            match proof.protocol.as_ref() {
+                Some(protocol) if protocol.eq_ignore_ascii_case(expected) => {}
+                _ => return Err(SelectionProofError::Semantics),
+            }
+        }
+        if let Some(expected) = self.expected_witness_commitments {
+            if proof.witness_commitments.len() != expected {
+                return Err(SelectionProofError::Semantics);
+            }
+        }
+        let expected = transcript_digest(circuit_id, self, inputs);
         if proof.transcript_digest != expected {
             return Err(SelectionProofError::InvalidProof);
         }
@@ -313,14 +387,211 @@ impl CircuitDescriptor {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionCircuitSummary {
+    pub circuit_id: String,
+    pub revision: u16,
+    pub expected_version: u16,
+    pub min_proof_len: usize,
+    pub expected_protocol: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SelectionManifestVersion {
+    epoch: u64,
+}
+
+impl SelectionManifestVersion {
+    pub fn epoch(self) -> u64 {
+        self.epoch
+    }
+}
+
+#[derive(Default)]
+struct CircuitRegistry {
+    descriptors: HashMap<String, Arc<SelectionCircuitDescriptor>>,
+    manifest_epoch: u64,
+    manifest_tag: Option<String>,
+}
+
+struct ManifestParseResult {
+    descriptors: HashMap<String, SelectionCircuitDescriptor>,
+    epoch: Option<u64>,
+    tag: Option<String>,
+}
+
+impl CircuitRegistry {
+    fn descriptor(&self, circuit_id: &str) -> Option<Arc<SelectionCircuitDescriptor>> {
+        self.descriptors.get(circuit_id).cloned()
+    }
+
+    fn summaries(&self) -> Vec<SelectionCircuitSummary> {
+        let mut entries: Vec<_> = self
+            .descriptors
+            .iter()
+            .map(|(id, descriptor)| SelectionCircuitSummary {
+                circuit_id: id.clone(),
+                revision: descriptor.revision,
+                expected_version: descriptor.expected_version,
+                min_proof_len: descriptor.min_proof_len,
+                expected_protocol: descriptor.expected_protocol.clone(),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.circuit_id.cmp(&b.circuit_id));
+        entries
+    }
+
+    fn manifest_version(&self) -> SelectionManifestVersion {
+        SelectionManifestVersion {
+            epoch: self.manifest_epoch,
+        }
+    }
+
+    fn install_manifest(
+        &mut self,
+        result: ManifestParseResult,
+    ) -> Result<SelectionManifestVersion, SelectionManifestError> {
+        if result.descriptors.is_empty() {
+            return Err(SelectionManifestError::Empty);
+        }
+        for (id, descriptor) in &result.descriptors {
+            if let Some(existing) = self.descriptors.get(id) {
+                if descriptor.revision < existing.revision {
+                    return Err(SelectionManifestError::RevisionRegression {
+                        circuit: id.clone(),
+                        current: existing.revision,
+                        new_revision: descriptor.revision,
+                    });
+                }
+            }
+        }
+        let next_epoch = match result.epoch {
+            Some(epoch) if epoch < self.manifest_epoch => {
+                return Err(SelectionManifestError::EpochRegression {
+                    current: self.manifest_epoch,
+                    proposed: epoch,
+                });
+            }
+            Some(epoch) => epoch,
+            None => self.manifest_epoch.saturating_add(1),
+        };
+        self.manifest_epoch = next_epoch;
+        self.manifest_tag = result.tag;
+        self.descriptors = result
+            .descriptors
+            .into_iter()
+            .map(|(id, descriptor)| (id, Arc::new(descriptor)))
+            .collect();
+        Ok(self.manifest_version())
+    }
+}
+
+fn parse_manifest_entry(
+    circuit_id: &str,
+    value: &json::Map,
+) -> Result<SelectionCircuitDescriptor, SelectionManifestError> {
+    let read_u16 = |field: &'static str| -> Result<u16, SelectionManifestError> {
+        value
+            .get(field)
+            .and_then(|val| val.as_u64())
+            .map(|num| num as u16)
+            .ok_or_else(|| SelectionManifestError::MissingField {
+                circuit: circuit_id.to_owned(),
+                field,
+            })
+    };
+    let read_min_proof = || -> Result<usize, SelectionManifestError> {
+        Ok(value
+            .get("min_proof_len")
+            .and_then(|val| val.as_u64())
+            .map(|num| num as usize)
+            .unwrap_or(PROOF_DIGEST_PREFIX_LEN)
+            .max(PROOF_DIGEST_PREFIX_LEN))
+    };
+    let revision = read_u16("revision")?;
+    let expected_version = value
+        .get("expected_version")
+        .and_then(|val| val.as_u64())
+        .map(|num| num as u16)
+        .unwrap_or(1);
+    let min_proof_len = read_min_proof()?;
+    let transcript_domain_separator = value
+        .get("transcript_domain_separator")
+        .and_then(|val| val.as_str())
+        .map(|s| s.to_owned());
+    let expected_witness_commitments = value
+        .get("expected_witness_commitments")
+        .and_then(|val| val.as_u64())
+        .map(|num| num as usize);
+    let expected_protocol = value
+        .get("expected_protocol")
+        .and_then(|val| val.as_str())
+        .map(|proto| {
+            let mut owned = proto.to_owned();
+            owned.make_ascii_lowercase();
+            owned
+        });
+    Ok(SelectionCircuitDescriptor {
+        revision,
+        expected_version,
+        min_proof_len,
+        domain_separator: transcript_domain_separator,
+        expected_witness_commitments,
+        expected_protocol,
+    })
+}
+
+fn parse_manifest_bytes(bytes: &[u8]) -> Result<ManifestParseResult, SelectionManifestError> {
+    let value: json::Value =
+        json::from_slice(bytes).map_err(|err| SelectionManifestError::Format(err.to_string()))?;
+    let map = value
+        .as_object()
+        .ok_or_else(|| SelectionManifestError::Format("manifest root must be an object".into()))?;
+    let mut descriptors = HashMap::new();
+    let mut epoch = None;
+    let mut tag = None;
+    for (key, entry) in map {
+        if key.starts_with('_') {
+            if key == "_meta" {
+                if let Some(meta) = entry.as_object() {
+                    if let Some(declared_epoch) = meta.get("epoch").and_then(|val| val.as_u64()) {
+                        epoch = Some(declared_epoch);
+                    }
+                    if let Some(label) = meta.get("tag").and_then(|val| val.as_str()) {
+                        tag = Some(label.to_owned());
+                    }
+                }
+            }
+            continue;
+        }
+        if descriptors.contains_key(key) {
+            return Err(SelectionManifestError::DuplicateCircuit(key.clone()));
+        }
+        let entry_map = entry.as_object().ok_or_else(|| {
+            SelectionManifestError::Format(format!("manifest entry '{key}' must be a JSON object"))
+        })?;
+        let descriptor = parse_manifest_entry(key, entry_map)?;
+        descriptors.insert(key.clone(), descriptor);
+    }
+    Ok(ManifestParseResult {
+        descriptors,
+        epoch,
+        tag,
+    })
+}
+
 fn transcript_digest(
     circuit_id: &str,
-    revision: u16,
+    descriptor: &SelectionCircuitDescriptor,
     inputs: &SelectionProofPublicInputs,
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(circuit_id.as_bytes());
-    hasher.update(&revision.to_le_bytes());
+    if let Some(domain) = &descriptor.domain_separator {
+        hasher.update(domain.as_bytes());
+    } else {
+        hasher.update(circuit_id.as_bytes());
+    }
+    hasher.update(&descriptor.revision.to_le_bytes());
     hasher.update(&inputs.commitment);
     hasher.update(&inputs.winner_index.to_le_bytes());
     hasher.update(&inputs.winner_quality_bid_usd_micros.to_le_bytes());
@@ -331,18 +602,61 @@ fn transcript_digest(
     *hasher.finalize().as_bytes()
 }
 
-static CIRCUIT_REGISTRY: Lazy<HashMap<&'static str, CircuitDescriptor>> = Lazy::new(|| {
-    let mut map = HashMap::new();
-    map.insert(
-        "selection_argmax_v1",
-        CircuitDescriptor {
-            revision: 1,
-            expected_version: 1,
-            min_proof_len: 48,
-        },
-    );
-    map
+pub fn compute_transcript_digest(
+    circuit_id: &str,
+    inputs: &SelectionProofPublicInputs,
+) -> Result<[u8; 32], SelectionProofError> {
+    let descriptor = descriptor_for(circuit_id).ok_or(SelectionProofError::UnsupportedCircuit)?;
+    Ok(transcript_digest(circuit_id, descriptor.as_ref(), inputs))
+}
+
+static CIRCUIT_REGISTRY: Lazy<RwLock<CircuitRegistry>> = Lazy::new(|| {
+    let mut registry = CircuitRegistry::default();
+    let embedded = parse_manifest_bytes(include_bytes!("../resources/selection_manifest.json"))
+        .expect("embedded selection manifest must parse");
+    registry
+        .install_manifest(embedded)
+        .expect("embedded selection manifest must be valid");
+    RwLock::new(registry)
 });
+
+pub fn install_selection_manifest(
+    bytes: &[u8],
+) -> Result<SelectionManifestVersion, SelectionManifestError> {
+    let result = parse_manifest_bytes(bytes)?;
+    let mut guard = CIRCUIT_REGISTRY
+        .write()
+        .map_err(|_| SelectionManifestError::Format("manifest registry poisoned".into()))?;
+    guard.install_manifest(result)
+}
+
+pub fn selection_manifest_version() -> SelectionManifestVersion {
+    CIRCUIT_REGISTRY
+        .read()
+        .map(|guard| guard.manifest_version())
+        .unwrap_or_default()
+}
+
+pub fn selection_manifest_tag() -> Option<String> {
+    CIRCUIT_REGISTRY
+        .read()
+        .ok()
+        .and_then(|guard| guard.manifest_tag.clone())
+}
+
+pub fn selection_circuit_summaries() -> Vec<SelectionCircuitSummary> {
+    CIRCUIT_REGISTRY
+        .read()
+        .map(|guard| guard.summaries())
+        .unwrap_or_default()
+}
+
+fn descriptor_for(circuit_id: &str) -> Option<Arc<SelectionCircuitDescriptor>> {
+    CIRCUIT_REGISTRY
+        .read()
+        .ok()
+        .and_then(|guard| guard.descriptor(circuit_id))
+}
 
 pub fn verify_selection_proof(
     circuit_id: &str,
@@ -351,9 +665,7 @@ pub fn verify_selection_proof(
 ) -> Result<SelectionProofVerification, SelectionProofError> {
     let value = json::from_slice(proof).map_err(|_| SelectionProofError::Format)?;
     let envelope = SelectionProofEnvelope::from_value(value)?;
-    let descriptor = CIRCUIT_REGISTRY
-        .get(circuit_id)
-        .ok_or(SelectionProofError::UnsupportedCircuit)?;
+    let descriptor = descriptor_for(circuit_id).ok_or(SelectionProofError::UnsupportedCircuit)?;
     descriptor.validate(circuit_id, &envelope, commitment)?;
     let SelectionProofEnvelope {
         public_inputs,
@@ -365,12 +677,23 @@ pub fn verify_selection_proof(
         value.make_ascii_lowercase();
         value
     });
+    let descriptor_ref = descriptor.as_ref();
+    let expected_commitments = descriptor_ref
+        .expected_witness_commitments
+        .map(|value| u16::try_from(value).map_err(|_| SelectionProofError::Semantics))
+        .transpose()?;
+    let domain_separator = descriptor_ref
+        .domain_separator
+        .clone()
+        .unwrap_or_else(|| circuit_id.to_string());
     Ok(SelectionProofVerification {
-        revision: descriptor.revision,
+        revision: descriptor_ref.revision,
         proof_digest: proof.transcript_digest,
         proof_len,
         protocol,
         witness_commitments: proof.witness_commitments,
+        transcript_domain_separator: domain_separator,
+        expected_witness_commitments: expected_commitments,
         public_inputs,
     })
 }
@@ -380,6 +703,16 @@ mod tests {
     use super::*;
 
     const CIRCUIT_ID: &str = "selection_argmax_v1";
+
+    fn circuit_descriptor() -> Arc<SelectionCircuitDescriptor> {
+        descriptor_for(CIRCUIT_ID).expect("descriptor")
+    }
+
+    fn current_revision() -> u16 {
+        circuit_descriptor().revision
+    }
+
+    static MANIFEST_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn make_inputs(commitment: [u8; 32]) -> SelectionProofPublicInputs {
         SelectionProofPublicInputs {
@@ -414,7 +747,9 @@ mod tests {
     where
         F: FnOnce(&mut Vec<u8>, &mut [u8; 32]),
     {
-        let mut transcript = transcript_digest(CIRCUIT_ID, revision, &inputs);
+        let mut descriptor = (*descriptor_for(CIRCUIT_ID).expect("descriptor")).clone();
+        descriptor.revision = revision;
+        let mut transcript = transcript_digest(CIRCUIT_ID, &descriptor, &inputs);
         let mut proof_bytes = vec![0xAB; 96];
         proof_bytes[..transcript.len()].copy_from_slice(&transcript);
         mutator(&mut proof_bytes, &mut transcript);
@@ -448,10 +783,11 @@ mod tests {
     fn verifies_valid_selection_proof() {
         let commitment = [7u8; 32];
         let inputs = make_inputs(commitment);
-        let proof = build_proof_payload(inputs.clone(), 1, |_, _| {});
+        let revision = current_revision();
+        let proof = build_proof_payload(inputs.clone(), revision, |_, _| {});
         let verification =
             verify_selection_proof(CIRCUIT_ID, &proof, &commitment).expect("proof should verify");
-        assert_eq!(verification.revision, 1);
+        assert_eq!(verification.revision, revision);
         assert_eq!(verification.public_inputs, inputs);
         assert_eq!(verification.public_inputs.candidate_count, 3);
         assert_eq!(verification.proof_len, 96);
@@ -464,7 +800,7 @@ mod tests {
     fn rejects_when_commitment_mismatch() {
         let commitment = [3u8; 32];
         let inputs = make_inputs(commitment);
-        let proof = build_proof_payload(inputs, 1, |_, _| {});
+        let proof = build_proof_payload(inputs, current_revision(), |_, _| {});
         let wrong_commitment = [9u8; 32];
         let err = verify_selection_proof(CIRCUIT_ID, &proof, &wrong_commitment)
             .expect_err("commitment mismatch must fail");
@@ -475,7 +811,7 @@ mod tests {
     fn rejects_when_proof_digest_corrupted() {
         let commitment = [5u8; 32];
         let inputs = make_inputs(commitment);
-        let proof = build_proof_payload(inputs, 1, |_, transcript| {
+        let proof = build_proof_payload(inputs, current_revision(), |_, transcript| {
             transcript[0] ^= 0xFF;
         });
         let err = verify_selection_proof(CIRCUIT_ID, &proof, &commitment)
@@ -487,9 +823,82 @@ mod tests {
     fn rejects_on_revision_mismatch() {
         let commitment = [11u8; 32];
         let inputs = make_inputs(commitment);
-        let proof = build_proof_payload(inputs, 2, |_, _| {});
+        let proof = build_proof_payload(inputs, current_revision().saturating_add(1), |_, _| {});
         let err = verify_selection_proof(CIRCUIT_ID, &proof, &commitment)
             .expect_err("revision mismatch must fail");
         assert_eq!(err, SelectionProofError::RevisionMismatch);
+    }
+
+    #[test]
+    fn installs_runtime_manifest_updates() {
+        let _guard = MANIFEST_TEST_LOCK.lock().unwrap();
+        let base_version = selection_manifest_version();
+        let descriptor = circuit_descriptor();
+        let mut entry = json::Map::new();
+        let new_revision = descriptor.revision.saturating_add(1);
+        entry.insert(
+            "revision".into(),
+            json::Value::Number(json::Number::from(new_revision)),
+        );
+        entry.insert(
+            "expected_version".into(),
+            json::Value::Number(json::Number::from(descriptor.expected_version)),
+        );
+        entry.insert(
+            "min_proof_len".into(),
+            json::Value::Number(json::Number::from(descriptor.min_proof_len as u64)),
+        );
+        if let Some(domain) = &descriptor.domain_separator {
+            entry.insert(
+                "transcript_domain_separator".into(),
+                json::Value::String(domain.clone()),
+            );
+        }
+        if let Some(commitments) = descriptor.expected_witness_commitments {
+            entry.insert(
+                "expected_witness_commitments".into(),
+                json::Value::Number(json::Number::from(commitments as u64)),
+            );
+        }
+        if let Some(protocol) = &descriptor.expected_protocol {
+            entry.insert(
+                "expected_protocol".into(),
+                json::Value::String(protocol.clone()),
+            );
+        }
+        let mut root = json::Map::new();
+        let mut meta = json::Map::new();
+        let new_epoch = base_version.epoch().saturating_add(5);
+        meta.insert(
+            "epoch".into(),
+            json::Value::Number(json::Number::from(new_epoch)),
+        );
+        meta.insert("tag".into(), json::Value::String("test-revision".into()));
+        root.insert("_meta".into(), json::Value::Object(meta));
+        root.insert(CIRCUIT_ID.into(), json::Value::Object(entry));
+        let manifest_bytes = json::to_vec(&json::Value::Object(root)).expect("manifest encode");
+        let version = install_selection_manifest(&manifest_bytes).expect("manifest installs");
+        assert_eq!(version.epoch(), new_epoch);
+        let summaries = selection_circuit_summaries();
+        let summary = summaries
+            .iter()
+            .find(|entry| entry.circuit_id == CIRCUIT_ID)
+            .expect("summary present");
+        assert_eq!(summary.revision, new_revision);
+    }
+
+    #[test]
+    fn rejects_manifest_epoch_regression() {
+        let _guard = MANIFEST_TEST_LOCK.lock().unwrap();
+        let revision = current_revision();
+        let manifest = format!(
+            "{{\"_meta\":{{\"epoch\":0}},\"selection_argmax_v1\":{{\"revision\":{revision},\"expected_version\":1,\"min_proof_len\":96}}}}"
+        );
+        let err =
+            install_selection_manifest(manifest.as_bytes()).expect_err("epoch regression fails");
+        assert!(matches!(
+            err,
+            SelectionManifestError::EpochRegression { .. }
+        ));
     }
 }

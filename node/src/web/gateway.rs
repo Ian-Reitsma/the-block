@@ -349,6 +349,9 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         provider,
         badges,
         bytes: ack.bytes,
+        attestations: Vec::new(),
+        committee_transcripts: Vec::new(),
+        population_estimate: None,
     };
     let key = ReservationKey {
         manifest: ack.manifest,

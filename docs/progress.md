@@ -1,4 +1,25 @@
 # Project Progress Snapshot
+> **Review (2025-10-29, early morning):** Selection honesty, pacing guard rails,
+> and broker telemetry now live on fully first-party rails. `zkp::selection`
+> still boots from the embedded manifest but installs descriptors into a runtime
+> registry protected by `foundation_lazy::Lazy`; governance can push updates via
+> `install_selection_manifest`, which hand-parses JSON, refuses revision
+> regressions, and only bumps the manifest epoch when the descriptor set is
+> monotonic so wallets cannot downgrade circuits. `selection_manifest_version`,
+> `selection_manifest_tag`, and `selection_circuit_summaries()` expose the active
+> descriptors for audit, and `SelectionProofMetadata` now records the manifest
+> epoch/tag, transcript domain separator, expected witness commitments, and
+> committee transcript digests alongside the composite welfare floor so receipts
+> prove both SNARK honesty and committee co-signature. `ad_market.inventory`,
+> `ad_market.list_campaigns`, and `ad_market.budget` still publish PI gains and
+> forgetting factors but now add a `pacing.status`/`pacing.reason` pair that flags
+> controller bounds (ηₚ, ηᵢ, forgetting) using the existing JSON builders, giving
+> operators structured visibility into pacing health without bespoke tooling.
+> `node/tests/ad_market_synthetic.rs` was extended to drive manifest summaries,
+> SNARK attestations (including committee transcripts), pacing status, and broker
+> rollovers end to end with only the in-process harness, covering failure cases
+> for malformed manifests and controller violations while keeping the flow
+> hermetic.
 > **Review (2025-10-28, late night):** Budget pacing and proof plumbing now
 > survive restarts. `BudgetBroker` snapshots serialise through first-party JSON
 > helpers, persist under sled’s `KEY_BUDGET`, and restore during marketplace

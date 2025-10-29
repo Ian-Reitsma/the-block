@@ -117,6 +117,23 @@ Additional subsystem counters include:
   of-selection attestation mix and verification latency. Tie these into the
   read-ops dashboard so SNARK fallbacks or repeated TEE failures surface before
   wallets violate campaign contracts.
+- `ad_selection_attestation_total{kind,result,reason}` tracks marketplace
+  attestation outcomes. Expect `reason` values of `circuit`, `invalid`, `length`,
+  `commitment`, `revision`, `format`, `semantics`, and `unsupported` depending on
+  the failure class surfaced by `zkp::selection`. Pair with
+  `ad_selection_proof_verify_seconds{circuit}` (verification latency histogram)
+  and `ad_selection_attestation_commitment_bytes{kind}` (proof byte length gauge)
+  to alert when wallets submit malformed proofs or repeated fallbacks stress the
+  verifier committee. Dashboards should highlight sustained
+  `reason="semantics"` spikes—they indicate wallets tried to clear below the
+  composite resource floor or misreported the runner-up bid.
+- `ad_selection_transcript_total{result,reason}` records committee transcript
+  normalisation outcomes. `result=accepted` signals transcripts matched the proof
+  digest and were stamped with the active manifest epoch; `result=rejected`
+  carries `reason` values such as `empty`, `digest`, or `metadata` when wallets
+  supply stale digests or omit transcript bodies. Pair this with the attestation
+  counters to ensure verifier committees co-sign the same proof the wallet
+  presented.
 - `PROOF_REBATES_PENDING_TOTAL`/`PROOF_REBATES_CLAIMED_TOTAL` track light-client rebate balances and payouts; alert when the pending gauge grows faster than block production.
 - `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL` surface bridge dispute activity, `BRIDGE_REWARD_CLAIMS_TOTAL` and `BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL` track governance-backed payout flows, `BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}` records settlement submissions, and `BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}` captures duty resolution outcomes alongside the `bridge_pending_withdrawals` gauges of outstanding releases per asset.
 

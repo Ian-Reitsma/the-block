@@ -1,4 +1,17 @@
 # Summary
+> **Review (2025-10-29, early morning):** Selection proofs now reference an
+> embedded manifest and pacing knobs are visible via RPC. `zkp::selection`
+> parses `crates/zkp/resources/selection_manifest.json` with the in-house JSON
+> and base64 helpers, locking circuit revision, transcript domain, minimum proof
+> length, witness commitments, and protocol casing before verifying wallet
+> proofs. `SelectionReceipt` metadata records the composite resource floor,
+> runner-up bid, clearing price, transcript domain separator, protocol, and
+> witness commitments so receipts prove the arg-max plus resource floor. RPC
+> responses (`ad_market.inventory`, `ad_market.list_campaigns`) now export the PI
+> gains, forgetting factor, smoothing weight, and target utilisation through the
+> existing codecs, and `node/tests/ad_market_synthetic.rs` stress-tests the flow
+> with pure first-party harnesses to guarantee pacing, broker rollovers, and
+> SNARK metadata survive load.
 > **Review (2025-10-28, late night):** Budget broker state now persists through
 > sled alongside SNARK metadata, keeping pacing and selection proofs first party
 > end to end. Manual JSON builders hash receipts via BLAKE3, the `zkp::selection`

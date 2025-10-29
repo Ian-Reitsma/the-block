@@ -25,6 +25,20 @@ cells while trimming runtime.
   `telemetry_summary_to_value` helper, extending the existing manual JSON map and
   Prometheus wrappers while the new `AdReadinessUtilizationDelta` alert rides the
   first-party ruleset.
+- ✅ Selection proofs and pacing telemetry stay hermetic. The embedded
+  `crates/zkp/resources/selection_manifest.json` feeds a runtime registry guarded
+  by `foundation_lazy::Lazy`; `install_selection_manifest` hand-parses JSON,
+  rejects revision regressions, and only bumps the manifest epoch when descriptors
+  advance monotonically. `SelectionProofMetadata` now records manifest epoch/tag,
+  transcript domain, expected witness commitments, and committee transcript
+  digests so receipts prove both welfare clearing and committee co-signature via
+  first-party code. `ad_market` exposes PI gains/forgetting factors through the
+  same JSON helpers and now includes a `pacing.status`/`pacing.reason` field that
+  flags controller bounds (ηₚ, ηᵢ, forgetting) without external tooling.
+  `node/tests/ad_market_synthetic.rs` drives manifest summaries, SNARK
+  attestations, pacing status, and broker rollovers end to end using only the
+  in-process harness, covering failure paths for malformed manifests and controller
+  violations without adding dependencies.
 - ✅ Treasury filters, CT/IT balances, and readiness-delta dashboards remain on
   first-party plumbing. Explorer and CLI disbursement queries add amount/time
   filters by extending existing structs, the governance RPCs expose CT/IT totals

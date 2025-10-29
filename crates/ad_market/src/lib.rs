@@ -10,14 +10,20 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-use zkp::selection::{SelectionProofPublicInputs, SelectionProofVerification};
+use zkp::selection::{
+    install_selection_manifest as zkp_install_selection_manifest, selection_circuit_summaries,
+    selection_manifest_tag, selection_manifest_version as zkp_selection_manifest_version,
+    SelectionCircuitSummary, SelectionManifestError, SelectionManifestVersion,
+    SelectionProofPublicInputs, SelectionProofVerification,
+};
 
 mod attestation;
 mod badge;
 mod budget;
 
 pub use attestation::{
-    AttestationSatisfaction, SelectionAttestationConfig, SelectionAttestationManager,
+    selection_commitment, AttestationSatisfaction, SelectionAttestationConfig,
+    SelectionAttestationManager,
 };
 pub use badge::{BadgeDecision, BadgeGuard, BadgeGuardConfig};
 pub use budget::{
@@ -249,6 +255,15 @@ pub struct MarketplaceConfig {
     pub badge_guard: BadgeGuardConfig,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PacingParameters {
+    pub price_eta_p_ppm: i32,
+    pub price_eta_i_ppm: i32,
+    pub price_forgetting_ppm: u32,
+    pub target_utilization_ppm: u32,
+    pub smoothing_ppm: u32,
+}
+
 impl MarketplaceConfig {
     pub fn normalized(self) -> Self {
         let mut normalized = self;
@@ -274,6 +289,16 @@ impl MarketplaceConfig {
         normalized.budget_broker = normalized.budget_broker.normalized();
         normalized.badge_guard = normalized.badge_guard.normalized();
         normalized
+    }
+
+    pub fn pacing_parameters(&self) -> PacingParameters {
+        PacingParameters {
+            price_eta_p_ppm: self.price_eta_p_ppm,
+            price_eta_i_ppm: self.price_eta_i_ppm,
+            price_forgetting_ppm: self.price_forgetting_ppm,
+            target_utilization_ppm: self.target_utilization_ppm,
+            smoothing_ppm: self.smoothing_ppm,
+        }
     }
 
     fn composite_floor_usd(&self, price_per_mib_usd_micros: u64, bytes: u64) -> u64 {
@@ -695,6 +720,7 @@ pub struct ImpressionContext {
     pub badges: Vec<String>,
     pub bytes: u64,
     pub attestations: Vec<SelectionAttestation>,
+    pub committee_transcripts: Vec<SelectionCommitteeTranscript>,
     pub population_estimate: Option<u64>,
 }
 
@@ -781,6 +807,59 @@ pub enum SelectionAttestation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SelectionCommitteeTranscript {
+    pub committee_id: String,
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub transcript: Vec<u8>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "foundation_serialization::serde_bytes"
+    )]
+    pub signature: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_epoch: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        with = "foundation_serialization::serde_bytes"
+    )]
+    pub transcript_digest: Vec<u8>,
+}
+
+impl SelectionCommitteeTranscript {
+    pub fn normalized(mut self) -> Self {
+        self.committee_id = self.committee_id.trim().to_lowercase();
+        self
+    }
+
+    pub fn compute_digest(&self) -> Option<[u8; 32]> {
+        if self.transcript.is_empty() {
+            None
+        } else {
+            Some(*blake3::hash(&self.transcript).as_bytes())
+        }
+    }
+
+    pub fn update_metadata(&mut self, manifest_epoch: u64, expected_digest: &[u8; 32]) -> bool {
+        if self.transcript_digest.is_empty() {
+            if let Some(digest) = self.compute_digest() {
+                if digest.as_ref() != expected_digest {
+                    return false;
+                }
+                self.transcript_digest = expected_digest.to_vec();
+            } else {
+                return false;
+            }
+        } else if self.transcript_digest.as_slice() != expected_digest {
+            return false;
+        }
+        self.manifest_epoch = Some(manifest_epoch);
+        true
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelectionProofMetadata {
     pub circuit_id: String,
     pub circuit_revision: u16,
@@ -796,11 +875,20 @@ pub struct SelectionProofMetadata {
         with = "serde_bytes_vec"
     )]
     pub witness_commitments: Vec<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_domain_separator: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_witness_commitments: Option<u16>,
+    pub manifest_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_tag: Option<String>,
     pub public_inputs: SelectionProofPublicInputs,
 }
 
 impl SelectionProofMetadata {
     fn from_verification(circuit_id: String, verification: SelectionProofVerification) -> Self {
+        let manifest_version = zkp_selection_manifest_version();
+        let manifest_tag = selection_manifest_tag();
         Self {
             circuit_id: circuit_id.to_lowercase(),
             circuit_revision: verification.revision,
@@ -812,6 +900,10 @@ impl SelectionProofMetadata {
                 .iter()
                 .map(|bytes| bytes.to_vec())
                 .collect(),
+            transcript_domain_separator: Some(verification.transcript_domain_separator),
+            expected_witness_commitments: verification.expected_witness_commitments,
+            manifest_epoch: manifest_version.epoch(),
+            manifest_tag,
             public_inputs: verification.public_inputs,
         }
     }
@@ -839,6 +931,11 @@ impl SelectionProofMetadata {
             out.push(buf);
         }
         Some(out)
+    }
+
+    fn expected_witness_commitments(&self) -> Option<usize> {
+        self.expected_witness_commitments
+            .map(|value| value as usize)
     }
 }
 
@@ -894,6 +991,8 @@ pub struct SelectionReceipt {
     pub attestation: Option<SelectionAttestation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof_metadata: Option<SelectionProofMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub committee_transcripts: Vec<SelectionCommitteeTranscript>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -962,6 +1061,9 @@ pub enum SelectionReceiptError {
         kind: SelectionAttestationKind,
         reason: &'static str,
     },
+    InvalidTranscript {
+        reason: &'static str,
+    },
 }
 
 impl std::fmt::Display for SelectionReceiptError {
@@ -1006,6 +1108,9 @@ impl std::fmt::Display for SelectionReceiptError {
             }
             SelectionReceiptError::InvalidAttestation { kind, reason } => {
                 write!(f, "invalid {:?} attestation: {reason}", kind)
+            }
+            SelectionReceiptError::InvalidTranscript { reason } => {
+                write!(f, "invalid committee transcript: {reason}")
             }
         }
     }
@@ -1159,6 +1264,39 @@ impl SelectionReceipt {
                 }
             }
         }
+        if !self.committee_transcripts.is_empty() {
+            let metadata = self
+                .proof_metadata
+                .as_ref()
+                .ok_or(SelectionReceiptError::ProofMetadataMissing)?;
+            let expected_digest = metadata.proof_digest_array().ok_or(
+                SelectionReceiptError::ProofMetadataMismatch {
+                    field: "proof_digest",
+                },
+            )?;
+            for transcript in &self.committee_transcripts {
+                if transcript.transcript.is_empty() {
+                    return Err(SelectionReceiptError::InvalidTranscript { reason: "empty" });
+                }
+                if let Some(epoch) = transcript.manifest_epoch {
+                    if epoch != metadata.manifest_epoch {
+                        return Err(SelectionReceiptError::InvalidTranscript {
+                            reason: "manifest_epoch",
+                        });
+                    }
+                }
+                if transcript.transcript_digest.is_empty() {
+                    let computed = transcript
+                        .compute_digest()
+                        .ok_or(SelectionReceiptError::InvalidTranscript { reason: "empty" })?;
+                    if computed != expected_digest {
+                        return Err(SelectionReceiptError::InvalidTranscript { reason: "digest" });
+                    }
+                } else if transcript.transcript_digest.as_slice() != expected_digest {
+                    return Err(SelectionReceiptError::InvalidTranscript { reason: "digest" });
+                }
+            }
+        }
         Ok(SelectionReceiptInsights {
             winner_index: self.winner_index,
             winner_quality_bid_usd_micros: winner.quality_adjusted_bid_usd_micros,
@@ -1206,6 +1344,27 @@ pub trait Marketplace: Send + Sync {
 
     fn budget_snapshot(&self) -> BudgetBrokerSnapshot {
         self.budget_broker().read().unwrap().snapshot()
+    }
+
+    fn pacing_parameters(&self) -> PacingParameters;
+
+    fn install_selection_manifest(
+        &self,
+        manifest_bytes: &[u8],
+    ) -> Result<SelectionManifestVersion, SelectionManifestError> {
+        zkp_install_selection_manifest(manifest_bytes)
+    }
+
+    fn selection_manifest_version(&self) -> SelectionManifestVersion {
+        zkp_selection_manifest_version()
+    }
+
+    fn selection_manifest_tag(&self) -> Option<String> {
+        selection_manifest_tag()
+    }
+
+    fn selection_manifest_summary(&self) -> Vec<SelectionCircuitSummary> {
+        selection_circuit_summaries()
     }
 }
 
@@ -2028,10 +2187,11 @@ impl Marketplace for InMemoryMarketplace {
             clearing_price_usd_micros: clearing_price,
             attestation: None,
             proof_metadata: None,
+            committee_transcripts: Vec::new(),
         };
-        let (attestation, satisfaction, metadata) = self
+        let (attestation, satisfaction, metadata, transcripts) = self
             .attestation
-            .attach_attestation(&receipt, &ctx.attestations);
+            .attach_attestation(&receipt, &ctx.attestations, &ctx.committee_transcripts);
         if matches!(satisfaction, AttestationSatisfaction::Missing)
             && self.attestation.config().require_attestation
         {
@@ -2039,6 +2199,7 @@ impl Marketplace for InMemoryMarketplace {
         }
         receipt.attestation = attestation;
         receipt.proof_metadata = metadata;
+        receipt.committee_transcripts = transcripts;
         if let Err(err) = self.attestation.validate_receipt(&receipt) {
             eprintln!("selection attestation validation failed: {err}");
             return None;
@@ -2202,6 +2363,10 @@ impl Marketplace for InMemoryMarketplace {
                 observed_utilization_ppm: state.observed_utilization_ppm(),
             })
             .collect()
+    }
+
+    fn pacing_parameters(&self) -> PacingParameters {
+        self.config.pacing_parameters()
     }
 }
 impl SledMarketplace {
@@ -2524,15 +2689,17 @@ impl Marketplace for SledMarketplace {
             clearing_price_usd_micros: clearing_price,
             attestation: None,
             proof_metadata: None,
+            committee_transcripts: Vec::new(),
         };
-        let (attestation, satisfaction, metadata) = self
+        let (attestation, satisfaction, metadata, transcripts) = self
             .attestation
-            .attach_attestation(&receipt, &ctx.attestations);
+            .attach_attestation(&receipt, &ctx.attestations, &ctx.committee_transcripts);
         if matches!(satisfaction, AttestationSatisfaction::Missing) {
             return None;
         }
         receipt.attestation = attestation;
         receipt.proof_metadata = metadata;
+        receipt.committee_transcripts = transcripts;
         if self.attestation.validate_receipt(&receipt).is_err() {
             return None;
         }
@@ -2731,6 +2898,10 @@ impl Marketplace for SledMarketplace {
 
     fn budget_broker(&self) -> &RwLock<BudgetBroker> {
         &self.budget_broker
+    }
+
+    fn pacing_parameters(&self) -> PacingParameters {
+        self.config.pacing_parameters()
     }
 }
 struct RoleUsdParts {
@@ -3024,6 +3195,7 @@ mod tests {
             badges: Vec::new(),
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
+            committee_transcripts: Vec::new(),
             population_estimate: Some(1_000),
         };
         market.update_oracle(TokenOracle::new(50_000, 25_000));
@@ -3114,6 +3286,7 @@ mod tests {
                 badges: Vec::new(),
                 bytes: BYTES_PER_MIB,
                 attestations: Vec::new(),
+                committee_transcripts: Vec::new(),
                 population_estimate: Some(1_000),
             };
             market
@@ -3244,6 +3417,7 @@ mod tests {
             badges: Vec::new(),
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
+            committee_transcripts: Vec::new(),
             population_estimate: Some(1_000),
         };
         let key = ReservationKey {
@@ -3305,6 +3479,7 @@ mod tests {
             badges: Vec::new(),
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
+            committee_transcripts: Vec::new(),
             population_estimate: Some(1_000),
         };
         let mut last_price = 0;
@@ -3339,6 +3514,7 @@ mod tests {
             badges: Vec::new(),
             bytes: BYTES_PER_MIB,
             attestations: Vec::new(),
+            committee_transcripts: Vec::new(),
             population_estimate: Some(1_000),
         };
         let handles: Vec<_> = (0u8..4u8)
@@ -3406,6 +3582,7 @@ mod tests {
             clearing_price_usd_micros: 110,
             attestation: None,
             proof_metadata: None,
+            committee_transcripts: Vec::new(),
         };
         let insights = receipt.validate().expect("receipt valid");
         assert_eq!(insights.winner_index, 0);
@@ -3454,6 +3631,7 @@ mod tests {
             clearing_price_usd_micros: 120,
             attestation: None,
             proof_metadata: None,
+            committee_transcripts: Vec::new(),
         };
         let err = receipt.validate().expect_err("receipt invalid");
         assert!(matches!(

@@ -9,6 +9,30 @@ RPC client.
 
 ## Immediate blockers
 
+## Recent progress (2025-10-29)
+
+- Selection circuits now live in a runtime registry. `install_selection_manifest`
+  parses manifests with `foundation_serialization::json::Value`, rejects revision
+  regressions, and only bumps the manifest epoch when the descriptor set is
+  monotonic. Operators can introspect the active descriptors via
+  `selection_circuit_summaries()` and manifest version/tag helpers—no serde or
+  external registry required.
+- `SelectionProofMetadata` now carries manifest epoch/tag, transcript domain
+  separator, expected witness commitments, and committee transcript digests.
+  Receipt validation replays the composite resource floor and rejects mismatched
+  transcripts, while attestation counters continue to emit
+  `ad_selection_attestation_total{reason}` from the first-party metrics facade.
+- `ad_market.inventory`, `ad_market.list_campaigns`, and `ad_market.budget` still
+  publish PI gains/forgetting factors but now include a `pacing.status` and
+  optional `pacing.reason` field so RPC consumers can spot controller bounds
+  violations (ηₚ, ηᵢ, forgetting) without bespoke tooling. The JSON envelopes are
+  still assembled entirely through the in-house helpers.
+- `node/tests/ad_market_synthetic.rs` drives manifest summaries, SNARK
+  attestations (including committee transcripts), pacing status, and broker
+  rollovers end to end using only the in-process harness, providing failure-path
+  coverage for malformed manifests and controller bounds without external
+  clients.
+
 ## Recent progress (2025-11-09)
 
 - Governance and node RPC paths now expose the `DualTokenSettlementEnabled`

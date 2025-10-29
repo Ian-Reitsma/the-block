@@ -80,6 +80,9 @@ fn identical_paths_yield_unique_reservations() {
         provider: Some(ack_one.provider.clone()),
         badges: Vec::new(),
         bytes: ack_one.bytes,
+        attestations: Vec::new(),
+        committee_transcripts: Vec::new(),
+        population_estimate: None,
     };
     assert!(market.reserve_impression(key_one, ctx.clone()).is_some());
     assert!(market.reserve_impression(key_two, ctx).is_some());
@@ -98,6 +101,9 @@ fn identical_paths_yield_unique_reservations() {
                 provider: Some(ack_one.provider.clone()),
                 badges: Vec::new(),
                 bytes: ack_one.bytes,
+                attestations: Vec::new(),
+                committee_transcripts: Vec::new(),
+                population_estimate: None,
             }
         )
         .is_none());

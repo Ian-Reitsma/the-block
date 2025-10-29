@@ -1,6 +1,6 @@
 use crate::{
-    SelectionAttestation, SelectionAttestationKind, SelectionProofMetadata, SelectionReceipt,
-    SelectionReceiptError,
+    SelectionAttestation, SelectionAttestationKind, SelectionCommitteeTranscript,
+    SelectionProofMetadata, SelectionReceipt, SelectionReceiptError,
 };
 use crypto_suite::hashing::blake3;
 use foundation_metrics::{gauge, histogram, increment_counter};
@@ -63,14 +63,57 @@ impl SelectionAttestationManager {
         &self.config
     }
 
+    fn normalize_transcripts(
+        &self,
+        metadata: &SelectionProofMetadata,
+        transcripts: &[SelectionCommitteeTranscript],
+    ) -> Vec<SelectionCommitteeTranscript> {
+        let Some(expected_digest) = metadata.proof_digest_array() else {
+            increment_counter!(
+                "ad_selection_transcript_total",
+                "result" => "rejected",
+                "reason" => "metadata"
+            );
+            return Vec::new();
+        };
+        let mut accepted = Vec::new();
+        for transcript in transcripts {
+            if transcript.transcript.is_empty() {
+                increment_counter!(
+                    "ad_selection_transcript_total",
+                    "result" => "rejected",
+                    "reason" => "empty"
+                );
+                continue;
+            }
+            let mut normalized = transcript.clone().normalized();
+            if !normalized.update_metadata(metadata.manifest_epoch, &expected_digest) {
+                increment_counter!(
+                    "ad_selection_transcript_total",
+                    "result" => "rejected",
+                    "reason" => "digest"
+                );
+                continue;
+            }
+            increment_counter!(
+                "ad_selection_transcript_total",
+                "result" => "accepted"
+            );
+            accepted.push(normalized);
+        }
+        accepted
+    }
+
     pub fn attach_attestation(
         &self,
         receipt: &SelectionReceipt,
         provided: &[SelectionAttestation],
+        transcripts: &[SelectionCommitteeTranscript],
     ) -> (
         Option<SelectionAttestation>,
         AttestationSatisfaction,
         Option<SelectionProofMetadata>,
+        Vec<SelectionCommitteeTranscript>,
     ) {
         let commitment = match compute_commitment(receipt) {
             Ok(value) => value,
@@ -83,7 +126,7 @@ impl SelectionAttestationManager {
                         "result" => "rejected",
                         "reason" => "commitment"
                     );
-                    return (None, AttestationSatisfaction::Missing, None);
+                    return (None, AttestationSatisfaction::Missing, None, Vec::new());
                 } else {
                     increment_counter!(
                         "ad_selection_attestation_total",
@@ -91,7 +134,7 @@ impl SelectionAttestationManager {
                         "result" => "accepted",
                         "reason" => "commitment"
                     );
-                    return (None, AttestationSatisfaction::Satisfied, None);
+                    return (None, AttestationSatisfaction::Satisfied, None, Vec::new());
                 }
             }
         };
@@ -134,6 +177,8 @@ impl SelectionAttestationManager {
                                 circuit_id.clone(),
                                 verification,
                             );
+                            let normalized_transcripts =
+                                self.normalize_transcripts(&metadata, transcripts);
                             return (
                                 Some(SelectionAttestation::Snark {
                                     proof: proof.clone(),
@@ -141,6 +186,7 @@ impl SelectionAttestationManager {
                                 }),
                                 AttestationSatisfaction::Satisfied,
                                 Some(metadata),
+                                normalized_transcripts,
                             );
                         }
                         Err(err) => {
@@ -179,7 +225,12 @@ impl SelectionAttestationManager {
                     "kind" => "tee",
                     "result" => "fallback"
                 );
-                return (Some(attestation), AttestationSatisfaction::Satisfied, None);
+                return (
+                    Some(attestation),
+                    AttestationSatisfaction::Satisfied,
+                    None,
+                    Vec::new(),
+                );
             }
         }
 
@@ -189,14 +240,14 @@ impl SelectionAttestationManager {
                 "kind" => "missing",
                 "result" => "rejected"
             );
-            (None, AttestationSatisfaction::Missing, None)
+            (None, AttestationSatisfaction::Missing, None, Vec::new())
         } else {
             increment_counter!(
                 "ad_selection_attestation_total",
                 "kind" => "missing",
                 "result" => "accepted"
             );
-            (None, AttestationSatisfaction::Satisfied, None)
+            (None, AttestationSatisfaction::Satisfied, None, Vec::new())
         }
     }
 
@@ -257,12 +308,66 @@ impl SelectionAttestationManager {
                         || (metadata.proof_length != 0
                             && metadata.proof_length != verification.proof_len)
                         || !protocols_consistent(&metadata.protocol, &verification.protocol)
+                        || metadata.transcript_domain_separator.is_none()
+                        || metadata
+                            .transcript_domain_separator
+                            .as_ref()
+                            .map(|domain| {
+                                !domain
+                                    .eq_ignore_ascii_case(&verification.transcript_domain_separator)
+                            })
+                            .unwrap_or(false)
+                        || metadata.expected_witness_commitments.is_none()
+                        || metadata
+                            .expected_witness_commitments()
+                            .map(|expected| {
+                                Some(expected)
+                                    != verification
+                                        .expected_witness_commitments
+                                        .map(|value| value as usize)
+                            })
+                            .unwrap_or(false)
                         || !commitments_consistent(&metadata, &verification)
                     {
                         return Err(SelectionReceiptError::InvalidAttestation {
                             kind: SelectionAttestationKind::Snark,
                             reason: "metadata",
                         });
+                    }
+                    if !receipt.committee_transcripts.is_empty() {
+                        let expected_digest = metadata.proof_digest_array().ok_or(
+                            SelectionReceiptError::InvalidTranscript { reason: "metadata" },
+                        )?;
+                        for transcript in &receipt.committee_transcripts {
+                            if transcript.transcript.is_empty() {
+                                return Err(SelectionReceiptError::InvalidTranscript {
+                                    reason: "empty",
+                                });
+                            }
+                            if transcript
+                                .manifest_epoch
+                                .filter(|epoch| *epoch == metadata.manifest_epoch)
+                                .is_none()
+                            {
+                                return Err(SelectionReceiptError::InvalidTranscript {
+                                    reason: "manifest_epoch",
+                                });
+                            }
+                            if transcript.transcript_digest.is_empty() {
+                                let computed = transcript.compute_digest().ok_or(
+                                    SelectionReceiptError::InvalidTranscript { reason: "empty" },
+                                )?;
+                                if computed != expected_digest {
+                                    return Err(SelectionReceiptError::InvalidTranscript {
+                                        reason: "digest",
+                                    });
+                                }
+                            } else if transcript.transcript_digest.as_slice() != expected_digest {
+                                return Err(SelectionReceiptError::InvalidTranscript {
+                                    reason: "digest",
+                                });
+                            }
+                        }
                     }
                     Ok(())
                 } else {
@@ -416,6 +521,10 @@ fn compute_commitment(receipt: &SelectionReceipt) -> Result<[u8; 32], serializat
     Ok(*blake3::hash(&serialized).as_bytes())
 }
 
+pub fn selection_commitment(receipt: &SelectionReceipt) -> Result<[u8; 32], serialization::Error> {
+    compute_commitment(receipt)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionProofError {
     Invalid,
@@ -463,22 +572,26 @@ mod tests {
     use crate::test_support::TestMetricsRecorder;
     use crate::{SelectionCandidateTrace, SelectionCohortTrace};
     use std::collections::HashSet;
-    use zkp::selection::{SelectionProofPublicInputs, SelectionProofVerification};
+    use zkp::selection::{
+        selection_circuit_summaries, SelectionCircuitSummary, SelectionProofPublicInputs,
+        SelectionProofVerification,
+    };
 
     const CIRCUIT_ID: &str = "selection_argmax_v1";
 
+    fn circuit_summary() -> SelectionCircuitSummary {
+        selection_circuit_summaries()
+            .into_iter()
+            .find(|summary| summary.circuit_id == CIRCUIT_ID)
+            .expect("circuit summary")
+    }
+
+    fn circuit_revision() -> u16 {
+        circuit_summary().revision
+    }
+
     fn transcript_digest(inputs: &SelectionProofPublicInputs) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(CIRCUIT_ID.as_bytes());
-        hasher.update(&1u16.to_le_bytes());
-        hasher.update(&inputs.commitment);
-        hasher.update(&inputs.winner_index.to_le_bytes());
-        hasher.update(&inputs.winner_quality_bid_usd_micros.to_le_bytes());
-        hasher.update(&inputs.runner_up_quality_bid_usd_micros.to_le_bytes());
-        hasher.update(&inputs.resource_floor_usd_micros.to_le_bytes());
-        hasher.update(&inputs.clearing_price_usd_micros.to_le_bytes());
-        hasher.update(&inputs.candidate_count.to_le_bytes());
-        *hasher.finalize().as_bytes()
+        zkp::selection::compute_transcript_digest(CIRCUIT_ID, inputs).expect("digest")
     }
 
     fn encode_bytes(bytes: &[u8]) -> String {
@@ -533,6 +646,7 @@ mod tests {
             clearing_price_usd_micros: 1_800_000,
             attestation: None,
             proof_metadata: None,
+            committee_transcripts: Vec::new(),
         };
         let commitment = compute_commitment(&receipt).expect("commitment");
         let inputs = SelectionProofPublicInputs {
@@ -563,9 +677,16 @@ mod tests {
             encode_bytes(&witness_commitments[0]),
             encode_bytes(&witness_commitments[1])
         );
+        let protocol = circuit_summary()
+            .expected_protocol
+            .as_deref()
+            .unwrap_or("groth16")
+            .to_string();
         let proof = format!(
-            "{{\"version\":1,\"circuit_revision\":1,\"public_inputs\":{},\"proof\":{{\"protocol\":\"groth16\",\"transcript_digest\":{},\"bytes\":{},\"witness_commitments\":{}}}}}",
+            "{{\"version\":1,\"circuit_revision\":{},\"public_inputs\":{},\"proof\":{{\"protocol\":\"{}\",\"transcript_digest\":{},\"bytes\":{},\"witness_commitments\":{}}}}}",
+            circuit_revision(),
             public_inputs,
+            protocol,
             encode_bytes(&transcript),
             encode_bytes(&proof_bytes),
             commitments_json,
@@ -595,9 +716,20 @@ mod tests {
         });
         let (receipt, _, verification) = build_receipt();
         let metadata = receipt.proof_metadata.as_ref().expect("metadata present");
-        assert_eq!(metadata.protocol.as_deref(), Some("groth16"));
+        assert_eq!(
+            metadata.protocol.as_deref(),
+            verification.protocol.as_deref()
+        );
         assert_eq!(metadata.proof_length, verification.proof_len);
         assert_eq!(metadata.witness_commitments.len(), 2);
+        assert_eq!(
+            metadata.transcript_domain_separator.as_deref(),
+            Some(verification.transcript_domain_separator.as_str())
+        );
+        assert_eq!(
+            metadata.expected_witness_commitments,
+            verification.expected_witness_commitments
+        );
         assert!(manager.validate_receipt(&receipt).is_ok());
     }
 
@@ -652,6 +784,44 @@ mod tests {
     }
 
     #[test]
+    fn attach_attestation_produces_transcript_metadata() {
+        let mut preferred = HashSet::new();
+        preferred.insert(CIRCUIT_ID.into());
+        let manager = SelectionAttestationManager::new(SelectionAttestationConfig {
+            preferred_circuit_ids: preferred,
+            allow_tee_fallback: false,
+            require_attestation: true,
+        });
+        let (receipt, proof_bytes, verification) = build_receipt();
+        let transcript = SelectionCommitteeTranscript {
+            committee_id: "committee-alpha".into(),
+            transcript: verification.proof_digest.to_vec(),
+            signature: Vec::new(),
+            manifest_epoch: None,
+            transcript_digest: verification.proof_digest.to_vec(),
+        };
+        let (attestation, satisfaction, metadata, transcripts) = manager.attach_attestation(
+            &receipt,
+            &[SelectionAttestation::Snark {
+                proof: proof_bytes,
+                circuit_id: CIRCUIT_ID.into(),
+            }],
+            &[transcript],
+        );
+        assert!(matches!(satisfaction, AttestationSatisfaction::Satisfied));
+        assert!(attestation.is_some());
+        let metadata = metadata.expect("metadata present");
+        assert_eq!(metadata.circuit_revision, verification.revision);
+        assert_eq!(transcripts.len(), 1);
+        let attached = &transcripts[0];
+        assert_eq!(attached.manifest_epoch, Some(metadata.manifest_epoch));
+        assert_eq!(
+            attached.transcript_digest.as_slice(),
+            metadata.proof_digest.as_slice()
+        );
+    }
+
+    #[test]
     fn attestation_metrics_recorded_under_load() {
         let Some(recorder) = TestMetricsRecorder::install() else {
             eprintln!("skipping metrics assertion; recorder already installed elsewhere");
@@ -671,7 +841,7 @@ mod tests {
             circuit_id: CIRCUIT_ID.into(),
         };
         for _ in 0..5 {
-            let _ = manager.attach_attestation(&receipt, &[attestation.clone()]);
+            let _ = manager.attach_attestation(&receipt, &[attestation.clone()], &[]);
         }
         let counters = recorder.counters();
         assert!(counters.iter().any(|event| {

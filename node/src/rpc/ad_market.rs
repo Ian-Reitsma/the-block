@@ -3,10 +3,11 @@
 use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{
     BudgetBrokerConfig, BudgetBrokerSnapshot, CampaignBudgetSnapshot, CohortBudgetSnapshot,
-    CohortPriceSnapshot, DistributionPolicy, MarketplaceHandle,
+    CohortPriceSnapshot, DistributionPolicy, MarketplaceHandle, PacingParameters,
 };
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
+use zkp::selection::{SelectionCircuitSummary, SelectionManifestVersion};
 
 fn unavailable() -> Value {
     let mut map = Map::new();
@@ -167,6 +168,173 @@ fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> Value {
     Value::Object(map)
 }
 
+fn pacing_to_value(params: &PacingParameters) -> Value {
+    let mut map = Map::new();
+    let mut status = "ok";
+    let mut reason = None;
+    let eta_p_abs = params.price_eta_p_ppm.abs();
+    if eta_p_abs > 250_000 {
+        status = "error";
+        reason = Some("eta_p_bounds");
+    } else {
+        let eta_i_limit = ((eta_p_abs as f64) * 0.05).round() as i32;
+        if params.price_eta_i_ppm.abs() > eta_i_limit {
+            status = "error";
+            reason = Some("eta_i_bounds");
+        } else if params.price_forgetting_ppm > 1_000_000 {
+            status = "error";
+            reason = Some("forgetting_bounds");
+        }
+    }
+    map.insert("status".into(), Value::String(status.into()));
+    if let Some(reason) = reason {
+        map.insert("reason".into(), Value::String(reason.into()));
+    }
+    map.insert(
+        "price_eta_p_ppm".into(),
+        Value::Number(Number::from(params.price_eta_p_ppm as i64)),
+    );
+    map.insert(
+        "price_eta_i_ppm".into(),
+        Value::Number(Number::from(params.price_eta_i_ppm as i64)),
+    );
+    map.insert(
+        "price_forgetting_ppm".into(),
+        Value::Number(Number::from(params.price_forgetting_ppm)),
+    );
+    map.insert(
+        "target_utilization_ppm".into(),
+        Value::Number(Number::from(params.target_utilization_ppm)),
+    );
+    map.insert(
+        "smoothing_ppm".into(),
+        Value::Number(Number::from(params.smoothing_ppm)),
+    );
+    Value::Object(map)
+}
+
+fn selection_manifest_to_value(
+    version: SelectionManifestVersion,
+    tag: Option<String>,
+    circuits: &[SelectionCircuitSummary],
+) -> Value {
+    let mut map = Map::new();
+    let mut status = "ok";
+    map.insert("epoch".into(), Value::Number(Number::from(version.epoch())));
+    if let Some(tag) = tag {
+        map.insert("tag".into(), Value::String(tag));
+    }
+    let circuit_values: Vec<Value> = circuits
+        .iter()
+        .map(|summary| {
+            let mut entry = Map::new();
+            entry.insert(
+                "circuit_id".into(),
+                Value::String(summary.circuit_id.clone()),
+            );
+            entry.insert(
+                "revision".into(),
+                Value::Number(Number::from(summary.revision)),
+            );
+            entry.insert(
+                "expected_version".into(),
+                Value::Number(Number::from(summary.expected_version)),
+            );
+            entry.insert(
+                "min_proof_len".into(),
+                Value::Number(Number::from(summary.min_proof_len as u64)),
+            );
+            if let Some(protocol) = &summary.expected_protocol {
+                entry.insert("expected_protocol".into(), Value::String(protocol.clone()));
+            }
+            Value::Object(entry)
+        })
+        .collect();
+    map.insert("circuits".into(), Value::Array(circuit_values));
+    if circuits.is_empty() {
+        status = "error";
+        map.insert("reason".into(), Value::String("empty".into()));
+    }
+    map.insert("status".into(), Value::String(status.into()));
+    Value::Object(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pacing_to_value_reports_bounds() {
+        let params = PacingParameters {
+            price_eta_p_ppm: 400_000,
+            price_eta_i_ppm: 0,
+            price_forgetting_ppm: 900_000,
+            target_utilization_ppm: 900_000,
+            smoothing_ppm: 200_000,
+        };
+        let value = pacing_to_value(&params);
+        if let Value::Object(map) = value {
+            assert_eq!(map.get("status").and_then(|v| v.as_str()), Some("error"));
+            assert_eq!(
+                map.get("reason").and_then(|v| v.as_str()),
+                Some("eta_p_bounds")
+            );
+        } else {
+            panic!("pacing_to_value must return an object");
+        }
+    }
+
+    #[test]
+    fn pacing_to_value_reports_eta_i_violation() {
+        let params = PacingParameters {
+            price_eta_p_ppm: 200_000,
+            price_eta_i_ppm: 15_000,
+            price_forgetting_ppm: 100_000,
+            target_utilization_ppm: 900_000,
+            smoothing_ppm: 200_000,
+        };
+        let value = pacing_to_value(&params);
+        let Value::Object(map) = value else {
+            panic!("pacing_to_value must return an object");
+        };
+        assert_eq!(map.get("status").and_then(|v| v.as_str()), Some("error"));
+        assert_eq!(
+            map.get("reason").and_then(|v| v.as_str()),
+            Some("eta_i_bounds")
+        );
+    }
+
+    #[test]
+    fn pacing_to_value_reports_forgetting_violation() {
+        let params = PacingParameters {
+            price_eta_p_ppm: 200_000,
+            price_eta_i_ppm: 5_000,
+            price_forgetting_ppm: 1_500_000,
+            target_utilization_ppm: 900_000,
+            smoothing_ppm: 200_000,
+        };
+        let value = pacing_to_value(&params);
+        let Value::Object(map) = value else {
+            panic!("pacing_to_value must return an object");
+        };
+        assert_eq!(map.get("status").and_then(|v| v.as_str()), Some("error"));
+        assert_eq!(
+            map.get("reason").and_then(|v| v.as_str()),
+            Some("forgetting_bounds")
+        );
+    }
+
+    #[test]
+    fn manifest_to_value_reports_empty_registry() {
+        let value = selection_manifest_to_value(SelectionManifestVersion::default(), None, &[]);
+        let Value::Object(map) = value else {
+            panic!("selection_manifest_to_value must return an object");
+        };
+        assert_eq!(map.get("status").and_then(|v| v.as_str()), Some("error"));
+        assert_eq!(map.get("reason").and_then(|v| v.as_str()), Some("empty"));
+    }
+}
+
 pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
     let Some(handle) = market else {
         return unavailable();
@@ -174,6 +342,7 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
     let campaigns = handle.list_campaigns();
     let distribution = handle.distribution();
     let oracle = handle.oracle();
+    let broker_snapshot = handle.budget_snapshot();
     let mut root = Map::new();
     root.insert("status".into(), Value::String("ok".into()));
     root.insert("distribution".into(), distribution_to_value(distribution));
@@ -187,6 +356,22 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
         Value::Number(Number::from(oracle.it_price_usd_micros)),
     );
     root.insert("oracle".into(), Value::Object(oracle_map));
+    root.insert(
+        "budget_broker".into(),
+        budget_snapshot_to_value(&broker_snapshot),
+    );
+    root.insert(
+        "pacing".into(),
+        pacing_to_value(&handle.pacing_parameters()),
+    );
+    root.insert(
+        "selection_manifest".into(),
+        selection_manifest_to_value(
+            handle.selection_manifest_version(),
+            handle.selection_manifest_tag(),
+            &handle.selection_manifest_summary(),
+        ),
+    );
     let items: Vec<Value> = campaigns.iter().map(campaign_summary_to_value).collect();
     root.insert("campaigns".into(), Value::Array(items));
     let pricing: Vec<Value> = handle
@@ -248,6 +433,18 @@ pub fn budget(market: Option<&MarketplaceHandle>) -> Value {
             root.insert(key, value);
         }
     }
+    root.insert(
+        "pacing".into(),
+        pacing_to_value(&handle.pacing_parameters()),
+    );
+    root.insert(
+        "selection_manifest".into(),
+        selection_manifest_to_value(
+            handle.selection_manifest_version(),
+            handle.selection_manifest_tag(),
+            &handle.selection_manifest_summary(),
+        ),
+    );
     Value::Object(root)
 }
 

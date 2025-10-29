@@ -1,4 +1,25 @@
 # System-Wide Economic Changes
+> **Review (2025-10-29, dawn):** Selection receipts now enforce the truthful floor
+> under a manifest registry, and pacing knobs surface controller health. The
+> embedded manifest still ships with the binary but is installed into a runtime
+> registry guarded by `foundation_lazy::Lazy`; `install_selection_manifest`
+> hand-parses JSON, rejects revision regressions, and only advances the manifest
+> epoch when the descriptor set is monotonic so wallets cannot downgrade circuits.
+> `selection_manifest_version`, `selection_manifest_tag`, and
+> `selection_circuit_summaries()` expose the active descriptors, while
+> `SelectionProofMetadata` threads manifest epoch/tag, transcript domain separator,
+> expected witness commitments, and committee transcript digests into every
+> receipt so settlements prove both welfare clearing and committee co-signature.
+> Rejections still bubble up through
+> `ad_selection_attestation_total{reason=semantics|revision|format|digest}` for
+> dashboards. Pacing parameters—PI gains, forgetting factor, target utilisation,
+> smoothing—remain exported via RPC (`ad_market.inventory`, `ad_market.budget`,
+> `ad_market.list_campaigns`) and now ship a `status`/`reason` pair that flags
+> controller bounds (ηₚ, ηᵢ, forgetting) using the same first-party JSON helpers.
+> The synthetic load scenario (`node/tests/ad_market_synthetic.rs`) drives
+> manifest updates, SNARK attestations (including committee transcripts), pacing
+> status, and broker rollovers under load so failure paths stay covered without
+> third-party harnesses.
 > **Review (2025-10-28, late night):** Budget pacing and selection proofs now
 > persist with first-party codecs. The `BudgetBroker` snapshot serialiser writes
 > κ shading, dual prices, and cohort spend into sled so restarts keep pacing
