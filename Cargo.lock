@@ -10,8 +10,10 @@ dependencies = [
  "foundation_metrics",
  "foundation_serde",
  "foundation_serialization",
+ "rand",
  "sled",
  "sys",
+ "verifier_selection",
  "zkp",
 ]
 
@@ -932,6 +934,18 @@ dependencies = [
  "rand",
  "runtime",
  "sys",
+]
+
+[[package]]
+name = "verifier_selection"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_metrics",
+ "foundation_serde",
+ "foundation_serialization",
+ "rand",
+ "thiserror",
 ]
 
 [[package]]

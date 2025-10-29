@@ -349,6 +349,7 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         provider,
         badges,
         bytes: ack.bytes,
+        ..ImpressionContext::default()
     };
     let key = ReservationKey {
         manifest: ack.manifest,

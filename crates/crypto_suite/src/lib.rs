@@ -12,6 +12,7 @@ pub mod key_derivation;
 pub mod mac;
 pub mod signatures;
 pub mod transactions;
+pub mod vrf;
 pub mod zk;
 
 /// Semantic version of the crypto suite crate for telemetry labeling.

@@ -1,4 +1,11 @@
 # Project Progress Snapshot
+> **Review (2025-10-29, night):** VRF-backed verifier selection and encrypted
+> badge soft intents now gate wallet proofs before settlement. Receipts carry
+> stake snapshots, committee transcripts, and ANN proofs produced exclusively by
+> the new `verifier_selection` crate and `badge::ann` helpers, while the
+> attestation manager validates VRF outputs with first-party BLAKE3 hashing. The
+> budget broker exposes pacing guidance (requested κ, multipliers, shadow prices)
+> through the existing telemetry JSON so shading analytics remain hermetic.
 > **Review (2025-10-29, evening):** Selection manifests now parse deterministically
 > across hot swaps and multi-entry manifests via the manual
 > `parse_manifest_value`/`parse_artifacts_value` helpers, with tests covering order

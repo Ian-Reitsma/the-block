@@ -57,6 +57,31 @@ pub struct BudgetBroker {
     campaigns: HashMap<String, CampaignBudgetState>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct BidShadingGuidance {
+    pub kappa: f64,
+    pub shadow_price: f64,
+    pub dual_price: f64,
+}
+
+impl BidShadingGuidance {
+    pub fn scaling_factor(&self) -> f64 {
+        let base = self.kappa.clamp(0.0, 10.0);
+        if !self.shadow_price.is_finite() || self.shadow_price <= f64::EPSILON {
+            return base;
+        }
+        (base / (1.0 + self.shadow_price)).clamp(0.0, 10.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BidShadingApplication {
+    pub requested_kappa: f64,
+    pub applied_multiplier: f64,
+    pub shadow_price: f64,
+    pub dual_price: f64,
+}
+
 impl BudgetBroker {
     pub fn new(config: BudgetBrokerConfig) -> Self {
         Self {
@@ -125,7 +150,11 @@ impl BudgetBroker {
         self.campaigns.remove(campaign_id);
     }
 
-    pub(crate) fn kappa_for(&mut self, campaign_id: &str, cohort: &CohortKey) -> f64 {
+    pub(crate) fn guidance_for(
+        &mut self,
+        campaign_id: &str,
+        cohort: &CohortKey,
+    ) -> BidShadingGuidance {
         self.ensure_campaign(campaign_id);
         let state = self
             .campaigns
@@ -144,7 +173,18 @@ impl BudgetBroker {
             "campaign" => campaign_id,
             "cohort_hash" => state.cohort_hash(cohort)
         );
-        clamped
+        let guidance = BidShadingGuidance {
+            kappa: clamped,
+            shadow_price: state.dual_price,
+            dual_price: state.dual_price,
+        };
+        gauge!(
+            "ad_budget_shading_multiplier",
+            guidance.scaling_factor(),
+            "campaign" => campaign_id,
+            "cohort_hash" => state.cohort_hash(cohort)
+        );
+        guidance
     }
 
     pub(crate) fn record_reservation(&mut self, campaign_id: &str, cohort: &CohortKey, spend: u64) {
@@ -660,8 +700,9 @@ mod tests {
         assert!(original.remaining_budget < original.total_budget);
 
         let mut restored = BudgetBroker::restore(config.clone(), &snapshot);
-        let kappa = restored.kappa_for("campaign-a", &cohort);
-        assert!(kappa >= 0.0);
+        let guidance = restored.guidance_for("campaign-a", &cohort);
+        assert!(guidance.kappa >= 0.0);
+        assert!(guidance.scaling_factor() >= 0.0);
         restored.record_reservation("campaign-a", &cohort, 100_000);
         let restored_snapshot = restored.snapshot();
         let restored_campaign = restored_snapshot
@@ -692,7 +733,8 @@ mod tests {
         let mut broker = BudgetBroker::new(sample_config());
         let cohort = sample_cohort();
         broker.ensure_registered("cmp-load", 5_000_000);
-        broker.kappa_for("cmp-load", &cohort);
+        let guidance = broker.guidance_for("cmp-load", &cohort);
+        assert!(guidance.scaling_factor() >= 0.0);
         for _ in 0..16 {
             broker.record_reservation("cmp-load", &cohort, 250_000);
         }

@@ -14,6 +14,16 @@ cells while trimming runtime.
 
 ## Highlights
 
+- ✅ VRF-backed verifier committees and ANN badge proofs stay entirely first
+  party. The new `verifier_selection` crate derives committees with
+  `crypto_suite::vrf` outputs, hashes stake snapshots with BLAKE3, and validates
+  receipts without third-party crypto. Soft-intent ANN receipts encrypt badge
+  hashes via `crypto_suite::encryption::symmetric`, and the ad-market guard now
+  verifies them through in-tree helpers while exposing the proofs over existing
+  JSON/telemetry builders. Budget shading guidance surfaces requested κ, shadow
+  prices, and applied multipliers strictly through `BudgetBroker` and
+  `foundation_metrics`, so richer pacing traces land with zero optimisation or
+  serde dependencies.
 - ✅ Dual-token settlement gating, treasury timelines, and readiness deltas stay
   entirely first party. Governance and node crates share hand-written codecs,
   stores, and runtime plumbing for the new `DualTokenSettlementEnabled`
