@@ -154,6 +154,7 @@ fn campaign_budget_snapshot_to_value(snapshot: &CampaignBudgetSnapshot) -> Value
 fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> Value {
     let mut map = Map::new();
     map.insert("config".into(), budget_config_to_value(&snapshot.config));
+    let analytics = ad_market::budget_snapshot_analytics(snapshot);
     map.insert(
         "campaigns".into(),
         Value::Array(
@@ -163,6 +164,134 @@ fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> Value {
                 .map(campaign_budget_snapshot_to_value)
                 .collect(),
         ),
+    );
+    map.insert(
+        "generated_at_micros".into(),
+        Value::Number(Number::from(snapshot.generated_at_micros)),
+    );
+    map.insert(
+        "summary".into(),
+        budget_snapshot_summary_with_analytics(&analytics, &snapshot.config),
+    );
+    map.insert(
+        "pacing".into(),
+        budget_snapshot_pacing(snapshot, &analytics),
+    );
+    Value::Object(map)
+}
+
+fn budget_snapshot_summary_with_analytics(
+    analytics: &ad_market::BudgetBrokerAnalytics,
+    config: &BudgetBrokerConfig,
+) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "campaign_count".into(),
+        Value::Number(Number::from(analytics.campaign_count)),
+    );
+    map.insert(
+        "cohort_count".into(),
+        Value::Number(Number::from(analytics.cohort_count)),
+    );
+    map.insert(
+        "mean_kappa".into(),
+        Value::Number(number_from_f64(analytics.mean_kappa)),
+    );
+    map.insert(
+        "min_kappa".into(),
+        Value::Number(number_from_f64(analytics.min_kappa)),
+    );
+    map.insert(
+        "max_kappa".into(),
+        Value::Number(number_from_f64(analytics.max_kappa)),
+    );
+    map.insert(
+        "mean_smoothed_error".into(),
+        Value::Number(number_from_f64(analytics.mean_smoothed_error)),
+    );
+    map.insert(
+        "max_abs_smoothed_error".into(),
+        Value::Number(number_from_f64(analytics.max_abs_smoothed_error)),
+    );
+    map.insert(
+        "realized_spend_total".into(),
+        Value::Number(number_from_f64(analytics.realized_spend_total)),
+    );
+    map.insert(
+        "epoch_target_total".into(),
+        Value::Number(number_from_f64(analytics.epoch_target_total)),
+    );
+    map.insert(
+        "epoch_spend_total".into(),
+        Value::Number(number_from_f64(analytics.epoch_spend_total)),
+    );
+    map.insert(
+        "dual_price_max".into(),
+        Value::Number(number_from_f64(analytics.dual_price_max)),
+    );
+    map.insert(
+        "config_step_size".into(),
+        Value::Number(number_from_f64(config.step_size)),
+    );
+    map.insert(
+        "config_max_kappa".into(),
+        Value::Number(number_from_f64(config.max_kappa)),
+    );
+    map.insert(
+        "config_smoothing".into(),
+        Value::Number(number_from_f64(config.smoothing)),
+    );
+    Value::Object(map)
+}
+
+fn budget_snapshot_pacing(
+    snapshot: &BudgetBrokerSnapshot,
+    analytics: &ad_market::BudgetBrokerAnalytics,
+) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "step_size".into(),
+        Value::Number(number_from_f64(snapshot.config.step_size)),
+    );
+    map.insert(
+        "max_kappa_config".into(),
+        Value::Number(number_from_f64(snapshot.config.max_kappa)),
+    );
+    map.insert(
+        "smoothing".into(),
+        Value::Number(number_from_f64(snapshot.config.smoothing)),
+    );
+    map.insert(
+        "epochs_per_budget".into(),
+        Value::Number(Number::from(snapshot.config.epochs_per_budget)),
+    );
+    map.insert(
+        "campaign_count".into(),
+        Value::Number(Number::from(analytics.campaign_count)),
+    );
+    map.insert(
+        "cohort_count".into(),
+        Value::Number(Number::from(analytics.cohort_count)),
+    );
+    map.insert(
+        "mean_kappa".into(),
+        Value::Number(number_from_f64(analytics.mean_kappa)),
+    );
+    map.insert(
+        "max_kappa_observed".into(),
+        Value::Number(number_from_f64(analytics.max_kappa)),
+    );
+    map.insert(
+        "mean_smoothed_error".into(),
+        Value::Number(number_from_f64(analytics.mean_smoothed_error)),
+    );
+    map.insert(
+        "max_abs_smoothed_error".into(),
+        Value::Number(number_from_f64(analytics.max_abs_smoothed_error)),
+    );
+    map.insert(
+        "dual_price_max".into(),
+        Value::Number(number_from_f64(analytics.dual_price_max)),
     );
     Value::Object(map)
 }
@@ -241,6 +370,25 @@ pub fn budget(market: Option<&MarketplaceHandle>) -> Value {
         return unavailable();
     };
     let snapshot = handle.budget_snapshot();
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::update_ad_budget_metrics(&snapshot);
+    let mut root = Map::new();
+    root.insert("status".into(), Value::String("ok".into()));
+    if let Value::Object(map) = budget_snapshot_to_value(&snapshot) {
+        for (key, value) in map {
+            root.insert(key, value);
+        }
+    }
+    Value::Object(root)
+}
+
+pub fn broker_state(market: Option<&MarketplaceHandle>) -> Value {
+    let Some(handle) = market else {
+        return unavailable();
+    };
+    let snapshot = handle.budget_snapshot();
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::update_ad_budget_metrics(&snapshot);
     let mut root = Map::new();
     root.insert("status".into(), Value::String("ok".into()));
     if let Value::Object(map) = budget_snapshot_to_value(&snapshot) {

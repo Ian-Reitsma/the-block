@@ -1,0 +1,9 @@
+{
+  "selection_argmax_v1": {
+    "revision": 1,
+    "version": 1,
+    "min_proof_len": 96,
+    "protocol": "groth16",
+    "witness_commitments": 2
+  }
+}

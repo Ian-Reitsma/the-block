@@ -30,6 +30,7 @@ node-data-*/
 demo_logs/
 db
 data/
+!crates/zkp/data/
 node/ban_db/
 node/snapshots/
 formal/.fstar/

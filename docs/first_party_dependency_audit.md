@@ -1,5 +1,18 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-29 update (selection digest enforcement & pacing telemetry):**
+> `SelectionReceipt::validate` now recomputes the commitment hash, proof-bytes
+> digest, and verifying-key digest entirely through the manifest-backed
+> `zkp::selection` helpers so tampered Groth16 payloads or stale keys are rejected
+> without trusting wallet-side metadata. `extract_proof_body_digest` parses the
+> proof envelope manually—no serde derives or external proof toolkits—and unit
+> tests cover proof-bytes and verifying-key mismatches. Ad-market budget snapshots
+> feed a first-party Prometheus bridge (`ad_budget_config_value`,
+> `ad_budget_campaign_*`, `ad_budget_cohort_*`, and the new
+> `ad_budget_summary_value{metric}` series) that store label lifetimes via
+> `HashSet` guards; the RPC handler records the snapshot once and telemetry fans
+> out gauges with zero third-party metrics crates.
+
 > **2025-10-28 update (selection proof metadata & broker snapshots):** Selection
 > commitments now render entirely through handwritten
 > `foundation_serialization::json::Value` maps—wallet receipts hash the raw

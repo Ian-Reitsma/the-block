@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-use zkp::selection::{SelectionProofPublicInputs, SelectionProofVerification};
+use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
 mod attestation;
 mod badge;
@@ -21,8 +21,8 @@ pub use attestation::{
 };
 pub use badge::{BadgeDecision, BadgeGuard, BadgeGuardConfig};
 pub use budget::{
-    BudgetBroker, BudgetBrokerConfig, BudgetBrokerSnapshot, CampaignBudgetSnapshot,
-    CohortBudgetSnapshot, CohortKeySnapshot,
+    BudgetBroker, BudgetBrokerAnalytics, BudgetBrokerConfig, BudgetBrokerSnapshot,
+    CampaignBudgetSnapshot, CohortBudgetSnapshot, CohortKeySnapshot,
 };
 #[cfg(test)]
 mod test_support;
@@ -108,6 +108,10 @@ fn read_f64(map: &JsonMap, key: &str) -> Result<f64, PersistenceError> {
         Some(_) => Err(invalid(format!("{key} must be a floating point number"))),
         None => Err(invalid(format!("missing {key}"))),
     }
+}
+
+fn number_from_f64(value: f64) -> JsonNumber {
+    JsonNumber::from_f64(value).unwrap_or_else(|| JsonNumber::from(0))
 }
 
 fn read_string_vec(map: &JsonMap, key: &str) -> Result<Vec<String>, PersistenceError> {
@@ -786,6 +790,10 @@ pub struct SelectionProofMetadata {
     pub circuit_revision: u16,
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub proof_digest: Vec<u8>,
+    #[serde(default, with = "foundation_serialization::serde_bytes")]
+    pub proof_bytes_digest: Vec<u8>,
+    #[serde(default, with = "foundation_serialization::serde_bytes")]
+    pub verifying_key_digest: Vec<u8>,
     #[serde(default)]
     pub proof_length: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -801,10 +809,26 @@ pub struct SelectionProofMetadata {
 
 impl SelectionProofMetadata {
     fn from_verification(circuit_id: String, verification: SelectionProofVerification) -> Self {
+        let digest = match selection::expected_transcript_digest(
+            &circuit_id,
+            verification.revision,
+            &verification.proof_bytes_digest,
+            &verification.public_inputs,
+        ) {
+            Ok(expected) => {
+                debug_assert_eq!(expected, verification.proof_digest);
+                expected
+            }
+            Err(_) => verification.proof_digest,
+        };
         Self {
             circuit_id: circuit_id.to_lowercase(),
             circuit_revision: verification.revision,
-            proof_digest: verification.proof_digest.to_vec(),
+            proof_digest: digest.to_vec(),
+            proof_bytes_digest: verification.proof_bytes_digest.to_vec(),
+            verifying_key_digest: selection::selection_circuit_artifact(&circuit_id)
+                .map(|artifact| artifact.verifying_key_digest.to_vec())
+                .unwrap_or_default(),
             proof_length: verification.proof_len,
             protocol: verification.protocol,
             witness_commitments: verification
@@ -822,6 +846,24 @@ impl SelectionProofMetadata {
         }
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&self.proof_digest);
+        Some(bytes)
+    }
+
+    fn proof_bytes_digest_array(&self) -> Option<[u8; 32]> {
+        if self.proof_bytes_digest.len() != 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&self.proof_bytes_digest);
+        Some(bytes)
+    }
+
+    fn verifying_key_digest_array(&self) -> Option<[u8; 32]> {
+        if self.verifying_key_digest.len() != 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&self.verifying_key_digest);
         Some(bytes)
     }
 
@@ -954,6 +996,7 @@ pub enum SelectionReceiptError {
         candidate: u64,
         winner: u64,
     },
+    CommitmentSerialization,
     ProofMetadataMissing,
     ProofMetadataMismatch {
         field: &'static str,
@@ -998,6 +1041,9 @@ impl std::fmt::Display for SelectionReceiptError {
                 f,
                 "non-winning candidate quality {candidate} exceeds winner quality {winner}"
             ),
+            SelectionReceiptError::CommitmentSerialization => {
+                write!(f, "unable to encode selection commitment")
+            }
             SelectionReceiptError::ProofMetadataMissing => {
                 write!(f, "missing selection proof metadata for SNARK attestation")
             }
@@ -1014,6 +1060,97 @@ impl std::fmt::Display for SelectionReceiptError {
 impl std::error::Error for SelectionReceiptError {}
 
 impl SelectionReceipt {
+    pub(crate) fn commitment_bytes_raw(&self) -> Result<[u8; 32], foundation_serialization::Error> {
+        let mut candidates_values = Vec::with_capacity(self.candidates.len());
+        for candidate in &self.candidates {
+            let mut candidate_map = JsonMap::new();
+            candidate_map.insert(
+                "campaign_id".into(),
+                JsonValue::String(candidate.campaign_id.clone()),
+            );
+            candidate_map.insert(
+                "creative_id".into(),
+                JsonValue::String(candidate.creative_id.clone()),
+            );
+            candidate_map.insert(
+                "base_bid_usd_micros".into(),
+                JsonValue::from(candidate.base_bid_usd_micros),
+            );
+            candidate_map.insert(
+                "quality_adjusted_bid_usd_micros".into(),
+                JsonValue::from(candidate.quality_adjusted_bid_usd_micros),
+            );
+            candidate_map.insert(
+                "available_budget_usd_micros".into(),
+                JsonValue::from(candidate.available_budget_usd_micros),
+            );
+            candidate_map.insert(
+                "action_rate_ppm".into(),
+                JsonValue::from(candidate.action_rate_ppm),
+            );
+            candidate_map.insert("lift_ppm".into(), JsonValue::from(candidate.lift_ppm));
+            candidate_map.insert(
+                "quality_multiplier".into(),
+                JsonValue::from(candidate.quality_multiplier),
+            );
+            candidate_map.insert(
+                "pacing_kappa".into(),
+                JsonValue::from(candidate.pacing_kappa),
+            );
+            candidates_values.push(JsonValue::Object(candidate_map));
+        }
+        let mut commitment_map = JsonMap::new();
+        commitment_map.insert(
+            "domain".into(),
+            JsonValue::String(self.cohort.domain.clone()),
+        );
+        commitment_map.insert(
+            "provider".into(),
+            self.cohort
+                .provider
+                .as_ref()
+                .map(|value| JsonValue::String(value.clone()))
+                .unwrap_or(JsonValue::Null),
+        );
+        let badge_values = self
+            .cohort
+            .badges
+            .iter()
+            .cloned()
+            .map(JsonValue::String)
+            .collect();
+        commitment_map.insert("badges".into(), JsonValue::Array(badge_values));
+        commitment_map.insert("bytes".into(), JsonValue::from(self.cohort.bytes));
+        commitment_map.insert(
+            "price_per_mib_usd_micros".into(),
+            JsonValue::from(self.cohort.price_per_mib_usd_micros),
+        );
+        commitment_map.insert(
+            "winner_index".into(),
+            JsonValue::from(self.winner_index as u64),
+        );
+        commitment_map.insert(
+            "runner_up_quality_bid_usd_micros".into(),
+            JsonValue::from(self.runner_up_quality_bid_usd_micros),
+        );
+        commitment_map.insert(
+            "clearing_price_usd_micros".into(),
+            JsonValue::from(self.clearing_price_usd_micros),
+        );
+        commitment_map.insert(
+            "resource_floor_usd_micros".into(),
+            JsonValue::from(self.resource_floor_usd_micros),
+        );
+        commitment_map.insert("candidates".into(), JsonValue::Array(candidates_values));
+        let serialized = json::to_vec_value(&JsonValue::Object(commitment_map));
+        Ok(*blake3::hash(&serialized).as_bytes())
+    }
+
+    pub fn commitment_digest(&self) -> Result<[u8; 32], SelectionReceiptError> {
+        self.commitment_bytes_raw()
+            .map_err(|_| SelectionReceiptError::CommitmentSerialization)
+    }
+
     pub fn attestation_kind(&self) -> SelectionAttestationKind {
         match self.attestation {
             Some(SelectionAttestation::Snark { .. }) => SelectionAttestationKind::Snark,
@@ -1137,7 +1274,78 @@ impl SelectionReceipt {
                             field: "candidate_count",
                         });
                     }
-                    if metadata.proof_digest_array().is_none() {
+                    let proof_digest = metadata.proof_digest_array().ok_or(
+                        SelectionReceiptError::ProofMetadataMismatch {
+                            field: "proof_digest",
+                        },
+                    )?;
+                    let proof_bytes_digest = metadata.proof_bytes_digest_array().ok_or(
+                        SelectionReceiptError::ProofMetadataMismatch {
+                            field: "proof_bytes_digest",
+                        },
+                    )?;
+                    let computed_proof_digest = selection::extract_proof_body_digest(proof)
+                        .map_err(|_| SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Snark,
+                            reason: "proof_format",
+                        })?;
+                    if proof_bytes_digest != computed_proof_digest {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "proof_bytes_digest",
+                        });
+                    }
+                    let verifying_key_digest = metadata.verifying_key_digest_array().ok_or(
+                        SelectionReceiptError::ProofMetadataMismatch {
+                            field: "verifying_key_digest",
+                        },
+                    )?;
+                    let expected_verifying_key =
+                        selection::selection_circuit_artifact(&metadata.circuit_id)
+                            .map(|artifact| artifact.verifying_key_digest)
+                            .ok_or(SelectionReceiptError::InvalidAttestation {
+                                kind: SelectionAttestationKind::Snark,
+                                reason: "artifact",
+                            })?;
+                    if verifying_key_digest != expected_verifying_key {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "verifying_key_digest",
+                        });
+                    }
+                    let proof_commitment =
+                        metadata.public_inputs.commitment_array().map_err(|_| {
+                            SelectionReceiptError::ProofMetadataMismatch {
+                                field: "commitment",
+                            }
+                        })?;
+                    let expected_commitment = self.commitment_digest()?;
+                    if proof_commitment != expected_commitment {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "commitment",
+                        });
+                    }
+                    if metadata.proof_length == 0 {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "proof_length",
+                        });
+                    }
+                    if metadata.witness_commitment_arrays().is_none() {
+                        return Err(SelectionReceiptError::ProofMetadataMismatch {
+                            field: "witness_commitments",
+                        });
+                    }
+                    let expected_digest = selection::expected_transcript_digest(
+                        &metadata.circuit_id,
+                        metadata.circuit_revision,
+                        &proof_bytes_digest,
+                        &metadata.public_inputs,
+                    )
+                    .map_err(|_| {
+                        SelectionReceiptError::InvalidAttestation {
+                            kind: SelectionAttestationKind::Snark,
+                            reason: "metadata",
+                        }
+                    })?;
+                    if proof_digest != expected_digest {
                         return Err(SelectionReceiptError::ProofMetadataMismatch {
                             field: "proof_digest",
                         });
@@ -1700,7 +1908,24 @@ fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> JsonValue {
         .map(campaign_budget_snapshot_to_value)
         .collect();
     map.insert("campaigns".into(), JsonValue::Array(campaigns));
+    let analytics = budget_snapshot_analytics(snapshot);
+    map.insert(
+        "generated_at_micros".into(),
+        JsonValue::from(snapshot.generated_at_micros),
+    );
+    map.insert(
+        "summary".into(),
+        analytics_to_value(&analytics, &snapshot.config),
+    );
+    map.insert(
+        "pacing".into(),
+        budget_snapshot_pacing(snapshot, &analytics),
+    );
     JsonValue::Object(map)
+}
+
+pub fn budget_snapshot_analytics(snapshot: &BudgetBrokerSnapshot) -> BudgetBrokerAnalytics {
+    budget::compute_budget_analytics(snapshot)
 }
 
 fn budget_snapshot_from_value(value: &JsonValue) -> Result<BudgetBrokerSnapshot, PersistenceError> {
@@ -1720,10 +1945,110 @@ fn budget_snapshot_from_value(value: &JsonValue) -> Result<BudgetBrokerSnapshot,
             .collect::<Result<Vec<_>, _>>()?,
         _ => return Err(invalid("campaigns must be an array")),
     };
+    let generated_at = map
+        .get("generated_at_micros")
+        .and_then(JsonValue::as_u64)
+        .unwrap_or_default();
     Ok(BudgetBrokerSnapshot {
+        generated_at_micros: generated_at,
         config: budget_broker_config_from_value(config_value)?,
         campaigns,
     })
+}
+
+fn analytics_to_value(analytics: &BudgetBrokerAnalytics, config: &BudgetBrokerConfig) -> JsonValue {
+    let mut summary = JsonMap::new();
+    summary.insert(
+        "campaign_count".into(),
+        JsonValue::from(analytics.campaign_count),
+    );
+    summary.insert(
+        "cohort_count".into(),
+        JsonValue::from(analytics.cohort_count),
+    );
+    summary.insert("mean_kappa".into(), JsonValue::from(analytics.mean_kappa));
+    summary.insert("min_kappa".into(), JsonValue::from(analytics.min_kappa));
+    summary.insert("max_kappa".into(), JsonValue::from(analytics.max_kappa));
+    summary.insert(
+        "mean_smoothed_error".into(),
+        JsonValue::from(analytics.mean_smoothed_error),
+    );
+    summary.insert(
+        "max_abs_smoothed_error".into(),
+        JsonValue::from(analytics.max_abs_smoothed_error),
+    );
+    summary.insert(
+        "realized_spend_total".into(),
+        JsonValue::from(analytics.realized_spend_total),
+    );
+    summary.insert(
+        "epoch_target_total".into(),
+        JsonValue::from(analytics.epoch_target_total),
+    );
+    summary.insert(
+        "epoch_spend_total".into(),
+        JsonValue::from(analytics.epoch_spend_total),
+    );
+    summary.insert(
+        "dual_price_max".into(),
+        JsonValue::from(analytics.dual_price_max),
+    );
+    summary.insert("config_step_size".into(), JsonValue::from(config.step_size));
+    summary.insert("config_max_kappa".into(), JsonValue::from(config.max_kappa));
+    summary.insert("config_smoothing".into(), JsonValue::from(config.smoothing));
+    JsonValue::Object(summary)
+}
+
+fn budget_snapshot_pacing(
+    snapshot: &BudgetBrokerSnapshot,
+    analytics: &BudgetBrokerAnalytics,
+) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "step_size".into(),
+        JsonValue::Number(number_from_f64(snapshot.config.step_size)),
+    );
+    map.insert(
+        "max_kappa_config".into(),
+        JsonValue::Number(number_from_f64(snapshot.config.max_kappa)),
+    );
+    map.insert(
+        "smoothing".into(),
+        JsonValue::Number(number_from_f64(snapshot.config.smoothing)),
+    );
+    map.insert(
+        "epochs_per_budget".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.config.epochs_per_budget)),
+    );
+    map.insert(
+        "campaign_count".into(),
+        JsonValue::Number(JsonNumber::from(analytics.campaign_count)),
+    );
+    map.insert(
+        "cohort_count".into(),
+        JsonValue::Number(JsonNumber::from(analytics.cohort_count)),
+    );
+    map.insert(
+        "mean_kappa".into(),
+        JsonValue::Number(number_from_f64(analytics.mean_kappa)),
+    );
+    map.insert(
+        "max_kappa_observed".into(),
+        JsonValue::Number(number_from_f64(analytics.max_kappa)),
+    );
+    map.insert(
+        "mean_smoothed_error".into(),
+        JsonValue::Number(number_from_f64(analytics.mean_smoothed_error)),
+    );
+    map.insert(
+        "max_abs_smoothed_error".into(),
+        JsonValue::Number(number_from_f64(analytics.max_abs_smoothed_error)),
+    );
+    map.insert(
+        "dual_price_max".into(),
+        JsonValue::Number(number_from_f64(analytics.dual_price_max)),
+    );
+    JsonValue::Object(map)
 }
 
 fn distribution_policy_to_value(policy: &DistributionPolicy) -> JsonValue {
@@ -2981,6 +3306,121 @@ mod tests {
     };
     use sys::tempfile::TempDir;
 
+    const SNARK_CIRCUIT_ID: &str = "selection_argmax_v1";
+
+    fn encode_bytes(bytes: &[u8]) -> String {
+        let mut encoded = String::from("[");
+        for (idx, byte) in bytes.iter().enumerate() {
+            if idx > 0 {
+                encoded.push(',');
+            }
+            use std::fmt::Write;
+            write!(&mut encoded, "{}", byte).expect("write byte");
+        }
+        encoded.push(']');
+        encoded
+    }
+
+    fn build_attested_receipt() -> (SelectionReceipt, SelectionProofMetadata) {
+        let mut receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "example.test".into(),
+                provider: Some("wallet".into()),
+                badges: vec!["badge-a".into(), "badge-b".into()],
+                bytes: BYTES_PER_MIB,
+                price_per_mib_usd_micros: 120,
+            },
+            candidates: vec![
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-snark".into(),
+                    creative_id: "creative-1".into(),
+                    base_bid_usd_micros: 170,
+                    quality_adjusted_bid_usd_micros: 180,
+                    available_budget_usd_micros: 5_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                    pacing_kappa: 1.0,
+                },
+                SelectionCandidateTrace {
+                    campaign_id: "cmp-runner".into(),
+                    creative_id: "creative-2".into(),
+                    base_bid_usd_micros: 140,
+                    quality_adjusted_bid_usd_micros: 140,
+                    available_budget_usd_micros: 5_000,
+                    action_rate_ppm: 0,
+                    lift_ppm: 0,
+                    quality_multiplier: 1.0,
+                    pacing_kappa: 1.0,
+                },
+            ],
+            winner_index: 0,
+            resource_floor_usd_micros: 100,
+            runner_up_quality_bid_usd_micros: 140,
+            clearing_price_usd_micros: 140,
+            attestation: None,
+            proof_metadata: None,
+        };
+        let commitment = receipt
+            .commitment_bytes_raw()
+            .expect("commitment bytes available");
+        let inputs = SelectionProofPublicInputs {
+            commitment: commitment.to_vec(),
+            winner_index: receipt.winner_index as u16,
+            winner_quality_bid_usd_micros: receipt.candidates[0].quality_adjusted_bid_usd_micros,
+            runner_up_quality_bid_usd_micros: receipt.runner_up_quality_bid_usd_micros,
+            resource_floor_usd_micros: receipt.resource_floor_usd_micros,
+            clearing_price_usd_micros: receipt.clearing_price_usd_micros,
+            candidate_count: receipt.candidates.len() as u16,
+        };
+        let proof_bytes = vec![0xBC; 128];
+        let proof_bytes_digest = selection::proof_bytes_digest(&proof_bytes);
+        let transcript = selection::expected_transcript_digest(
+            SNARK_CIRCUIT_ID,
+            1,
+            &proof_bytes_digest,
+            &inputs,
+        )
+        .expect("transcript digest");
+        let commitments_json = format!(
+            "[{},{}]",
+            encode_bytes(&[0x44; 32]),
+            encode_bytes(&[0x77; 32])
+        );
+        let public_inputs_json = format!(
+            "{{\"commitment\":{},\"winner_index\":{},\"winner_quality_bid_usd_micros\":{},\"runner_up_quality_bid_usd_micros\":{},\"resource_floor_usd_micros\":{},\"clearing_price_usd_micros\":{},\"candidate_count\":{}}}",
+            encode_bytes(&inputs.commitment),
+            inputs.winner_index,
+            inputs.winner_quality_bid_usd_micros,
+            inputs.runner_up_quality_bid_usd_micros,
+            inputs.resource_floor_usd_micros,
+            inputs.clearing_price_usd_micros,
+            inputs.candidate_count,
+        );
+        let proof_payload = format!(
+            "{{\"version\":1,\"circuit_revision\":1,\"public_inputs\":{},\"proof\":{{\"protocol\":\"groth16\",\"transcript_digest\":{},\"bytes\":{},\"witness_commitments\":{}}}}}",
+            public_inputs_json,
+            encode_bytes(&transcript),
+            encode_bytes(&proof_bytes),
+            commitments_json,
+        )
+        .into_bytes();
+        let verification = selection::verify_selection_proof(
+            SNARK_CIRCUIT_ID,
+            &proof_payload,
+            &receipt.commitment_digest().expect("commitment digest"),
+        )
+        .expect("proof verifies");
+        let metadata =
+            SelectionProofMetadata::from_verification(SNARK_CIRCUIT_ID.to_string(), verification);
+        receipt.attestation = Some(SelectionAttestation::Snark {
+            proof: proof_payload,
+            circuit_id: SNARK_CIRCUIT_ID.to_string(),
+        });
+        receipt.proof_metadata = Some(metadata.clone());
+        (receipt, metadata)
+    }
+
     fn sample_campaign(id: &str, budget_usd_micros: u64) -> Campaign {
         Campaign {
             id: id.to_string(),
@@ -3462,6 +3902,42 @@ mod tests {
                 declared: 90,
                 computed: 120
             }
+        ));
+    }
+
+    #[test]
+    fn selection_receipt_validation_accepts_snark_attestation() {
+        let (receipt, _) = build_attested_receipt();
+        let insights = receipt.validate().expect("attested receipt valid");
+        assert_eq!(insights.attestation_kind, SelectionAttestationKind::Snark);
+        assert_eq!(insights.winner_index, 0);
+    }
+
+    #[test]
+    fn selection_receipt_validation_rejects_proof_bytes_digest_mismatch() {
+        let (mut receipt, mut metadata) = build_attested_receipt();
+        metadata.proof_bytes_digest[0] ^= 0x01;
+        receipt.proof_metadata = Some(metadata);
+        let err = receipt.validate().expect_err("digest mismatch detected");
+        assert!(matches!(
+            err,
+            SelectionReceiptError::ProofMetadataMismatch { field }
+            if field == "proof_bytes_digest"
+        ));
+    }
+
+    #[test]
+    fn selection_receipt_validation_rejects_verifying_key_mismatch() {
+        let (mut receipt, mut metadata) = build_attested_receipt();
+        metadata.verifying_key_digest[0] ^= 0x01;
+        receipt.proof_metadata = Some(metadata);
+        let err = receipt
+            .validate()
+            .expect_err("verifying key mismatch detected");
+        assert!(matches!(
+            err,
+            SelectionReceiptError::ProofMetadataMismatch { field }
+            if field == "verifying_key_digest"
         ));
     }
 }
