@@ -1,5 +1,29 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-30 update (mesh forwarder & advertiser auth):** The RangeBoost mesh
+> queue gained a first-party forwarder thread that only spawns when
+> `--range-boost`/`TB_MESH_STATIC_PEERS` enables mesh mode, keeping HTTP-only
+> gateways free of background workers while mesh deployments log retries via the
+> existing `diagnostics` facade. The ad marketplace now links against the
+> in-tree `diagnostics` crate to emit those forwarding logs; no third-party
+> logging stack was added. Conversion ingest enforces an
+> `Authorization: Advertiser <account>:<token>` header backed by a
+> campaign-level `conversion_token_hash` (BLAKE3 hex) so uplift observations stay
+> first party end to end—error codes surface missing headers, account mismatches,
+> and invalid tokens without relying on serde/json helpers.
+> **2025-10-30 update (targeting expansion, uplift conversions, mesh queue):**
+> Campaign/creative targeting now serialises geo, device, delivery, and CRM
+> selectors solely through `foundation_serialization` helpers; gateway
+> `ImpressionContext` enrichment, selection traces, and read acknowledgements
+> reuse the same manual JSON paths so no serde backslide accompanies the richer
+> schema. Uplift holdout assignment and conversion ingestion flow through the
+> existing in-house RPC facade—`ad_market.record_conversion` persists sled
+> snapshots with bespoke JSON walkers while integration tests consume only
+> first-party clients. RangeBoost mesh delivery stages eligible creatives via the
+> existing queue and records hop proofs without introducing external mesh
+> toolkits, and the genesis/build stubs rotated to the new ad-settlement hash
+> with compile-time verification still anchored entirely on `hashlayout::BlockEncoder`.
+
 > **2025-11-10 update (Python binding macros & telemetry recorder helpers):**
 > `python_bridge_macros` introduces first-party `#[new]`, `#[getter]`,
 > `#[setter]`, and `#[staticmethod]` attribute stubs so the node’s Python

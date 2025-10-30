@@ -2,7 +2,7 @@ use crate::budget::{
     BidShadingApplication as BudgetBidShadingApplication,
     BidShadingGuidance as BudgetBidShadingGuidance,
 };
-use crypto_suite::hashing::blake3;
+use crypto_suite::{hashing::blake3, hex};
 use foundation_metrics::{gauge, histogram, increment_counter};
 use foundation_serialization::{
     self,
@@ -46,6 +46,7 @@ const TREE_METADATA: &str = "metadata";
 const KEY_DISTRIBUTION: &[u8] = b"distribution";
 const KEY_BUDGET: &[u8] = b"budget";
 const KEY_TOKEN_REMAINDERS: &[u8] = b"token_remainders";
+const KEY_UPLIFT: &[u8] = b"uplift";
 
 pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
@@ -127,6 +128,52 @@ fn read_f64(map: &JsonMap, key: &str) -> Result<f64, PersistenceError> {
 
 fn number_from_f64(value: f64) -> JsonNumber {
     JsonNumber::from_f64(value).unwrap_or_else(|| JsonNumber::from(0))
+}
+
+mod serde_optional_bytes {
+    use foundation_serialization::serde_bytes;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serde_bytes::serialize(bytes, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct OptionalBytes;
+
+        impl<'de> serde::de::Visitor<'de> for OptionalBytes {
+            type Value = Option<Vec<u8>>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an optional byte array")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(None)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                serde_bytes::deserialize(deserializer).map(Some)
+            }
+        }
+
+        deserializer.deserialize_option(OptionalBytes)
+    }
 }
 
 fn read_string_vec(map: &JsonMap, key: &str) -> Result<Vec<String>, PersistenceError> {
@@ -645,9 +692,308 @@ pub struct ReservationKey {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GeoTargeting {
+    #[serde(default)]
+    pub countries: Vec<String>,
+    #[serde(default)]
+    pub regions: Vec<String>,
+    #[serde(default)]
+    pub metros: Vec<String>,
+}
+
+impl GeoTargeting {
+    fn is_empty(&self) -> bool {
+        self.countries.is_empty() && self.regions.is_empty() && self.metros.is_empty()
+    }
+
+    fn matches(&self, ctx: Option<&GeoContext>) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+        let Some(geo) = ctx else {
+            return false;
+        };
+        if !self.countries.is_empty() {
+            let Some(country) = geo.country.as_ref() else {
+                return false;
+            };
+            if !self
+                .countries
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(country))
+            {
+                return false;
+            }
+        }
+        if !self.regions.is_empty() {
+            let Some(region) = geo.region.as_ref() else {
+                return false;
+            };
+            if !self.regions.iter().any(|r| r.eq_ignore_ascii_case(region)) {
+                return false;
+            }
+        }
+        if !self.metros.is_empty() {
+            let Some(metro) = geo.metro.as_ref() else {
+                return false;
+            };
+            if !self.metros.iter().any(|m| m.eq_ignore_ascii_case(metro)) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DeviceTargeting {
+    #[serde(default)]
+    pub os_families: Vec<String>,
+    #[serde(default)]
+    pub device_classes: Vec<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+impl DeviceTargeting {
+    fn is_empty(&self) -> bool {
+        self.os_families.is_empty()
+            && self.device_classes.is_empty()
+            && self.models.is_empty()
+            && self.capabilities.is_empty()
+    }
+
+    fn matches(&self, ctx: Option<&DeviceContext>) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+        let Some(device) = ctx else {
+            return false;
+        };
+        if !self.os_families.is_empty() {
+            let Some(os) = device.os_family.as_ref() else {
+                return false;
+            };
+            if !self
+                .os_families
+                .iter()
+                .any(|family| family.eq_ignore_ascii_case(os))
+            {
+                return false;
+            }
+        }
+        if !self.device_classes.is_empty() {
+            let Some(class) = device.device_class.as_ref() else {
+                return false;
+            };
+            if !self
+                .device_classes
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(class))
+            {
+                return false;
+            }
+        }
+        if !self.models.is_empty() {
+            let Some(model) = device.model.as_ref() else {
+                return false;
+            };
+            if !self.models.iter().any(|m| m.eq_ignore_ascii_case(model)) {
+                return false;
+            }
+        }
+        if !self.capabilities.is_empty() {
+            if device.capabilities.is_empty() {
+                return false;
+            }
+            let caps: HashSet<&str> = device.capabilities.iter().map(String::as_str).collect();
+            if self
+                .capabilities
+                .iter()
+                .any(|required| !caps.contains(required.as_str()))
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CrmListTargeting {
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+impl CrmListTargeting {
+    fn matches(&self, lists: &[String]) -> bool {
+        if self.include.is_empty() && self.exclude.is_empty() {
+            return true;
+        }
+        let inventory: HashSet<&str> = lists.iter().map(String::as_str).collect();
+        if !self.include.is_empty()
+            && self
+                .include
+                .iter()
+                .any(|item| !inventory.contains(item.as_str()))
+        {
+            return false;
+        }
+        if self
+            .exclude
+            .iter()
+            .any(|item| inventory.contains(item.as_str()))
+        {
+            return false;
+        }
+        true
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryChannel {
+    Http,
+    Mesh,
+}
+
+impl Default for DeliveryChannel {
+    fn default() -> Self {
+        DeliveryChannel::Http
+    }
+}
+
+impl DeliveryChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeliveryChannel::Http => "http",
+            DeliveryChannel::Mesh => "mesh",
+        }
+    }
+}
+
+impl std::fmt::Display for DeliveryChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for DeliveryChannel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "http" => Ok(DeliveryChannel::Http),
+            "mesh" => Ok(DeliveryChannel::Mesh),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DeliveryTargeting {
+    #[serde(default)]
+    pub allowed_channels: Vec<DeliveryChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_channel: Option<DeliveryChannel>,
+}
+
+impl DeliveryTargeting {
+    fn allows(&self, channel: DeliveryChannel) -> bool {
+        self.allowed_channels.is_empty() || self.allowed_channels.contains(&channel)
+    }
+
+    fn prefers(&self, channel: DeliveryChannel) -> bool {
+        self.preferred_channel
+            .map(|pref| pref == channel)
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GeoContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metro: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DeviceContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MeshContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hop_proofs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CreativePlacement {
+    #[serde(default)]
+    pub mesh_enabled: bool,
+    #[serde(default)]
+    pub mesh_only: bool,
+    #[serde(default)]
+    pub allowed_channels: Vec<DeliveryChannel>,
+}
+
+impl Default for CreativePlacement {
+    fn default() -> Self {
+        Self {
+            mesh_enabled: false,
+            mesh_only: false,
+            allowed_channels: Vec::new(),
+        }
+    }
+}
+
+impl CreativePlacement {
+    fn allows(&self, channel: DeliveryChannel) -> bool {
+        if !self.allowed_channels.is_empty() && !self.allowed_channels.contains(&channel) {
+            return false;
+        }
+        match channel {
+            DeliveryChannel::Mesh => self.mesh_enabled,
+            DeliveryChannel::Http => !self.mesh_only,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CampaignTargeting {
     pub domains: Vec<String>,
     pub badges: Vec<String>,
+    #[serde(default)]
+    pub geo: GeoTargeting,
+    #[serde(default)]
+    pub device: DeviceTargeting,
+    #[serde(default)]
+    pub crm_lists: CrmListTargeting,
+    #[serde(default)]
+    pub delivery: DeliveryTargeting,
 }
 
 fn default_margin_ppm() -> u32 {
@@ -680,6 +1026,14 @@ pub struct Creative {
     pub domains: Vec<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub metadata: HashMap<String, String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_optional_bytes"
+    )]
+    pub mesh_payload: Option<Vec<u8>>,
+    #[serde(default)]
+    pub placement: CreativePlacement,
 }
 
 impl Creative {
@@ -859,6 +1213,16 @@ pub struct ImpressionContext {
         with = "foundation_serialization::serde_bytes"
     )]
     pub verifier_transcript: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo: Option<GeoContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceContext>,
+    #[serde(default)]
+    pub crm_lists: Vec<String>,
+    #[serde(default)]
+    pub delivery_channel: DeliveryChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<MeshContext>,
 }
 
 #[derive(Clone, Debug)]
@@ -867,12 +1231,16 @@ pub struct MatchOutcome {
     pub creative_id: String,
     pub price_per_mib_usd_micros: u64,
     pub total_usd_micros: u64,
+    pub clearing_price_usd_micros: u64,
     pub resource_floor_usd_micros: u64,
     pub resource_floor_breakdown: ResourceFloorBreakdown,
     pub runner_up_quality_bid_usd_micros: u64,
     pub quality_adjusted_bid_usd_micros: u64,
     pub selection_receipt: SelectionReceipt,
     pub uplift: UpliftEstimate,
+    pub uplift_assignment: UpliftHoldoutAssignment,
+    pub delivery_channel: DeliveryChannel,
+    pub mesh_payload: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -884,6 +1252,14 @@ pub struct SettlementBreakdown {
     pub total_usd_micros: u64,
     pub demand_usd_micros: u64,
     pub resource_floor_usd_micros: u64,
+    #[serde(default)]
+    pub clearing_price_usd_micros: u64,
+    #[serde(default)]
+    pub delivery_channel: DeliveryChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_payload: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_payload_digest: Option<String>,
     #[serde(default)]
     pub resource_floor_breakdown: ResourceFloorBreakdown,
     pub runner_up_quality_bid_usd_micros: u64,
@@ -917,6 +1293,17 @@ pub struct SettlementBreakdown {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConversionEvent {
+    pub campaign_id: String,
+    pub creative_id: String,
+    pub assignment: UpliftHoldoutAssignment,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_usd_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at_micros: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelectionCohortTrace {
     pub domain: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -925,6 +1312,14 @@ pub struct SelectionCohortTrace {
     pub badges: Vec<String>,
     pub bytes: u64,
     pub price_per_mib_usd_micros: u64,
+    #[serde(default)]
+    pub delivery_channel: DeliveryChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_peer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_transport: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_latency_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -957,6 +1352,10 @@ pub struct SelectionCandidateTrace {
     pub uplift_sample_size: u64,
     #[serde(default)]
     pub uplift_ece: f64,
+    #[serde(default)]
+    pub delivery_channel: DeliveryChannel,
+    #[serde(default)]
+    pub preferred_delivery_match: bool,
 }
 
 impl Default for SelectionCandidateTrace {
@@ -980,6 +1379,8 @@ impl Default for SelectionCandidateTrace {
             predicted_propensity: 0.0,
             uplift_sample_size: 0,
             uplift_ece: 0.0,
+            delivery_channel: DeliveryChannel::Http,
+            preferred_delivery_match: false,
         }
     }
 }
@@ -1179,6 +1580,8 @@ pub struct SelectionReceipt {
     pub badge_soft_intent: Option<badge::ann::SoftIntentReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badge_soft_intent_snapshot: Option<badge::ann::WalletAnnIndexSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uplift_assignment: Option<UpliftHoldoutAssignment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1399,6 +1802,14 @@ impl SelectionReceipt {
                 JsonValue::from(candidate.uplift_sample_size),
             );
             candidate_map.insert("uplift_ece".into(), JsonValue::from(candidate.uplift_ece));
+            candidate_map.insert(
+                "delivery_channel".into(),
+                JsonValue::String(candidate.delivery_channel.as_str().to_string()),
+            );
+            candidate_map.insert(
+                "preferred_delivery_match".into(),
+                JsonValue::Bool(candidate.preferred_delivery_match),
+            );
             candidates_values.push(JsonValue::Object(candidate_map));
         }
         let mut commitment_map = JsonMap::new();
@@ -1428,6 +1839,33 @@ impl SelectionReceipt {
             JsonValue::from(self.cohort.price_per_mib_usd_micros),
         );
         commitment_map.insert(
+            "delivery_channel".into(),
+            JsonValue::String(self.cohort.delivery_channel.as_str().to_string()),
+        );
+        commitment_map.insert(
+            "mesh_peer".into(),
+            self.cohort
+                .mesh_peer
+                .as_ref()
+                .map(|value| JsonValue::String(value.clone()))
+                .unwrap_or(JsonValue::Null),
+        );
+        commitment_map.insert(
+            "mesh_transport".into(),
+            self.cohort
+                .mesh_transport
+                .as_ref()
+                .map(|value| JsonValue::String(value.clone()))
+                .unwrap_or(JsonValue::Null),
+        );
+        commitment_map.insert(
+            "mesh_latency_ms".into(),
+            self.cohort
+                .mesh_latency_ms
+                .map(JsonValue::from)
+                .unwrap_or(JsonValue::Null),
+        );
+        commitment_map.insert(
             "winner_index".into(),
             JsonValue::from(self.winner_index as u64),
         );
@@ -1444,6 +1882,20 @@ impl SelectionReceipt {
             JsonValue::from(self.resource_floor_usd_micros),
         );
         commitment_map.insert("candidates".into(), JsonValue::Array(candidates_values));
+        if let Some(assignment) = &self.uplift_assignment {
+            commitment_map.insert(
+                "uplift_assignment_fold".into(),
+                JsonValue::from(assignment.fold as u64),
+            );
+            commitment_map.insert(
+                "uplift_assignment_in_holdout".into(),
+                JsonValue::Bool(assignment.in_holdout),
+            );
+            commitment_map.insert(
+                "uplift_assignment_propensity".into(),
+                JsonValue::Number(number_from_f64(assignment.propensity)),
+            );
+        }
         let serialized = json::to_vec_value(&JsonValue::Object(commitment_map));
         Ok(*blake3::hash(&serialized).as_bytes())
     }
@@ -1741,6 +2193,7 @@ pub struct CohortPriceSnapshot {
 pub trait Marketplace: Send + Sync {
     fn register_campaign(&self, campaign: Campaign) -> Result<(), MarketplaceError>;
     fn list_campaigns(&self) -> Vec<CampaignSummary>;
+    fn campaign(&self, id: &str) -> Option<Campaign>;
     fn reserve_impression(
         &self,
         key: ReservationKey,
@@ -1754,6 +2207,7 @@ pub trait Marketplace: Send + Sync {
     fn oracle(&self) -> TokenOracle;
     fn cohort_prices(&self) -> Vec<CohortPriceSnapshot>;
     fn budget_broker(&self) -> &RwLock<BudgetBroker>;
+    fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError>;
 
     fn budget_broker_config(&self) -> BudgetBrokerConfig {
         self.budget_broker().read().unwrap().config().clone()
@@ -1778,6 +2232,7 @@ struct ReservationState {
     bytes: u64,
     price_per_mib_usd_micros: u64,
     total_usd_micros: u64,
+    clearing_price_usd_micros: u64,
     demand_usd_micros: u64,
     resource_floor_usd_micros: u64,
     resource_floor_breakdown: ResourceFloorBreakdown,
@@ -1786,6 +2241,9 @@ struct ReservationState {
     cohort: CohortKey,
     selection_receipt: SelectionReceipt,
     uplift: UpliftEstimate,
+    assignment: UpliftHoldoutAssignment,
+    delivery_channel: DeliveryChannel,
+    mesh_payload: Option<Vec<u8>>,
 }
 
 pub struct InMemoryMarketplace {
@@ -1827,6 +2285,7 @@ pub struct SledMarketplace {
 pub enum MarketplaceError {
     DuplicateCampaign,
     UnknownCampaign,
+    UnknownCreative,
     PersistenceFailure(String),
 }
 
@@ -1887,6 +2346,13 @@ fn creative_to_value(creative: &Creative) -> JsonValue {
         metadata.insert(key.clone(), JsonValue::String(value.clone()));
     }
     map.insert("metadata".into(), JsonValue::Object(metadata));
+    if let Some(payload) = creative.mesh_payload.as_ref() {
+        map.insert(
+            "mesh_payload".into(),
+            JsonValue::String(hex::encode(payload)),
+        );
+    }
+    map.insert("placement".into(), placement_to_value(&creative.placement));
     JsonValue::Object(map)
 }
 
@@ -1919,6 +2385,76 @@ fn creative_from_value(value: &JsonValue) -> Result<Creative, PersistenceError> 
         badges: read_string_vec(obj, "badges")?,
         domains: read_string_vec(obj, "domains")?,
         metadata: read_string_map(obj, "metadata")?,
+        mesh_payload: obj
+            .get("mesh_payload")
+            .map(|value| match value.as_str() {
+                Some(hex_str) => {
+                    hex::decode(hex_str).map_err(|_| invalid("mesh_payload must be hex encoded"))
+                }
+                None => Err(invalid("mesh_payload must be a string")),
+            })
+            .transpose()?,
+        placement: obj
+            .get("placement")
+            .map(placement_from_value)
+            .transpose()?
+            .unwrap_or_default(),
+    })
+}
+
+fn placement_to_value(placement: &CreativePlacement) -> JsonValue {
+    let mut obj = JsonMap::new();
+    obj.insert(
+        "mesh_enabled".into(),
+        JsonValue::Bool(placement.mesh_enabled),
+    );
+    obj.insert("mesh_only".into(), JsonValue::Bool(placement.mesh_only));
+    if !placement.allowed_channels.is_empty() {
+        obj.insert(
+            "allowed_channels".into(),
+            JsonValue::Array(
+                placement
+                    .allowed_channels
+                    .iter()
+                    .map(|channel| JsonValue::String(channel.as_str().to_string()))
+                    .collect(),
+            ),
+        );
+    }
+    JsonValue::Object(obj)
+}
+
+fn placement_from_value(value: &JsonValue) -> Result<CreativePlacement, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("placement must be an object"))?;
+    let mesh_enabled = obj
+        .get("mesh_enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    let mesh_only = obj
+        .get("mesh_only")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    let mut allowed_channels = Vec::new();
+    if let Some(entry) = obj.get("allowed_channels") {
+        let arr = entry
+            .as_array()
+            .ok_or_else(|| invalid("placement.allowed_channels must be an array"))?;
+        for value in arr {
+            let name = value
+                .as_str()
+                .ok_or_else(|| invalid("placement.allowed_channels entries must be strings"))?;
+            let channel = name
+                .parse::<DeliveryChannel>()
+                .map_err(|_| invalid("placement.allowed_channels entry invalid"))?;
+            allowed_channels.push(channel);
+        }
+    }
+    Ok(CreativePlacement {
+        mesh_enabled,
+        mesh_only,
+        allowed_channels,
     })
 }
 
@@ -1946,6 +2482,29 @@ fn targeting_to_value(targeting: &CampaignTargeting) -> JsonValue {
                 .collect(),
         ),
     );
+    if !targeting.geo.is_empty() {
+        map.insert("geo".into(), geo_targeting_to_value(&targeting.geo));
+    }
+    if !targeting.device.is_empty() {
+        map.insert(
+            "device".into(),
+            device_targeting_to_value(&targeting.device),
+        );
+    }
+    if !(targeting.crm_lists.include.is_empty() && targeting.crm_lists.exclude.is_empty()) {
+        map.insert(
+            "crm_lists".into(),
+            crm_targeting_to_value(&targeting.crm_lists),
+        );
+    }
+    if !targeting.delivery.allowed_channels.is_empty()
+        || targeting.delivery.preferred_channel.is_some()
+    {
+        map.insert(
+            "delivery".into(),
+            delivery_targeting_to_value(&targeting.delivery),
+        );
+    }
     JsonValue::Object(map)
 }
 
@@ -1956,6 +2515,245 @@ fn targeting_from_value(value: &JsonValue) -> Result<CampaignTargeting, Persiste
     Ok(CampaignTargeting {
         domains: read_string_vec(obj, "domains")?,
         badges: read_string_vec(obj, "badges")?,
+        geo: obj
+            .get("geo")
+            .map(geo_targeting_from_value)
+            .transpose()?
+            .unwrap_or_default(),
+        device: obj
+            .get("device")
+            .map(device_targeting_from_value)
+            .transpose()?
+            .unwrap_or_default(),
+        crm_lists: obj
+            .get("crm_lists")
+            .map(crm_targeting_from_value)
+            .transpose()?
+            .unwrap_or_default(),
+        delivery: obj
+            .get("delivery")
+            .map(delivery_targeting_from_value)
+            .transpose()?
+            .unwrap_or_default(),
+    })
+}
+
+fn geo_targeting_to_value(targeting: &GeoTargeting) -> JsonValue {
+    let mut obj = JsonMap::new();
+    if !targeting.countries.is_empty() {
+        obj.insert(
+            "countries".into(),
+            JsonValue::Array(
+                targeting
+                    .countries
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.regions.is_empty() {
+        obj.insert(
+            "regions".into(),
+            JsonValue::Array(
+                targeting
+                    .regions
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.metros.is_empty() {
+        obj.insert(
+            "metros".into(),
+            JsonValue::Array(
+                targeting
+                    .metros
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    JsonValue::Object(obj)
+}
+
+fn geo_targeting_from_value(value: &JsonValue) -> Result<GeoTargeting, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("geo targeting must be an object"))?;
+    Ok(GeoTargeting {
+        countries: read_string_vec(obj, "countries")?,
+        regions: read_string_vec(obj, "regions")?,
+        metros: read_string_vec(obj, "metros")?,
+    })
+}
+
+fn device_targeting_to_value(targeting: &DeviceTargeting) -> JsonValue {
+    let mut obj = JsonMap::new();
+    if !targeting.os_families.is_empty() {
+        obj.insert(
+            "os_families".into(),
+            JsonValue::Array(
+                targeting
+                    .os_families
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.device_classes.is_empty() {
+        obj.insert(
+            "device_classes".into(),
+            JsonValue::Array(
+                targeting
+                    .device_classes
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.models.is_empty() {
+        obj.insert(
+            "models".into(),
+            JsonValue::Array(
+                targeting
+                    .models
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.capabilities.is_empty() {
+        obj.insert(
+            "capabilities".into(),
+            JsonValue::Array(
+                targeting
+                    .capabilities
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    JsonValue::Object(obj)
+}
+
+fn device_targeting_from_value(value: &JsonValue) -> Result<DeviceTargeting, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("device targeting must be an object"))?;
+    Ok(DeviceTargeting {
+        os_families: read_string_vec(obj, "os_families")?,
+        device_classes: read_string_vec(obj, "device_classes")?,
+        models: read_string_vec(obj, "models")?,
+        capabilities: read_string_vec(obj, "capabilities")?,
+    })
+}
+
+fn crm_targeting_to_value(targeting: &CrmListTargeting) -> JsonValue {
+    let mut obj = JsonMap::new();
+    if !targeting.include.is_empty() {
+        obj.insert(
+            "include".into(),
+            JsonValue::Array(
+                targeting
+                    .include
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !targeting.exclude.is_empty() {
+        obj.insert(
+            "exclude".into(),
+            JsonValue::Array(
+                targeting
+                    .exclude
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
+        );
+    }
+    JsonValue::Object(obj)
+}
+
+fn crm_targeting_from_value(value: &JsonValue) -> Result<CrmListTargeting, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("crm targeting must be an object"))?;
+    Ok(CrmListTargeting {
+        include: read_string_vec(obj, "include")?,
+        exclude: read_string_vec(obj, "exclude")?,
+    })
+}
+
+fn delivery_targeting_to_value(targeting: &DeliveryTargeting) -> JsonValue {
+    let mut obj = JsonMap::new();
+    if !targeting.allowed_channels.is_empty() {
+        obj.insert(
+            "allowed_channels".into(),
+            JsonValue::Array(
+                targeting
+                    .allowed_channels
+                    .iter()
+                    .map(|channel| JsonValue::String(channel.as_str().to_string()))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(preferred) = targeting.preferred_channel {
+        obj.insert(
+            "preferred_channel".into(),
+            JsonValue::String(preferred.as_str().to_string()),
+        );
+    }
+    JsonValue::Object(obj)
+}
+
+fn delivery_targeting_from_value(value: &JsonValue) -> Result<DeliveryTargeting, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("delivery targeting must be an object"))?;
+    let mut allowed_channels = Vec::new();
+    if let Some(entry) = obj.get("allowed_channels") {
+        let arr = entry
+            .as_array()
+            .ok_or_else(|| invalid("delivery.allowed_channels must be an array"))?;
+        for value in arr {
+            let name = value
+                .as_str()
+                .ok_or_else(|| invalid("delivery.allowed_channels entries must be strings"))?;
+            let channel = name
+                .parse::<DeliveryChannel>()
+                .map_err(|_| invalid("delivery.allowed_channels entry invalid"))?;
+            allowed_channels.push(channel);
+        }
+    }
+    let preferred_channel = obj
+        .get("preferred_channel")
+        .and_then(JsonValue::as_str)
+        .map(|value| value.parse::<DeliveryChannel>())
+        .transpose()
+        .map_err(|_| invalid("delivery.preferred_channel invalid"))?;
+    Ok(DeliveryTargeting {
+        allowed_channels,
+        preferred_channel,
     })
 }
 
@@ -2070,6 +2868,146 @@ fn serialize_budget_snapshot(snapshot: &BudgetBrokerSnapshot) -> Result<Vec<u8>,
 fn deserialize_budget_snapshot(bytes: &[u8]) -> Result<BudgetBrokerSnapshot, PersistenceError> {
     let value = json::value_from_slice(bytes)?;
     budget_snapshot_from_value(&value)
+}
+
+fn uplift_fold_snapshot_to_value(fold: &uplift::UpliftFoldSnapshot) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "fold_index".into(),
+        JsonValue::Number(JsonNumber::from(fold.fold_index)),
+    );
+    map.insert(
+        "treatment_count".into(),
+        JsonValue::Number(JsonNumber::from(fold.treatment_count)),
+    );
+    map.insert(
+        "treatment_success".into(),
+        JsonValue::Number(JsonNumber::from(fold.treatment_success)),
+    );
+    map.insert(
+        "control_count".into(),
+        JsonValue::Number(JsonNumber::from(fold.control_count)),
+    );
+    map.insert(
+        "control_success".into(),
+        JsonValue::Number(JsonNumber::from(fold.control_success)),
+    );
+    JsonValue::Object(map)
+}
+
+fn uplift_fold_snapshot_from_value(
+    value: &JsonValue,
+) -> Result<uplift::UpliftFoldSnapshot, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("uplift fold must be an object"))?;
+    Ok(uplift::UpliftFoldSnapshot {
+        fold_index: read_u64(obj, "fold_index")? as u8,
+        treatment_count: read_u64(obj, "treatment_count")?,
+        treatment_success: read_u64(obj, "treatment_success")?,
+        control_count: read_u64(obj, "control_count")?,
+        control_success: read_u64(obj, "control_success")?,
+    })
+}
+
+fn uplift_creative_snapshot_to_value(snapshot: &uplift::UpliftCreativeSnapshot) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert("key".into(), JsonValue::String(snapshot.key.clone()));
+    map.insert(
+        "treatment_count".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.treatment_count)),
+    );
+    map.insert(
+        "treatment_success".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.treatment_success)),
+    );
+    map.insert(
+        "control_count".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.control_count)),
+    );
+    map.insert(
+        "control_success".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.control_success)),
+    );
+    if !snapshot.folds.is_empty() {
+        let folds: Vec<JsonValue> = snapshot
+            .folds
+            .iter()
+            .map(uplift_fold_snapshot_to_value)
+            .collect();
+        map.insert("folds".into(), JsonValue::Array(folds));
+    }
+    JsonValue::Object(map)
+}
+
+fn uplift_creative_snapshot_from_value(
+    value: &JsonValue,
+) -> Result<uplift::UpliftCreativeSnapshot, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("uplift creative must be an object"))?;
+    let folds = match obj.get("folds") {
+        Some(JsonValue::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(uplift_fold_snapshot_from_value(item)?);
+            }
+            out
+        }
+        Some(_) => return Err(invalid("uplift creative folds must be an array")),
+        None => Vec::new(),
+    };
+    Ok(uplift::UpliftCreativeSnapshot {
+        key: read_string(obj, "key")?,
+        treatment_count: read_u64(obj, "treatment_count")?,
+        treatment_success: read_u64(obj, "treatment_success")?,
+        control_count: read_u64(obj, "control_count")?,
+        control_success: read_u64(obj, "control_success")?,
+        folds,
+    })
+}
+
+fn uplift_snapshot_to_value(snapshot: &UpliftSnapshot) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "generated_at_micros".into(),
+        JsonValue::Number(JsonNumber::from(snapshot.generated_at_micros)),
+    );
+    let creatives: Vec<JsonValue> = snapshot
+        .creatives
+        .iter()
+        .map(uplift_creative_snapshot_to_value)
+        .collect();
+    map.insert("creatives".into(), JsonValue::Array(creatives));
+    JsonValue::Object(map)
+}
+
+fn uplift_snapshot_from_value(value: &JsonValue) -> Result<UpliftSnapshot, PersistenceError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid("uplift snapshot must be an object"))?;
+    let creatives_value = obj
+        .get("creatives")
+        .ok_or_else(|| invalid("uplift snapshot missing creatives"))?;
+    let creatives = creatives_value
+        .as_array()
+        .ok_or_else(|| invalid("uplift snapshot creatives must be an array"))?
+        .iter()
+        .map(uplift_creative_snapshot_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(UpliftSnapshot {
+        generated_at_micros: read_u64(obj, "generated_at_micros")?,
+        creatives,
+    })
+}
+
+fn serialize_uplift_snapshot(snapshot: &UpliftSnapshot) -> Result<Vec<u8>, PersistenceError> {
+    Ok(json::to_vec_value(&uplift_snapshot_to_value(snapshot)))
+}
+
+fn deserialize_uplift_snapshot(bytes: &[u8]) -> Result<UpliftSnapshot, PersistenceError> {
+    let value = json::value_from_slice(bytes)?;
+    uplift_snapshot_from_value(&value)
 }
 
 fn serialize_token_remainders(ledger: &TokenRemainderLedger) -> Result<Vec<u8>, PersistenceError> {
@@ -2598,6 +3536,18 @@ impl InMemoryMarketplace {
         if !targeting.domains.is_empty() && !targeting.domains.iter().any(|d| d == &ctx.domain) {
             return false;
         }
+        if !targeting.geo.matches(ctx.geo.as_ref()) {
+            return false;
+        }
+        if !targeting.device.matches(ctx.device.as_ref()) {
+            return false;
+        }
+        if !targeting.crm_lists.matches(&ctx.crm_lists) {
+            return false;
+        }
+        if !targeting.delivery.allows(ctx.delivery_channel) {
+            return false;
+        }
         if !targeting.badges.is_empty() {
             let required = match self
                 .badge_guard
@@ -2628,6 +3578,9 @@ impl InMemoryMarketplace {
 
     fn matches_creative(&self, creative: &Creative, ctx: &ImpressionContext) -> bool {
         if !creative.domains.is_empty() && !creative.domains.iter().any(|d| d == &ctx.domain) {
+            return false;
+        }
+        if !creative.placement.allows(ctx.delivery_channel) {
             return false;
         }
         if !creative.badges.is_empty() {
@@ -2707,8 +3660,40 @@ impl Marketplace for InMemoryMarketplace {
             .collect()
     }
 
+    fn campaign(&self, id: &str) -> Option<Campaign> {
+        let guard = self.campaigns.read().ok()?;
+        guard.get(id).map(|state| state.campaign.clone())
+    }
+
     fn budget_broker(&self) -> &RwLock<BudgetBroker> {
         &self.budget_broker
+    }
+
+    fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError> {
+        {
+            let campaigns = self.campaigns.read().unwrap();
+            let state = campaigns
+                .get(&event.campaign_id)
+                .ok_or(MarketplaceError::UnknownCampaign)?;
+            if !state
+                .campaign
+                .creatives
+                .iter()
+                .any(|creative| creative.id == event.creative_id)
+            {
+                return Err(MarketplaceError::UnknownCreative);
+            }
+        }
+        {
+            let mut estimator = self.uplift.write().unwrap();
+            estimator.record_observation(
+                &event.campaign_id,
+                &event.creative_id,
+                &event.assignment,
+                true,
+            );
+        }
+        Ok(())
     }
 
     fn reserve_impression(
@@ -2756,6 +3741,8 @@ impl Marketplace for InMemoryMarketplace {
         struct Candidate {
             trace: SelectionCandidateTrace,
             uplift: UpliftEstimate,
+            preference_match: bool,
+            mesh_payload: Option<Vec<u8>>,
         }
 
         let campaigns = self.campaigns.read().unwrap();
@@ -2792,6 +3779,11 @@ impl Marketplace for InMemoryMarketplace {
                 {
                     continue;
                 }
+                let preference_match = state
+                    .campaign
+                    .targeting
+                    .delivery
+                    .prefers(ctx.delivery_channel);
                 let trace = SelectionCandidateTrace {
                     campaign_id: state.campaign.id.clone(),
                     creative_id: creative.id.clone(),
@@ -2811,6 +3803,8 @@ impl Marketplace for InMemoryMarketplace {
                     predicted_propensity: uplift_estimate.propensity,
                     uplift_sample_size: uplift_estimate.sample_size,
                     uplift_ece: uplift_estimate.ece,
+                    delivery_channel: ctx.delivery_channel,
+                    preferred_delivery_match: preference_match,
                 };
                 let idx = candidates.len();
                 if let Some(best) = best_index {
@@ -2823,6 +3817,14 @@ impl Marketplace for InMemoryMarketplace {
                                 > best_trace.available_budget_usd_micros)
                     {
                         best_index = Some(idx);
+                    } else if trace.quality_adjusted_bid_usd_micros
+                        == best_trace.quality_adjusted_bid_usd_micros
+                        && trace.available_budget_usd_micros
+                            == best_trace.available_budget_usd_micros
+                        && preference_match
+                        && !candidates[best].preference_match
+                    {
+                        best_index = Some(idx);
                     }
                 } else {
                     best_index = Some(idx);
@@ -2830,6 +3832,8 @@ impl Marketplace for InMemoryMarketplace {
                 candidates.push(Candidate {
                     trace,
                     uplift: uplift_estimate,
+                    preference_match,
+                    mesh_payload: creative.mesh_payload.clone(),
                 });
             }
         }
@@ -2852,12 +3856,32 @@ impl Marketplace for InMemoryMarketplace {
             .collect();
         let winner_trace = receipt_candidates[winner_index].clone();
         let winner_uplift = candidates[winner_index].uplift.clone();
+        let winner_mesh_payload = candidates[winner_index].mesh_payload.clone();
         let clearing_price = resource_floor
             .max(runner_up_quality)
             .min(winner_trace.quality_adjusted_bid_usd_micros);
         if clearing_price == 0 {
             return None;
         }
+        let mut assignment_seed = Vec::new();
+        assignment_seed.extend_from_slice(&key.discriminator);
+        assignment_seed.extend_from_slice(ctx.domain.as_bytes());
+        if let Some(provider_id) = ctx.provider.as_ref() {
+            assignment_seed.extend_from_slice(provider_id.as_bytes());
+        }
+        let assignment = {
+            let estimator = self.uplift.read().unwrap();
+            estimator.assign_holdout(
+                &winner_trace.campaign_id,
+                &winner_trace.creative_id,
+                &assignment_seed,
+            )
+        };
+        let effective_total_usd_micros = if assignment.in_holdout {
+            0
+        } else {
+            clearing_price
+        };
         let (soft_intent_receipt, soft_intent_snapshot) =
             soft_intent_artifacts(&ctx.badges, &ctx.soft_intent);
         let mut receipt = SelectionReceipt {
@@ -2867,6 +3891,10 @@ impl Marketplace for InMemoryMarketplace {
                 badges: ctx.badges.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
+                delivery_channel: ctx.delivery_channel,
+                mesh_peer: ctx.mesh.as_ref().and_then(|m| m.peer_id.clone()),
+                mesh_transport: ctx.mesh.as_ref().and_then(|m| m.transport.clone()),
+                mesh_latency_ms: ctx.mesh.as_ref().and_then(|m| m.latency_ms),
             },
             candidates: receipt_candidates,
             winner_index,
@@ -2881,6 +3909,7 @@ impl Marketplace for InMemoryMarketplace {
             verifier_transcript: ctx.verifier_transcript.clone(),
             badge_soft_intent: soft_intent_receipt,
             badge_soft_intent_snapshot: soft_intent_snapshot,
+            uplift_assignment: Some(assignment.clone()),
         };
         let (attestation, satisfaction, metadata) = self
             .attestation
@@ -2906,13 +3935,15 @@ impl Marketplace for InMemoryMarketplace {
         let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
             return None;
         };
-        if state.remaining_budget_usd_micros < clearing_price {
-            return None;
+        if !assignment.in_holdout {
+            if state.remaining_budget_usd_micros < clearing_price {
+                return None;
+            }
+            state.remaining_budget_usd_micros -= clearing_price;
+            state.reserved_budget_usd_micros = state
+                .reserved_budget_usd_micros
+                .saturating_add(clearing_price);
         }
-        state.remaining_budget_usd_micros -= clearing_price;
-        state.reserved_budget_usd_micros = state
-            .reserved_budget_usd_micros
-            .saturating_add(clearing_price);
         reservations.insert(
             key,
             ReservationState {
@@ -2920,7 +3951,8 @@ impl Marketplace for InMemoryMarketplace {
                 creative_id: winner_trace.creative_id.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
-                total_usd_micros: clearing_price,
+                total_usd_micros: effective_total_usd_micros,
+                clearing_price_usd_micros: clearing_price,
                 demand_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
                 resource_floor_usd_micros: resource_floor,
                 resource_floor_breakdown: floor_breakdown.clone(),
@@ -2929,19 +3961,26 @@ impl Marketplace for InMemoryMarketplace {
                 cohort,
                 selection_receipt: receipt.clone(),
                 uplift: winner_uplift.clone(),
+                assignment: assignment.clone(),
+                delivery_channel: ctx.delivery_channel,
+                mesh_payload: winner_mesh_payload.clone(),
             },
         );
         Some(MatchOutcome {
             campaign_id: winner_trace.campaign_id,
             creative_id: winner_trace.creative_id,
             price_per_mib_usd_micros: price_per_mib,
-            total_usd_micros: clearing_price,
+            total_usd_micros: effective_total_usd_micros,
+            clearing_price_usd_micros: clearing_price,
             resource_floor_usd_micros: resource_floor,
             resource_floor_breakdown: floor_breakdown,
             runner_up_quality_bid_usd_micros: runner_up_quality,
             quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
             selection_receipt: receipt,
             uplift: winner_uplift,
+            uplift_assignment: assignment,
+            delivery_channel: ctx.delivery_channel,
+            mesh_payload: winner_mesh_payload,
         })
     }
 
@@ -2950,6 +3989,27 @@ impl Marketplace for InMemoryMarketplace {
             let mut guard = self.reservations.write().unwrap();
             guard.remove(key)?
         };
+        let assignment = reservation.assignment.clone();
+        {
+            let mut estimator = self.uplift.write().unwrap();
+            estimator.record_observation(
+                &reservation.campaign_id,
+                &reservation.creative_id,
+                &assignment,
+                false,
+            );
+        }
+        {
+            let mut consumed = self.consumed_reservations.write().unwrap();
+            consumed.insert(*key);
+        }
+        if assignment.in_holdout {
+            return None;
+        }
+        let mesh_payload_digest = reservation
+            .mesh_payload
+            .as_ref()
+            .map(|payload| hex::encode(blake3::hash(payload).as_bytes()));
         let mut campaigns = self.campaigns.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
         if state.reserved_budget_usd_micros < reservation.total_usd_micros {
@@ -2958,10 +4018,6 @@ impl Marketplace for InMemoryMarketplace {
         state.reserved_budget_usd_micros = state
             .reserved_budget_usd_micros
             .saturating_sub(reservation.total_usd_micros);
-        {
-            let mut consumed = self.consumed_reservations.write().unwrap();
-            consumed.insert(*key);
-        }
         drop(campaigns);
         {
             let mut pricing = self.pricing.write().unwrap();
@@ -2987,6 +4043,22 @@ impl Marketplace for InMemoryMarketplace {
         if let Err(err) = self.persist_token_remainders() {
             eprintln!("failed to persist token remainders: {err}");
         }
+        let mesh_bytes = reservation
+            .mesh_payload
+            .as_ref()
+            .map(|payload| payload.len())
+            .unwrap_or(0);
+        let mesh_digest_label = mesh_payload_digest.as_deref().unwrap_or("none");
+        diagnostics::log::info!(format!(
+            "ad_reservation_commit campaign={} creative={} channel={} clearing_price={} mesh_bytes={} mesh_digest={}",
+            reservation.campaign_id,
+            reservation.creative_id,
+            reservation.delivery_channel.as_str(),
+            reservation.clearing_price_usd_micros,
+            mesh_bytes,
+            mesh_digest_label
+        ));
+        let mesh_payload = reservation.mesh_payload.clone();
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -2995,6 +4067,10 @@ impl Marketplace for InMemoryMarketplace {
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
             resource_floor_usd_micros: reservation.resource_floor_usd_micros,
+            clearing_price_usd_micros: reservation.clearing_price_usd_micros,
+            delivery_channel: reservation.delivery_channel,
+            mesh_payload,
+            mesh_payload_digest,
             resource_floor_breakdown: reservation.resource_floor_breakdown.clone(),
             runner_up_quality_bid_usd_micros: reservation.runner_up_quality_bid_usd_micros,
             quality_adjusted_bid_usd_micros: reservation.quality_adjusted_bid_usd_micros,
@@ -3131,6 +4207,19 @@ impl SledMarketplace {
             metadata_tree.flush()?;
             ledger
         };
+        let uplift_bytes = metadata_tree.get(KEY_UPLIFT)?;
+        let uplift_snapshot = uplift_bytes
+            .as_ref()
+            .map(|bytes| deserialize_uplift_snapshot(bytes))
+            .transpose()?;
+        let uplift_estimator =
+            UpliftEstimator::from_snapshot(normalized.uplift.clone(), uplift_snapshot.clone());
+        if uplift_bytes.is_none() {
+            let snapshot = uplift_estimator.snapshot();
+            let bytes = serialize_uplift_snapshot(&snapshot)?;
+            metadata_tree.insert(KEY_UPLIFT, bytes)?;
+            metadata_tree.flush()?;
+        }
 
         Ok(Self {
             _db: db,
@@ -3149,7 +4238,7 @@ impl SledMarketplace {
             privacy_budget: RwLock::new(PrivacyBudgetManager::new(
                 normalized.privacy_budget.clone(),
             )),
-            uplift: RwLock::new(UpliftEstimator::new(normalized.uplift.clone())),
+            uplift: RwLock::new(uplift_estimator),
             token_remainders: RwLock::new(token_remainders),
         })
     }
@@ -3191,8 +4280,31 @@ impl SledMarketplace {
         Ok(())
     }
 
+    fn persist_uplift(&self) -> Result<(), PersistenceError> {
+        let snapshot = {
+            let guard = self.uplift.read().unwrap();
+            guard.snapshot()
+        };
+        let bytes = serialize_uplift_snapshot(&snapshot)?;
+        self.metadata_tree.insert(KEY_UPLIFT, bytes)?;
+        self.metadata_tree.flush()?;
+        Ok(())
+    }
+
     fn matches_targeting(&self, targeting: &CampaignTargeting, ctx: &ImpressionContext) -> bool {
         if !targeting.domains.is_empty() && !targeting.domains.iter().any(|d| d == &ctx.domain) {
+            return false;
+        }
+        if !targeting.geo.matches(ctx.geo.as_ref()) {
+            return false;
+        }
+        if !targeting.device.matches(ctx.device.as_ref()) {
+            return false;
+        }
+        if !targeting.crm_lists.matches(&ctx.crm_lists) {
+            return false;
+        }
+        if !targeting.delivery.allows(ctx.delivery_channel) {
             return false;
         }
         if !targeting.badges.is_empty() {
@@ -3225,6 +4337,9 @@ impl SledMarketplace {
 
     fn matches_creative(&self, creative: &Creative, ctx: &ImpressionContext) -> bool {
         if !creative.domains.is_empty() && !creative.domains.iter().any(|d| d == &ctx.domain) {
+            return false;
+        }
+        if !creative.placement.allows(ctx.delivery_channel) {
             return false;
         }
         if !creative.badges.is_empty() {
@@ -3306,6 +4421,11 @@ impl Marketplace for SledMarketplace {
             .collect()
     }
 
+    fn campaign(&self, id: &str) -> Option<Campaign> {
+        let guard = self.campaigns.read().ok()?;
+        guard.get(id).map(|state| state.campaign.clone())
+    }
+
     fn reserve_impression(
         &self,
         key: ReservationKey,
@@ -3346,6 +4466,8 @@ impl Marketplace for SledMarketplace {
         struct Candidate {
             trace: SelectionCandidateTrace,
             uplift: UpliftEstimate,
+            preference_match: bool,
+            mesh_payload: Option<Vec<u8>>,
         }
 
         let campaigns = self.campaigns.read().unwrap();
@@ -3382,6 +4504,11 @@ impl Marketplace for SledMarketplace {
                 {
                     continue;
                 }
+                let preference_match = state
+                    .campaign
+                    .targeting
+                    .delivery
+                    .prefers(ctx.delivery_channel);
                 let trace = SelectionCandidateTrace {
                     campaign_id: state.campaign.id.clone(),
                     creative_id: creative.id.clone(),
@@ -3401,6 +4528,8 @@ impl Marketplace for SledMarketplace {
                     predicted_propensity: uplift_estimate.propensity,
                     uplift_sample_size: uplift_estimate.sample_size,
                     uplift_ece: uplift_estimate.ece,
+                    delivery_channel: ctx.delivery_channel,
+                    preferred_delivery_match: preference_match,
                 };
                 let idx = candidates.len();
                 if let Some(best) = best_index {
@@ -3413,6 +4542,14 @@ impl Marketplace for SledMarketplace {
                                 > best_trace.available_budget_usd_micros)
                     {
                         best_index = Some(idx);
+                    } else if trace.quality_adjusted_bid_usd_micros
+                        == best_trace.quality_adjusted_bid_usd_micros
+                        && trace.available_budget_usd_micros
+                            == best_trace.available_budget_usd_micros
+                        && preference_match
+                        && !candidates[best].preference_match
+                    {
+                        best_index = Some(idx);
                     }
                 } else {
                     best_index = Some(idx);
@@ -3420,6 +4557,8 @@ impl Marketplace for SledMarketplace {
                 candidates.push(Candidate {
                     trace,
                     uplift: uplift_estimate,
+                    preference_match,
+                    mesh_payload: creative.mesh_payload.clone(),
                 });
             }
         }
@@ -3441,6 +4580,7 @@ impl Marketplace for SledMarketplace {
             .collect();
         let winner_trace = receipt_candidates[winner_index].clone();
         let winner_uplift = candidates[winner_index].uplift.clone();
+        let winner_mesh_payload = candidates[winner_index].mesh_payload.clone();
         let clearing_price = resource_floor
             .max(runner_up_quality)
             .min(winner_trace.quality_adjusted_bid_usd_micros)
@@ -3448,6 +4588,25 @@ impl Marketplace for SledMarketplace {
         if clearing_price == 0 {
             return None;
         }
+        let mut assignment_seed = Vec::new();
+        assignment_seed.extend_from_slice(&key.discriminator);
+        assignment_seed.extend_from_slice(ctx.domain.as_bytes());
+        if let Some(provider_id) = ctx.provider.as_ref() {
+            assignment_seed.extend_from_slice(provider_id.as_bytes());
+        }
+        let assignment = {
+            let estimator = self.uplift.read().unwrap();
+            estimator.assign_holdout(
+                &winner_trace.campaign_id,
+                &winner_trace.creative_id,
+                &assignment_seed,
+            )
+        };
+        let effective_total_usd_micros = if assignment.in_holdout {
+            0
+        } else {
+            clearing_price
+        };
         let (soft_intent_receipt, soft_intent_snapshot) =
             soft_intent_artifacts(&ctx.badges, &ctx.soft_intent);
         let mut receipt = SelectionReceipt {
@@ -3457,6 +4616,10 @@ impl Marketplace for SledMarketplace {
                 badges: ctx.badges.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
+                delivery_channel: ctx.delivery_channel,
+                mesh_peer: ctx.mesh.as_ref().and_then(|m| m.peer_id.clone()),
+                mesh_transport: ctx.mesh.as_ref().and_then(|m| m.transport.clone()),
+                mesh_latency_ms: ctx.mesh.as_ref().and_then(|m| m.latency_ms),
             },
             candidates: receipt_candidates,
             winner_index,
@@ -3471,6 +4634,7 @@ impl Marketplace for SledMarketplace {
             verifier_transcript: ctx.verifier_transcript.clone(),
             badge_soft_intent: soft_intent_receipt,
             badge_soft_intent_snapshot: soft_intent_snapshot,
+            uplift_assignment: Some(assignment.clone()),
         };
         let (attestation, satisfaction, metadata) = self
             .attestation
@@ -3492,21 +4656,23 @@ impl Marketplace for SledMarketplace {
         let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
             return None;
         };
-        if state.remaining_budget_usd_micros < clearing_price {
-            return None;
-        }
-        let prev_state = state.clone();
-        state.remaining_budget_usd_micros -= clearing_price;
-        state.reserved_budget_usd_micros = state
-            .reserved_budget_usd_micros
-            .saturating_add(clearing_price);
-        if let Err(err) = self.persist_campaign(state) {
-            *state = prev_state;
-            eprintln!(
-                "failed to persist campaign {} after reservation: {err}",
-                state.campaign.id
-            );
-            return None;
+        if !assignment.in_holdout {
+            if state.remaining_budget_usd_micros < clearing_price {
+                return None;
+            }
+            let prev_state = state.clone();
+            state.remaining_budget_usd_micros -= clearing_price;
+            state.reserved_budget_usd_micros = state
+                .reserved_budget_usd_micros
+                .saturating_add(clearing_price);
+            if let Err(err) = self.persist_campaign(state) {
+                *state = prev_state;
+                eprintln!(
+                    "failed to persist campaign {} after reservation: {err}",
+                    state.campaign.id
+                );
+                return None;
+            }
         }
         reservations.insert(
             key,
@@ -3515,7 +4681,8 @@ impl Marketplace for SledMarketplace {
                 creative_id: winner_trace.creative_id.clone(),
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
-                total_usd_micros: clearing_price,
+                total_usd_micros: effective_total_usd_micros,
+                clearing_price_usd_micros: clearing_price,
                 demand_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
                 resource_floor_usd_micros: resource_floor,
                 resource_floor_breakdown: floor_breakdown.clone(),
@@ -3524,19 +4691,26 @@ impl Marketplace for SledMarketplace {
                 cohort,
                 selection_receipt: receipt.clone(),
                 uplift: winner_uplift.clone(),
+                assignment: assignment.clone(),
+                delivery_channel: ctx.delivery_channel,
+                mesh_payload: winner_mesh_payload.clone(),
             },
         );
         Some(MatchOutcome {
             campaign_id: winner_trace.campaign_id,
             creative_id: winner_trace.creative_id,
             price_per_mib_usd_micros: price_per_mib,
-            total_usd_micros: clearing_price,
+            total_usd_micros: effective_total_usd_micros,
+            clearing_price_usd_micros: clearing_price,
             resource_floor_usd_micros: resource_floor,
             resource_floor_breakdown: floor_breakdown,
             runner_up_quality_bid_usd_micros: runner_up_quality,
             quality_adjusted_bid_usd_micros: winner_trace.quality_adjusted_bid_usd_micros,
             selection_receipt: receipt,
             uplift: winner_uplift,
+            uplift_assignment: assignment,
+            delivery_channel: ctx.delivery_channel,
+            mesh_payload: winner_mesh_payload,
         })
     }
 
@@ -3545,6 +4719,30 @@ impl Marketplace for SledMarketplace {
             let mut guard = self.reservations.write().unwrap();
             guard.remove(key)?
         };
+        let assignment = reservation.assignment.clone();
+        {
+            let mut estimator = self.uplift.write().unwrap();
+            estimator.record_observation(
+                &reservation.campaign_id,
+                &reservation.creative_id,
+                &assignment,
+                false,
+            );
+        }
+        if let Err(err) = self.persist_uplift() {
+            eprintln!("failed to persist uplift snapshot: {err}");
+        }
+        {
+            let mut consumed = self.consumed_reservations.write().unwrap();
+            consumed.insert(*key);
+        }
+        if assignment.in_holdout {
+            return None;
+        }
+        let mesh_payload_digest = reservation
+            .mesh_payload
+            .as_ref()
+            .map(|payload| hex::encode(blake3::hash(payload).as_bytes()));
         let mut campaigns = self.campaigns.write().unwrap();
         let state = campaigns.get_mut(&reservation.campaign_id)?;
         if state.reserved_budget_usd_micros < reservation.total_usd_micros {
@@ -3553,10 +4751,6 @@ impl Marketplace for SledMarketplace {
         state.reserved_budget_usd_micros = state
             .reserved_budget_usd_micros
             .saturating_sub(reservation.total_usd_micros);
-        {
-            let mut consumed = self.consumed_reservations.write().unwrap();
-            consumed.insert(*key);
-        }
         let snapshot = state.clone();
         drop(campaigns);
         if let Err(err) = self.persist_campaign(&snapshot) {
@@ -3596,6 +4790,22 @@ impl Marketplace for SledMarketplace {
         if let Err(err) = self.persist_token_remainders() {
             eprintln!("failed to persist token remainders: {err}");
         }
+        let mesh_bytes = reservation
+            .mesh_payload
+            .as_ref()
+            .map(|payload| payload.len())
+            .unwrap_or(0);
+        let mesh_digest_label = mesh_payload_digest.as_deref().unwrap_or("none");
+        diagnostics::log::info!(format!(
+            "ad_reservation_commit campaign={} creative={} channel={} clearing_price={} mesh_bytes={} mesh_digest={}",
+            reservation.campaign_id,
+            reservation.creative_id,
+            reservation.delivery_channel.as_str(),
+            reservation.clearing_price_usd_micros,
+            mesh_bytes,
+            mesh_digest_label
+        ));
+        let mesh_payload = reservation.mesh_payload.clone();
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -3604,6 +4814,10 @@ impl Marketplace for SledMarketplace {
             total_usd_micros: reservation.total_usd_micros,
             demand_usd_micros: reservation.demand_usd_micros,
             resource_floor_usd_micros: reservation.resource_floor_usd_micros,
+            clearing_price_usd_micros: reservation.clearing_price_usd_micros,
+            delivery_channel: reservation.delivery_channel,
+            mesh_payload,
+            mesh_payload_digest,
             resource_floor_breakdown: reservation.resource_floor_breakdown.clone(),
             runner_up_quality_bid_usd_micros: reservation.runner_up_quality_bid_usd_micros,
             quality_adjusted_bid_usd_micros: reservation.quality_adjusted_bid_usd_micros,
@@ -3694,6 +4908,36 @@ impl Marketplace for SledMarketplace {
 
     fn budget_broker(&self) -> &RwLock<BudgetBroker> {
         &self.budget_broker
+    }
+
+    fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError> {
+        {
+            let campaigns = self.campaigns.read().unwrap();
+            let state = campaigns
+                .get(&event.campaign_id)
+                .ok_or(MarketplaceError::UnknownCampaign)?;
+            if !state
+                .campaign
+                .creatives
+                .iter()
+                .any(|creative| creative.id == event.creative_id)
+            {
+                return Err(MarketplaceError::UnknownCreative);
+            }
+        }
+        {
+            let mut estimator = self.uplift.write().unwrap();
+            estimator.record_observation(
+                &event.campaign_id,
+                &event.creative_id,
+                &event.assignment,
+                true,
+            );
+        }
+        if let Err(err) = self.persist_uplift() {
+            return Err(err.into());
+        }
+        Ok(())
     }
 }
 struct RoleUsdParts {
@@ -4092,6 +5336,10 @@ mod tests {
                 badges: vec!["badge-a".into(), "badge-b".into()],
                 bytes: BYTES_PER_MIB,
                 price_per_mib_usd_micros: 120,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![
                 SelectionCandidateTrace {
@@ -4144,6 +5392,11 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
         };
         let commitment = receipt
             .commitment_bytes_raw()
@@ -4220,10 +5473,13 @@ mod tests {
                 badges: Vec::new(),
                 domains: vec!["example.test".to_string()],
                 metadata: HashMap::new(),
+                mesh_payload: None,
+                placement: CreativePlacement::default(),
             }],
             targeting: CampaignTargeting {
                 domains: vec!["example.test".to_string()],
                 badges: Vec::new(),
+                ..CampaignTargeting::default()
             },
             metadata: HashMap::new(),
         }
@@ -4550,7 +5806,7 @@ mod tests {
                 .reserve_impression(key, ctx.clone())
                 .expect("reserved");
             last_price = outcome.price_per_mib_usd_micros;
-            market.commit(&key).expect("commit");
+            market.commit(&key);
         }
         let snapshots = market.cohort_prices();
         assert_eq!(snapshots.len(), 1);
@@ -4608,6 +5864,10 @@ mod tests {
                 badges: vec!["a".into()],
                 bytes: 1_024,
                 price_per_mib_usd_micros: 120,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![
                 SelectionCandidateTrace {
@@ -4660,6 +5920,11 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
         };
         let insights = receipt.validate().expect("receipt valid");
         assert_eq!(insights.winner_index, 0);
@@ -4677,6 +5942,10 @@ mod tests {
                 badges: Vec::new(),
                 bytes: 512,
                 price_per_mib_usd_micros: 90,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![
                 SelectionCandidateTrace {
@@ -4729,6 +5998,11 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
         };
         let err = receipt.validate().expect_err("receipt invalid");
         assert!(matches!(
@@ -4749,6 +6023,10 @@ mod tests {
                 badges: vec!["badge".into()],
                 bytes: 256,
                 price_per_mib_usd_micros: 80,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![SelectionCandidateTrace {
                 campaign_id: "cmp".into(),
@@ -4779,6 +6057,11 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
         };
         let err = receipt.validate().expect_err("breakdown mismatch");
         assert!(matches!(
@@ -4821,5 +6104,113 @@ mod tests {
             SelectionReceiptError::ProofMetadataMismatch { field }
             if field == "verifying_key_digest"
         ));
+    }
+
+    #[test]
+    fn record_conversion_updates_treatment_bucket() {
+        let config = MarketplaceConfig::default();
+        let market = InMemoryMarketplace::new(config);
+        let creative = Creative {
+            id: "creative".into(),
+            action_rate_ppm: 100_000,
+            margin_ppm: PPM_SCALE as u32,
+            value_per_action_usd_micros: 100_000,
+            max_cpi_usd_micros: None,
+            lift_ppm: 0,
+            badges: Vec::new(),
+            domains: Vec::new(),
+            metadata: HashMap::new(),
+            mesh_payload: None,
+            placement: CreativePlacement::default(),
+        };
+        let campaign = Campaign {
+            id: "cmp".into(),
+            advertiser_account: "adv".into(),
+            budget_usd_micros: 5_000_000,
+            creatives: vec![creative],
+            targeting: CampaignTargeting::default(),
+            metadata: HashMap::new(),
+        };
+        market
+            .register_campaign(campaign)
+            .expect("campaign registered");
+        let event = ConversionEvent {
+            campaign_id: "cmp".into(),
+            creative_id: "creative".into(),
+            assignment: UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            },
+            value_usd_micros: Some(250_000),
+            occurred_at_micros: Some(123_456),
+        };
+        market
+            .record_conversion(event)
+            .expect("conversion recorded");
+
+        let snapshot = market.uplift.read().unwrap().snapshot();
+        assert_eq!(snapshot.creatives.len(), 1);
+        let creative_snapshot = &snapshot.creatives[0];
+        assert_eq!(creative_snapshot.treatment_count, 1);
+        assert_eq!(creative_snapshot.treatment_success, 1);
+        assert_eq!(creative_snapshot.control_count, 0);
+        assert_eq!(creative_snapshot.control_success, 0);
+    }
+
+    #[test]
+    fn sled_record_conversion_persists_snapshot() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("market");
+        let config = MarketplaceConfig::default();
+        let mut campaign_metadata = HashMap::new();
+        campaign_metadata.insert("channel".into(), "mesh".into());
+        let creative = Creative {
+            id: "creative".into(),
+            action_rate_ppm: 80_000,
+            margin_ppm: PPM_SCALE as u32,
+            value_per_action_usd_micros: 120_000,
+            max_cpi_usd_micros: None,
+            lift_ppm: 0,
+            badges: Vec::new(),
+            domains: Vec::new(),
+            metadata: HashMap::new(),
+            mesh_payload: None,
+            placement: CreativePlacement::default(),
+        };
+        let campaign = Campaign {
+            id: "cmp".into(),
+            advertiser_account: "adv".into(),
+            budget_usd_micros: 4_000_000,
+            creatives: vec![creative],
+            targeting: CampaignTargeting::default(),
+            metadata: campaign_metadata,
+        };
+        let market = SledMarketplace::open(&path, config.clone()).expect("sled opened");
+        market
+            .register_campaign(campaign)
+            .expect("campaign registered");
+        let event = ConversionEvent {
+            campaign_id: "cmp".into(),
+            creative_id: "creative".into(),
+            assignment: UpliftHoldoutAssignment {
+                fold: 1,
+                in_holdout: true,
+                propensity: 0.5,
+            },
+            value_usd_micros: None,
+            occurred_at_micros: Some(999_000),
+        };
+        market
+            .record_conversion(event)
+            .expect("conversion recorded");
+        drop(market);
+
+        let reopened = SledMarketplace::open(&path, config).expect("sled reopened");
+        let snapshot = reopened.uplift.read().unwrap().snapshot();
+        assert_eq!(snapshot.creatives.len(), 1);
+        let creative_snapshot = &snapshot.creatives[0];
+        assert_eq!(creative_snapshot.control_count, 1);
+        assert_eq!(creative_snapshot.control_success, 1);
     }
 }

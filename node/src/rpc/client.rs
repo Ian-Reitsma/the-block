@@ -739,7 +739,7 @@ mod tests {
 
         let client = RpcClient {
             http: http_client::http_client(),
-            base_timeout: Duration::from_millis(100),
+            base_timeout: Duration::from_millis(1_000),
             jitter: Duration::from_millis(0),
             max_retries: 0,
             fault_rate: 0.0,

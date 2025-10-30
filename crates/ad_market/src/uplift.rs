@@ -53,6 +53,17 @@ pub struct UpliftCreativeSnapshot {
     pub treatment_success: u64,
     pub control_count: u64,
     pub control_success: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folds: Vec<UpliftFoldSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct UpliftFoldSnapshot {
+    pub fold_index: u8,
+    pub treatment_count: u64,
+    pub treatment_success: u64,
+    pub control_count: u64,
+    pub control_success: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -97,6 +108,14 @@ impl UpliftEstimator {
             config: config.normalized(),
             buckets: HashMap::new(),
         }
+    }
+
+    pub fn from_snapshot(config: UpliftEstimatorConfig, snapshot: Option<UpliftSnapshot>) -> Self {
+        let mut estimator = Self::new(config);
+        if let Some(snapshot) = snapshot {
+            estimator.restore(&snapshot);
+        }
+        estimator
     }
 
     pub fn config(&self) -> &UpliftEstimatorConfig {
@@ -173,6 +192,22 @@ impl UpliftEstimator {
             .buckets
             .iter()
             .map(|(key, folds)| {
+                let per_fold = vec![
+                    UpliftFoldSnapshot {
+                        fold_index: 0,
+                        treatment_count: folds[0].treatment_count,
+                        treatment_success: folds[0].treatment_success,
+                        control_count: folds[0].control_count,
+                        control_success: folds[0].control_success,
+                    },
+                    UpliftFoldSnapshot {
+                        fold_index: 1,
+                        treatment_count: folds[1].treatment_count,
+                        treatment_success: folds[1].treatment_success,
+                        control_count: folds[1].control_count,
+                        control_success: folds[1].control_success,
+                    },
+                ];
                 let combined = UpliftBucket {
                     treatment_count: folds[0].treatment_count + folds[1].treatment_count,
                     treatment_success: folds[0].treatment_success + folds[1].treatment_success,
@@ -185,12 +220,39 @@ impl UpliftEstimator {
                     treatment_success: combined.treatment_success,
                     control_count: combined.control_count,
                     control_success: combined.control_success,
+                    folds: per_fold,
                 }
             })
             .collect();
         UpliftSnapshot {
             generated_at_micros: now_micros(),
             creatives,
+        }
+    }
+
+    pub fn restore(&mut self, snapshot: &UpliftSnapshot) {
+        self.buckets.clear();
+        for creative in &snapshot.creatives {
+            let mut folds = [UpliftBucket::default(), UpliftBucket::default()];
+            if creative.folds.is_empty() {
+                folds[0] = UpliftBucket {
+                    treatment_count: creative.treatment_count,
+                    treatment_success: creative.treatment_success,
+                    control_count: creative.control_count,
+                    control_success: creative.control_success,
+                };
+            } else {
+                for fold in &creative.folds {
+                    let idx = (fold.fold_index as usize) % 2;
+                    folds[idx] = UpliftBucket {
+                        treatment_count: fold.treatment_count,
+                        treatment_success: fold.treatment_success,
+                        control_count: fold.control_count,
+                        control_success: fold.control_success,
+                    };
+                }
+            }
+            self.buckets.insert(creative.key.clone(), folds);
         }
     }
 

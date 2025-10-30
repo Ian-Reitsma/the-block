@@ -20,7 +20,7 @@ use crate::governance::{DisbursementStatus, NODE_GOV_STORE};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
-use ad_market::SettlementBreakdown;
+use ad_market::{DeliveryChannel, SettlementBreakdown};
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
@@ -1512,6 +1512,21 @@ impl Blockchain {
         };
         let hardware_addr = hardware_address(&provider_id);
         let verifier_addr = verifier_address(&ack.domain);
+        let mesh_bytes = settlement
+            .mesh_payload
+            .as_ref()
+            .map(|payload| payload.len())
+            .unwrap_or(0);
+        let mesh_digest_label = settlement.mesh_payload_digest.as_deref().unwrap_or("none");
+        diagnostics::log::info!(format!(
+            "ad_settlement_record campaign={} creative={} channel={} clearing_price={} mesh_bytes={} mesh_digest={}",
+            settlement.campaign_id,
+            settlement.creative_id,
+            settlement.delivery_channel.as_str(),
+            settlement.clearing_price_usd_micros,
+            mesh_bytes,
+            mesh_digest_label
+        ));
         let record = AdSettlementRecord {
             campaign_id: settlement.campaign_id.clone(),
             creative_id: settlement.creative_id.clone(),
@@ -1535,6 +1550,10 @@ impl Blockchain {
             total_usd_micros: settlement.total_usd_micros,
             ct_price_usd_micros: settlement.ct_price_usd_micros,
             it_price_usd_micros: settlement.it_price_usd_micros,
+            delivery_channel: settlement.delivery_channel,
+            clearing_price_usd_micros: settlement.clearing_price_usd_micros,
+            mesh_payload_digest: settlement.mesh_payload_digest.clone(),
+            mesh_payload_bytes: mesh_bytes as u64,
         };
         self.pending_ad_settlements.push(record);
 
@@ -1591,6 +1610,10 @@ pub struct AdSettlementRecord {
     pub total_usd_micros: u64,
     pub ct_price_usd_micros: u64,
     pub it_price_usd_micros: u64,
+    pub delivery_channel: DeliveryChannel,
+    pub clearing_price_usd_micros: u64,
+    pub mesh_payload_digest: Option<String>,
+    pub mesh_payload_bytes: u64,
 }
 
 fn distribute_scalar(total: u64, weights: &[(usize, u64)]) -> Vec<u64> {
@@ -5849,7 +5872,8 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 mod tests {
     use super::*;
     use ad_market::{
-        ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt,
+        DeliveryChannel, ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace,
+        SelectionReceipt,
     };
     use crypto_suite::hashing::blake3::Hasher;
     use crypto_suite::signatures::ed25519::SigningKey;
@@ -5869,6 +5893,11 @@ mod tests {
             campaign_id: None,
             creative_id: None,
             selection_receipt: None,
+            geo: None,
+            device: None,
+            crm_lists: Vec::new(),
+            delivery_channel: DeliveryChannel::Http,
+            mesh: None,
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
@@ -5985,6 +6014,10 @@ mod tests {
                 badges: Vec::new(),
                 bytes: 1_024,
                 price_per_mib_usd_micros: 80,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![
                 SelectionCandidateTrace {
@@ -6028,6 +6061,12 @@ mod tests {
             clearing_price_usd_micros: 100,
             attestation: None,
             proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
+            uplift_assignment: None,
         });
         let err = bc.submit_read_ack(ack).expect_err("ack rejected");
         assert_eq!(err, ReadAckError::InvalidSelectionReceipt);

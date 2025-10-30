@@ -1,4 +1,5 @@
 use concurrency::{Lazy, MutexExt};
+use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
@@ -9,8 +10,9 @@ use std::os::unix::net::UnixStream;
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Mutex,
+    Arc, Mutex, Weak,
 };
+use std::thread;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "telemetry")]
@@ -243,6 +245,124 @@ impl RangeBoost {
     pub fn pending(&self) -> usize {
         self.queue.len()
     }
+
+    pub fn requeue_front(&mut self, bundle: Bundle) {
+        self.queue.push_front(bundle);
+    }
+}
+
+#[derive(Debug)]
+enum ForwardError {
+    Disabled,
+    NoPeers,
+    UnsupportedTransport(String),
+    Encode,
+    Io(std::io::Error),
+}
+
+const IDLE_SLEEP: Duration = Duration::from_millis(200);
+const RETRY_SLEEP: Duration = Duration::from_millis(250);
+const DISABLED_SLEEP: Duration = Duration::from_millis(1000);
+
+fn forward_bundle(bundle: &Bundle) -> Result<(), ForwardError> {
+    if !is_enabled() {
+        return Err(ForwardError::Disabled);
+    }
+    let peer = best_peer().ok_or(ForwardError::NoPeers)?;
+    let payload = json::to_vec(bundle).map_err(|_| ForwardError::Encode)?;
+    send_to_peer(&peer.addr, &payload).map_err(|err| {
+        if let std::io::ErrorKind::Unsupported = err.kind() {
+            ForwardError::UnsupportedTransport(peer.addr)
+        } else {
+            ForwardError::Io(err)
+        }
+    })
+}
+
+fn send_to_peer(addr: &str, payload: &[u8]) -> std::io::Result<()> {
+    if let Some(path) = addr.strip_prefix("unix:") {
+        #[cfg(unix)]
+        {
+            let mut stream = UnixStream::connect(path)?;
+            let len = payload.len() as u32;
+            stream.write_all(&len.to_le_bytes())?;
+            stream.write_all(payload)?;
+            stream.flush()?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unix sockets not supported on this platform",
+            ));
+        }
+    }
+    if addr.starts_with("bt:") || addr.starts_with("wifi:") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "range boost transport not implemented",
+        ));
+    }
+    let socket: SocketAddr = addr.parse().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid mesh peer address: {addr}"),
+        )
+    })?;
+    let mut stream = TcpStream::connect_timeout(&socket, Duration::from_millis(500))?;
+    let len = payload.len() as u32;
+    stream.write_all(&len.to_le_bytes())?;
+    stream.write_all(payload)?;
+    stream.flush()?;
+    Ok(())
+}
+
+pub fn spawn_forwarder(queue: &Arc<Mutex<RangeBoost>>) {
+    if !is_enabled() {
+        diagnostics::log::info!("range_boost_forwarder_skipped disabled=true");
+        return;
+    }
+    let weak_queue = Arc::downgrade(queue);
+    thread::spawn(move || loop {
+        let Some(queue) = Weak::upgrade(&weak_queue) else {
+            break;
+        };
+        let bundle = {
+            let mut guard = queue.lock().unwrap();
+            guard.dequeue()
+        };
+        match bundle {
+            Some(bundle) => match forward_bundle(&bundle) {
+                Ok(()) => {}
+                Err(err) => {
+                    {
+                        let mut guard = queue.lock().unwrap();
+                        guard.requeue_front(bundle);
+                    }
+                    match &err {
+                        ForwardError::Disabled => thread::sleep(DISABLED_SLEEP),
+                        ForwardError::NoPeers => thread::sleep(RETRY_SLEEP),
+                        ForwardError::UnsupportedTransport(addr) => {
+                            diagnostics::log::warn!(
+                                "range_boost_forward_unsupported transport={addr}"
+                            );
+                            thread::sleep(RETRY_SLEEP);
+                        }
+                        ForwardError::Encode => {
+                            diagnostics::log::warn!("range_boost_forward_encode_failed");
+                            thread::sleep(RETRY_SLEEP);
+                        }
+                        ForwardError::Io(err) => {
+                            diagnostics::log::warn!(format!("range_boost_forward_io_error: {err}"));
+                            thread::sleep(RETRY_SLEEP);
+                        }
+                    }
+                }
+            },
+            None => thread::sleep(IDLE_SLEEP),
+        }
+    });
 }
 
 #[cfg(test)]

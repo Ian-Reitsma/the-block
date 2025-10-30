@@ -8,7 +8,8 @@
 #![deny(warnings)]
 
 use ad_market::{
-    ann, BadgeSoftIntentContext, ImpressionContext, MarketplaceHandle, ReservationKey,
+    ann, BadgeSoftIntentContext, DeliveryChannel, DeviceContext, GeoContext, ImpressionContext,
+    MarketplaceHandle, MeshContext, ReservationKey,
 };
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::{self, Hasher};
@@ -17,14 +18,15 @@ use std::fs;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Instant,
 };
 use sys::signals::{Signals, SIGHUP};
 
 use crate::web::rate_limit::RateLimitFilter;
 use crate::{
-    ad_readiness::AdReadinessHandle, net, service_badge, storage::pipeline, vm::wasm, ReadAck,
+    ad_readiness::AdReadinessHandle, net, range_boost, range_boost::RangeBoost, service_badge,
+    storage::pipeline, vm::wasm, ReadAck,
 };
 use foundation_serialization::{binary, json};
 use httpd::{
@@ -64,6 +66,7 @@ struct GatewayState {
     buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>>,
     filter: Arc<Mutex<RateLimitFilter>>,
     readiness: Option<AdReadinessHandle>,
+    mesh_queue: Arc<Mutex<RangeBoost>>,
 }
 
 #[derive(Clone)]
@@ -74,6 +77,43 @@ struct DynamicFunc {
 
 static DYNAMIC_FUNCS: Lazy<Mutex<HashMap<(String, String), DynamicFunc>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+
+static CRM_MEMBERSHIPS: Lazy<RwLock<HashMap<String, Vec<String>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn provider_crm_lists(provider: &str) -> Vec<String> {
+    CRM_MEMBERSHIPS
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .get(provider)
+        .cloned()
+        .map(|mut lists| {
+            lists.retain(|item| !item.is_empty());
+            lists.sort();
+            lists.dedup();
+            lists
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+fn set_crm_lists(provider: &str, lists: &[&str]) {
+    CRM_MEMBERSHIPS
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(
+            provider.to_string(),
+            lists.iter().map(|entry| entry.to_string()).collect(),
+        );
+}
+
+#[cfg(test)]
+fn clear_crm_lists() {
+    CRM_MEMBERSHIPS
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clear();
+}
 
 fn normalize_dynamic_path(path: &str) -> String {
     if let Some(rest) = path.strip_prefix('/') {
@@ -105,6 +145,20 @@ const HEADER_ACK_BYTES: &str = "x-theblock-ack-bytes";
 const HEADER_ACK_TIMESTAMP: &str = "x-theblock-ack-ts";
 const HEADER_BADGE_ANN_SNAPSHOT: &str = "x-theblock-ann-snapshot";
 const HEADER_BADGE_ANN_PROOF: &str = "x-theblock-ann-proof";
+const HEADER_GEO_COUNTRY: &str = "x-theblock-geo-country";
+const HEADER_GEO_REGION: &str = "x-theblock-geo-region";
+const HEADER_GEO_METRO: &str = "x-theblock-geo-metro";
+const HEADER_DEVICE_OS: &str = "x-theblock-device-os";
+const HEADER_DEVICE_OS_VERSION: &str = "x-theblock-device-os-version";
+const HEADER_DEVICE_CLASS: &str = "x-theblock-device-class";
+const HEADER_DEVICE_MODEL: &str = "x-theblock-device-model";
+const HEADER_DEVICE_CAPABILITIES: &str = "x-theblock-device-capabilities";
+const HEADER_CRM_LISTS: &str = "x-theblock-crm-lists";
+const HEADER_DELIVERY_CHANNEL: &str = "x-theblock-delivery-channel";
+const HEADER_MESH_PEER: &str = "x-theblock-mesh-peer";
+const HEADER_MESH_TRANSPORT: &str = "x-theblock-mesh-transport";
+const HEADER_MESH_LATENCY: &str = "x-theblock-mesh-latency";
+const HEADER_MESH_HOPS: &str = "x-theblock-mesh-hop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AckParseError {
@@ -234,6 +288,198 @@ fn parse_soft_intent(
     }))
 }
 
+fn parse_geo_context(req: &Request<GatewayState>) -> Option<GeoContext> {
+    let mut context = GeoContext::default();
+    let mut seen = false;
+    if let Some(value) = req.header(HEADER_GEO_COUNTRY) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.country = Some(trimmed.to_ascii_uppercase());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_GEO_REGION) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.region = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_GEO_METRO) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.metro = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if !seen {
+        let ip = req.remote_addr().ip();
+        if ip.is_loopback() {
+            context.country = Some("ZZ".into());
+            seen = true;
+        }
+    }
+    if seen {
+        Some(context)
+    } else {
+        None
+    }
+}
+
+fn infer_device_from_user_agent(agent: &str, ctx: &mut DeviceContext) -> bool {
+    let mut updated = false;
+    let lower = agent.to_ascii_lowercase();
+    if ctx.os_family.is_none() {
+        if lower.contains("android") {
+            ctx.os_family = Some("android".into());
+            updated = true;
+        } else if lower.contains("iphone") || lower.contains("ipad") {
+            ctx.os_family = Some("ios".into());
+            updated = true;
+        } else if lower.contains("windows") {
+            ctx.os_family = Some("windows".into());
+            updated = true;
+        } else if lower.contains("mac os x") || lower.contains("macintosh") {
+            ctx.os_family = Some("macos".into());
+            updated = true;
+        } else if lower.contains("linux") {
+            ctx.os_family = Some("linux".into());
+            updated = true;
+        }
+    }
+    if ctx.device_class.is_none() {
+        if lower.contains("tablet") || lower.contains("ipad") {
+            ctx.device_class = Some("tablet".into());
+            updated = true;
+        } else if lower.contains("mobile") || lower.contains("iphone") || lower.contains("android")
+        {
+            ctx.device_class = Some("mobile".into());
+            updated = true;
+        } else if lower.contains("tv") || lower.contains("smarttv") {
+            ctx.device_class = Some("tv".into());
+            updated = true;
+        } else if lower.contains("xbox") || lower.contains("playstation") {
+            ctx.device_class = Some("console".into());
+            updated = true;
+        } else if lower.contains("windows")
+            || lower.contains("macintosh")
+            || lower.contains("linux")
+        {
+            ctx.device_class = Some("desktop".into());
+            updated = true;
+        }
+    }
+    updated
+}
+
+fn parse_capability_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.to_string())
+        .collect()
+}
+
+fn parse_device_context(req: &Request<GatewayState>) -> Option<DeviceContext> {
+    let mut context = DeviceContext::default();
+    let mut seen = false;
+    if let Some(value) = req.header(HEADER_DEVICE_OS) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.os_family = Some(trimmed.to_lowercase());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_DEVICE_OS_VERSION) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.os_version = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_DEVICE_CLASS) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.device_class = Some(trimmed.to_lowercase());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_DEVICE_MODEL) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            context.model = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if let Some(value) = req.header(HEADER_DEVICE_CAPABILITIES) {
+        let caps = parse_capability_list(value);
+        if !caps.is_empty() {
+            context.capabilities = caps;
+            seen = true;
+        }
+    }
+    if let Some(agent) = req.header("user-agent") {
+        if infer_device_from_user_agent(agent, &mut context) {
+            seen = true;
+        }
+    }
+    if seen {
+        Some(context)
+    } else {
+        None
+    }
+}
+
+fn parse_crm_lists(req: &Request<GatewayState>) -> Vec<String> {
+    req.header(HEADER_CRM_LISTS)
+        .map(parse_capability_list)
+        .unwrap_or_default()
+}
+
+fn parse_delivery_channel(req: &Request<GatewayState>) -> DeliveryChannel {
+    req.header(HEADER_DELIVERY_CHANNEL)
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or_default()
+}
+
+fn parse_mesh_context(req: &Request<GatewayState>) -> Option<MeshContext> {
+    let mut context = MeshContext::default();
+    let mut seen = false;
+    if let Some(peer) = req.header(HEADER_MESH_PEER) {
+        let trimmed = peer.trim();
+        if !trimmed.is_empty() {
+            context.peer_id = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if let Some(transport) = req.header(HEADER_MESH_TRANSPORT) {
+        let trimmed = transport.trim();
+        if !trimmed.is_empty() {
+            context.transport = Some(trimmed.to_string());
+            seen = true;
+        }
+    }
+    if let Some(latency) = req.header(HEADER_MESH_LATENCY) {
+        if let Ok(value) = latency.trim().parse::<u64>() {
+            context.latency_ms = Some(value);
+            seen = true;
+        }
+    }
+    if let Some(hops) = req.header(HEADER_MESH_HOPS) {
+        let proofs = parse_capability_list(hops);
+        if !proofs.is_empty() {
+            context.hop_proofs = proofs;
+            seen = true;
+        }
+    }
+    if seen {
+        Some(context)
+    } else {
+        None
+    }
+}
+
 fn parse_signed_ack(
     req: &Request<GatewayState>,
     domain: &str,
@@ -276,6 +522,11 @@ fn parse_signed_ack(
     let client_hash = compute_client_hash(&req.remote_addr(), domain);
     let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
     let provider = infer_provider_for(&manifest, &path_hash).unwrap_or_default();
+    let geo = parse_geo_context(req);
+    let device = parse_device_context(req);
+    let mut crm_lists = parse_crm_lists(req);
+    let delivery_channel = parse_delivery_channel(req);
+    let mesh = parse_mesh_context(req);
     let ack = ReadAck {
         manifest,
         path_hash,
@@ -289,6 +540,15 @@ fn parse_signed_ack(
         campaign_id: None,
         creative_id: None,
         selection_receipt: None,
+        geo,
+        device,
+        crm_lists: {
+            crm_lists.sort();
+            crm_lists.dedup();
+            crm_lists
+        },
+        delivery_channel,
+        mesh,
         badge_soft_intent: soft_intent,
         readiness: None,
         zk_proof: None,
@@ -345,6 +605,11 @@ fn build_read_ack(
             campaign_id: None,
             creative_id: None,
             selection_receipt: None,
+            geo: None,
+            device: None,
+            crm_lists: Vec::new(),
+            delivery_channel: DeliveryChannel::default(),
+            mesh: None,
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
@@ -392,12 +657,42 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         .as_ref()
         .map(|id| service_badge::provider_badges(id))
         .unwrap_or_default();
+    let mut crm_lists = ack.crm_lists.clone();
+    if let Some(provider_id) = provider.as_deref() {
+        crm_lists.extend(provider_crm_lists(provider_id));
+    }
+    crm_lists.sort();
+    crm_lists.dedup();
+    let mut mesh_context = ack.mesh.clone();
+    if mesh_context.is_none() && ack.delivery_channel == DeliveryChannel::Mesh {
+        if let Some(peer) = range_boost::best_peer() {
+            let mut ctx = MeshContext::default();
+            ctx.peer_id = Some(peer.addr.clone());
+            let transport = if peer.addr.starts_with("bt:") {
+                "bluetooth"
+            } else if peer.addr.starts_with("wifi:") {
+                "wifi"
+            } else {
+                "range_boost"
+            };
+            ctx.transport = Some(transport.into());
+            ctx.latency_ms = Some(peer.latency_ms.min(u128::from(u64::MAX)) as u64);
+            mesh_context = Some(ctx);
+        }
+    }
+    ack.crm_lists = crm_lists.clone();
+    ack.mesh = mesh_context.clone();
     let ctx = ImpressionContext {
         domain: ack.domain.clone(),
         provider,
         badges,
         bytes: ack.bytes,
+        geo: ack.geo.clone(),
+        device: ack.device.clone(),
+        crm_lists,
         soft_intent: ack.badge_soft_intent.clone(),
+        delivery_channel: ack.delivery_channel,
+        mesh: mesh_context,
         ..ImpressionContext::default()
     };
     let key = ReservationKey {
@@ -406,9 +701,29 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         discriminator: ack.reservation_discriminator(),
     };
     if let Some(outcome) = market.reserve_impression(key, ctx) {
+        let holdout = outcome.uplift_assignment.in_holdout;
+        let delivery_channel = outcome.delivery_channel;
+        let mesh_payload = outcome.mesh_payload.clone();
         ack.campaign_id = Some(outcome.campaign_id);
         ack.creative_id = Some(outcome.creative_id);
         ack.selection_receipt = Some(outcome.selection_receipt);
+        ack.delivery_channel = delivery_channel;
+        if ack.delivery_channel != DeliveryChannel::Mesh {
+            ack.mesh = None;
+        } else if !holdout {
+            if let Some(payload) = mesh_payload {
+                let mut queue = state.mesh_queue.lock().unwrap();
+                queue.enqueue(payload);
+                let idx = queue.pending().saturating_sub(1);
+                if let Some(mesh) = ack.mesh.as_ref() {
+                    for hop in &mesh.hop_proofs {
+                        if !hop.is_empty() {
+                            queue.record_proof(idx, range_boost::HopProof { relay: hop.clone() });
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -474,6 +789,8 @@ pub async fn run(
 ) -> diagnostics::anyhow::Result<()> {
     let listener =
         net::listener::bind_runtime("gateway", "gateway_listener_bind_failed", addr).await?;
+    let mesh_queue = Arc::new(Mutex::new(RangeBoost::new()));
+    range_boost::spawn_forwarder(&mesh_queue);
     let state = GatewayState {
         stake,
         read_tx,
@@ -481,6 +798,7 @@ pub async fn run(
         filter: Arc::clone(&IP_FILTER),
         market,
         readiness,
+        mesh_queue,
     };
     let router = Router::new(state)
         .upgrade("/ws/peer_metrics", ws_peer_metrics)
@@ -650,9 +968,9 @@ mod tests {
         badge::ann::{SoftIntentReceipt, WalletAnnIndexSnapshot},
         badge::BadgeSoftIntentContext,
         budget::{BudgetBroker, BudgetBrokerConfig},
-        uplift::UpliftEstimate,
-        Campaign, CampaignTargeting, Creative, DistributionPolicy, InMemoryMarketplace,
-        Marketplace, MarketplaceConfig, MatchOutcome, ResourceFloorBreakdown,
+        uplift::{UpliftEstimate, UpliftHoldoutAssignment},
+        Campaign, CampaignTargeting, Creative, DeliveryChannel, DistributionPolicy,
+        InMemoryMarketplace, Marketplace, MarketplaceConfig, MatchOutcome, ResourceFloorBreakdown,
         SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt, TokenOracle,
         MICROS_PER_DOLLAR,
     };
@@ -686,6 +1004,7 @@ mod tests {
         market: Option<MarketplaceHandle>,
         readiness: Option<AdReadinessHandle>,
     ) -> (GatewayState, mpsc::Receiver<ReadAck>) {
+        clear_crm_lists();
         let allowed = domains
             .iter()
             .map(|d| d.to_string())
@@ -699,6 +1018,7 @@ mod tests {
                 filter: Arc::new(Mutex::new(RateLimitFilter::new())),
                 market,
                 readiness,
+                mesh_queue: Arc::new(Mutex::new(RangeBoost::new())),
             },
             rx,
         )
@@ -732,6 +1052,10 @@ mod tests {
 
         fn list_campaigns(&self) -> Vec<ad_market::CampaignSummary> {
             Vec::new()
+        }
+
+        fn campaign(&self, _id: &str) -> Option<ad_market::Campaign> {
+            None
         }
 
         fn reserve_impression(
@@ -773,6 +1097,13 @@ mod tests {
 
         fn budget_broker(&self) -> &RwLock<BudgetBroker> {
             &self.broker
+        }
+
+        fn record_conversion(
+            &self,
+            _event: ad_market::ConversionEvent,
+        ) -> Result<(), ad_market::MarketplaceError> {
+            Ok(())
         }
     }
 
@@ -1338,6 +1669,8 @@ mod tests {
             predicted_propensity: 0.42,
             uplift_sample_size: 128,
             uplift_ece: 0.08,
+            delivery_channel: DeliveryChannel::Http,
+            preferred_delivery_match: false,
         };
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
@@ -1346,6 +1679,10 @@ mod tests {
                 badges: vec!["vip".into()],
                 bytes: 512,
                 price_per_mib_usd_micros: 100,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![candidate.clone()],
             winner_index: 0,
@@ -1365,12 +1702,14 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: Some(ann_receipt.clone()),
             badge_soft_intent_snapshot: Some(snapshot.clone()),
+            uplift_assignment: None,
         };
         let outcome = MatchOutcome {
             campaign_id: "cmp-test".into(),
             creative_id: "creative-test".into(),
             price_per_mib_usd_micros: 100,
             total_usd_micros: 2_048,
+            clearing_price_usd_micros: 1_000,
             resource_floor_usd_micros: 90,
             resource_floor_breakdown: receipt.resource_floor_breakdown.clone(),
             runner_up_quality_bid_usd_micros: 800,
@@ -1383,6 +1722,13 @@ mod tests {
                 ece: 0.05,
                 sample_size: 256,
             },
+            uplift_assignment: UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            },
+            delivery_channel: DeliveryChannel::Http,
+            mesh_payload: None,
         };
         let market: MarketplaceHandle = Arc::new(StubMarketplace::new(outcome));
         let (state, _rx) = state_with_market(&["selection.test"], Some(market), None);
@@ -1400,6 +1746,11 @@ mod tests {
             campaign_id: None,
             creative_id: None,
             selection_receipt: None,
+            geo: None,
+            device: None,
+            crm_lists: Vec::new(),
+            delivery_channel: DeliveryChannel::Http,
+            mesh: None,
             badge_soft_intent: Some(BadgeSoftIntentContext {
                 wallet_index: Some(snapshot.clone()),
                 proof: Some(ann_receipt.clone()),
@@ -1466,6 +1817,10 @@ mod tests {
                 badges: vec!["tier.one".into(), "tier.two".into()],
                 bytes: 1_024,
                 price_per_mib_usd_micros: 220,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![runner_up.clone(), winner.clone()],
             winner_index: 1,
@@ -1485,6 +1840,7 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: None,
         };
         let outcome = MatchOutcome {
             campaign_id: winner.campaign_id.clone(),
@@ -1503,6 +1859,13 @@ mod tests {
                 ece: 0.06,
                 sample_size: 384,
             },
+            uplift_assignment: UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            },
+            delivery_channel: DeliveryChannel::Http,
+            mesh_payload: None,
         };
         let market: MarketplaceHandle = Arc::new(StubMarketplace::new(outcome));
         let (state, _rx) = state_with_market(&["multi.test"], Some(market), None);
@@ -1520,6 +1883,11 @@ mod tests {
             campaign_id: None,
             creative_id: None,
             selection_receipt: None,
+            geo: None,
+            device: None,
+            crm_lists: Vec::new(),
+            delivery_channel: DeliveryChannel::Http,
+            mesh: None,
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
@@ -1540,6 +1908,129 @@ mod tests {
         assert!((enriched_runner.shadow_price - runner_up.shadow_price).abs() < f64::EPSILON);
         assert!((enriched_winner.requested_kappa - winner.requested_kappa).abs() < f64::EPSILON);
         assert!((enriched_winner.shadow_price - winner.shadow_price).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn attach_campaign_metadata_enqueues_mesh_payload_and_proofs() {
+        let candidate = SelectionCandidateTrace {
+            campaign_id: "cmp-mesh".into(),
+            creative_id: "creative-mesh".into(),
+            base_bid_usd_micros: 1_200,
+            quality_adjusted_bid_usd_micros: 1_500,
+            available_budget_usd_micros: 9_000,
+            action_rate_ppm: 40_000,
+            lift_ppm: 50_000,
+            quality_multiplier: 1.2,
+            ..SelectionCandidateTrace::default()
+        };
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "mesh.test".into(),
+                provider: Some("mesh-provider".into()),
+                badges: vec!["mesh.badge".into()],
+                bytes: 2_048,
+                price_per_mib_usd_micros: 180,
+                delivery_channel: DeliveryChannel::Mesh,
+                mesh_peer: Some("peer-alpha".into()),
+                mesh_transport: Some("wifi".into()),
+                mesh_latency_ms: Some(7),
+            },
+            candidates: vec![candidate.clone()],
+            winner_index: 0,
+            resource_floor_usd_micros: 160,
+            resource_floor_breakdown: ResourceFloorBreakdown {
+                bandwidth_usd_micros: 90,
+                verifier_usd_micros: 40,
+                host_usd_micros: 30,
+                qualified_impressions_per_proof: 256,
+            },
+            runner_up_quality_bid_usd_micros: 0,
+            clearing_price_usd_micros: 1_600,
+            attestation: None,
+            proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
+        };
+        let mesh_payload = vec![9u8, 8u8, 7u8];
+        let outcome = MatchOutcome {
+            campaign_id: candidate.campaign_id.clone(),
+            creative_id: candidate.creative_id.clone(),
+            price_per_mib_usd_micros: 180,
+            total_usd_micros: 3_072,
+            clearing_price_usd_micros: 1_600,
+            resource_floor_usd_micros: 160,
+            resource_floor_breakdown: receipt.resource_floor_breakdown.clone(),
+            runner_up_quality_bid_usd_micros: 0,
+            quality_adjusted_bid_usd_micros: candidate.quality_adjusted_bid_usd_micros,
+            selection_receipt: receipt.clone(),
+            uplift: UpliftEstimate {
+                lift_ppm: 50_000,
+                baseline_action_rate_ppm: 40_000,
+                propensity: 0.5,
+                ece: 0.05,
+                sample_size: 10,
+            },
+            uplift_assignment: UpliftHoldoutAssignment {
+                fold: 1,
+                in_holdout: false,
+                propensity: 1.0,
+            },
+            delivery_channel: DeliveryChannel::Mesh,
+            mesh_payload: Some(mesh_payload.clone()),
+        };
+        let market: MarketplaceHandle = Arc::new(StubMarketplace::new(outcome));
+        let (state, _rx) = state_with_market(&["mesh.test"], Some(market), None);
+        let queue = state.mesh_queue.clone();
+
+        let mut ack = ReadAck {
+            manifest: [11u8; 32],
+            path_hash: [22u8; 32],
+            bytes: 3_072,
+            ts: 1_234,
+            client_hash: [33u8; 32],
+            pk: [44u8; 32],
+            sig: vec![55u8; 64],
+            domain: "mesh.test".into(),
+            provider: String::new(),
+            campaign_id: None,
+            creative_id: None,
+            selection_receipt: None,
+            geo: None,
+            device: None,
+            crm_lists: Vec::new(),
+            delivery_channel: DeliveryChannel::Mesh,
+            mesh: Some(MeshContext {
+                peer_id: Some("peer-alpha".into()),
+                transport: Some("wifi".into()),
+                latency_ms: Some(9),
+                hop_proofs: vec!["relay-1".into(), "relay-2".into()],
+            }),
+            badge_soft_intent: None,
+            readiness: None,
+            zk_proof: None,
+        };
+
+        attach_campaign_metadata(&state, &mut ack);
+
+        assert_eq!(ack.campaign_id.as_deref(), Some("cmp-mesh"));
+        assert_eq!(ack.creative_id.as_deref(), Some("creative-mesh"));
+        assert_eq!(ack.delivery_channel, DeliveryChannel::Mesh);
+        assert!(ack.mesh.is_some());
+
+        let mut guard = queue.lock().unwrap();
+        assert_eq!(guard.pending(), 1);
+        let bundle = guard.dequeue().expect("bundle enqueued");
+        assert_eq!(bundle.payload, mesh_payload);
+        let relays: Vec<String> = bundle.proofs.into_iter().map(|proof| proof.relay).collect();
+        assert_eq!(relays, vec!["relay-1".to_string(), "relay-2".to_string()]);
     }
 
     #[test]

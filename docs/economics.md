@@ -207,8 +207,15 @@ the marketplace records both the USD total and the oracle snapshot inside the
 `SettlementBreakdown` structure:
 
 - `total_usd_micros` captures the billed amount before rounding losses.
+- `price_per_mib_usd_micros` records the marginal USD price applied to the
+  impression payload, while `clearing_price_usd_micros` stores the auction
+  clearing price that determined the payment.
 - `ct_price_usd_micros` and `it_price_usd_micros` store the CT/IT oracle
   prices that were applied during conversion.
+- `delivery_channel` enumerates whether the impression was delivered over HTTP
+  or mesh (`DeliveryChannel::Mesh`), and `mesh_payload`/`mesh_payload_digest`
+  surface the staged payload bytes and their BLAKE3 digest when RangeBoost mesh
+  delivery was used.
 - `viewer_ct`, `host_ct`, `hardware_ct`, `verifier_ct`, `liquidity_ct`, and
   `miner_ct` represent the CT settlement that continues to feed the on-chain
   ledger.

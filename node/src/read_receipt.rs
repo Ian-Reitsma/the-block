@@ -1,5 +1,8 @@
 use crate::ad_readiness::AdReadinessSnapshot;
-use ad_market::{BadgeSoftIntentContext, SelectionReceipt};
+use ad_market::{
+    BadgeSoftIntentContext, DeliveryChannel, DeviceContext, GeoContext, MeshContext,
+    SelectionReceipt,
+};
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
@@ -41,6 +44,21 @@ pub struct ReadAck {
     #[serde(default)]
     /// Optional selection receipt attesting to the on-device auction outcome.
     pub selection_receipt: Option<SelectionReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Geolocation context used during marketplace selection.
+    pub geo: Option<GeoContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Device fingerprint provided by the client or inferred from headers.
+    pub device: Option<DeviceContext>,
+    #[serde(default)]
+    /// CRM cohort memberships associated with the viewer.
+    pub crm_lists: Vec<String>,
+    #[serde(default)]
+    /// Delivery channel requested for this acknowledgement.
+    pub delivery_channel: DeliveryChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Mesh context describing RangeBoost delivery parameters.
+    pub mesh: Option<MeshContext>,
     #[serde(default)]
     /// Wallet-provided ANN soft-intent context used during selection.
     pub badge_soft_intent: Option<BadgeSoftIntentContext>,

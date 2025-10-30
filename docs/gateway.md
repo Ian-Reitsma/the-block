@@ -38,32 +38,39 @@ Security considerations are catalogued under
    limits, and its output streamed back to the client.
 6. **Campaign Match & ReadAck Append** – once the response body is sent, the
    gateway asks the first-party advertising marketplace for a matching campaign
-   given the domain, provider metadata, and badge context. Provider badges come
-   from the global registry maintained by `service_badge::provider_badges`, so
-   physical-presence checks survive restarts and badge revocations without
-   querying sled mid-request. Provider identity now flows through
-   `storage::pipeline::provider_for_manifest`: manifests published with explicit
-   provider lists always win, and multi-provider manifests hash the reservation
-   key (domain + path + byte range) to select a stable entry. Gateway tests use
-   the new `pipeline::override_manifest_providers_for_test` hook so multi-provider
-   scenarios stay hermetic without touching the filesystem. The winning creative
-   (if any) is recorded on the acknowledgement, the caller-supplied
-   `X-TheBlock-Ack-*` headers are validated, and the Ed25519 signature over the
-   manifest, path hash, byte count, timestamp, client hash, domain, provider, and
-   campaign fields is verified before the fully signed `ReadAck` is pushed into
-   the batching queue. `ReadAck` now carries an optional `badge_soft_intent`
-   payload containing the ANN snapshot fingerprint, encrypted query ciphertext,
-   IV, and nearest-neighbour distance; gateway parses
-   `X-TheBlock-Ann-{Snapshot,Proof}` headers into that structure and threads it to
-  the ad marketplace so wallets can audit badge intent. Selection traces expose
-  `requested_kappa`, shading multipliers, shadow prices, and dual-token toggles,
-  letting RPC/SDK consumers correlate pacing guidance with the receipt that
-  cleared the impression. The gateway integration test suite now asserts those
-  fields for every candidate in the receipt, so multi-creative auctions surface
-  consistent shading telemetry rather than only reporting the winner. Wallets
-  that supply additional ANN entropy see it preserved in the soft-intent
-  payload, and verification rejects transcripts whose ciphertext or IV no longer
-  match the mixed entropy parameters.
+   using the domain, provider metadata, badge context, and the new geo/device/CRM
+   selectors. Provider badges still come from the global registry maintained by
+   `service_badge::provider_badges`, so physical-presence checks survive restarts
+   and badge revocations without querying sled mid-request. Provider identity now
+   flows through `storage::pipeline::provider_for_manifest`: manifests published
+   with explicit provider lists always win, and multi-provider manifests hash the
+   reservation key (domain + path + byte range) to select a stable entry. Gateway
+   tests use the `pipeline::override_manifest_providers_for_test` hook so
+   multi-provider scenarios stay hermetic without touching the filesystem. The
+   winning creative (if any) is recorded on the acknowledgement, the
+   caller-supplied `X-TheBlock-Ack-*` headers are validated, and the Ed25519
+   signature over the manifest, path hash, byte count, timestamp, client hash,
+   domain, provider, and campaign fields is verified before the fully signed
+   `ReadAck` is pushed into the batching queue. Clients may optionally provide
+   `X-TheBlock-Geo-{Country,Region,Metro}`, `X-TheBlock-Device-{Os,Os-Version,Class,Model,Capabilities}`,
+   `X-TheBlock-CRM-Lists`, `X-TheBlock-Delivery-Channel`, and `X-TheBlock-Mesh-*`
+  headers; the gateway normalizes those hints, merges CRM memberships registered
+  for the serving provider, and projects RangeBoost peer latency when mesh
+  delivery is requested. The mesh queue’s forwarder thread only starts when
+  `range_boost::is_enabled()` is true (`--range-boost` or `TB_MESH_STATIC_PEERS`),
+  so HTTP-only nodes avoid spawning the worker. `ReadAck` now carries the resolved `geo`, `device`,
+  `crm_lists`, `delivery_channel`, and mesh context alongside the existing
+   `badge_soft_intent` payload (ANN snapshot fingerprint, encrypted query
+   ciphertext, IV, and nearest-neighbour distance). Selection traces continue to
+   expose `requested_kappa`, shading multipliers, shadow prices, dual-token
+   toggles, and uplift holdout assignments so RPC/SDK consumers can correlate
+   pacing guidance with the receipt that cleared the impression. The gateway
+   integration test suite asserts those fields for every candidate in the
+   receipt, so multi-creative auctions surface consistent shading telemetry
+   rather than only reporting the winner. Wallets that supply additional ANN
+   entropy see it preserved in the soft-intent payload, and verification rejects
+   transcripts whose ciphertext or IV no longer match the mixed entropy
+   parameters.
 
 ### WebSocket peer metrics
 

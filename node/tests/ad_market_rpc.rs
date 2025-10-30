@@ -17,7 +17,7 @@ use ad_market::{
     SelectionAttestation, SelectionAttestationKind, SelectionReceipt, SledMarketplace,
     VerifierCommitteeConfig, MICROS_PER_DOLLAR,
 };
-use crypto_suite::{encoding::hex, vrf};
+use crypto_suite::{encoding::hex, hashing::blake3, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
@@ -47,14 +47,19 @@ struct RpcHarness {
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: MarketplaceHandle,
+    in_memory_market: Option<Arc<InMemoryMarketplace>>,
     admin_token: String,
     readiness: Option<AdReadinessHandle>,
 }
 
 impl RpcHarness {
     fn call(&self, method: &str, params: Value) -> Response {
+        self.call_with_auth(method, params, None)
+    }
+
+    fn call_with_auth(&self, method: &str, params: Value, auth: Option<String>) -> Response {
         let request = RpcRequest::new(method.to_string(), params);
-        let auth_header = format!("Bearer {}", self.admin_token);
+        let auth_header = auth.unwrap_or_else(|| format!("Bearer {}", self.admin_token));
         fuzz_dispatch_request(
             Arc::clone(&self.bc),
             Arc::clone(&self.mining),
@@ -111,7 +116,8 @@ fn build_in_memory_harness(
     let admin_token = format!("integration-token-{}", name);
     let runtime_cfg = fuzz_runtime_config_with_admin(admin_token.clone());
 
-    let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(config));
+    let market_impl = Arc::new(InMemoryMarketplace::new(config));
+    let market: MarketplaceHandle = market_impl.clone();
     let readiness = AdReadinessHandle::new(AdReadinessConfig {
         window_secs: 300,
         min_unique_viewers: 1,
@@ -127,6 +133,7 @@ fn build_in_memory_harness(
         dids,
         runtime_cfg,
         market,
+        in_memory_market: Some(market_impl),
         admin_token,
         readiness: Some(readiness.clone()),
     });
@@ -316,6 +323,7 @@ fn ad_market_rpc_endpoints_round_trip() {
         dids,
         runtime_cfg,
         market,
+        in_memory_market: None,
         admin_token,
         readiness: Some(readiness.clone()),
     });
@@ -1465,4 +1473,297 @@ fn ad_market_metrics_export_surfaces_committee_rejection_labels() {
         (delta - 1.0).abs() < f64::EPSILON,
         "expected exactly one rejection increment (baseline={baseline_value}, after={after_value})"
     );
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_success() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_rpc", config);
+    let creative = Creative {
+        id: "creative-rpc".into(),
+        action_rate_ppm: 150_000,
+        margin_ppm: 900_000,
+        value_per_action_usd_micros: 500_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 0,
+        badges: Vec::new(),
+        domains: Vec::new(),
+        metadata: HashMap::new(),
+        mesh_payload: None,
+        placement: Default::default(),
+    };
+    let advertiser_token = "adv-rpc-token";
+    let token_hash = hex::encode(blake3::hash(advertiser_token.as_bytes()).as_bytes());
+    let mut metadata = HashMap::new();
+    metadata.insert("conversion_token_hash".into(), token_hash);
+    let campaign = Campaign {
+        id: "cmp-rpc".into(),
+        advertiser_account: "adv-rpc".into(),
+        budget_usd_micros: 8_000_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata,
+    };
+    harness
+        .market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+    let params = json_mod::json!({
+        "campaign_id": "cmp-rpc",
+        "creative_id": "creative-rpc",
+        "advertiser_account": "adv-rpc",
+        "assignment": {
+            "fold": 0,
+            "in_holdout": false,
+            "propensity": 1.0
+        },
+        "value_usd_micros": 250_000,
+        "occurred_at_micros": 777_000
+    });
+    let response = harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some(format!("Advertiser adv-rpc:{advertiser_token}")),
+    );
+    let value = expect_ok(response);
+    assert_eq!(value["status"], Value::String("ok".into()));
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_rejects_unknown_creative() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_unknown", config);
+    let params = json_mod::json!({
+        "campaign_id": "missing-cmp",
+        "creative_id": "missing-creative",
+        "advertiser_account": "missing-adv",
+        "assignment": {
+            "fold": 1,
+            "in_holdout": true,
+            "propensity": 0.5
+        }
+    });
+    let error = expect_error(harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some("Advertiser missing-adv:token".into()),
+    ));
+    assert_eq!(error.code(), -32001);
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_requires_authorization_header() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_no_auth", config);
+    let creative = Creative {
+        id: "creative-auth".into(),
+        action_rate_ppm: 120_000,
+        margin_ppm: 800_000,
+        value_per_action_usd_micros: 400_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 0,
+        badges: Vec::new(),
+        domains: Vec::new(),
+        metadata: HashMap::new(),
+        mesh_payload: None,
+        placement: Default::default(),
+    };
+    let token_hash = hex::encode(blake3::hash(b"adv-auth-token").as_bytes());
+    let mut metadata = HashMap::new();
+    metadata.insert("conversion_token_hash".into(), token_hash);
+    let campaign = Campaign {
+        id: "cmp-auth".into(),
+        advertiser_account: "adv-auth".into(),
+        budget_usd_micros: 5_000_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata,
+    };
+    harness
+        .market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+    let params = json_mod::json!({
+        "campaign_id": "cmp-auth",
+        "creative_id": "creative-auth",
+        "advertiser_account": "adv-auth",
+        "assignment": {
+            "fold": 0,
+            "in_holdout": false,
+            "propensity": 1.0
+        }
+    });
+    let error = expect_error(harness.call("ad_market.record_conversion", params));
+    assert_eq!(error.code(), -32030);
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_rejects_invalid_token() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_bad_token", config);
+    let creative = Creative {
+        id: "creative-bad-token".into(),
+        action_rate_ppm: 100_000,
+        margin_ppm: 850_000,
+        value_per_action_usd_micros: 350_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 0,
+        badges: Vec::new(),
+        domains: Vec::new(),
+        metadata: HashMap::new(),
+        mesh_payload: None,
+        placement: Default::default(),
+    };
+    let valid_hash = hex::encode(blake3::hash(b"correct-token").as_bytes());
+    let mut metadata = HashMap::new();
+    metadata.insert("conversion_token_hash".into(), valid_hash);
+    let campaign = Campaign {
+        id: "cmp-bad-token".into(),
+        advertiser_account: "adv-bad".into(),
+        budget_usd_micros: 6_000_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata,
+    };
+    harness
+        .market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+    let params = json_mod::json!({
+        "campaign_id": "cmp-bad-token",
+        "creative_id": "creative-bad-token",
+        "advertiser_account": "adv-bad",
+        "assignment": {
+            "fold": 1,
+            "in_holdout": false,
+            "propensity": 0.8
+        }
+    });
+    let error = expect_error(harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some("Advertiser adv-bad:wrong-token".into()),
+    ));
+    assert_eq!(error.code(), -32033);
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_rejects_account_mismatch() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_account_mismatch", config);
+    let creative = Creative {
+        id: "creative-mismatch".into(),
+        action_rate_ppm: 110_000,
+        margin_ppm: 820_000,
+        value_per_action_usd_micros: 360_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 0,
+        badges: Vec::new(),
+        domains: Vec::new(),
+        metadata: HashMap::new(),
+        mesh_payload: None,
+        placement: Default::default(),
+    };
+    let hash = hex::encode(blake3::hash(b"mismatch-token").as_bytes());
+    let mut metadata = HashMap::new();
+    metadata.insert("conversion_token_hash".into(), hash);
+    let campaign = Campaign {
+        id: "cmp-mismatch".into(),
+        advertiser_account: "adv-match".into(),
+        budget_usd_micros: 4_500_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata,
+    };
+    harness
+        .market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+    let params = json_mod::json!({
+        "campaign_id": "cmp-mismatch",
+        "creative_id": "creative-mismatch",
+        "advertiser_account": "adv-match",
+        "assignment": {
+            "fold": 2,
+            "in_holdout": true,
+            "propensity": 0.4
+        }
+    });
+    let error = expect_error(harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some("Advertiser adv-other:mismatch-token".into()),
+    ));
+    assert_eq!(error.code(), -32031);
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_rejects_missing_token_metadata() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_missing_token", config);
+    let creative = Creative {
+        id: "creative-missing-token".into(),
+        action_rate_ppm: 95_000,
+        margin_ppm: 780_000,
+        value_per_action_usd_micros: 300_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 0,
+        badges: Vec::new(),
+        domains: Vec::new(),
+        metadata: HashMap::new(),
+        mesh_payload: None,
+        placement: Default::default(),
+    };
+    let campaign = Campaign {
+        id: "cmp-missing-token".into(),
+        advertiser_account: "adv-missing".into(),
+        budget_usd_micros: 3_500_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata: HashMap::new(),
+    };
+    harness
+        .market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+    let params = json_mod::json!({
+        "campaign_id": "cmp-missing-token",
+        "creative_id": "creative-missing-token",
+        "advertiser_account": "adv-missing",
+        "assignment": {
+            "fold": 3,
+            "in_holdout": false,
+            "propensity": 0.6
+        }
+    });
+    let error = expect_error(harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some("Advertiser adv-missing:any".into()),
+    ));
+    assert_eq!(error.code(), -32032);
+}
+
+#[testkit::tb_serial]
+fn rpc_record_conversion_rejects_malformed_payload() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_record_conversion_malformed", config);
+    let params = json_mod::json!({
+        "campaign_id": "cmp-malformed",
+        "creative_id": "creative-malformed",
+        "advertiser_account": "adv-malformed"
+    });
+    let error = expect_error(harness.call_with_auth(
+        "ad_market.record_conversion",
+        params,
+        Some("Advertiser adv-malformed:token".into()),
+    ));
+    assert_eq!(error.code(), -32602);
 }

@@ -1036,6 +1036,7 @@ mod tests {
             ad_verifier_it: TokenAmount::new(23),
             ad_liquidity_it: TokenAmount::new(24),
             ad_miner_it: TokenAmount::new(25),
+            treasury_events: Vec::new(),
             ad_total_usd_micros: 26,
             ad_settlement_count: 2,
             ad_oracle_ct_price_usd_micros: 27,

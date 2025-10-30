@@ -1,8 +1,8 @@
 #![cfg(feature = "integration-tests")]
 
 use ad_market::{
-    ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt,
-    SettlementBreakdown, UpliftEstimate,
+    DeliveryChannel, ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace,
+    SelectionReceipt, SettlementBreakdown, UpliftEstimate,
 };
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex;
@@ -130,6 +130,10 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         total_usd_micros: 80,
         demand_usd_micros: 80,
         resource_floor_usd_micros: 80,
+        clearing_price_usd_micros: 80,
+        delivery_channel: DeliveryChannel::Http,
+        mesh_payload: None,
+        mesh_payload_digest: None,
         resource_floor_breakdown: floor_breakdown(80),
         runner_up_quality_bid_usd_micros: 0,
         quality_adjusted_bid_usd_micros: 80,
@@ -247,6 +251,10 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         total_usd_micros: 120,
         demand_usd_micros: 160,
         resource_floor_usd_micros: 120,
+        clearing_price_usd_micros: 120,
+        delivery_channel: DeliveryChannel::Http,
+        mesh_payload: None,
+        mesh_payload_digest: None,
         resource_floor_breakdown: floor_breakdown(120),
         runner_up_quality_bid_usd_micros: 0,
         quality_adjusted_bid_usd_micros: 160,
@@ -280,6 +288,10 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         total_usd_micros: 150,
         demand_usd_micros: 180,
         resource_floor_usd_micros: 150,
+        clearing_price_usd_micros: 150,
+        delivery_channel: DeliveryChannel::Http,
+        mesh_payload: None,
+        mesh_payload_digest: None,
         resource_floor_breakdown: floor_breakdown(150),
         runner_up_quality_bid_usd_micros: 0,
         quality_adjusted_bid_usd_micros: 180,
@@ -387,6 +399,10 @@ fn dual_token_feature_flag_suppresses_it_when_disabled() {
         total_usd_micros: 90,
         demand_usd_micros: 90,
         resource_floor_usd_micros: 90,
+        clearing_price_usd_micros: 90,
+        delivery_channel: DeliveryChannel::Http,
+        mesh_payload: None,
+        mesh_payload_digest: None,
         resource_floor_breakdown: floor_breakdown(90),
         runner_up_quality_bid_usd_micros: 0,
         quality_adjusted_bid_usd_micros: 90,
