@@ -158,6 +158,15 @@
     },
     {
       "deprecated": false,
+      "description": "Verifier committee receipt rejections grouped by committee label and reason",
+      "labels": [
+        "committee",
+        "reason"
+      ],
+      "name": "ad_verifier_committee_rejection_total"
+    },
+    {
+      "deprecated": false,
       "description": "Total service badges revoked",
       "labels": [],
       "name": "badge_revoked_total"
@@ -1647,6 +1656,24 @@
       "description": "Per-iteration duration for the ANN soft-intent verification benchmark",
       "labels": [],
       "name": "benchmark_ann_soft_intent_verification_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "P50 per-iteration duration for the ANN soft-intent verification benchmark",
+      "labels": [],
+      "name": "benchmark_ann_soft_intent_verification_seconds_p50"
+    },
+    {
+      "deprecated": false,
+      "description": "P90 per-iteration duration for the ANN soft-intent verification benchmark",
+      "labels": [],
+      "name": "benchmark_ann_soft_intent_verification_seconds_p90"
+    },
+    {
+      "deprecated": false,
+      "description": "P99 per-iteration duration for the ANN soft-intent verification benchmark",
+      "labels": [],
+      "name": "benchmark_ann_soft_intent_verification_seconds_p99"
     }
   ]
 }

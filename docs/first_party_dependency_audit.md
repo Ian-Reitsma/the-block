@@ -7,9 +7,10 @@
 > crates are required. Selection receipts embed stake snapshots and committee
 > receipts via the same first-party BLAKE3 hashing path, and the attestation
 > manager’s guard now recomputes stake thresholds from the provided snapshot
-> before accepting any wallet proof. Integration tests exercise stale snapshots
-> and mismatched transcripts through `ad_market.reserve_impression`, proving the
-> guard strips invalid committees without leaning on third-party harnesses.
+> and cross-checks the serialized committee weights before accepting any wallet
+> proof. Integration tests exercise stale snapshots, mismatched transcripts, and
+> weight inflation through `ad_market.reserve_impression`, proving the guard
+> strips invalid committees without leaning on third-party harnesses.
 > Soft-intent ANN proofs derive encrypted buckets with
 > `crypto_suite::encryption::symmetric` plus BLAKE3 keys, wallets can inject
 > optional entropy that is persisted on receipts, and `badge::ann::verify_receipt`
@@ -18,10 +19,17 @@
 > on the in-house `testkit`/`concurrency` stack, and gateway tests assert
 > requested κ, multipliers, shadow prices, and ANN digests for every candidate so
 > pacing analytics and receipt traces stay free of serde or external math crates.
-> Benchmark runs publish `benchmark_ann_soft_intent_verification_seconds` through
-> the first-party exporter under a file lock when `TB_BENCH_PROM_PATH` is set,
-> letting dashboards track ANN verification latency without ever leaving the
-> workspace tooling.
+> Benchmark runs publish `benchmark_ann_soft_intent_verification_seconds` plus
+> the `_p50`, `_p90`, and `_p99` gauges, `benchmark_*_iterations`, and the
+> new `benchmark_*_regression` flags through the first-party exporter under a
+> file lock when `TB_BENCH_PROM_PATH` is set. History retention and alerting stay
+> in-house: `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT` append timestamped
+> CSV rows while `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` clamp
+> acceptable runtimes and atomically record human-readable alerts without touching
+> external tooling. Committee guard rejections likewise surface via
+> `ad_verifier_committee_rejection_total{committee,reason}`, extending the
+> existing telemetry with a pure first-party counter so operators catch stake or
+> snapshot mismatches in real time.
 
 > **2025-10-29 update (selection digest enforcement & pacing telemetry):**
 > `SelectionReceipt::validate` now recomputes the commitment hash, proof-bytes

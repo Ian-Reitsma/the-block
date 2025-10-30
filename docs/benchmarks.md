@@ -26,14 +26,30 @@ expanding badge tables—latency grows linearly with bucket count, so operators 
 gauge acceptable ANN fan-out before rolling out larger cohorts.
 
 When `TB_BENCH_PROM_PATH=/path/to/metrics.prom` is set, the shared `testkit`
-exporter now acquires a file lock before rewriting the Prometheus snapshot so
+exporter acquires a file lock before rewriting the Prometheus snapshot so
 concurrent suites append deterministically without clobbering each other’s
-measurements. One `benchmark_<name>_seconds` series is emitted per run, keeping
-the most recent timing for dashboards and alerts. The monitoring stack ingests
-the file via the
-`benchmark_ann_soft_intent_verification_seconds` descriptor in
-`monitoring/metrics.json`, and the generated Grafana dashboards now include a
-**Benchmarks** row plotting the ANN verification latency beside existing gateway
-and marketplace panels. This keeps regression history, alerting, and dashboards
-fully first party while letting operators compare wallet-scale ANN timings with
-live pacing telemetry.
+measurements. Each run persists a `benchmark_<name>_seconds` gauge alongside the
+`_p50`, `_p90`, and `_p99` percentiles computed from the captured iteration
+durations plus a `benchmark_<name>_regression` flag that flips to `1` whenever a
+threshold breach is detected. Operators can optionally pin absolute regression
+ceilings via
+`TB_BENCH_REGRESSION_THRESHOLDS="per_iter=0.015,p90=0.040,p99=0.060"`; every
+key maps to the per-iteration average or one of the tracked percentiles. Failed
+checks surface both in stdout/stderr and through the exported
+`benchmark_<name>_*_regression` gauges, making it trivial to wire alerts straight
+into Prometheus or Grafana annotations.
+
+Threshold keys are normalised to lowercase before comparison, so `P50=0.010`
+and `p50=0.010` behave identically. Malformed pairs (`p50=abc`, `per_iter=`)
+are ignored rather than aborting the run, letting suites tighten thresholds
+incrementally without bricking CI when an operator mistypes a value.
+
+Setting `TB_BENCH_HISTORY_PATH=/var/lib/the-block/bench_history.csv` instructs
+the harness to append timestamped CSV rows with the iteration count, elapsed
+seconds, per-iteration average, and the recorded percentiles. History pruning is
+first-party as well: `TB_BENCH_HISTORY_LIMIT=200` keeps the most recent 200 rows
+in the file, and `TB_BENCH_ALERT_PATH` points at an optional text file that will
+be atomically overwritten with a human-readable regression summary whenever any
+threshold trips. Dashboards ingest both the Prometheus snapshot and the rolling
+CSV, letting ANN percentile trends sit beside gateway, pacing, and committee
+panels without relying on third-party tooling.

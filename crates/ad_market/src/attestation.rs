@@ -168,11 +168,12 @@ impl SelectionAttestationManager {
                             );
                             if let Some(guard) = &self.committee_guard {
                                 if let Err(err) = guard.validate(receipt) {
+                                    guard.record_rejection(err.reason());
                                     increment_counter!(
-                                        "ad_selection_attestation_total",
-                                        "kind" => "snark",
-                                        "result" => "rejected",
-                                        "reason" => err.reason()
+                                    "ad_selection_attestation_total",
+                                    "kind" => "snark",
+                                    "result" => "rejected",
+                                    "reason" => err.reason()
                                     );
                                     continue;
                                 }
@@ -430,6 +431,14 @@ impl VerifierCommitteeGuard {
         .map_err(CommitteeValidationError::Invalid)?;
         Ok(())
     }
+
+    fn record_rejection(&self, reason: &str) {
+        increment_counter!(
+            "ad_verifier_committee_rejection_total",
+            "committee" => self.policy.label.as_str(),
+            "reason" => reason
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -466,6 +475,9 @@ impl CommitteeValidationError {
             CommitteeValidationError::Invalid(VerifierSelectionError::StakeUnitsMismatch {
                 ..
             }) => "stake_units",
+            CommitteeValidationError::Invalid(VerifierSelectionError::StakeWeightMismatch {
+                ..
+            }) => "stake_weight",
         }
     }
 }
@@ -903,6 +915,71 @@ mod tests {
             SelectionReceiptError::VerifierCommitteeInvalid { reason }
                 if reason == "missing_snapshot"
         ));
+    }
+
+    #[test]
+    fn committee_rejections_increment_metrics() {
+        let Some(recorder) = TestMetricsRecorder::install() else {
+            eprintln!("skipping metrics assertion; recorder already installed elsewhere");
+            return;
+        };
+        recorder.reset();
+        let mut preferred = HashSet::new();
+        preferred.insert(CIRCUIT_ID.into());
+        let mut rng = rand::rngs::StdRng::seed_from_u64(47);
+        let (secret, public) = vrf::SecretKey::generate(&mut rng);
+        let snapshot = sample_snapshot();
+        let transcript = b"selection-transcript".to_vec();
+        let policy = CommitteePolicy {
+            label: "verifier-selection".into(),
+            committee_size: 2,
+            minimum_total_stake: 1,
+            stake_threshold_ppm: 500_000,
+        };
+        let selection =
+            verifier_selection::select_committee(&secret, &policy, &snapshot, &transcript)
+                .expect("committee selected");
+        let manager = SelectionAttestationManager::new(SelectionAttestationConfig {
+            preferred_circuit_ids: preferred,
+            allow_tee_fallback: false,
+            require_attestation: true,
+            verifier_committee: Some(VerifierCommitteeConfig {
+                vrf_public_key_hex: hex::encode(public.to_bytes()),
+                committee_size: policy.committee_size,
+                minimum_total_stake: 1,
+                stake_threshold_ppm: policy.stake_threshold_ppm,
+                label: policy.label.clone(),
+                require_snapshot: true,
+            }),
+        });
+        let (mut receipt, proof, _) = build_receipt();
+        receipt.verifier_committee = Some(selection.receipt.clone());
+        receipt.verifier_transcript = transcript;
+        let attestation = SelectionAttestation::Snark {
+            proof: proof.clone(),
+            circuit_id: CIRCUIT_ID.into(),
+        };
+        let (accepted, satisfaction, metadata) =
+            manager.attach_attestation(&receipt, &[attestation]);
+        assert!(accepted.is_none());
+        assert_eq!(satisfaction, AttestationSatisfaction::Missing);
+        assert!(metadata.is_none());
+
+        let counters = recorder.counters();
+        assert!(
+            counters.iter().any(|event| {
+                event.name == "ad_verifier_committee_rejection_total"
+                    && event
+                        .labels
+                        .iter()
+                        .any(|(k, v)| k == "reason" && v == "snapshot_missing")
+                    && event
+                        .labels
+                        .iter()
+                        .any(|(k, v)| k == "committee" && v == &policy.label)
+            }),
+            "expected committee rejection counter, got {counters:?}"
+        );
     }
 
     #[test]
