@@ -704,10 +704,6 @@ impl Creative {
         }
     }
 
-    fn quality_multiplier(&self, config: &MarketplaceConfig) -> f64 {
-        self.quality_multiplier_with_lift(config, self.effective_lift_ppm())
-    }
-
     fn quality_multiplier_with_lift(&self, config: &MarketplaceConfig, lift_ppm: u32) -> f64 {
         config.quality_multiplier(self.action_rate_ppm, lift_ppm)
     }
@@ -916,6 +912,8 @@ pub struct SettlementBreakdown {
     #[serde(default)]
     pub it_twap_window_id: u64,
     pub selection_receipt: SelectionReceipt,
+    #[serde(default)]
+    pub uplift: UpliftEstimate,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -3020,6 +3018,7 @@ impl Marketplace for InMemoryMarketplace {
             ct_twap_window_id: oracle.ct_twap_window_id,
             it_twap_window_id: oracle.it_twap_window_id,
             selection_receipt: reservation.selection_receipt,
+            uplift: reservation.uplift,
         })
     }
 
@@ -3594,6 +3593,9 @@ impl Marketplace for SledMarketplace {
                 reservation.total_usd_micros,
             );
         }
+        if let Err(err) = self.persist_token_remainders() {
+            eprintln!("failed to persist token remainders: {err}");
+        }
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -3625,6 +3627,7 @@ impl Marketplace for SledMarketplace {
             ct_twap_window_id: oracle.ct_twap_window_id,
             it_twap_window_id: oracle.it_twap_window_id,
             selection_receipt: reservation.selection_receipt,
+            uplift: reservation.uplift,
         })
     }
 

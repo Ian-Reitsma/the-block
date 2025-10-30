@@ -6,7 +6,7 @@
 > attestation manager validates VRF outputs with first-party BLAKE3 hashing.
 > The verifier guard now recomputes stake thresholds from the supplied
 > snapshot—never from receipt weights—and integration coverage exercises stale
-> snapshots plus mismatched transcripts end to end through
+> snapshots, mismatched transcripts, and weight inflation end to end through
 > `ad_market.reserve_impression`. Gateway and SDK surfaces emit requested κ,
 > shading multipliers, ANN ciphertext digests, and dual-token toggles so analysts
 > can trace selection guidance and badge intent in real time. The ANN pipeline
@@ -16,9 +16,11 @@
 > stays consistent beyond the winner. The `ann_soft_intent_verification`
 > benchmark measures ANN receipt verification across 128–32 768 bucket tables
 > with salted and wallet-entropy derivation, and the shared benchmarking harness
-> locks the Prometheus export so concurrent runs cannot clobber metrics. The
-> monitoring generator ingests the updated samples and keeps ANN verification
-> latency plotted beside pacing telemetry without leaving the first-party stack.
+> locks the Prometheus export while writing `benchmark_ann_soft_intent_verification_seconds`
+> alongside `_p50`/`_p90`/`_p99` percentiles so concurrent runs cannot clobber metrics.
+> The monitoring generator ingests the updated samples and keeps ANN verification
+> latency distributions plotted beside pacing telemetry without leaving the
+> first-party stack.
 > **Review (2025-10-29, evening):** Selection manifests now parse deterministically
 > across hot swaps and multi-entry manifests via the manual
 > `parse_manifest_value`/`parse_artifacts_value` helpers, with tests covering order
@@ -244,6 +246,24 @@
 > logs `read_ack_processed_total{result="invalid_privacy"}` whenever proofs fail
 > under observe mode. New regression tests cover the proof round-trip and enforce
 > that identical reads no longer collide in the ad marketplace.
+> **Review (2025-10-30, early morning):** ANN benchmark automation now writes
+> per-run history and regression signals entirely in-house. `TB_BENCH_HISTORY_PATH`
+> + `TB_BENCH_HISTORY_LIMIT` persist timestamped percentiles alongside
+> `benchmark_*_iterations`, while `TB_BENCH_REGRESSION_THRESHOLDS` +
+> `TB_BENCH_ALERT_PATH` clamp acceptable latency and emit first-party alert
+> summaries. Telemetry ingests the new `benchmark_*_regression` gauges beside the
+> existing percentiles so Grafana and the HTML dashboards highlight slow runs
+> without third-party tooling. Verifier committee guards now increment
+> `ad_verifier_committee_rejection_total{committee,reason}` whenever stake,
+> snapshot, or VRF mismatches surface, keeping weight tampering observable in real
+> time. Parser coverage now exercises malformed `TB_BENCH_REGRESSION_THRESHOLDS`
+> entries and confirms case-insensitive keys so CI can reject slow runs without
+> human typos breaking suites, while new committee guard integration tests assert
+> the rejection counter increments under missing-snapshot failures. With those
+> guardrails in place, `SettlementBreakdown` carries the winning creative’s
+> `uplift` payload
+> so RPC consumers and explorers correlate pacing analytics with realised lift
+> without recomputing estimates off-box.
 > **Review (2025-11-06, afternoon):** Advertising settlements now show the full
 > dual-token story across the explorer, CLI, telemetry, and readiness RPC. The
 > ledger codecs persist CT totals, IT totals, USD micros, settlement counts, and

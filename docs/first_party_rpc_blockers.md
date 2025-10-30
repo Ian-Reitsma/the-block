@@ -17,12 +17,13 @@ RPC client.
   `crypto_suite::vrf` implementation, stake hashes use BLAKE3, and the
   attestation manager validates wallet receipts strictly through these helpers—no
   external crypto or serialization stacks were introduced.
-- Integration tests now cover stale stake snapshots and mismatched transcripts by
-  driving `ad_market.reserve_impression` through the same RPC harness the SDK
-  uses. When attestation is required, tampered receipts now block the reservation
-  outright (invalid transcripts or stale snapshots return `None`), while valid
-  proofs still settle. The test harness stays entirely on
-  `foundation_serialization` + `testkit`—no external frameworks required.
+- Integration tests now cover stale stake snapshots, mismatched transcripts, and
+  weight inflation by driving `ad_market.reserve_impression` through the same
+  RPC harness the SDK uses. When attestation is required, tampered receipts now
+  block the reservation outright (invalid transcripts, stale snapshots, or
+  mismatched committee weights return `None`), while valid proofs still settle.
+  The test harness stays entirely on `foundation_serialization` + `testkit`—no
+  external frameworks required.
 - Wallet badge soft-intent contexts carry encrypted ANN receipts produced with
   `crypto_suite::encryption::symmetric` and BLAKE3-derived keys. The guard
   verifies proofs via `badge::ann::verify_receipt`, and RPC surfaces reuse the
@@ -34,8 +35,14 @@ RPC client.
   can supply optional entropy that rides through the ANN receipt fields, and
   the verification path rejects tampered IV/ciphertext pairs strictly through the
   first-party crypto facade. Benchmark exports acquire a file lock before writing
-  `benchmark_ann_soft_intent_verification_seconds`, preventing concurrent suites
-  from clobbering RPC-facing metrics.
+  `benchmark_ann_soft_intent_verification_seconds`, the `_p50`/`_p90`/`_p99`
+  gauges, `benchmark_*_iterations`, and the `benchmark_*_regression` flags,
+  preventing concurrent suites from clobbering RPC-facing metrics while keeping
+  regression signals entirely first party. `TB_BENCH_HISTORY_PATH` +
+  `TB_BENCH_HISTORY_LIMIT` persist timestamped CSV rows for RPC consumers that
+  replay history, and `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH`
+  clamp acceptable runtimes and emit on-disk alert summaries without any external
+  tooling.
 - Budget shading guidance now reports requested κ, applied multipliers, shadow
   prices, and dual prices through the existing JSON/telemetry helpers. All
   shading math stays inside `BudgetBroker`, and the receipts expose the richer
@@ -50,7 +57,7 @@ RPC client.
   privacy budget, uplift, and remainder fields strictly through first-party
   builders. `PrivacyBudgetManager` decisions surface as structured errors without
   policy engines, the uplift estimate rides the existing receipt JSON helpers,
-  and `SettlementBreakdown` includes `resource_floor_breakdown`, TWAP window IDs,
+  and `SettlementBreakdown` includes `uplift`, `resource_floor_breakdown`, TWAP window IDs,
   and per-role CT/IT remainders assembled with `foundation_serialization`.
   `ad_market.broker_state` reuses the same helpers to embed pacing analytics and
   budget snapshots, while telemetry updates (`ad_privacy_budget_*`,

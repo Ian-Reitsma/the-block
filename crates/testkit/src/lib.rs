@@ -8,12 +8,120 @@
 /// Benchmark helpers that execute the provided closure a fixed number of
 /// iterations and emit human-readable timing summaries.
 pub mod bench {
+    use std::collections::HashMap;
     use std::env;
     use std::fs::{self, File};
     use std::io::{ErrorKind, Read};
     use std::path::{Path, PathBuf};
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    const PERCENTILES: [(&str, f64); 3] = [("p50", 0.50), ("p90", 0.90), ("p99", 0.99)];
+
+    #[derive(Clone, Copy, Debug)]
+    struct PercentileSample {
+        label: &'static str,
+        value: Duration,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ComparisonKind {
+        PerIteration,
+        Percentile(&'static str),
+    }
+
+    impl ComparisonKind {
+        fn key(&self) -> &'static str {
+            match self {
+                ComparisonKind::PerIteration => "per_iter",
+                ComparisonKind::Percentile(label) => label,
+            }
+        }
+
+        fn metric_name(&self, base: &str) -> String {
+            match self {
+                ComparisonKind::PerIteration => base.to_string(),
+                ComparisonKind::Percentile(label) => format!("{base}_{label}"),
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct MetricComparison {
+        kind: ComparisonKind,
+        value: f64,
+        threshold: Option<f64>,
+        exceeded: bool,
+    }
+
+    impl MetricComparison {
+        fn new(kind: ComparisonKind, value: Option<f64>, threshold: Option<f64>) -> Self {
+            let (value, exceeded) = match (value, threshold) {
+                (Some(v), Some(limit)) => (v, v > limit),
+                (Some(v), None) => (v, false),
+                (None, Some(_limit)) => (f64::NAN, true),
+                (None, None) => (f64::NAN, false),
+            };
+            Self {
+                kind,
+                value,
+                threshold,
+                exceeded,
+            }
+        }
+
+        fn describe(&self) -> String {
+            match (self.value.is_nan(), self.threshold) {
+                (true, Some(limit)) => {
+                    format!("{} missing (threshold {:.6})", self.kind.key(), limit)
+                }
+                (false, Some(limit)) => {
+                    format!("{} {:.6} > {:.6}", self.kind.key(), self.value, limit)
+                }
+                _ => self.kind.key().to_string(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct RegressionReport {
+        comparisons: Vec<MetricComparison>,
+    }
+
+    impl RegressionReport {
+        fn triggered(&self) -> bool {
+            self.comparisons.iter().any(|cmp| cmp.exceeded)
+        }
+
+        fn exceeded(&self) -> impl Iterator<Item = &MetricComparison> {
+            self.comparisons.iter().filter(|cmp| cmp.exceeded)
+        }
+
+        fn comparisons(&self) -> &[MetricComparison] {
+            &self.comparisons
+        }
+    }
+
+    struct BenchmarkSnapshot<'a> {
+        name: &'a str,
+        iterations: usize,
+        elapsed: Duration,
+        per_iteration: Duration,
+        percentiles: Vec<PercentileSample>,
+    }
+
+    impl<'a> BenchmarkSnapshot<'a> {
+        fn percentile_value(&self, label: &str) -> Option<Duration> {
+            self.percentiles
+                .iter()
+                .find(|sample| sample.label == label)
+                .map(|sample| sample.value)
+        }
+
+        fn percentile_or(&self, label: &str, default: Duration) -> Duration {
+            self.percentile_value(label).unwrap_or(default)
+        }
+    }
 
     /// Default number of iterations used when the benchmark macro does not
     /// specify a custom count.
@@ -26,6 +134,7 @@ pub mod bench {
         pub iterations: usize,
         /// Total elapsed wall-clock time.
         pub elapsed: Duration,
+        pub samples: Vec<Duration>,
     }
 
     impl BenchResult {
@@ -36,6 +145,21 @@ pub mod bench {
             }
             self.elapsed / self.iterations as u32
         }
+
+        /// Returns the recorded per-iteration samples sorted in ascending order.
+        pub fn samples(&self) -> &[Duration] {
+            &self.samples
+        }
+
+        /// Returns the duration at the requested percentile using nearest-rank rounding.
+        pub fn percentile(&self, quantile: f64) -> Option<Duration> {
+            if self.samples.is_empty() {
+                return None;
+            }
+            let clamped = quantile.clamp(0.0, 1.0);
+            let idx = ((self.samples.len() - 1) as f64 * clamped).round() as usize;
+            self.samples.get(idx).copied()
+        }
     }
 
     /// Runs a benchmark by executing `body` `iterations` times.
@@ -44,40 +168,309 @@ pub mod bench {
         F: FnMut(),
     {
         let iterations = iterations.max(1);
-        let start = Instant::now();
+        let mut samples = Vec::with_capacity(iterations);
+        let mut total = Duration::from_secs(0);
         for _ in 0..iterations {
+            let started = Instant::now();
             body();
+            let elapsed = started.elapsed();
+            total += elapsed;
+            samples.push(elapsed);
         }
-        let elapsed = start.elapsed();
+        samples.sort();
         report(
             name,
             BenchResult {
                 iterations,
-                elapsed,
+                elapsed: total,
+                samples,
             },
         );
     }
 
     fn report(name: &str, result: BenchResult) {
-        let per_iter = result.per_iteration();
+        let snapshot = BenchmarkSnapshot {
+            name,
+            iterations: result.iterations,
+            elapsed: result.elapsed,
+            per_iteration: result.per_iteration(),
+            percentiles: PERCENTILES
+                .iter()
+                .filter_map(|(label, quantile)| {
+                    result.percentile(*quantile).map(|value| PercentileSample {
+                        label: *label,
+                        value,
+                    })
+                })
+                .collect(),
+        };
+        let regression = evaluate_thresholds(&snapshot);
+        let p50 = snapshot.percentile_or("p50", snapshot.per_iteration);
+        let p90 = snapshot.percentile_or("p90", snapshot.per_iteration);
+        let p99 = snapshot.percentile_or("p99", snapshot.per_iteration);
         println!(
-            "benchmark `{name}`: {iters} iters in {total:?} ({avg:?}/iter)",
-            iters = result.iterations,
-            total = result.elapsed,
-            avg = per_iter
+            "benchmark `{name}`: {iters} iters in {total:?} ({avg:?}/iter, p50={p50:?}, p90={p90:?}, p99={p99:?})",
+            iters = snapshot.iterations,
+            total = snapshot.elapsed,
+            avg = snapshot.per_iteration,
+            p50 = p50,
+            p90 = p90,
+            p99 = p99
         );
-        if let Err(err) = export_prometheus(name, per_iter) {
+        if regression.triggered() {
+            let details: Vec<String> = regression.exceeded().map(|cmp| cmp.describe()).collect();
+            eprintln!(
+                "benchmark `{name}` regression detected: {}",
+                details.join(", ")
+            );
+        }
+        if let Err(err) = export_prometheus(&snapshot, &regression) {
             eprintln!("failed to export benchmark metric: {err}");
+        }
+        if let Err(err) = persist_history(&snapshot, &regression) {
+            eprintln!("failed to persist benchmark history: {err}");
+        }
+        if let Err(err) = emit_alert(&snapshot, &regression) {
+            eprintln!("failed to emit benchmark alert: {err}");
         }
     }
 
-    fn export_prometheus(name: &str, per_iter: Duration) -> Result<(), std::io::Error> {
+    fn export_prometheus(
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
+    ) -> Result<(), std::io::Error> {
         let path = match env::var("TB_BENCH_PROM_PATH") {
             Ok(value) if !value.is_empty() => value,
             _ => return Ok(()),
         };
-        let sanitized: String = name
-            .chars()
+        let sanitized = sanitize_metric_name(snapshot.name);
+        let metric_name = if sanitized.is_empty() {
+            "benchmark_seconds".to_string()
+        } else {
+            format!("benchmark_{}_seconds", sanitized)
+        };
+        let metrics = build_metric_series(&metric_name, snapshot, regression);
+        let path_buf = PathBuf::from(path);
+        with_file_lock(&path_buf, || export_prometheus_locked(&path_buf, &metrics))
+    }
+
+    fn build_metric_series(
+        metric_name: &str,
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
+    ) -> Vec<(String, f64)> {
+        let mut metrics = Vec::new();
+        metrics.push((
+            metric_name.to_string(),
+            snapshot.per_iteration.as_secs_f64(),
+        ));
+        metrics.push((
+            format!("{metric_name}_iterations"),
+            snapshot.iterations as f64,
+        ));
+        for sample in &snapshot.percentiles {
+            metrics.push((
+                format!("{metric_name}_{}", sample.label),
+                sample.value.as_secs_f64(),
+            ));
+        }
+        metrics.push((
+            format!("{metric_name}_regression"),
+            if regression.triggered() { 1.0 } else { 0.0 },
+        ));
+        for comparison in regression.comparisons() {
+            if let Some(threshold) = comparison.threshold {
+                let metric = comparison.kind.metric_name(metric_name);
+                metrics.push((format!("{metric}_threshold"), threshold));
+                metrics.push((
+                    format!("{metric}_regression"),
+                    if comparison.exceeded { 1.0 } else { 0.0 },
+                ));
+            }
+        }
+        metrics
+    }
+
+    fn persist_history(
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
+    ) -> Result<(), std::io::Error> {
+        let path = match env::var("TB_BENCH_HISTORY_PATH") {
+            Ok(value) if !value.is_empty() => PathBuf::from(value),
+            _ => return Ok(()),
+        };
+        let limit = env::var("TB_BENCH_HISTORY_LIMIT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok());
+        let line = build_history_line(snapshot, regression);
+        with_file_lock(&path, || persist_history_locked(&path, &line, limit))
+    }
+
+    fn build_history_line(
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
+    ) -> String {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        let p50 = snapshot.percentile_value("p50");
+        let p90 = snapshot.percentile_value("p90");
+        let p99 = snapshot.percentile_value("p99");
+        let regressions: Vec<&'static str> =
+            regression.exceeded().map(|cmp| cmp.kind.key()).collect();
+        format!(
+            "{timestamp:.6},{iters},{elapsed:.9},{per_iter:.9},{p50},{p90},{p99},{regressions}",
+            iters = snapshot.iterations,
+            elapsed = snapshot.elapsed.as_secs_f64(),
+            per_iter = snapshot.per_iteration.as_secs_f64(),
+            p50 = format_optional_duration(p50),
+            p90 = format_optional_duration(p90),
+            p99 = format_optional_duration(p99),
+            regressions = if regressions.is_empty() {
+                "none".to_string()
+            } else {
+                regressions.join("|")
+            }
+        )
+    }
+
+    fn format_optional_duration(value: Option<Duration>) -> String {
+        value
+            .map(|duration| format!("{:.9}", duration.as_secs_f64()))
+            .unwrap_or_else(|| "".to_string())
+    }
+
+    fn persist_history_locked(
+        path: &Path,
+        line: &str,
+        limit: Option<usize>,
+    ) -> Result<(), std::io::Error> {
+        let mut existing = String::new();
+        if let Ok(mut file) = File::open(path) {
+            file.read_to_string(&mut existing)?;
+        }
+        let mut rows: Vec<String> = existing
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.to_string())
+            .collect();
+        if rows
+            .first()
+            .map(|line| line.starts_with("timestamp"))
+            .unwrap_or(false)
+        {
+            // header present
+        } else {
+            rows.insert(
+                0,
+                "timestamp,iterations,elapsed_seconds,per_iter_seconds,p50_seconds,p90_seconds,p99_seconds,regressions"
+                    .to_string(),
+            );
+        }
+        rows.push(line.to_string());
+        if let Some(limit) = limit {
+            if limit == 0 {
+                rows.truncate(1);
+            } else {
+                let mut entries: Vec<String> = rows.into_iter().skip(1).collect();
+                if entries.len() > limit {
+                    entries = entries.split_off(entries.len() - limit);
+                }
+                rows = Vec::with_capacity(entries.len() + 1);
+                rows.push(
+                    "timestamp,iterations,elapsed_seconds,per_iter_seconds,p50_seconds,p90_seconds,p99_seconds,regressions"
+                        .to_string(),
+                );
+                rows.extend(entries);
+            }
+        }
+        let mut output = rows.join("\n");
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        fs::write(path, output)
+    }
+
+    fn emit_alert(
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
+    ) -> Result<(), std::io::Error> {
+        if !regression.triggered() {
+            return Ok(());
+        }
+        let message = {
+            let details: Vec<String> = regression.exceeded().map(|cmp| cmp.describe()).collect();
+            format!(
+                "benchmark `{}` regression: {}",
+                snapshot.name,
+                details.join(", ")
+            )
+        };
+        if let Ok(path) = env::var("TB_BENCH_ALERT_PATH") {
+            if !path.is_empty() {
+                let path_buf = PathBuf::from(path);
+                with_file_lock(&path_buf, || fs::write(&path_buf, &message))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate_thresholds(snapshot: &BenchmarkSnapshot<'_>) -> RegressionReport {
+        let mut thresholds = parse_thresholds();
+        let mut comparisons = Vec::new();
+        let per_iter = snapshot.per_iteration.as_secs_f64();
+        comparisons.push(MetricComparison::new(
+            ComparisonKind::PerIteration,
+            Some(per_iter),
+            thresholds.remove("per_iter"),
+        ));
+        let percentile_map: HashMap<&str, f64> = snapshot
+            .percentiles
+            .iter()
+            .map(|sample| (sample.label, sample.value.as_secs_f64()))
+            .collect();
+        for (label, _quantile) in PERCENTILES.iter() {
+            let value = percentile_map.get(label).copied();
+            let threshold = thresholds.remove(*label);
+            comparisons.push(MetricComparison::new(
+                ComparisonKind::Percentile(label),
+                value,
+                threshold,
+            ));
+        }
+        for key in thresholds.keys() {
+            eprintln!("unknown benchmark regression threshold `{key}` ignored");
+        }
+        RegressionReport { comparisons }
+    }
+
+    fn parse_thresholds() -> HashMap<String, f64> {
+        match env::var("TB_BENCH_REGRESSION_THRESHOLDS") {
+            Ok(raw) if !raw.trim().is_empty() => {
+                let mut map = HashMap::new();
+                for entry in raw.split(',') {
+                    let trimmed = entry.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let mut parts = trimmed.splitn(2, '=');
+                    let key = parts.next().unwrap().trim().to_lowercase();
+                    let Some(value_str) = parts.next() else {
+                        continue;
+                    };
+                    if let Ok(value) = value_str.trim().parse::<f64>() {
+                        map.insert(key, value);
+                    }
+                }
+                map
+            }
+            _ => HashMap::new(),
+        }
+    }
+
+    fn sanitize_metric_name(name: &str) -> String {
+        name.chars()
             .map(|ch| {
                 if ch.is_ascii_alphanumeric() || ch == '_' {
                     ch.to_ascii_lowercase()
@@ -85,19 +478,10 @@ pub mod bench {
                     '_'
                 }
             })
-            .collect();
-        let metric_name = if sanitized.is_empty() {
-            "benchmark_seconds".to_string()
-        } else {
-            format!("benchmark_{}_seconds", sanitized)
-        };
-        let path_buf = PathBuf::from(path);
-        with_prometheus_lock(&path_buf, || {
-            export_prometheus_locked(&path_buf, &metric_name, per_iter)
-        })
+            .collect()
     }
 
-    fn with_prometheus_lock<F>(path: &Path, mut body: F) -> Result<(), std::io::Error>
+    fn with_file_lock<F>(path: &Path, mut body: F) -> Result<(), std::io::Error>
     where
         F: FnMut() -> Result<(), std::io::Error>,
     {
@@ -134,20 +518,27 @@ pub mod bench {
 
     fn export_prometheus_locked(
         path: &Path,
-        metric_name: &str,
-        per_iter: Duration,
+        metrics: &[(String, f64)],
     ) -> Result<(), std::io::Error> {
         let mut existing = String::new();
         if let Ok(mut file) = File::open(path) {
             file.read_to_string(&mut existing)?;
         }
+        let metric_names: Vec<&str> = metrics.iter().map(|(name, _)| name.as_str()).collect();
         let mut lines: Vec<String> = existing
             .lines()
-            .filter(|line| !line.starts_with(&metric_name))
+            .filter(|line| {
+                let trimmed = line.trim();
+                !metric_names
+                    .iter()
+                    .any(|metric| trimmed.starts_with(metric))
+            })
             .map(|line| line.to_string())
             .filter(|line| !line.trim().is_empty())
             .collect();
-        lines.push(format!("{} {}", metric_name, per_iter.as_secs_f64()));
+        for (name, value) in metrics {
+            lines.push(format!("{name} {value}"));
+        }
         lines.sort();
         let mut output = lines.join("\n");
         if !output.ends_with('\n') {
@@ -582,6 +973,9 @@ mod tests {
         env::remove_var("TB_BENCH_PROM_PATH");
         let contents = fs::read_to_string(&path).expect("benchmark metric written");
         assert!(contents.contains("benchmark_test_metric_seconds"));
+        assert!(contents.contains("benchmark_test_metric_seconds_p50"));
+        assert!(contents.contains("benchmark_test_metric_seconds_p90"));
+        assert!(contents.contains("benchmark_test_metric_seconds_p99"));
         let _ = fs::remove_file(path);
     }
 }

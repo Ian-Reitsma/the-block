@@ -61,12 +61,17 @@ five seconds by default and never leaves first-party code.
 
 Benchmarks surface in the same view. When suites export Prometheus samples via
 `TB_BENCH_PROM_PATH`, the generator acquires the shared lock, ingests
-`benchmark_ann_soft_intent_verification_seconds` alongside the live metrics, and
-renders a dedicated **Benchmarks** row in both Grafana and the HTML dashboard.
-Panels plot the ANN verification latency and annotate recent runs so operators
-can correlate wallet-scale ANN timings with gateway pacing guidance without
-leaving the in-house tooling; larger badge tables and wallet-supplied entropy
-values now show up in the time series without clobbering concurrent runs.
+`benchmark_ann_soft_intent_verification_seconds`, the `_p50`, `_p90`, and `_p99`
+percentiles, the `benchmark_*_iterations` totals, and the
+`benchmark_*_regression` gauges alongside the live metrics, and renders a
+dedicated **Benchmarks** row in both Grafana and the HTML dashboard. Operators
+may set `TB_BENCH_REGRESSION_THRESHOLDS` to clamp acceptable runtime, and the
+dashboards will highlight any run that trips the new regression gauges. Setting
+`TB_BENCH_HISTORY_PATH` stores a CSV history that the generator also mirrors so
+multi-run trends stay visible without external tooling. Panels plot the ANN
+verification latency distribution, annotate threshold breaches, and correlate
+wallet-scale ANN timings with gateway pacing guidance without ever leaving the
+in-house stack.
 
 ## Chaos attestations and readiness metrics
 
@@ -237,6 +242,11 @@ costs remain visible when demand clears near the floor. The alerts—
 on the panels when proof supply degrades, pacing stalls, or verifier amortisation
 drifts. All panels flow through the helper builders in
 `monitoring/src/dashboard.rs`, keeping the JSON templates entirely first party.
+Committee validation now feeds directly into telemetry as well:
+`ad_verifier_committee_rejection_total{committee,reason}` increments whenever the
+first-party guard rejects a receipt for stake, snapshot, or VRF mismatches, and
+the dashboards expose the counter beside the attestation panels so operators can
+spot weight inflation or snapshot omissions in real time.
 
 Privacy and uplift telemetry chart beside the pacing graphs. Counters
 `ad_privacy_budget_total{family,result}` and gauges

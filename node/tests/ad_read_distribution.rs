@@ -2,7 +2,7 @@
 
 use ad_market::{
     ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt,
-    SettlementBreakdown,
+    SettlementBreakdown, UpliftEstimate,
 };
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex;
@@ -153,6 +153,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         ct_twap_window_id: 0,
         it_twap_window_id: 0,
         selection_receipt: dummy_receipt("cmp-1", "creative-1", 80, 80, 0, 80),
+        uplift: UpliftEstimate::default(),
     };
     bc.record_ad_settlement(&ack, settlement);
 
@@ -269,6 +270,7 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         ct_twap_window_id: 0,
         it_twap_window_id: 0,
         selection_receipt: dummy_receipt("cmp-1", "creative-1", 120, 120, 0, 160),
+        uplift: UpliftEstimate::default(),
     };
     let settlement_b = SettlementBreakdown {
         campaign_id: "cmp-2".into(),
@@ -301,6 +303,7 @@ fn dual_token_liquidity_splits_roll_into_block_totals() {
         ct_twap_window_id: 0,
         it_twap_window_id: 0,
         selection_receipt: dummy_receipt("cmp-2", "creative-2", 150, 150, 0, 180),
+        uplift: UpliftEstimate::default(),
     };
     bc.record_ad_settlement(&ack_a, settlement_a.clone());
     bc.record_ad_settlement(&ack_b, settlement_b.clone());
@@ -407,6 +410,7 @@ fn dual_token_feature_flag_suppresses_it_when_disabled() {
         ct_twap_window_id: 0,
         it_twap_window_id: 0,
         selection_receipt: dummy_receipt("cmp-flag", "creative-flag", 90, 90, 0, 90),
+        uplift: UpliftEstimate::default(),
     };
     bc.record_ad_settlement(&ack, settlement.clone());
 

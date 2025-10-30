@@ -1,22 +1,30 @@
 # System-Wide Economic Changes
 > **Review (2025-10-29, evening):** Verifier committee enforcement now sources
 > stake thresholds from authoritative snapshots instead of trusting receipt
-> weights. `verifier_selection::validate_committee` multiplies stake units inside
-> the supplied snapshot, and integration coverage drives stale snapshots plus
-> transcript mismatches through `ad_market.reserve_impression` to prove invalid
-> committees drop their attestation before settlement. Gateway and RPC payloads
-> surface requested κ, shading multipliers, ANN ciphertext digests, and dual-token
-> toggles through the existing JSON helpers so analysts can correlate pacing
-> guidance with badge intent without replaying fixtures. ANN snapshots carry
+> weights, and `verifier_selection::validate_committee` cross-checks the serialized
+> weight ppm for every member. Integration coverage drives stale snapshots,
+> transcript mismatches, and weight inflation through `ad_market.reserve_impression`
+> to prove invalid committees drop their attestation before settlement. Gateway
+> and RPC payloads surface requested κ, shading multipliers, ANN ciphertext digests,
+> and dual-token toggles through the existing JSON helpers so analysts can correlate
+> pacing guidance with badge intent without replaying fixtures. ANN snapshots carry
 > entropy salts for key/IV derivation, wallets can mix extra entropy that now
 > persists on receipts, and the `badge::ann` verifier rejects tampered IV/ciphertext
 > pairs accordingly. The `ann_soft_intent_verification` benchmark profiles
 > verification latency across 128–32 768 bucket tables, giving wallet integrators
 > deterministic timing data for larger badge sets, and benchmark runs can emit
-> `benchmark_ann_soft_intent_verification_seconds` via `TB_BENCH_PROM_PATH` under a
-> shared lock. The monitoring generator charts the series in a dedicated
-> Benchmarks row so ANN latency trends sit beside pacing and readiness telemetry
-> even when suites run concurrently.
+> `benchmark_ann_soft_intent_verification_seconds` plus `_p50`/`_p90`/`_p99` gauges,
+> `benchmark_*_iterations`, and `benchmark_*_regression` flags via `TB_BENCH_PROM_PATH`
+> under a shared lock. Optional `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT`
+> persist timestamped histories while `TB_BENCH_REGRESSION_THRESHOLDS` +
+> `TB_BENCH_ALERT_PATH` gate acceptable latency and emit alert summaries entirely
+> in house. The monitoring generator charts the series in a dedicated Benchmarks
+> row so ANN latency trends and regression spikes sit beside pacing and readiness
+> telemetry even when suites run concurrently. Committee enforcement now increments
+> `ad_verifier_committee_rejection_total{committee,reason}` for stake, snapshot, or
+> weight mismatches, and `SettlementBreakdown` carries the winning creative’s
+> `uplift` estimate so RPC consumers tie realised lift back to pacing guidance
+> without recomputing client-side.
 > **Review (2025-10-29, morning):** Selection receipts now recompute their
 > commitment hash, proof-bytes digest, verifying-key digest, and transcript using
 > the manifest-backed helpers in `zkp::selection`. The new

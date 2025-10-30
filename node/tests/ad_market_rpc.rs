@@ -1212,3 +1212,103 @@ fn ad_market_committee_blocks_invalid_when_attestation_required() {
         SelectionAttestationKind::Snark
     );
 }
+
+#[testkit::tb_serial]
+fn ad_market_committee_rejects_weight_mismatch() {
+    let fixture = committee_fixture();
+    let mut config = MarketplaceConfig::default();
+    config.attestation.preferred_circuit_ids = {
+        let mut set = HashSet::new();
+        set.insert(SELECTION_CIRCUIT_ID.to_string());
+        set
+    };
+    config.attestation.allow_tee_fallback = false;
+    config.attestation.require_attestation = false;
+    config.attestation.verifier_committee = Some(verifier_committee_config(&fixture));
+
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_committee_weight_mismatch", config.clone());
+
+    let campaign_payload = parse_json(
+        r#"{
+            "id": "cmp-committee-weight",
+            "advertiser_account": "adv-committee",
+            "budget_usd_micros": 6800000,
+            "creatives": [
+                {
+                    "id": "creative-committee-weight",
+                    "action_rate_ppm": 520000,
+                    "margin_ppm": 690000,
+                    "value_per_action_usd_micros": 1480000,
+                    "max_cpi_usd_micros": 1480000,
+                    "badges": [],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+    expect_ok(harness.call("ad_market.register_campaign", campaign_payload));
+
+    let market = Arc::clone(&harness.market);
+    let mut base_ctx = ImpressionContext::default();
+    base_ctx.domain = "example.test".into();
+    base_ctx.provider = Some("wallet".into());
+    base_ctx.bytes = 1_024;
+    base_ctx.population_estimate = Some(84);
+    base_ctx.verifier_committee = Some(fixture.receipt.clone());
+    base_ctx.verifier_stake_snapshot = Some(fixture.snapshot.clone());
+    base_ctx.verifier_transcript = fixture.transcript.clone();
+
+    let key_probe = make_reservation_key(4_301);
+    let outcome_probe = market
+        .reserve_impression(key_probe.clone(), base_ctx.clone())
+        .expect("probe reservation");
+    let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
+    market.cancel(&key_probe);
+
+    let attestation = SelectionAttestation::Snark {
+        proof: proof_bytes.clone(),
+        circuit_id: SELECTION_CIRCUIT_ID.into(),
+    };
+
+    let mut tampered_receipt = fixture.receipt.clone();
+    if let Some(member) = tampered_receipt.committee.get_mut(0) {
+        member.weight_ppm = member.weight_ppm.saturating_add(25_000);
+    }
+
+    let mut ctx_invalid = base_ctx.clone();
+    ctx_invalid.attestations = vec![attestation.clone()];
+    ctx_invalid.verifier_committee = Some(tampered_receipt);
+    let key_invalid = make_reservation_key(4_302);
+    let outcome_invalid = market
+        .reserve_impression(key_invalid.clone(), ctx_invalid)
+        .expect("invalid reservation");
+    assert_eq!(
+        outcome_invalid.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Missing,
+        "tampered committee weight should strip attestation"
+    );
+    assert!(
+        outcome_invalid.selection_receipt.proof_metadata.is_none(),
+        "tampered committee weight should drop proof metadata"
+    );
+    market.cancel(&key_invalid);
+
+    let mut ctx_valid = base_ctx.clone();
+    ctx_valid.attestations = vec![attestation];
+    let key_valid = make_reservation_key(4_303);
+    let outcome_valid = market
+        .reserve_impression(key_valid.clone(), ctx_valid)
+        .expect("valid reservation");
+    market.cancel(&key_valid);
+    assert_eq!(
+        outcome_valid.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Snark
+    );
+}
