@@ -1,4 +1,32 @@
 # System-Wide Economic Changes
+> **Review (2025-10-30, afternoon):** RangeBoost mesh delivery now includes a
+> first-party forwarder thread that only launches when `--range-boost` (or
+> `TB_MESH_STATIC_PEERS`) enables mesh mode. HTTP-only nodes skip the worker,
+> while mesh deployments drain queued payloads, requeue transient failures, and
+> log diagnostics without external tooling. Conversion ingest requires
+> advertisers to persist a BLAKE3 digest under `conversion_token_hash` and to
+> call `ad_market.record_conversion` with
+> `Authorization: Advertiser <account>:<token>`—missing headers, mismatched
+> accounts, or bad secrets now fail with explicit RPC codes before uplift
+> snapshots record treatment/control deltas. `SettlementBreakdown` exposes the
+> auction clearing price, delivery channel, and mesh payload digests alongside
+> the dual-token CT/IT totals so diagnostics, ledger snapshots, and dashboards
+> all observe mesh deliveries. Regression coverage (`cargo test -p ad_market`,
+> `cargo test -p the_block --test ad_market_rpc`, `cargo test -p the_block --test
+> mesh_sim`) locks the new flow in place.
+> **Review (2025-10-30, morning):** Geo/device/CRM/delivery targeting now feeds
+> directly into campaign matching and settlement. `CampaignTargeting` and
+> `SelectionReceipt` serialise the richer selectors via the existing
+> first-party JSON helpers, the gateway enriches impression contexts and read
+> acknowledgements with the same data, and RangeBoost mesh requests stage
+> creatives through the in-house queue while logging hop proofs. Uplift holdout
+> assignments are embedded in match outcomes and persisted across in-memory and
+> sled marketplaces, and a new conversion ingestion RPC records treatment/control
+> deltas through manual JSON walkers that also persist uplift snapshots. Block
+> headers, codec fixtures, and genesis verification absorbed the expanded
+> ad-settlement footprint (dual-token IT totals, delivery channel, mesh payload,
+> treasury events), rotating the consensus hash to `2fe62d67…` with the
+> build-script stub updated alongside `hash_genesis::calculate_genesis_hash`.
 > **Review (2025-10-29, evening):** Verifier committee enforcement now sources
 > stake thresholds from authoritative snapshots instead of trusting receipt
 > weights, and `verifier_selection::validate_committee` cross-checks the serialized

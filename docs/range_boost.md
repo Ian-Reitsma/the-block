@@ -30,7 +30,15 @@ returns the current queue depth for monitoring.
 offline and forward it once connectivity resumes, appending their identity as a
 hop proof.
 - **Long-range mesh** – Nodes beyond direct radio range can leverage passerby
-devices to hop bundles toward the core network.
+  devices to hop bundles toward the core network.
+- **Ad delivery enrichment** – The HTTP gateway consults `RangeBoost::best_peer()`
+  when an impression requests mesh delivery, embedding the peer identifier,
+  inferred transport, and observed latency into the `ReadAck` so advertisers can
+  target or audit mesh impressions without guessing which hop carried the
+  payload. Eligible creatives are simultaneously staged into the
+  first-party queue via `RangeBoost::enqueue`, and mesh responses append hop
+  proofs as relays forward bundles, keeping Bluetooth/Wi-Fi distribution
+  observable without third-party tooling.
 
 ## Operational Notes
 
@@ -45,6 +53,21 @@ expiry timestamps to drop stale bundles once telemetry hooks are available.
 neighbouring nodes for faster dissemination.
 5. **Testing** – `node/tests/range_boost.rs` demonstrates enqueueing, proof
 recording, and dequeue semantics.
+
+## Forwarder runtime
+
+`RangeBoost::spawn_forwarder` now owns the queue-draining worker. The gateway
+instantiates the queue on startup and only spawns the forwarder when
+`range_boost::is_enabled()` is true (the `--range-boost` CLI flag or
+`TB_MESH_STATIC_PEERS` environment variable). Nodes that run strictly over HTTP
+therefore skip the background thread entirely, avoiding needless wake-ups. When
+mesh mode is active the worker upgrades a weak reference to the queue, pops the
+oldest bundle, and forwards it to the lowest-latency peer discovered by
+`best_peer()`. Failed deliveries are requeued and logged via
+`diagnostics::log::{info!, warn!}` so operators can spot unsupported transports
+or transient sockets without third-party tooling. The loop sleeps while the
+queue is empty or mesh mode is disabled, and exits automatically if the owning
+`Arc` drops (e.g., during shutdown or tests).
 
 ## Example
 

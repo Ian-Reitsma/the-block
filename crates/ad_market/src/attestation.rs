@@ -574,7 +574,9 @@ impl From<zkp::selection::SelectionProofError> for SelectionProofError {
 mod tests {
     use super::*;
     use crate::test_support::TestMetricsRecorder;
-    use crate::{SelectionCandidateTrace, SelectionCohortTrace};
+    use crate::{
+        DeliveryChannel, SelectionCandidateTrace, SelectionCohortTrace, UpliftHoldoutAssignment,
+    };
     use std::collections::HashSet;
     use verifier_selection::{self, CommitteeConfig as CommitteePolicy};
     use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
@@ -608,6 +610,10 @@ mod tests {
                 badges: vec!["badge-a".into(), "badge-b".into()],
                 bytes: 512,
                 price_per_mib_usd_micros: 1_500_000,
+                delivery_channel: DeliveryChannel::Http,
+                mesh_peer: None,
+                mesh_transport: None,
+                mesh_latency_ms: None,
             },
             candidates: vec![
                 SelectionCandidateTrace {
@@ -660,6 +666,11 @@ mod tests {
             verifier_transcript: Vec::new(),
             badge_soft_intent: None,
             badge_soft_intent_snapshot: None,
+            uplift_assignment: Some(UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            }),
         };
         let commitment = receipt.commitment_bytes_raw().expect("commitment");
         let inputs = SelectionProofPublicInputs {

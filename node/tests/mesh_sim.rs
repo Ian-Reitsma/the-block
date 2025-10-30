@@ -1,8 +1,11 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(unix)]
 
+use foundation_serialization::json;
 use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::os::unix::net::UnixListener;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use sys::tempfile::tempdir;
@@ -39,4 +42,43 @@ fn unix_mesh_prefers_low_latency() {
     let peers = range_boost::discover_peers();
     assert!(peers.len() >= 2);
     assert_eq!(peers[0].addr, format!("unix:{}", fast_path.display()));
+}
+
+#[test]
+fn tcp_forwarder_delivers_bundle() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 1];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(&buf);
+        }
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut len_bytes = [0u8; 4];
+            stream.read_exact(&mut len_bytes).unwrap();
+            let len = u32::from_le_bytes(len_bytes) as usize;
+            let mut buf = vec![0u8; len];
+            stream.read_exact(&mut buf).unwrap();
+            tx.send(buf).unwrap();
+        }
+    });
+
+    std::env::set_var("TB_MESH_STATIC_PEERS", addr.to_string());
+    range_boost::set_enabled(true);
+    range_boost::discover_peers();
+
+    let queue = Arc::new(Mutex::new(range_boost::RangeBoost::new()));
+    range_boost::spawn_forwarder(&queue);
+    {
+        let mut guard = queue.lock().unwrap();
+        guard.enqueue(b"mesh-test".to_vec());
+    }
+
+    let payload = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let bundle: range_boost::Bundle = json::from_slice(&payload).unwrap();
+    assert_eq!(bundle.payload, b"mesh-test");
+    range_boost::set_enabled(false);
 }

@@ -14,6 +14,26 @@ cells while trimming runtime.
 
 ## Highlights
 
+- ✅ RangeBoost mesh delivery now drains via a first-party forwarder thread. The
+  gateway only spawns the worker when `--range-boost`/`TB_MESH_STATIC_PEERS`
+  enables mesh mode, so HTTP-only deployments skip the thread entirely. The
+  worker logs retries through the in-tree `diagnostics` crate, and
+  `crates/ad_market` now links against the same facade to emit settlement log
+  lines without introducing third-party logging dependencies. Conversion ingest
+  requires `Authorization: Advertiser <account>:<token>` plus a
+  campaign-level `conversion_token_hash` (BLAKE3 hex), all built on the existing
+  JSON walkers so uplift observations remain first party.
+- ✅ Geo/device/CRM/delivery targeting, uplift holdouts, conversion ingestion,
+  and RangeBoost mesh staging all reuse existing first-party helpers. Campaign
+  schemas, selection receipts, and gateway enrichments serialise through
+  `foundation_serialization::json` without reintroducing serde; the uplift
+  estimator snapshot persists via bespoke JSON walkers in both marketplace
+  backends; and mesh deliveries enqueue payloads plus hop proofs via the
+  in-tree queue so Bluetooth/Wi-Fi routing adds no external crates. Block
+  codecs, genesis verification, and RPC responses picked up the expanded
+  ad-settlement fields (dual-token IT totals, delivery channel, mesh payload,
+  treasury events) with compile-time validation still anchored on
+  `hashlayout::BlockEncoder`.
 - ✅ VRF-backed verifier committees and ANN badge proofs stay entirely first
   party. The new `verifier_selection` crate derives committees with
   `crypto_suite::vrf` outputs, hashes stake snapshots with BLAKE3, and validates

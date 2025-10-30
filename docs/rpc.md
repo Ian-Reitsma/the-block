@@ -157,12 +157,24 @@ integration tests illustrate this flow end-to-end.
 - `analytics` – returns `{reads, bytes}` served for a domain based on finalized
   `ReadAck` batches.
 - `ad_market.inventory` – returns `{status, distribution, oracle, cohort_prices,
-  campaigns}`. `distribution` mirrors the active `DistributionPolicy`
-  percentages, `oracle` includes the current `{ct_price_usd_micros,
-  it_price_usd_micros}` snapshot, and `campaigns` is an array of
-  `{id, advertiser_account, remaining_budget_usd_micros, creatives}` entries
-  (creative IDs only) so governance and operators can audit live USD budgets
-  without reading sled snapshots.
+  campaigns}`. `distribution` mirrors the active `DistributionPolicy` split,
+  `oracle` exposes the `{ct_price_usd_micros, it_price_usd_micros}` snapshot,
+  `cohort_prices` reports the per-cohort USD reserve/clearing rates, and
+  `campaigns` contains `{id, advertiser_account, remaining_budget_usd_micros,
+  reserved_budget_usd_micros, creatives}` so operators can audit pacing without
+  scraping sled. The payload embeds uplift snapshots, selection traces, delivery
+  channels, and mesh placement metadata for each campaign.
+- `ad_market.record_conversion` – records an advertiser conversion event and
+  feeds the uplift estimator. Requests must include the HTTP header
+  `Authorization: Advertiser <account>:<token>` and the campaign metadata must
+  persist a BLAKE3 hex digest of the shared secret under
+  `conversion_token_hash`. Payloads follow
+  `{campaign_id, creative_id, advertiser_account, assignment, value_usd_micros?, occurred_at_micros?}`
+  where `assignment` mirrors the holdout/treatment tuple delivered in
+  `SelectionReceipt`. The handler rejects missing auth (`-32030`), advertiser
+  mismatches (`-32031`), missing hashes (`-32032`), invalid tokens (`-32033`),
+  unknown campaigns (`-32001`), and unknown creatives (`-32002`). Successful
+  calls return `{status:"ok"}`.
 - `ad_market.distribution` – surfaces the persisted
   `{viewer_percent, host_percent, hardware_percent, verifier_percent,
   liquidity_percent}` split backing subsidy settlements, matching the CLI output

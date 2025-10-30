@@ -41,6 +41,18 @@ explicit hosting and campaign metadata:
   present, the node replays the receipt to ensure the clearing price matches
   `max(runner_up_quality, resource_floor)` and that the attestation is
   well-formed (SNARK preferred, TEE accepted while circuit proofs stabilize).
+- `geo` – optional geographic context derived from `X-TheBlock-Geo-*` headers or
+  inferred from the serving provider. Country, region, and metro codes are
+  normalized for analytics and targeting.
+- `device` – optional device fingerprint covering OS family/version, device
+  class, hardware model, and declared capabilities. User-agent heuristics fill
+  gaps when explicit headers are absent.
+- `crm_lists` – deduplicated advertiser cohort memberships aggregated from
+  `X-TheBlock-CRM-Lists` and provider-registered CRM registries.
+- `delivery_channel` – delivery mode requested by the caller (`http` or `mesh`).
+  Mesh holdouts bypass spend but remain observable in receipts.
+- `mesh` – optional RangeBoost context describing the peer identifier, transport
+  label, latency, and hop proofs captured for mesh deliveries.
 - `badge_soft_intent` – optional ANN proof supplied by wallets when badge-gated
   campaigns match. The structure stores the ANN snapshot fingerprint, encrypted
   badge hash, IV, neighbour fingerprint, wallet-supplied entropy (when present),
@@ -77,11 +89,13 @@ Attestations are preferred as SNARK proofs (non-empty circuit identifiers plus
 proof bytes) but TEE reports remain an accepted fallback while circuits roll
 out; missing or malformed attestations are counted explicitly so operators can
 chart wallet compliance. Receipts now expose pacing guidance fields—requested κ,
-applied shading multiplier, shadow price, dual-token flag, and ANN ciphertext
-fingerprint—for every candidate, so wallets and auditors can match settlement
-deltas to the broker’s decision without replaying out-of-band telemetry. Gateway
-regression tests assert the shading metadata across multi-creative traces to keep
-SDK and RPC consumers aligned with broker guidance.
+applied shading multiplier, shadow price, dual-token flag, ANN ciphertext
+fingerprint, and the uplift holdout assignment for the winning candidate—so
+wallets and auditors can match settlement deltas to the broker’s decision
+without replaying out-of-band telemetry or guessing whether a given impression
+should be suppressed. Gateway regression tests assert the shading metadata and
+holdout flags across multi-creative traces to keep SDK and RPC consumers aligned
+with broker guidance.
 
 ## 1.1 Privacy commitments
 
@@ -114,6 +128,21 @@ the request so the gateway can verify the signature before enqueueing the
 - `X-TheBlock-Ack-Bytes` – decimal byte count the client expects to receive.
 - `X-TheBlock-Ack-Ts` – millisecond timestamp chosen by the client when the
   read completes.
+- `X-TheBlock-Geo-Country`, `X-TheBlock-Geo-Region`, `X-TheBlock-Geo-Metro` –
+  optional geographic hints. Missing entries leave the gateway to infer geography
+  from provider policy.
+- `X-TheBlock-Device-Os`, `X-TheBlock-Device-Os-Version`,
+  `X-TheBlock-Device-Class`, `X-TheBlock-Device-Model`,
+  `X-TheBlock-Device-Capabilities` – optional device metadata used for targeting
+  and analytics. Values are lowercased and deduplicated.
+- `X-TheBlock-CRM-Lists` – comma-separated CRM cohort identifiers supplied by the
+  advertiser or wallet application. Entries are normalized and merged with
+  provider-registered CRM memberships.
+- `X-TheBlock-Delivery-Channel` – requested delivery mode (`http` or `mesh`).
+- `X-TheBlock-Mesh-Peer`, `X-TheBlock-Mesh-Transport`,
+  `X-TheBlock-Mesh-Latency`, `X-TheBlock-Mesh-Hop` – optional mesh hints that let
+  RangeBoost-enabled gateways pin impressions to nearby peers and record hop
+  proofs.
 
 The gateway recomputes `path_hash` from the request path, derives
 `client_hash = blake3(domain || client_ip_octets)`, and rejects the request when

@@ -1,4 +1,34 @@
 # Summary
+> **Review (2025-10-30, afternoon):** RangeBoost now ships a first-party
+> forwarder thread that drains the mesh queue whenever `--range-boost` is
+> enabled, logging delivery failures via `diagnostics::log` and staying idle
+> when mesh is disabled so HTTP-only nodes avoid background churn. Gateway start
+> up wires the worker only when the range-boost flag (or
+> `TB_MESH_STATIC_PEERS`) is active, and `node/tests/mesh_sim.rs` stages UNIX and
+> TCP peers to prove queued bundles reach the lowest-latency hop. Conversion
+> ingest enforces advertiser authentication: campaigns must persist the
+> BLAKE3-hashed shared secret under `conversion_token_hash`, callers supply
+> `Authorization: Advertiser <account>:<token>`, and
+> `ad_market.record_conversion` rejects mismatched accounts, missing hashes, or
+> malformed payloads with specific error codes. Reservation commits now emit the
+> clearing price, delivery channel, mesh payload length, and digest across
+> `SettlementBreakdown`, the sled ledger, diagnostics logs, and RPC snapshots, so
+> auditors and dashboards observe mesh deliveries alongside the dual-token CT/IT
+> totals. Regression coverage re-ran `cargo test -p ad_market`,
+> `cargo test -p the_block --test ad_market_rpc`, and
+> `cargo test -p the_block --test mesh_sim` to lock the new flows in place.
+> **Review (2025-10-30, morning):** Geo/device/CRM/delivery targeting, uplift
+> holdouts, conversion ingestion, and RangeBoost mesh staging are now wired end
+> to end through the first-party stack. Campaign and creative schemas extend the
+> manual JSON helpers, `attach_campaign_metadata` normalises the richer headers
+> and selection traces, `ReadAck` carries the new context fields, and
+> `ad_market.record_conversion` persists uplift snapshots without serde. Mesh
+> impressions enqueue payloads via `RangeBoost::enqueue` while logging hop
+> proofs, and consensus rotated genesis to `2fe62d67…` after block codecs picked
+> up dual-token IT payouts, delivery metadata, and treasury events—all still
+> verified at compile time by `hash_genesis`. RPC/tests exercise the new knobs so
+> SDKs observe consistent targeting, holdout, and mesh metadata across reserve,
+> commit, and conversion flows.
 > **Review (2025-10-29, evening):** Gateway and SDK surfaces now emit ANN soft-
 > intent payloads (`requested_kappa`, `shadow_price`, dual-token toggles, and
 > ANN ciphertext fingerprints) so campaign analysts and wallet auditors can

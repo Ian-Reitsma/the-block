@@ -2,9 +2,11 @@
 
 use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{
-    BudgetBrokerConfig, BudgetBrokerSnapshot, CampaignBudgetSnapshot, CohortBudgetSnapshot,
-    CohortPriceSnapshot, DistributionPolicy, MarketplaceHandle,
+    BudgetBrokerConfig, BudgetBrokerSnapshot, Campaign, CampaignBudgetSnapshot,
+    CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy,
+    MarketplaceHandle, UpliftHoldoutAssignment,
 };
+use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
 
@@ -16,6 +18,122 @@ fn unavailable() -> Value {
 
 fn number_from_f64(value: f64) -> Number {
     Number::from_f64(value).unwrap_or_else(|| Number::from(0))
+}
+
+fn invalid_params(message: &'static str) -> RpcError {
+    RpcError::new(-32602, message)
+}
+
+fn parse_non_empty_string(value: &Value, field: &'static str) -> Result<String, RpcError> {
+    match value {
+        Value::String(s) if !s.trim().is_empty() => Ok(s.trim().to_string()),
+        _ => Err(invalid_params(field)),
+    }
+}
+
+fn parse_optional_u64(value: Option<&Value>, field: &'static str) -> Result<Option<u64>, RpcError> {
+    match value {
+        Some(Value::Number(n)) => n.as_u64().ok_or_else(|| invalid_params(field)).map(Some),
+        Some(_) => Err(invalid_params(field)),
+        None => Ok(None),
+    }
+}
+
+fn parse_assignment(value: &Value) -> Result<UpliftHoldoutAssignment, RpcError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid_params("assignment"))?;
+    let fold = obj
+        .get("fold")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_params("assignment.fold"))?;
+    if fold > u64::from(u8::MAX) {
+        return Err(invalid_params("assignment.fold"));
+    }
+    let in_holdout = obj
+        .get("in_holdout")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| invalid_params("assignment.in_holdout"))?;
+    let propensity = obj
+        .get("propensity")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| invalid_params("assignment.propensity"))?;
+    Ok(UpliftHoldoutAssignment {
+        fold: fold as u8,
+        in_holdout,
+        propensity,
+    })
+}
+
+fn parse_conversion_params(params: &Value) -> Result<(ConversionEvent, String), RpcError> {
+    let obj = params
+        .as_object()
+        .ok_or_else(|| invalid_params("object required"))?;
+    let campaign_id = obj
+        .get("campaign_id")
+        .map(|v| parse_non_empty_string(v, "campaign_id"))
+        .ok_or_else(|| invalid_params("campaign_id"))??;
+    let creative_id = obj
+        .get("creative_id")
+        .map(|v| parse_non_empty_string(v, "creative_id"))
+        .ok_or_else(|| invalid_params("creative_id"))??;
+    let advertiser_account = obj
+        .get("advertiser_account")
+        .map(|v| parse_non_empty_string(v, "advertiser_account"))
+        .ok_or_else(|| invalid_params("advertiser_account"))??;
+    let assignment_value = obj
+        .get("assignment")
+        .ok_or_else(|| invalid_params("assignment"))?;
+    let assignment = parse_assignment(assignment_value)?;
+    let value_usd_micros = parse_optional_u64(obj.get("value_usd_micros"), "value_usd_micros")?;
+    let occurred_at_micros =
+        parse_optional_u64(obj.get("occurred_at_micros"), "occurred_at_micros")?;
+    let event = ConversionEvent {
+        campaign_id,
+        creative_id,
+        assignment,
+        value_usd_micros,
+        occurred_at_micros,
+    };
+    Ok((event, advertiser_account))
+}
+
+const CONVERSION_TOKEN_HASH_KEY: &str = "conversion_token_hash";
+
+fn err_auth_required() -> RpcError {
+    RpcError::new(-32030, "advertiser authorization required")
+}
+
+fn err_advertiser_mismatch() -> RpcError {
+    RpcError::new(-32031, "advertiser mismatch")
+}
+
+fn err_token_missing() -> RpcError {
+    RpcError::new(-32032, "conversion token missing")
+}
+
+fn err_token_invalid() -> RpcError {
+    RpcError::new(-32033, "invalid advertiser token")
+}
+
+fn parse_advertiser_auth(auth: Option<&str>) -> Result<(String, String), RpcError> {
+    let header = auth.ok_or_else(err_auth_required)?;
+    let header = header.trim();
+    let Some(rest) = header.strip_prefix("Advertiser ") else {
+        return Err(err_auth_required());
+    };
+    let mut parts = rest.splitn(2, ':');
+    let account = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(err_auth_required)?;
+    let token = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(err_auth_required)?;
+    Ok((account.to_string(), token.to_string()))
 }
 
 fn campaign_summary_to_value(summary: &ad_market::CampaignSummary) -> Value {
@@ -745,6 +863,55 @@ pub fn register_campaign(
         }
         Err(ad_market::MarketplaceError::DuplicateCampaign) => {
             Err(RpcError::new(-32000, "campaign already exists"))
+        }
+        Err(ad_market::MarketplaceError::PersistenceFailure(_)) => {
+            Err(RpcError::new(-32603, "persistence failure"))
+        }
+        Err(_) => Err(RpcError::new(-32603, "internal error")),
+    }
+}
+
+pub fn record_conversion(
+    market: Option<&MarketplaceHandle>,
+    params: &Value,
+    auth: Option<&str>,
+) -> Result<Value, RpcError> {
+    let Some(handle) = market else {
+        return Err(RpcError::new(-32603, "ad market disabled"));
+    };
+    let (event, advertiser_account) = parse_conversion_params(params)?;
+    let (auth_account, token) = parse_advertiser_auth(auth)?;
+    if advertiser_account != auth_account {
+        return Err(err_advertiser_mismatch());
+    }
+    let campaign: Campaign = handle
+        .campaign(&event.campaign_id)
+        .ok_or(RpcError::new(-32001, "unknown campaign"))?;
+    if campaign.advertiser_account != advertiser_account {
+        return Err(err_advertiser_mismatch());
+    }
+    let expected_hash = campaign
+        .metadata
+        .get(CONVERSION_TOKEN_HASH_KEY)
+        .ok_or_else(err_token_missing)?;
+    let provided_hash = blake3::hash(token.as_bytes());
+    let provided_hex = hex::encode(provided_hash.as_bytes());
+    if expected_hash.len() != provided_hex.len()
+        || !bool::from(expected_hash.as_bytes().ct_eq(provided_hex.as_bytes()))
+    {
+        return Err(err_token_invalid());
+    }
+    match handle.record_conversion(event) {
+        Ok(()) => {
+            let mut map = Map::new();
+            map.insert("status".into(), Value::String("ok".into()));
+            Ok(Value::Object(map))
+        }
+        Err(ad_market::MarketplaceError::UnknownCampaign) => {
+            Err(RpcError::new(-32001, "unknown campaign"))
+        }
+        Err(ad_market::MarketplaceError::UnknownCreative) => {
+            Err(RpcError::new(-32002, "unknown creative"))
         }
         Err(ad_market::MarketplaceError::PersistenceFailure(_)) => {
             Err(RpcError::new(-32603, "persistence failure"))

@@ -18,7 +18,10 @@ dashboard match the USD amounts and oracle snapshot captured during settlement,
 removing the temporary over-reporting that appeared while the IT share was
 double counted. Debug assertions in the shared helper and a new uneven-price
 regression keep the split anchored even when oracle prices produce non-zero
-remainders, so dashboards never drift from the configured budgets.
+remainders, so dashboards never drift from the configured budgets. The expanded
+schema also surfaces `clearing_price_usd_micros`, `delivery_channel`, and the
+RangeBoost `mesh_payload_digest`, letting dashboards flag mesh deliveries without
+shelling out to RPC inspectors.
 
 The static dashboard now calls out the peer-level gauges emitted by the explorer
 pipeline—`explorer_block_payout_ad_usd_total`,

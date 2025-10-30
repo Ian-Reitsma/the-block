@@ -1,4 +1,30 @@
 # Status & Roadmap
+> **Review (2025-10-30, afternoon):** RangeBoost mesh delivery now features a
+> first-party forwarder thread that is only spawned when `--range-boost`
+> (or `TB_MESH_STATIC_PEERS`) enables mesh mode, leaving HTTP-only deployments
+> free of background workers while mesh nodes drain queued payloads and log
+> retries via `diagnostics::log`. Conversion ingest requires advertisers to hash
+> their shared secret (`conversion_token_hash`) and present
+> `Authorization: Advertiser <account>:<token>`; the RPC reports missing headers,
+> account mismatches, or invalid tokens with dedicated error codes before
+> recording uplift snapshots. `SettlementBreakdown` now surfaces the auction
+> clearing price, delivery channel, and mesh payload digest/length so auditors,
+> dashboards, and ledger snapshots trace mesh deliveries alongside dual-token
+> totals. Regression suites (`cargo test -p ad_market`,
+> `cargo test -p the_block --test ad_market_rpc`, and
+> `cargo test -p the_block --test mesh_sim`) cover the new flows end to end.
+> **Review (2025-10-30, morning):** Marketplace targeting now honours geo,
+> device, delivery-channel, and CRM selectors through the first-party JSON
+> builders; gateway receipt plumbing projects those hints into selection traces
+> and read acknowledgements while RangeBoost mesh requests stage payloads and hop
+> proofs for downstream relays. Uplift holdouts are assigned during reservation,
+> surfaced on `SelectionReceipt`, and persisted across in-memory and sled
+> marketplaces alongside the new conversion ingestion RPC, letting advertisers
+> stream deterministic treatment/control updates without schema churn. Block
+> codecs and genesis verification absorbed the expanded ad-settlement footprint
+> (dual-token IT payouts, delivery metadata, treasury events), rotating the
+> consensus hash to `2fe62d67…` with the build-script stub updated in lockstep so
+> explorers, CLIs, and RPC clients stay in sync.
 > **Review (2025-10-29, night):** Verifier committees now flow end to end through
 > first-party VRF sampling. `verifier_selection` builds stake snapshots, derives
 > committees with `crypto_suite::vrf`, and stores transcripts on selection
@@ -199,6 +225,17 @@
 > impressions can no longer leak unpaid acks. These fixes keep governance policy
 > in lockstep with production payouts while hardening the gateway-worker and
 > sled persistence path.
+> **Review (2025-11-07, morning):** Gateway targeting now ingests geo, device,
+> CRM, and delivery hints directly from client headers, merges them with
+> provider-registered cohorts, and propagates the resulting context (including
+> RangeBoost peer latency when mesh delivery is requested) into every
+> acknowledgement. The ad marketplace persists uplift estimator snapshots to sled
+> and records holdout assignments alongside reservations so control impressions
+> bypass spend without losing attribution. Selection receipts expose the holdout
+> flag and mesh metadata, and gateway tests pin CRM merging plus holdout
+> suppression before the marketplace commits spend. Upcoming work: wire the new
+> conversion ingestion RPC so advertiser-side events feed the estimator, finish
+> RangeBoost payload propagation, and expand RPC coverage for geo/device filters.
 > **Review (2025-10-25, evening):** Gateway badge targeting now threads the
 > concrete provider ID from storage manifests through read acknowledgements, the
 > gateway suite gained deterministic overrides plus a `just test-gateway` recipe

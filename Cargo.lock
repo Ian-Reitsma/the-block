@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "concurrency",
  "crypto_suite",
+ "diagnostics",
  "foundation_metrics",
  "foundation_serde",
  "foundation_serialization",

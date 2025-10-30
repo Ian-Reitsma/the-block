@@ -435,6 +435,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "ad_market.budget",
     "ad_market.broker_state",
     "ad_market.readiness",
+    "ad_market.record_conversion",
     "register_handle",
     "resolve_handle",
     "whoami",
@@ -703,6 +704,7 @@ fn execute_rpc(
             Arc::clone(&runtime_cfg),
             state.market.clone(),
             state.ad_readiness.clone(),
+            auth,
         )
     };
 
@@ -1009,6 +1011,7 @@ fn dispatch(
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
     readiness: Option<crate::ad_readiness::AdReadinessHandle>,
+    auth: Option<&str>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
         let badge = req
@@ -1036,6 +1039,10 @@ fn dispatch(
         "ad_market.register_campaign" => {
             let params = req.params.as_value().clone();
             ad_market::register_campaign(market_ref, &params)?
+        }
+        "ad_market.record_conversion" => {
+            let params = req.params.as_value().clone();
+            ad_market::record_conversion(market_ref, &params, auth)?
         }
         "set_difficulty" => {
             let val = req
