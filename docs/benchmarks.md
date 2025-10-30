@@ -37,19 +37,38 @@ ceilings via
 key maps to the per-iteration average or one of the tracked percentiles. Failed
 checks surface both in stdout/stderr and through the exported
 `benchmark_<name>_*_regression` gauges, making it trivial to wire alerts straight
-into Prometheus or Grafana annotations.
+into Prometheus or Grafana annotations. Threshold keys are normalised to
+lowercase before comparison, so `P50=0.010` and `p50=0.010` behave identically.
+Malformed pairs (`p50=abc`, `per_iter=`) are ignored rather than aborting the
+run, letting suites tighten thresholds incrementally without bricking CI when an
+operator mistypes a value. Unsupported keys (anything outside `per_iter`,
+`p50`, `p90`, and `p99`) trigger a stderr warning and are skipped so mis-typed
+percentiles never poison CI jobs.
 
-Threshold keys are normalised to lowercase before comparison, so `P50=0.010`
-and `p50=0.010` behave identically. Malformed pairs (`p50=abc`, `per_iter=`)
-are ignored rather than aborting the run, letting suites tighten thresholds
-incrementally without bricking CI when an operator mistypes a value.
+CI no longer has to smuggle every regression bound through the environment.
+Place per-benchmark configuration files under `config/benchmarks/` (for example
+`config/benchmarks/ann_soft_intent_verification.thresholds`) or point
+`TB_BENCH_THRESHOLD_DIR` at a directory containing `<sanitised-name>.thresholds`
+files. Each file follows the same `key=value` syntax as the legacy environment
+variable and the harness merges the on-disk thresholds with any runtime
+overrides defined in `TB_BENCH_REGRESSION_THRESHOLDS`, giving operators a clean
+way to share canonical limits across clusters while still allowing emergency
+tightening in CI.
 
 Setting `TB_BENCH_HISTORY_PATH=/var/lib/the-block/bench_history.csv` instructs
 the harness to append timestamped CSV rows with the iteration count, elapsed
-seconds, per-iteration average, and the recorded percentiles. History pruning is
-first-party as well: `TB_BENCH_HISTORY_LIMIT=200` keeps the most recent 200 rows
-in the file, and `TB_BENCH_ALERT_PATH` points at an optional text file that will
-be atomically overwritten with a human-readable regression summary whenever any
-threshold trips. Dashboards ingest both the Prometheus snapshot and the rolling
-CSV, letting ANN percentile trends sit beside gateway, pacing, and committee
-panels without relying on third-party tooling.
+seconds, per-iteration average, the recorded percentiles, and the exponentially
+weighted moving averages (`per_iter_ewma_seconds`, `p50_ewma_seconds`, etc.) so
+dashboards can distinguish transient spikes from sustained slowdowns. History
+pruning is first-party as well: `TB_BENCH_HISTORY_LIMIT=200` keeps the most
+recent 200 rows in the file, and `TB_BENCH_ALERT_PATH` points at an optional text
+file that will be atomically overwritten with a human-readable regression
+summary whenever any threshold trips. Dashboards ingest both the Prometheus
+snapshot and the rolling CSV, letting ANN percentile trends sit beside gateway,
+pacing, and committee panels without relying on third-party tooling.
+
+When a run omits percentile samples (for example, a calibration pass that skips
+per-iteration timings), the CSV now records blank percentile columns while the
+EWMA columns carry forward the last known values. This keeps the moving
+averages continuous without suggesting that the most recent run observed a zero
+latency percentile.

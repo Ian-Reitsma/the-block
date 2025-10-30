@@ -17,7 +17,17 @@
 > percentiles via the first-party `testkit` exporter, `monitoring/metrics.json`
 > registers the series, and the generated Grafana dashboards add a **Benchmarks**
 > row so ANN verification latency distributions live beside gateway pacing and
-> readiness panels even when suites run in parallel.
+> readiness panels even when suites run in parallel. CSV history retention now
+> captures exponentially weighted moving averages, canonical thresholds live
+> alongside the source under `config/benchmarks/<name>.thresholds`, and the RPC
+> regression suite scrapes the metrics exporter after a forced committee failure
+> to lock in the expected `ad_verifier_committee_rejection_total` labels. The new
+> `python_bridge_macros` crate keeps the Python bindings first-party with no-op
+> `#[new]`/`#[getter]`/`#[setter]`/`#[staticmethod]` attributes, the metrics
+> exporter installs the recorder automatically before each scrape, and telemetry
+> helpers reset/register committee-rejection labels so RPC regressions stay
+> hermetic while benchmark writers warn on unsupported threshold keys and carry
+> EWMA columns forward even when a run omits percentile samples.
 > **Review (2025-10-28, late night):** Budget broker state now persists through
 > sled alongside SNARK metadata, keeping pacing and selection proofs first party
 > end to end. Manual JSON builders hash receipts via BLAKE3, the `zkp::selection`

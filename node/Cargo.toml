@@ -104,7 +104,7 @@ inhouse = []
 privacy = ["dep:privacy"]
 reentrant_scheduler = []
 s2n-quic = ["quic", "transport/s2n-quic"]
-python-bindings = ["dep:python_bridge"]
+python-bindings = ["dep:python_bridge", "python_bridge/python-bindings"]
 
 [dev-dependencies]
 jurisdiction = { path = "../crates/jurisdiction" }

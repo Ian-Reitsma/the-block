@@ -11,6 +11,8 @@ pub mod hashing;
 pub mod key_derivation;
 pub mod mac;
 pub mod signatures;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 pub mod transactions;
 pub mod vrf;
 pub mod zk;

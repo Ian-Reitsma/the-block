@@ -5,5 +5,8 @@ edition = "2021"
 
 [features]
 default = []
-python-bindings = []
+python-bindings = ["python_bridge_macros"]
+
+[dependencies]
+python_bridge_macros = { path = "../python_bridge_macros", optional = true }
 

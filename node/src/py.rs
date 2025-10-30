@@ -8,6 +8,10 @@ pub type PyErrorKind = python_bridge::ErrorKind;
 pub type PyResult<T> = python_bridge::Result<T>;
 
 #[cfg(feature = "python-bindings")]
+pub use python_bridge::{getter, new, setter, staticmethod};
+
+#[cfg(feature = "python-bindings")]
+#[allow(unused_imports)]
 pub use python_bridge::{
     ensure_enabled, prepare_freethreaded_python, report_disabled, with_interpreter, Interpreter,
 };

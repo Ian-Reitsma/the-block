@@ -22,15 +22,24 @@
 > trend beside pacing dashboards without leaving first-party tooling.
 > **Review (2025-10-30, early morning):** Bench automation now persists
 > timestamped histories and regression flags without leaving the workspace.
-> `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT` capture CSV trends while
-> `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` gate acceptable latency
-> and emit alert summaries entirely through the first-party harness; dashboards
-> ingest the new `benchmark_*_iterations` and `benchmark_*_regression` gauges so
-> ANN latency spikes highlight themselves beside pacing panels. Verifier guard
-> rejections surfaced through `ad_verifier_committee_rejection_total{committee,reason}`
-> keep snapshot and weight tampering observable in real time, and
-> `SettlementBreakdown` now carries the winner’s uplift estimate so RPC consumers
-> and explorers correlate pacing analytics with realised lift without recomputing
+> `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT` capture CSV trends (now with
+> exponentially weighted moving averages) while
+> `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep canonical
+> latency ceilings versioned and `TB_BENCH_REGRESSION_THRESHOLDS` +
+> `TB_BENCH_ALERT_PATH` gate acceptable latency through the first-party harness;
+> dashboards ingest the new `benchmark_*_iterations` and `benchmark_*_regression`
+> gauges so ANN latency spikes highlight themselves beside pacing panels.
+> Verifier guard rejections surfaced through
+> `ad_verifier_committee_rejection_total{committee,reason}` keep snapshot and
+> weight tampering observable in real time, the RPC regression suite now scrapes
+> the metrics exporter after a forced failure to pin the expected labels, and the
+> telemetry helper seeds the recorder automatically while exposing reset/
+> registration helpers so tests can pre-register expected label sets without
+> leaking state between runs. Unsupported regression keys now emit warnings and
+> are skipped, and history CSVs preserve EWMA columns even when a run omits
+> percentile samples, keeping the latency trend continuous for dashboards.
+> `SettlementBreakdown` carries the winner’s uplift estimate so RPC consumers and
+> explorers correlate pacing analytics with realised lift without recomputing
 > client-side.
 > **Review (2025-10-29, evening):** Selection manifests gained regression coverage
 > for hot swaps and multi-entry ordering via the manual

@@ -180,6 +180,7 @@ dependencies = [
  "codec",
  "foundation_bigint",
  "foundation_lazy",
+ "foundation_metrics",
  "foundation_serde",
  "foundation_serialization",
  "rand",
@@ -657,6 +658,13 @@ dependencies = [
 
 [[package]]
 name = "python_bridge"
+version = "0.1.0"
+dependencies = [
+ "python_bridge_macros",
+]
+
+[[package]]
+name = "python_bridge_macros"
 version = "0.1.0"
 
 [[package]]

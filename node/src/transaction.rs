@@ -5,6 +5,8 @@
 
 pub mod binary;
 
+#[cfg(feature = "python-bindings")]
+use crate::py::{getter, setter};
 use crate::py::{PyError, PyResult};
 use crate::{to_array_32, to_array_64};
 use concurrency::{cache::LruCache, Lazy, MutexExt};
@@ -25,7 +27,7 @@ fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
 }
 
-#[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
+#[allow(dead_code)]
 fn py_type_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
 }
@@ -224,13 +226,13 @@ impl RawTxPayload {
 
     // Python alias property: expose `from` alongside `from_` for ergonomics
     #[cfg_attr(feature = "python-bindings", getter(from))]
-    #[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
+    #[allow(dead_code)]
     fn get_from_alias(&self) -> String {
         self.from_.clone()
     }
 
     #[cfg_attr(feature = "python-bindings", setter(from))]
-    #[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
+    #[allow(dead_code)]
     fn set_from_alias(&mut self, val: String) {
         self.from_ = val;
     }

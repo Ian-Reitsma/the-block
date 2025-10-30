@@ -88,6 +88,7 @@ members = [
   "crates/thiserror",
   "crates/dependency_guard",
   "crates/python_bridge",
+  "crates/python_bridge_macros",
   "crates/sys",
   "crates/http_env",
   "crates/tls_warning",

@@ -66,12 +66,19 @@ percentiles, the `benchmark_*_iterations` totals, and the
 `benchmark_*_regression` gauges alongside the live metrics, and renders a
 dedicated **Benchmarks** row in both Grafana and the HTML dashboard. Operators
 may set `TB_BENCH_REGRESSION_THRESHOLDS` to clamp acceptable runtime, and the
-dashboards will highlight any run that trips the new regression gauges. Setting
-`TB_BENCH_HISTORY_PATH` stores a CSV history that the generator also mirrors so
-multi-run trends stay visible without external tooling. Panels plot the ANN
-verification latency distribution, annotate threshold breaches, and correlate
-wallet-scale ANN timings with gateway pacing guidance without ever leaving the
-in-house stack.
+dashboards will highlight any run that trips the new regression gauges.
+Canonical thresholds now live alongside the source under
+`config/benchmarks/<sanitised-name>.thresholds` (or any directory passed via
+`TB_BENCH_THRESHOLD_DIR`), letting operators version per-benchmark limits
+without leaning on CI environment shims. The harness merges the on-disk values
+with any runtime overrides defined through `TB_BENCH_REGRESSION_THRESHOLDS`.
+Setting `TB_BENCH_HISTORY_PATH` stores a CSV history that the generator also
+mirrors so multi-run trends stay visible without external tooling. The exported
+rows include exponentially weighted moving averages for the per-iteration
+average and tracked percentiles, helping dashboards separate transient spikes
+from sustained slowdowns. Panels plot the ANN verification latency distribution,
+annotate threshold breaches, and correlate wallet-scale ANN timings with
+gateway pacing guidance without ever leaving the in-house stack.
 
 ## Chaos attestations and readiness metrics
 
@@ -246,7 +253,18 @@ Committee validation now feeds directly into telemetry as well:
 `ad_verifier_committee_rejection_total{committee,reason}` increments whenever the
 first-party guard rejects a receipt for stake, snapshot, or VRF mismatches, and
 the dashboards expose the counter beside the attestation panels so operators can
-spot weight inflation or snapshot omissions in real time.
+spot weight inflation or snapshot omissions in real time. A dedicated
+RPC-level regression drives a forced committee failure through the JSON-RPC
+dispatcher, scrapes the metrics exporter, and asserts the counter surfaces with
+the expected `committee`/`reason` label pairings, keeping the HTTP exporter and
+label plumbing tested end-to-end. The exporter now installs the
+`foundation_metrics` recorder on demand before each scrape, so tests and
+lightweight demos no longer have to call `telemetry::init_wrapper_metrics`
+manually. Helpers such as
+`the_block::reset_ad_verifier_committee_rejections()` and
+`the_block::ensure_ad_verifier_committee_label(committee, reason)` make it easy
+for suites to clear the counter and register expected label pairs before
+asserting against the `/metrics` payload, preventing cross-test leakage.
 
 Privacy and uplift telemetry chart beside the pacing graphs. Counters
 `ad_privacy_budget_total{family,result}` and gauges

@@ -33,11 +33,24 @@ cells while trimming runtime.
   together with `_p50`/`_p90`/`_p99` gauges, `benchmark_*_iterations`, and the
   new `benchmark_*_regression` flags under a file lock for dashboards to ingest.
   `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT` persist timestamped CSV
-  histories, and `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` clamp
-  acceptable runtime while keeping alerting entirely first party. Committee
-  enforcement now increments `ad_verifier_committee_rejection_total{committee,reason}`
-  whenever receipts fail stake or weight checks, giving operators immediate
-  visibility without external telemetry crates.
+  histories (including exponentially weighted moving averages) while
+  `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep canonical
+  thresholds versioned alongside the source and
+  `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` clamp acceptable
+  runtime and emit first-party alert summaries. Committee enforcement now
+  increments `ad_verifier_committee_rejection_total{committee,reason}` whenever
+  receipts fail stake or weight checks, and the RPC regression suite drives a
+  forced failure through the metrics exporter to guarantee the HTTP scrape shows
+  the expected labels.
+- ✅ Python bindings continue to avoid third-party proc-macro stacks. The new
+  `python_bridge_macros` crate ships no-op `#[new]`, `#[getter]`, `#[setter]`,
+  and `#[staticmethod]` attributes so the node and wallet bindings compile
+  without `pyo3`, and `python_bridge` re-exports the macros behind the
+  `python-bindings` feature. `node::telemetry` now seeds the
+  `foundation_metrics` recorder automatically on every scrape while helper
+  functions reset and register `ad_verifier_committee_rejection_total`
+  label-sets for tests, keeping the RPC regressions hermetic without importing
+  external telemetry crates.
 - ✅ Dual-token settlement gating, treasury timelines, and readiness deltas stay
   entirely first party. Governance and node crates share hand-written codecs,
   stores, and runtime plumbing for the new `DualTokenSettlementEnabled`
