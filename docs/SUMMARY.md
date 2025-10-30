@@ -1,4 +1,23 @@
 # Summary
+> **Review (2025-10-29, evening):** Gateway and SDK surfaces now emit ANN soft-
+> intent payloads (`requested_kappa`, `shadow_price`, dual-token toggles, and
+> ANN ciphertext fingerprints) so campaign analysts and wallet auditors can
+> trace badge-derived intent end to end. ANN snapshots carry entropy salts that
+> mix into both the key and IV derivation, wallets can inject additional entropy
+> that persists on receipts, and a refreshed `ann_soft_intent_verification`
+> benchmark measures verification across 128–32 768 bucket tables. The attestation
+> manager’s verifier guard recomputes stake thresholds from the supplied snapshot
+> rather than trusting receipt weights, gateway tests assert shading telemetry for
+> every candidate in multi-creative traces, and integration coverage drives stale
+> snapshots plus transcript mismatches through `ad_market.reserve_impression` to
+> prove invalid committees are stripped before settlements land.
+> Benchmarks now publish straight into the monitoring stack under a shared lock:
+> setting `TB_BENCH_PROM_PATH` writes
+> `benchmark_ann_soft_intent_verification_seconds` via the first-party `testkit`
+> exporter, `monitoring/metrics.json` registers the series, and the generated
+> Grafana dashboards add a **Benchmarks** row so ANN verification latency trends
+> live beside gateway pacing and readiness panels even when suites run in
+> parallel.
 > **Review (2025-10-28, late night):** Budget broker state now persists through
 > sled alongside SNARK metadata, keeping pacing and selection proofs first party
 > end to end. Manual JSON builders hash receipts via BLAKE3, the `zkp::selection`

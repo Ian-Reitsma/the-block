@@ -1641,6 +1641,12 @@
       ],
       "name": "chaos_site_readiness",
       "unit": "ratio"
+    },
+    {
+      "deprecated": false,
+      "description": "Per-iteration duration for the ANN soft-intent verification benchmark",
+      "labels": [],
+      "name": "benchmark_ann_soft_intent_verification_seconds"
     }
   ]
 }

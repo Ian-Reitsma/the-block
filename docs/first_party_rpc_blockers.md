@@ -17,11 +17,25 @@ RPC client.
   `crypto_suite::vrf` implementation, stake hashes use BLAKE3, and the
   attestation manager validates wallet receipts strictly through these helpers—no
   external crypto or serialization stacks were introduced.
+- Integration tests now cover stale stake snapshots and mismatched transcripts by
+  driving `ad_market.reserve_impression` through the same RPC harness the SDK
+  uses. When attestation is required, tampered receipts now block the reservation
+  outright (invalid transcripts or stale snapshots return `None`), while valid
+  proofs still settle. The test harness stays entirely on
+  `foundation_serialization` + `testkit`—no external frameworks required.
 - Wallet badge soft-intent contexts carry encrypted ANN receipts produced with
   `crypto_suite::encryption::symmetric` and BLAKE3-derived keys. The guard
   verifies proofs via `badge::ann::verify_receipt`, and RPC surfaces reuse the
   existing JSON builders so wallets can submit ANN payloads without relying on
   third-party ML or crypto crates.
+- Gateway selection traces now assert requested κ, shadow prices, and ANN
+  digests for every candidate in multi-creative receipts, keeping SDK surfaces in
+  sync with pacing telemetry without introducing serde-derived helpers. Wallets
+  can supply optional entropy that rides through the ANN receipt fields, and
+  the verification path rejects tampered IV/ciphertext pairs strictly through the
+  first-party crypto facade. Benchmark exports acquire a file lock before writing
+  `benchmark_ann_soft_intent_verification_seconds`, preventing concurrent suites
+  from clobbering RPC-facing metrics.
 - Budget shading guidance now reports requested κ, applied multipliers, shadow
   prices, and dual prices through the existing JSON/telemetry helpers. All
   shading math stays inside `BudgetBroker`, and the receipts expose the richer

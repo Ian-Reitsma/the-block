@@ -41,6 +41,15 @@ explicit hosting and campaign metadata:
   present, the node replays the receipt to ensure the clearing price matches
   `max(runner_up_quality, resource_floor)` and that the attestation is
   well-formed (SNARK preferred, TEE accepted while circuit proofs stabilize).
+- `badge_soft_intent` – optional ANN proof supplied by wallets when badge-gated
+  campaigns match. The structure stores the ANN snapshot fingerprint, encrypted
+  badge hash, IV, neighbour fingerprint, wallet-supplied entropy (when present),
+  and Hamming distance so auditors can confirm the wallet satisfied badge intent
+  without learning the badge set. The gateway populates the field from
+  `X-TheBlock-Ann-{Snapshot,Proof}` headers and forwards the raw snapshot when
+  present so verifiers can recompute the ANN selection offline; tampered
+  ciphertext/IV pairs are rejected because verification recomputes the mixed
+  entropy locally.
 - `readiness` – optional `AdReadinessSnapshot` captured when the gateway attaches
   campaign metadata. The snapshot commits to rolling viewer/host/provider
   counters and is accompanied by a zero-knowledge proof.
@@ -67,7 +76,12 @@ runner-up quality, and clearing price before accepting the acknowledgement.
 Attestations are preferred as SNARK proofs (non-empty circuit identifiers plus
 proof bytes) but TEE reports remain an accepted fallback while circuits roll
 out; missing or malformed attestations are counted explicitly so operators can
-chart wallet compliance.
+chart wallet compliance. Receipts now expose pacing guidance fields—requested κ,
+applied shading multiplier, shadow price, dual-token flag, and ANN ciphertext
+fingerprint—for every candidate, so wallets and auditors can match settlement
+deltas to the broker’s decision without replaying out-of-band telemetry. Gateway
+regression tests assert the shading metadata across multi-creative traces to keep
+SDK and RPC consumers aligned with broker guidance.
 
 ## 1.1 Privacy commitments
 

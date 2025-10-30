@@ -111,6 +111,7 @@ jurisdiction = { path = "../crates/jurisdiction" }
 sim = { package = "tb-sim", path = "../sim" }
 testkit = { path = "../crates/testkit" }
 foundation_tls = { path = "../crates/foundation_tls" }
+verifier_selection = { path = "../crates/verifier_selection" }
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

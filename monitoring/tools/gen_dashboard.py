@@ -4,7 +4,7 @@ import json, pathlib
 repo = pathlib.Path(__file__).resolve().parents[2]
 schema = json.loads((repo / 'monitoring/metrics.json').read_text())
 
-groups = {"DEX": [], "Compute": [], "Gossip": [], "Other": []}
+groups = {"DEX": [], "Compute": [], "Gossip": [], "Benchmarks": [], "Other": []}
 for m in [m for m in schema["metrics"] if not m.get("deprecated")]:
     panel = {
         "type": "timeseries",
@@ -20,6 +20,8 @@ for m in [m for m in schema["metrics"] if not m.get("deprecated")]:
         groups["Compute"].append(panel)
     elif name.startswith("gossip_"):
         groups["Gossip"].append(panel)
+    elif name.startswith("benchmark_"):
+        groups["Benchmarks"].append(panel)
     else:
         groups["Other"].append(panel)
 

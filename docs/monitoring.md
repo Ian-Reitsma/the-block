@@ -59,6 +59,15 @@ recent `/dids` history for cross-navigation. Additional gauges expose
 correlate reward shifts with governance interventions. The HTML refreshes every
 five seconds by default and never leaves first-party code.
 
+Benchmarks surface in the same view. When suites export Prometheus samples via
+`TB_BENCH_PROM_PATH`, the generator acquires the shared lock, ingests
+`benchmark_ann_soft_intent_verification_seconds` alongside the live metrics, and
+renders a dedicated **Benchmarks** row in both Grafana and the HTML dashboard.
+Panels plot the ANN verification latency and annotate recent runs so operators
+can correlate wallet-scale ANN timings with gateway pacing guidance without
+leaving the in-house tooling; larger badge tables and wallet-supplied entropy
+values now show up in the time series without clobbering concurrent runs.
+
 ## Chaos attestations and readiness metrics
 
 The WAN chaos verifier now lives entirely inside the workspace:

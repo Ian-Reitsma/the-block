@@ -106,7 +106,7 @@ def main(argv: list[str]) -> int:
     except Exception as err:  # pragma: no cover - defensive
         body = f"<p class=\\"error\\">Unexpected error: {err}</p>"
     else:
-        sections = {"DEX": [], "Compute": [], "Gossip": [], "Other": []}
+        sections = {"DEX": [], "Compute": [], "Gossip": [], "Benchmarks": [], "Other": []}
         for metric in METRICS_SPEC["metrics"]:
             if metric.get("deprecated"):
                 continue
@@ -117,6 +117,8 @@ def main(argv: list[str]) -> int:
                 sections["Compute"].append(metric)
             elif name.startswith("gossip_"):
                 sections["Gossip"].append(metric)
+            elif name.startswith("benchmark_"):
+                sections["Benchmarks"].append(metric)
             else:
                 sections["Other"].append(metric)
         rendered = []

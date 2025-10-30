@@ -1,4 +1,22 @@
 # System-Wide Economic Changes
+> **Review (2025-10-29, evening):** Verifier committee enforcement now sources
+> stake thresholds from authoritative snapshots instead of trusting receipt
+> weights. `verifier_selection::validate_committee` multiplies stake units inside
+> the supplied snapshot, and integration coverage drives stale snapshots plus
+> transcript mismatches through `ad_market.reserve_impression` to prove invalid
+> committees drop their attestation before settlement. Gateway and RPC payloads
+> surface requested κ, shading multipliers, ANN ciphertext digests, and dual-token
+> toggles through the existing JSON helpers so analysts can correlate pacing
+> guidance with badge intent without replaying fixtures. ANN snapshots carry
+> entropy salts for key/IV derivation, wallets can mix extra entropy that now
+> persists on receipts, and the `badge::ann` verifier rejects tampered IV/ciphertext
+> pairs accordingly. The `ann_soft_intent_verification` benchmark profiles
+> verification latency across 128–32 768 bucket tables, giving wallet integrators
+> deterministic timing data for larger badge sets, and benchmark runs can emit
+> `benchmark_ann_soft_intent_verification_seconds` via `TB_BENCH_PROM_PATH` under a
+> shared lock. The monitoring generator charts the series in a dedicated
+> Benchmarks row so ANN latency trends sit beside pacing and readiness telemetry
+> even when suites run concurrently.
 > **Review (2025-10-29, morning):** Selection receipts now recompute their
 > commitment hash, proof-bytes digest, verifying-key digest, and transcript using
 > the manifest-backed helpers in `zkp::selection`. The new
