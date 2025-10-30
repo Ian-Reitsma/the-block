@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -8,18 +8,22 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use sys::tempfile::TempDir;
 
 use ad_market::{
-    DistributionPolicy, ImpressionContext, InMemoryMarketplace, MarketplaceConfig,
-    MarketplaceHandle, ReservationKey, SelectionAttestation, SelectionAttestationKind,
-    SelectionReceipt, SledMarketplace, MICROS_PER_DOLLAR,
+    Campaign, CampaignTargeting, Creative, DistributionPolicy, ImpressionContext,
+    InMemoryMarketplace, Marketplace, MarketplaceConfig, MarketplaceHandle, ReservationKey,
+    SelectionAttestation, SelectionAttestationKind, SelectionReceipt, SledMarketplace,
+    VerifierCommitteeConfig, MICROS_PER_DOLLAR,
 };
+use crypto_suite::{encoding::hex, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
+use rand::rngs::StdRng;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},
     rpc::{fuzz_dispatch_request, fuzz_runtime_config_with_admin, RpcRuntimeConfig},
     Blockchain,
 };
+use verifier_selection::{self, CommitteeConfig as CommitteePolicy, StakeEntry, StakeSnapshot};
 use zkp::selection::{self, SelectionProofPublicInputs};
 
 mod util;
@@ -183,6 +187,63 @@ fn build_snark_proof(receipt: &SelectionReceipt) -> Vec<u8> {
         commitments_json,
     );
     proof_json.into_bytes()
+}
+
+struct CommitteeFixture {
+    policy: CommitteePolicy,
+    snapshot: StakeSnapshot,
+    transcript: Vec<u8>,
+    receipt: verifier_selection::SelectionReceipt,
+    public_key: vrf::PublicKey,
+}
+
+fn committee_fixture() -> CommitteeFixture {
+    let snapshot = StakeSnapshot {
+        staking_epoch: 77,
+        verifiers: vec![
+            StakeEntry {
+                verifier_id: "alpha".into(),
+                stake_units: 1_000,
+            },
+            StakeEntry {
+                verifier_id: "beta".into(),
+                stake_units: 2_000,
+            },
+            StakeEntry {
+                verifier_id: "gamma".into(),
+                stake_units: 4_000,
+            },
+        ],
+    };
+    let policy = CommitteePolicy {
+        label: "verifier-selection".into(),
+        committee_size: 2,
+        minimum_total_stake: 1,
+        stake_threshold_ppm: 0,
+    };
+    let transcript = b"committee-fixture".to_vec();
+    let mut rng = StdRng::seed_from_u64(41);
+    let (secret, public) = vrf::SecretKey::generate(&mut rng);
+    let selection = verifier_selection::select_committee(&secret, &policy, &snapshot, &transcript)
+        .expect("committee selected");
+    CommitteeFixture {
+        policy,
+        snapshot,
+        transcript,
+        receipt: selection.receipt,
+        public_key: public,
+    }
+}
+
+fn verifier_committee_config(fixture: &CommitteeFixture) -> VerifierCommitteeConfig {
+    VerifierCommitteeConfig {
+        vrf_public_key_hex: hex::encode(fixture.public_key.to_bytes()),
+        committee_size: fixture.policy.committee_size,
+        minimum_total_stake: fixture.policy.minimum_total_stake,
+        stake_threshold_ppm: fixture.policy.stake_threshold_ppm,
+        label: fixture.policy.label.clone(),
+        require_snapshot: true,
+    }
 }
 
 fn make_reservation_key(seed: u64) -> ReservationKey {
@@ -840,5 +901,314 @@ fn ad_market_broker_state_rpc_load() {
     assert!(
         p95 < 750_000,
         "p95 attestation latency should stay under 750ms: {p95}"
+    );
+}
+
+#[testkit::tb_serial]
+fn ad_market_committee_rejects_stale_snapshot() {
+    let fixture = committee_fixture();
+    let mut config = MarketplaceConfig::default();
+    config.attestation.preferred_circuit_ids = {
+        let mut set = HashSet::new();
+        set.insert(SELECTION_CIRCUIT_ID.to_string());
+        set
+    };
+    config.attestation.allow_tee_fallback = false;
+    config.attestation.require_attestation = false;
+    config.attestation.verifier_committee = Some(verifier_committee_config(&fixture));
+
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_committee_stale_snapshot", config.clone());
+
+    let campaign_payload = parse_json(
+        r#"{
+            "id": "cmp-committee",
+            "advertiser_account": "adv-committee",
+            "budget_usd_micros": 6000000,
+            "creatives": [
+                {
+                    "id": "creative-committee",
+                    "action_rate_ppm": 500000,
+                    "margin_ppm": 700000,
+                    "value_per_action_usd_micros": 1500000,
+                    "max_cpi_usd_micros": 1500000,
+                    "badges": [],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+    expect_ok(harness.call("ad_market.register_campaign", campaign_payload));
+
+    let market = Arc::clone(&harness.market);
+    let mut base_ctx = ImpressionContext::default();
+    base_ctx.domain = "example.test".into();
+    base_ctx.provider = Some("wallet".into());
+    base_ctx.bytes = 1_024;
+    base_ctx.population_estimate = Some(96);
+    base_ctx.verifier_committee = Some(fixture.receipt.clone());
+    base_ctx.verifier_stake_snapshot = Some(fixture.snapshot.clone());
+    base_ctx.verifier_transcript = fixture.transcript.clone();
+
+    let key_probe = make_reservation_key(4_001);
+    let outcome_probe = market
+        .reserve_impression(key_probe.clone(), base_ctx.clone())
+        .expect("probe reservation");
+    let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
+    market.cancel(&key_probe);
+
+    let attestation = SelectionAttestation::Snark {
+        proof: proof_bytes.clone(),
+        circuit_id: SELECTION_CIRCUIT_ID.into(),
+    };
+
+    let mut ctx_stale = base_ctx.clone();
+    ctx_stale.attestations = vec![attestation.clone()];
+    let mut stale_snapshot = fixture.snapshot.clone();
+    stale_snapshot.staking_epoch = stale_snapshot.staking_epoch.saturating_add(9);
+    ctx_stale.verifier_stake_snapshot = Some(stale_snapshot);
+    let key_stale = make_reservation_key(4_002);
+    let outcome_stale = market
+        .reserve_impression(key_stale.clone(), ctx_stale)
+        .expect("stale snapshot reservation");
+    assert_eq!(
+        outcome_stale.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Missing,
+        "stale stake snapshot should strip the attestation"
+    );
+    assert!(
+        outcome_stale.selection_receipt.proof_metadata.is_none(),
+        "stale stake snapshot should drop proof metadata"
+    );
+    market.cancel(&key_stale);
+
+    let mut ctx_valid = base_ctx.clone();
+    ctx_valid.attestations = vec![attestation];
+    let key_valid = make_reservation_key(4_003);
+    let outcome_valid = market
+        .reserve_impression(key_valid.clone(), ctx_valid)
+        .expect("valid reservation");
+    market.cancel(&key_valid);
+    assert_eq!(
+        outcome_valid.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Snark
+    );
+}
+
+#[testkit::tb_serial]
+fn ad_market_committee_rejects_mismatched_transcript() {
+    let fixture = committee_fixture();
+    let mut config = MarketplaceConfig::default();
+    config.attestation.preferred_circuit_ids = {
+        let mut set = HashSet::new();
+        set.insert(SELECTION_CIRCUIT_ID.to_string());
+        set
+    };
+    config.attestation.allow_tee_fallback = false;
+    config.attestation.require_attestation = false;
+    config.attestation.verifier_committee = Some(verifier_committee_config(&fixture));
+
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_committee_transcript", config.clone());
+
+    let campaign_payload = parse_json(
+        r#"{
+            "id": "cmp-committee-transcript",
+            "advertiser_account": "adv-committee",
+            "budget_usd_micros": 4800000,
+            "creatives": [
+                {
+                    "id": "creative-committee-transcript",
+                    "action_rate_ppm": 520000,
+                    "margin_ppm": 690000,
+                    "value_per_action_usd_micros": 1400000,
+                    "max_cpi_usd_micros": 1400000,
+                    "badges": [],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+    expect_ok(harness.call("ad_market.register_campaign", campaign_payload));
+
+    let market = Arc::clone(&harness.market);
+    let mut base_ctx = ImpressionContext::default();
+    base_ctx.domain = "example.test".into();
+    base_ctx.provider = Some("wallet".into());
+    base_ctx.bytes = 896;
+    base_ctx.population_estimate = Some(72);
+    base_ctx.verifier_committee = Some(fixture.receipt.clone());
+    base_ctx.verifier_stake_snapshot = Some(fixture.snapshot.clone());
+    base_ctx.verifier_transcript = fixture.transcript.clone();
+
+    let key_probe = make_reservation_key(4_101);
+    let outcome_probe = market
+        .reserve_impression(key_probe.clone(), base_ctx.clone())
+        .expect("probe reservation");
+    let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
+    market.cancel(&key_probe);
+
+    let attestation = SelectionAttestation::Snark {
+        proof: proof_bytes.clone(),
+        circuit_id: SELECTION_CIRCUIT_ID.into(),
+    };
+
+    let mut ctx_mismatched = base_ctx.clone();
+    ctx_mismatched.attestations = vec![attestation.clone()];
+    ctx_mismatched.verifier_transcript = b"unexpected-transcript".to_vec();
+    let key_bad = make_reservation_key(4_102);
+    let outcome_bad = market
+        .reserve_impression(key_bad.clone(), ctx_mismatched)
+        .expect("mismatched transcript reservation");
+    assert_eq!(
+        outcome_bad.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Missing,
+        "mismatched transcript should strip attestation"
+    );
+    assert!(
+        outcome_bad.selection_receipt.proof_metadata.is_none(),
+        "mismatched transcript should drop proof metadata"
+    );
+    market.cancel(&key_bad);
+
+    let mut ctx_valid = base_ctx.clone();
+    ctx_valid.attestations = vec![attestation];
+    let key_valid = make_reservation_key(4_103);
+    let outcome_valid = market
+        .reserve_impression(key_valid.clone(), ctx_valid)
+        .expect("valid reservation");
+    market.cancel(&key_valid);
+    assert_eq!(
+        outcome_valid.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Snark
+    );
+}
+
+#[testkit::tb_serial]
+fn ad_market_committee_blocks_invalid_when_attestation_required() {
+    let fixture = committee_fixture();
+    let mut config = MarketplaceConfig::default();
+    config.attestation.preferred_circuit_ids = {
+        let mut set = HashSet::new();
+        set.insert(SELECTION_CIRCUIT_ID.to_string());
+        set
+    };
+    config.attestation.allow_tee_fallback = false;
+    config.attestation.require_attestation = true;
+    config.attestation.verifier_committee = Some(verifier_committee_config(&fixture));
+
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_committee_required", config.clone());
+
+    let campaign_payload = parse_json(
+        r#"{
+            "id": "cmp-committee-required",
+            "advertiser_account": "adv-committee",
+            "budget_usd_micros": 7200000,
+            "creatives": [
+                {
+                    "id": "creative-committee-required",
+                    "action_rate_ppm": 540000,
+                    "margin_ppm": 680000,
+                    "value_per_action_usd_micros": 1450000,
+                    "max_cpi_usd_micros": 1450000,
+                    "badges": [],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+    expect_ok(harness.call("ad_market.register_campaign", campaign_payload));
+
+    let campaign = Campaign {
+        id: "cmp-committee-required".into(),
+        advertiser_account: "adv-committee".into(),
+        budget_usd_micros: 7_200_000,
+        creatives: vec![Creative {
+            id: "creative-committee-required".into(),
+            action_rate_ppm: 540_000,
+            margin_ppm: 680_000,
+            value_per_action_usd_micros: 1_450_000,
+            max_cpi_usd_micros: Some(1_450_000),
+            lift_ppm: 0,
+            badges: Vec::new(),
+            domains: vec!["example.test".into()],
+            metadata: HashMap::new(),
+        }],
+        targeting: CampaignTargeting {
+            domains: vec!["example.test".into()],
+            badges: Vec::new(),
+        },
+        metadata: HashMap::new(),
+    };
+
+    let mut probe_config = config.clone();
+    probe_config.attestation.require_attestation = false;
+    let probe_market = InMemoryMarketplace::new(probe_config);
+    probe_market
+        .register_campaign(campaign.clone())
+        .expect("probe campaign registered");
+
+    let market = Arc::clone(&harness.market);
+    let mut base_ctx = ImpressionContext::default();
+    base_ctx.domain = "example.test".into();
+    base_ctx.provider = Some("wallet".into());
+    base_ctx.bytes = 2_048;
+    base_ctx.population_estimate = Some(120);
+    base_ctx.verifier_committee = Some(fixture.receipt.clone());
+    base_ctx.verifier_stake_snapshot = Some(fixture.snapshot.clone());
+    base_ctx.verifier_transcript = fixture.transcript.clone();
+
+    let key_probe = make_reservation_key(4_101);
+    let outcome_probe = probe_market
+        .reserve_impression(key_probe.clone(), base_ctx.clone())
+        .expect("probe reservation");
+    let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
+    probe_market.cancel(&key_probe);
+
+    let attestation = SelectionAttestation::Snark {
+        proof: proof_bytes.clone(),
+        circuit_id: SELECTION_CIRCUIT_ID.into(),
+    };
+
+    let mut ctx_invalid = base_ctx.clone();
+    ctx_invalid.attestations = vec![attestation.clone()];
+    ctx_invalid.verifier_transcript = b"tampered-transcript".to_vec();
+    let key_invalid = make_reservation_key(4_102);
+    assert!(
+        market
+            .reserve_impression(key_invalid.clone(), ctx_invalid)
+            .is_none(),
+        "invalid transcript should block reservation when attestation required"
+    );
+
+    let mut ctx_valid = base_ctx.clone();
+    ctx_valid.attestations = vec![attestation];
+    let key_valid = make_reservation_key(4_103);
+    let outcome_valid = market
+        .reserve_impression(key_valid.clone(), ctx_valid)
+        .expect("valid reservation");
+    market.cancel(&key_valid);
+    assert_eq!(
+        outcome_valid.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Snark
     );
 }

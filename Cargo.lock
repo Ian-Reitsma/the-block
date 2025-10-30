@@ -6,6 +6,7 @@ version = 4
 name = "ad_market"
 version = "0.1.0"
 dependencies = [
+ "concurrency",
  "crypto_suite",
  "foundation_metrics",
  "foundation_serde",
@@ -13,6 +14,7 @@ dependencies = [
  "rand",
  "sled",
  "sys",
+ "testkit",
  "verifier_selection",
  "zkp",
 ]
@@ -893,6 +895,7 @@ dependencies = [
  "testkit",
  "tls_warning",
  "transport",
+ "verifier_selection",
  "wallet",
  "zkp",
 ]

@@ -409,12 +409,16 @@ impl VerifierCommitteeGuard {
         let Some(committee) = receipt.verifier_committee.as_ref() else {
             return Err(CommitteeValidationError::MissingReceipt);
         };
-        if self.require_snapshot && receipt.verifier_stake_snapshot.is_none() {
-            return Err(CommitteeValidationError::MissingSnapshot);
-        }
-        let Some(snapshot) = receipt.verifier_stake_snapshot.as_ref() else {
+        if receipt.verifier_stake_snapshot.is_none() {
+            if self.require_snapshot || self.policy.stake_threshold_ppm > 0 {
+                return Err(CommitteeValidationError::MissingSnapshot);
+            }
             return Ok(());
-        };
+        }
+        let snapshot = receipt
+            .verifier_stake_snapshot
+            .as_ref()
+            .expect("snapshot checked above");
         let transcript = receipt.verifier_transcript.as_slice();
         verifier_selection::validate_committee(
             &self.public_key,
@@ -459,6 +463,9 @@ impl CommitteeValidationError {
             CommitteeValidationError::Invalid(
                 VerifierSelectionError::StakeThresholdViolation { .. },
             ) => "threshold",
+            CommitteeValidationError::Invalid(VerifierSelectionError::StakeUnitsMismatch {
+                ..
+            }) => "stake_units",
         }
     }
 }
@@ -849,6 +856,52 @@ mod tests {
         assert!(matches!(
             err,
             SelectionReceiptError::VerifierCommitteeMissing
+        ));
+    }
+
+    #[test]
+    fn committee_guard_rejects_missing_snapshot_when_threshold_enabled() {
+        let mut preferred = HashSet::new();
+        preferred.insert(CIRCUIT_ID.into());
+        let mut rng = rand::rngs::StdRng::seed_from_u64(43);
+        let (secret, public) = vrf::SecretKey::generate(&mut rng);
+        let snapshot = sample_snapshot();
+        let transcript = b"selection-transcript".to_vec();
+        let policy = CommitteePolicy {
+            label: "verifier-selection".into(),
+            committee_size: 2,
+            minimum_total_stake: 1,
+            stake_threshold_ppm: 250_000,
+        };
+        let selection =
+            verifier_selection::select_committee(&secret, &policy, &snapshot, &transcript)
+                .expect("committee selected");
+        let manager = SelectionAttestationManager::new(SelectionAttestationConfig {
+            preferred_circuit_ids: preferred,
+            allow_tee_fallback: false,
+            require_attestation: true,
+            verifier_committee: Some(VerifierCommitteeConfig {
+                vrf_public_key_hex: hex::encode(public.to_bytes()),
+                committee_size: policy.committee_size,
+                minimum_total_stake: 1,
+                stake_threshold_ppm: policy.stake_threshold_ppm,
+                label: policy.label.clone(),
+                require_snapshot: false,
+            }),
+        });
+        let (mut receipt, _, _) = build_receipt();
+        receipt.verifier_committee = Some(selection.receipt.clone());
+        receipt.verifier_transcript = transcript;
+        if let Some(metadata) = receipt.proof_metadata.as_mut() {
+            metadata.verifier_committee = Some(selection.receipt.clone());
+        }
+        let err = manager
+            .validate_receipt(&receipt)
+            .expect_err("missing snapshot should fail when threshold set");
+        assert!(matches!(
+            err,
+            SelectionReceiptError::VerifierCommitteeInvalid { reason }
+                if reason == "missing_snapshot"
         ));
     }
 

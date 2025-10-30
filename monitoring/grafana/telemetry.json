@@ -4683,6 +4683,25 @@
       ],
       "title": "telemetry_alloc_bytes",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 250,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "benchmark_ann_soft_intent_verification_seconds"
+        }
+      ],
+      "title": "benchmark_ann_soft_intent_verification_seconds",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 37,

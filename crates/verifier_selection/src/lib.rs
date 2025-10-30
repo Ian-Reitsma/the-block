@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 use foundation_metrics::{gauge, histogram};
 
 const PPM_SCALE: f64 = 1_000_000.0;
+const PPM_SCALE_U128: u128 = 1_000_000;
 
 /// Error conditions surfaced while computing or validating verifier committees.
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
@@ -30,6 +31,8 @@ pub enum SelectionError {
     SnapshotHashMismatch,
     #[error("stake threshold violation for verifier {verifier_id}")]
     StakeThresholdViolation { verifier_id: String },
+    #[error("stake units mismatch for verifier {verifier_id}")]
+    StakeUnitsMismatch { verifier_id: String },
 }
 
 /// Configuration describing how committees should be formed.
@@ -214,6 +217,7 @@ pub fn validate_committee(
         return Err(SelectionError::InvalidProof);
     }
     let priorities = compute_priorities(output.as_bytes(), snapshot);
+    let total_stake = snapshot.total_stake().max(1);
     let mut ranked: Vec<_> = priorities.into_iter().collect();
     ranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
     for (idx, (verifier_id, _priority)) in ranked
@@ -230,9 +234,25 @@ pub fn validate_committee(
         if member.verifier_id != verifier_id {
             return Err(SelectionError::CommitteeMemberMismatch { verifier_id });
         }
+        let Some(snapshot_entry) = snapshot
+            .verifiers
+            .iter()
+            .find(|entry| entry.verifier_id == member.verifier_id)
+        else {
+            return Err(SelectionError::CommitteeMemberMismatch {
+                verifier_id: member.verifier_id.clone(),
+            });
+        };
+        if snapshot_entry.stake_units != member.stake_units {
+            return Err(SelectionError::StakeUnitsMismatch {
+                verifier_id: member.verifier_id.clone(),
+            });
+        }
         if normalized.stake_threshold_ppm > 0 {
-            let weight = member.weight_ppm as u128;
-            if weight < normalized.stake_threshold_ppm as u128 {
+            let stake_units = snapshot_entry.stake_units as u128;
+            let meets_threshold = stake_units.saturating_mul(PPM_SCALE_U128)
+                >= (normalized.stake_threshold_ppm as u128).saturating_mul(total_stake);
+            if !meets_threshold {
                 return Err(SelectionError::StakeThresholdViolation {
                     verifier_id: member.verifier_id.clone(),
                 });
@@ -381,5 +401,81 @@ mod tests {
             err,
             SelectionError::CommitteeMemberMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn rejects_inflated_committee_weight() {
+        let snapshot = StakeSnapshot {
+            staking_epoch: 11,
+            verifiers: vec![
+                StakeEntry {
+                    verifier_id: "alpha".into(),
+                    stake_units: 400,
+                },
+                StakeEntry {
+                    verifier_id: "beta".into(),
+                    stake_units: 300,
+                },
+                StakeEntry {
+                    verifier_id: "gamma".into(),
+                    stake_units: 300,
+                },
+            ],
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(13);
+        let (secret, public) = vrf::SecretKey::generate(&mut rng);
+        let config = CommitteeConfig {
+            label: "selection".into(),
+            committee_size: 1,
+            minimum_total_stake: 1,
+            stake_threshold_ppm: 600_000,
+        };
+        let mut receipt = select_committee(&secret, &config, &snapshot, b"threshold")
+            .unwrap()
+            .into_receipt();
+        assert_eq!(receipt.committee.len(), 1);
+        let member = receipt.committee.get_mut(0).expect("committee member");
+        assert!(member.weight_ppm < config.stake_threshold_ppm);
+        member.weight_ppm = config.stake_threshold_ppm;
+        let err = validate_committee(&public, &config, &snapshot, b"threshold", &receipt)
+            .expect_err("inflated weight should fail");
+        assert!(matches!(
+            err,
+            SelectionError::StakeThresholdViolation { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_committee_stake_units() {
+        let snapshot = StakeSnapshot {
+            staking_epoch: 5,
+            verifiers: vec![
+                StakeEntry {
+                    verifier_id: "alpha".into(),
+                    stake_units: 1_000,
+                },
+                StakeEntry {
+                    verifier_id: "beta".into(),
+                    stake_units: 2_000,
+                },
+            ],
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(21);
+        let (secret, public) = vrf::SecretKey::generate(&mut rng);
+        let config = CommitteeConfig {
+            label: "selection".into(),
+            committee_size: 2,
+            minimum_total_stake: 1,
+            stake_threshold_ppm: 300_000,
+        };
+        let mut receipt = select_committee(&secret, &config, &snapshot, b"stake-units")
+            .unwrap()
+            .into_receipt();
+        assert_eq!(receipt.committee.len(), 2);
+        let member = receipt.committee.get_mut(0).expect("member");
+        member.stake_units = member.stake_units.saturating_add(5_000);
+        let err = validate_committee(&public, &config, &snapshot, b"stake-units", &receipt)
+            .expect_err("mismatched stake units should fail");
+        assert!(matches!(err, SelectionError::StakeUnitsMismatch { .. }));
     }
 }

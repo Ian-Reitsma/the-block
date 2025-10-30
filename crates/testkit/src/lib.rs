@@ -8,6 +8,11 @@
 /// Benchmark helpers that execute the provided closure a fixed number of
 /// iterations and emit human-readable timing summaries.
 pub mod bench {
+    use std::env;
+    use std::fs::{self, File};
+    use std::io::{ErrorKind, Read};
+    use std::path::{Path, PathBuf};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     /// Default number of iterations used when the benchmark macro does not
@@ -61,6 +66,94 @@ pub mod bench {
             total = result.elapsed,
             avg = per_iter
         );
+        if let Err(err) = export_prometheus(name, per_iter) {
+            eprintln!("failed to export benchmark metric: {err}");
+        }
+    }
+
+    fn export_prometheus(name: &str, per_iter: Duration) -> Result<(), std::io::Error> {
+        let path = match env::var("TB_BENCH_PROM_PATH") {
+            Ok(value) if !value.is_empty() => value,
+            _ => return Ok(()),
+        };
+        let sanitized: String = name
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let metric_name = if sanitized.is_empty() {
+            "benchmark_seconds".to_string()
+        } else {
+            format!("benchmark_{}_seconds", sanitized)
+        };
+        let path_buf = PathBuf::from(path);
+        with_prometheus_lock(&path_buf, || {
+            export_prometheus_locked(&path_buf, &metric_name, per_iter)
+        })
+    }
+
+    fn with_prometheus_lock<F>(path: &Path, mut body: F) -> Result<(), std::io::Error>
+    where
+        F: FnMut() -> Result<(), std::io::Error>,
+    {
+        let lock_path = PathBuf::from(format!("{}.lock", path.display()));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match File::options()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(lock) => {
+                    let result = body();
+                    drop(lock);
+                    let _ = fs::remove_file(&lock_path);
+                    return result;
+                }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                    if Instant::now() >= deadline {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::WouldBlock,
+                            format!(
+                                "timed out acquiring benchmark export lock {}",
+                                lock_path.display()
+                            ),
+                        ));
+                    }
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn export_prometheus_locked(
+        path: &Path,
+        metric_name: &str,
+        per_iter: Duration,
+    ) -> Result<(), std::io::Error> {
+        let mut existing = String::new();
+        if let Ok(mut file) = File::open(path) {
+            file.read_to_string(&mut existing)?;
+        }
+        let mut lines: Vec<String> = existing
+            .lines()
+            .filter(|line| !line.starts_with(&metric_name))
+            .map(|line| line.to_string())
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        lines.push(format!("{} {}", metric_name, per_iter.as_secs_f64()));
+        lines.sort();
+        let mut output = lines.join("\n");
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        fs::write(path, output)
     }
 }
 
@@ -463,3 +556,32 @@ macro_rules! tb_fixture {
 }
 
 pub use testkit_macros::tb_serial;
+
+#[cfg(test)]
+mod tests {
+    use super::bench;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn bench_report_writes_prometheus_metric() {
+        let mut path = PathBuf::from(env::temp_dir());
+        path.push(format!(
+            "tb_bench_metric_{}_{}.prom",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_str = path.to_string_lossy().to_string();
+        env::set_var("TB_BENCH_PROM_PATH", &path_str);
+        let _ = fs::remove_file(&path);
+        bench::run("test_metric", 1, || {});
+        env::remove_var("TB_BENCH_PROM_PATH");
+        let contents = fs::read_to_string(&path).expect("benchmark metric written");
+        assert!(contents.contains("benchmark_test_metric_seconds"));
+        let _ = fs::remove_file(path);
+    }
+}

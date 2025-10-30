@@ -51,7 +51,19 @@ Security considerations are catalogued under
    `X-TheBlock-Ack-*` headers are validated, and the Ed25519 signature over the
    manifest, path hash, byte count, timestamp, client hash, domain, provider, and
    campaign fields is verified before the fully signed `ReadAck` is pushed into
-   the batching queue.
+   the batching queue. `ReadAck` now carries an optional `badge_soft_intent`
+   payload containing the ANN snapshot fingerprint, encrypted query ciphertext,
+   IV, and nearest-neighbour distance; gateway parses
+   `X-TheBlock-Ann-{Snapshot,Proof}` headers into that structure and threads it to
+  the ad marketplace so wallets can audit badge intent. Selection traces expose
+  `requested_kappa`, shading multipliers, shadow prices, and dual-token toggles,
+  letting RPC/SDK consumers correlate pacing guidance with the receipt that
+  cleared the impression. The gateway integration test suite now asserts those
+  fields for every candidate in the receipt, so multi-creative auctions surface
+  consistent shading telemetry rather than only reporting the winner. Wallets
+  that supply additional ANN entropy see it preserved in the soft-intent
+  payload, and verification rejects transcripts whose ciphertext or IV no longer
+  match the mixed entropy parameters.
 
 ### WebSocket peer metrics
 

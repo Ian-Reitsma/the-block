@@ -7,7 +7,9 @@
 
 #![deny(warnings)]
 
-use ad_market::{ImpressionContext, MarketplaceHandle, ReservationKey};
+use ad_market::{
+    ann, BadgeSoftIntentContext, ImpressionContext, MarketplaceHandle, ReservationKey,
+};
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::hex;
@@ -24,7 +26,7 @@ use crate::web::rate_limit::RateLimitFilter;
 use crate::{
     ad_readiness::AdReadinessHandle, net, service_badge, storage::pipeline, vm::wasm, ReadAck,
 };
-use foundation_serialization::json;
+use foundation_serialization::{binary, json};
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -101,6 +103,8 @@ const HEADER_ACK_PUBKEY: &str = "x-theblock-ack-pk";
 const HEADER_ACK_SIGNATURE: &str = "x-theblock-ack-sig";
 const HEADER_ACK_BYTES: &str = "x-theblock-ack-bytes";
 const HEADER_ACK_TIMESTAMP: &str = "x-theblock-ack-ts";
+const HEADER_BADGE_ANN_SNAPSHOT: &str = "x-theblock-ann-snapshot";
+const HEADER_BADGE_ANN_PROOF: &str = "x-theblock-ann-proof";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AckParseError {
@@ -117,6 +121,7 @@ enum AckParseError {
         actual: u64,
     },
     InvalidSignature,
+    AnnDeserialize(&'static str),
 }
 
 impl AckParseError {
@@ -140,6 +145,9 @@ fn ack_error_response(err: AckParseError) -> Response {
             format!("ack byte mismatch: declared {declared}, served {actual}")
         }
         AckParseError::InvalidSignature => "invalid read acknowledgement signature".to_string(),
+        AckParseError::AnnDeserialize(header) => {
+            format!("failed to decode ANN payload from {header}")
+        }
     };
     Response::new(StatusCode::BAD_REQUEST)
         .with_body(message.into_bytes())
@@ -189,6 +197,43 @@ fn decode_hex_vec(
     Ok(bytes)
 }
 
+fn parse_soft_intent(
+    req: &Request<GatewayState>,
+) -> Result<Option<BadgeSoftIntentContext>, AckParseError> {
+    let snapshot_bytes = req.header(HEADER_BADGE_ANN_SNAPSHOT);
+    let proof_bytes = req.header(HEADER_BADGE_ANN_PROOF);
+    if snapshot_bytes.is_none() && proof_bytes.is_none() {
+        return Ok(None);
+    }
+    let snapshot = match snapshot_bytes {
+        Some(value) if !value.is_empty() => {
+            let bytes =
+                hex::decode(value).map_err(|_| AckParseError::Decode(HEADER_BADGE_ANN_SNAPSHOT))?;
+            let snapshot: ann::WalletAnnIndexSnapshot = binary::decode(&bytes)
+                .map_err(|_| AckParseError::AnnDeserialize(HEADER_BADGE_ANN_SNAPSHOT))?;
+            Some(snapshot)
+        }
+        _ => None,
+    };
+    let proof = match proof_bytes {
+        Some(value) if !value.is_empty() => {
+            let bytes =
+                hex::decode(value).map_err(|_| AckParseError::Decode(HEADER_BADGE_ANN_PROOF))?;
+            let proof: ann::SoftIntentReceipt = binary::decode(&bytes)
+                .map_err(|_| AckParseError::AnnDeserialize(HEADER_BADGE_ANN_PROOF))?;
+            Some(proof)
+        }
+        _ => None,
+    };
+    if snapshot.is_none() && proof.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(BadgeSoftIntentContext {
+        wallet_index: snapshot,
+        proof,
+    }))
+}
+
 fn parse_signed_ack(
     req: &Request<GatewayState>,
     domain: &str,
@@ -227,6 +272,7 @@ fn parse_signed_ack(
             actual: bytes,
         });
     }
+    let soft_intent = parse_soft_intent(req)?;
     let client_hash = compute_client_hash(&req.remote_addr(), domain);
     let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
     let provider = infer_provider_for(&manifest, &path_hash).unwrap_or_default();
@@ -243,6 +289,7 @@ fn parse_signed_ack(
         campaign_id: None,
         creative_id: None,
         selection_receipt: None,
+        badge_soft_intent: soft_intent,
         readiness: None,
         zk_proof: None,
     };
@@ -298,6 +345,7 @@ fn build_read_ack(
             campaign_id: None,
             creative_id: None,
             selection_receipt: None,
+            badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
         }),
@@ -349,6 +397,7 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         provider,
         badges,
         bytes: ack.bytes,
+        soft_intent: ack.badge_soft_intent.clone(),
         ..ImpressionContext::default()
     };
     let key = ReservationKey {
@@ -598,13 +647,20 @@ mod tests {
     use crate::ad_readiness::{AdReadinessConfig, AdReadinessHandle};
     use crate::storage::pipeline;
     use ad_market::{
+        badge::ann::{SoftIntentReceipt, WalletAnnIndexSnapshot},
+        badge::BadgeSoftIntentContext,
+        budget::{BudgetBroker, BudgetBrokerConfig},
+        uplift::UpliftEstimate,
         Campaign, CampaignTargeting, Creative, DistributionPolicy, InMemoryMarketplace,
-        MarketplaceConfig, MICROS_PER_DOLLAR,
+        Marketplace, MarketplaceConfig, MatchOutcome, ResourceFloorBreakdown,
+        SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt, TokenOracle,
+        MICROS_PER_DOLLAR,
     };
+    use foundation_serialization::binary;
     use httpd::{Method, Router, StatusCode};
     use runtime::sync::mpsc;
     use std::collections::{BTreeSet, HashMap, HashSet};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, RwLock};
 
     struct StaticStake {
         allowed: HashSet<String>,
@@ -646,6 +702,78 @@ mod tests {
             },
             rx,
         )
+    }
+
+    struct StubMarketplace {
+        outcome: Mutex<Option<MatchOutcome>>,
+        broker: RwLock<BudgetBroker>,
+        distribution: RwLock<DistributionPolicy>,
+        oracle: RwLock<TokenOracle>,
+    }
+
+    impl StubMarketplace {
+        fn new(outcome: MatchOutcome) -> Self {
+            Self {
+                outcome: Mutex::new(Some(outcome)),
+                broker: RwLock::new(BudgetBroker::new(BudgetBrokerConfig::default())),
+                distribution: RwLock::new(DistributionPolicy::default()),
+                oracle: RwLock::new(TokenOracle::default()),
+            }
+        }
+    }
+
+    impl Marketplace for StubMarketplace {
+        fn register_campaign(
+            &self,
+            _campaign: ad_market::Campaign,
+        ) -> Result<(), ad_market::MarketplaceError> {
+            unimplemented!()
+        }
+
+        fn list_campaigns(&self) -> Vec<ad_market::CampaignSummary> {
+            Vec::new()
+        }
+
+        fn reserve_impression(
+            &self,
+            _key: ad_market::ReservationKey,
+            _ctx: ImpressionContext,
+        ) -> Option<MatchOutcome> {
+            self.outcome.lock().unwrap().clone()
+        }
+
+        fn commit(
+            &self,
+            _key: &ad_market::ReservationKey,
+        ) -> Option<ad_market::SettlementBreakdown> {
+            None
+        }
+
+        fn cancel(&self, _key: &ad_market::ReservationKey) {}
+
+        fn distribution(&self) -> DistributionPolicy {
+            self.distribution.read().unwrap().clone()
+        }
+
+        fn update_distribution(&self, policy: DistributionPolicy) {
+            *self.distribution.write().unwrap() = policy;
+        }
+
+        fn update_oracle(&self, oracle: TokenOracle) {
+            *self.oracle.write().unwrap() = oracle;
+        }
+
+        fn oracle(&self) -> TokenOracle {
+            self.oracle.read().unwrap().clone()
+        }
+
+        fn cohort_prices(&self) -> Vec<ad_market::CohortPriceSnapshot> {
+            Vec::new()
+        }
+
+        fn budget_broker(&self) -> &RwLock<BudgetBroker> {
+            &self.broker
+        }
     }
 
     #[test]
@@ -1078,6 +1206,340 @@ mod tests {
         service_badge::clear_badges();
         pipeline::clear_test_manifest_providers();
         pipeline::clear_test_static_blobs();
+    }
+
+    #[test]
+    fn static_read_attaches_soft_intent_receipt() {
+        service_badge::clear_badges();
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+        service_badge::set_physical_presence("gateway-ldn-01", true);
+
+        let mut config = MarketplaceConfig::default();
+        config.badge_guard.soft_intent_required = false;
+        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(config));
+        market
+            .register_campaign(Campaign {
+                id: "cmp-soft-intent".to_string(),
+                advertiser_account: "adv-soft".to_string(),
+                budget_usd_micros: 4 * MICROS_PER_DOLLAR,
+                creatives: vec![Creative {
+                    id: "creative-soft".to_string(),
+                    action_rate_ppm: 320_000,
+                    margin_ppm: 850_000,
+                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
+                    lift_ppm: 410_000,
+                    badges: vec!["physical_presence".to_string()],
+                    domains: vec!["signed.test".to_string()],
+                    metadata: HashMap::new(),
+                }],
+                targeting: CampaignTargeting {
+                    domains: vec!["signed.test".to_string()],
+                    badges: vec!["physical_presence".to_string()],
+                },
+                metadata: HashMap::new(),
+            })
+            .expect("campaign registered");
+
+        let (state, mut rx) = state_with_market(&["signed.test"], Some(market.clone()), None);
+        let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
+        let remote: SocketAddr = "127.0.0.1:9500".parse().unwrap();
+        let manifest = [0x44u8; 32];
+        let path = "/soft.html";
+        let bytes = 524_288u64;
+        let ts = 1_889_000_001u64;
+        pipeline::override_manifest_providers_for_test(
+            manifest,
+            vec!["gateway-ldn-01".to_string()],
+        );
+        pipeline::override_static_blob_for_test("signed.test", path, vec![0u8; bytes as usize]);
+
+        let badge_list = vec!["physical_presence".to_string()];
+        let query = ann::hash_badges(&badge_list);
+        let snapshot = ann::WalletAnnIndexSnapshot::new([0xAA; 32], vec![query, [0x33; 32]], 16);
+        let proof = ann::build_proof(&snapshot, &badge_list).expect("soft intent proof");
+        let snapshot_hex = hex::encode(binary::encode(&snapshot));
+        let proof_hex = hex::encode(binary::encode(&proof));
+
+        let mut rng = OsRng::default();
+        let signing = SigningKey::generate(&mut rng);
+        let pk_bytes = signing.verifying_key().to_bytes();
+        let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
+        let client_hash = compute_client_hash(&remote, "signed.test");
+        let mut hasher = Hasher::new();
+        hasher.update(&manifest);
+        hasher.update(&path_hash);
+        hasher.update(&bytes.to_le_bytes());
+        hasher.update(&ts.to_le_bytes());
+        hasher.update(&client_hash);
+        let signature = signing.sign(hasher.finalize().as_bytes()).to_bytes();
+
+        let request = router
+            .request_builder()
+            .host("signed.test")
+            .path(path)
+            .remote_addr(remote)
+            .header(HEADER_ACK_MANIFEST, hex::encode(manifest))
+            .header(HEADER_ACK_PUBKEY, hex::encode(pk_bytes))
+            .header(HEADER_ACK_SIGNATURE, hex::encode(signature))
+            .header(HEADER_ACK_BYTES, bytes.to_string())
+            .header(HEADER_ACK_TIMESTAMP, ts.to_string())
+            .header(HEADER_BADGE_ANN_SNAPSHOT, snapshot_hex)
+            .header(HEADER_BADGE_ANN_PROOF, proof_hex)
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let ack = rx.try_recv().expect("ack queued");
+        let context = ack.badge_soft_intent.as_ref().expect("soft intent context");
+        let wallet_snapshot = context.wallet_index.as_ref().expect("snapshot present");
+        assert_eq!(wallet_snapshot.fingerprint, snapshot.fingerprint);
+        assert_eq!(wallet_snapshot.bucket_hashes, snapshot.bucket_hashes);
+        assert_eq!(wallet_snapshot.dimensions, snapshot.dimensions);
+        assert_eq!(context.proof.as_ref(), Some(&proof));
+
+        let receipt = ack.selection_receipt.as_ref().expect("selection receipt");
+        assert_eq!(receipt.badge_soft_intent.as_ref(), Some(&proof));
+        let receipt_snapshot = receipt
+            .badge_soft_intent_snapshot
+            .as_ref()
+            .expect("receipt snapshot");
+        assert_eq!(receipt_snapshot.fingerprint, snapshot.fingerprint);
+        assert_eq!(receipt_snapshot.bucket_hashes, snapshot.bucket_hashes);
+        assert_eq!(receipt_snapshot.dimensions, snapshot.dimensions);
+
+        service_badge::clear_badges();
+        pipeline::clear_test_manifest_providers();
+        pipeline::clear_test_static_blobs();
+    }
+
+    #[test]
+    fn attach_campaign_metadata_propagates_shading_and_ann_fields() {
+        let snapshot = WalletAnnIndexSnapshot::new([7u8; 32], vec![[1u8; 32]; 2], 3)
+            .with_entropy_salt(vec![9u8; 16]);
+        let ann_receipt = SoftIntentReceipt::default();
+        let candidate = SelectionCandidateTrace {
+            campaign_id: "cmp-test".into(),
+            creative_id: "creative-test".into(),
+            base_bid_usd_micros: 1_200,
+            quality_adjusted_bid_usd_micros: 1_050,
+            available_budget_usd_micros: 5_000,
+            action_rate_ppm: 450_000,
+            lift_ppm: 25_000,
+            quality_multiplier: 1.1,
+            pacing_kappa: 0.75,
+            requested_kappa: 0.66,
+            shading_multiplier: 0.9,
+            shadow_price: 0.33,
+            dual_price: 0.2,
+            predicted_lift_ppm: 20_000,
+            baseline_action_rate_ppm: 420_000,
+            predicted_propensity: 0.42,
+            uplift_sample_size: 128,
+            uplift_ece: 0.08,
+        };
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "selection.test".into(),
+                provider: Some("provider".into()),
+                badges: vec!["vip".into()],
+                bytes: 512,
+                price_per_mib_usd_micros: 100,
+            },
+            candidates: vec![candidate.clone()],
+            winner_index: 0,
+            resource_floor_usd_micros: 90,
+            resource_floor_breakdown: ResourceFloorBreakdown {
+                bandwidth_usd_micros: 50,
+                verifier_usd_micros: 20,
+                host_usd_micros: 20,
+                qualified_impressions_per_proof: 128,
+            },
+            runner_up_quality_bid_usd_micros: 800,
+            clearing_price_usd_micros: 1_000,
+            attestation: None,
+            proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: Some(ann_receipt.clone()),
+            badge_soft_intent_snapshot: Some(snapshot.clone()),
+        };
+        let outcome = MatchOutcome {
+            campaign_id: "cmp-test".into(),
+            creative_id: "creative-test".into(),
+            price_per_mib_usd_micros: 100,
+            total_usd_micros: 2_048,
+            resource_floor_usd_micros: 90,
+            resource_floor_breakdown: receipt.resource_floor_breakdown.clone(),
+            runner_up_quality_bid_usd_micros: 800,
+            quality_adjusted_bid_usd_micros: 1_050,
+            selection_receipt: receipt.clone(),
+            uplift: UpliftEstimate {
+                lift_ppm: 20_000,
+                baseline_action_rate_ppm: 400_000,
+                propensity: 0.4,
+                ece: 0.05,
+                sample_size: 256,
+            },
+        };
+        let market: MarketplaceHandle = Arc::new(StubMarketplace::new(outcome));
+        let (state, _rx) = state_with_market(&["selection.test"], Some(market), None);
+
+        let mut ack = ReadAck {
+            manifest: [0u8; 32],
+            path_hash: [1u8; 32],
+            bytes: 2_048,
+            ts: 123,
+            client_hash: [2u8; 32],
+            pk: [3u8; 32],
+            sig: vec![4u8; 64],
+            domain: "selection.test".into(),
+            provider: "".into(),
+            campaign_id: None,
+            creative_id: None,
+            selection_receipt: None,
+            badge_soft_intent: Some(BadgeSoftIntentContext {
+                wallet_index: Some(snapshot.clone()),
+                proof: Some(ann_receipt.clone()),
+            }),
+            readiness: None,
+            zk_proof: None,
+        };
+
+        attach_campaign_metadata(&state, &mut ack);
+
+        let receipt = ack
+            .selection_receipt
+            .as_ref()
+            .expect("selection receipt attached");
+        assert_eq!(receipt.candidates.len(), 1);
+        let candidate = &receipt.candidates[0];
+        assert!((candidate.requested_kappa - 0.66).abs() < f64::EPSILON);
+        assert!((candidate.shadow_price - 0.33).abs() < f64::EPSILON);
+        assert_eq!(receipt.badge_soft_intent.as_ref(), Some(&ann_receipt));
+        assert_eq!(receipt.badge_soft_intent_snapshot.as_ref(), Some(&snapshot));
+        let context = ack.badge_soft_intent.as_ref().expect("context preserved");
+        assert_eq!(context.proof.as_ref(), Some(&ann_receipt));
+        assert_eq!(context.wallet_index.as_ref(), Some(&snapshot));
+    }
+
+    #[test]
+    fn attach_campaign_metadata_preserves_multi_candidate_enrichment() {
+        let winner = SelectionCandidateTrace {
+            campaign_id: "cmp-winner".into(),
+            creative_id: "creative-winner".into(),
+            base_bid_usd_micros: 1_800_000,
+            quality_adjusted_bid_usd_micros: 1_950_000,
+            available_budget_usd_micros: 7_200_000,
+            action_rate_ppm: 410_000,
+            lift_ppm: 52_000,
+            quality_multiplier: 1.15,
+            pacing_kappa: 0.72,
+            requested_kappa: 0.58,
+            shading_multiplier: 0.84,
+            shadow_price: 0.27,
+            dual_price: 0.19,
+            ..SelectionCandidateTrace::default()
+        };
+        let runner_up = SelectionCandidateTrace {
+            campaign_id: "cmp-runner".into(),
+            creative_id: "creative-runner".into(),
+            base_bid_usd_micros: 1_400_000,
+            quality_adjusted_bid_usd_micros: 1_520_000,
+            available_budget_usd_micros: 5_600_000,
+            action_rate_ppm: 360_000,
+            lift_ppm: 37_000,
+            quality_multiplier: 1.08,
+            pacing_kappa: 0.66,
+            requested_kappa: 0.49,
+            shading_multiplier: 0.79,
+            shadow_price: 0.31,
+            dual_price: 0.23,
+            ..SelectionCandidateTrace::default()
+        };
+        let receipt = SelectionReceipt {
+            cohort: SelectionCohortTrace {
+                domain: "multi.test".into(),
+                provider: Some("wallet".into()),
+                badges: vec!["tier.one".into(), "tier.two".into()],
+                bytes: 1_024,
+                price_per_mib_usd_micros: 220,
+            },
+            candidates: vec![runner_up.clone(), winner.clone()],
+            winner_index: 1,
+            resource_floor_usd_micros: 180,
+            resource_floor_breakdown: ResourceFloorBreakdown {
+                bandwidth_usd_micros: 120,
+                verifier_usd_micros: 35,
+                host_usd_micros: 25,
+                qualified_impressions_per_proof: 512,
+            },
+            runner_up_quality_bid_usd_micros: runner_up.quality_adjusted_bid_usd_micros,
+            clearing_price_usd_micros: 1_520_000,
+            attestation: None,
+            proof_metadata: None,
+            verifier_committee: None,
+            verifier_stake_snapshot: None,
+            verifier_transcript: Vec::new(),
+            badge_soft_intent: None,
+            badge_soft_intent_snapshot: None,
+        };
+        let outcome = MatchOutcome {
+            campaign_id: winner.campaign_id.clone(),
+            creative_id: winner.creative_id.clone(),
+            price_per_mib_usd_micros: 220,
+            total_usd_micros: 2_048,
+            resource_floor_usd_micros: 180,
+            resource_floor_breakdown: receipt.resource_floor_breakdown.clone(),
+            runner_up_quality_bid_usd_micros: runner_up.quality_adjusted_bid_usd_micros,
+            quality_adjusted_bid_usd_micros: winner.quality_adjusted_bid_usd_micros,
+            selection_receipt: receipt.clone(),
+            uplift: UpliftEstimate {
+                lift_ppm: 49_000,
+                baseline_action_rate_ppm: 395_000,
+                propensity: 0.43,
+                ece: 0.06,
+                sample_size: 384,
+            },
+        };
+        let market: MarketplaceHandle = Arc::new(StubMarketplace::new(outcome));
+        let (state, _rx) = state_with_market(&["multi.test"], Some(market), None);
+
+        let mut ack = ReadAck {
+            manifest: [5u8; 32],
+            path_hash: [7u8; 32],
+            bytes: 2_048,
+            ts: 77,
+            client_hash: [3u8; 32],
+            pk: [1u8; 32],
+            sig: vec![2u8; 64],
+            domain: "multi.test".into(),
+            provider: String::new(),
+            campaign_id: None,
+            creative_id: None,
+            selection_receipt: None,
+            badge_soft_intent: None,
+            readiness: None,
+            zk_proof: None,
+        };
+
+        attach_campaign_metadata(&state, &mut ack);
+
+        assert_eq!(ack.campaign_id.as_deref(), Some("cmp-winner"));
+        assert_eq!(ack.creative_id.as_deref(), Some("creative-winner"));
+        let attached = ack
+            .selection_receipt
+            .as_ref()
+            .expect("selection receipt attached");
+        assert_eq!(attached.candidates.len(), 2);
+        let enriched_runner = &attached.candidates[0];
+        let enriched_winner = &attached.candidates[1];
+        assert!((enriched_runner.requested_kappa - runner_up.requested_kappa).abs() < f64::EPSILON);
+        assert!((enriched_runner.shadow_price - runner_up.shadow_price).abs() < f64::EPSILON);
+        assert!((enriched_winner.requested_kappa - winner.requested_kappa).abs() < f64::EPSILON);
+        assert!((enriched_winner.shadow_price - winner.shadow_price).abs() < f64::EPSILON);
     }
 
     #[test]

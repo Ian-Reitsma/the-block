@@ -3,11 +3,23 @@
 > first-party VRF sampling. `verifier_selection` builds stake snapshots, derives
 > committees with `crypto_suite::vrf`, and stores transcripts on selection
 > receipts; the attestation manager validates snapshots/transcripts before
-> settlement, closing the loop without external crypto. Badge soft intents gained
-> encrypted ANN receipts via `crypto_suite::encryption::symmetric`, and the badge
-> guard verifies proofs before matching. `BudgetBroker` now publishes κ requests,
-> multipliers, shadow prices, and dual prices via the existing JSON/telemetry
-> helpers so pacing analytics stay hermetic.
+> settlement, closing the loop without external crypto. The guard now recomputes
+> stake thresholds from the provided snapshot rather than trusting receipt
+> weights, and integration coverage exercises stale snapshots plus mismatched
+> transcripts to prove invalid committees are stripped before commitments.
+> Badge soft intents gained encrypted ANN receipts via
+> `crypto_suite::encryption::symmetric`, entropy salts feed both key and IV
+> derivation, and wallets can optionally mix extra entropy that propagates through
+> receipt verification. Gateway and SDK surfaces emit requested κ, shading
+> multipliers, ANN ciphertext fingerprints, and dual-token toggles so pacing
+> analytics stay hermetic; unit tests now assert those fields for every candidate
+> in multi-creative traces so downstream consumers see consistent shading
+> telemetry. The `ann_soft_intent_verification` benchmark measures verification
+> latency across 128–32 768 bucket tables, and `testkit` exports the timing to
+> Prometheus under a file lock whenever `TB_BENCH_PROM_PATH` is set so concurrent
+> suites cannot overwrite samples. The monitoring generator renders a Benchmarks
+> row so ANN verification timings trend beside pacing dashboards without leaving
+> first-party tooling.
 > **Review (2025-10-29, evening):** Selection manifests gained regression coverage
 > for hot swaps and multi-entry ordering via the manual
 > `parse_manifest_value`/`parse_artifacts_value` helpers, proving verifying-key

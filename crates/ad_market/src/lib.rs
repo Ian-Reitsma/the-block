@@ -24,6 +24,7 @@ mod uplift;
 
 pub use attestation::{
     AttestationSatisfaction, SelectionAttestationConfig, SelectionAttestationManager,
+    VerifierCommitteeConfig,
 };
 pub use badge::{ann, BadgeDecision, BadgeGuard, BadgeGuardConfig, BadgeSoftIntentContext};
 pub use budget::{

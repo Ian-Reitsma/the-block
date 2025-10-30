@@ -15,3 +15,10 @@ sled = { path = "../../sled" }
 [dev-dependencies]
 sys = { path = "../sys" }
 rand = { path = "../rand" }
+testkit = { path = "../testkit" }
+concurrency = { path = "../concurrency" }
+
+[[bench]]
+name = "ann"
+path = "benches/ann.rs"
+harness = false

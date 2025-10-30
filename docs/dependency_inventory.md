@@ -17,13 +17,20 @@ cells while trimming runtime.
 - ✅ VRF-backed verifier committees and ANN badge proofs stay entirely first
   party. The new `verifier_selection` crate derives committees with
   `crypto_suite::vrf` outputs, hashes stake snapshots with BLAKE3, and validates
-  receipts without third-party crypto. Soft-intent ANN receipts encrypt badge
-  hashes via `crypto_suite::encryption::symmetric`, and the ad-market guard now
-  verifies them through in-tree helpers while exposing the proofs over existing
-  JSON/telemetry builders. Budget shading guidance surfaces requested κ, shadow
-  prices, and applied multipliers strictly through `BudgetBroker` and
-  `foundation_metrics`, so richer pacing traces land with zero optimisation or
-  serde dependencies.
+  receipts without third-party crypto. The guard now recomputes stake thresholds
+  from the supplied snapshot and the integration suite drives stale snapshots +
+  mismatched transcripts through `ad_market.reserve_impression`, proving the
+  attestation path rejects tampering without external harnesses. Soft-intent ANN
+  receipts encrypt badge hashes via `crypto_suite::encryption::symmetric`, entropy
+  salts mix into key/IV derivation, wallets can inject optional entropy that
+  persists on receipts, and the `ann_soft_intent_verification` bench exercises
+  128–32 768 bucket tables solely through `testkit` + `concurrency`. Gateway traces
+  surface requested κ, shadow prices, and ANN ciphertext digests for every
+  candidate strictly via `BudgetBroker` + `foundation_metrics`, so richer pacing data
+  lands without serde or optimisation crates. When `TB_BENCH_PROM_PATH` is set, the
+  same first-party harness writes `benchmark_ann_soft_intent_verification_seconds`
+  under a file lock for dashboards to ingest, keeping regression history and alerts
+  inside the workspace even when suites run concurrently.
 - ✅ Dual-token settlement gating, treasury timelines, and readiness deltas stay
   entirely first party. Governance and node crates share hand-written codecs,
   stores, and runtime plumbing for the new `DualTokenSettlementEnabled`

@@ -354,620 +354,6 @@
     },
     {
       "id": 21,
-      "title": "Treasury",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Treasury disbursements grouped by status",
-      "id": 22,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "treasury_disbursement_count",
-          "legendFormat": "{{status}}"
-        }
-      ],
-      "title": "Treasury disbursements (count by status)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Aggregated CT amount for treasury disbursements by status",
-      "id": 23,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "treasury_disbursement_amount_ct",
-          "legendFormat": "{{status}}"
-        }
-      ],
-      "title": "Treasury disbursement CT by status",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Seconds since the most recent treasury disbursement snapshot",
-      "id": 24,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "treasury_disbursement_snapshot_age_seconds",
-          "legendFormat": "{{__name__}}"
-        }
-      ],
-      "title": "Treasury snapshot age (seconds)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Age of the oldest scheduled treasury disbursement in seconds",
-      "id": 25,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "treasury_disbursement_scheduled_oldest_age_seconds",
-          "legendFormat": "{{__name__}}"
-        }
-      ],
-      "title": "Oldest scheduled treasury disbursement age (seconds)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Next scheduled treasury disbursement epoch (0 when none queued)",
-      "id": 26,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "treasury_disbursement_next_epoch",
-          "legendFormat": "{{__name__}}"
-        }
-      ],
-      "title": "Next treasury disbursement epoch",
-      "type": "timeseries"
-    },
-    {
-      "id": 27,
-      "title": "Block Payouts",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Read subsidy CT routed to each role from finalized blocks",
-      "id": 28,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (role)(increase(explorer_block_payout_read_total[5m]))",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Read subsidy payouts (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Advertising CT routed to each role from finalized blocks",
-      "id": 29,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (role)(increase(explorer_block_payout_ad_total[5m]))",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Advertising payouts (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp for the most recent read subsidy payout reported per role",
-      "id": 30,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (role)(explorer_block_payout_read_last_seen_timestamp)",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Read subsidy last seen (timestamp)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp for the most recent read subsidy payout reported per role",
-      "id": 31,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "clamp_min(time() - max by (role)(explorer_block_payout_read_last_seen_timestamp), 0)",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Read subsidy staleness (seconds)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp for the most recent advertising payout reported per role",
-      "id": 32,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (role)(explorer_block_payout_ad_last_seen_timestamp)",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Advertising payout last seen (timestamp)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp for the most recent advertising payout reported per role",
-      "id": 33,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "clamp_min(time() - max by (role)(explorer_block_payout_ad_last_seen_timestamp), 0)",
-          "legendFormat": "{{role}}"
-        }
-      ],
-      "title": "Advertising payout staleness (seconds)",
-      "type": "timeseries"
-    },
-    {
-      "id": 34,
-      "title": "Bridge",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge reward claim operations processed",
-      "id": 35,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "increase(bridge_reward_claims_total[5m])"
-        }
-      ],
-      "title": "bridge_reward_claims_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Total bridge reward allowance consumed by approved claims",
-      "id": 36,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "increase(bridge_reward_approvals_consumed_total[5m])"
-        }
-      ],
-      "title": "bridge_reward_approvals_consumed_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge settlement submissions grouped by result and reason",
-      "id": 37,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (result, reason)(increase(bridge_settlement_results_total[5m]))",
-          "legendFormat": "{{result}} · {{reason}}"
-        }
-      ],
-      "title": "bridge_settlement_results_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge dispute outcomes grouped by duty kind and outcome",
-      "id": 38,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (kind, outcome)(increase(bridge_dispute_outcomes_total[5m]))",
-          "legendFormat": "{{kind}} · {{outcome}}"
-        }
-      ],
-      "title": "bridge_dispute_outcomes_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge liquidity locked grouped by asset label",
-      "id": 39,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (asset)(increase(bridge_liquidity_locked_total[5m]))",
-          "legendFormat": "{{asset}}"
-        }
-      ],
-      "title": "bridge_liquidity_locked_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge liquidity unlocked grouped by asset label",
-      "id": 40,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (asset)(increase(bridge_liquidity_unlocked_total[5m]))",
-          "legendFormat": "{{asset}}"
-        }
-      ],
-      "title": "bridge_liquidity_unlocked_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge liquidity minted grouped by asset label",
-      "id": 41,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (asset)(increase(bridge_liquidity_minted_total[5m]))",
-          "legendFormat": "{{asset}}"
-        }
-      ],
-      "title": "bridge_liquidity_minted_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge liquidity burned grouped by asset label",
-      "id": 42,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (asset)(increase(bridge_liquidity_burned_total[5m]))",
-          "legendFormat": "{{asset}}"
-        }
-      ],
-      "title": "bridge_liquidity_burned_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Per-scrape bridge counter deltas grouped by metric",
-      "id": 43,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (metric)(bridge_metric_delta)"
-        }
-      ],
-      "title": "bridge_metric_delta",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Per-second bridge counter growth grouped by metric",
-      "id": 44,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (metric)(bridge_metric_rate_per_second)"
-        }
-      ],
-      "title": "bridge_metric_rate_per_second",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge anomaly detector activations",
-      "id": 45,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "increase(bridge_anomaly_total[5m])"
-        }
-      ],
-      "title": "bridge_anomaly_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge remediation actions grouped by outcome and playbook",
-      "id": 46,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))",
-          "legendFormat": "{{action}} · {{playbook}}"
-        }
-      ],
-      "title": "bridge_remediation_action_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge remediation dispatch attempts grouped by target surface and status",
-      "id": 47,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))",
-          "legendFormat": "{{action}} · {{target}} · {{status}}"
-        }
-      ],
-      "title": "bridge_remediation_dispatch_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge remediation dispatch acknowledgements grouped by target and state",
-      "id": 48,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))",
-          "legendFormat": "{{action}} · {{target}} · {{state}}"
-        }
-      ],
-      "title": "bridge_remediation_dispatch_ack_total (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Bridge remediation acknowledgement latency grouped by playbook and state",
-      "id": 49,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
-          "legendFormat": "{playbook} · {state} · p50"
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
-          "legendFormat": "{playbook} · {state} · p95"
-        },
-        {
-          "expr": "bridge_remediation_ack_target_seconds{phase=\"retry\"}",
-          "legendFormat": "{playbook} · retry target"
-        },
-        {
-          "expr": "bridge_remediation_ack_target_seconds{phase=\"escalate\"}",
-          "legendFormat": "{playbook} · escalate target"
-        }
-      ],
-      "title": "bridge_remediation_ack_latency_seconds (p50/p95)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Outstanding bridge remediation spool artifacts awaiting acknowledgement",
-      "id": 50,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "bridge_remediation_spool_artifacts"
-        }
-      ],
-      "title": "bridge_remediation_spool_artifacts",
-      "type": "timeseries"
-    },
-    {
-      "id": 51,
-      "title": "Chaos Readiness",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Chaos readiness grouped by module, scenario, site, and provider",
-      "id": 52,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "chaos_site_readiness",
-          "legendFormat": "{{module}} · {{scenario}} · {{site}} · {{provider}}"
-        }
-      ],
-      "title": "Chaos site readiness",
-      "type": "timeseries"
-    },
-    {
-      "id": 53,
       "title": "Gossip",
       "type": "row"
     },
@@ -976,7 +362,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 54,
+      "id": 22,
       "options": {
         "legend": {
           "showLegend": false
@@ -995,7 +381,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 55,
+      "id": 23,
       "options": {
         "legend": {
           "showLegend": false
@@ -1014,7 +400,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 56,
+      "id": 24,
       "options": {
         "legend": {
           "showLegend": false
@@ -1033,7 +419,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 57,
+      "id": 25,
       "options": {
         "legend": {
           "showLegend": false
@@ -1048,8 +434,8 @@
       "type": "timeseries"
     },
     {
-      "id": 58,
-      "title": "TLS",
+      "id": 26,
+      "title": "Benchmarks",
       "type": "row"
     },
     {
@@ -1057,197 +443,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "description": "TLS environment configuration warnings grouped by prefix and code",
-      "id": 59,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (prefix, code)(increase(tls_env_warning_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp of the most recent TLS environment warning",
-      "id": 60,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (prefix, code)(tls_env_warning_last_seen_seconds)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (last seen)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unix timestamp of the most recent TLS environment warning",
-      "id": 61,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (age seconds)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Fingerprint of the most recent TLS warning detail payload",
-      "id": 62,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (prefix, code)(tls_env_warning_detail_fingerprint)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (detail fingerprint hash)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Fingerprint of the most recent TLS warning variables payload",
-      "id": 63,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (prefix, code)(tls_env_warning_variables_fingerprint)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (variables fingerprint hash)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unique TLS warning detail fingerprints observed",
-      "id": 64,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (prefix, code)(tls_env_warning_detail_unique_fingerprints)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (unique detail fingerprints)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Unique TLS warning variables fingerprints observed",
-      "id": 65,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "max by (prefix, code)(tls_env_warning_variables_unique_fingerprints)",
-          "legendFormat": "{{prefix}} · {{code}}"
-        }
-      ],
-      "title": "TLS env warnings (unique variables fingerprints)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Cumulative TLS warning events grouped by detail fingerprint",
-      "id": 66,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (prefix, code, fingerprint)(increase(tls_env_warning_detail_fingerprint_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}} · {{fingerprint}}"
-        }
-      ],
-      "title": "TLS env warnings (detail fingerprint 5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Cumulative TLS warning events grouped by variables fingerprint",
-      "id": 67,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (prefix, code, fingerprint)(increase(tls_env_warning_variables_fingerprint_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}} · {{fingerprint}}"
-        }
-      ],
-      "title": "TLS env warnings (variables fingerprint 5m delta)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Number of active TLS warning snapshots after retention pruning",
-      "id": 68,
+      "id": 27,
       "options": {
         "legend": {
           "showLegend": false
@@ -1255,183 +451,14 @@
       },
       "targets": [
         {
-          "expr": "tls_env_warning_active_snapshots"
+          "expr": "benchmark_ann_soft_intent_verification_seconds"
         }
       ],
-      "title": "TLS env warnings (active snapshots)",
+      "title": "benchmark_ann_soft_intent_verification_seconds",
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "TLS warning snapshots exceeding the retention window",
-      "id": 69,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "tls_env_warning_stale_snapshots"
-        }
-      ],
-      "title": "TLS env warnings (stale snapshots)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Configured TLS warning retention window in seconds",
-      "id": 70,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "tls_env_warning_retention_seconds"
-        }
-      ],
-      "title": "TLS env warnings (retention seconds)",
-      "type": "timeseries"
-    },
-    {
-      "id": 71,
-      "title": "Dependencies",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Policy violations detected by the dependency registry",
-      "id": 72,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_policy_violation",
-          "legendFormat": "{{crate}} {{version}} · {{kind}}"
-        }
-      ],
-      "title": "Dependency policy violations by crate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Total dependency policy violations emitted by the registry",
-      "id": 73,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_policy_violation_total"
-        }
-      ],
-      "title": "Dependency policy violations (total)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Outcome of the latest dependency registry check",
-      "id": 74,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_registry_check_status",
-          "legendFormat": "{{status}} · {{detail}}"
-        }
-      ],
-      "title": "Dependency registry check status",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Counts associated with dependency registry check outcomes",
-      "id": 75,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_registry_check_counts",
-          "legendFormat": "{{kind}}"
-        }
-      ],
-      "title": "Dependency registry drift counts",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Total dependency policy violations detected during the last run",
-      "id": 76,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_policy_violation_total"
-        }
-      ],
-      "title": "Dependency policy violations (total)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
-      "description": "Dependency policy violations grouped by crate, version, kind, and depth",
-      "id": 77,
-      "options": {
-        "legend": {
-          "showLegend": true
-        }
-      },
-      "targets": [
-        {
-          "expr": "dependency_policy_violation",
-          "legendFormat": "{{crate}} {{version}} · {{kind}}"
-        }
-      ],
-      "title": "Dependency policy violations by crate",
-      "type": "timeseries"
-    },
-    {
-      "id": 78,
+      "id": 28,
       "title": "Other",
       "type": "row"
     },
@@ -1440,7 +467,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 79,
+      "id": 29,
       "options": {
         "legend": {
           "showLegend": false
@@ -1459,7 +486,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 80,
+      "id": 30,
       "options": {
         "legend": {
           "showLegend": false
@@ -1478,7 +505,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 81,
+      "id": 31,
       "options": {
         "legend": {
           "showLegend": false
@@ -1497,7 +524,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 82,
+      "id": 32,
       "options": {
         "legend": {
           "showLegend": false
@@ -1516,7 +543,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 83,
+      "id": 33,
       "options": {
         "legend": {
           "showLegend": false
@@ -1535,7 +562,216 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 84,
+      "id": 34,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_total"
+        }
+      ],
+      "title": "tls_env_warning_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_last_seen_seconds"
+        }
+      ],
+      "title": "tls_env_warning_last_seen_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_detail_fingerprint"
+        }
+      ],
+      "title": "tls_env_warning_detail_fingerprint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_variables_fingerprint"
+        }
+      ],
+      "title": "tls_env_warning_variables_fingerprint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 38,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_detail_unique_fingerprints"
+        }
+      ],
+      "title": "tls_env_warning_detail_unique_fingerprints",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_variables_unique_fingerprints"
+        }
+      ],
+      "title": "tls_env_warning_variables_unique_fingerprints",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_detail_fingerprint_total"
+        }
+      ],
+      "title": "tls_env_warning_detail_fingerprint_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_variables_fingerprint_total"
+        }
+      ],
+      "title": "tls_env_warning_variables_fingerprint_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 42,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_active_snapshots"
+        }
+      ],
+      "title": "tls_env_warning_active_snapshots",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 43,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_stale_snapshots"
+        }
+      ],
+      "title": "tls_env_warning_stale_snapshots",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 44,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "tls_env_warning_retention_seconds"
+        }
+      ],
+      "title": "tls_env_warning_retention_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 45,
       "options": {
         "legend": {
           "showLegend": false
@@ -1554,7 +790,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 85,
+      "id": 46,
       "options": {
         "legend": {
           "showLegend": false
@@ -1573,7 +809,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 86,
+      "id": 47,
       "options": {
         "legend": {
           "showLegend": false
@@ -1592,7 +828,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 87,
+      "id": 48,
       "options": {
         "legend": {
           "showLegend": false
@@ -1611,7 +847,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 88,
+      "id": 49,
       "options": {
         "legend": {
           "showLegend": false
@@ -1630,7 +866,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 89,
+      "id": 50,
       "options": {
         "legend": {
           "showLegend": false
@@ -1649,7 +885,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 90,
+      "id": 51,
       "options": {
         "legend": {
           "showLegend": false
@@ -1668,7 +904,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 91,
+      "id": 52,
       "options": {
         "legend": {
           "showLegend": false
@@ -1687,7 +923,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 92,
+      "id": 53,
       "options": {
         "legend": {
           "showLegend": false
@@ -1706,7 +942,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 93,
+      "id": 54,
       "options": {
         "legend": {
           "showLegend": false
@@ -1725,7 +961,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 94,
+      "id": 55,
       "options": {
         "legend": {
           "showLegend": false
@@ -1744,7 +980,349 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 95,
+      "id": 56,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "explorer_block_payout_read_total"
+        }
+      ],
+      "title": "explorer_block_payout_read_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 57,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "explorer_block_payout_ad_total"
+        }
+      ],
+      "title": "explorer_block_payout_ad_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 58,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "explorer_block_payout_read_last_seen_timestamp"
+        }
+      ],
+      "title": "explorer_block_payout_read_last_seen_timestamp",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 59,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "explorer_block_payout_ad_last_seen_timestamp"
+        }
+      ],
+      "title": "explorer_block_payout_ad_last_seen_timestamp",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 60,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_reward_claims_total"
+        }
+      ],
+      "title": "bridge_reward_claims_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 61,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_reward_approvals_consumed_total"
+        }
+      ],
+      "title": "bridge_reward_approvals_consumed_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 62,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_settlement_results_total"
+        }
+      ],
+      "title": "bridge_settlement_results_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 63,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_dispute_outcomes_total"
+        }
+      ],
+      "title": "bridge_dispute_outcomes_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 64,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_liquidity_locked_total"
+        }
+      ],
+      "title": "bridge_liquidity_locked_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 65,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_liquidity_unlocked_total"
+        }
+      ],
+      "title": "bridge_liquidity_unlocked_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 66,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_liquidity_minted_total"
+        }
+      ],
+      "title": "bridge_liquidity_minted_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 67,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_liquidity_burned_total"
+        }
+      ],
+      "title": "bridge_liquidity_burned_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 68,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_metric_delta"
+        }
+      ],
+      "title": "bridge_metric_delta",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 69,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_metric_rate_per_second"
+        }
+      ],
+      "title": "bridge_metric_rate_per_second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 70,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_anomaly_total"
+        }
+      ],
+      "title": "bridge_anomaly_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 71,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_remediation_action_total"
+        }
+      ],
+      "title": "bridge_remediation_action_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 72,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_remediation_dispatch_total"
+        }
+      ],
+      "title": "bridge_remediation_dispatch_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 73,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_remediation_dispatch_ack_total"
+        }
+      ],
+      "title": "bridge_remediation_dispatch_ack_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 74,
       "options": {
         "legend": {
           "showLegend": false
@@ -1763,7 +1341,45 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 96,
+      "id": 75,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_remediation_ack_latency_seconds"
+        }
+      ],
+      "title": "bridge_remediation_ack_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 76,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "bridge_remediation_spool_artifacts"
+        }
+      ],
+      "title": "bridge_remediation_spool_artifacts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 77,
       "options": {
         "legend": {
           "showLegend": false
@@ -1782,7 +1398,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 97,
+      "id": 78,
       "options": {
         "legend": {
           "showLegend": false
@@ -1801,7 +1417,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 98,
+      "id": 79,
       "options": {
         "legend": {
           "showLegend": false
@@ -1820,7 +1436,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 99,
+      "id": 80,
       "options": {
         "legend": {
           "showLegend": false
@@ -1839,7 +1455,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 100,
+      "id": 81,
       "options": {
         "legend": {
           "showLegend": false
@@ -1858,7 +1474,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 101,
+      "id": 82,
       "options": {
         "legend": {
           "showLegend": false
@@ -1877,7 +1493,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 102,
+      "id": 83,
       "options": {
         "legend": {
           "showLegend": false
@@ -1896,7 +1512,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 103,
+      "id": 84,
       "options": {
         "legend": {
           "showLegend": false
@@ -1915,7 +1531,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 104,
+      "id": 85,
       "options": {
         "legend": {
           "showLegend": false
@@ -1934,7 +1550,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 105,
+      "id": 86,
       "options": {
         "legend": {
           "showLegend": false
@@ -1953,7 +1569,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 106,
+      "id": 87,
       "options": {
         "legend": {
           "showLegend": false
@@ -1972,7 +1588,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 107,
+      "id": 88,
       "options": {
         "legend": {
           "showLegend": false
@@ -1991,7 +1607,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 108,
+      "id": 89,
       "options": {
         "legend": {
           "showLegend": false
@@ -2010,7 +1626,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 109,
+      "id": 90,
       "options": {
         "legend": {
           "showLegend": false
@@ -2029,7 +1645,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 110,
+      "id": 91,
       "options": {
         "legend": {
           "showLegend": false
@@ -2048,7 +1664,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 111,
+      "id": 92,
       "options": {
         "legend": {
           "showLegend": false
@@ -2067,7 +1683,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 112,
+      "id": 93,
       "options": {
         "legend": {
           "showLegend": false
@@ -2086,7 +1702,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 113,
+      "id": 94,
       "options": {
         "legend": {
           "showLegend": false
@@ -2105,7 +1721,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 114,
+      "id": 95,
       "options": {
         "legend": {
           "showLegend": false
@@ -2124,7 +1740,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 115,
+      "id": 96,
       "options": {
         "legend": {
           "showLegend": false
@@ -2143,7 +1759,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 116,
+      "id": 97,
       "options": {
         "legend": {
           "showLegend": false
@@ -2162,7 +1778,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 117,
+      "id": 98,
       "options": {
         "legend": {
           "showLegend": false
@@ -2181,7 +1797,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 118,
+      "id": 99,
       "options": {
         "legend": {
           "showLegend": false
@@ -2200,7 +1816,102 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 119,
+      "id": 100,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "treasury_disbursement_count"
+        }
+      ],
+      "title": "treasury_disbursement_count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "treasury_disbursement_amount_ct"
+        }
+      ],
+      "title": "treasury_disbursement_amount_ct",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 102,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "treasury_disbursement_snapshot_age_seconds"
+        }
+      ],
+      "title": "treasury_disbursement_snapshot_age_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 103,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "treasury_disbursement_scheduled_oldest_age_seconds"
+        }
+      ],
+      "title": "treasury_disbursement_scheduled_oldest_age_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 104,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "treasury_disbursement_next_epoch"
+        }
+      ],
+      "title": "treasury_disbursement_next_epoch",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 105,
       "options": {
         "legend": {
           "showLegend": false
@@ -2219,7 +1930,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 120,
+      "id": 106,
       "options": {
         "legend": {
           "showLegend": false
@@ -2238,7 +1949,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 121,
+      "id": 107,
       "options": {
         "legend": {
           "showLegend": false
@@ -2257,7 +1968,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 122,
+      "id": 108,
       "options": {
         "legend": {
           "showLegend": false
@@ -2276,7 +1987,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 123,
+      "id": 109,
       "options": {
         "legend": {
           "showLegend": false
@@ -2295,7 +2006,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 124,
+      "id": 110,
       "options": {
         "legend": {
           "showLegend": false
@@ -2314,7 +2025,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 125,
+      "id": 111,
       "options": {
         "legend": {
           "showLegend": false
@@ -2333,7 +2044,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 126,
+      "id": 112,
       "options": {
         "legend": {
           "showLegend": false
@@ -2352,7 +2063,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 127,
+      "id": 113,
       "options": {
         "legend": {
           "showLegend": false
@@ -2371,7 +2082,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 128,
+      "id": 114,
       "options": {
         "legend": {
           "showLegend": false
@@ -2390,7 +2101,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 129,
+      "id": 115,
       "options": {
         "legend": {
           "showLegend": false
@@ -2409,7 +2120,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 130,
+      "id": 116,
       "options": {
         "legend": {
           "showLegend": false
@@ -2428,7 +2139,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 131,
+      "id": 117,
       "options": {
         "legend": {
           "showLegend": false
@@ -2447,7 +2158,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 132,
+      "id": 118,
       "options": {
         "legend": {
           "showLegend": false
@@ -2466,7 +2177,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 133,
+      "id": 119,
       "options": {
         "legend": {
           "showLegend": false
@@ -2485,7 +2196,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 134,
+      "id": 120,
       "options": {
         "legend": {
           "showLegend": false
@@ -2504,7 +2215,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 135,
+      "id": 121,
       "options": {
         "legend": {
           "showLegend": false
@@ -2523,7 +2234,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 136,
+      "id": 122,
       "options": {
         "legend": {
           "showLegend": false
@@ -2542,7 +2253,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 137,
+      "id": 123,
       "options": {
         "legend": {
           "showLegend": false
@@ -2561,7 +2272,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 138,
+      "id": 124,
       "options": {
         "legend": {
           "showLegend": false
@@ -2580,7 +2291,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 139,
+      "id": 125,
       "options": {
         "legend": {
           "showLegend": false
@@ -2599,7 +2310,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 140,
+      "id": 126,
       "options": {
         "legend": {
           "showLegend": false
@@ -2618,7 +2329,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 141,
+      "id": 127,
       "options": {
         "legend": {
           "showLegend": false
@@ -2637,7 +2348,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 142,
+      "id": 128,
       "options": {
         "legend": {
           "showLegend": false
@@ -2656,7 +2367,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 143,
+      "id": 129,
       "options": {
         "legend": {
           "showLegend": false
@@ -2675,7 +2386,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 144,
+      "id": 130,
       "options": {
         "legend": {
           "showLegend": false
@@ -2694,7 +2405,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 145,
+      "id": 131,
       "options": {
         "legend": {
           "showLegend": false
@@ -2713,7 +2424,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 146,
+      "id": 132,
       "options": {
         "legend": {
           "showLegend": false
@@ -2732,7 +2443,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 147,
+      "id": 133,
       "options": {
         "legend": {
           "showLegend": false
@@ -2751,7 +2462,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 148,
+      "id": 134,
       "options": {
         "legend": {
           "showLegend": false
@@ -2770,7 +2481,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 149,
+      "id": 135,
       "options": {
         "legend": {
           "showLegend": false
@@ -2789,7 +2500,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 150,
+      "id": 136,
       "options": {
         "legend": {
           "showLegend": false
@@ -2808,7 +2519,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 151,
+      "id": 137,
       "options": {
         "legend": {
           "showLegend": false
@@ -2827,7 +2538,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 152,
+      "id": 138,
       "options": {
         "legend": {
           "showLegend": false
@@ -2846,7 +2557,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 153,
+      "id": 139,
       "options": {
         "legend": {
           "showLegend": false
@@ -2865,7 +2576,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 154,
+      "id": 140,
       "options": {
         "legend": {
           "showLegend": false
@@ -2884,7 +2595,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 155,
+      "id": 141,
       "options": {
         "legend": {
           "showLegend": false
@@ -2903,7 +2614,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 156,
+      "id": 142,
       "options": {
         "legend": {
           "showLegend": false
@@ -2922,7 +2633,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 157,
+      "id": 143,
       "options": {
         "legend": {
           "showLegend": false
@@ -2941,7 +2652,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 158,
+      "id": 144,
       "options": {
         "legend": {
           "showLegend": false
@@ -2960,7 +2671,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 159,
+      "id": 145,
       "options": {
         "legend": {
           "showLegend": false
@@ -2979,7 +2690,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 160,
+      "id": 146,
       "options": {
         "legend": {
           "showLegend": false
@@ -2998,7 +2709,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 161,
+      "id": 147,
       "options": {
         "legend": {
           "showLegend": false
@@ -3017,7 +2728,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 162,
+      "id": 148,
       "options": {
         "legend": {
           "showLegend": false
@@ -3036,7 +2747,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 163,
+      "id": 149,
       "options": {
         "legend": {
           "showLegend": false
@@ -3055,7 +2766,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 164,
+      "id": 150,
       "options": {
         "legend": {
           "showLegend": false
@@ -3074,7 +2785,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 165,
+      "id": 151,
       "options": {
         "legend": {
           "showLegend": false
@@ -3093,7 +2804,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 166,
+      "id": 152,
       "options": {
         "legend": {
           "showLegend": false
@@ -3112,7 +2823,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 167,
+      "id": 153,
       "options": {
         "legend": {
           "showLegend": false
@@ -3131,7 +2842,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 168,
+      "id": 154,
       "options": {
         "legend": {
           "showLegend": false
@@ -3150,7 +2861,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 169,
+      "id": 155,
       "options": {
         "legend": {
           "showLegend": false
@@ -3169,7 +2880,45 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 170,
+      "id": 156,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_policy_violation"
+        }
+      ],
+      "title": "dependency_policy_violation",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 157,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_policy_violation_total"
+        }
+      ],
+      "title": "dependency_policy_violation_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 158,
       "options": {
         "legend": {
           "showLegend": false
@@ -3188,7 +2937,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 171,
+      "id": 159,
       "options": {
         "legend": {
           "showLegend": false
@@ -3207,7 +2956,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 172,
+      "id": 160,
       "options": {
         "legend": {
           "showLegend": false
@@ -3226,7 +2975,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 173,
+      "id": 161,
       "options": {
         "legend": {
           "showLegend": false
@@ -3245,7 +2994,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 174,
+      "id": 162,
       "options": {
         "legend": {
           "showLegend": false
@@ -3264,7 +3013,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 175,
+      "id": 163,
       "options": {
         "legend": {
           "showLegend": false
@@ -3283,7 +3032,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 176,
+      "id": 164,
       "options": {
         "legend": {
           "showLegend": false
@@ -3302,7 +3051,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 177,
+      "id": 165,
       "options": {
         "legend": {
           "showLegend": false
@@ -3321,7 +3070,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 178,
+      "id": 166,
       "options": {
         "legend": {
           "showLegend": false
@@ -3340,7 +3089,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 179,
+      "id": 167,
       "options": {
         "legend": {
           "showLegend": false
@@ -3359,7 +3108,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 180,
+      "id": 168,
       "options": {
         "legend": {
           "showLegend": false
@@ -3378,7 +3127,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 181,
+      "id": 169,
       "options": {
         "legend": {
           "showLegend": false
@@ -3397,7 +3146,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 182,
+      "id": 170,
       "options": {
         "legend": {
           "showLegend": false
@@ -3416,7 +3165,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 183,
+      "id": 171,
       "options": {
         "legend": {
           "showLegend": false
@@ -3435,7 +3184,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 184,
+      "id": 172,
       "options": {
         "legend": {
           "showLegend": false
@@ -3454,7 +3203,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 185,
+      "id": 173,
       "options": {
         "legend": {
           "showLegend": false
@@ -3473,7 +3222,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 186,
+      "id": 174,
       "options": {
         "legend": {
           "showLegend": false
@@ -3492,7 +3241,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 187,
+      "id": 175,
       "options": {
         "legend": {
           "showLegend": false
@@ -3511,7 +3260,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 188,
+      "id": 176,
       "options": {
         "legend": {
           "showLegend": false
@@ -3530,7 +3279,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 189,
+      "id": 177,
       "options": {
         "legend": {
           "showLegend": false
@@ -3549,7 +3298,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 190,
+      "id": 178,
       "options": {
         "legend": {
           "showLegend": false
@@ -3568,7 +3317,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 191,
+      "id": 179,
       "options": {
         "legend": {
           "showLegend": false
@@ -3587,7 +3336,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 192,
+      "id": 180,
       "options": {
         "legend": {
           "showLegend": false
@@ -3606,7 +3355,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 193,
+      "id": 181,
       "options": {
         "legend": {
           "showLegend": false
@@ -3625,7 +3374,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 194,
+      "id": 182,
       "options": {
         "legend": {
           "showLegend": false
@@ -3644,7 +3393,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 195,
+      "id": 183,
       "options": {
         "legend": {
           "showLegend": false
@@ -3663,7 +3412,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 196,
+      "id": 184,
       "options": {
         "legend": {
           "showLegend": false
@@ -3682,7 +3431,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 197,
+      "id": 185,
       "options": {
         "legend": {
           "showLegend": false
@@ -3701,7 +3450,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 198,
+      "id": 186,
       "options": {
         "legend": {
           "showLegend": false
@@ -3720,7 +3469,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 199,
+      "id": 187,
       "options": {
         "legend": {
           "showLegend": false
@@ -3739,7 +3488,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 200,
+      "id": 188,
       "options": {
         "legend": {
           "showLegend": false
@@ -3758,7 +3507,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 201,
+      "id": 189,
       "options": {
         "legend": {
           "showLegend": false
@@ -3777,7 +3526,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 202,
+      "id": 190,
       "options": {
         "legend": {
           "showLegend": false
@@ -3796,7 +3545,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 203,
+      "id": 191,
       "options": {
         "legend": {
           "showLegend": false
@@ -3815,7 +3564,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 204,
+      "id": 192,
       "options": {
         "legend": {
           "showLegend": false
@@ -3834,7 +3583,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 205,
+      "id": 193,
       "options": {
         "legend": {
           "showLegend": false
@@ -3853,7 +3602,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 206,
+      "id": 194,
       "options": {
         "legend": {
           "showLegend": false
@@ -3872,7 +3621,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 207,
+      "id": 195,
       "options": {
         "legend": {
           "showLegend": false
@@ -3891,7 +3640,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 208,
+      "id": 196,
       "options": {
         "legend": {
           "showLegend": false
@@ -3910,7 +3659,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 209,
+      "id": 197,
       "options": {
         "legend": {
           "showLegend": false
@@ -3929,7 +3678,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 210,
+      "id": 198,
       "options": {
         "legend": {
           "showLegend": false
@@ -3948,7 +3697,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 211,
+      "id": 199,
       "options": {
         "legend": {
           "showLegend": false
@@ -3967,7 +3716,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 212,
+      "id": 200,
       "options": {
         "legend": {
           "showLegend": false
@@ -3986,7 +3735,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 213,
+      "id": 201,
       "options": {
         "legend": {
           "showLegend": false
@@ -4005,7 +3754,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 214,
+      "id": 202,
       "options": {
         "legend": {
           "showLegend": false
@@ -4024,7 +3773,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 215,
+      "id": 203,
       "options": {
         "legend": {
           "showLegend": false
@@ -4043,7 +3792,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 216,
+      "id": 204,
       "options": {
         "legend": {
           "showLegend": false
@@ -4062,7 +3811,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 217,
+      "id": 205,
       "options": {
         "legend": {
           "showLegend": false
@@ -4081,7 +3830,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 218,
+      "id": 206,
       "options": {
         "legend": {
           "showLegend": false
@@ -4100,7 +3849,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 219,
+      "id": 207,
       "options": {
         "legend": {
           "showLegend": false
@@ -4119,7 +3868,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 220,
+      "id": 208,
       "options": {
         "legend": {
           "showLegend": false
@@ -4138,7 +3887,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 221,
+      "id": 209,
       "options": {
         "legend": {
           "showLegend": false
@@ -4157,7 +3906,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 222,
+      "id": 210,
       "options": {
         "legend": {
           "showLegend": false
@@ -4176,7 +3925,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 223,
+      "id": 211,
       "options": {
         "legend": {
           "showLegend": false
@@ -4195,7 +3944,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 224,
+      "id": 212,
       "options": {
         "legend": {
           "showLegend": false
@@ -4214,7 +3963,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 225,
+      "id": 213,
       "options": {
         "legend": {
           "showLegend": false
@@ -4233,7 +3982,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 226,
+      "id": 214,
       "options": {
         "legend": {
           "showLegend": false
@@ -4252,7 +4001,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 227,
+      "id": 215,
       "options": {
         "legend": {
           "showLegend": false
@@ -4271,7 +4020,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 228,
+      "id": 216,
       "options": {
         "legend": {
           "showLegend": false
@@ -4290,7 +4039,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 229,
+      "id": 217,
       "options": {
         "legend": {
           "showLegend": false
@@ -4309,7 +4058,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 230,
+      "id": 218,
       "options": {
         "legend": {
           "showLegend": false
@@ -4328,7 +4077,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 231,
+      "id": 219,
       "options": {
         "legend": {
           "showLegend": false
@@ -4347,7 +4096,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 232,
+      "id": 220,
       "options": {
         "legend": {
           "showLegend": false
@@ -4366,7 +4115,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 233,
+      "id": 221,
       "options": {
         "legend": {
           "showLegend": false
@@ -4385,7 +4134,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 234,
+      "id": 222,
       "options": {
         "legend": {
           "showLegend": false
@@ -4404,7 +4153,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 235,
+      "id": 223,
       "options": {
         "legend": {
           "showLegend": false
@@ -4423,7 +4172,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 236,
+      "id": 224,
       "options": {
         "legend": {
           "showLegend": false
@@ -4442,7 +4191,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 237,
+      "id": 225,
       "options": {
         "legend": {
           "showLegend": false
@@ -4461,7 +4210,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 238,
+      "id": 226,
       "options": {
         "legend": {
           "showLegend": false
@@ -4480,7 +4229,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 239,
+      "id": 227,
       "options": {
         "legend": {
           "showLegend": false
@@ -4499,7 +4248,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 240,
+      "id": 228,
       "options": {
         "legend": {
           "showLegend": false
@@ -4518,7 +4267,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 241,
+      "id": 229,
       "options": {
         "legend": {
           "showLegend": false
@@ -4537,7 +4286,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 242,
+      "id": 230,
       "options": {
         "legend": {
           "showLegend": false
@@ -4556,7 +4305,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 243,
+      "id": 231,
       "options": {
         "legend": {
           "showLegend": false
@@ -4575,7 +4324,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 244,
+      "id": 232,
       "options": {
         "legend": {
           "showLegend": false
@@ -4594,7 +4343,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 245,
+      "id": 233,
       "options": {
         "legend": {
           "showLegend": false
@@ -4613,7 +4362,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 246,
+      "id": 234,
       "options": {
         "legend": {
           "showLegend": false
@@ -4632,7 +4381,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 247,
+      "id": 235,
       "options": {
         "legend": {
           "showLegend": false
@@ -4651,7 +4400,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 248,
+      "id": 236,
       "options": {
         "legend": {
           "showLegend": false
@@ -4670,7 +4419,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "id": 249,
+      "id": 237,
       "options": {
         "legend": {
           "showLegend": false
@@ -4682,6 +4431,101 @@
         }
       ],
       "title": "telemetry_alloc_bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 238,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_registry_check_status"
+        }
+      ],
+      "title": "dependency_registry_check_status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 239,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_registry_check_counts"
+        }
+      ],
+      "title": "dependency_registry_check_counts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 240,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_policy_violation_total"
+        }
+      ],
+      "title": "dependency_policy_violation_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 241,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dependency_policy_violation"
+        }
+      ],
+      "title": "dependency_policy_violation",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 242,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "chaos_site_readiness"
+        }
+      ],
+      "title": "chaos_site_readiness",
       "type": "timeseries"
     }
   ],

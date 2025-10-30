@@ -3,9 +3,22 @@
 > badge soft intents now gate wallet proofs before settlement. Receipts carry
 > stake snapshots, committee transcripts, and ANN proofs produced exclusively by
 > the new `verifier_selection` crate and `badge::ann` helpers, while the
-> attestation manager validates VRF outputs with first-party BLAKE3 hashing. The
-> budget broker exposes pacing guidance (requested κ, multipliers, shadow prices)
-> through the existing telemetry JSON so shading analytics remain hermetic.
+> attestation manager validates VRF outputs with first-party BLAKE3 hashing.
+> The verifier guard now recomputes stake thresholds from the supplied
+> snapshot—never from receipt weights—and integration coverage exercises stale
+> snapshots plus mismatched transcripts end to end through
+> `ad_market.reserve_impression`. Gateway and SDK surfaces emit requested κ,
+> shading multipliers, ANN ciphertext digests, and dual-token toggles so analysts
+> can trace selection guidance and badge intent in real time. The ANN pipeline
+> now mixes wallet-provided entropy into key/IV derivation, stamps the entropy
+> on receipts, and rejects tampered ciphertexts; gateway tests assert the new
+> fields across every candidate in multi-creative traces so shading telemetry
+> stays consistent beyond the winner. The `ann_soft_intent_verification`
+> benchmark measures ANN receipt verification across 128–32 768 bucket tables
+> with salted and wallet-entropy derivation, and the shared benchmarking harness
+> locks the Prometheus export so concurrent runs cannot clobber metrics. The
+> monitoring generator ingests the updated samples and keeps ANN verification
+> latency plotted beside pacing telemetry without leaving the first-party stack.
 > **Review (2025-10-29, evening):** Selection manifests now parse deterministically
 > across hot swaps and multi-entry manifests via the manual
 > `parse_manifest_value`/`parse_artifacts_value` helpers, with tests covering order

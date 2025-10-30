@@ -39,6 +39,7 @@ fn build_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
         campaign_id: None,
         creative_id: None,
         selection_receipt: None,
+        badge_soft_intent: None,
         readiness: None,
         zk_proof: None,
     }
