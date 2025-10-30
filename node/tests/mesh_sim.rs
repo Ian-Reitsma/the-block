@@ -67,7 +67,7 @@ fn tcp_forwarder_delivers_bundle() {
     });
 
     std::env::set_var("TB_MESH_STATIC_PEERS", addr.to_string());
-    range_boost::set_enabled(true);
+    range_boost::set_enabled(false);
     range_boost::discover_peers();
 
     let queue = Arc::new(Mutex::new(range_boost::RangeBoost::new()));
@@ -76,6 +76,10 @@ fn tcp_forwarder_delivers_bundle() {
         let mut guard = queue.lock().unwrap();
         guard.enqueue(b"mesh-test".to_vec());
     }
+
+    assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+
+    range_boost::set_enabled(true);
 
     let payload = rx.recv_timeout(Duration::from_secs(2)).unwrap();
     let bundle: range_boost::Bundle = json::from_slice(&payload).unwrap();

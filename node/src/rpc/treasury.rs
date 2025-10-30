@@ -4,6 +4,7 @@ use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::treasury::{
     DisbursementStatus as GovDisbursementStatus, TreasuryBalanceEventKind as GovBalanceEventKind,
     TreasuryBalanceSnapshot as GovBalanceSnapshot, TreasuryDisbursement as GovDisbursement,
+    TreasuryExecutorSnapshot as GovExecutorSnapshot,
 };
 
 const DEFAULT_LIMIT: u64 = 50;
@@ -79,6 +80,8 @@ pub struct TreasuryBalanceResponse {
     pub balance_it: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor: Option<TreasuryExecutorSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,6 +147,20 @@ pub enum TreasuryBalanceEventKind {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct TreasuryExecutorSnapshot {
+    pub last_tick_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_at: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub last_error: Option<String>,
+    pub pending_matured: u64,
+    pub staged_intents: u64,
+}
+
 pub fn disbursements(
     store: &GovStore,
     request: TreasuryDisbursementsRequest,
@@ -180,10 +197,15 @@ pub fn balance(store: &GovStore) -> Result<TreasuryBalanceResponse, RpcError> {
         .into_iter()
         .next()
         .map(TreasuryBalanceSnapshot::from);
+    let executor = store
+        .executor_snapshot()
+        .map_err(storage_error)?
+        .map(TreasuryExecutorSnapshot::from);
     Ok(TreasuryBalanceResponse {
         balance_ct: balances.consumer,
         balance_it: balances.industrial,
         last_snapshot,
+        executor,
     })
 }
 
@@ -276,6 +298,19 @@ impl From<GovBalanceEventKind> for TreasuryBalanceEventKind {
             GovBalanceEventKind::Queued => TreasuryBalanceEventKind::Queued,
             GovBalanceEventKind::Executed => TreasuryBalanceEventKind::Executed,
             GovBalanceEventKind::Cancelled => TreasuryBalanceEventKind::Cancelled,
+        }
+    }
+}
+
+impl From<GovExecutorSnapshot> for TreasuryExecutorSnapshot {
+    fn from(value: GovExecutorSnapshot) -> Self {
+        Self {
+            last_tick_at: value.last_tick_at,
+            last_success_at: value.last_success_at,
+            last_error_at: value.last_error_at,
+            last_error: value.last_error,
+            pending_matured: value.pending_matured,
+            staged_intents: value.staged_intents,
         }
     }
 }

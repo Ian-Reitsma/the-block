@@ -69,6 +69,16 @@ or transient sockets without third-party tooling. The loop sleeps while the
 queue is empty or mesh mode is disabled, and exits automatically if the owning
 `Arc` drops (e.g., during shutdown or tests).
 
+Runtime toggling now rides `RangeBoost::set_enabled`. The queue keeps a
+`ForwarderState` so flipping the flag wakes the worker immediately. When mesh
+mode is disabled the thread drains in-flight bundles, commits any retry state,
+and then parks without spinning. Re-enabling mesh delivery reuses the same
+thread where possible and only spawns a replacement if shutdown already
+completed, letting operators and tests switch delivery strategies without
+restarting the node or leaking workers. The `node/tests/mesh_sim.rs` harness
+exercises rapid enable/disable loops to guarantee queued payloads survive while
+the worker is paused.
+
 ## Example
 
 ```rust

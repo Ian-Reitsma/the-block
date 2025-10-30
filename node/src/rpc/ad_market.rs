@@ -6,9 +6,13 @@ use ad_market::{
     CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy,
     MarketplaceHandle, UpliftHoldoutAssignment,
 };
+use concurrency::Lazy;
 use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
+use std::collections::BTreeMap;
+use std::sync::RwLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unavailable() -> Value {
     let mut map = Map::new();
@@ -99,6 +103,85 @@ fn parse_conversion_params(params: &Value) -> Result<(ConversionEvent, String), 
 }
 
 const CONVERSION_TOKEN_HASH_KEY: &str = "conversion_token_hash";
+
+#[derive(Clone, Debug)]
+struct ConversionErrorRecord {
+    code: String,
+    occurred_at: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ConversionSummaryStats {
+    authenticated: u64,
+    rejected: BTreeMap<String, u64>,
+    last_error: Option<ConversionErrorRecord>,
+    last_authenticated_at: Option<u64>,
+}
+
+static CONVERSION_STATS: Lazy<RwLock<ConversionSummaryStats>> =
+    Lazy::new(|| RwLock::new(ConversionSummaryStats::default()));
+
+fn now_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn record_conversion_success() {
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::sampled_inc_vec(&crate::telemetry::AD_CONVERSION_TOTAL, &["accepted", "ok"]);
+    let mut guard = CONVERSION_STATS.write().expect("conversion stats poisoned");
+    guard.authenticated = guard.authenticated.saturating_add(1);
+    guard.last_authenticated_at = Some(now_ts());
+}
+
+fn record_conversion_error(code: &str) {
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::sampled_inc_vec(&crate::telemetry::AD_CONVERSION_TOTAL, &["rejected", code]);
+    let mut guard = CONVERSION_STATS.write().expect("conversion stats poisoned");
+    let entry = guard.rejected.entry(code.to_string()).or_insert(0);
+    *entry = entry.saturating_add(1);
+    guard.last_error = Some(ConversionErrorRecord {
+        code: code.to_string(),
+        occurred_at: now_ts(),
+    });
+}
+
+fn conversion_summary_value() -> Value {
+    let guard = CONVERSION_STATS.read().expect("conversion stats poisoned");
+    let mut map = Map::new();
+    map.insert(
+        "authenticated_total".into(),
+        Value::Number(Number::from(guard.authenticated)),
+    );
+    let rejected_total: u64 = guard.rejected.values().copied().sum();
+    map.insert(
+        "rejected_total".into(),
+        Value::Number(Number::from(rejected_total)),
+    );
+    let mut errors = Map::new();
+    for (code, count) in guard.rejected.iter() {
+        errors.insert(code.clone(), Value::Number(Number::from(*count)));
+    }
+    map.insert("error_counts".into(), Value::Object(errors));
+    if let Some(ts) = guard.last_authenticated_at {
+        map.insert(
+            "last_authenticated_at".into(),
+            Value::Number(Number::from(ts)),
+        );
+    }
+    if let Some(last_error) = guard.last_error.clone() {
+        let mut last = Map::new();
+        last.insert("code".into(), Value::String(last_error.code));
+        last.insert(
+            "occurred_at".into(),
+            Value::Number(Number::from(last_error.occurred_at)),
+        );
+        map.insert("last_error".into(), Value::Object(last));
+    }
+    Value::Object(map)
+}
 
 fn err_auth_required() -> RpcError {
     RpcError::new(-32030, "advertiser authorization required")
@@ -311,6 +394,7 @@ fn budget_snapshot_to_value(snapshot: &BudgetBrokerSnapshot) -> Value {
         "pacing".into(),
         budget_snapshot_pacing(snapshot, &analytics),
     );
+    map.insert("conversion_summary".into(), conversion_summary_value());
     Value::Object(map)
 }
 
@@ -764,6 +848,7 @@ pub fn readiness(
     if let Some(distribution) = distribution_value {
         root.insert("distribution".into(), distribution);
     }
+    root.insert("conversion_summary".into(), conversion_summary_value());
     let mut oracle_map = Map::new();
     let mut snapshot_oracle = Map::new();
     snapshot_oracle.insert(
@@ -877,46 +962,77 @@ pub fn record_conversion(
     auth: Option<&str>,
 ) -> Result<Value, RpcError> {
     let Some(handle) = market else {
+        record_conversion_error("market_disabled");
         return Err(RpcError::new(-32603, "ad market disabled"));
     };
-    let (event, advertiser_account) = parse_conversion_params(params)?;
-    let (auth_account, token) = parse_advertiser_auth(auth)?;
+    let (event, advertiser_account) = match parse_conversion_params(params) {
+        Ok(value) => value,
+        Err(err) => {
+            record_conversion_error("invalid_params");
+            return Err(err);
+        }
+    };
+    let (auth_account, token) = match parse_advertiser_auth(auth) {
+        Ok(value) => value,
+        Err(err) => {
+            record_conversion_error("auth_required");
+            return Err(err);
+        }
+    };
     if advertiser_account != auth_account {
+        record_conversion_error("advertiser_mismatch");
         return Err(err_advertiser_mismatch());
     }
-    let campaign: Campaign = handle
-        .campaign(&event.campaign_id)
-        .ok_or(RpcError::new(-32001, "unknown campaign"))?;
+    let campaign: Campaign = match handle.campaign(&event.campaign_id) {
+        Some(c) => c,
+        None => {
+            record_conversion_error("unknown_campaign");
+            return Err(RpcError::new(-32001, "unknown campaign"));
+        }
+    };
     if campaign.advertiser_account != advertiser_account {
+        record_conversion_error("advertiser_mismatch");
         return Err(err_advertiser_mismatch());
     }
-    let expected_hash = campaign
-        .metadata
-        .get(CONVERSION_TOKEN_HASH_KEY)
-        .ok_or_else(err_token_missing)?;
+    let expected_hash = match campaign.metadata.get(CONVERSION_TOKEN_HASH_KEY) {
+        Some(hash) => hash,
+        None => {
+            record_conversion_error("token_missing");
+            return Err(err_token_missing());
+        }
+    };
     let provided_hash = blake3::hash(token.as_bytes());
     let provided_hex = hex::encode(provided_hash.as_bytes());
     if expected_hash.len() != provided_hex.len()
         || !bool::from(expected_hash.as_bytes().ct_eq(provided_hex.as_bytes()))
     {
+        record_conversion_error("token_invalid");
         return Err(err_token_invalid());
     }
     match handle.record_conversion(event) {
         Ok(()) => {
+            record_conversion_success();
             let mut map = Map::new();
             map.insert("status".into(), Value::String("ok".into()));
+            map.insert("conversion_summary".into(), conversion_summary_value());
             Ok(Value::Object(map))
         }
         Err(ad_market::MarketplaceError::UnknownCampaign) => {
+            record_conversion_error("unknown_campaign");
             Err(RpcError::new(-32001, "unknown campaign"))
         }
         Err(ad_market::MarketplaceError::UnknownCreative) => {
+            record_conversion_error("unknown_creative");
             Err(RpcError::new(-32002, "unknown creative"))
         }
         Err(ad_market::MarketplaceError::PersistenceFailure(_)) => {
+            record_conversion_error("persistence_failure");
             Err(RpcError::new(-32603, "persistence failure"))
         }
-        Err(_) => Err(RpcError::new(-32603, "internal error")),
+        Err(_) => {
+            record_conversion_error("internal_error");
+            Err(RpcError::new(-32603, "internal error"))
+        }
     }
 }
 

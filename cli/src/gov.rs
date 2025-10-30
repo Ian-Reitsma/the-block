@@ -14,7 +14,7 @@ use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
-    TreasuryBalanceSnapshot, TreasuryDisbursement, Vote, VoteChoice,
+    TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot, Vote, VoteChoice,
 };
 use httpd::ClientError;
 use std::io::{self, Write};
@@ -176,6 +176,8 @@ pub struct RpcTreasuryBalanceResult {
     pub balance_it: u64,
     #[serde(default)]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
+    #[serde(default)]
+    pub executor: Option<TreasuryExecutorSnapshot>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -205,6 +207,8 @@ pub struct TreasuryFetchOutput {
     pub balance_history: Option<Vec<TreasuryBalanceSnapshot>>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub balance_next_cursor: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub executor: Option<TreasuryExecutorSnapshot>,
 }
 
 #[derive(Serialize)]
@@ -305,6 +309,7 @@ pub fn combine_treasury_fetch_results(
         last_snapshot: balance.last_snapshot,
         balance_history: None,
         balance_next_cursor: None,
+        executor: balance.executor,
     };
 
     if let Some(history_result) = history {

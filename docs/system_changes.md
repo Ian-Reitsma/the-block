@@ -122,6 +122,7 @@
 > the liquidity split, and the rounding behaviour, and the sled/in-memory
 > implementations share the same helper so RPC/gateway flows return consistent
 > JSON across backends.
+> **Review (2025-10-30, late night):** Treasury execution now runs automatically under a first-party executor. Governance and node stores persist `SignedExecutionIntent` blobs in sled, the node runtime spawns the executor via `--treasury-executor --treasury-key <ID>`, and the worker signs, stages, and submits transactions once epochs mature while memo-derived dependency checks gate downstream releases. RPC and CLI surfaces now include executor snapshots (last tick/success/error timestamps plus pending/staged counts), telemetry adds `treasury_executor_*` gauges/counters for dashboards, and integration tests cover dependency gating, nonce reuse, cancellation handling, and crash-safe persistence. Ad-market telemetry gained `ad_conversion_total{status,code}` so authenticated conversion health is observable alongside readiness, and mesh integration tests assert holdout/treatment deliveries populate the new mesh digest/length fields inside settlement breakdowns.
 > **Review (2025-11-08, early morning):** Readiness telemetry now exposes the
 > utilisation signals that govern posted-price updates. The node persists the
 > archived oracle snapshot **and** the live marketplace oracle inside

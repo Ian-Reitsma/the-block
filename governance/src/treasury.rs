@@ -1,6 +1,16 @@
 use foundation_serialization::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::codec::{BinaryCodec, BinaryWriter, Result as CodecResult};
+
+fn write_bytes(writer: &mut BinaryWriter, data: &[u8]) {
+    writer.write_bytes(data);
+}
+
+fn read_bytes(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Vec<u8>> {
+    reader.read_bytes()
+}
+
 fn now_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -64,6 +74,104 @@ pub fn mark_cancelled(disbursement: &mut TreasuryDisbursement, reason: String) {
         reason,
         cancelled_at: now_ts(),
     };
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct SignedExecutionIntent {
+    pub disbursement_id: u64,
+    pub tx_bytes: Vec<u8>,
+    pub tx_hash: String,
+    pub staged_at: u64,
+}
+
+impl SignedExecutionIntent {
+    pub fn new(disbursement_id: u64, tx_bytes: Vec<u8>, tx_hash: String) -> Self {
+        Self {
+            disbursement_id,
+            tx_bytes,
+            tx_hash,
+            staged_at: now_ts(),
+        }
+    }
+}
+
+impl BinaryCodec for SignedExecutionIntent {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.disbursement_id.encode(writer);
+        write_bytes(writer, &self.tx_bytes);
+        self.tx_hash.encode(writer);
+        self.staged_at.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            disbursement_id: u64::decode(reader)?,
+            tx_bytes: read_bytes(reader)?,
+            tx_hash: String::decode(reader)?,
+            staged_at: u64::decode(reader)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct TreasuryExecutorSnapshot {
+    #[serde(default)]
+    pub last_tick_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_at: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub pending_matured: u64,
+    #[serde(default)]
+    pub staged_intents: u64,
+}
+
+impl TreasuryExecutorSnapshot {
+    pub fn record_tick(&mut self, pending: u64, staged: u64) {
+        self.last_tick_at = now_ts();
+        self.pending_matured = pending;
+        self.staged_intents = staged;
+    }
+
+    pub fn record_success(&mut self, pending: u64, staged: u64) {
+        self.record_tick(pending, staged);
+        self.last_success_at = Some(self.last_tick_at);
+        self.last_error = None;
+        self.last_error_at = None;
+    }
+
+    pub fn record_error(&mut self, message: String, pending: u64, staged: u64) {
+        self.record_tick(pending, staged);
+        self.last_error = Some(message);
+        self.last_error_at = Some(self.last_tick_at);
+    }
+}
+
+impl BinaryCodec for TreasuryExecutorSnapshot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.last_tick_at.encode(writer);
+        self.last_success_at.encode(writer);
+        self.last_error_at.encode(writer);
+        self.last_error.encode(writer);
+        self.pending_matured.encode(writer);
+        self.staged_intents.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            last_tick_at: u64::decode(reader)?,
+            last_success_at: Option::<u64>::decode(reader)?,
+            last_error_at: Option::<u64>::decode(reader)?,
+            last_error: Option::<String>::decode(reader)?,
+            pending_matured: u64::decode(reader)?,
+            staged_intents: u64::decode(reader)?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

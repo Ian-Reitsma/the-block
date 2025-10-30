@@ -43,12 +43,139 @@ static PEER_LATENCY: Lazy<Mutex<HashMap<String, u128>>> = Lazy::new(|| Mutex::ne
 static MESH_TASK_ACTIVE: AtomicBool = AtomicBool::new(false);
 static RANGE_BOOST_ENABLED: AtomicBool = AtomicBool::new(false);
 
+#[derive(Default)]
+struct ForwarderState {
+    queue: Option<Weak<Mutex<RangeBoost>>>,
+    handle: Option<ForwarderHandle>,
+}
+
+struct ForwarderHandle {
+    shutdown: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl ForwarderHandle {
+    fn spawn(queue: Weak<Mutex<RangeBoost>>) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let handle = thread::spawn(move || forwarder_loop(thread_shutdown, queue));
+        Self {
+            shutdown,
+            thread: Some(handle),
+        }
+    }
+
+    fn stop(mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.thread.take() {
+            if let Err(err) = handle.join() {
+                diagnostics::log::warn!(format!("range_boost_forwarder_join_failed: {:?}", err));
+            }
+        }
+    }
+}
+
+static FORWARDER_STATE: Lazy<Mutex<ForwarderState>> =
+    Lazy::new(|| Mutex::new(ForwarderState::default()));
+
+fn ensure_forwarder_running(state: &mut ForwarderState, queue: Weak<Mutex<RangeBoost>>) {
+    if let Some(handle) = state.handle.as_mut() {
+        if let Some(thread) = handle.thread.as_mut() {
+            if !thread.is_finished() {
+                return;
+            }
+        }
+        if let Some(old) = state.handle.take() {
+            old.stop();
+        }
+    }
+    state.handle = Some(ForwarderHandle::spawn(queue));
+}
+
+fn update_forwarder_state(enabled: bool) {
+    if enabled {
+        let mut state = FORWARDER_STATE.lock().unwrap();
+        if let Some(queue) = state.queue.clone() {
+            ensure_forwarder_running(&mut state, queue);
+        }
+    } else {
+        let handle = {
+            let mut state = FORWARDER_STATE.lock().unwrap();
+            state.handle.take()
+        };
+        if let Some(handle) = handle {
+            handle.stop();
+        }
+    }
+}
+
+fn sleep_with_shutdown(shutdown: &Arc<AtomicBool>, duration: Duration) {
+    const CHECK_INTERVAL: Duration = Duration::from_millis(50);
+    let mut elapsed = Duration::from_millis(0);
+    while elapsed < duration {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        let remaining = duration.saturating_sub(elapsed);
+        let step = if remaining > CHECK_INTERVAL {
+            CHECK_INTERVAL
+        } else {
+            remaining
+        };
+        thread::sleep(step);
+        elapsed += step;
+    }
+}
+
+fn forwarder_loop(shutdown: Arc<AtomicBool>, weak_queue: Weak<Mutex<RangeBoost>>) {
+    while !shutdown.load(Ordering::SeqCst) {
+        let Some(queue) = Weak::upgrade(&weak_queue) else {
+            break;
+        };
+        let bundle = {
+            let mut guard = queue.lock().unwrap();
+            guard.dequeue()
+        };
+        match bundle {
+            Some(bundle) => match forward_bundle(&bundle) {
+                Ok(()) => {}
+                Err(err) => {
+                    {
+                        let mut guard = queue.lock().unwrap();
+                        guard.requeue_front(bundle);
+                    }
+                    match &err {
+                        ForwardError::Disabled => sleep_with_shutdown(&shutdown, DISABLED_SLEEP),
+                        ForwardError::NoPeers => sleep_with_shutdown(&shutdown, RETRY_SLEEP),
+                        ForwardError::UnsupportedTransport(addr) => {
+                            diagnostics::log::warn!(
+                                "range_boost_forward_unsupported transport={addr}"
+                            );
+                            sleep_with_shutdown(&shutdown, RETRY_SLEEP);
+                        }
+                        ForwardError::Encode => {
+                            diagnostics::log::warn!("range_boost_forward_encode_failed");
+                            sleep_with_shutdown(&shutdown, RETRY_SLEEP);
+                        }
+                        ForwardError::Io(err) => {
+                            diagnostics::log::warn!(format!("range_boost_forward_io_error: {err}"));
+                            sleep_with_shutdown(&shutdown, RETRY_SLEEP);
+                        }
+                    }
+                }
+            },
+            None => sleep_with_shutdown(&shutdown, IDLE_SLEEP),
+        }
+    }
+}
+
 pub fn mesh_active() -> bool {
     MESH_TASK_ACTIVE.load(Ordering::SeqCst)
 }
 
 pub fn set_enabled(v: bool) {
     RANGE_BOOST_ENABLED.store(v, Ordering::SeqCst);
+    update_forwarder_state(v);
 }
 
 pub fn is_enabled() -> bool {
@@ -319,50 +446,16 @@ fn send_to_peer(addr: &str, payload: &[u8]) -> std::io::Result<()> {
 }
 
 pub fn spawn_forwarder(queue: &Arc<Mutex<RangeBoost>>) {
-    if !is_enabled() {
-        diagnostics::log::info!("range_boost_forwarder_skipped disabled=true");
-        return;
-    }
     let weak_queue = Arc::downgrade(queue);
-    thread::spawn(move || loop {
-        let Some(queue) = Weak::upgrade(&weak_queue) else {
-            break;
-        };
-        let bundle = {
-            let mut guard = queue.lock().unwrap();
-            guard.dequeue()
-        };
-        match bundle {
-            Some(bundle) => match forward_bundle(&bundle) {
-                Ok(()) => {}
-                Err(err) => {
-                    {
-                        let mut guard = queue.lock().unwrap();
-                        guard.requeue_front(bundle);
-                    }
-                    match &err {
-                        ForwardError::Disabled => thread::sleep(DISABLED_SLEEP),
-                        ForwardError::NoPeers => thread::sleep(RETRY_SLEEP),
-                        ForwardError::UnsupportedTransport(addr) => {
-                            diagnostics::log::warn!(
-                                "range_boost_forward_unsupported transport={addr}"
-                            );
-                            thread::sleep(RETRY_SLEEP);
-                        }
-                        ForwardError::Encode => {
-                            diagnostics::log::warn!("range_boost_forward_encode_failed");
-                            thread::sleep(RETRY_SLEEP);
-                        }
-                        ForwardError::Io(err) => {
-                            diagnostics::log::warn!(format!("range_boost_forward_io_error: {err}"));
-                            thread::sleep(RETRY_SLEEP);
-                        }
-                    }
-                }
-            },
-            None => thread::sleep(IDLE_SLEEP),
+    {
+        let mut state = FORWARDER_STATE.lock().unwrap();
+        state.queue = Some(weak_queue.clone());
+        if is_enabled() {
+            ensure_forwarder_running(&mut state, weak_queue);
+        } else {
+            diagnostics::log::info!("range_boost_forwarder_skipped disabled=true");
         }
-    });
+    }
 }
 
 #[cfg(test)]

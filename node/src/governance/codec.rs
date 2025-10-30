@@ -5,7 +5,8 @@ use super::{
 };
 use foundation_serialization::json::{self, Map, Value};
 use governance_spec::treasury::{
-    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 use std::convert::TryInto;
 
@@ -693,6 +694,24 @@ impl BinaryCodec for TreasuryDisbursement {
     }
 }
 
+impl BinaryCodec for SignedExecutionIntent {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.disbursement_id.encode(writer);
+        writer.write_bytes(&self.tx_bytes);
+        self.tx_hash.encode(writer);
+        self.staged_at.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            disbursement_id: u64::decode(reader)?,
+            tx_bytes: reader.read_bytes()?,
+            tx_hash: String::decode(reader)?,
+            staged_at: u64::decode(reader)?,
+        })
+    }
+}
+
 impl BinaryCodec for TreasuryBalanceSnapshot {
     fn encode(&self, writer: &mut BinaryWriter) {
         self.id.encode(writer);
@@ -723,6 +742,28 @@ impl BinaryCodec for TreasuryBalanceSnapshot {
             } else {
                 0
             },
+        })
+    }
+}
+
+impl BinaryCodec for TreasuryExecutorSnapshot {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.last_tick_at.encode(writer);
+        self.last_success_at.encode(writer);
+        self.last_error_at.encode(writer);
+        self.last_error.encode(writer);
+        self.pending_matured.encode(writer);
+        self.staged_intents.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        Ok(Self {
+            last_tick_at: u64::decode(reader)?,
+            last_success_at: Option::<u64>::decode(reader)?,
+            last_error_at: Option::<u64>::decode(reader)?,
+            last_error: Option::<String>::decode(reader)?,
+            pending_matured: u64::decode(reader)?,
+            staged_intents: u64::decode(reader)?,
         })
     }
 }

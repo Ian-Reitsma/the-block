@@ -32,10 +32,12 @@ pub use reward::{approved_reward_claims, ensure_reward_claim_authorized, RewardC
 pub use state::TreasuryState;
 pub use store::{
     DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryBalances,
-    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY,
+    QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use treasury::{
-    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 
 /// Simplified address type reused across governance records.
