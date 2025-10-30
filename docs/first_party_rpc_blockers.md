@@ -39,10 +39,17 @@ RPC client.
   gauges, `benchmark_*_iterations`, and the `benchmark_*_regression` flags,
   preventing concurrent suites from clobbering RPC-facing metrics while keeping
   regression signals entirely first party. `TB_BENCH_HISTORY_PATH` +
-  `TB_BENCH_HISTORY_LIMIT` persist timestamped CSV rows for RPC consumers that
-  replay history, and `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH`
+  `TB_BENCH_HISTORY_LIMIT` persist timestamped CSV rows (with exponentially
+  weighted moving averages) for RPC consumers that replay history, and
+  `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep canonical
+  ceilings in-repo while `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH`
   clamp acceptable runtimes and emit on-disk alert summaries without any external
-  tooling.
+  tooling. The regression suite also forces a committee failure through the
+  metrics exporter to assert `ad_verifier_committee_rejection_total` exposes the
+  expected labels over JSON-RPC. `serve_metrics_with_shutdown` now installs the
+  recorder automatically and exposes helpers to reset/register the
+  `ad_verifier_committee_rejection_total{committee,reason}` handles, keeping the
+  RPC tests hermetic without shelling out to third-party telemetry crates.
 - Budget shading guidance now reports requested κ, applied multipliers, shadow
   prices, and dual prices through the existing JSON/telemetry helpers. All
   shading math stays inside `BudgetBroker`, and the receipts expose the richer

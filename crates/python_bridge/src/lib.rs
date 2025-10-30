@@ -9,6 +9,9 @@ use std::slice;
 use std::str;
 use std::sync::OnceLock;
 
+#[cfg(feature = "python-bindings")]
+pub use python_bridge_macros::{getter, new, setter, staticmethod};
+
 mod loader;
 use loader::SharedLibrary;
 

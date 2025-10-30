@@ -2,6 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+#[cfg(feature = "python-bindings")]
+use std::io::{Read, Write};
+#[cfg(feature = "python-bindings")]
+use std::net::TcpStream;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -17,6 +21,8 @@ use crypto_suite::{encoding::hex, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
+#[cfg(feature = "python-bindings")]
+use the_block::serve_metrics_with_shutdown;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},
@@ -1310,5 +1316,153 @@ fn ad_market_committee_rejects_weight_mismatch() {
     assert_eq!(
         outcome_valid.selection_receipt.attestation_kind(),
         SelectionAttestationKind::Snark
+    );
+}
+
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+fn scrape_metrics(addr: &str) -> String {
+    let mut stream = TcpStream::connect(addr).expect("connect metrics exporter");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .expect("write metrics request");
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).expect("read metrics response");
+    String::from_utf8(buf).expect("metrics response utf8")
+}
+
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+fn parse_committee_metric(metrics: &str, committee: &str, reason: &str) -> Option<f64> {
+    for line in metrics.lines() {
+        if line.starts_with("#") {
+            continue;
+        }
+        if !line.starts_with("ad_verifier_committee_rejection_total{") {
+            continue;
+        }
+        if !line.contains(&format!("committee=\"{committee}\"")) {
+            continue;
+        }
+        if !line.contains(&format!("reason=\"{reason}\"")) {
+            continue;
+        }
+        if let Some(value_str) = line.split_whitespace().last() {
+            if let Ok(value) = value_str.parse::<f64>() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+#[testkit::tb_serial]
+fn ad_market_metrics_export_surfaces_committee_rejection_labels() {
+    the_block::prepare_freethreaded_python().expect("python runtime initialised");
+    let fixture = committee_fixture();
+    the_block::reset_ad_verifier_committee_rejections();
+    the_block::ensure_ad_verifier_committee_label(&fixture.policy.label, "snapshot_missing");
+    let mut config = MarketplaceConfig::default();
+    config.attestation.preferred_circuit_ids = {
+        let mut set = HashSet::new();
+        set.insert(SELECTION_CIRCUIT_ID.to_string());
+        set
+    };
+    config.attestation.allow_tee_fallback = false;
+    config.attestation.require_attestation = false;
+    config.attestation.verifier_committee = Some(verifier_committee_config(&fixture));
+
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_metrics_export", config.clone());
+
+    let campaign_payload = parse_json(
+        r#"{
+            "id": "cmp-committee-metrics",
+            "advertiser_account": "adv-committee",
+            "budget_usd_micros": 6400000,
+            "creatives": [
+                {
+                    "id": "creative-committee-metrics",
+                    "action_rate_ppm": 530000,
+                    "margin_ppm": 670000,
+                    "value_per_action_usd_micros": 1420000,
+                    "max_cpi_usd_micros": 1420000,
+                    "badges": [],
+                    "domains": ["example.test"],
+                    "metadata": {}
+                }
+            ],
+            "targeting": {
+                "domains": ["example.test"],
+                "badges": []
+            },
+            "metadata": {}
+        }"#,
+    );
+    expect_ok(harness.call("ad_market.register_campaign", campaign_payload));
+
+    let market = Arc::clone(&harness.market);
+    let mut base_ctx = ImpressionContext::default();
+    base_ctx.domain = "example.test".into();
+    base_ctx.provider = Some("wallet".into());
+    base_ctx.bytes = 1_024;
+    base_ctx.population_estimate = Some(92);
+    base_ctx.verifier_committee = Some(fixture.receipt.clone());
+    base_ctx.verifier_stake_snapshot = Some(fixture.snapshot.clone());
+    base_ctx.verifier_transcript = fixture.transcript.clone();
+
+    let key_probe = make_reservation_key(7_001);
+    let outcome_probe = market
+        .reserve_impression(key_probe.clone(), base_ctx.clone())
+        .expect("probe reservation");
+    let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
+    market.cancel(&key_probe);
+
+    let (addr, handle) =
+        serve_metrics_with_shutdown("127.0.0.1:0").expect("start metrics exporter");
+    let baseline_metrics = scrape_metrics(&addr);
+    let baseline_metric =
+        parse_committee_metric(&baseline_metrics, &fixture.policy.label, "snapshot_missing");
+    if let Some(value) = baseline_metric {
+        assert!(
+            value == 0.0,
+            "expected rejection counter to start at zero, found {value}"
+        );
+    }
+    let baseline_value = baseline_metric.unwrap_or(0.0);
+
+    let mut ctx_missing_snapshot = base_ctx.clone();
+    ctx_missing_snapshot.verifier_stake_snapshot = None;
+    ctx_missing_snapshot.verifier_committee = Some(fixture.receipt.clone());
+    ctx_missing_snapshot.verifier_transcript = fixture.transcript.clone();
+    ctx_missing_snapshot.attestations = vec![SelectionAttestation::Snark {
+        proof: proof_bytes.clone(),
+        circuit_id: SELECTION_CIRCUIT_ID.into(),
+    }];
+
+    let key_missing = make_reservation_key(7_002);
+    let outcome_missing = market
+        .reserve_impression(key_missing.clone(), ctx_missing_snapshot)
+        .expect("missing snapshot reservation");
+    market.cancel(&key_missing);
+    assert_eq!(
+        outcome_missing.selection_receipt.attestation_kind(),
+        SelectionAttestationKind::Missing,
+        "missing snapshot should prevent attestation attachment",
+    );
+
+    let after_metrics = scrape_metrics(&addr);
+    handle.shutdown();
+    let after_value =
+        parse_committee_metric(&after_metrics, &fixture.policy.label, "snapshot_missing")
+            .unwrap_or_else(|| {
+                panic!(
+                    "committee rejection metric missing after failure. payload:\n{}",
+                    after_metrics
+                )
+            });
+    let delta = after_value - baseline_value;
+    assert!(
+        (delta - 1.0).abs() < f64::EPSILON,
+        "expected exactly one rejection increment (baseline={baseline_value}, after={after_value})"
     );
 }

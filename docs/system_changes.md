@@ -16,15 +16,22 @@
 > `benchmark_ann_soft_intent_verification_seconds` plus `_p50`/`_p90`/`_p99` gauges,
 > `benchmark_*_iterations`, and `benchmark_*_regression` flags via `TB_BENCH_PROM_PATH`
 > under a shared lock. Optional `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT`
-> persist timestamped histories while `TB_BENCH_REGRESSION_THRESHOLDS` +
-> `TB_BENCH_ALERT_PATH` gate acceptable latency and emit alert summaries entirely
-> in house. The monitoring generator charts the series in a dedicated Benchmarks
-> row so ANN latency trends and regression spikes sit beside pacing and readiness
-> telemetry even when suites run concurrently. Committee enforcement now increments
-> `ad_verifier_committee_rejection_total{committee,reason}` for stake, snapshot, or
-> weight mismatches, and `SettlementBreakdown` carries the winning creative’s
-> `uplift` estimate so RPC consumers tie realised lift back to pacing guidance
-> without recomputing client-side.
+> persist timestamped histories (now with exponentially weighted moving averages)
+> while `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep
+> canonical latency ceilings versioned alongside the source and
+> `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` gate acceptable latency
+> and emit alert summaries entirely in house. The monitoring generator charts the
+> series in a dedicated Benchmarks row so ANN latency trends and regression spikes
+> sit beside pacing and readiness telemetry even when suites run concurrently.
+> Committee enforcement now increments `ad_verifier_committee_rejection_total{committee,reason}`
+> for stake, snapshot, or weight mismatches, the RPC regression suite scrapes the
+> metrics exporter after a forced failure to lock in the expected labels, and the
+> telemetry helper installs the recorder automatically while exposing reset/
+> registration hooks so tests can seed expected label sets without leaking state
+> between runs. With that guardrail in place,
+> `SettlementBreakdown` carries the winning creative’s `uplift` estimate so RPC
+> consumers tie realised lift back to pacing guidance without recomputing client-
+> side.
 > **Review (2025-10-29, morning):** Selection receipts now recompute their
 > commitment hash, proof-bytes digest, verifying-key digest, and transcript using
 > the manifest-backed helpers in `zkp::selection`. The new

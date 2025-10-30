@@ -17,6 +17,13 @@ pub mod bench {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     const PERCENTILES: [(&str, f64); 3] = [("p50", 0.50), ("p90", 0.90), ("p99", 0.99)];
+    const SUPPORTED_THRESHOLD_KEYS: [&str; 4] = ["per_iter", "p50", "p90", "p99"];
+
+    fn is_supported_threshold(key: &str) -> bool {
+        SUPPORTED_THRESHOLD_KEYS
+            .iter()
+            .any(|candidate| candidate == &key)
+    }
 
     #[derive(Clone, Copy, Debug)]
     struct PercentileSample {
@@ -178,7 +185,7 @@ pub mod bench {
             samples.push(elapsed);
         }
         samples.sort();
-        report(
+        record_result(
             name,
             BenchResult {
                 iterations,
@@ -186,6 +193,13 @@ pub mod bench {
                 samples,
             },
         );
+    }
+
+    /// Record a pre-computed benchmark [`BenchResult`]. This is primarily used by
+    /// integration tests that need to exercise history persistence without
+    /// executing the benchmark body.
+    pub fn record_result(name: &str, result: BenchResult) {
+        report(name, result);
     }
 
     fn report(name: &str, result: BenchResult) {
@@ -291,6 +305,17 @@ pub mod bench {
         metrics
     }
 
+    const HISTORY_HEADER: &str = "timestamp,iterations,elapsed_seconds,per_iter_seconds,p50_seconds,p90_seconds,p99_seconds,regressions,per_iter_ewma_seconds,p50_ewma_seconds,p90_ewma_seconds,p99_ewma_seconds";
+    const EWMA_ALPHA: f64 = 0.2;
+
+    #[derive(Clone, Copy)]
+    struct HistoryEwma {
+        per_iter: f64,
+        p50: Option<f64>,
+        p90: Option<f64>,
+        p99: Option<f64>,
+    }
+
     fn persist_history(
         snapshot: &BenchmarkSnapshot<'_>,
         regression: &RegressionReport,
@@ -302,13 +327,15 @@ pub mod bench {
         let limit = env::var("TB_BENCH_HISTORY_LIMIT")
             .ok()
             .and_then(|value| value.parse::<usize>().ok());
-        let line = build_history_line(snapshot, regression);
-        with_file_lock(&path, || persist_history_locked(&path, &line, limit))
+        with_file_lock(&path, || {
+            persist_history_locked(&path, snapshot, regression, limit)
+        })
     }
 
     fn build_history_line(
         snapshot: &BenchmarkSnapshot<'_>,
         regression: &RegressionReport,
+        ewma: &HistoryEwma,
     ) -> String {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -319,19 +346,28 @@ pub mod bench {
         let p99 = snapshot.percentile_value("p99");
         let regressions: Vec<&'static str> =
             regression.exceeded().map(|cmp| cmp.kind.key()).collect();
+        let per_iter_ewma = format!("{:.9}", ewma.per_iter);
+        let p50_ewma = format_optional_seconds(ewma.p50);
+        let p90_ewma = format_optional_seconds(ewma.p90);
+        let p99_ewma = format_optional_seconds(ewma.p99);
+        let regressions = if regressions.is_empty() {
+            "none".to_string()
+        } else {
+            regressions.join("|")
+        };
         format!(
-            "{timestamp:.6},{iters},{elapsed:.9},{per_iter:.9},{p50},{p90},{p99},{regressions}",
+            "{timestamp:.6},{iters},{elapsed:.9},{per_iter:.9},{p50},{p90},{p99},{regressions},{per_iter_ewma},{p50_ewma},{p90_ewma},{p99_ewma}",
             iters = snapshot.iterations,
             elapsed = snapshot.elapsed.as_secs_f64(),
             per_iter = snapshot.per_iteration.as_secs_f64(),
             p50 = format_optional_duration(p50),
             p90 = format_optional_duration(p90),
             p99 = format_optional_duration(p99),
-            regressions = if regressions.is_empty() {
-                "none".to_string()
-            } else {
-                regressions.join("|")
-            }
+            regressions = regressions,
+            per_iter_ewma = per_iter_ewma,
+            p50_ewma = p50_ewma,
+            p90_ewma = p90_ewma,
+            p99_ewma = p99_ewma,
         )
     }
 
@@ -341,9 +377,16 @@ pub mod bench {
             .unwrap_or_else(|| "".to_string())
     }
 
+    fn format_optional_seconds(value: Option<f64>) -> String {
+        value
+            .map(|seconds| format!("{seconds:.9}"))
+            .unwrap_or_else(|| "".to_string())
+    }
+
     fn persist_history_locked(
         path: &Path,
-        line: &str,
+        snapshot: &BenchmarkSnapshot<'_>,
+        regression: &RegressionReport,
         limit: Option<usize>,
     ) -> Result<(), std::io::Error> {
         let mut existing = String::new();
@@ -352,44 +395,113 @@ pub mod bench {
         }
         let mut rows: Vec<String> = existing
             .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| line.to_string())
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with("timestamp") {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
             .collect();
-        if rows
-            .first()
-            .map(|line| line.starts_with("timestamp"))
-            .unwrap_or(false)
-        {
-            // header present
-        } else {
-            rows.insert(
-                0,
-                "timestamp,iterations,elapsed_seconds,per_iter_seconds,p50_seconds,p90_seconds,p99_seconds,regressions"
-                    .to_string(),
-            );
-        }
-        rows.push(line.to_string());
+        let previous_ewma = parse_previous_ewma(&rows);
+        let ewma = compute_history_ewma(snapshot, previous_ewma);
+        let line = build_history_line(snapshot, regression, &ewma);
+        rows.push(line);
         if let Some(limit) = limit {
             if limit == 0 {
-                rows.truncate(1);
-            } else {
-                let mut entries: Vec<String> = rows.into_iter().skip(1).collect();
-                if entries.len() > limit {
-                    entries = entries.split_off(entries.len() - limit);
-                }
-                rows = Vec::with_capacity(entries.len() + 1);
-                rows.push(
-                    "timestamp,iterations,elapsed_seconds,per_iter_seconds,p50_seconds,p90_seconds,p99_seconds,regressions"
-                        .to_string(),
-                );
-                rows.extend(entries);
+                rows.clear();
+            } else if rows.len() > limit {
+                let start = rows.len() - limit;
+                rows = rows.split_off(start);
             }
         }
-        let mut output = rows.join("\n");
-        if !output.ends_with('\n') {
+        let mut output = String::with_capacity((rows.len() + 1) * HISTORY_HEADER.len());
+        output.push_str(HISTORY_HEADER);
+        output.push('\n');
+        for row in &rows {
+            output.push_str(row);
             output.push('\n');
         }
         fs::write(path, output)
+    }
+
+    fn parse_previous_ewma(rows: &[String]) -> Option<HistoryEwma> {
+        rows.last().and_then(|line| {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 12 {
+                let per_iter = parts[8].trim().parse::<f64>().ok()?;
+                let p50 = parse_optional_seconds(parts[9]);
+                let p90 = parse_optional_seconds(parts[10]);
+                let p99 = parse_optional_seconds(parts[11]);
+                Some(HistoryEwma {
+                    per_iter,
+                    p50,
+                    p90,
+                    p99,
+                })
+            } else if parts.len() >= 8 {
+                let per_iter = parts[3].trim().parse::<f64>().ok()?;
+                let p50 = parse_optional_seconds(parts[4]);
+                let p90 = parse_optional_seconds(parts[5]);
+                let p99 = parse_optional_seconds(parts[6]);
+                Some(HistoryEwma {
+                    per_iter,
+                    p50,
+                    p90,
+                    p99,
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    fn parse_optional_seconds(value: &str) -> Option<f64> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            trimmed.parse::<f64>().ok()
+        }
+    }
+
+    fn compute_history_ewma(
+        snapshot: &BenchmarkSnapshot<'_>,
+        previous: Option<HistoryEwma>,
+    ) -> HistoryEwma {
+        let per_iter = snapshot.per_iteration.as_secs_f64();
+        let p50 = snapshot.percentile_value("p50").map(|d| d.as_secs_f64());
+        let p90 = snapshot.percentile_value("p90").map(|d| d.as_secs_f64());
+        let p99 = snapshot.percentile_value("p99").map(|d| d.as_secs_f64());
+        if let Some(prev) = previous {
+            HistoryEwma {
+                per_iter: ewma_value(per_iter, prev.per_iter),
+                p50: ewma_optional(p50, prev.p50),
+                p90: ewma_optional(p90, prev.p90),
+                p99: ewma_optional(p99, prev.p99),
+            }
+        } else {
+            HistoryEwma {
+                per_iter,
+                p50,
+                p90,
+                p99,
+            }
+        }
+    }
+
+    fn ewma_value(current: f64, previous: f64) -> f64 {
+        (EWMA_ALPHA * current) + ((1.0 - EWMA_ALPHA) * previous)
+    }
+
+    fn ewma_optional(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
+        match (current, previous) {
+            (Some(curr), Some(prev)) => Some(ewma_value(curr, prev)),
+            (Some(curr), None) => Some(curr),
+            (None, Some(prev)) => Some(prev),
+            (None, None) => None,
+        }
     }
 
     fn emit_alert(
@@ -417,7 +529,10 @@ pub mod bench {
     }
 
     fn evaluate_thresholds(snapshot: &BenchmarkSnapshot<'_>) -> RegressionReport {
-        let mut thresholds = parse_thresholds();
+        let mut thresholds = load_thresholds_from_config(snapshot.name);
+        for (key, value) in parse_thresholds_env() {
+            thresholds.insert(key, value);
+        }
         let mut comparisons = Vec::new();
         let per_iter = snapshot.per_iteration.as_secs_f64();
         comparisons.push(MetricComparison::new(
@@ -439,13 +554,20 @@ pub mod bench {
                 threshold,
             ));
         }
-        for key in thresholds.keys() {
-            eprintln!("unknown benchmark regression threshold `{key}` ignored");
+        if !thresholds.is_empty() {
+            let mut keys: Vec<_> = thresholds.keys().cloned().collect();
+            keys.sort();
+            panic!(
+                "benchmark `{}` threshold configuration contains unknown keys: {} (supported keys: {})",
+                snapshot.name,
+                keys.join(", "),
+                SUPPORTED_THRESHOLD_KEYS.join(", ")
+            );
         }
         RegressionReport { comparisons }
     }
 
-    fn parse_thresholds() -> HashMap<String, f64> {
+    fn parse_thresholds_env() -> HashMap<String, f64> {
         match env::var("TB_BENCH_REGRESSION_THRESHOLDS") {
             Ok(raw) if !raw.trim().is_empty() => {
                 let mut map = HashMap::new();
@@ -460,6 +582,12 @@ pub mod bench {
                         continue;
                     };
                     if let Ok(value) = value_str.trim().parse::<f64>() {
+                        if !is_supported_threshold(&key) {
+                            eprintln!(
+                                "ignoring unsupported benchmark threshold `{key}` from TB_BENCH_REGRESSION_THRESHOLDS"
+                            );
+                            continue;
+                        }
                         map.insert(key, value);
                     }
                 }
@@ -467,6 +595,73 @@ pub mod bench {
             }
             _ => HashMap::new(),
         }
+    }
+
+    fn load_thresholds_from_config(name: &str) -> HashMap<String, f64> {
+        let mut map = HashMap::new();
+        let sanitized = sanitize_metric_name(name);
+        if sanitized.is_empty() {
+            return map;
+        }
+        if let Some(path) = benchmark_threshold_path(&sanitized) {
+            if let Ok(contents) = fs::read_to_string(&path) {
+                for line in contents.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    let mut parts = trimmed.splitn(2, '=');
+                    let key = parts.next().unwrap().trim().to_lowercase();
+                    let Some(value_str) = parts.next() else {
+                        continue;
+                    };
+                    if let Ok(value) = value_str.trim().parse::<f64>() {
+                        if !is_supported_threshold(&key) {
+                            eprintln!(
+                                "ignoring unsupported benchmark threshold `{key}` from {}",
+                                path.display()
+                            );
+                            continue;
+                        }
+                        map.insert(key, value);
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    fn benchmark_threshold_path(name: &str) -> Option<PathBuf> {
+        if let Ok(dir) = env::var("TB_BENCH_THRESHOLD_DIR") {
+            if !dir.trim().is_empty() {
+                let path = PathBuf::from(dir).join(format!("{name}.thresholds"));
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+        default_threshold_dir().and_then(|dir| {
+            let path = dir.join(format!("{name}.thresholds"));
+            if path.exists() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn default_threshold_dir() -> Option<PathBuf> {
+        let mut dir = env::current_dir().ok()?;
+        for _ in 0..5 {
+            let candidate = dir.join("config").join("benchmarks");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+        None
     }
 
     fn sanitize_metric_name(name: &str) -> String {

@@ -1,5 +1,16 @@
 # First-Party Dependency Migration Audit
 
+> **2025-11-10 update (Python binding macros & telemetry recorder helpers):**
+> `python_bridge_macros` introduces first-party `#[new]`, `#[getter]`,
+> `#[setter]`, and `#[staticmethod]` attribute stubs so the node’s Python
+> bindings compile without `pyo3` or third-party proc-macro crates. The node and
+> wallet bindings keep re-exporting the attributes through the existing
+> `python_bridge` facade, and `node::telemetry` now installs the
+> `foundation_metrics` recorder automatically when `/metrics` is scraped. Tests
+> reset and register `ad_verifier_committee_rejection_total{committee,reason}`
+> label handles via in-tree helpers before asserting on exporter payloads,
+> keeping the RPC regression hermetic and first party end-to-end.
+
 > **2025-10-29 update (VRF committee guard, ANN proofs, pacing guidance):** The
 > new `verifier_selection` crate implements VRF-backed committee sampling on top
 > of the in-house `crypto_suite::vrf` module—VRF keys, outputs, and proofs are
@@ -24,12 +35,17 @@
 > new `benchmark_*_regression` flags through the first-party exporter under a
 > file lock when `TB_BENCH_PROM_PATH` is set. History retention and alerting stay
 > in-house: `TB_BENCH_HISTORY_PATH` + `TB_BENCH_HISTORY_LIMIT` append timestamped
-> CSV rows while `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` clamp
-> acceptable runtimes and atomically record human-readable alerts without touching
-> external tooling. Committee guard rejections likewise surface via
+> CSV rows (now with exponentially weighted moving averages) while
+> `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep canonical
+> regression thresholds versioned alongside the source and
+> `TB_BENCH_REGRESSION_THRESHOLDS` + `TB_BENCH_ALERT_PATH` clamp acceptable
+> runtimes and atomically record human-readable alerts without touching external
+> tooling. Committee guard rejections likewise surface via
 > `ad_verifier_committee_rejection_total{committee,reason}`, extending the
 > existing telemetry with a pure first-party counter so operators catch stake or
-> snapshot mismatches in real time.
+> snapshot mismatches in real time, and the RPC regression suite now drives a
+> forced committee failure through the metrics exporter to pin the expected label
+> set.
 
 > **2025-10-29 update (selection digest enforcement & pacing telemetry):**
 > `SelectionReceipt::validate` now recomputes the commitment hash, proof-bytes

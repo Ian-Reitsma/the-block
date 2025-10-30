@@ -64,11 +64,128 @@ fn history_records_runs_with_percentiles() {
     let contents = fs::read_to_string(&history_path).expect("history written");
     let lines: Vec<&str> = contents.lines().collect();
     assert!(lines.len() >= 3, "expected header plus at least two rows");
-    assert!(lines[0].starts_with("timestamp"));
+    let header_fields: Vec<&str> = lines[0].split(',').collect();
+    assert!(header_fields.contains(&"per_iter_ewma_seconds"));
     let fields: Vec<&str> = lines[1].split(',').collect();
-    assert!(fields.len() >= 8, "expected percentile columns");
-    let regressions = fields.last().unwrap();
-    assert!(!regressions.is_empty());
+    assert!(
+        fields.len() >= header_fields.len(),
+        "expected percentile columns"
+    );
+    let regressions_idx = header_fields
+        .iter()
+        .position(|col| *col == "regressions")
+        .expect("regressions column present");
+    assert!(!fields[regressions_idx].is_empty());
+    let per_iter_ewma_idx = header_fields
+        .iter()
+        .position(|col| *col == "per_iter_ewma_seconds")
+        .expect("per_iter_ewma column present");
+    assert!(
+        fields[per_iter_ewma_idx]
+            .parse::<f64>()
+            .expect("per_iter ewma numeric")
+            >= 0.0
+    );
+    let _ = fs::remove_file(&history_path);
+}
+
+#[test]
+fn history_records_missing_percentiles_as_empty_fields() {
+    let history_path = unique_path("history_missing");
+    std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
+    bench::record_result(
+        "history_missing_percentiles",
+        bench::BenchResult {
+            iterations: 1,
+            elapsed: Duration::from_millis(5),
+            samples: Vec::new(),
+        },
+    );
+    std::env::remove_var("TB_BENCH_HISTORY_PATH");
+    let contents = fs::read_to_string(&history_path).expect("history written");
+    let lines: Vec<&str> = contents.lines().collect();
+    assert!(lines.len() >= 2, "expected header and data row");
+    let header_fields: Vec<&str> = lines[0].split(',').collect();
+    let row_fields: Vec<&str> = lines[1].split(',').collect();
+    let blank_columns = [
+        "p50_seconds",
+        "p90_seconds",
+        "p99_seconds",
+        "p50_ewma_seconds",
+        "p90_ewma_seconds",
+        "p99_ewma_seconds",
+    ];
+    for column in blank_columns {
+        let idx = header_fields
+            .iter()
+            .position(|col| *col == column)
+            .unwrap_or_else(|| panic!("{column} column missing"));
+        assert!(row_fields.get(idx).is_some(), "{column} value missing");
+        assert!(
+            row_fields[idx].is_empty(),
+            "{column} should be empty when percentile data is absent"
+        );
+    }
+    let _ = fs::remove_file(&history_path);
+}
+
+#[test]
+fn history_ewma_persists_when_percentiles_missing() {
+    let history_path = unique_path("history_mixed");
+    std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
+    bench::record_result(
+        "history_mixed_percentiles",
+        bench::BenchResult {
+            iterations: 2,
+            elapsed: Duration::from_millis(6),
+            samples: vec![Duration::from_millis(2), Duration::from_millis(4)],
+        },
+    );
+    bench::record_result(
+        "history_mixed_percentiles",
+        bench::BenchResult {
+            iterations: 1,
+            elapsed: Duration::from_millis(5),
+            samples: Vec::new(),
+        },
+    );
+    std::env::remove_var("TB_BENCH_HISTORY_PATH");
+    let contents = fs::read_to_string(&history_path).expect("history written");
+    let lines: Vec<&str> = contents.lines().collect();
+    assert!(lines.len() >= 3, "expected header plus two rows");
+    let header_fields: Vec<&str> = lines[0].split(',').collect();
+    let last_fields: Vec<&str> = lines.last().unwrap().split(',').collect();
+    let percentile_columns = ["p50_seconds", "p90_seconds", "p99_seconds"];
+    for column in percentile_columns {
+        let idx = header_fields
+            .iter()
+            .position(|col| *col == column)
+            .unwrap_or_else(|| panic!("{column} column missing"));
+        assert!(last_fields.get(idx).is_some(), "{column} value missing");
+        assert!(
+            last_fields[idx].is_empty(),
+            "{column} should be empty on missing samples"
+        );
+    }
+    let ewma_columns = [
+        "per_iter_ewma_seconds",
+        "p50_ewma_seconds",
+        "p90_ewma_seconds",
+        "p99_ewma_seconds",
+    ];
+    for column in ewma_columns {
+        let idx = header_fields
+            .iter()
+            .position(|col| *col == column)
+            .unwrap_or_else(|| panic!("{column} column missing"));
+        assert!(
+            last_fields
+                .get(idx)
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false),
+            "{column} should preserve previous EWMA value"
+        );
+    }
     let _ = fs::remove_file(&history_path);
 }
 
@@ -88,8 +205,13 @@ fn regression_thresholds_trigger_alert_files() {
     let contents = fs::read_to_string(&history_path).expect("history retained");
     let lines: Vec<&str> = contents.lines().collect();
     assert!(lines.len() >= 2);
+    let header_fields: Vec<&str> = lines[0].split(',').collect();
+    let regressions_idx = header_fields
+        .iter()
+        .position(|col| *col == "regressions")
+        .expect("regressions header present");
     let last_fields: Vec<&str> = lines.last().unwrap().split(',').collect();
-    assert_eq!(last_fields.last().copied(), Some("per_iter"));
+    assert_eq!(last_fields.get(regressions_idx).copied(), Some("per_iter"));
     let _ = fs::remove_file(&history_path);
     let _ = fs::remove_file(&alert_path);
 }
@@ -122,5 +244,52 @@ fn thresholds_are_case_insensitive() {
     std::env::remove_var("TB_BENCH_REGRESSION_THRESHOLDS");
     let alert = fs::read_to_string(&alert_path).expect("alert written");
     assert!(alert.contains("p50"));
+    let _ = fs::remove_file(&alert_path);
+}
+
+#[test]
+fn threshold_directory_overrides_apply() {
+    let history_path = unique_path("history_config");
+    let alert_path = unique_path("alert_config");
+    let threshold_dir = unique_path("threshold_dir");
+    fs::create_dir_all(&threshold_dir).expect("threshold dir");
+    let config_path = threshold_dir.join("threshold_config.thresholds");
+    fs::write(&config_path, "per_iter=0\n").expect("config written");
+    std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
+    std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
+    std::env::set_var("TB_BENCH_THRESHOLD_DIR", &threshold_dir);
+    bench::run("threshold_config", 1, || {});
+    std::env::remove_var("TB_BENCH_HISTORY_PATH");
+    std::env::remove_var("TB_BENCH_ALERT_PATH");
+    std::env::remove_var("TB_BENCH_THRESHOLD_DIR");
+    let alert = fs::read_to_string(&alert_path).expect("alert written");
+    assert!(alert.contains("per_iter"));
+    let contents = fs::read_to_string(&history_path).expect("history retained");
+    let lines: Vec<&str> = contents.lines().collect();
+    let header_fields: Vec<&str> = lines[0].split(',').collect();
+    let regressions_idx = header_fields
+        .iter()
+        .position(|col| *col == "regressions")
+        .expect("regressions header present");
+    let last_fields: Vec<&str> = lines.last().unwrap().split(',').collect();
+    assert_eq!(last_fields.get(regressions_idx).copied(), Some("per_iter"));
+    let _ = fs::remove_file(&history_path);
+    let _ = fs::remove_file(&alert_path);
+    let _ = fs::remove_file(&config_path);
+    let _ = fs::remove_dir(&threshold_dir);
+}
+
+#[test]
+fn unknown_threshold_keys_are_ignored_with_warning() {
+    let alert_path = unique_path("alert_unknown");
+    std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
+    std::env::set_var("TB_BENCH_REGRESSION_THRESHOLDS", "p42=1");
+    bench::run("threshold_unknown", 1, || {});
+    std::env::remove_var("TB_BENCH_ALERT_PATH");
+    std::env::remove_var("TB_BENCH_REGRESSION_THRESHOLDS");
+    assert!(
+        !alert_path.exists(),
+        "unknown thresholds should not trigger regression alerts"
+    );
     let _ = fs::remove_file(&alert_path);
 }

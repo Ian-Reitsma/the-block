@@ -38,6 +38,12 @@ pub mod ledger_binary;
 mod legacy_cbor;
 mod py;
 
+#[cfg(feature = "python-bindings")]
+pub use py::prepare_freethreaded_python;
+
+#[cfg(feature = "python-bindings")]
+#[allow(unused_imports)]
+use crate::py::{getter, new, setter, staticmethod};
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry-json")]
 use foundation_serialization::json::{self, Map as JsonMap, Number, Value as JsonValue};
@@ -137,7 +143,9 @@ pub mod provenance;
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
 pub use telemetry::{
-    gather_metrics, redact_at_rest, serve_metrics, serve_metrics_with_shutdown, MetricsServer,
+    ensure_ad_verifier_committee_label, gather_metrics, redact_at_rest,
+    reset_ad_verifier_committee_rejections, serve_metrics, serve_metrics_with_shutdown,
+    MetricsServer,
 };
 pub mod update;
 

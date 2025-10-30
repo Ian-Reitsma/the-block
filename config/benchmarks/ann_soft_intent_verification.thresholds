@@ -1,0 +1,5 @@
+# Thresholds for the ann_soft_intent_verification benchmark
+per_iter=0.750
+p50=0.700
+p90=0.900
+p99=1.200

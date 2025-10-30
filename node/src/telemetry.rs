@@ -596,6 +596,23 @@ impl MetricsRecorder for NodeMetricsRecorder {
                     _ => {}
                 }
             }
+            "ad_verifier_committee_rejection_total" => {
+                let Some(committee) = label_value(labels, "committee") else {
+                    return;
+                };
+                let Some(reason) = label_value(labels, "reason") else {
+                    return;
+                };
+                let delta = counter_delta(value);
+                if delta == 0 {
+                    return;
+                }
+                if let Ok(counter) = AD_VERIFIER_COMMITTEE_REJECTION_TOTAL
+                    .ensure_handle_for_label_values(&[committee, reason])
+                {
+                    counter.inc_by(delta);
+                }
+            }
             "remote_signer_request_total" => {
                 let delta = counter_delta(value);
                 if delta > 0 {
@@ -2733,6 +2750,39 @@ pub static READ_SELECTION_PROOF_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(
     hv
 });
 
+pub static AD_VERIFIER_COMMITTEE_REJECTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_verifier_committee_rejection_total",
+            "Ad verifier committee attestation rejections by committee and reason",
+        ),
+        &["committee", "reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad verifier committee rejection: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad verifier committee rejection: {e}"));
+    c
+});
+
+#[cfg(feature = "telemetry")]
+pub fn reset_ad_verifier_committee_rejections() {
+    AD_VERIFIER_COMMITTEE_REJECTION_TOTAL.reset();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn reset_ad_verifier_committee_rejections() {}
+
+#[cfg(feature = "telemetry")]
+pub fn ensure_ad_verifier_committee_label(committee: &str, reason: &str) {
+    AD_VERIFIER_COMMITTEE_REJECTION_TOTAL
+        .ensure_handle_for_label_values(&[committee, reason])
+        .expect(LABEL_REGISTRATION_ERR);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn ensure_ad_verifier_committee_label(_committee: &str, _reason: &str) {}
+
 pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -2808,8 +2858,7 @@ pub static AD_BUDGET_CONFIG_VALUES: Lazy<GaugeVec> = Lazy::new(|| {
             "Budget broker configuration parameters exposed for pacing inspection",
         ),
         &["parameter"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget config value: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget config value: {e}"));
@@ -2824,8 +2873,7 @@ pub static AD_BUDGET_CAMPAIGN_REMAINING_USD: Lazy<GaugeVec> = Lazy::new(|| {
             "Remaining campaign budget tracked by the broker (USD micros)",
         ),
         &["campaign"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign remaining: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget campaign remaining: {e}"));
@@ -2840,8 +2888,7 @@ pub static AD_BUDGET_CAMPAIGN_DUAL_PRICE: Lazy<GaugeVec> = Lazy::new(|| {
             "Current dual price for campaign pacing",
         ),
         &["campaign"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign dual price: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget campaign dual price: {e}"));
@@ -2856,8 +2903,7 @@ pub static AD_BUDGET_CAMPAIGN_EPOCH_TARGET_USD: Lazy<GaugeVec> = Lazy::new(|| {
             "Per-epoch spend target for campaigns (USD micros)",
         ),
         &["campaign"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget campaign epoch target: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget campaign epoch target: {e}"));
@@ -2872,8 +2918,7 @@ pub static AD_BUDGET_COHORT_KAPPA: Lazy<GaugeVec> = Lazy::new(|| {
             "Cohort-level pacing multiplier (kappa)",
         ),
         &["campaign", "domain", "provider", "badges"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort kappa: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget cohort kappa: {e}"));
@@ -2885,8 +2930,7 @@ pub static AD_BUDGET_COHORT_ERROR: Lazy<GaugeVec> = Lazy::new(|| {
     let g = GaugeVec::new(
         Opts::new("ad_budget_cohort_error", "Smoothed pacing error per cohort"),
         &["campaign", "domain", "provider", "badges"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort error: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget cohort error: {e}"));
@@ -2901,8 +2945,7 @@ pub static AD_BUDGET_COHORT_REALIZED_USD: Lazy<GaugeVec> = Lazy::new(|| {
             "Realized spend per cohort (USD micros)",
         ),
         &["campaign", "domain", "provider", "badges"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget cohort realized: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget cohort realized: {e}"));
@@ -2917,8 +2960,7 @@ pub static AD_BUDGET_SUMMARY_VALUES: Lazy<GaugeVec> = Lazy::new(|| {
             "Aggregated budget broker analytics for pacing diagnostics",
         ),
         &["metric"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec ad budget summary value: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad budget summary value: {e}"));
@@ -3937,39 +3979,39 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
         let config = &snapshot.config;
         let analytics = ad_market::budget_snapshot_analytics(snapshot);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["epoch_impressions"])
+            .ensure_handle_for_label_values(&["epoch_impressions"])
             .unwrap_or_else(|e| panic!("budget config epoch impressions: {e}"))
             .set(config.epoch_impressions as f64);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["step_size"])
+            .ensure_handle_for_label_values(&["step_size"])
             .unwrap_or_else(|e| panic!("budget config step size: {e}"))
             .set(config.step_size);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["dual_step"])
+            .ensure_handle_for_label_values(&["dual_step"])
             .unwrap_or_else(|e| panic!("budget config dual step: {e}"))
             .set(config.dual_step);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["dual_forgetting"])
+            .ensure_handle_for_label_values(&["dual_forgetting"])
             .unwrap_or_else(|e| panic!("budget config dual forgetting: {e}"))
             .set(config.dual_forgetting);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["max_kappa"])
+            .ensure_handle_for_label_values(&["max_kappa"])
             .unwrap_or_else(|e| panic!("budget config max kappa: {e}"))
             .set(config.max_kappa);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["min_kappa"])
+            .ensure_handle_for_label_values(&["min_kappa"])
             .unwrap_or_else(|e| panic!("budget config min kappa: {e}"))
             .set(config.min_kappa);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["shadow_price_cap"])
+            .ensure_handle_for_label_values(&["shadow_price_cap"])
             .unwrap_or_else(|e| panic!("budget config shadow price cap: {e}"))
             .set(config.shadow_price_cap);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["smoothing"])
+            .ensure_handle_for_label_values(&["smoothing"])
             .unwrap_or_else(|e| panic!("budget config smoothing: {e}"))
             .set(config.smoothing);
         AD_BUDGET_CONFIG_VALUES
-            .with_label_values(&["epochs_per_budget"])
+            .ensure_handle_for_label_values(&["epochs_per_budget"])
             .unwrap_or_else(|e| panic!("budget config epochs per budget: {e}"))
             .set(config.epochs_per_budget as f64);
 
@@ -3977,43 +4019,43 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
             .set(snapshot.generated_at_micros.min(i64::MAX as u64) as i64);
 
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["campaign_count"])
+            .ensure_handle_for_label_values(&["campaign_count"])
             .unwrap_or_else(|e| panic!("budget summary campaign count: {e}"))
             .set(analytics.campaign_count as f64);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["cohort_count"])
+            .ensure_handle_for_label_values(&["cohort_count"])
             .unwrap_or_else(|e| panic!("budget summary cohort count: {e}"))
             .set(analytics.cohort_count as f64);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["mean_kappa"])
+            .ensure_handle_for_label_values(&["mean_kappa"])
             .unwrap_or_else(|e| panic!("budget summary mean kappa: {e}"))
             .set(analytics.mean_kappa);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["max_kappa"])
+            .ensure_handle_for_label_values(&["max_kappa"])
             .unwrap_or_else(|e| panic!("budget summary max kappa: {e}"))
             .set(analytics.max_kappa);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["mean_smoothed_error"])
+            .ensure_handle_for_label_values(&["mean_smoothed_error"])
             .unwrap_or_else(|e| panic!("budget summary mean error: {e}"))
             .set(analytics.mean_smoothed_error);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["max_abs_smoothed_error"])
+            .ensure_handle_for_label_values(&["max_abs_smoothed_error"])
             .unwrap_or_else(|e| panic!("budget summary max abs error: {e}"))
             .set(analytics.max_abs_smoothed_error);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["realized_spend_total_usd"])
+            .ensure_handle_for_label_values(&["realized_spend_total_usd"])
             .unwrap_or_else(|e| panic!("budget summary realized spend: {e}"))
             .set(analytics.realized_spend_total);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["epoch_target_total_usd"])
+            .ensure_handle_for_label_values(&["epoch_target_total_usd"])
             .unwrap_or_else(|e| panic!("budget summary epoch target: {e}"))
             .set(analytics.epoch_target_total);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["epoch_spend_total_usd"])
+            .ensure_handle_for_label_values(&["epoch_spend_total_usd"])
             .unwrap_or_else(|e| panic!("budget summary epoch spend: {e}"))
             .set(analytics.epoch_spend_total);
         AD_BUDGET_SUMMARY_VALUES
-            .with_label_values(&["dual_price_max"])
+            .ensure_handle_for_label_values(&["dual_price_max"])
             .unwrap_or_else(|e| panic!("budget summary dual price max: {e}"))
             .set(analytics.dual_price_max);
 
@@ -4023,15 +4065,15 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
             new_campaigns.insert(campaign.campaign_id.clone());
             let labels = [campaign.campaign_id.as_str()];
             AD_BUDGET_CAMPAIGN_REMAINING_USD
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("budget remaining labels: {e}"))
                 .set(campaign.remaining_budget as f64);
             AD_BUDGET_CAMPAIGN_DUAL_PRICE
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("budget dual price labels: {e}"))
                 .set(campaign.dual_price);
             AD_BUDGET_CAMPAIGN_EPOCH_TARGET_USD
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("budget epoch target labels: {e}"))
                 .set(campaign.epoch_target);
 
@@ -4054,15 +4096,15 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
                     badges.as_str(),
                 ];
                 AD_BUDGET_COHORT_KAPPA
-                    .with_label_values(&labels)
+                    .ensure_handle_for_label_values(&labels)
                     .unwrap_or_else(|e| panic!("budget cohort kappa labels: {e}"))
                     .set(cohort.kappa);
                 AD_BUDGET_COHORT_ERROR
-                    .with_label_values(&labels)
+                    .ensure_handle_for_label_values(&labels)
                     .unwrap_or_else(|e| panic!("budget cohort error labels: {e}"))
                     .set(cohort.smoothed_error);
                 AD_BUDGET_COHORT_REALIZED_USD
-                    .with_label_values(&labels)
+                    .ensure_handle_for_label_values(&labels)
                     .unwrap_or_else(|e| panic!("budget cohort realized labels: {e}"))
                     .set(cohort.realized_spend);
                 new_cohorts.insert((campaign.campaign_id.clone(), domain, provider, badges));
@@ -4236,15 +4278,15 @@ pub fn update_ad_market_utilization_metrics(
                 badges_label.as_str(),
             ];
             AD_MARKET_UTILIZATION_OBSERVED
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("ad market utilization observed labels: {e}"))
                 .set(i64::from(entry.observed_utilization_ppm));
             AD_MARKET_UTILIZATION_TARGET
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("ad market utilization target labels: {e}"))
                 .set(i64::from(entry.target_utilization_ppm));
             AD_MARKET_UTILIZATION_DELTA
-                .with_label_values(&labels)
+                .ensure_handle_for_label_values(&labels)
                 .unwrap_or_else(|e| panic!("ad market utilization delta labels: {e}"))
                 .set(entry.delta_ppm);
             new_labels.insert((domain_label, provider_label, badges_label));
@@ -6144,6 +6186,7 @@ pub fn redact_at_rest(dir: &str, hours: u64, hash: bool) -> PyResult<()> {
 }
 
 fn gather() -> String {
+    init_wrapper_metrics();
     // Ensure all metrics are registered even if they haven't been used yet so
     // `gather_metrics` always exposes a stable set of counters.
     let _ = (
@@ -6275,6 +6318,7 @@ impl Drop for MetricsServer {
 }
 
 pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServer)> {
+    init_wrapper_metrics();
     use std::io::{Read, Write};
     use std::sync::{atomic::AtomicBool, Arc};
     use std::time::Duration;

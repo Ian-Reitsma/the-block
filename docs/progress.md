@@ -248,22 +248,37 @@
 > that identical reads no longer collide in the ad marketplace.
 > **Review (2025-10-30, early morning):** ANN benchmark automation now writes
 > per-run history and regression signals entirely in-house. `TB_BENCH_HISTORY_PATH`
-> + `TB_BENCH_HISTORY_LIMIT` persist timestamped percentiles alongside
-> `benchmark_*_iterations`, while `TB_BENCH_REGRESSION_THRESHOLDS` +
+> + `TB_BENCH_HISTORY_LIMIT` persist timestamped percentiles (plus exponentially
+> weighted moving averages) alongside `benchmark_*_iterations`, while
+> `config/benchmarks/<name>.thresholds` + `TB_BENCH_THRESHOLD_DIR` keep canonical
+> regression ceilings versioned and `TB_BENCH_REGRESSION_THRESHOLDS` +
 > `TB_BENCH_ALERT_PATH` clamp acceptable latency and emit first-party alert
 > summaries. Telemetry ingests the new `benchmark_*_regression` gauges beside the
 > existing percentiles so Grafana and the HTML dashboards highlight slow runs
 > without third-party tooling. Verifier committee guards now increment
 > `ad_verifier_committee_rejection_total{committee,reason}` whenever stake,
-> snapshot, or VRF mismatches surface, keeping weight tampering observable in real
-> time. Parser coverage now exercises malformed `TB_BENCH_REGRESSION_THRESHOLDS`
-> entries and confirms case-insensitive keys so CI can reject slow runs without
+> snapshot, or VRF mismatches surface, and the RPC regression suite scrapes the
+> metrics exporter after a forced committee failure to lock in the expected
+> labels, keeping weight tampering observable in real time. Parser coverage now
+> exercises malformed `TB_BENCH_REGRESSION_THRESHOLDS` entries and confirms
+> case-insensitive keys so CI can reject slow runs without
 > human typos breaking suites, while new committee guard integration tests assert
 > the rejection counter increments under missing-snapshot failures. With those
 > guardrails in place, `SettlementBreakdown` carries the winning creative’s
 > `uplift` payload
 > so RPC consumers and explorers correlate pacing analytics with realised lift
 > without recomputing estimates off-box.
+> **Review (2025-11-10, early morning):** `python_bridge_macros` replaces the
+> last proc-macro holdout with first-party `#[new]`/`#[getter]`/`#[setter]`/
+> `#[staticmethod]` stubs so the node’s Python bindings build without `pyo3`, and
+> the bindings keep re-exporting them through the in-tree bridge. `serve_metrics`
+> now installs the `foundation_metrics` recorder on demand and exposes helpers to
+> reset/register `ad_verifier_committee_rejection_total{committee,reason}`
+> handles before RPC tests scrape the exporter, eliminating cross-test leakage.
+> Benchmark automation warns on unsupported regression keys (`p42`, etc.) while
+> skipping them, and history CSVs preserve EWMA columns even when a run omits
+> percentile samples, so dashboards keep a continuous latency trend without
+> suggesting zero-cost iterations.
 > **Review (2025-11-06, afternoon):** Advertising settlements now show the full
 > dual-token story across the explorer, CLI, telemetry, and readiness RPC. The
 > ledger codecs persist CT totals, IT totals, USD micros, settlement counts, and
