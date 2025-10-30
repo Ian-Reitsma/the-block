@@ -17,8 +17,9 @@ use concurrency::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::treasury::{
-    mark_cancelled, mark_executed, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
-    TreasuryDisbursement,
+    mark_cancelled, mark_executed, DisbursementStatus, SignedExecutionIntent,
+    TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    TreasuryExecutorSnapshot,
 };
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
@@ -27,10 +28,15 @@ use sled::Config;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
+use std::fmt::{self, Write as FmtWrite};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc, Mutex, Weak,
+};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const ACTIVATION_DELAY: u64 = 2;
 pub const ROLLBACK_WINDOW_EPOCHS: u64 = 1;
@@ -39,6 +45,7 @@ const PARAM_HISTORY_LIMIT: usize = 512;
 const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
 const TREASURY_HISTORY_LIMIT: usize = 1024;
 const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
+const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
@@ -67,6 +74,216 @@ impl TreasuryBalances {
             industrial: updated_industrial as u64,
         })
     }
+}
+
+#[derive(Clone)]
+pub struct TreasuryExecutorConfig {
+    pub poll_interval: Duration,
+    pub epoch_source: Arc<dyn Fn() -> u64 + Send + Sync>,
+    pub signer: Arc<
+        dyn Fn(&TreasuryDisbursement) -> Result<SignedExecutionIntent, TreasuryExecutorError>
+            + Send
+            + Sync,
+    >,
+    pub submitter:
+        Arc<dyn Fn(&SignedExecutionIntent) -> Result<String, TreasuryExecutorError> + Send + Sync>,
+    pub dependency_check: Option<
+        Arc<
+            dyn Fn(&GovStore, &TreasuryDisbursement) -> Result<bool, TreasuryExecutorError>
+                + Send
+                + Sync,
+        >,
+    >,
+}
+
+#[derive(Debug)]
+pub enum TreasuryExecutorError {
+    Storage(String),
+    Signing(String),
+    Submission(String),
+    Cancelled { reason: String },
+}
+
+impl TreasuryExecutorError {
+    pub fn cancelled(reason: impl Into<String>) -> Self {
+        Self::Cancelled {
+            reason: reason.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Storage(msg) | Self::Signing(msg) | Self::Submission(msg) => msg,
+            Self::Cancelled { reason } => reason,
+        }
+    }
+
+    pub fn is_storage(&self) -> bool {
+        matches!(self, Self::Storage(_))
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled { .. })
+    }
+}
+
+impl fmt::Display for TreasuryExecutorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Storage(msg) => write!(f, "storage error: {msg}"),
+            Self::Signing(msg) => write!(f, "signing error: {msg}"),
+            Self::Submission(msg) => write!(f, "submission error: {msg}"),
+            Self::Cancelled { reason } => write!(f, "cancelled: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for TreasuryExecutorError {}
+
+impl From<sled::Error> for TreasuryExecutorError {
+    fn from(err: sled::Error) -> Self {
+        TreasuryExecutorError::Storage(err.to_string())
+    }
+}
+
+pub struct TreasuryExecutorHandle {
+    shutdown: Arc<AtomicBool>,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl TreasuryExecutorHandle {
+    pub fn shutdown(&self) {
+        self.shutdown.store(true, AtomicOrdering::SeqCst);
+    }
+
+    pub fn join(&self) {
+        if let Some(handle) = self.thread.lock().ok().and_then(|mut guard| guard.take()) {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for TreasuryExecutorHandle {
+    fn drop(&mut self) {
+        self.shutdown();
+        if let Ok(mut guard) = self.thread.lock() {
+            if let Some(handle) = guard.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+fn run_executor_tick(
+    store: &GovStore,
+    config: &TreasuryExecutorConfig,
+    snapshot: &mut TreasuryExecutorSnapshot,
+) -> Result<(), TreasuryExecutorError> {
+    let current_epoch = (config.epoch_source)();
+    let mut disbursements = store.load_disbursements()?;
+    disbursements.sort_by_key(|d| d.id);
+    let mut staged_lookup: HashMap<u64, SignedExecutionIntent> = store
+        .load_execution_intents()?
+        .into_iter()
+        .map(|intent| (intent.disbursement_id, intent))
+        .collect();
+
+    let mut pending_matured = 0u64;
+    let mut success_total = 0u64;
+    let mut cancelled_total = 0u64;
+    let mut last_error: Option<String> = None;
+
+    for disbursement in disbursements {
+        if !matches!(disbursement.status, DisbursementStatus::Scheduled) {
+            continue;
+        }
+        if disbursement.scheduled_epoch > current_epoch {
+            continue;
+        }
+        if let Some(check) = &config.dependency_check {
+            if !check(store, &disbursement)? {
+                continue;
+            }
+        }
+        pending_matured = pending_matured.saturating_add(1);
+        let intent = if let Some(existing) = staged_lookup.remove(&disbursement.id) {
+            existing
+        } else {
+            let intent = (config.signer)(&disbursement)?;
+            store.record_execution_intent(intent.clone())?;
+            intent
+        };
+        match (config.submitter)(&intent) {
+            Ok(tx_hash) => {
+                store.execute_disbursement(disbursement.id, &tx_hash)?;
+                let _ = store.remove_execution_intent(disbursement.id);
+                success_total = success_total.saturating_add(1);
+            }
+            Err(err) => {
+                if err.is_storage() {
+                    return Err(err);
+                }
+                if err.is_cancelled() {
+                    store.cancel_disbursement(disbursement.id, err.message())?;
+                    let _ = store.remove_execution_intent(disbursement.id);
+                    cancelled_total = cancelled_total.saturating_add(1);
+                } else {
+                    last_error = Some(err.message().to_string());
+                }
+            }
+        }
+    }
+
+    let staged_total = store.load_execution_intents()?.len() as u64;
+    if let Some(message) = last_error.clone() {
+        snapshot.record_error(message, pending_matured, staged_total);
+    } else {
+        snapshot.record_success(pending_matured, staged_total);
+    }
+    store.store_executor_snapshot(snapshot)?;
+
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::TREASURY_EXECUTOR_PENDING_MATURED.set(pending_matured as i64);
+        crate::telemetry::TREASURY_EXECUTOR_STAGED_INTENTS.set(staged_total as i64);
+        crate::telemetry::TREASURY_EXECUTOR_LAST_TICK_SECONDS
+            .set(snapshot.last_tick_at.min(i64::MAX as u64) as i64);
+        if let Some(ts) = snapshot.last_success_at {
+            crate::telemetry::TREASURY_EXECUTOR_LAST_SUCCESS_SECONDS
+                .set(ts.min(i64::MAX as u64) as i64);
+        }
+        if let Some(ts) = snapshot.last_error_at {
+            crate::telemetry::TREASURY_EXECUTOR_LAST_ERROR_SECONDS
+                .set(ts.min(i64::MAX as u64) as i64);
+        } else {
+            crate::telemetry::TREASURY_EXECUTOR_LAST_ERROR_SECONDS.set(0);
+        }
+
+        if success_total > 0 {
+            crate::telemetry::TREASURY_EXECUTOR_RESULT_TOTAL
+                .ensure_handle_for_label_values(&["success"])
+                .unwrap_or_else(|e| panic!("treasury executor success handle: {e}"))
+                .inc_by(success_total as u64);
+        }
+        if cancelled_total > 0 {
+            crate::telemetry::TREASURY_EXECUTOR_RESULT_TOTAL
+                .ensure_handle_for_label_values(&["cancelled"])
+                .unwrap_or_else(|e| panic!("treasury executor cancelled handle: {e}"))
+                .inc_by(cancelled_total as u64);
+        }
+        if let Some(err) = last_error {
+            crate::telemetry::TREASURY_EXECUTOR_RESULT_TOTAL
+                .ensure_handle_for_label_values(&["error"])
+                .unwrap_or_else(|e| panic!("treasury executor error handle: {e}"))
+                .inc();
+            crate::telemetry::TREASURY_EXECUTOR_ERRORS_TOTAL
+                .ensure_handle_for_label_values(&[err.as_str()])
+                .unwrap_or_else(|e| panic!("treasury executor error code handle: {e}"))
+                .inc();
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -257,6 +474,32 @@ fn ser<T: BinaryCodec>(value: &T) -> sled::Result<Vec<u8>> {
 
 fn de<T: BinaryCodec>(bytes: &[u8]) -> sled::Result<T> {
     decode_binary(bytes)
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = FmtWrite::write_fmt(&mut out, format_args!("{:02x}", byte));
+    }
+    out
+}
+
+fn hex_to_bytes(value: &str) -> sled::Result<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return Err(sled::Error::Unsupported("invalid hex length".into()));
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    let chars: Vec<char> = value.chars().collect();
+    for chunk in chars.chunks(2) {
+        let hi = chunk[0]
+            .to_digit(16)
+            .ok_or_else(|| sled::Error::Unsupported("invalid hex character".into()))?;
+        let lo = chunk[1]
+            .to_digit(16)
+            .ok_or_else(|| sled::Error::Unsupported("invalid hex character".into()))?;
+        bytes.push(((hi << 4) | lo) as u8);
+    }
+    Ok(bytes)
 }
 
 fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
@@ -508,6 +751,129 @@ fn dependency_policy_record_from_json(value: &Value) -> CodecResult<DependencyPo
         kind: kind.to_string(),
         allowed,
     })
+}
+
+fn execution_intent_to_json(intent: &SignedExecutionIntent) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "disbursement_id".into(),
+        Value::Number(Number::from(intent.disbursement_id)),
+    );
+    map.insert(
+        "tx_bytes".into(),
+        Value::String(bytes_to_hex(&intent.tx_bytes)),
+    );
+    map.insert("tx_hash".into(), Value::String(intent.tx_hash.clone()));
+    map.insert(
+        "staged_at".into(),
+        Value::Number(Number::from(intent.staged_at)),
+    );
+    Value::Object(map)
+}
+
+fn execution_intent_from_json(value: &Value) -> CodecResult<SignedExecutionIntent> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| sled::Error::Unsupported("treasury intent JSON: expected object".into()))?;
+    let disbursement_id = obj
+        .get("disbursement_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury intent JSON: missing disbursement_id".into())
+        })?;
+    let tx_bytes_hex = obj
+        .get("tx_bytes")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("treasury intent JSON: missing tx_bytes".into()))?;
+    let tx_bytes = hex_to_bytes(tx_bytes_hex)?;
+    let tx_hash = obj
+        .get("tx_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| sled::Error::Unsupported("treasury intent JSON: missing tx_hash".into()))?
+        .to_string();
+    let staged_at = obj
+        .get("staged_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury intent JSON: missing staged_at".into())
+        })?;
+    Ok(SignedExecutionIntent {
+        disbursement_id,
+        tx_bytes,
+        tx_hash,
+        staged_at,
+    })
+}
+
+fn executor_snapshot_to_json(snapshot: &TreasuryExecutorSnapshot) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "last_tick_at".into(),
+        Value::Number(Number::from(snapshot.last_tick_at)),
+    );
+    if let Some(ts) = snapshot.last_success_at {
+        map.insert("last_success_at".into(), Value::Number(Number::from(ts)));
+    }
+    if let Some(ts) = snapshot.last_error_at {
+        map.insert("last_error_at".into(), Value::Number(Number::from(ts)));
+    }
+    if let Some(err) = snapshot.last_error.as_ref() {
+        map.insert("last_error".into(), Value::String(err.clone()));
+    }
+    map.insert(
+        "pending_matured".into(),
+        Value::Number(Number::from(snapshot.pending_matured)),
+    );
+    map.insert(
+        "staged_intents".into(),
+        Value::Number(Number::from(snapshot.staged_intents)),
+    );
+    Value::Object(map)
+}
+
+fn executor_snapshot_from_json(value: &Value) -> CodecResult<TreasuryExecutorSnapshot> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("treasury executor JSON: expected object".into())
+    })?;
+    let last_tick_at = obj
+        .get("last_tick_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury executor JSON: missing last_tick_at".into())
+        })?;
+    let last_success_at = obj.get("last_success_at").and_then(Value::as_u64);
+    let last_error_at = obj.get("last_error_at").and_then(Value::as_u64);
+    let last_error = obj
+        .get("last_error")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let pending_matured = obj
+        .get("pending_matured")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let staged_intents = obj
+        .get("staged_intents")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Ok(TreasuryExecutorSnapshot {
+        last_tick_at,
+        last_success_at,
+        last_error_at,
+        last_error,
+        pending_matured,
+        staged_intents,
+    })
+}
+
+fn execution_intents_to_json_array(intents: &[SignedExecutionIntent]) -> Value {
+    Value::Array(intents.iter().map(execution_intent_to_json).collect())
+}
+
+fn execution_intents_from_json_array(value: &Value) -> CodecResult<Vec<SignedExecutionIntent>> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| sled::Error::Unsupported("treasury intent JSON: expected array".into()))?;
+    arr.iter().map(execution_intent_from_json).collect()
 }
 
 fn fee_floor_record_to_json(record: &FeeFloorPolicyRecord) -> Value {
@@ -768,6 +1134,18 @@ impl GovStore {
             .join("treasury_balance.json")
     }
 
+    fn treasury_execution_intent_path(&self) -> PathBuf {
+        self.base_path
+            .join("governance")
+            .join("treasury_execution_intents.json")
+    }
+
+    fn treasury_executor_snapshot_path(&self) -> PathBuf {
+        self.base_path
+            .join("governance")
+            .join("treasury_executor_snapshot.json")
+    }
+
     fn treasury_disbursements_tree(&self) -> sled::Tree {
         self.db
             .open_tree("treasury/disbursements")
@@ -784,6 +1162,18 @@ impl GovStore {
         self.db
             .open_tree("treasury/balance_history")
             .unwrap_or_else(|e| panic!("open treasury balance history tree: {e}"))
+    }
+
+    fn treasury_execution_intents_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("treasury/execution_intents")
+            .unwrap_or_else(|e| panic!("open treasury execution intents tree: {e}"))
+    }
+
+    fn treasury_executor_snapshot_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("treasury/executor_snapshot")
+            .unwrap_or_else(|e| panic!("open treasury executor snapshot tree: {e}"))
     }
 
     fn load_disbursements(&self) -> sled::Result<Vec<TreasuryDisbursement>> {
@@ -860,6 +1250,117 @@ impl GovStore {
         }
         std::fs::write(&path, bytes).map_err(|e| {
             sled::Error::Unsupported(format!("write treasury disbursements: {e}").into())
+        })
+    }
+
+    fn load_execution_intents(&self) -> sled::Result<Vec<SignedExecutionIntent>> {
+        let tree = self.treasury_execution_intents_tree();
+        let mut from_tree = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let intent: SignedExecutionIntent = de(&raw)?;
+            from_tree.push(intent);
+        }
+        if !from_tree.is_empty() {
+            from_tree.sort_by_key(|intent| intent.disbursement_id);
+            return Ok(from_tree);
+        }
+
+        let path = self.treasury_execution_intent_path();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    let value = json_from_bytes(&bytes).map_err(|e| {
+                        sled::Error::Unsupported(
+                            format!("decode treasury execution intents: {e}").into(),
+                        )
+                    })?;
+                    let mut decoded = execution_intents_from_json_array(&value)?;
+                    decoded.sort_by_key(|intent| intent.disbursement_id);
+                    if !decoded.is_empty() {
+                        let _ = self.persist_execution_intents(&decoded);
+                    }
+                    Ok(decoded)
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
+            Err(err) => Err(sled::Error::Unsupported(
+                format!("read treasury execution intents: {err}").into(),
+            )),
+        }
+    }
+
+    fn persist_execution_intents(&self, intents: &[SignedExecutionIntent]) -> sled::Result<()> {
+        let mut trimmed = intents.to_vec();
+        trimmed.sort_by_key(|intent| intent.staged_at);
+        if trimmed.len() > TREASURY_INTENT_HISTORY_LIMIT {
+            let drop = trimmed.len() - TREASURY_INTENT_HISTORY_LIMIT;
+            trimmed.drain(0..drop);
+        }
+
+        let tree = self.treasury_execution_intents_tree();
+        let mut existing: Vec<Vec<u8>> = Vec::new();
+        for entry in tree.iter() {
+            let (k, _) = entry?;
+            existing.push(k.to_vec());
+        }
+
+        for intent in &trimmed {
+            let key = ser(&intent.disbursement_id)?;
+            tree.insert(&key, ser(intent)?)?;
+            if let Some(pos) = existing.iter().position(|candidate| candidate == &key) {
+                existing.swap_remove(pos);
+            }
+        }
+
+        for key in existing {
+            tree.remove(key)?;
+        }
+
+        let value = execution_intents_to_json_array(&trimmed);
+        let bytes = json_to_bytes(&value);
+        let path = self.treasury_execution_intent_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&path, bytes).map_err(|e| {
+            sled::Error::Unsupported(format!("write treasury execution intents: {e}").into())
+        })
+    }
+
+    fn load_executor_snapshot(&self) -> sled::Result<Option<TreasuryExecutorSnapshot>> {
+        let tree = self.treasury_executor_snapshot_tree();
+        if let Some(raw) = tree.get(b"snapshot")? {
+            return de(&raw).map(Some);
+        }
+        let path = self.treasury_executor_snapshot_path();
+        if let Ok(bytes) = std::fs::read(&path) {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            let value = json_from_bytes(&bytes).map_err(|e| {
+                sled::Error::Unsupported(format!("decode treasury executor snapshot: {e}").into())
+            })?;
+            let snapshot = executor_snapshot_from_json(&value)?;
+            let _ = self.store_executor_snapshot(&snapshot);
+            return Ok(Some(snapshot));
+        }
+        Ok(None)
+    }
+
+    fn store_executor_snapshot(&self, snapshot: &TreasuryExecutorSnapshot) -> sled::Result<()> {
+        let tree = self.treasury_executor_snapshot_tree();
+        tree.insert(b"snapshot", ser(snapshot)?)?;
+        let value = executor_snapshot_to_json(snapshot);
+        let bytes = json_to_bytes(&value);
+        let path = self.treasury_executor_snapshot_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&path, bytes).map_err(|e| {
+            sled::Error::Unsupported(format!("write treasury executor snapshot: {e}").into())
         })
     }
 
@@ -1827,6 +2328,91 @@ impl GovStore {
             Err(sled::Error::Unsupported(
                 format!("unknown treasury disbursement id {id}").into(),
             ))
+        }
+    }
+
+    pub fn execution_intents(&self) -> sled::Result<Vec<SignedExecutionIntent>> {
+        self.load_execution_intents()
+    }
+
+    pub fn execution_intent(&self, id: u64) -> sled::Result<Option<SignedExecutionIntent>> {
+        let tree = self.treasury_execution_intents_tree();
+        match tree.get(ser(&id)?)? {
+            Some(raw) => de(&raw).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn record_execution_intent(&self, intent: SignedExecutionIntent) -> sled::Result<()> {
+        let mut intents = self.load_execution_intents()?;
+        intents.retain(|entry| entry.disbursement_id != intent.disbursement_id);
+        intents.push(intent);
+        self.persist_execution_intents(&intents)
+    }
+
+    pub fn remove_execution_intent(&self, id: u64) -> sled::Result<()> {
+        let mut intents = self.load_execution_intents()?;
+        let len_before = intents.len();
+        intents.retain(|entry| entry.disbursement_id != id);
+        if intents.len() != len_before {
+            self.persist_execution_intents(&intents)?;
+        } else {
+            let tree = self.treasury_execution_intents_tree();
+            let _ = tree.remove(ser(&id)?);
+        }
+        Ok(())
+    }
+
+    pub fn executor_snapshot(&self) -> sled::Result<Option<TreasuryExecutorSnapshot>> {
+        self.load_executor_snapshot()
+    }
+
+    pub fn update_executor_snapshot(
+        &self,
+        snapshot: &TreasuryExecutorSnapshot,
+    ) -> sled::Result<()> {
+        self.store_executor_snapshot(snapshot)
+    }
+
+    pub fn spawn_treasury_executor(
+        &self,
+        config: TreasuryExecutorConfig,
+    ) -> TreasuryExecutorHandle {
+        let store = self.clone();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let poll_interval = config.poll_interval;
+        let handle = thread::spawn(move || {
+            let mut snapshot = store
+                .load_executor_snapshot()
+                .unwrap_or_else(|_| Some(TreasuryExecutorSnapshot::default()))
+                .unwrap_or_default();
+            loop {
+                if thread_shutdown.load(AtomicOrdering::SeqCst) {
+                    break;
+                }
+
+                if let Err(err) = run_executor_tick(&store, &config, &mut snapshot) {
+                    if err.is_storage() {
+                        break;
+                    }
+                    snapshot.record_error(
+                        err.message().to_string(),
+                        snapshot.pending_matured,
+                        snapshot.staged_intents,
+                    );
+                    let _ = store.store_executor_snapshot(&snapshot);
+                }
+
+                if thread_shutdown.load(AtomicOrdering::SeqCst) {
+                    break;
+                }
+                thread::sleep(poll_interval);
+            }
+        });
+        TreasuryExecutorHandle {
+            shutdown,
+            thread: Mutex::new(Some(handle)),
         }
     }
 

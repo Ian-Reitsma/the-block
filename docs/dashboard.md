@@ -32,6 +32,10 @@ oracles (`ad_readiness_market_{ct,it}_price_usd_micros`), the settlement totals,
 and the `utilization` map returned by `ad_market.readiness`, showing
 mean/min/max cohort utilisation plus per-cohort targets, observed ppm, deltas,
 and price-per-MiB inputs that informed the latest settlements.
+An adjacent **Authenticated Conversions** sparkline graphs
+`ad_conversion_total{status,code}` five-minute deltas so ops teams can spot
+token mismatches or missing headers in real time; the tooltip enumerates the
+dominant error codes when failures spike.
 
 The treasury section gained a **Dual-Token Disbursements** timeline sourced from
 the new `Block::treasury_events` payload. Each executed disbursement displays the
@@ -41,6 +45,11 @@ Dashboards colourise events whose cohorts triggered the
 `AdReadinessUtilizationDelta` alert, tying treasury releases back to the
 readiness deltas emitted by the metrics aggregator and confirming governance
 flags are aligned across runtime, explorer, and telemetry surfaces.
+The panel now embeds a compact executor health widget sourced from
+`treasury_executor_pending_matured`, `treasury_executor_staged_intents`, and the
+`*_last_{tick,success,error}_seconds` gauges so operators can confirm the
+automated executor is draining mature disbursements and alert immediately when
+ticks stall or error streaks grow.
 
 The SPA now includes attestation and pacing cards. Selection receipts display the
 latest `ad_selection_attestation_total{kind,result}` breakdown with tooltips

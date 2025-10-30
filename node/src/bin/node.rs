@@ -15,7 +15,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
     Arc, Mutex,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
@@ -32,6 +32,9 @@ use ad_market::{
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
+use the_block::treasury_executor::{
+    memo_dependency_check, spawn_executor as spawn_treasury_executor, ExecutorParams,
+};
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     gateway::dns::{install_ledger_context, BlockchainLedger},
@@ -616,6 +619,15 @@ enum Commands {
 
         /// Enable VM debugging features
         enable_vm_debug: bool,
+
+        /// Enable automated treasury execution
+        treasury_executor: bool,
+
+        /// Signing key identifier used by the treasury executor
+        treasury_key: Option<String>,
+
+        /// Seconds between treasury executor polling ticks
+        treasury_poll_interval: u64,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -861,6 +873,24 @@ fn build_run_command() -> CliCommand {
         "enable-vm-debug",
         "Enable VM debugging features",
     )))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "treasury_executor",
+        "treasury-executor",
+        "Enable automated treasury disbursement execution",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "treasury_key",
+        "treasury-key",
+        "Key identifier used to sign treasury disbursements",
+    )))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "treasury_poll_interval",
+            "treasury-poll-interval",
+            "Seconds between treasury executor polling ticks",
+        )
+        .default("15"),
+    ))
     .build()
 }
 
@@ -1001,6 +1031,9 @@ fn parse_run(matches: &Matches) -> Result<Commands, String> {
         .transpose()?
         .unwrap_or(AckPrivacyArg::Enforce);
     let enable_vm_debug = matches.get_flag("enable_vm_debug");
+    let treasury_executor = matches.get_flag("treasury_executor");
+    let treasury_key = matches.get_string("treasury_key");
+    let treasury_poll_interval = parse_u64_option(matches, "treasury_poll_interval", 15)?;
 
     Ok(Commands::Run {
         rpc_addr,
@@ -1027,6 +1060,9 @@ fn parse_run(matches: &Matches) -> Result<Commands, String> {
         jurisdiction,
         overlay_backend,
         enable_vm_debug,
+        treasury_executor,
+        treasury_key,
+        treasury_poll_interval,
     })
 }
 
@@ -1253,6 +1289,9 @@ async fn async_main() -> std::process::ExitCode {
             jurisdiction,
             overlay_backend,
             enable_vm_debug,
+            treasury_executor,
+            treasury_key,
+            treasury_poll_interval,
         } => {
             if auto_tune {
                 #[cfg(feature = "telemetry")]
@@ -1276,6 +1315,23 @@ async fn async_main() -> std::process::ExitCode {
                     (None, None)
                 }
             };
+            if treasury_executor && treasury_key.is_none() {
+                eprintln!("--treasury-executor requires --treasury-key <key-id>");
+                return std::process::ExitCode::FAILURE;
+            }
+            let gov_db_path = format!("{data_dir}/governance.db");
+            if let Some(parent) = Path::new(&gov_db_path).parent() {
+                if let Err(err) = fs::create_dir_all(parent) {
+                    eprintln!(
+                        "failed to create governance store directory {}: {err}",
+                        parent.display()
+                    );
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            std::env::set_var("TB_GOVERNANCE_DB_PATH", &gov_db_path);
+            let gov_store = the_block::governance::GovStore::open(&gov_db_path);
+            let poll_interval_secs = treasury_poll_interval.max(1);
             let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
             let ack_privacy_mode = ReadAckPrivacyMode::from(ack_privacy);
             if inner.config.read_ack_privacy != ack_privacy_mode {
@@ -1347,6 +1403,19 @@ async fn async_main() -> std::process::ExitCode {
             let treasury_account = {
                 let guard = bc.lock().unwrap();
                 guard.config.treasury_account.clone()
+            };
+            let _treasury_executor_handle = if treasury_executor {
+                let key_id = treasury_key.clone().expect("treasury key checked above");
+                let signing_key = load_key(&key_id);
+                let params = ExecutorParams {
+                    poll_interval: Duration::from_secs(poll_interval_secs),
+                    signing_key: Arc::new(signing_key.to_bytes().to_vec()),
+                    treasury_account: treasury_account.clone(),
+                    dependency_check: Some(memo_dependency_check()),
+                };
+                Some(spawn_treasury_executor(&gov_store, Arc::clone(&bc), params))
+            } else {
+                None
             };
             install_ledger_context(Arc::new(BlockchainLedger::new(
                 Arc::clone(&bc),

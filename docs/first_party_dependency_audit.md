@@ -1,5 +1,17 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-30 update (treasury executor automation & conversion telemetry):**
+> The node and governance crates now stage signed treasury intents entirely
+> through sled + `foundation_serialization` helpers, and the runtime executor
+> uses in-house signing/submitter closures plus memo-derived dependency hooks to
+> drain disbursements without background cron or third-party schedulers. Executor
+> metrics ride the existing `foundation_metrics` facade, while RPC/CLI snapshots
+> reuse the shared codecs—no new RPC clients or serde derives were introduced.
+> Authenticated conversion counters, readiness summaries, and the new mesh
+> settlement fields all serialize through the same manual JSON walkers as prior
+> advertising updates, keeping telemetry and RPC surfaces first party end to end.
+> RangeBoost’s forwarder toggles continue to lean on the in-tree concurrency
+> primitives, so runtime enable/disable logic stays hermetic.
 > **2025-10-30 update (mesh forwarder & advertiser auth):** The RangeBoost mesh
 > queue gained a first-party forwarder thread that only spawns when
 > `--range-boost`/`TB_MESH_STATIC_PEERS` enables mesh mode, keeping HTTP-only

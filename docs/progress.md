@@ -1,4 +1,18 @@
 # Project Progress Snapshot
+> **Review (2025-10-30, late night):** Treasury execution is now automated end
+> to end. Governance and node stores stage signed intents in sled, the node
+> spawns the executor via `--treasury-executor --treasury-key <ID>`, and the
+> worker submits transactions once epochs mature while respecting memo-declared
+> dependencies. RPC/CLI surfaces expose executor snapshots (last tick, success,
+> error, pending matured, staged intents), and telemetry gauges/counters power
+> Grafana alerts when queues back up or submissions fail. Integration coverage
+> exercises dependency gating, nonce reuse, and crash-safe persistence for both
+> governance and node paths. Advertising telemetry now exports
+> `ad_conversion_total{status,code}` so dashboards can correlate authenticated
+> conversion health with readiness, and the treasury dashboard renders executor
+> liveness beside the dual-token timeline. Mesh integration tests validate
+> holdout/treatment settlement payloads populate the new mesh digest/length
+> fields for both cohorts.
 > **Review (2025-10-30, afternoon):** RangeBoost mesh delivery now includes a
 > first-party queue forwarder that activates only when mesh mode is enabled,
 > keeping HTTP-only gateways free of background workers while mesh deployments

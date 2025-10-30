@@ -18,8 +18,9 @@ pub use bicameral::{
 };
 pub use governance_spec::treasury;
 pub use governance_spec::treasury::{
-    mark_cancelled, mark_executed, DisbursementStatus, TreasuryBalanceEventKind,
-    TreasuryBalanceSnapshot, TreasuryDisbursement,
+    mark_cancelled, mark_executed, DisbursementStatus, SignedExecutionIntent,
+    TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    TreasuryExecutorSnapshot,
 };
 pub use governance_spec::{
     approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval,
@@ -32,8 +33,9 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
-    QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryExecutorConfig,
+    TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY, QUORUM,
+    ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 

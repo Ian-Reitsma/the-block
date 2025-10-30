@@ -158,6 +158,7 @@ pub use service_badge::ServiceBadgeTracker;
 pub mod blob_chain;
 
 pub mod governance;
+pub mod treasury_executor;
 pub use governance::{
     retune_multipliers, Bicameral, BicameralGovernance as Governance,
     BicameralProposal as LegacyProposal, GovStore, House, ParamKey, Params, Proposal,

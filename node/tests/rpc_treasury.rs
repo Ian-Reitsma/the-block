@@ -146,6 +146,7 @@ fn rpc_treasury_endpoints_surface_history() {
             .as_ref()
             .expect("last snapshot present");
         assert!(matches!(last_snapshot.event, BalanceEventKind::Accrual));
+        assert!(balance.result.executor.is_none());
 
         let mut history_params = Map::new();
         history_params.insert("limit".to_string(), Value::Number(Number::from(4)));
@@ -212,6 +213,8 @@ struct TreasuryBalancePayload {
     balance_it: u64,
     #[serde(default)]
     last_snapshot: Option<TreasuryBalanceSnapshot>,
+    #[serde(default)]
+    executor: Option<TreasuryExecutorSnapshot>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +231,23 @@ struct TreasuryBalanceSnapshot {
     event: BalanceEventKind,
     #[serde(default)]
     disbursement_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct TreasuryExecutorSnapshot {
+    #[serde(default)]
+    last_tick_at: u64,
+    #[serde(default)]
+    last_success_at: Option<u64>,
+    #[serde(default)]
+    last_error_at: Option<u64>,
+    #[serde(default)]
+    last_error: Option<String>,
+    #[serde(default)]
+    pending_matured: u64,
+    #[serde(default)]
+    staged_intents: u64,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]

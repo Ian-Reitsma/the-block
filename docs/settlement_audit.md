@@ -50,10 +50,12 @@ exact same values, keeping offline reconciliation aligned with live telemetry.
 
 Recent schema expansions surface additional delivery context: `clearing_price_usd_micros`
 captures the marginal price, `delivery_channel` distinguishes HTTP from mesh
-delivery, and `mesh_payload_digest` exposes the BLAKE3 digest of any staged
-mesh payload. Auditors should compare these values with the reservation logs and
-diagnostic events (e.g. `range_boost_forward_*`) to ensure mesh deliveries were
-properly staged and that HTTP impressions did not carry mesh payloads.
+delivery, `mesh_payload_digest` exposes the BLAKE3 digest of any staged mesh
+payload, and `mesh_payload_bytes` records the payload length. Auditors should
+compare these values with the reservation logs and diagnostic events (e.g.
+`range_boost_forward_*`) to ensure mesh deliveries were properly staged, holdout
+and treatment cohorts received identical payloads, and that HTTP impressions did
+not carry mesh content unexpectedly.
 
 Anchors appear with `entity == "__anchor__"` and include the BLAKE3 hash of the submitted receipt bundle. Explorer jobs should persist these markers and render continuity timelines alongside the Merkle roots returned by `compute_market.recent_roots`.
 

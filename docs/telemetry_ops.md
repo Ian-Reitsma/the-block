@@ -29,6 +29,19 @@ for correlating metrics with structured logs across the fleet.
   remains `0`, oracle prices diverge unexpectedly, or skips climb for more than
   one readiness window so governance can postpone activation or seed additional
   hosts/providers before enabling the ad rail.
+- **Authenticated conversions** – Alert when
+  `increase(ad_conversion_total{status="error"}[10m])` deviates from the normal
+  baseline or any individual `code` label (e.g., `missing_auth_header`,
+  `invalid_token`, `unauthorized_account`) spikes. Pair the alert with RPC error
+  sampling so operators can reset advertiser tokens or fix SDK rollouts before
+  attribution dashboards go dark.
+- **Treasury executor** – Track
+  `treasury_executor_pending_matured`, `treasury_executor_staged_intents`, and
+  the `treasury_executor_last_{tick,success,error}_seconds` gauges. Page when
+  `pending_matured` grows for multiple polling intervals or when
+  `treasury_executor_result_total{result="error"}` increments twice in a row so
+  ops can inspect dependency blockers, account balances, or signing keys before
+  disbursements back up.
 - **Correlating anomalies** – `log_correlation_fail_total{metric}` increments
   whenever the aggregator cannot locate logs for a metric spike. Combine this
   with `aggregator_ingest_total{result="error"}` to detect ingest backpressure.

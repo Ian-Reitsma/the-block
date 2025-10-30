@@ -228,10 +228,17 @@ cluster-wide gauges when compiled with `--features telemetry`:
   the aggregator prunes retired label handles; pair them with the readiness RPC’s
   `utilization` summary (mean/min/max ppm plus per-cohort price/target pairs) to
   page when utilisation drifts from governance targets despite steady demand.
-  The aggregator now forwards the entire `ad_readiness` JSON map—including
-  `delta_utilization_ppm`—through `telemetry_summary_to_value`, so CI artefacts
-  and downstream automation consume the same per-cohort deltas that drive the new
-  Prometheus alerting rules.
+The aggregator now forwards the entire `ad_readiness` JSON map—including
+`delta_utilization_ppm`—through `telemetry_summary_to_value`, so CI artefacts
+and downstream automation consume the same per-cohort deltas that drive the new
+Prometheus alerting rules.
+- `ad_conversion_total{status,code}` – authenticated conversion attempts recorded
+  directly by the node. `status` splits `success`, `error`, and `cancelled`
+  outcomes while `code` carries the stable RPC error identifier for rejected
+  conversions (`missing_auth_header`, `unauthorized_account`, `invalid_token`,
+  `stale_request`, etc.). Dashboards can graph
+  `increase(ad_conversion_total{status="error"}[5m])` next to readiness gauges to
+  spot authentication drift without scraping RPC logs.
 - `chaos_readiness{module,scenario}`,
   `chaos_site_readiness{module,scenario,site,provider}`, and
   `chaos_sla_breach_total` – readiness snapshots and breach counts derived from
@@ -246,6 +253,16 @@ cluster-wide gauges when compiled with `--features telemetry`:
   - `codec_payload_bytes{codec,direction,profile,version}`, `codec_serialize_fail_total{codec,profile,version}`, and `codec_deserialize_fail_total{codec,profile,version}` report codec throughput and failures with an explicit `codec::VERSION` label.
   - `crypto_backend_info{algorithm,backend,version}` identifies the Ed25519 implementation in use, and `crypto_operation_total{algorithm,backend,version,operation,result}` captures success and error counts for signing and verification paths.
 - `dependency_policy_violation{crate,version,kind,detail,depth}` and `dependency_policy_violation_total` allow alerting on supply-chain policy regressions emitted by the dependency registry tool.
+- `treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
+  `treasury_executor_last_tick_seconds`,
+  `treasury_executor_last_success_seconds`, and
+  `treasury_executor_last_error_seconds` surface the executor’s liveness stamps
+  and backlog depth. Couple them with `treasury_executor_result_total{result}`
+  (`success`, `cancelled`, `error`) and
+  `treasury_executor_errors_total{reason}` to alert on repeated submission
+  failures, cancelled disbursements (insufficient CT/IT balance), or dependency
+  gating. The RPC and CLI surfaces reuse the same snapshot so dashboards can tie
+  metrics back to individual disbursements.
 - `tls_env_warning_total{prefix,code}` and
   `tls_env_warning_last_seen_seconds{prefix,code}` track TLS configuration
   warnings forwarded from diagnostics. Fingerprint gauges

@@ -11,6 +11,15 @@ RPC client.
 
 ## Recent progress (2025-11-09)
 
+- Treasury RPC surfaces now include executor snapshots (last tick/success/error,
+  pending matured, staged intents) generated via the existing codecs, and the
+  CLI reuses the shared JSON helpers so automation can inspect executor health
+  without new RPC clients. The node spawns the treasury executor through
+  first-party closures that sign and submit intents directly against the
+  in-memory blockchain harness, keeping scheduling and submission logic entirely
+  in-house while integration tests assert dependency gating, cancellation, and
+  restart recovery.
+
 - `ad_market.record_conversion` now enforces advertiser authentication entirely
   through first-party helpers. Campaigns must persist a BLAKE3 digest under
   `conversion_token_hash`, callers provide `Authorization: Advertiser

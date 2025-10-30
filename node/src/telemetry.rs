@@ -2798,6 +2798,21 @@ pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static AD_CONVERSION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_conversion_total",
+            "Authenticated conversion attempts partitioned by status and error code",
+        ),
+        &["status", "code"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad conversion: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad conversion: {e}"));
+    c
+});
+
 #[cfg(feature = "telemetry")]
 pub static AD_MARKET_UTILIZATION_OBSERVED: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
@@ -4340,6 +4355,96 @@ pub static GOV_QUORUM_REQUIRED: Lazy<IntGaugeHandle> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry gov_quorum_required: {e}"));
     g.handle()
+});
+
+pub static TREASURY_EXECUTOR_PENDING_MATURED: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_pending_matured",
+        "Matured treasury disbursements pending execution",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_pending_matured: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_pending_matured: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_STAGED_INTENTS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_staged_intents",
+        "Staged treasury execution intents awaiting submission",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_staged_intents: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_staged_intents: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_LAST_TICK_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_last_tick_seconds",
+        "Timestamp of the last treasury executor tick",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_last_tick_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_last_tick_seconds: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_LAST_SUCCESS_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_last_success_seconds",
+        "Timestamp of the last successful treasury executor run",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_last_success_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_last_success_seconds: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_LAST_ERROR_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_last_error_seconds",
+        "Timestamp of the last treasury executor error",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_last_error_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_last_error_seconds: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_RESULT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "treasury_executor_result_total",
+            "Treasury executor outcomes by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter treasury_executor_result_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_result_total: {e}"));
+    c
+});
+
+pub static TREASURY_EXECUTOR_ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "treasury_executor_errors_total",
+            "Treasury executor submission errors by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter treasury_executor_errors_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_errors_total: {e}"));
+    c
 });
 
 pub static RECEIPT_CORRUPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {

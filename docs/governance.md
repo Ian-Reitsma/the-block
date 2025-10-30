@@ -161,6 +161,37 @@ appends a balance snapshot noting the CT/IT deltas, resulting balances, and any
 associated disbursement ID, keeping historical accruals in lockstep with the
 legacy JSON snapshots.
 
+#### Automated treasury executor
+
+- The governance and node stores now persist signed execution intents under
+  `treasury/execution_intents`. When a scheduled disbursement reaches its
+  `scheduled_epoch`, the executor signs a transaction via the configured treasury
+  key, stages the encoded bytes, and reuses the intent on retries to keep nonce
+  allocation deterministic across restarts.
+- `treasury_executor::spawn_executor` wires the background worker into the node.
+  Pass `--treasury-executor --treasury-key <KEY>` (and optionally
+  `--treasury-poll-interval <secs>`) to enable automatic execution at runtime.
+  The helper derives nonces from the treasury account, enforces dependency hooks
+  (memo-based `depends_on=[…]` by default), and cancels disbursements when the
+  treasury lacks CT/IT balance or when the submitter returns a terminal
+  `TxAdmissionError`.
+- `gov.treasury.balance` now embeds an `executor` snapshot exposing
+  `last_tick_at`, `last_success_at`, `last_error_at`, `pending_matured`, and
+  `staged_intents`. `contract gov treasury fetch` renders the same snapshot in the
+  CLI, alongside executor uptime, last error string, and whether any intents are
+  waiting on dependency gates.
+- The worker publishes metrics
+  (`treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
+  `treasury_executor_last_{tick,success,error}_seconds`,
+  `treasury_executor_result_total{result}`, and
+  `treasury_executor_errors_total{reason}`) so dashboards can alert when mature
+  disbursements accumulate, ticks stall, or submissions fail repeatedly. The RPC
+  summary and CLI output reuse the same snapshot, keeping observability
+  consistent across telemetry, dashboards, and operator tooling.
+- Integration coverage in `node/tests/treasury.rs` exercises dependency gating,
+  nonce reuse, and crash-safe intent staging, while the governance tests confirm
+  staged intents survive restarts and avoid double-signing.
+
 ### Read-acknowledgement anomaly response
 
 Governance stewards the acknowledgement policy because sustained invalid receipt rates can signal hostile gateways or broken client integrations. When dashboards show `read_ack_processed_total{result="invalid_signature"}` or `{result="invalid_privacy"}` rising faster than the `ok` series:

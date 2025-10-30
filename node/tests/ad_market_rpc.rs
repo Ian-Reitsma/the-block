@@ -12,10 +12,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use sys::tempfile::TempDir;
 
 use ad_market::{
-    Campaign, CampaignTargeting, Creative, DistributionPolicy, ImpressionContext,
-    InMemoryMarketplace, Marketplace, MarketplaceConfig, MarketplaceHandle, ReservationKey,
-    SelectionAttestation, SelectionAttestationKind, SelectionReceipt, SledMarketplace,
-    VerifierCommitteeConfig, MICROS_PER_DOLLAR,
+    Campaign, CampaignTargeting, Creative, CreativePlacement, DeliveryChannel, DistributionPolicy,
+    ImpressionContext, InMemoryMarketplace, Marketplace, MarketplaceConfig, MarketplaceHandle,
+    MeshContext, ReservationKey, SelectionAttestation, SelectionAttestationKind, SelectionReceipt,
+    SledMarketplace, VerifierCommitteeConfig, MICROS_PER_DOLLAR,
 };
 use crypto_suite::{encoding::hex, hashing::blake3, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
@@ -1480,6 +1480,16 @@ fn rpc_record_conversion_success() {
     let config = MarketplaceConfig::default();
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_record_conversion_rpc", config);
+    let baseline_budget = expect_ok(harness.call("ad_market.budget", Value::Null));
+    let baseline_summary = baseline_budget
+        .get("conversion_summary")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let baseline_authenticated = baseline_summary
+        .get("authenticated_total")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let creative = Creative {
         id: "creative-rpc".into(),
         action_rate_ppm: 150_000,
@@ -1528,6 +1538,31 @@ fn rpc_record_conversion_success() {
     );
     let value = expect_ok(response);
     assert_eq!(value["status"], Value::String("ok".into()));
+    let summary = value
+        .get("conversion_summary")
+        .and_then(Value::as_object)
+        .cloned()
+        .expect("conversion summary in response");
+    let updated_total = summary
+        .get("authenticated_total")
+        .and_then(Value::as_u64)
+        .expect("authenticated_total present");
+    assert!(
+        updated_total >= baseline_authenticated + 1,
+        "authenticated_total should increment"
+    );
+    let budget_after = expect_ok(harness.call("ad_market.budget", Value::Null));
+    let budget_summary = budget_after
+        .get("conversion_summary")
+        .and_then(Value::as_object)
+        .cloned()
+        .expect("conversion summary in budget");
+    assert_eq!(
+        budget_summary
+            .get("authenticated_total")
+            .and_then(Value::as_u64),
+        Some(updated_total)
+    );
 }
 
 #[testkit::tb_serial]
@@ -1554,10 +1589,133 @@ fn rpc_record_conversion_rejects_unknown_creative() {
 }
 
 #[testkit::tb_serial]
+fn mesh_holdout_treatment_settlement_has_mesh_fields() {
+    let mut config = MarketplaceConfig::default();
+    config.oracles.prices.ct_price_usd_micros = 1_000_000;
+    config.oracles.prices.it_price_usd_micros = 1_000_000;
+    let (_dir, harness, _readiness) =
+        build_in_memory_harness("ad_market_mesh_holdout_treatment", config);
+    let market = harness
+        .in_memory_market
+        .clone()
+        .expect("in-memory market available");
+
+    let mesh_payload: Vec<u8> = vec![0xAB, 0xCD, 0xEF, 0x01];
+    let creative = Creative {
+        id: "creative-mesh".into(),
+        action_rate_ppm: 400_000,
+        margin_ppm: 800_000,
+        value_per_action_usd_micros: 750_000,
+        max_cpi_usd_micros: None,
+        lift_ppm: 150_000,
+        badges: vec![],
+        domains: vec!["mesh.test".into()],
+        metadata: HashMap::new(),
+        mesh_payload: Some(mesh_payload.clone()),
+        placement: CreativePlacement {
+            mesh_enabled: true,
+            mesh_only: false,
+            allowed_channels: vec![DeliveryChannel::Mesh],
+        },
+    };
+    let campaign = Campaign {
+        id: "cmp-mesh".into(),
+        advertiser_account: "mesh-advertiser".into(),
+        budget_usd_micros: 5_000_000,
+        creatives: vec![creative],
+        targeting: CampaignTargeting::default(),
+        metadata: HashMap::new(),
+    };
+    market
+        .register_campaign(campaign)
+        .expect("campaign registered");
+
+    let mut ctx = ImpressionContext::default();
+    ctx.domain = "mesh.test".into();
+    ctx.provider = Some("mesh-gateway".into());
+    ctx.bytes = 256;
+    ctx.population_estimate = Some(250);
+    ctx.delivery_channel = DeliveryChannel::Mesh;
+    ctx.mesh = Some(MeshContext {
+        peer_id: Some("mesh-peer-1".into()),
+        transport: Some("tcp".into()),
+        latency_ms: Some(42),
+        hop_proofs: vec!["hop-01".into(), "hop-02".into()],
+    });
+
+    let mut holdout_payload: Option<Vec<u8>> = None;
+    let mut holdout_digest: Option<String> = None;
+    let mut holdout_mesh_peer = None;
+    let mut treatment_payload: Option<Vec<u8>> = None;
+    let mut treatment_digest: Option<String> = None;
+    let mut treatment_settlement = None;
+
+    for seed in 10_000..20_000u64 {
+        let key = make_reservation_key(seed);
+        if let Some(outcome) = market.reserve_impression(key.clone(), ctx.clone()) {
+            let Some(payload) = outcome.mesh_payload.clone() else {
+                market.cancel(&key);
+                continue;
+            };
+            let digest = hex::encode(blake3::hash(&payload).as_bytes());
+            if outcome.uplift_assignment.in_holdout {
+                holdout_payload = Some(payload);
+                holdout_digest = Some(digest);
+                holdout_mesh_peer = outcome.selection_receipt.cohort.mesh_peer.clone();
+                assert!(market.commit(&key).is_none());
+            } else {
+                let settlement = market.commit(&key).expect("treatment settlement produced");
+                treatment_payload = settlement.mesh_payload.clone();
+                treatment_digest = settlement.mesh_payload_digest.clone();
+                treatment_settlement = Some(settlement);
+            }
+        }
+        if holdout_payload.is_some() && treatment_settlement.is_some() {
+            break;
+        }
+    }
+
+    let settlement = treatment_settlement.expect("treatment settlement found");
+    let holdout_payload = holdout_payload.expect("holdout payload captured");
+    let holdout_digest = holdout_digest.expect("holdout digest computed");
+    let treatment_payload = treatment_payload.expect("treatment payload present");
+    let treatment_digest = treatment_digest.expect("treatment digest present");
+
+    let expected_digest = hex::encode(blake3::hash(&mesh_payload).as_bytes());
+    assert_eq!(holdout_payload, mesh_payload);
+    assert_eq!(treatment_payload, mesh_payload);
+    assert_eq!(treatment_digest, expected_digest);
+    assert_eq!(holdout_digest, expected_digest);
+    assert_eq!(
+        settlement.mesh_payload_digest.as_deref(),
+        Some(expected_digest.as_str())
+    );
+    assert_eq!(settlement.delivery_channel, DeliveryChannel::Mesh);
+    assert!(settlement.mesh_payload.is_some());
+    assert_eq!(
+        settlement.selection_receipt.cohort.mesh_peer.as_deref(),
+        Some("mesh-peer-1")
+    );
+    assert_eq!(holdout_mesh_peer.as_deref(), Some("mesh-peer-1"));
+}
+
+#[testkit::tb_serial]
 fn rpc_record_conversion_requires_authorization_header() {
     let config = MarketplaceConfig::default();
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_record_conversion_no_auth", config);
+    let baseline_budget = expect_ok(harness.call("ad_market.budget", Value::Null));
+    let baseline_errors = baseline_budget
+        .get("conversion_summary")
+        .and_then(Value::as_object)
+        .and_then(|summary| summary.get("error_counts"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let baseline_auth_required = baseline_errors
+        .get("auth_required")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let creative = Creative {
         id: "creative-auth".into(),
         action_rate_ppm: 120_000,
@@ -1598,6 +1756,22 @@ fn rpc_record_conversion_requires_authorization_header() {
     });
     let error = expect_error(harness.call("ad_market.record_conversion", params));
     assert_eq!(error.code(), -32030);
+    let budget_after = expect_ok(harness.call("ad_market.budget", Value::Null));
+    let after_errors = budget_after
+        .get("conversion_summary")
+        .and_then(Value::as_object)
+        .and_then(|summary| summary.get("error_counts"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let after_auth_required = after_errors
+        .get("auth_required")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    assert!(
+        after_auth_required >= baseline_auth_required + 1,
+        "auth_required error counter should increment"
+    );
 }
 
 #[testkit::tb_serial]

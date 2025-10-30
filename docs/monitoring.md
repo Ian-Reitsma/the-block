@@ -209,6 +209,14 @@ snapshots, and runbooks inherit the CT/IT balance story without waiting for the
 governance activation. Alerts reuse the same counters to warn when balances or
 disbursement volumes drift across currencies.
 
+The executor widget consumes `treasury_executor_pending_matured`,
+`treasury_executor_staged_intents`, and the `treasury_executor_last_{tick,success,error}_seconds`
+gauges so operators can confirm the automated worker is draining matured
+disbursements. Companion counters `treasury_executor_result_total{result}` and
+`treasury_executor_errors_total{reason}` drive the new
+`TreasuryExecutorSubmissionFailures` alert, paging when cancellations or
+submission errors spike two intervals in a row.
+
 An “Ad Readiness” row now accompanies the payouts panels. Gauges plot the latest
 `ad_readiness_ready`, `ad_readiness_unique_viewers`, `ad_readiness_host_count`,
 `ad_readiness_provider_count`, `ad_readiness_total_usd_micros`,
