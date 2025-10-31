@@ -181,10 +181,15 @@ fn run_executor_tick(
         .refresh_executor_lease(&config.identity, config.lease_ttl)
         .map_err(TreasuryExecutorError::from)?;
     snapshot.record_lease(
-        Some(lease.holder.clone()),
+        if lease.released || lease.holder.is_empty() {
+            None
+        } else {
+            Some(lease.holder.clone())
+        },
         Some(lease.expires_at),
         Some(lease.renewed_at),
         lease.last_nonce,
+        lease.released,
     );
     config
         .nonce_floor
@@ -846,6 +851,9 @@ fn executor_snapshot_to_json(snapshot: &TreasuryExecutorSnapshot) -> Value {
             Value::Number(Number::from(nonce)),
         );
     }
+    if snapshot.lease_released {
+        map.insert("lease_released".into(), Value::Bool(true));
+    }
     Value::Object(map)
 }
 
@@ -892,6 +900,10 @@ fn executor_snapshot_from_json(value: &Value) -> CodecResult<TreasuryExecutorSna
         lease_renewed_at,
         last_submitted_nonce,
         lease_last_nonce: obj.get("lease_last_nonce").and_then(|v| v.as_u64()),
+        lease_released: obj
+            .get("lease_released")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -903,6 +915,8 @@ pub struct ExecutorLeaseRecord {
     pub renewed_at: u64,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last_nonce: Option<u64>,
+    #[serde(default)]
+    pub released: bool,
 }
 
 impl BinaryCodec for ExecutorLeaseRecord {
@@ -911,6 +925,7 @@ impl BinaryCodec for ExecutorLeaseRecord {
         self.expires_at.encode(writer);
         self.renewed_at.encode(writer);
         self.last_nonce.encode(writer);
+        self.released.encode(writer);
     }
 
     fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
@@ -919,6 +934,7 @@ impl BinaryCodec for ExecutorLeaseRecord {
             expires_at: u64::decode(reader)?,
             renewed_at: u64::decode(reader)?,
             last_nonce: Option::<u64>::decode(reader)?,
+            released: bool::decode(reader).unwrap_or(false),
         })
     }
 }
@@ -936,6 +952,9 @@ fn executor_lease_to_json(record: &ExecutorLeaseRecord) -> Value {
     );
     if let Some(nonce) = record.last_nonce {
         map.insert("last_nonce".into(), Value::Number(Number::from(nonce)));
+    }
+    if record.released {
+        map.insert("released".into(), Value::Bool(true));
     }
     Value::Object(map)
 }
@@ -964,11 +983,16 @@ fn executor_lease_from_json(value: &Value) -> CodecResult<ExecutorLeaseRecord> {
             sled::Error::Unsupported("treasury executor lease JSON: missing renewed_at".into())
         })?;
     let last_nonce = obj.get("last_nonce").and_then(Value::as_u64);
+    let released = obj
+        .get("released")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     Ok(ExecutorLeaseRecord {
         holder,
         expires_at,
         renewed_at,
         last_nonce,
+        released,
     })
 }
 
@@ -1407,10 +1431,15 @@ impl GovStore {
         };
         if let Some(lease) = self.executor_lease_record()? {
             snapshot.record_lease(
-                Some(lease.holder.clone()),
+                if lease.released || lease.holder.is_empty() {
+                    None
+                } else {
+                    Some(lease.holder.clone())
+                },
                 Some(lease.expires_at),
                 Some(lease.renewed_at),
                 lease.last_nonce,
+                lease.released,
             );
             if let Some(nonce) = lease.last_nonce {
                 snapshot.record_nonce(nonce);
@@ -2747,6 +2776,7 @@ impl GovStore {
                         expires_at: now.saturating_add(ttl_secs),
                         renewed_at: now,
                         last_nonce,
+                        released: false,
                     };
                     let new_bytes = ser(&existing)?;
                     match tree.compare_and_swap(key, current.clone(), Some(new_bytes))? {
@@ -2760,6 +2790,7 @@ impl GovStore {
                         expires_at: now.saturating_add(ttl_secs),
                         renewed_at: now,
                         last_nonce: None,
+                        released: false,
                     };
                     let new_bytes = ser(&record)?;
                     match tree.compare_and_swap(key, None, Some(new_bytes))? {
@@ -2789,6 +2820,7 @@ impl GovStore {
                 expires_at: now,
                 renewed_at: now,
                 last_nonce: existing.last_nonce,
+                released: true,
             };
             let new_bytes = ser(&updated)?;
             match tree.compare_and_swap(key, Some(bytes), Some(new_bytes))? {
@@ -2808,6 +2840,9 @@ impl GovStore {
             };
             let mut existing = de::<ExecutorLeaseRecord>(&bytes)?;
             if existing.holder != holder {
+                return Ok(());
+            }
+            if existing.released {
                 return Ok(());
             }
             existing.last_nonce = Some(nonce);

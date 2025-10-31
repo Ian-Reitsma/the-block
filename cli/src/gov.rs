@@ -228,6 +228,9 @@ struct ExecutorStatusReport {
     snapshot: Option<TreasuryExecutorSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     lease_seconds_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    lease_last_nonce: Option<u64>,
+    lease_released: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     staged_intents: Vec<SignedExecutionIntent>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1436,6 +1439,11 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 .as_ref()
                 .and_then(|snap| snap.lease_expires_at)
                 .and_then(|expires| expires.checked_sub(now_secs));
+            let lease_last_nonce = snapshot.as_ref().and_then(|snap| snap.lease_last_nonce);
+            let lease_released = snapshot
+                .as_ref()
+                .map(|snap| snap.lease_released)
+                .unwrap_or(false);
             let staged_ids: Vec<u64> = intents
                 .iter()
                 .map(|intent| intent.disbursement_id)
@@ -1443,6 +1451,8 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let report = ExecutorStatusReport {
                 snapshot,
                 lease_seconds_remaining,
+                lease_last_nonce,
+                lease_released,
                 staged_intents: intents,
                 dependency_blocks: blocked,
             };
@@ -1470,6 +1480,12 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                     }
                     if let Some(nonce) = snap.last_submitted_nonce {
                         writeln!(out, "Last submitted nonce: {nonce}")?;
+                    }
+                    if let Some(watermark) = report.lease_last_nonce {
+                        writeln!(out, "Lease nonce watermark: {watermark}")?;
+                    }
+                    if report.lease_released {
+                        writeln!(out, "Lease status: released (awaiting new holder)")?;
                     }
                     writeln!(
                         out,

@@ -177,18 +177,22 @@ legacy JSON snapshots.
   `TxAdmissionError`.
 - `gov.treasury.balance` now embeds an `executor` snapshot exposing
   `last_tick_at`, `last_success_at`, `last_error_at`, `pending_matured`,
-  `staged_intents`, and `lease_last_nonce` (the shared nonce watermark carried
-  across lease holders). `contract gov treasury fetch` renders the same snapshot
-  in the CLI, alongside executor uptime, last error string, and whether any
-  intents are waiting on dependency gates.
+  `staged_intents`, `lease_last_nonce` (the shared nonce watermark carried
+  across lease holders), and `lease_released` (a boolean marker indicating the
+  previous holder explicitly released the lease while preserving the watermark).
+  `contract gov treasury fetch` renders the same snapshot in the CLI, alongside
+  executor uptime, last error string, watermark status, and whether any intents
+  are waiting on dependency gates. See [Treasury executor runbook](treasury.md)
+  for multi-node deployment guidance and recovery procedures.
 - The worker publishes metrics
   (`treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
   `treasury_executor_last_{tick,success,error}_seconds`,
-  `treasury_executor_result_total{result}`, and
-  `treasury_executor_errors_total{reason}`) so dashboards can alert when mature
-  disbursements accumulate, ticks stall, or submissions fail repeatedly. The RPC
-  summary and CLI output reuse the same snapshot, keeping observability
-  consistent across telemetry, dashboards, and operator tooling.
+  `treasury_executor_last_submitted_nonce`,
+  `treasury_executor_lease_last_nonce`, `treasury_executor_result_total{result}`,
+  and `treasury_executor_errors_total{reason}`) so dashboards can alert when
+  mature disbursements accumulate, watermarks stall, or submissions fail
+  repeatedly. The RPC summary and CLI output reuse the same snapshot, keeping
+  observability consistent across telemetry, dashboards, and operator tooling.
 - Integration coverage in `node/tests/treasury.rs` exercises dependency gating,
   nonce reuse, failover watermark continuity (`executor_failover_preserves_nonce_watermark`),
   and crash-safe intent staging, while the governance tests confirm staged

@@ -173,3 +173,20 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
     ));
     Ok(())
 }
+
+#[cfg(feature = "telemetry")]
+#[test]
+fn treasury_executor_gauges_accept_updates() {
+    use the_block::telemetry::{
+        TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE, TREASURY_EXECUTOR_LEASE_LAST_NONCE,
+    };
+
+    TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE.set(0);
+    TREASURY_EXECUTOR_LEASE_LAST_NONCE.set(0);
+
+    TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE.set(321);
+    TREASURY_EXECUTOR_LEASE_LAST_NONCE.set(314);
+
+    assert_eq!(TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE.value(), 321);
+    assert_eq!(TREASURY_EXECUTOR_LEASE_LAST_NONCE.value(), 314);
+}

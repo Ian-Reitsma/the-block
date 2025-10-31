@@ -644,6 +644,9 @@ struct ExplorerExecutorReport {
     snapshot: Option<TreasuryExecutorSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     lease_seconds_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    lease_last_nonce: Option<u64>,
+    lease_released: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     staged_intents: Vec<SignedExecutionIntent>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -691,9 +694,16 @@ async fn treasury_executor_status(
         .as_ref()
         .and_then(|snap| snap.lease_expires_at)
         .and_then(|expires| expires.checked_sub(now_secs));
+    let lease_last_nonce = snapshot.as_ref().and_then(|snap| snap.lease_last_nonce);
+    let lease_released = snapshot
+        .as_ref()
+        .map(|snap| snap.lease_released)
+        .unwrap_or(false);
     let report = ExplorerExecutorReport {
         snapshot,
         lease_seconds_remaining,
+        lease_last_nonce,
+        lease_released,
         staged_intents: intents,
         dependency_blocks,
     };

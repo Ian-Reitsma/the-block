@@ -169,6 +169,8 @@ pub struct TreasuryExecutorSnapshot {
     pub last_submitted_nonce: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lease_last_nonce: Option<u64>,
+    #[serde(default)]
+    pub lease_released: bool,
 }
 
 pub fn disbursements(
@@ -326,6 +328,7 @@ impl From<GovExecutorSnapshot> for TreasuryExecutorSnapshot {
             lease_renewed_at: value.lease_renewed_at,
             last_submitted_nonce: value.last_submitted_nonce,
             lease_last_nonce: value.lease_last_nonce,
+            lease_released: value.lease_released,
         }
     }
 }

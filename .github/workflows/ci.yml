@@ -94,6 +94,14 @@ jobs:
         run: cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: range boost telemetry tests
+        run: just test-range-boost
+        env:
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: governance failover smoke
+        run: cargo test -p governance executor_failover_preserves_nonce_watermark
+        env:
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: metrics naming check
         run: cargo test -p metrics-aggregator --test naming
         env:

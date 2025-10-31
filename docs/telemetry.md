@@ -50,6 +50,8 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `range_boost_toggle_latency_seconds` records the interval between
   `RangeBoost::set_enabled` calls to prove toggles reach the worker without
   stalling.
+  The Grafana templates expose all three metrics under a dedicated **Range Boost**
+  row, and CI runs `just test-range-boost` to keep the telemetry path green.
 - `overlay_backend_active{backend}` flips to 1 for the active overlay backend
   (stub or libp2p)
 - `overlay_peer_total{backend}` counts overlay peers currently tracked by the
@@ -265,14 +267,16 @@ Prometheus alerting rules.
 - `dependency_policy_violation{crate,version,kind,detail,depth}` and `dependency_policy_violation_total` allow alerting on supply-chain policy regressions emitted by the dependency registry tool.
 - `treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
   `treasury_executor_last_tick_seconds`,
-  `treasury_executor_last_success_seconds`, and
-  `treasury_executor_last_error_seconds` surface the executor’s liveness stamps
-  and backlog depth. Couple them with `treasury_executor_result_total{result}`
-  (`success`, `cancelled`, `error`) and
+  `treasury_executor_last_success_seconds`,
+  `treasury_executor_last_error_seconds`,
+  `treasury_executor_last_submitted_nonce`, and
+  `treasury_executor_lease_last_nonce` surface the executor’s liveness stamps,
+  backlog depth, and lease watermark. Couple them with
+  `treasury_executor_result_total{result}` (`success`, `cancelled`, `error`) and
   `treasury_executor_errors_total{reason}` to alert on repeated submission
-  failures, cancelled disbursements (insufficient CT/IT balance), or dependency
-  gating. The RPC and CLI surfaces reuse the same snapshot so dashboards can tie
-  metrics back to individual disbursements.
+  failures, cancelled disbursements (insufficient CT/IT balance), stalled
+  watermarks, or dependency gating. The RPC and CLI surfaces reuse the same
+  snapshot so dashboards can tie metrics back to individual disbursements.
 - `tls_env_warning_total{prefix,code}` and
   `tls_env_warning_last_seen_seconds{prefix,code}` track TLS configuration
   warnings forwarded from diagnostics. Fingerprint gauges

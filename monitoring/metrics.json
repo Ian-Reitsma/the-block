@@ -610,6 +610,36 @@
     },
     {
       "deprecated": false,
+      "description": "Latest nonce submitted by the treasury executor",
+      "labels": [],
+      "name": "treasury_executor_last_submitted_nonce"
+    },
+    {
+      "deprecated": false,
+      "description": "Lease watermark nonce retained across treasury executor holders",
+      "labels": [],
+      "name": "treasury_executor_lease_last_nonce"
+    },
+    {
+      "deprecated": false,
+      "description": "RangeBoost forwarder failures observed",
+      "labels": [],
+      "name": "range_boost_forwarder_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "RangeBoost enqueue attempts dropped due to injection",
+      "labels": [],
+      "name": "range_boost_enqueue_error_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Latency observed between RangeBoost enable/disable toggles",
+      "labels": [],
+      "name": "range_boost_toggle_latency_seconds"
+    },
+    {
+      "deprecated": false,
       "description": "Governance quorum",
       "labels": [],
       "name": "gov_quorum_required"
