@@ -83,15 +83,18 @@ pub struct SignedExecutionIntent {
     pub tx_bytes: Vec<u8>,
     pub tx_hash: String,
     pub staged_at: u64,
+    #[serde(default)]
+    pub nonce: u64,
 }
 
 impl SignedExecutionIntent {
-    pub fn new(disbursement_id: u64, tx_bytes: Vec<u8>, tx_hash: String) -> Self {
+    pub fn new(disbursement_id: u64, tx_bytes: Vec<u8>, tx_hash: String, nonce: u64) -> Self {
         Self {
             disbursement_id,
             tx_bytes,
             tx_hash,
             staged_at: now_ts(),
+            nonce,
         }
     }
 }
@@ -102,6 +105,7 @@ impl BinaryCodec for SignedExecutionIntent {
         write_bytes(writer, &self.tx_bytes);
         self.tx_hash.encode(writer);
         self.staged_at.encode(writer);
+        self.nonce.encode(writer);
     }
 
     fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
@@ -110,6 +114,7 @@ impl BinaryCodec for SignedExecutionIntent {
             tx_bytes: read_bytes(reader)?,
             tx_hash: String::decode(reader)?,
             staged_at: u64::decode(reader)?,
+            nonce: u64::decode(reader).unwrap_or(0),
         })
     }
 }
@@ -129,6 +134,14 @@ pub struct TreasuryExecutorSnapshot {
     pub pending_matured: u64,
     #[serde(default)]
     pub staged_intents: u64,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub lease_holder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_renewed_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_submitted_nonce: Option<u64>,
 }
 
 impl TreasuryExecutorSnapshot {
@@ -150,6 +163,21 @@ impl TreasuryExecutorSnapshot {
         self.last_error = Some(message);
         self.last_error_at = Some(self.last_tick_at);
     }
+
+    pub fn record_lease(
+        &mut self,
+        holder: Option<String>,
+        expires_at: Option<u64>,
+        renewed_at: Option<u64>,
+    ) {
+        self.lease_holder = holder;
+        self.lease_expires_at = expires_at;
+        self.lease_renewed_at = renewed_at;
+    }
+
+    pub fn record_nonce(&mut self, nonce: u64) {
+        self.last_submitted_nonce = Some(nonce);
+    }
 }
 
 impl BinaryCodec for TreasuryExecutorSnapshot {
@@ -160,6 +188,10 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
         self.last_error.encode(writer);
         self.pending_matured.encode(writer);
         self.staged_intents.encode(writer);
+        self.lease_holder.encode(writer);
+        self.lease_expires_at.encode(writer);
+        self.lease_renewed_at.encode(writer);
+        self.last_submitted_nonce.encode(writer);
     }
 
     fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
@@ -170,6 +202,10 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
             last_error: Option::<String>::decode(reader)?,
             pending_matured: u64::decode(reader)?,
             staged_intents: u64::decode(reader)?,
+            lease_holder: Option::<String>::decode(reader)?,
+            lease_expires_at: Option::<u64>::decode(reader)?,
+            lease_renewed_at: Option::<u64>::decode(reader)?,
+            last_submitted_nonce: Option::<u64>::decode(reader)?,
         })
     }
 }

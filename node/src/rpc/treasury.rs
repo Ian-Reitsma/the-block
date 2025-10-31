@@ -159,6 +159,14 @@ pub struct TreasuryExecutorSnapshot {
     pub last_error: Option<String>,
     pub pending_matured: u64,
     pub staged_intents: u64,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub lease_holder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_renewed_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_submitted_nonce: Option<u64>,
 }
 
 pub fn disbursements(
@@ -311,6 +319,10 @@ impl From<GovExecutorSnapshot> for TreasuryExecutorSnapshot {
             last_error: value.last_error,
             pending_matured: value.pending_matured,
             staged_intents: value.staged_intents,
+            lease_holder: value.lease_holder,
+            lease_expires_at: value.lease_expires_at,
+            lease_renewed_at: value.lease_renewed_at,
+            last_submitted_nonce: value.last_submitted_nonce,
         }
     }
 }

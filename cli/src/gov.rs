@@ -9,6 +9,7 @@ use cli_core::{
     parse::Matches,
 };
 use foundation_serialization::binary;
+use foundation_serialization::json::Value;
 use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
@@ -18,6 +19,7 @@ use governance::{
 };
 use httpd::ClientError;
 use std::io::{self, Write};
+use std::time::SystemTime;
 use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 
 struct CliReleaseVerifier;
@@ -209,6 +211,27 @@ pub struct TreasuryFetchOutput {
     pub balance_next_cursor: Option<u64>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub executor: Option<TreasuryExecutorSnapshot>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ExecutorDependency {
+    disbursement_id: u64,
+    dependencies: Vec<u64>,
+    memo: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ExecutorStatusReport {
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    snapshot: Option<TreasuryExecutorSnapshot>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    lease_seconds_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    staged_intents: Vec<SignedExecutionIntent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dependency_blocks: Vec<ExecutorDependency>,
 }
 
 #[derive(Serialize)]
@@ -409,6 +432,10 @@ pub enum GovTreasuryCmd {
         include_history: bool,
         history_after_id: Option<u64>,
         history_limit: Option<usize>,
+    },
+    Executor {
+        state: String,
+        json: bool,
     },
 }
 
@@ -873,6 +900,23 @@ impl GovTreasuryCmd {
             )))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.treasury.executor"),
+                "executor",
+                "Show automated treasury executor status",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("state", "state", "Path to governance state store")
+                    .default("gov.db"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .build(),
+        )
         .build()
     }
 
@@ -974,6 +1018,12 @@ impl GovTreasuryCmd {
                     history_after_id,
                     history_limit,
                 })
+            }
+            "executor" => {
+                let state =
+                    take_string(sub_matches, "state").unwrap_or_else(|| "gov.db".to_string());
+                let json = sub_matches.get_flag("json");
+                Ok(GovTreasuryCmd::Executor { state, json })
             }
             other => Err(format!("unknown subcommand '{other}' for 'gov treasury'")),
         }
@@ -1351,6 +1401,146 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 Err(err) => eprintln!("format failed: {err}"),
             }
         }
+        GovTreasuryCmd::Executor { state, json } => {
+            let store = GovStore::open(state);
+            let snapshot = store.executor_snapshot().map_err(|err| {
+                io::Error::new(io::ErrorKind::Other, format!("executor snapshot: {err}"))
+            })?;
+            let intents = store.execution_intents().map_err(|err| {
+                io::Error::new(io::ErrorKind::Other, format!("execution intents: {err}"))
+            })?;
+            let disbursements = store.disbursements().map_err(|err| {
+                io::Error::new(io::ErrorKind::Other, format!("load disbursements: {err}"))
+            })?;
+            let blocked: Vec<ExecutorDependency> = disbursements
+                .into_iter()
+                .filter(|d| matches!(d.status, DisbursementStatus::Scheduled))
+                .filter_map(|d| {
+                    let deps = parse_dependency_list(&d.memo);
+                    if deps.is_empty() {
+                        None
+                    } else {
+                        Some(ExecutorDependency {
+                            disbursement_id: d.id,
+                            dependencies: deps,
+                            memo: d.memo,
+                        })
+                    }
+                })
+                .collect();
+            let now_secs = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let lease_seconds_remaining = snapshot
+                .as_ref()
+                .and_then(|snap| snap.lease_expires_at)
+                .and_then(|expires| expires.checked_sub(now_secs));
+            let staged_ids: Vec<u64> = intents
+                .iter()
+                .map(|intent| intent.disbursement_id)
+                .collect();
+            let report = ExecutorStatusReport {
+                snapshot,
+                lease_seconds_remaining,
+                staged_intents: intents,
+                dependency_blocks: blocked,
+            };
+            if json {
+                let serialized = json::to_string_pretty(&report)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                writeln!(out, "{serialized}")?;
+            } else {
+                if let Some(snap) = &report.snapshot {
+                    writeln!(
+                        out,
+                        "Lease holder: {}",
+                        snap.lease_holder.clone().unwrap_or_else(|| "(none)".into())
+                    )?;
+                    if let Some(expires) = snap.lease_expires_at {
+                        let remaining = lease_seconds_remaining
+                            .map(|secs| format!(" ({secs}s remaining)"))
+                            .unwrap_or_default();
+                        writeln!(out, "Lease expires at: {expires}{remaining}")?;
+                    } else {
+                        writeln!(out, "Lease expires at: (unknown)")?;
+                    }
+                    if let Some(renewed) = snap.lease_renewed_at {
+                        writeln!(out, "Lease renewed at: {renewed}")?;
+                    }
+                    if let Some(nonce) = snap.last_submitted_nonce {
+                        writeln!(out, "Last submitted nonce: {nonce}")?;
+                    }
+                    writeln!(
+                        out,
+                        "Pending matured disbursements: {}",
+                        snap.pending_matured
+                    )?;
+                    writeln!(out, "Staged intents: {}", snap.staged_intents)?;
+                    writeln!(out, "Last tick at: {}", snap.last_tick_at)?;
+                    if let Some(ts) = snap.last_success_at {
+                        writeln!(out, "Last success at: {ts}")?;
+                    }
+                    if let Some(err_ts) = snap.last_error_at {
+                        writeln!(out, "Last error at: {err_ts}")?;
+                    }
+                    if let Some(err) = snap.last_error.as_ref() {
+                        writeln!(out, "Last error: {err}")?;
+                    }
+                } else {
+                    writeln!(
+                        out,
+                        "executor snapshot unavailable; automation not yet initialised"
+                    )?;
+                }
+                if !staged_ids.is_empty() {
+                    writeln!(out, "Staged disbursement intents: {staged_ids:?}")?;
+                }
+                if !report.dependency_blocks.is_empty() {
+                    writeln!(out, "Dependency blockers:")?;
+                    for block in &report.dependency_blocks {
+                        writeln!(
+                            out,
+                            "  disbursement #{}, waiting on {:?}",
+                            block.disbursement_id, block.dependencies
+                        )?;
+                    }
+                }
+                writeln!(
+                    out,
+                    "Provisioning guidance: launch nodes with --treasury-executor --treasury-key <KEY_ID> \n  optional flags: --treasury-executor-id <IDENTITY>, --treasury-executor-lease <seconds>."
+                )?;
+            }
+        }
     }
     Ok(())
+}
+
+fn parse_dependency_list(memo: &str) -> Vec<u64> {
+    let trimmed = memo.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(Value::Object(map)) = json::from_str::<Value>(trimmed) {
+        if let Some(Value::Array(items)) = map.get("depends_on") {
+            return items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::Number(num) => num.as_u64(),
+                    Value::String(text) => text.trim().parse::<u64>().ok(),
+                    _ => None,
+                })
+                .collect();
+        }
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("depends_on=")
+        .or_else(|| trimmed.strip_prefix("depends_on:"))
+    {
+        return rest
+            .split(',')
+            .filter_map(|entry| entry.trim().parse::<u64>().ok())
+            .collect();
+    }
+    Vec::new()
 }

@@ -23,3 +23,14 @@ fn parse_packet() {
     assert_eq!(peer.addr, "unix:/tmp/sock");
     assert_eq!(peer.latency_ms, 42);
 }
+
+#[test]
+fn range_boost_toggle_stress() {
+    for i in 0..256 {
+        let enable = i % 2 == 0;
+        the_block::range_boost::set_enabled(enable);
+        assert_eq!(the_block::range_boost::is_enabled(), enable);
+    }
+    the_block::range_boost::set_enabled(false);
+    assert!(!the_block::range_boost::is_enabled());
+}

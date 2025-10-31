@@ -1,5 +1,6 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
+use crate::fee;
 use crate::transaction::FeeLane;
 use concurrency::{mutex, MutexExt, MutexT};
 use foundation_serialization::{Deserialize, Serialize};
@@ -133,7 +134,10 @@ fn default_multiplier() -> f64 {
 pub struct ExecutionReceipt {
     pub reference: [u8; 32],
     pub output: [u8; 32],
-    pub payout: u64,
+    #[serde(default, alias = "payout")]
+    pub payout_ct: u64,
+    #[serde(default)]
+    pub payout_it: u64,
     #[serde(
         default = "foundation_serialization::defaults::default",
         skip_serializing_if = "foundation_serialization::skip::option_is_none"
@@ -155,6 +159,10 @@ impl ExecutionReceipt {
             }
         }
         true
+    }
+
+    pub fn total(&self) -> u64 {
+        self.payout_ct.saturating_add(self.payout_it)
     }
 }
 
@@ -279,6 +287,7 @@ struct JobState {
     provider: String,
     provider_bond: u64,
     price_per_unit: u64,
+    fee_pct_ct: u8,
     paid_slices: usize,
     completed: bool,
 }
@@ -437,6 +446,7 @@ impl Market {
             provider: offer.provider.clone(),
             provider_bond: offer.provider_bond,
             price_per_unit: offer.price_per_unit,
+            fee_pct_ct: offer.fee_pct_ct,
             paid_slices: 0,
             completed: false,
         };
@@ -530,7 +540,7 @@ impl Market {
     pub fn submit_slice(
         &mut self,
         job_id: &str,
-        proof: ExecutionReceipt,
+        mut proof: ExecutionReceipt,
     ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
         self.sweep_overdue_jobs();
@@ -592,7 +602,24 @@ impl Market {
             crate::telemetry::SNARK_VERIFICATIONS_TOTAL.inc();
         }
         let slice_units = state.job.workloads[state.paid_slices].units();
-        if proof.payout != slice_units * state.price_per_unit {
+        let total_expected = slice_units
+            .checked_mul(state.price_per_unit)
+            .ok_or("payout overflow")?;
+        let (expected_ct, expected_it) =
+            crate::fee::decompose(state.fee_pct_ct, total_expected).map_err(|_| "payout split")?;
+        if proof.payout_ct == 0 && proof.payout_it == 0 {
+            // Legacy receipts send total payout through alias field
+            proof.payout_ct = proof.total();
+        }
+        if proof.payout_it == 0
+            && proof.payout_ct == total_expected
+            && expected_it > 0
+        {
+            // Upgrade legacy receipts to the expected split automatically.
+            proof.payout_ct = expected_ct;
+            proof.payout_it = expected_it;
+        }
+        if proof.payout_ct != expected_ct || proof.payout_it != expected_it {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
@@ -602,11 +629,16 @@ impl Market {
             return Err("payout mismatch");
         }
         record_units_processed(slice_units);
+        settlement::Settlement::accrue_split(
+            &state.provider,
+            proof.payout_ct,
+            proof.payout_it,
+        );
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
         }
-        Ok(proof.payout)
+        Ok(proof.total())
     }
 
     /// Finalize a job and release bonds if complete.
@@ -702,7 +734,8 @@ impl Market {
             let receipt = ExecutionReceipt {
                 reference: expected,
                 output,
-                payout: units * price_per_unit,
+            payout_ct: units * price_per_unit,
+            payout_it: 0,
                 proof: proof_bytes,
             };
             total += self.submit_slice(job_id, receipt)?;
@@ -842,7 +875,8 @@ mod tests {
         let receipt = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout: 1,
+            payout_ct: 1,
+            payout_it: 0,
             proof: None,
         };
         assert!(receipt.verify(&Workload::Transcode(data.to_vec())));
@@ -919,7 +953,8 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout: 5,
+            payout_ct: 5,
+            payout_it: 0,
             proof: None,
         };
         assert_eq!(
@@ -1085,7 +1120,8 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout: 5,
+            payout_ct: 5,
+            payout_it: 0,
             proof: None,
         };
         market

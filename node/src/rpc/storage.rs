@@ -2,9 +2,11 @@
 
 use concurrency::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
-use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::Arc;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
+use storage_market::{
+    ProofOutcome, ProofRecord, ReplicaIncentive, StorageMarket, StorageMarketError,
+};
 
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
@@ -16,10 +18,6 @@ fn json_object(pairs: Vec<(&str, Value)>) -> Value {
         map.insert(key.to_string(), value);
     }
     Value::Object(map)
-}
-
-fn status_value(status: &'static str) -> Value {
-    json_object(vec![("status", Value::String(status.to_string()))])
 }
 
 fn error_value(message: impl Into<String>) -> Value {
@@ -44,10 +42,184 @@ fn pipeline_path() -> String {
     std::env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string())
 }
 
-static CONTRACTS: Lazy<Mutex<BTreeMap<String, StorageContract>>> =
-    Lazy::new(|| Mutex::new(BTreeMap::new()));
-static ALLOCATIONS: Lazy<Mutex<BTreeMap<String, Vec<String>>>> =
-    Lazy::new(|| Mutex::new(BTreeMap::new()));
+fn market_path() -> String {
+    std::env::var("TB_STORAGE_MARKET_DIR").unwrap_or_else(|_| "storage_market".to_string())
+}
+
+type StorageMarketHandle = Arc<StorageMarket>;
+
+static MARKET: Lazy<StorageMarketHandle> = Lazy::new(|| {
+    let path = market_path();
+    let market = StorageMarket::open(&path)
+        .unwrap_or_else(|err| panic!("failed to open storage market at {path}: {err}"));
+    Arc::new(market)
+});
+
+fn market_error_value(err: StorageMarketError) -> Value {
+    error_value(err.to_string())
+}
+
+fn outcome_to_string(outcome: &ProofOutcome) -> &'static str {
+    match outcome {
+        ProofOutcome::Success => "success",
+        ProofOutcome::Failure => "failure",
+    }
+}
+
+fn proof_record_value(record: &ProofRecord) -> Value {
+    let mut map = Map::new();
+    map.insert("object_id".into(), Value::String(record.object_id.clone()));
+    map.insert("provider".into(), Value::String(record.provider_id.clone()));
+    map.insert(
+        "remaining_deposit_ct".into(),
+        Value::Number(Number::from(record.remaining_deposit_ct)),
+    );
+    map.insert(
+        "accrued_ct".into(),
+        Value::Number(Number::from(record.amount_accrued_ct)),
+    );
+    map.insert(
+        "proof_successes".into(),
+        Value::Number(Number::from(record.proof_successes)),
+    );
+    map.insert(
+        "proof_failures".into(),
+        Value::Number(Number::from(record.proof_failures)),
+    );
+    map.insert(
+        "outcome".into(),
+        Value::String(outcome_to_string(&record.outcome).to_string()),
+    );
+    map.insert(
+        "slashed_ct".into(),
+        Value::Number(Number::from(record.slashed_ct)),
+    );
+    Value::Object(map)
+}
+
+fn replica_value(object_id: &str, contract: &StorageContract, replica: &ReplicaIncentive) -> Value {
+    let mut map = Map::new();
+    map.insert("object_id".into(), Value::String(object_id.to_string()));
+    map.insert(
+        "provider".into(),
+        Value::String(replica.provider_id.clone()),
+    );
+    map.insert(
+        "shares".into(),
+        Value::Number(Number::from(replica.allocated_shares as u64)),
+    );
+    map.insert(
+        "price_per_block".into(),
+        Value::Number(Number::from(replica.price_per_block)),
+    );
+    map.insert(
+        "deposit_ct".into(),
+        Value::Number(Number::from(replica.deposit_ct)),
+    );
+    map.insert(
+        "proof_successes".into(),
+        Value::Number(Number::from(replica.proof_successes)),
+    );
+    map.insert(
+        "proof_failures".into(),
+        Value::Number(Number::from(replica.proof_failures)),
+    );
+    map.insert(
+        "contract_accrued_ct".into(),
+        Value::Number(Number::from(contract.accrued)),
+    );
+    map.insert(
+        "contract_total_deposit_ct".into(),
+        Value::Number(Number::from(contract.total_deposit_ct)),
+    );
+    map.insert(
+        "last_payment_block".into(),
+        contract
+            .last_payment_block
+            .map(|block| Value::Number(Number::from(block)))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "last_proof_block".into(),
+        replica
+            .last_proof_block
+            .map(|block| Value::Number(Number::from(block)))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "last_outcome".into(),
+        replica
+            .last_outcome
+            .as_ref()
+            .map(|outcome| Value::String(outcome_to_string(outcome).to_string()))
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn compute_price_distribution(
+    total_price: u64,
+    allocation: &[(String, u16)],
+    total_shares: u16,
+) -> Vec<u64> {
+    if total_price == 0 || allocation.is_empty() || total_shares == 0 {
+        return vec![0; allocation.len()];
+    }
+    let total_price = u128::from(total_price);
+    let total_shares = u128::from(total_shares);
+    let mut weights: Vec<(usize, u128, u128)> = allocation
+        .iter()
+        .enumerate()
+        .map(|(idx, (_, shares))| {
+            let share = u128::from(*shares);
+            let numerator = total_price * share;
+            let base = numerator / total_shares;
+            let remainder = numerator % total_shares;
+            (idx, base, remainder)
+        })
+        .collect();
+    let mut distribution: Vec<u64> = weights
+        .iter()
+        .map(|(_, base, _)| (*base).min(u128::from(u64::MAX)) as u64)
+        .collect();
+    let allocated: u128 = distribution.iter().map(|value| u128::from(*value)).sum();
+    let mut leftover = total_price.saturating_sub(allocated);
+    if leftover > 0 && !weights.is_empty() {
+        weights.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        let len = weights.len();
+        let mut idx = 0usize;
+        while leftover > 0 {
+            let target = weights[idx % len].0;
+            distribution[target] = distribution[target].saturating_add(1);
+            leftover = leftover.saturating_sub(1);
+            idx += 1;
+        }
+    }
+    distribution
+}
+
+fn build_replicas(
+    contract: &StorageContract,
+    allocation: &[(String, u16)],
+) -> Vec<ReplicaIncentive> {
+    let total_shares = if contract.shares == 0 {
+        1
+    } else {
+        contract.shares
+    };
+    let price_distribution =
+        compute_price_distribution(contract.price_per_block, allocation, total_shares);
+    allocation
+        .iter()
+        .zip(price_distribution.into_iter())
+        .map(|((provider, shares), price)| {
+            let deposit = u128::from(price)
+                .saturating_mul(u128::from(contract.retention_blocks))
+                .min(u128::from(u64::MAX)) as u64;
+            ReplicaIncentive::new(provider.clone(), *shares, price, deposit)
+        })
+        .collect()
+}
 
 /// Register a new storage contract for the given object and allocate shards.
 pub fn upload(
@@ -55,67 +227,94 @@ pub fn upload(
     offers: Vec<StorageOffer>,
 ) -> foundation_serialization::json::Value {
     let allocation = crate::gateway::storage_alloc::allocate(&offers, contract.shares);
-    let providers: Vec<String> = allocation.iter().map(|(p, _)| p.clone()).collect();
-    let object_id = contract.object_id.clone();
-    let mut store = CONTRACTS.lock().unwrap();
-    store.insert(object_id.clone(), contract);
-    ALLOCATIONS
-        .lock()
-        .unwrap()
-        .insert(object_id, providers.clone());
-    #[cfg(feature = "telemetry")]
-    {
-        crate::telemetry::STORAGE_CONTRACT_CREATED_TOTAL.inc();
+    if allocation.is_empty() {
+        return error_value("no_providers");
     }
-    json_object(vec![
-        ("status", Value::String("ok".to_string())),
-        (
-            "providers",
-            Value::Array(providers.into_iter().map(Value::String).collect()),
-        ),
-    ])
+    let replicas = build_replicas(&contract, &allocation);
+    let providers: Vec<Value> = allocation
+        .iter()
+        .map(|(provider, _)| Value::String(provider.clone()))
+        .collect();
+    match MARKET.register_contract(contract, replicas.clone()) {
+        Ok(record) => {
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::STORAGE_CONTRACT_CREATED_TOTAL.inc();
+            }
+            let replica_values: Vec<Value> = replicas
+                .iter()
+                .map(|replica| replica_value(&record.contract.object_id, &record.contract, replica))
+                .collect();
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                ("providers", Value::Array(providers)),
+                ("replicas", Value::Array(replica_values)),
+                (
+                    "total_deposit_ct",
+                    Value::Number(Number::from(record.contract.total_deposit_ct)),
+                ),
+            ])
+        }
+        Err(err) => market_error_value(err),
+    }
 }
 
 /// Challenge a provider to prove retrievability of an object.
 pub fn challenge(
     object_id: &str,
+    provider_id: Option<&str>,
     chunk_idx: u64,
     proof: [u8; 32],
     current_block: u64,
 ) -> foundation_serialization::json::Value {
-    let store = CONTRACTS.lock().unwrap();
-    if let Some(contract) = store.get(object_id) {
-        match contract.verify_proof(chunk_idx, proof, current_block) {
-            Ok(()) => {
-                #[cfg(feature = "telemetry")]
-                {
-                    crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
-                }
-                status_value("ok")
+    let record = match MARKET.load_contract(object_id) {
+        Ok(Some(record)) => record,
+        Ok(None) => return error_value("not_found"),
+        Err(err) => return market_error_value(err),
+    };
+    match record
+        .contract
+        .verify_proof(chunk_idx, proof, current_block)
+    {
+        Ok(()) => {
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
             }
-            Err(ContractError::Expired) => {
-                #[cfg(feature = "telemetry")]
-                {
-                    crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
-                }
-                error_value("expired")
-            }
-            Err(ContractError::ChallengeFailed) => {
-                #[cfg(feature = "telemetry")]
-                {
-                    crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
-                }
-                if let Some(provs) = ALLOCATIONS.lock().unwrap().get(object_id) {
-                    if let Some(first) = provs.first() {
-                        let rep = crate::compute_market::scheduler::reputation_get(first) - 1;
-                        crate::compute_market::scheduler::merge_reputation(first, rep, u64::MAX);
-                    }
-                }
-                error_value("challenge_failed")
+            match MARKET.record_proof_outcome(object_id, provider_id, current_block, true) {
+                Ok(proof_record) => json_object(vec![
+                    ("status", Value::String("ok".to_string())),
+                    ("proof", proof_record_value(&proof_record)),
+                ]),
+                Err(err) => market_error_value(err),
             }
         }
-    } else {
-        error_value("not_found")
+        Err(ContractError::Expired) => {
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
+            }
+            error_value("expired")
+        }
+        Err(ContractError::ChallengeFailed) => {
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
+            }
+            let targeted_provider = provider_id.map(|p| p.to_string()).or_else(|| {
+                record
+                    .replicas
+                    .first()
+                    .map(|replica| replica.provider_id.clone())
+            });
+            if let Some(provider) = targeted_provider {
+                let reputation = crate::compute_market::scheduler::reputation_get(&provider);
+                let updated = reputation.saturating_sub(1);
+                crate::compute_market::scheduler::merge_reputation(&provider, updated, u64::MAX);
+            }
+            let _ = MARKET.record_proof_outcome(object_id, provider_id, current_block, false);
+            error_value("challenge_failed")
+        }
     }
 }
 
@@ -196,6 +395,29 @@ pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::V
             ])
         }
         Err(err) => error_value(err.to_string()),
+    }
+}
+
+/// Return the incentive snapshot for all registered replicas.
+pub fn incentives_snapshot() -> foundation_serialization::json::Value {
+    match MARKET.contracts() {
+        Ok(records) => {
+            let mut replicas = Vec::new();
+            for record in records {
+                for replica in &record.replicas {
+                    replicas.push(replica_value(
+                        &record.contract.object_id,
+                        &record.contract,
+                        replica,
+                    ));
+                }
+            }
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                ("replicas", Value::Array(replicas)),
+            ])
+        }
+        Err(err) => market_error_value(err),
     }
 }
 
@@ -360,8 +582,11 @@ mod tests {
     use foundation_serialization::json::{
         Map as JsonMap, Number as JsonNumber, Value as JsonValue,
     };
+    use std::sync::Once;
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
+
+    static INIT_MARKET: Once = Once::new();
 
     fn json_string(value: &str) -> JsonValue {
         JsonValue::String(value.to_owned())
@@ -369,6 +594,20 @@ mod tests {
 
     fn json_number(value: i64) -> JsonValue {
         JsonValue::Number(JsonNumber::from(value))
+    }
+
+    fn ensure_market_dir() {
+        INIT_MARKET.call_once(|| {
+            let dir = tempdir().expect("tempdir");
+            std::env::set_var("TB_STORAGE_MARKET_DIR", dir.path());
+            Box::leak(Box::new(dir));
+            let _ = MARKET.clear();
+        });
+    }
+
+    fn reset_state() {
+        ensure_market_dir();
+        MARKET.clear().expect("clear market");
     }
 
     fn json_object(entries: &[(&str, JsonValue)]) -> JsonValue {
@@ -379,22 +618,19 @@ mod tests {
         JsonValue::Object(map)
     }
 
-    fn reset_state() {
-        CONTRACTS.lock().unwrap().clear();
-        ALLOCATIONS.lock().unwrap().clear();
-    }
-
     fn sample_contract() -> StorageContract {
         StorageContract {
             object_id: "obj-1".into(),
             provider_id: "prov-a".into(),
             original_bytes: 1_024,
             shares: 4,
-            price_per_block: 1,
+            price_per_block: 4,
             start_block: 10,
             retention_blocks: 20,
             next_payment_block: 10,
             accrued: 0,
+            total_deposit_ct: 0,
+            last_payment_block: None,
         }
     }
 
@@ -406,29 +642,19 @@ mod tests {
     }
 
     #[test]
-    fn upload_records_contract_and_allocations() {
+    fn upload_records_contract_and_replicas() {
         reset_state();
         let contract = sample_contract();
-        let object_id = contract.object_id.clone();
         let response = upload(contract.clone(), sample_offers());
         assert_eq!(response["status"], json_string("ok"));
         let providers_json = response["providers"].as_array().expect("providers array");
         assert_eq!(providers_json.len(), 2);
-        assert!(providers_json.iter().any(|p| p.as_str() == Some("prov-a")));
-        assert!(providers_json.iter().any(|p| p.as_str() == Some("prov-b")));
-
-        let stored = CONTRACTS.lock().unwrap();
-        let stored_contract = stored.get(&object_id).expect("contract stored");
-        assert_eq!(stored_contract.provider_id, contract.provider_id);
-        drop(stored);
-
-        let allocations = ALLOCATIONS.lock().unwrap();
-        let providers = allocations.get(&object_id).expect("allocation stored");
-        assert_eq!(providers.len(), 2);
-        assert!(providers.contains(&"prov-a".to_string()));
-        assert!(providers.contains(&"prov-b".to_string()));
-        drop(allocations);
-
+        let replicas = response["replicas"].as_array().expect("replicas array");
+        assert_eq!(replicas.len(), 2);
+        let deposit = response["total_deposit_ct"]
+            .as_u64()
+            .expect("deposit value");
+        assert!(deposit > 0);
         reset_state();
     }
 
@@ -440,23 +666,23 @@ mod tests {
         let proof = contract.expected_proof(0);
         upload(contract.clone(), sample_offers());
 
-        let ok = challenge(&object_id, 0, proof, contract.start_block);
-        assert_eq!(ok, json_object(&[("status", json_string("ok"))]));
+        let ok = challenge(&object_id, None, 0, proof, contract.start_block);
+        assert_eq!(ok["status"], json_string("ok"));
+        assert!(ok["proof"].is_object());
 
         let expired = challenge(
             &object_id,
-            0,
+            None,
             proof,
             contract.start_block + contract.retention_blocks + 1,
         );
         assert_eq!(expired, json_object(&[("error", json_string("expired"))]));
 
-        let wrong = challenge(&object_id, 0, [0u8; 32], contract.start_block);
+        let wrong = challenge(&object_id, None, 0, [0u8; 32], contract.start_block);
         assert_eq!(
             wrong,
             json_object(&[("error", json_string("challenge_failed"))])
         );
-
         reset_state();
     }
 

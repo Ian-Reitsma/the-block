@@ -300,6 +300,8 @@ pub fn handle(cmd: StorageCmd) {
                 retention_blocks: retention,
                 next_payment_block: 1,
                 accrued: 0,
+                total_deposit_ct: 0,
+                last_payment_block: None,
             };
             let total = price * retention;
             let payload = RawTxPayload {
@@ -330,7 +332,7 @@ pub fn handle(cmd: StorageCmd) {
             h.update(&chunk.to_le_bytes());
             let mut proof = [0u8; 32];
             proof.copy_from_slice(h.finalize().as_bytes());
-            let resp = rpc::storage::challenge(&object_id, chunk, proof, block);
+            let resp = rpc::storage::challenge(&object_id, None, chunk, proof, block);
             println!("{}", resp);
         }
         StorageCmd::Providers { json } => {

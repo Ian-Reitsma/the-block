@@ -107,7 +107,9 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
     }
     let (sk, _) = the_block::generate_keypair();
     let params = ExecutorParams {
+        identity: "node-test-exec".into(),
         poll_interval: Duration::from_millis(50),
+        lease_ttl: Duration::from_millis(200),
         signing_key: Arc::new(sk),
         treasury_account: "treasury".into(),
         dependency_check: Some(memo_dependency_check()),

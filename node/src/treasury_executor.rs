@@ -14,7 +14,9 @@ pub type DependencyCheck = Arc<
 >;
 
 pub struct ExecutorParams {
+    pub identity: String,
     pub poll_interval: Duration,
+    pub lease_ttl: Duration,
     pub signing_key: Arc<Vec<u8>>,
     pub treasury_account: String,
     pub dependency_check: Option<DependencyCheck>,
@@ -177,6 +179,7 @@ fn signer_closure(
             disbursement.id,
             tx_bytes,
             tx_hash,
+            payload.nonce,
         ))
     })
 }
@@ -225,7 +228,9 @@ pub fn spawn_executor(
     params: ExecutorParams,
 ) -> TreasuryExecutorHandle {
     let ExecutorParams {
+        identity,
         poll_interval,
+        lease_ttl,
         signing_key,
         treasury_account,
         dependency_check,
@@ -239,7 +244,9 @@ pub fn spawn_executor(
     let submitter = submitter_closure(blockchain);
     let dependency_check = dependency_check.unwrap_or_else(memo_dependency_check);
     let config = TreasuryExecutorConfig {
+        identity,
         poll_interval,
+        lease_ttl,
         epoch_source,
         signer,
         submitter,

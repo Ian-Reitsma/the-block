@@ -700,14 +700,25 @@ impl BinaryCodec for SignedExecutionIntent {
         writer.write_bytes(&self.tx_bytes);
         self.tx_hash.encode(writer);
         self.staged_at.encode(writer);
+        self.nonce.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        let disbursement_id = u64::decode(reader)?;
+        let tx_bytes = reader.read_bytes()?;
+        let tx_hash = String::decode(reader)?;
+        let staged_at = u64::decode(reader)?;
+        let nonce = if reader.remaining() >= 8 {
+            u64::decode(reader)?
+        } else {
+            0
+        };
         Ok(Self {
-            disbursement_id: u64::decode(reader)?,
-            tx_bytes: reader.read_bytes()?,
-            tx_hash: String::decode(reader)?,
-            staged_at: u64::decode(reader)?,
+            disbursement_id,
+            tx_bytes,
+            tx_hash,
+            staged_at,
+            nonce,
         })
     }
 }
@@ -754,6 +765,10 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
         self.last_error.encode(writer);
         self.pending_matured.encode(writer);
         self.staged_intents.encode(writer);
+        self.lease_holder.encode(writer);
+        self.lease_expires_at.encode(writer);
+        self.lease_renewed_at.encode(writer);
+        self.last_submitted_nonce.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
@@ -764,6 +779,10 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
             last_error: Option::<String>::decode(reader)?,
             pending_matured: u64::decode(reader)?,
             staged_intents: u64::decode(reader)?,
+            lease_holder: Option::<String>::decode(reader)?,
+            lease_expires_at: Option::<u64>::decode(reader)?,
+            lease_renewed_at: Option::<u64>::decode(reader)?,
+            last_submitted_nonce: Option::<u64>::decode(reader)?,
         })
     }
 }

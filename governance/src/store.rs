@@ -73,7 +73,9 @@ impl TreasuryBalances {
 
 #[derive(Clone)]
 pub struct TreasuryExecutorConfig {
+    pub identity: String,
     pub poll_interval: Duration,
+    pub lease_ttl: Duration,
     pub epoch_source: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub signer: Arc<
         dyn Fn(&TreasuryDisbursement) -> Result<SignedExecutionIntent, TreasuryExecutorError>
@@ -174,6 +176,29 @@ fn run_executor_tick(
     config: &TreasuryExecutorConfig,
     snapshot: &mut TreasuryExecutorSnapshot,
 ) -> Result<(), TreasuryExecutorError> {
+    let (lease, acquired) = store
+        .refresh_executor_lease(&config.identity, config.lease_ttl)
+        .map_err(TreasuryExecutorError::from)?;
+    snapshot.record_lease(
+        Some(lease.holder.clone()),
+        Some(lease.expires_at),
+        Some(lease.renewed_at),
+    );
+    if let Some(nonce) = lease.last_nonce {
+        snapshot.record_nonce(nonce);
+    }
+    if !acquired {
+        let staged_total = store
+            .load_execution_intents()
+            .map_err(TreasuryExecutorError::from)?
+            .len() as u64;
+        snapshot.record_error(format!("lease_held_by {}", lease.holder), 0, staged_total);
+        store
+            .store_executor_snapshot(snapshot)
+            .map_err(TreasuryExecutorError::from)?;
+        return Ok(());
+    }
+
     let current_epoch = (config.epoch_source)();
     let mut disbursements = store.load_disbursements()?;
     disbursements.sort_by_key(|d| d.id);
@@ -210,6 +235,8 @@ fn run_executor_tick(
             Ok(tx_hash) => {
                 store.execute_disbursement(disbursement.id, &tx_hash)?;
                 let _ = store.remove_execution_intent(disbursement.id);
+                store.record_executor_nonce(&config.identity, intent.nonce)?;
+                snapshot.record_nonce(intent.nonce);
             }
             Err(err) => {
                 if err.is_storage() {
@@ -456,6 +483,13 @@ fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
         Ok(list) => Ok(list),
         Err(_) => de::<u64>(bytes).map(|single| vec![single]),
     }
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs()
 }
 
 fn did_revocation_to_json(record: &DidRevocationRecord) -> Value {
@@ -717,6 +751,7 @@ fn execution_intent_to_json(intent: &SignedExecutionIntent) -> Value {
         "staged_at".into(),
         Value::Number(Number::from(intent.staged_at)),
     );
+    map.insert("nonce".into(), Value::Number(Number::from(intent.nonce)));
     Value::Object(map)
 }
 
@@ -746,11 +781,13 @@ fn execution_intent_from_json(value: &Value) -> CodecResult<SignedExecutionInten
         .ok_or_else(|| {
             sled::Error::Unsupported("treasury intent JSON: missing staged_at".into())
         })?;
+    let nonce = obj.get("nonce").and_then(Value::as_u64).unwrap_or(0);
     Ok(SignedExecutionIntent {
         disbursement_id,
         tx_bytes,
         tx_hash,
         staged_at,
+        nonce,
     })
 }
 
@@ -777,6 +814,27 @@ fn executor_snapshot_to_json(snapshot: &TreasuryExecutorSnapshot) -> Value {
         "staged_intents".into(),
         Value::Number(Number::from(snapshot.staged_intents)),
     );
+    if let Some(holder) = &snapshot.lease_holder {
+        map.insert("lease_holder".into(), Value::String(holder.clone()));
+    }
+    if let Some(expires) = snapshot.lease_expires_at {
+        map.insert(
+            "lease_expires_at".into(),
+            Value::Number(Number::from(expires)),
+        );
+    }
+    if let Some(renewed) = snapshot.lease_renewed_at {
+        map.insert(
+            "lease_renewed_at".into(),
+            Value::Number(Number::from(renewed)),
+        );
+    }
+    if let Some(nonce) = snapshot.last_submitted_nonce {
+        map.insert(
+            "last_submitted_nonce".into(),
+            Value::Number(Number::from(nonce)),
+        );
+    }
     Value::Object(map)
 }
 
@@ -804,6 +862,13 @@ fn executor_snapshot_from_json(value: &Value) -> CodecResult<TreasuryExecutorSna
         .get("staged_intents")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let lease_holder = obj
+        .get("lease_holder")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let lease_expires_at = obj.get("lease_expires_at").and_then(Value::as_u64);
+    let lease_renewed_at = obj.get("lease_renewed_at").and_then(Value::as_u64);
+    let last_submitted_nonce = obj.get("last_submitted_nonce").and_then(Value::as_u64);
     Ok(TreasuryExecutorSnapshot {
         last_tick_at,
         last_success_at,
@@ -811,6 +876,87 @@ fn executor_snapshot_from_json(value: &Value) -> CodecResult<TreasuryExecutorSna
         last_error,
         pending_matured,
         staged_intents,
+        lease_holder,
+        lease_expires_at,
+        lease_renewed_at,
+        last_submitted_nonce,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ExecutorLeaseRecord {
+    pub holder: String,
+    pub expires_at: u64,
+    pub renewed_at: u64,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub last_nonce: Option<u64>,
+}
+
+impl BinaryCodec for ExecutorLeaseRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.holder.encode(writer);
+        self.expires_at.encode(writer);
+        self.renewed_at.encode(writer);
+        self.last_nonce.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            holder: String::decode(reader)?,
+            expires_at: u64::decode(reader)?,
+            renewed_at: u64::decode(reader)?,
+            last_nonce: Option::<u64>::decode(reader)?,
+        })
+    }
+}
+
+fn executor_lease_to_json(record: &ExecutorLeaseRecord) -> Value {
+    let mut map = Map::new();
+    map.insert("holder".into(), Value::String(record.holder.clone()));
+    map.insert(
+        "expires_at".into(),
+        Value::Number(Number::from(record.expires_at)),
+    );
+    map.insert(
+        "renewed_at".into(),
+        Value::Number(Number::from(record.renewed_at)),
+    );
+    if let Some(nonce) = record.last_nonce {
+        map.insert("last_nonce".into(), Value::Number(Number::from(nonce)));
+    }
+    Value::Object(map)
+}
+
+fn executor_lease_from_json(value: &Value) -> CodecResult<ExecutorLeaseRecord> {
+    let obj = value.as_object().ok_or_else(|| {
+        sled::Error::Unsupported("treasury executor lease JSON: expected object".into())
+    })?;
+    let holder = obj
+        .get("holder")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury executor lease JSON: missing holder".into())
+        })?
+        .to_string();
+    let expires_at = obj
+        .get("expires_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury executor lease JSON: missing expires_at".into())
+        })?;
+    let renewed_at = obj
+        .get("renewed_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            sled::Error::Unsupported("treasury executor lease JSON: missing renewed_at".into())
+        })?;
+    let last_nonce = obj.get("last_nonce").and_then(Value::as_u64);
+    Ok(ExecutorLeaseRecord {
+        holder,
+        expires_at,
+        renewed_at,
+        last_nonce,
     })
 }
 
@@ -1227,22 +1373,37 @@ impl GovStore {
 
     fn load_executor_snapshot(&self) -> sled::Result<Option<TreasuryExecutorSnapshot>> {
         let tree = self.treasury_executor_state_tree();
-        if let Some(raw) = tree.get(b"snapshot")? {
-            return de(&raw).map(Some);
-        }
-        let path = self.treasury_executor_state_path();
-        if let Ok(bytes) = std::fs::read(&path) {
-            if bytes.is_empty() {
+        let mut snapshot = if let Some(raw) = tree.get(b"snapshot")? {
+            de(&raw)?
+        } else {
+            let path = self.treasury_executor_state_path();
+            if let Ok(bytes) = std::fs::read(&path) {
+                if bytes.is_empty() {
+                    return Ok(None);
+                }
+                let value = json_from_bytes(&bytes).map_err(|e| {
+                    sled::Error::Unsupported(
+                        format!("decode treasury executor snapshot: {e}").into(),
+                    )
+                })?;
+                let snapshot = executor_snapshot_from_json(&value)?;
+                let _ = self.store_executor_snapshot(&snapshot);
+                snapshot
+            } else {
                 return Ok(None);
             }
-            let value = json_from_bytes(&bytes).map_err(|e| {
-                sled::Error::Unsupported(format!("decode treasury executor snapshot: {e}").into())
-            })?;
-            let snapshot = executor_snapshot_from_json(&value)?;
-            let _ = self.store_executor_snapshot(&snapshot);
-            return Ok(Some(snapshot));
+        };
+        if let Some(lease) = self.executor_lease_record()? {
+            snapshot.record_lease(
+                Some(lease.holder.clone()),
+                Some(lease.expires_at),
+                Some(lease.renewed_at),
+            );
+            if let Some(nonce) = lease.last_nonce {
+                snapshot.record_nonce(nonce);
+            }
         }
-        Ok(None)
+        Ok(Some(snapshot))
     }
 
     fn store_executor_snapshot(&self, snapshot: &TreasuryExecutorSnapshot) -> sled::Result<()> {
@@ -1257,6 +1418,31 @@ impl GovStore {
         std::fs::write(&path, bytes).map_err(|e| {
             sled::Error::Unsupported(format!("write treasury executor snapshot: {e}").into())
         })
+    }
+
+    fn executor_lease_record(&self) -> sled::Result<Option<ExecutorLeaseRecord>> {
+        let tree = self.treasury_executor_state_tree();
+        if let Some(raw) = tree.get(b"lease")? {
+            return de(&raw).map(Some);
+        }
+        Ok(None)
+    }
+
+    fn persist_executor_lease(
+        &self,
+        expected: Option<Vec<u8>>,
+        record: &ExecutorLeaseRecord,
+    ) -> sled::Result<bool> {
+        let tree = self.treasury_executor_state_tree();
+        let new_bytes = ser(record)?;
+        let result = tree.compare_and_swap(b"lease", expected, Some(new_bytes))?;
+        Ok(result.is_ok())
+    }
+
+    fn remove_executor_lease(&self, expected: Option<Vec<u8>>) -> sled::Result<bool> {
+        let tree = self.treasury_executor_state_tree();
+        let result = tree.compare_and_swap(b"lease", expected, None)?;
+        Ok(result.is_ok())
     }
 
     fn load_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {
@@ -2525,11 +2711,95 @@ impl GovStore {
         self.load_executor_snapshot()
     }
 
-    pub fn update_executor_snapshot(
+    pub fn refresh_executor_lease(
         &self,
-        snapshot: &TreasuryExecutorSnapshot,
-    ) -> sled::Result<()> {
-        self.store_executor_snapshot(snapshot)
+        holder: &str,
+        ttl: Duration,
+    ) -> sled::Result<(ExecutorLeaseRecord, bool)> {
+        let ttl_secs = ttl.as_secs().max(1);
+        let now = unix_now();
+        let tree = self.treasury_executor_state_tree();
+        let key = b"lease";
+        loop {
+            let current = tree.get(key)?;
+            match current.clone() {
+                Some(bytes) => {
+                    let mut existing = de::<ExecutorLeaseRecord>(&bytes)?;
+                    if existing.expires_at > now && existing.holder != holder {
+                        return Ok((existing, false));
+                    }
+                    let last_nonce = if existing.holder == holder {
+                        existing.last_nonce
+                    } else {
+                        None
+                    };
+                    existing = ExecutorLeaseRecord {
+                        holder: holder.to_string(),
+                        expires_at: now.saturating_add(ttl_secs),
+                        renewed_at: now,
+                        last_nonce,
+                    };
+                    let new_bytes = ser(&existing)?;
+                    match tree.compare_and_swap(key, current.clone(), Some(new_bytes))? {
+                        Ok(_) => return Ok((existing, true)),
+                        Err(_) => continue,
+                    }
+                }
+                None => {
+                    let record = ExecutorLeaseRecord {
+                        holder: holder.to_string(),
+                        expires_at: now.saturating_add(ttl_secs),
+                        renewed_at: now,
+                        last_nonce: None,
+                    };
+                    let new_bytes = ser(&record)?;
+                    match tree.compare_and_swap(key, None, Some(new_bytes))? {
+                        Ok(_) => return Ok((record, true)),
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn release_executor_lease(&self, holder: &str) -> sled::Result<()> {
+        let tree = self.treasury_executor_state_tree();
+        let key = b"lease";
+        loop {
+            let current = tree.get(key)?;
+            let Some(bytes) = current.clone() else {
+                return Ok(());
+            };
+            let existing = de::<ExecutorLeaseRecord>(&bytes)?;
+            if existing.holder != holder {
+                return Ok(());
+            }
+            match tree.compare_and_swap(key, Some(bytes), None)? {
+                Ok(_) => return Ok(()),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    pub fn record_executor_nonce(&self, holder: &str, nonce: u64) -> sled::Result<()> {
+        let tree = self.treasury_executor_state_tree();
+        let key = b"lease";
+        loop {
+            let current = tree.get(key)?;
+            let Some(bytes) = current.clone() else {
+                return Ok(());
+            };
+            let mut existing = de::<ExecutorLeaseRecord>(&bytes)?;
+            if existing.holder != holder {
+                return Ok(());
+            }
+            existing.last_nonce = Some(nonce);
+            let new_bytes = ser(&existing)?;
+            match tree.compare_and_swap(key, Some(bytes), Some(new_bytes))? {
+                Ok(_) => return Ok(()),
+                Err(_) => continue,
+            }
+        }
     }
 
     pub fn spawn_treasury_executor(
@@ -2567,6 +2837,7 @@ impl GovStore {
                 }
                 thread::sleep(poll_interval);
             }
+            let _ = store.release_executor_lease(&config.identity);
         });
         TreasuryExecutorHandle {
             shutdown,

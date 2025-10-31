@@ -1,9 +1,14 @@
-use governance::{DisbursementStatus, GovStore, TreasuryBalanceEventKind};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use governance::{DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryDisbursement};
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
 };
-use std::time::Duration;
 use sys::tempfile::tempdir;
 
 #[test]
@@ -144,7 +149,9 @@ fn treasury_executor_stages_and_executes() {
     let sign_calls = Arc::new(AtomicUsize::new(0));
     let submit_calls = Arc::new(AtomicUsize::new(0));
     let config = governance::TreasuryExecutorConfig {
+        identity: "test-exec".into(),
         poll_interval: Duration::from_millis(25),
+        lease_ttl: Duration::from_secs(1),
         epoch_source: Arc::new(|| 10),
         signer: {
             let counter = Arc::clone(&sign_calls);
@@ -154,6 +161,7 @@ fn treasury_executor_stages_and_executes() {
                     disbursement.id,
                     vec![0xde, 0xad, 0xbe, 0xef],
                     format!("intent-{}", disbursement.id),
+                    7,
                 ))
             })
         },
@@ -216,11 +224,14 @@ fn treasury_executor_reuses_staged_intents() {
             disbursement.id,
             vec![0u8; 4],
             "pre-staged".into(),
+            9,
         ))
         .expect("stage intent");
     let sign_calls = Arc::new(AtomicUsize::new(0));
     let config = governance::TreasuryExecutorConfig {
+        identity: "reuse-exec".into(),
         poll_interval: Duration::from_millis(25),
+        lease_ttl: Duration::from_millis(250),
         epoch_source: Arc::new(|| 5),
         signer: {
             let counter = Arc::clone(&sign_calls);
@@ -230,6 +241,7 @@ fn treasury_executor_reuses_staged_intents() {
                     0,
                     Vec::new(),
                     String::new(),
+                    0,
                 ))
             })
         },
@@ -261,4 +273,86 @@ fn treasury_executor_reuses_staged_intents() {
     assert_eq!(sign_calls.load(Ordering::SeqCst), 0);
     handle.shutdown();
     handle.join();
+}
+
+#[test]
+fn executor_leases_coordinate_holders() {
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("gov.db");
+    let store = GovStore::open(&db_path);
+    let (lease, acquired) = store
+        .refresh_executor_lease("exec-a", Duration::from_millis(100))
+        .expect("acquire lease");
+    assert!(acquired);
+    assert_eq!(lease.holder, "exec-a");
+    let (second, acquired_second) = store
+        .refresh_executor_lease("exec-b", Duration::from_millis(100))
+        .expect("refresh lease");
+    assert!(!acquired_second);
+    assert_eq!(second.holder, "exec-a");
+    store
+        .release_executor_lease("exec-a")
+        .expect("release lease");
+    let (final_lease, acquired_final) = store
+        .refresh_executor_lease("exec-b", Duration::from_millis(100))
+        .expect("acquire second lease");
+    assert!(acquired_final);
+    assert_eq!(final_lease.holder, "exec-b");
+}
+
+#[test]
+fn treasury_executor_records_submission_errors() -> Result<()> {
+    let dir = tempdir()?;
+    let db_path = dir.path().join("gov.db");
+    let store = GovStore::open(&db_path);
+    store.record_treasury_accrual(2_000, 0)?;
+    let disbursement = store.queue_disbursement("omega", 250, 0, "{}", 0)?;
+    let error_count = Arc::new(AtomicUsize::new(0));
+    let config = governance::TreasuryExecutorConfig {
+        identity: "error-exec".into(),
+        poll_interval: Duration::from_millis(25),
+        lease_ttl: Duration::from_millis(250),
+        epoch_source: Arc::new(|| 1),
+        signer: Arc::new(move |disbursement: &TreasuryDisbursement| {
+            Ok(governance::SignedExecutionIntent::new(
+                disbursement.id,
+                vec![0xde, 0xad],
+                format!("err-intent-{}", disbursement.id),
+                42,
+            ))
+        }),
+        submitter: {
+            let counter = Arc::clone(&error_count);
+            Arc::new(move |_intent| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Err(governance::TreasuryExecutorError::Submission(
+                    "simulated submission failure".into(),
+                ))
+            })
+        },
+        dependency_check: None,
+    };
+    let handle = store.spawn_treasury_executor(config);
+    let mut observed_error = None;
+    for _ in 0..40 {
+        if let Some(snapshot) = store.executor_snapshot()? {
+            if snapshot.last_error.is_some() {
+                observed_error = Some(snapshot);
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    handle.shutdown();
+    handle.join();
+    let snapshot = observed_error.expect("executor did not record submission error");
+    assert!(snapshot
+        .last_error
+        .as_deref()
+        .is_some_and(|msg| msg.contains("simulated submission failure")));
+    assert!(snapshot.last_submitted_nonce.is_none());
+    let staged = store.execution_intent(disbursement.id)?;
+    assert!(staged.is_some(), "failed intent should remain staged");
+    assert!(error_count.load(Ordering::SeqCst) > 0);
+    Ok(())
 }

@@ -33,6 +33,8 @@ const KEY_AUDIT: &str = "audit_log";
 const KEY_ROOTS: &str = "recent_roots";
 const KEY_NEXT_SEQ: &str = "next_seq";
 const KEY_SLA_QUEUE: &str = "sla_queue";
+const KEY_SLA_HISTORY: &str = "sla_history";
+const SLA_HISTORY_LIMIT: usize = 256;
 
 fn json_map(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -141,6 +143,7 @@ struct SettlementState {
     roots: VecDeque<[u8; 32]>,
     next_seq: u64,
     sla: Vec<SlaRecord>,
+    sla_history: VecDeque<SlaResolution>,
 }
 
 impl SettlementState {
@@ -154,6 +157,8 @@ impl SettlementState {
         let roots = load_or_default::<VecDeque<[u8; 32]>, _>(&db, KEY_ROOTS, VecDeque::new);
         let next_seq = load_or_default::<u64, _>(&db, KEY_NEXT_SEQ, || 0u64);
         let sla = load_or_default::<Vec<SlaRecord>, _>(&db, KEY_SLA_QUEUE, Vec::new);
+        let sla_history =
+            load_or_default::<VecDeque<SlaResolution>, _>(&db, KEY_SLA_HISTORY, VecDeque::new);
         Self {
             db,
             base,
@@ -165,6 +170,7 @@ impl SettlementState {
             roots,
             next_seq,
             sla,
+            sla_history,
         }
     }
 

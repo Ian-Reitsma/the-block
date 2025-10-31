@@ -11,10 +11,14 @@ use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
-    governance::{DisbursementStatus, TreasuryDisbursement},
+    governance::{
+        DisbursementStatus, GovStore, SignedExecutionIntent, TreasuryDisbursement,
+        TreasuryExecutorSnapshot,
+    },
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
     Block, BlockTreasuryEvent,
@@ -90,6 +94,7 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/mempool/fee_floor_policy", fee_floor_policy_history)
         .get("/governance/dependency_policy", dependency_policy_history)
         .get("/governance/treasury/disbursements", treasury_disbursements)
+        .get("/governance/treasury/executor", treasury_executor_status)
         .get("/network/certs", network_certs)
         .get("/network/overlay", network_overlay)
         .get("/blocks/:hash/proof", block_proof)
@@ -612,7 +617,6 @@ async fn treasury_disbursements(
         min_status_ts,
         max_status_ts,
     };
-
     match explorer.treasury_disbursements(page, page_size, filter) {
         Ok(result) => {
             let payload = result.to_json_value();
@@ -623,6 +627,108 @@ async fn treasury_disbursements(
             Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ExplorerExecutorDependency {
+    disbursement_id: u64,
+    dependencies: Vec<u64>,
+    memo: String,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ExplorerExecutorReport {
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    snapshot: Option<TreasuryExecutorSnapshot>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    lease_seconds_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    staged_intents: Vec<SignedExecutionIntent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dependency_blocks: Vec<ExplorerExecutorDependency>,
+}
+
+async fn treasury_executor_status(
+    request: Request<ExplorerHttpState>,
+) -> Result<Response, HttpError> {
+    let store_path = request
+        .query_param("state")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into()));
+    let store = GovStore::open(store_path);
+    let snapshot = store
+        .executor_snapshot()
+        .map_err(|err| HttpError::Handler(format!("executor snapshot: {err}")))?;
+    let intents = store
+        .execution_intents()
+        .map_err(|err| HttpError::Handler(format!("execution intents: {err}")))?;
+    let disbursements = store
+        .disbursements()
+        .map_err(|err| HttpError::Handler(format!("load disbursements: {err}")))?;
+    let dependency_blocks: Vec<ExplorerExecutorDependency> = disbursements
+        .into_iter()
+        .filter(|d| matches!(d.status, DisbursementStatus::Scheduled))
+        .filter_map(|d| {
+            let deps = parse_dependency_list(&d.memo);
+            if deps.is_empty() {
+                None
+            } else {
+                Some(ExplorerExecutorDependency {
+                    disbursement_id: d.id,
+                    dependencies: deps,
+                    memo: d.memo,
+                })
+            }
+        })
+        .collect();
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let lease_seconds_remaining = snapshot
+        .as_ref()
+        .and_then(|snap| snap.lease_expires_at)
+        .and_then(|expires| expires.checked_sub(now_secs));
+    let report = ExplorerExecutorReport {
+        snapshot,
+        lease_seconds_remaining,
+        staged_intents: intents,
+        dependency_blocks,
+    };
+    Response::new(StatusCode::OK).json(&report)
+}
+
+fn parse_dependency_list(memo: &str) -> Vec<u64> {
+    let trimmed = memo.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(json_value) = json::from_str::<json::Value>(trimmed) {
+        if let Some(map) = json_value.as_object() {
+            if let Some(json::Value::Array(items)) = map.get("depends_on") {
+                return items
+                    .iter()
+                    .filter_map(|item| match item {
+                        json::Value::Number(num) => num.as_u64(),
+                        json::Value::String(text) => text.trim().parse::<u64>().ok(),
+                        _ => None,
+                    })
+                    .collect();
+            }
+        }
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("depends_on=")
+        .or_else(|| trimmed.strip_prefix("depends_on:"))
+    {
+        return rest
+            .split(',')
+            .filter_map(|entry| entry.trim().parse::<u64>().ok())
+            .collect();
+    }
+    Vec::new()
 }
 
 async fn network_certs(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {

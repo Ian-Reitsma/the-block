@@ -50,6 +50,7 @@ members = [
   "inflation",
   "metrics-aggregator",
   "storage",
+  "storage_market",
   "privacy",
   "dkg",
   "governance",
@@ -111,4 +112,3 @@ serde = { package = "foundation_serde", path = "crates/foundation_serde", defaul
 # level again via a `.cargo/config.toml` override whenever deeper symbolisation
 # is required.
 debug = 1
-

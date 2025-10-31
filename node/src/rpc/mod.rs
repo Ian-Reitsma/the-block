@@ -2539,6 +2539,8 @@ fn dispatch(
                 retention_blocks,
                 next_payment_block: start_block + 1,
                 accrued: 0,
+                total_deposit_ct: 0,
+                last_payment_block: None,
             };
             let offer = StorageOffer::new(
                 provider_id,
@@ -2554,6 +2556,7 @@ fn dispatch(
                 .get("object_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let provider_id = req.params.get("provider_id").and_then(|v| v.as_str());
             let chunk_idx = req
                 .params
                 .get("chunk_idx")
@@ -2575,7 +2578,7 @@ fn dispatch(
                 .get("current_block")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            storage::challenge(object_id, chunk_idx, proof, current_block)
+            storage::challenge(object_id, provider_id, chunk_idx, proof, current_block)
         }
         "storage.manifests" => {
             let limit = req
@@ -2599,6 +2602,7 @@ fn dispatch(
                 .unwrap_or(false);
             storage::set_provider_maintenance(provider, maintenance)
         }
+        "storage_incentives" => storage::incentives_snapshot(),
         "gov_propose" => {
             let proposer = req
                 .params

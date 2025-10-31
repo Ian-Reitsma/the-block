@@ -59,6 +59,7 @@ bridge-types = { path = "../crates/bridge-types" }
 codec = { path = "../crates/codec" }
 # storage market primitives
 storage = { path = "../storage" }
+storage_market = { path = "../storage_market" }
 # advertising marketplace
 ad-market = { path = "../crates/ad_market", package = "ad_market" }
 zkp = { path = "../crates/zkp" }
@@ -207,4 +208,3 @@ test = false
 name = "migrate_overlay_store"
 path = "../scripts/migrate_overlay_store.rs"
 test = false
-

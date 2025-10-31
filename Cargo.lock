@@ -767,6 +767,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "storage_market"
+version = "0.1.0"
+dependencies = [
+ "foundation_serde",
+ "foundation_serialization",
+ "sled",
+ "storage",
+ "sys",
+ "thiserror",
+]
+
+[[package]]
 name = "storage_migrate"
 version = "0.1.0"
 dependencies = [
@@ -899,6 +911,7 @@ dependencies = [
  "state",
  "storage",
  "storage_engine",
+ "storage_market",
  "sys",
  "tb-sim",
  "testkit",

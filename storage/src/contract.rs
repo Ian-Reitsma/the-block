@@ -24,6 +24,12 @@ pub struct StorageContract {
     pub next_payment_block: u64,
     /// Total amount accrued so far
     pub accrued: u64,
+    /// Combined replica deposit currently reserved for the contract
+    #[serde(default)]
+    pub total_deposit_ct: u64,
+    /// Last block height where `pay` advanced the schedule
+    #[serde(default)]
+    pub last_payment_block: Option<u64>,
 }
 
 /// Errors related to storage contracts
@@ -83,6 +89,7 @@ impl StorageContract {
         let amount = blocks * self.price_per_block;
         self.accrued += amount;
         self.next_payment_block = due_block + 1;
+        self.last_payment_block = Some(due_block);
         amount
     }
 }
@@ -103,11 +110,15 @@ mod tests {
             retention_blocks: 5,
             next_payment_block: 1,
             accrued: 0,
+            total_deposit_ct: 0,
+            last_payment_block: None,
         };
         assert_eq!(c.pay(0), 0);
         assert_eq!(c.pay(2), 4); // blocks 1-2
         assert_eq!(c.accrued, 4);
+        assert_eq!(c.last_payment_block, Some(2));
         assert_eq!(c.pay(10), 6); // blocks 3-5
         assert_eq!(c.accrued, 10);
+        assert_eq!(c.last_payment_block, Some(5));
     }
 }

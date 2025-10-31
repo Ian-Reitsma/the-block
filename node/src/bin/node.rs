@@ -626,8 +626,14 @@ enum Commands {
         /// Signing key identifier used by the treasury executor
         treasury_key: Option<String>,
 
+        /// Identity advertised for the treasury executor lease
+        treasury_executor_id: Option<String>,
+
         /// Seconds between treasury executor polling ticks
         treasury_poll_interval: u64,
+
+        /// Seconds before the treasury executor lease expires
+        treasury_executor_lease: u64,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -883,6 +889,11 @@ fn build_run_command() -> CliCommand {
         "treasury-key",
         "Key identifier used to sign treasury disbursements",
     )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "treasury_executor_id",
+        "treasury-executor-id",
+        "Identity string advertised by the treasury executor lease",
+    )))
     .arg(ArgSpec::Option(
         OptionSpec::new(
             "treasury_poll_interval",
@@ -890,6 +901,14 @@ fn build_run_command() -> CliCommand {
             "Seconds between treasury executor polling ticks",
         )
         .default("15"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "treasury_executor_lease",
+            "treasury-executor-lease",
+            "Seconds before the treasury executor lease expires",
+        )
+        .default("60"),
     ))
     .build()
 }
@@ -1033,7 +1052,9 @@ fn parse_run(matches: &Matches) -> Result<Commands, String> {
     let enable_vm_debug = matches.get_flag("enable_vm_debug");
     let treasury_executor = matches.get_flag("treasury_executor");
     let treasury_key = matches.get_string("treasury_key");
+    let treasury_executor_id = matches.get_string("treasury_executor_id");
     let treasury_poll_interval = parse_u64_option(matches, "treasury_poll_interval", 15)?;
+    let treasury_executor_lease = parse_u64_option(matches, "treasury_executor_lease", 60)?;
 
     Ok(Commands::Run {
         rpc_addr,
@@ -1063,6 +1084,8 @@ fn parse_run(matches: &Matches) -> Result<Commands, String> {
         treasury_executor,
         treasury_key,
         treasury_poll_interval,
+        treasury_executor_id,
+        treasury_executor_lease,
     })
 }
 
@@ -1292,6 +1315,8 @@ async fn async_main() -> std::process::ExitCode {
             treasury_executor,
             treasury_key,
             treasury_poll_interval,
+            treasury_executor_id,
+            treasury_executor_lease,
         } => {
             if auto_tune {
                 #[cfg(feature = "telemetry")]
@@ -1407,8 +1432,14 @@ async fn async_main() -> std::process::ExitCode {
             let _treasury_executor_handle = if treasury_executor {
                 let key_id = treasury_key.clone().expect("treasury key checked above");
                 let signing_key = load_key(&key_id);
+                let identity = treasury_executor_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{treasury_account}-{}", std::process::id()));
+                let lease_ttl = Duration::from_secs(treasury_executor_lease.max(5));
                 let params = ExecutorParams {
+                    identity,
                     poll_interval: Duration::from_secs(poll_interval_secs),
+                    lease_ttl,
                     signing_key: Arc::new(signing_key.to_bytes().to_vec()),
                     treasury_account: treasury_account.clone(),
                     dependency_check: Some(memo_dependency_check()),

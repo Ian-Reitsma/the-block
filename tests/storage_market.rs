@@ -14,6 +14,8 @@ fn storage_contract_lifecycle() {
         retention_blocks: 10,
         next_payment_block: 1,
         accrued: 0,
+        total_deposit_ct: 0,
+        last_payment_block: None,
     };
     assert!(contract.is_active(5).is_ok());
     assert!(contract.is_active(20).is_err());
@@ -31,14 +33,16 @@ fn retrieval_challenge_and_slash() {
         retention_blocks: 10,
         next_payment_block: 1,
         accrued: 0,
+        total_deposit_ct: 0,
+        last_payment_block: None,
     };
     let offer = StorageOffer::new("provA".into(), 4096, 1, 10);
     rpc::storage::upload(contract.clone(), vec![offer]);
     let proof = contract.expected_proof(0);
-    let ok = rpc::storage::challenge(&contract.object_id, 0, proof, 5);
+    let ok = rpc::storage::challenge(&contract.object_id, None, 0, proof, 5);
     assert_eq!(ok["status"], "ok");
     assert_eq!(telemetry::RETRIEVAL_SUCCESS_TOTAL.value(), 1);
-    let bad = rpc::storage::challenge(&contract.object_id, 0, [0u8; 32], 5);
+    let bad = rpc::storage::challenge(&contract.object_id, None, 0, [0u8; 32], 5);
     assert_eq!(bad["error"], "challenge_failed");
     assert_eq!(telemetry::RETRIEVAL_FAILURE_TOTAL.value(), 1);
 }
@@ -55,6 +59,8 @@ fn payments_accrue() {
         retention_blocks: 4,
         next_payment_block: 1,
         accrued: 0,
+        total_deposit_ct: 0,
+        last_payment_block: None,
     };
     assert_eq!(contract.pay(2), 6);
     assert_eq!(contract.pay(5), 6);

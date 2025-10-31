@@ -1,0 +1,14 @@
+[package]
+name = "storage_market"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+storage = { path = "../storage" }
+sled = { path = "../sled" }
+foundation_serialization = { path = "../crates/foundation_serialization" }
+thiserror = { path = "../crates/thiserror" }
+serde = { workspace = true }
+
+[dev-dependencies]
+sys = { path = "../crates/sys" }
