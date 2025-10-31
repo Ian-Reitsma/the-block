@@ -176,10 +176,11 @@ legacy JSON snapshots.
   treasury lacks CT/IT balance or when the submitter returns a terminal
   `TxAdmissionError`.
 - `gov.treasury.balance` now embeds an `executor` snapshot exposing
-  `last_tick_at`, `last_success_at`, `last_error_at`, `pending_matured`, and
-  `staged_intents`. `contract gov treasury fetch` renders the same snapshot in the
-  CLI, alongside executor uptime, last error string, and whether any intents are
-  waiting on dependency gates.
+  `last_tick_at`, `last_success_at`, `last_error_at`, `pending_matured`,
+  `staged_intents`, and `lease_last_nonce` (the shared nonce watermark carried
+  across lease holders). `contract gov treasury fetch` renders the same snapshot
+  in the CLI, alongside executor uptime, last error string, and whether any
+  intents are waiting on dependency gates.
 - The worker publishes metrics
   (`treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
   `treasury_executor_last_{tick,success,error}_seconds`,
@@ -189,8 +190,9 @@ legacy JSON snapshots.
   summary and CLI output reuse the same snapshot, keeping observability
   consistent across telemetry, dashboards, and operator tooling.
 - Integration coverage in `node/tests/treasury.rs` exercises dependency gating,
-  nonce reuse, and crash-safe intent staging, while the governance tests confirm
-  staged intents survive restarts and avoid double-signing.
+  nonce reuse, failover watermark continuity (`executor_failover_preserves_nonce_watermark`),
+  and crash-safe intent staging, while the governance tests confirm staged
+  intents survive restarts and avoid double-signing.
 
 ### Read-acknowledgement anomaly response
 

@@ -5,10 +5,10 @@ edition = "2021"
 
 [dependencies]
 storage = { path = "../storage" }
-sled = { path = "../sled" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 thiserror = { path = "../crates/thiserror" }
 serde = { workspace = true }
+storage_engine = { path = "../crates/storage_engine" }
 
 [dev-dependencies]
 sys = { path = "../crates/sys" }

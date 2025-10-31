@@ -17,6 +17,13 @@ for correlating metrics with structured logs across the fleet.
   `/logs/search` dump when either counter spikes and stores the payload under
   `$TB_LOG_DUMP_DIR`. Grafana panels link directly to the cached diagnostics
   returned by the `net.quic_stats` RPC.
+- **RangeBoost mesh** – Alert whenever
+  `range_boost_forwarder_fail_total` or `range_boost_enqueue_error_total`
+  increases without an accompanying retry success. Pair the counters with the
+  `range_boost_toggle_latency_seconds` histogram to confirm enable/disable
+  operations propagate, and track `mesh_peer_connected_total`/`mesh_peer_latency_ms`
+  for peer health. The `test-range-boost` Justfile recipe exercises these paths
+  in CI so dashboards stay wired to first-party telemetry.
 - **Compute marketplace** – The `compute_market_dashboard.json` add-on highlights
   `fee_floor_current`, per-sender slot pressure, and SLA violation counters so
   admission policy or scheduler regressions trigger fast follow-up.

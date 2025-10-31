@@ -769,6 +769,7 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
         self.lease_expires_at.encode(writer);
         self.lease_renewed_at.encode(writer);
         self.last_submitted_nonce.encode(writer);
+        self.lease_last_nonce.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
@@ -783,6 +784,7 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
             lease_expires_at: Option::<u64>::decode(reader)?,
             lease_renewed_at: Option::<u64>::decode(reader)?,
             last_submitted_nonce: Option::<u64>::decode(reader)?,
+            lease_last_nonce: Option::<u64>::decode(reader)?,
         })
     }
 }

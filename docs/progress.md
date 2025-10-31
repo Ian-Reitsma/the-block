@@ -1,4 +1,15 @@
 # Project Progress Snapshot
+> **Review (2025-10-31, morning):** `storage_market` now persists contracts and
+> replica incentives through the in-house `storage_engine` adapter with manual
+> `foundation_serialization` codecs, retiring the sled shim from FIRST_PARTY_ONLY
+> builds. RangeBoost picked up first-party failure-injection hooks
+> (`set_forwarder_fault_mode`, `inject_enqueue_error`) plus new telemetry
+> counters/histograms so mesh stress tests run entirely inside the crate, and
+> the treasury executor retains a shared lease watermark (`lease_last_nonce`)
+> to keep nonce continuity across failover. Integration suites in
+> `storage_market/tests`, `node/tests/range_boost.rs`, and
+> `governance/tests/treasury.rs` cover the new engine adapter, mesh fault drills,
+> and executor failover behaviour respectively.
 > **Review (2025-10-30, late night):** Treasury execution is now automated end
 > to end. Governance and node stores stage signed intents in sled, the node
 > spawns the executor via `--treasury-executor --treasury-key <ID>`, and the

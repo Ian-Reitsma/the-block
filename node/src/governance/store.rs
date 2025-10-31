@@ -32,7 +32,7 @@ use std::fmt::{self, Write as FmtWrite};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
     Arc, Mutex, Weak,
 };
 use std::thread;
@@ -96,6 +96,7 @@ pub struct TreasuryExecutorConfig {
                 + Sync,
         >,
     >,
+    pub nonce_floor: Arc<AtomicU64>,
 }
 
 #[derive(Debug)]
@@ -188,10 +189,11 @@ fn run_executor_tick(
         Some(lease.holder.clone()),
         Some(lease.expires_at),
         Some(lease.renewed_at),
+        lease.last_nonce,
     );
-    if let Some(nonce) = lease.last_nonce {
-        snapshot.record_nonce(nonce);
-    }
+    config
+        .nonce_floor
+        .store(lease.last_nonce.unwrap_or(0), AtomicOrdering::SeqCst);
     if !acquired {
         let staged_total = store
             .load_execution_intents()
@@ -244,6 +246,9 @@ fn run_executor_tick(
                 let _ = store.remove_execution_intent(disbursement.id);
                 store.record_executor_nonce(&config.identity, intent.nonce)?;
                 snapshot.record_nonce(intent.nonce);
+                config
+                    .nonce_floor
+                    .store(intent.nonce, AtomicOrdering::SeqCst);
                 success_total = success_total.saturating_add(1);
             }
             Err(err) => {
@@ -914,6 +919,12 @@ fn executor_snapshot_to_json(snapshot: &TreasuryExecutorSnapshot) -> Value {
             Value::Number(Number::from(nonce)),
         );
     }
+    if let Some(nonce) = snapshot.lease_last_nonce {
+        map.insert(
+            "lease_last_nonce".into(),
+            Value::Number(Number::from(nonce)),
+        );
+    }
     Value::Object(map)
 }
 
@@ -959,6 +970,7 @@ fn executor_snapshot_from_json(value: &Value) -> CodecResult<TreasuryExecutorSna
         lease_expires_at,
         lease_renewed_at,
         last_submitted_nonce,
+        lease_last_nonce: obj.get("lease_last_nonce").and_then(Value::as_u64),
     })
 }
 
@@ -1464,10 +1476,8 @@ impl GovStore {
                     Some(lease.holder.clone()),
                     Some(lease.expires_at),
                     Some(lease.renewed_at),
+                    lease.last_nonce,
                 );
-                if let Some(nonce) = lease.last_nonce {
-                    snapshot.record_nonce(nonce);
-                }
             }
         }
         Ok(snapshot_opt)
@@ -2507,11 +2517,7 @@ impl GovStore {
                     if existing.expires_at > now && existing.holder != holder {
                         return Ok((existing, false));
                     }
-                    let last_nonce = if existing.holder == holder {
-                        existing.last_nonce
-                    } else {
-                        None
-                    };
+                    let last_nonce = existing.last_nonce;
                     existing = ExecutorLeaseRecord {
                         holder: holder.to_string(),
                         expires_at: now.saturating_add(ttl_secs),
@@ -2553,7 +2559,15 @@ impl GovStore {
             if existing.holder != holder {
                 return Ok(());
             }
-            match tree.compare_and_swap(key, Some(bytes), None)? {
+            let now = unix_now();
+            let updated = ExecutorLeaseRecord {
+                holder: String::new(),
+                expires_at: now,
+                renewed_at: now,
+                last_nonce: existing.last_nonce,
+            };
+            let new_bytes = ser(&updated)?;
+            match tree.compare_and_swap(key, Some(bytes), Some(new_bytes))? {
                 Ok(_) => return Ok(()),
                 Err(_) => continue,
             }

@@ -40,6 +40,16 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
     the system clock moves backwards, `node/src/net/peer_metrics_store.rs`
     returns an empty snapshot and logs a warning rather than panicking, so metric
     exports continue even when disks misbehave during chaos drills.
+- `mesh_peer_connected_total{peer_id}` and `mesh_peer_latency_ms{peer_id}` report
+  RangeBoost peer discovery and observed latency.
+- `range_boost_forwarder_fail_total` increments whenever the RangeBoost
+  forwarder surfaces an error (including injected faults) so mesh deployments
+  can alert on repeated retries.
+- `range_boost_enqueue_error_total` counts intentionally dropped enqueue
+  attempts driven via the injection hook, letting dashboards confirm alert wiring.
+- `range_boost_toggle_latency_seconds` records the interval between
+  `RangeBoost::set_enabled` calls to prove toggles reach the worker without
+  stalling.
 - `overlay_backend_active{backend}` flips to 1 for the active overlay backend
   (stub or libp2p)
 - `overlay_peer_total{backend}` counts overlay peers currently tracked by the

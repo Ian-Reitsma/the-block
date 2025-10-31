@@ -9,14 +9,17 @@ use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
 use std::process::Command;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU8, Ordering},
     Arc, Mutex, Weak,
 };
 use std::thread;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS};
+use crate::telemetry::{
+    MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS, RANGE_BOOST_ENQUEUE_ERROR_TOTAL,
+    RANGE_BOOST_FORWARDER_FAIL_TOTAL, RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HopProof {
@@ -42,6 +45,20 @@ pub struct MeshPeer {
 static PEER_LATENCY: Lazy<Mutex<HashMap<String, u128>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static MESH_TASK_ACTIVE: AtomicBool = AtomicBool::new(false);
 static RANGE_BOOST_ENABLED: AtomicBool = AtomicBool::new(false);
+static FORWARDER_FAULT_MODE: AtomicU8 = AtomicU8::new(FaultMode::None as u8);
+static ENQUEUE_ERROR: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "telemetry")]
+static LAST_TOGGLE: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaultMode {
+    None = 0,
+    ForceDisabled = 1,
+    ForceNoPeers = 2,
+    ForceEncode = 3,
+    ForceIo = 4,
+}
 
 #[derive(Default)]
 struct ForwarderState {
@@ -144,6 +161,8 @@ fn forwarder_loop(shutdown: Arc<AtomicBool>, weak_queue: Weak<Mutex<RangeBoost>>
                         let mut guard = queue.lock().unwrap();
                         guard.requeue_front(bundle);
                     }
+                    #[cfg(feature = "telemetry")]
+                    RANGE_BOOST_FORWARDER_FAIL_TOTAL.inc();
                     match &err {
                         ForwardError::Disabled => sleep_with_shutdown(&shutdown, DISABLED_SLEEP),
                         ForwardError::NoPeers => sleep_with_shutdown(&shutdown, RETRY_SLEEP),
@@ -174,12 +193,40 @@ pub fn mesh_active() -> bool {
 }
 
 pub fn set_enabled(v: bool) {
+    #[cfg(feature = "telemetry")]
+    {
+        let now = Instant::now();
+        let mut guard = LAST_TOGGLE.lock().unwrap();
+        if let Some(previous) = *guard {
+            let delta = now.saturating_duration_since(previous);
+            RANGE_BOOST_TOGGLE_LATENCY_SECONDS.observe(delta.as_secs_f64());
+        }
+        *guard = Some(now);
+    }
     RANGE_BOOST_ENABLED.store(v, Ordering::SeqCst);
     update_forwarder_state(v);
 }
 
 pub fn is_enabled() -> bool {
     RANGE_BOOST_ENABLED.load(Ordering::SeqCst)
+}
+
+pub fn set_forwarder_fault_mode(mode: FaultMode) {
+    FORWARDER_FAULT_MODE.store(mode as u8, Ordering::SeqCst);
+}
+
+pub fn inject_enqueue_error() {
+    ENQUEUE_ERROR.store(true, Ordering::SeqCst);
+}
+
+fn current_fault_mode() -> FaultMode {
+    match FORWARDER_FAULT_MODE.load(Ordering::SeqCst) {
+        1 => FaultMode::ForceDisabled,
+        2 => FaultMode::ForceNoPeers,
+        3 => FaultMode::ForceEncode,
+        4 => FaultMode::ForceIo,
+        _ => FaultMode::None,
+    }
 }
 
 fn record_latency(addr: String, latency: u128) {
@@ -353,6 +400,11 @@ impl RangeBoost {
     }
 
     pub fn enqueue(&mut self, payload: Vec<u8>) {
+        if ENQUEUE_ERROR.swap(false, Ordering::SeqCst) {
+            #[cfg(feature = "telemetry")]
+            RANGE_BOOST_ENQUEUE_ERROR_TOTAL.inc();
+            return;
+        }
         self.queue.push_back(Bundle {
             payload,
             proofs: vec![],
@@ -392,6 +444,18 @@ const RETRY_SLEEP: Duration = Duration::from_millis(250);
 const DISABLED_SLEEP: Duration = Duration::from_millis(1000);
 
 fn forward_bundle(bundle: &Bundle) -> Result<(), ForwardError> {
+    match current_fault_mode() {
+        FaultMode::None => {}
+        FaultMode::ForceDisabled => return Err(ForwardError::Disabled),
+        FaultMode::ForceNoPeers => return Err(ForwardError::NoPeers),
+        FaultMode::ForceEncode => return Err(ForwardError::Encode),
+        FaultMode::ForceIo => {
+            return Err(ForwardError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "range boost fault injection",
+            )))
+        }
+    }
     if !is_enabled() {
         return Err(ForwardError::Disabled);
     }

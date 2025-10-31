@@ -1,16 +1,19 @@
 #![forbid(unsafe_code)]
 
-use foundation_serialization::{self as ser, Deserialize, Serialize};
-use sled::{Config, Tree};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+mod codec;
+mod engine;
+
+use codec::{deserialize_contract_record, serialize_contract_record};
+use engine::{Engine, Tree};
+use foundation_serialization::{Deserialize, Serialize};
+use std::path::Path;
 use storage::StorageContract;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StorageMarketError {
-    #[error("database error: {0}")]
-    Database(#[from] sled::Error),
+    #[error("storage engine error: {0}")]
+    Engine(#[from] storage_engine::StorageError),
     #[error("serialization error: {0}")]
     Serialization(String),
     #[error("contract not found: {0}")]
@@ -25,14 +28,6 @@ pub enum StorageMarketError {
 }
 
 pub type Result<T> = std::result::Result<T, StorageMarketError>;
-
-fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    ser::json::to_vec(value).map_err(|err| StorageMarketError::Serialization(err.to_string()))
-}
-
-fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    ser::json::from_slice(bytes).map_err(|err| StorageMarketError::Serialization(err.to_string()))
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProofOutcome {
@@ -118,27 +113,20 @@ pub struct ProofRecord {
 
 #[derive(Clone)]
 pub struct StorageMarket {
-    db: Arc<sled::Db>,
-    contracts: Arc<Tree>,
-    base_path: PathBuf,
+    engine: Engine,
+    contracts: Tree,
 }
 
 impl StorageMarket {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let base = path.as_ref().to_path_buf();
-        let mut cfg = Config::default();
-        cfg = cfg.path(&base);
-        let db = Arc::new(cfg.open()?);
-        let contracts = Arc::new(db.open_tree("market/contracts")?);
-        Ok(Self {
-            db,
-            contracts,
-            base_path: base,
-        })
+        let base = path.as_ref();
+        let engine = Engine::open(base)?;
+        let contracts = engine.open_tree("market/contracts")?;
+        Ok(Self { engine, contracts })
     }
 
     pub fn base_path(&self) -> &Path {
-        &self.base_path
+        self.engine.base_path()
     }
 
     pub fn register_contract(
@@ -150,21 +138,23 @@ impl StorageMarket {
         contract.total_deposit_ct = total_deposit;
         let record = ContractRecord::with_replicas(contract, replicas);
         let key = record.contract.object_id.as_bytes();
-        let value = encode(&record)?;
-        self.contracts.insert(key, value)?;
+        let value = serialize_contract_record(&record)?;
+        let _ = self.contracts.insert(key, value)?;
         Ok(record)
     }
 
     pub fn load_contract(&self, object_id: &str) -> Result<Option<ContractRecord>> {
         let maybe = self.contracts.get(object_id.as_bytes())?;
-        maybe.map(|bytes| decode(&bytes)).transpose()
+        maybe
+            .map(|bytes| deserialize_contract_record(&bytes))
+            .transpose()
     }
 
     pub fn contracts(&self) -> Result<Vec<ContractRecord>> {
         let mut records: Vec<ContractRecord> = Vec::new();
         for entry in self.contracts.iter() {
             let (_, value) = entry?;
-            records.push(decode(&value)?);
+            records.push(deserialize_contract_record(&value)?);
         }
         records.sort_by(|a, b| a.contract.object_id.cmp(&b.contract.object_id));
         Ok(records)
@@ -188,7 +178,7 @@ impl StorageMarket {
             let Some(bytes) = current.clone() else {
                 return Err(StorageMarketError::ContractMissing(object_id.to_string()));
             };
-            let mut record: ContractRecord = decode(&bytes)?;
+            let mut record: ContractRecord = deserialize_contract_record(&bytes)?;
             let provider = if let Some(id) = provider_id {
                 id.to_string()
             } else {
@@ -214,14 +204,15 @@ impl StorageMarket {
                 (outcome, slashed, successes, failures, remaining)
             };
             if success {
-                let _ = record.contract.pay(block);
+                let pay_block = block.saturating_sub(1);
+                let _ = record.contract.pay(pay_block);
             }
             record.contract.total_deposit_ct = record
                 .replicas
                 .iter()
                 .map(|replica| replica.deposit_ct)
                 .sum();
-            let updated = encode(&record)?;
+            let updated = serialize_contract_record(&record)?;
             match self
                 .contracts
                 .compare_and_swap(key, current.clone(), Some(updated.clone()))?

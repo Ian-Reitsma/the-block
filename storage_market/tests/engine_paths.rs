@@ -1,0 +1,71 @@
+#![forbid(unsafe_code)]
+
+use std::error::Error;
+
+use storage::StorageContract;
+use storage_market::{ProofOutcome, ReplicaIncentive, StorageMarket};
+use sys::tempfile::tempdir;
+
+type TestResult<T> = Result<T, Box<dyn Error>>;
+
+#[test]
+fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
+    let dir = tempdir()?;
+    let path = dir.path().join("market.db");
+
+    let market = StorageMarket::open(&path)?;
+    let contract = StorageContract {
+        object_id: "obj-1".into(),
+        provider_id: "primary".into(),
+        original_bytes: 2_048,
+        shares: 8,
+        price_per_block: 10,
+        start_block: 0,
+        retention_blocks: 12,
+        next_payment_block: 1,
+        accrued: 0,
+        total_deposit_ct: 0,
+        last_payment_block: None,
+    };
+    let replica_a = ReplicaIncentive::new("primary".into(), 8, 10, 100);
+    let replica_b = ReplicaIncentive::new("backup".into(), 4, 10, 50);
+
+    let registered = market.register_contract(contract, vec![replica_a, replica_b])?;
+    assert_eq!(registered.contract.total_deposit_ct, 150);
+
+    let listing = market.contracts()?;
+    assert_eq!(listing.len(), 1);
+    assert_eq!(listing[0].contract.object_id, "obj-1");
+
+    let success = market.record_proof_outcome("obj-1", Some("primary"), 5, true)?;
+    assert_eq!(success.outcome, ProofOutcome::Success);
+    assert_eq!(success.amount_accrued_ct, 40);
+    assert_eq!(success.remaining_deposit_ct, 100);
+
+    let failure = market.record_proof_outcome("obj-1", Some("backup"), 6, false)?;
+    assert_eq!(failure.outcome, ProofOutcome::Failure);
+    assert_eq!(failure.slashed_ct, 10);
+    assert_eq!(failure.remaining_deposit_ct, 40);
+    assert_eq!(failure.amount_accrued_ct, 40);
+
+    drop(market);
+
+    let reopened = StorageMarket::open(&path)?;
+    let persisted = reopened
+        .load_contract("obj-1")?
+        .expect("contract should persist");
+    assert_eq!(persisted.contract.total_deposit_ct, 140);
+    assert_eq!(
+        persisted
+            .replicas
+            .iter()
+            .find(|r| r.provider_id == "backup")
+            .map(|r| r.deposit_ct),
+        Some(40)
+    );
+
+    reopened.clear()?;
+    assert!(reopened.contracts()?.is_empty());
+
+    Ok(())
+}

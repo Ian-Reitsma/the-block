@@ -79,6 +79,43 @@ restarting the node or leaking workers. The `node/tests/mesh_sim.rs` harness
 exercises rapid enable/disable loops to guarantee queued payloads survive while
 the worker is paused.
 
+## Failure injection and stress testing
+
+The queue now exposes first-party fault hooks so stress suites can flip failure
+paths without external harnesses:
+
+- `range_boost::set_forwarder_fault_mode(FaultMode::ForceEncode | ForceIo |
+  ForceNoPeers | ForceDisabled)` forces the next `forward_bundle` to surface
+  the requested error, exercising retry branches and logging without altering
+  production code.
+- `range_boost::inject_enqueue_error()` drops the next `enqueue` attempt and
+  increments the dedicated telemetry counter so operators can validate alerting
+  without staging malformed payloads.
+
+`node/tests/range_boost.rs` gained the `range_boost_fault_injection_counts_failures`
+and `range_boost_toggle_latency_records_histogram` suites, hammering rapid
+enable/disable cycles while asserting the new telemetry surfaces. The forwarder
+tests stay entirely inside the in-tree queue and concurrency primitives—no
+third-party mocks or mesh toolkits are required.
+
+## Telemetry
+
+RangeBoost emits both peer-discovery gauges and queue-level instrumentation:
+
+- `mesh_peer_connected_total{peer_id}` – total mesh peers discovered.
+- `mesh_peer_latency_ms{peer_id}` – last observed latency in milliseconds.
+- `range_boost_forwarder_fail_total` – cumulative forwarder errors (retry
+  paths, injected failures, unsupported transports).
+- `range_boost_enqueue_error_total` – number of intentionally dropped enqueues
+  (via the injection hook) so dashboards can confirm alert wiring.
+- `range_boost_toggle_latency_seconds` – histogram tracking the interval
+  between enable/disable calls, giving operators confidence that toggles reach
+  the worker without stalling.
+
+These counters land in the existing Prometheus registry and back the new
+`test-range-boost` Justfile recipe, letting CI exercise mesh-mode telemetry
+without compiling auxiliary tooling.
+
 ## Example
 
 ```rust
@@ -108,13 +145,9 @@ Run the node with local mesh support using the `--range-boost` flag:
 the-block node run --range-boost
 ```
 
-Telemetry records:
-
-- `mesh_peer_connected_total{peer_id}` – total mesh peers discovered.
-- `mesh_peer_latency_ms{peer_id}` – last observed latency in milliseconds.
-
-`node/tests/mesh_sim.rs` provides a UNIX-domain-socket harness that simulates
-mesh links and validates latency-based scoring.
+Refer to the telemetry section above for the full metric list. The
+`node/tests/mesh_sim.rs` harness still exercises peer-discovery gauges by
+simulating UNIX-domain-socket transport and verifying latency-based scoring.
 
 ## Hardware & Setup
 
