@@ -5,6 +5,7 @@ use std::env;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
+use std::time::Duration;
 use sys::tempfile;
 use the_block::governance::treasury::{mark_cancelled, mark_executed, TreasuryBalanceEventKind};
 use the_block::governance::{GovStore, TreasuryBalanceSnapshot, TreasuryDisbursement};
@@ -91,6 +92,9 @@ fn treasury_metrics_from_store_source() {
     store
         .execute_disbursement(queued.id, "0xbeef")
         .expect("execute");
+    store
+        .refresh_executor_lease("lease-holder", Duration::from_secs(120))
+        .expect("lease");
 
     env::set_var(
         "AGGREGATOR_TREASURY_DB",
@@ -110,6 +114,7 @@ fn treasury_metrics_from_store_source() {
         let body = String::from_utf8(resp.body().to_vec()).expect("metrics utf8");
         assert!(body.contains("treasury_balance_current_ct"));
         assert!(body.contains("treasury_disbursement_count{status=\"executed\"} 1"));
+        assert!(body.contains("treasury_executor_lease_released 0"));
     });
 }
 

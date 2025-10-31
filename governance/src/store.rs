@@ -2830,6 +2830,14 @@ impl GovStore {
         }
     }
 
+    pub fn current_executor_lease(&self) -> sled::Result<Option<ExecutorLeaseRecord>> {
+        let tree = self.treasury_executor_state_tree();
+        match tree.get(b"lease")? {
+            Some(bytes) => Ok(Some(de::<ExecutorLeaseRecord>(&bytes)?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn record_executor_nonce(&self, holder: &str, nonce: u64) -> sled::Result<()> {
         let tree = self.treasury_executor_state_tree();
         let key = b"lease";

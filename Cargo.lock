@@ -158,6 +158,7 @@ dependencies = [
  "runtime",
  "state",
  "storage",
+ "storage_market",
  "sys",
  "testkit",
  "the_block",

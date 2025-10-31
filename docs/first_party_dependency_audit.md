@@ -1,5 +1,18 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-31 update (importer checksums, lease drill CLI, mesh queue metrics):**
+> `tools/storage_migrate checksum` reuses the in-house engine walkers and
+> BLAKE3 helper so legacy directories can be fingerprinted without touching
+> third-party tooling; the storage importer CLI now writes audit JSON and runs
+> checksum-only verifies via the same path, with regression coverage in
+> `storage_market/tests` ensuring FIRST_PARTY_ONLY builds capture
+> `no_change`/`overwritten` statistics deterministically. Treasury operators can
+> now release the executor lease through
+> `contract-cli gov treasury lease release`, the gauge lands in the existing
+> Prometheus registry, and the alert generator consumes it without crossing
+> dependency boundaries. RangeBoost queue depth/age metrics were added to the
+> first-party telemetry facade and Grafana generator, keeping mesh monitoring
+> entirely on the in-house tooling.
 > **2025-10-31 update (storage market engine, RangeBoost fault hooks, treasury watermark):**
 > `storage_market` now opens contract state through the shared
 > `storage_engine` facade; JSON encoding/decoding runs through

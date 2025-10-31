@@ -1,4 +1,19 @@
 # Project Progress Snapshot
+> **Review (2025-10-31, afternoon):** `contract-cli storage importer` now emits
+> machine-readable audits (`--json --out`), records unchanged manifest entries
+> via the new `no_change` counter, and surfaces a manifest/database checksum via
+> `storage importer verify --scope {contracts,all}`. `tools/storage_migrate`
+> picked up a sibling `checksum` subcommand so operators can fingerprint legacy
+> directories before and after migrations, and the shared BLAKE3 helper keeps
+> CLI/database comparisons deterministic. Treasury operations gained
+> `contract-cli gov treasury lease release --state … --holder …`, exporting the
+> release marker through Prometheus (`treasury_executor_lease_released`), a new
+> Grafana scalar, and the `TreasuryLeaseReleased` alert. Metrics aggregator tests
+> assert the gauge is present alongside the existing disbursement counters.
+> RangeBoost telemetry now includes queue depth and oldest-age gauges,
+> dashboard generators expect all five mesh panels, and the RangeBoost tests
+> assert the row renders forwarder, enqueue, toggle-latency, and queue metrics
+> in one pass.
 > **Review (2025-10-31, evening):** `storage_market` now persists contracts and
 > replica incentives through the in-house `storage_engine` adapter with manual
 > `foundation_serialization` codecs, retiring the sled shim from FIRST_PARTY_ONLY

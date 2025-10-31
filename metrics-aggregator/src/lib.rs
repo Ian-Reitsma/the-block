@@ -255,6 +255,7 @@ const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_s
 const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds";
 const METRIC_TREASURY_NEXT_EPOCH: &str = "treasury_disbursement_next_epoch";
+const METRIC_TREASURY_LEASE_RELEASED: &str = "treasury_executor_lease_released";
 const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current_ct";
 const METRIC_TREASURY_BALANCE_CURRENT_IT: &str = "treasury_balance_current_it";
 const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta_ct";
@@ -617,6 +618,7 @@ impl AppState {
                                 );
                             }
                             Self::apply_balance_metrics(metrics, &history, None, now);
+                            metrics.treasury_executor_lease_released.set(0.0);
                         }
                         Err(err) => {
                             warn!(
@@ -644,8 +646,9 @@ impl AppState {
                     store.disbursements(),
                     store.treasury_balance_history(),
                     store.treasury_balances(),
+                    store.executor_snapshot(),
                 ) {
-                    (Ok(records), Ok(history), Ok(current_balances)) => {
+                    (Ok(records), Ok(history), Ok(current_balances), Ok(snapshot)) => {
                         let summary = TreasurySummary::from_records(&records);
                         Self::apply_disbursement_metrics(metrics, &summary, now);
                         if history.is_empty() && !records.is_empty() {
@@ -655,8 +658,17 @@ impl AppState {
                             );
                         }
                         Self::apply_balance_metrics(metrics, &history, Some(current_balances), now);
+                        let released = snapshot.map(|snap| snap.lease_released).unwrap_or(false);
+                        metrics.treasury_executor_lease_released.set(if released {
+                            1.0
+                        } else {
+                            0.0
+                        });
                     }
-                    (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
+                    (Err(err), _, _, _)
+                    | (_, Err(err), _, _)
+                    | (_, _, Err(err), _)
+                    | (_, _, _, Err(err)) => {
                         warn!(
                             target: "aggregator",
                             error = %err,
@@ -763,6 +775,7 @@ impl AppState {
     fn reset_treasury_metrics(metrics: &AggregatorMetrics) {
         Self::zero_disbursement_metrics(metrics);
         Self::zero_balance_metrics(metrics);
+        metrics.treasury_executor_lease_released.set(0.0);
     }
 
     fn current_token(&self) -> String {
@@ -1801,6 +1814,7 @@ struct AggregatorMetrics {
     treasury_disbursement_snapshot_age: Gauge,
     treasury_disbursement_scheduled_oldest_age: Gauge,
     treasury_disbursement_next_epoch: Gauge,
+    treasury_executor_lease_released: Gauge,
     treasury_balance_current: Gauge,
     treasury_balance_current_it: Gauge,
     treasury_balance_last_delta: Gauge,
@@ -3329,6 +3343,13 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_disbursement_next_epoch.clone()))
         .expect("register treasury_disbursement_next_epoch");
+    let treasury_executor_lease_released = Gauge::new(
+        METRIC_TREASURY_LEASE_RELEASED,
+        "Flag indicating the treasury executor lease is released (1=released)",
+    );
+    registry
+        .register(Box::new(treasury_executor_lease_released.clone()))
+        .expect("register treasury_executor_lease_released");
     let treasury_balance_current = Gauge::new(
         METRIC_TREASURY_BALANCE_CURRENT,
         "Current treasury balance in CT",
@@ -3771,6 +3792,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         treasury_disbursement_snapshot_age,
         treasury_disbursement_scheduled_oldest_age,
         treasury_disbursement_next_epoch,
+        treasury_executor_lease_released,
         treasury_balance_current,
         treasury_balance_current_it,
         treasury_balance_last_delta,

@@ -196,6 +196,8 @@ fn run_executor_tick(
         lease.last_nonce,
         lease.released,
     );
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::TREASURY_EXECUTOR_LEASE_RELEASED.set(if lease.released { 1 } else { 0 });
     config
         .nonce_floor
         .store(lease.last_nonce.unwrap_or(0), AtomicOrdering::SeqCst);
@@ -2605,6 +2607,14 @@ impl GovStore {
                 Ok(_) => return Ok(()),
                 Err(_) => continue,
             }
+        }
+    }
+
+    pub fn current_executor_lease(&self) -> sled::Result<Option<ExecutorLeaseRecord>> {
+        let tree = self.treasury_executor_snapshot_tree();
+        match tree.get(b"lease")? {
+            Some(bytes) => Ok(Some(de::<ExecutorLeaseRecord>(&bytes)?)),
+            None => Ok(None),
         }
     }
 

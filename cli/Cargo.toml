@@ -17,6 +17,7 @@ dkg = { path = "../dkg", optional = true }
 diagnostics = { path = "../crates/diagnostics" }
 dex = { path = "../dex" }
 storage = { path = "../storage" }
+storage_market = { path = "../storage_market" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 light-client = { path = "../crates/light-client" }
 crypto = { path = "../crypto" }

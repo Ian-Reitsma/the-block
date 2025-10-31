@@ -49,6 +49,8 @@ tests:
         values: '0+1x31'
       - series: 'treasury_executor_lease_last_nonce'
         values: '5+0x16 5+0x7 2+0x8'
+      - series: 'treasury_executor_lease_released'
+        values: '0+0x25 1+0x6'
     alert_rule_test:
       - eval_time: 20m
         alertname: ConvergenceLag
@@ -167,3 +169,10 @@ tests:
               severity: page
             exp_annotations:
               summary: "Treasury executor lease watermark regressed"
+      - eval_time: 30m
+        alertname: TreasuryLeaseReleased
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+            exp_annotations:
+              summary: "Treasury executor lease released"

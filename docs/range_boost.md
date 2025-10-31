@@ -111,13 +111,18 @@ RangeBoost emits both peer-discovery gauges and queue-level instrumentation:
 - `range_boost_toggle_latency_seconds` – histogram tracking the interval
   between enable/disable calls, giving operators confidence that toggles reach
   the worker without stalling.
+- `range_boost_queue_depth` – current number of bundles staged for delivery.
+- `range_boost_queue_oldest_seconds` – age of the oldest queued bundle,
+  allowing alerts to spot stuck delivery pipelines.
 
 These counters land in the existing Prometheus registry and back the new
 `test-range-boost` Justfile recipe, letting CI exercise mesh-mode telemetry
 without compiling auxiliary tooling. Grafana now exposes a **Range Boost** row
 for the forwarder/error/toggle metrics, and the
 `RangeBoostForwarderFailures` alert pages when retries accumulate without
-operators intentionally flipping the mesh toggle.
+operators intentionally flipping the mesh toggle, while
+`RangeBoostQueueStalled` watches the depth and oldest-age gauges to call out
+queues that stop draining.
 
 ## Example
 

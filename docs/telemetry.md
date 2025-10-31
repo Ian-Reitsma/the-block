@@ -50,6 +50,9 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `range_boost_toggle_latency_seconds` records the interval between
   `RangeBoost::set_enabled` calls to prove toggles reach the worker without
   stalling.
+ - `range_boost_queue_depth` reports the active bundle backlog.
+ - `range_boost_queue_oldest_seconds` measures the age of the oldest queued
+   bundle so alerting can catch stalled pipelines.
   The Grafana templates expose all three metrics under a dedicated **Range Boost**
   row, and CI runs `just test-range-boost` to keep the telemetry path green.
 - `overlay_backend_active{backend}` flips to 1 for the active overlay backend
@@ -272,6 +275,8 @@ Prometheus alerting rules.
   `treasury_executor_last_submitted_nonce`, and
   `treasury_executor_lease_last_nonce` surface the executor’s liveness stamps,
   backlog depth, and lease watermark. Couple them with
+  `treasury_executor_lease_released` (1 when the lease is released by the prior
+  holder) and
   `treasury_executor_result_total{result}` (`success`, `cancelled`, `error`) and
   `treasury_executor_errors_total{reason}` to alert on repeated submission
   failures, cancelled disbursements (insufficient CT/IT balance), stalled

@@ -629,7 +629,7 @@ async fn treasury_disbursements(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 struct ExplorerExecutorDependency {
     disbursement_id: u64,
@@ -639,7 +639,8 @@ struct ExplorerExecutorDependency {
 
 #[derive(Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
-struct ExplorerExecutorReport {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplorerExecutorReport {
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     snapshot: Option<TreasuryExecutorSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -653,6 +654,12 @@ struct ExplorerExecutorReport {
     dependency_blocks: Vec<ExplorerExecutorDependency>,
 }
 
+impl ExplorerExecutorReport {
+    pub fn lease_released(&self) -> bool {
+        self.lease_released
+    }
+}
+
 async fn treasury_executor_status(
     request: Request<ExplorerHttpState>,
 ) -> Result<Response, HttpError> {
@@ -660,7 +667,12 @@ async fn treasury_executor_status(
         .query_param("state")
         .map(|s| s.to_string())
         .unwrap_or_else(|| env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into()));
-    let store = GovStore::open(store_path);
+    let report = build_executor_report(&store_path)?;
+    Response::new(StatusCode::OK).json(&report)
+}
+
+pub fn build_executor_report(store_path: &str) -> Result<ExplorerExecutorReport, HttpError> {
+    let store = GovStore::open(store_path.to_string());
     let snapshot = store
         .executor_snapshot()
         .map_err(|err| HttpError::Handler(format!("executor snapshot: {err}")))?;
@@ -695,19 +707,22 @@ async fn treasury_executor_status(
         .and_then(|snap| snap.lease_expires_at)
         .and_then(|expires| expires.checked_sub(now_secs));
     let lease_last_nonce = snapshot.as_ref().and_then(|snap| snap.lease_last_nonce);
-    let lease_released = snapshot
-        .as_ref()
-        .map(|snap| snap.lease_released)
-        .unwrap_or(false);
-    let report = ExplorerExecutorReport {
+    let lease_released = if let Some(snap) = snapshot.as_ref() {
+        snap.lease_released
+    } else {
+        store
+            .current_executor_lease()
+            .map(|lease| lease.map(|record| record.released).unwrap_or(false))
+            .map_err(|err| HttpError::Handler(format!("executor lease: {err}")))?
+    };
+    Ok(ExplorerExecutorReport {
         snapshot,
         lease_seconds_remaining,
         lease_last_nonce,
         lease_released,
         staged_intents: intents,
         dependency_blocks,
-    };
-    Response::new(StatusCode::OK).json(&report)
+    })
 }
 
 fn parse_dependency_list(memo: &str) -> Vec<u64> {

@@ -150,6 +150,8 @@ const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str =
 const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
 const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
 const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
+const TREASURY_LEASE_RELEASED_PANEL_TITLE: &str = "treasury_executor_lease_released";
+const TREASURY_LEASE_RELEASED_EXPR: &str = "treasury_executor_lease_released";
 const RANGE_BOOST_ROW_TITLE: &str = "Range Boost";
 const RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE: &str = "RangeBoost forwarder failures (5m delta)";
 const RANGE_BOOST_FORWARDER_FAIL_EXPR: &str = "increase(range_boost_forwarder_fail_total[5m])";
@@ -161,6 +163,10 @@ const RANGE_BOOST_TOGGLE_LATENCY_PANEL_TITLE: &str = "RangeBoost toggle latency 
 const RANGE_BOOST_TOGGLE_LATENCY_EXPR: &str =
     "histogram_quantile(0.95, sum(rate(range_boost_toggle_latency_seconds_bucket[5m])) by (le))";
 const RANGE_BOOST_TOGGLE_LATENCY_LEGEND: &str = "p95";
+const RANGE_BOOST_QUEUE_DEPTH_PANEL_TITLE: &str = "RangeBoost queue depth";
+const RANGE_BOOST_QUEUE_DEPTH_EXPR: &str = "range_boost_queue_depth";
+const RANGE_BOOST_QUEUE_OLDEST_PANEL_TITLE: &str = "RangeBoost queue oldest age (seconds)";
+const RANGE_BOOST_QUEUE_OLDEST_EXPR: &str = "range_boost_queue_oldest_seconds";
 const PAYOUT_ROW_TITLE: &str = "Block Payouts";
 const PAYOUT_READ_PANEL_TITLE: &str = "Read subsidy payouts (5m delta)";
 const PAYOUT_READ_EXPR: &str = "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
@@ -454,6 +460,14 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             ));
             continue;
         }
+        if metric.name == TREASURY_LEASE_RELEASED_EXPR {
+            treasury.push(build_treasury_scalar_panel(
+                TREASURY_LEASE_RELEASED_PANEL_TITLE,
+                TREASURY_LEASE_RELEASED_EXPR,
+                metric,
+            ));
+            continue;
+        }
         if metric.name == "range_boost_forwarder_fail_total" {
             range_boost.push(build_grouped_delta_panel(
                 RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE,
@@ -477,6 +491,22 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
                 RANGE_BOOST_TOGGLE_LATENCY_PANEL_TITLE,
                 RANGE_BOOST_TOGGLE_LATENCY_EXPR,
                 RANGE_BOOST_TOGGLE_LATENCY_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == RANGE_BOOST_QUEUE_DEPTH_EXPR {
+            range_boost.push(build_simple_timeseries_panel(
+                RANGE_BOOST_QUEUE_DEPTH_PANEL_TITLE,
+                RANGE_BOOST_QUEUE_DEPTH_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == RANGE_BOOST_QUEUE_OLDEST_EXPR {
+            range_boost.push(build_simple_timeseries_panel(
+                RANGE_BOOST_QUEUE_OLDEST_PANEL_TITLE,
+                RANGE_BOOST_QUEUE_OLDEST_EXPR,
                 metric,
             ));
             continue;
@@ -887,6 +917,35 @@ fn build_bridge_metric_panel(title: &str, expr: &str, description: &str) -> Valu
 
     let mut legend = Map::new();
     legend.insert("showLegend".into(), Value::from(true));
+    let mut options = Map::new();
+    options.insert("legend".into(), Value::Object(legend));
+    panel.insert("options".into(), Value::Object(options));
+
+    let mut datasource = Map::new();
+    datasource.insert("type".into(), Value::from("foundation-telemetry"));
+    datasource.insert("uid".into(), Value::from("foundation"));
+    panel.insert("datasource".into(), Value::Object(datasource));
+
+    Value::Object(panel)
+}
+
+fn build_simple_timeseries_panel(title: &str, expr: &str, metric: &Metric) -> Value {
+    let mut panel = Map::new();
+    panel.insert("type".into(), Value::from("timeseries"));
+    panel.insert("title".into(), Value::from(title));
+    if !metric.description.is_empty() {
+        panel.insert(
+            "description".into(),
+            Value::from(metric.description.clone()),
+        );
+    }
+
+    let mut target = Map::new();
+    target.insert("expr".into(), Value::from(expr));
+    panel.insert("targets".into(), Value::Array(vec![Value::Object(target)]));
+
+    let mut legend = Map::new();
+    legend.insert("showLegend".into(), Value::from(false));
     let mut options = Map::new();
     options.insert("legend".into(), Value::Object(legend));
     panel.insert("options".into(), Value::Object(options));
@@ -1998,12 +2057,38 @@ mod tests {
 
     #[test]
     fn range_boost_metrics_render_in_row() {
-        let metrics = vec![Metric {
-            name: "range_boost_forwarder_fail_total".into(),
-            description: "RangeBoost forwarder failures observed".into(),
-            unit: String::new(),
-            deprecated: false,
-        }];
+        let metrics = vec![
+            Metric {
+                name: "range_boost_forwarder_fail_total".into(),
+                description: "RangeBoost forwarder failures observed".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "range_boost_enqueue_error_total".into(),
+                description: "RangeBoost enqueue attempts dropped due to injection".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: "range_boost_toggle_latency_seconds".into(),
+                description: "Latency observed between RangeBoost enable/disable toggles".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: RANGE_BOOST_QUEUE_DEPTH_EXPR.into(),
+                description: "Current number of bundles pending in the RangeBoost queue".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+            Metric {
+                name: RANGE_BOOST_QUEUE_OLDEST_EXPR.into(),
+                description: "Age in seconds of the oldest RangeBoost queue entry".into(),
+                unit: String::new(),
+                deprecated: false,
+            },
+        ];
 
         let dashboard = generate(&metrics, None).expect("dashboard generation");
         let panels = match &dashboard {
@@ -2014,7 +2099,11 @@ mod tests {
             _ => panic!("dashboard is not an object"),
         };
 
-        assert_eq!(panels.len(), 2, "expected Range Boost row and panel");
+        assert_eq!(
+            panels.len(),
+            metrics.len() + 1,
+            "expected Range Boost row and panels"
+        );
 
         let row = panels
             .iter()
@@ -2029,35 +2118,79 @@ mod tests {
             .expect("range boost row present");
         assert_eq!(row.get("title"), Some(&Value::from(RANGE_BOOST_ROW_TITLE)));
 
-        let panel = panels
-            .iter()
-            .find_map(|panel| match panel {
-                Value::Object(map)
-                    if map
-                        .get("title")
-                        .and_then(Value::as_str)
-                        .map(|title| title == RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE)
-                        .unwrap_or(false) =>
-                {
-                    Some(map)
-                }
-                _ => None,
-            })
-            .expect("range boost panel present");
+        let assert_panel = |title: &str, expr: &str, legend: Option<&str>| {
+            let panel = panels
+                .iter()
+                .find_map(|panel| match panel {
+                    Value::Object(map)
+                        if map
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .map(|candidate| candidate == title)
+                            .unwrap_or(false) =>
+                    {
+                        Some(map)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing panel '{title}'"));
 
-        let expr = panel
-            .get("targets")
-            .and_then(|value| match value {
-                Value::Array(items) => items.first(),
-                _ => None,
-            })
-            .and_then(|value| match value {
-                Value::Object(map) => map.get("expr"),
-                _ => None,
-            })
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        assert_eq!(expr, RANGE_BOOST_FORWARDER_FAIL_EXPR);
+            let expr_value = panel
+                .get("targets")
+                .and_then(|value| match value {
+                    Value::Array(items) => items.first(),
+                    _ => None,
+                })
+                .and_then(|value| match value {
+                    Value::Object(map) => map.get("expr"),
+                    _ => None,
+                })
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            assert_eq!(expr_value, expr);
+
+            let legend_value = panel
+                .get("targets")
+                .and_then(|value| match value {
+                    Value::Array(items) => items.first(),
+                    _ => None,
+                })
+                .and_then(|value| match value {
+                    Value::Object(map) => map.get("legendFormat"),
+                    _ => None,
+                })
+                .and_then(Value::as_str);
+            match legend {
+                Some(expected) => assert_eq!(legend_value, Some(expected)),
+                None => assert!(legend_value.is_none()),
+            }
+        };
+
+        assert_panel(
+            RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE,
+            RANGE_BOOST_FORWARDER_FAIL_EXPR,
+            Some(RANGE_BOOST_FORWARDER_FAIL_LEGEND),
+        );
+        assert_panel(
+            RANGE_BOOST_ENQUEUE_ERROR_PANEL_TITLE,
+            RANGE_BOOST_ENQUEUE_ERROR_EXPR,
+            Some(RANGE_BOOST_ENQUEUE_ERROR_LEGEND),
+        );
+        assert_panel(
+            RANGE_BOOST_TOGGLE_LATENCY_PANEL_TITLE,
+            RANGE_BOOST_TOGGLE_LATENCY_EXPR,
+            Some(RANGE_BOOST_TOGGLE_LATENCY_LEGEND),
+        );
+        assert_panel(
+            RANGE_BOOST_QUEUE_DEPTH_PANEL_TITLE,
+            RANGE_BOOST_QUEUE_DEPTH_EXPR,
+            None,
+        );
+        assert_panel(
+            RANGE_BOOST_QUEUE_OLDEST_PANEL_TITLE,
+            RANGE_BOOST_QUEUE_OLDEST_EXPR,
+            None,
+        );
     }
 
     #[test]
