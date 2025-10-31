@@ -29,6 +29,16 @@ the legacy unit test continues to cover internal bookkeeping. Because the
 market writes JSON blobs through the facade, FIRST_PARTY_ONLY builds no longer
 link the compatibility `sled` layer just to run storage integration tests.
 
+On startup the market also detects legacy sled manifests. If
+`legacy_manifest.json` is present in the storage directory,
+`StorageMarket::open` will decode the hex-encoded entries, reserialise them
+through the in-house codecs, write the records into the new engine, and rename
+the manifest to `legacy_manifest.migrated.json` to avoid double-imports. This
+keeps older deployments upgradeable without bundling third-party sled codecs.
+Concurrent CAS stress tests (`concurrent_record_proof_outcome_is_linearizable`)
+now hammer the in-house compare-and-swap loops to prove the new engine handles
+heavy contention without panics.
+
 ## Proof of Retrievability
 Clients may issue random chunk challenges to providers. Successful proofs
 increment `retrieval_success_total`; failures result in slashing, removal from

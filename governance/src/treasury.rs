@@ -144,6 +144,8 @@ pub struct TreasuryExecutorSnapshot {
     pub last_submitted_nonce: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lease_last_nonce: Option<u64>,
+    #[serde(default)]
+    pub lease_released: bool,
 }
 
 impl TreasuryExecutorSnapshot {
@@ -172,11 +174,13 @@ impl TreasuryExecutorSnapshot {
         expires_at: Option<u64>,
         renewed_at: Option<u64>,
         last_nonce: Option<u64>,
+        released: bool,
     ) {
         self.lease_holder = holder;
         self.lease_expires_at = expires_at;
         self.lease_renewed_at = renewed_at;
         self.lease_last_nonce = last_nonce;
+        self.lease_released = released;
     }
 
     pub fn record_nonce(&mut self, nonce: u64) {
@@ -197,6 +201,7 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
         self.lease_renewed_at.encode(writer);
         self.last_submitted_nonce.encode(writer);
         self.lease_last_nonce.encode(writer);
+        self.lease_released.encode(writer);
     }
 
     fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
@@ -212,6 +217,7 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
             lease_renewed_at: Option::<u64>::decode(reader)?,
             last_submitted_nonce: Option::<u64>::decode(reader)?,
             lease_last_nonce: Option::<u64>::decode(reader)?,
+            lease_released: bool::decode(reader).unwrap_or(false),
         })
     }
 }

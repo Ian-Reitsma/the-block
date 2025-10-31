@@ -4417,6 +4417,30 @@ pub static TREASURY_EXECUTOR_LAST_ERROR_SECONDS: Lazy<IntGaugeHandle> = Lazy::ne
     g.handle()
 });
 
+pub static TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_last_submitted_nonce",
+        "Latest nonce submitted by the treasury executor",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_last_submitted_nonce: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_last_submitted_nonce: {e}"));
+    g.handle()
+});
+
+pub static TREASURY_EXECUTOR_LEASE_LAST_NONCE: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_lease_last_nonce",
+        "Lease watermark nonce retained across treasury executor holders",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_lease_last_nonce: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_lease_last_nonce: {e}"));
+    g.handle()
+});
+
 pub static TREASURY_EXECUTOR_RESULT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(

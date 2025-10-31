@@ -22,8 +22,10 @@ for correlating metrics with structured logs across the fleet.
   increases without an accompanying retry success. Pair the counters with the
   `range_boost_toggle_latency_seconds` histogram to confirm enable/disable
   operations propagate, and track `mesh_peer_connected_total`/`mesh_peer_latency_ms`
-  for peer health. The `test-range-boost` Justfile recipe exercises these paths
-  in CI so dashboards stay wired to first-party telemetry.
+  for peer health. Grafana now includes a dedicated **Range Boost** row and the
+  `RangeBoostForwarderFailures` alert covers repeated errors without a toggle.
+  CI runs `just test-range-boost` to keep the metric path and alert wiring
+  hermetic.
 - **Compute marketplace** – The `compute_market_dashboard.json` add-on highlights
   `fee_floor_current`, per-sender slot pressure, and SLA violation counters so
   admission policy or scheduler regressions trigger fast follow-up.
@@ -43,12 +45,16 @@ for correlating metrics with structured logs across the fleet.
   sampling so operators can reset advertiser tokens or fix SDK rollouts before
   attribution dashboards go dark.
 - **Treasury executor** – Track
-  `treasury_executor_pending_matured`, `treasury_executor_staged_intents`, and
-  the `treasury_executor_last_{tick,success,error}_seconds` gauges. Page when
-  `pending_matured` grows for multiple polling intervals or when
-  `treasury_executor_result_total{result="error"}` increments twice in a row so
-  ops can inspect dependency blockers, account balances, or signing keys before
-  disbursements back up.
+  `treasury_executor_pending_matured`, `treasury_executor_staged_intents`,
+  `treasury_executor_last_{tick,success,error}_seconds`,
+  `treasury_executor_last_submitted_nonce`, and
+  `treasury_executor_lease_last_nonce`. Page when `pending_matured` grows for
+  multiple polling intervals, when
+  `treasury_executor_result_total{result="error"}` increments twice in a row,
+  or when the watermark stagnates/rewinds. The new
+  `TreasuryLeaseWatermarkLagging` and `TreasuryLeaseWatermarkRegression`
+  alerts encapsulate those conditions so operators can inspect dependency
+  blockers, account balances, or hand-off states before disbursements back up.
 - **Correlating anomalies** – `log_correlation_fail_total{metric}` increments
   whenever the aggregator cannot locate logs for a metric spike. Combine this
   with `aggregator_ingest_total{result="error"}` to detect ingest backpressure.

@@ -110,6 +110,35 @@ groups:
           severity: warn
         annotations:
           summary: "Selection proof attestation rejected for {{ $value }} proofs"
+      - alert: RangeBoostForwarderFailures
+        expr: |
+          increase(range_boost_forwarder_fail_total[5m]) >= 3
+            and on() increase(range_boost_toggle_latency_seconds_count[5m]) == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "RangeBoost forwarder failures accumulating without recent toggles"
+      - alert: TreasuryLeaseWatermarkLagging
+        expr: |
+          clamp_min(
+            treasury_executor_last_submitted_nonce - treasury_executor_lease_last_nonce,
+            0
+          ) > 1
+            and delta(treasury_executor_last_submitted_nonce[10m]) > 0
+            and delta(treasury_executor_lease_last_nonce[10m]) == 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Treasury executor lease watermark stuck behind submitted nonces"
+      - alert: TreasuryLeaseWatermarkRegression
+        expr: delta(treasury_executor_lease_last_nonce[15m]) < 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Treasury executor lease watermark regressed"
       - alert: AdBudgetProgressFlat
         expr: |
           (max_over_time(ad_budget_progress[1h]) - min_over_time(ad_budget_progress[1h])) < 0.01

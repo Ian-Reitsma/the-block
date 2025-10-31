@@ -9,6 +9,7 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 thiserror = { path = "../crates/thiserror" }
 serde = { workspace = true }
 storage_engine = { path = "../crates/storage_engine" }
+crypto_suite = { path = "../crates/crypto_suite" }
 
 [dev-dependencies]
 sys = { path = "../crates/sys" }

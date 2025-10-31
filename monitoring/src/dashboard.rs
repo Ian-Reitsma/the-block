@@ -150,6 +150,17 @@ const TREASURY_SCHEDULED_OLDEST_PANEL_TITLE: &str =
 const TREASURY_SCHEDULED_OLDEST_EXPR: &str = "treasury_disbursement_scheduled_oldest_age_seconds";
 const TREASURY_NEXT_EPOCH_PANEL_TITLE: &str = "Next treasury disbursement epoch";
 const TREASURY_NEXT_EPOCH_EXPR: &str = "treasury_disbursement_next_epoch";
+const RANGE_BOOST_ROW_TITLE: &str = "Range Boost";
+const RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE: &str = "RangeBoost forwarder failures (5m delta)";
+const RANGE_BOOST_FORWARDER_FAIL_EXPR: &str = "increase(range_boost_forwarder_fail_total[5m])";
+const RANGE_BOOST_FORWARDER_FAIL_LEGEND: &str = "{{__name__}}";
+const RANGE_BOOST_ENQUEUE_ERROR_PANEL_TITLE: &str = "RangeBoost enqueue errors (5m delta)";
+const RANGE_BOOST_ENQUEUE_ERROR_EXPR: &str = "increase(range_boost_enqueue_error_total[5m])";
+const RANGE_BOOST_ENQUEUE_ERROR_LEGEND: &str = "{{__name__}}";
+const RANGE_BOOST_TOGGLE_LATENCY_PANEL_TITLE: &str = "RangeBoost toggle latency p95";
+const RANGE_BOOST_TOGGLE_LATENCY_EXPR: &str =
+    "histogram_quantile(0.95, sum(rate(range_boost_toggle_latency_seconds_bucket[5m])) by (le))";
+const RANGE_BOOST_TOGGLE_LATENCY_LEGEND: &str = "p95";
 const PAYOUT_ROW_TITLE: &str = "Block Payouts";
 const PAYOUT_READ_PANEL_TITLE: &str = "Read subsidy payouts (5m delta)";
 const PAYOUT_READ_EXPR: &str = "sum by (role)(increase(explorer_block_payout_read_total[5m]))";
@@ -331,6 +342,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
     let mut dex = Vec::new();
     let mut compute = Vec::new();
     let mut treasury = Vec::new();
+    let mut range_boost = Vec::new();
     let mut payouts = Vec::new();
     let mut advertising = Vec::new();
     let mut bridge = Vec::new();
@@ -438,6 +450,33 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             treasury.push(build_treasury_scalar_panel(
                 TREASURY_NEXT_EPOCH_PANEL_TITLE,
                 TREASURY_NEXT_EPOCH_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "range_boost_forwarder_fail_total" {
+            range_boost.push(build_grouped_delta_panel(
+                RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE,
+                RANGE_BOOST_FORWARDER_FAIL_EXPR,
+                RANGE_BOOST_FORWARDER_FAIL_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "range_boost_enqueue_error_total" {
+            range_boost.push(build_grouped_delta_panel(
+                RANGE_BOOST_ENQUEUE_ERROR_PANEL_TITLE,
+                RANGE_BOOST_ENQUEUE_ERROR_EXPR,
+                RANGE_BOOST_ENQUEUE_ERROR_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "range_boost_toggle_latency_seconds" {
+            range_boost.push(build_histogram_panel(
+                RANGE_BOOST_TOGGLE_LATENCY_PANEL_TITLE,
+                RANGE_BOOST_TOGGLE_LATENCY_EXPR,
+                RANGE_BOOST_TOGGLE_LATENCY_LEGEND,
                 metric,
             ));
             continue;
@@ -746,6 +785,8 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
             compute.push(panel_value);
         } else if metric.name.starts_with("treasury_") {
             treasury.push(panel_value);
+        } else if metric.name.starts_with("range_boost_") {
+            range_boost.push(panel_value);
         } else if metric.name.starts_with("gossip_") {
             gossip.push(panel_value);
         } else {
@@ -760,6 +801,7 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         ("DEX", dex),
         ("Compute", compute),
         ("Treasury", treasury),
+        (RANGE_BOOST_ROW_TITLE, range_boost),
         (PAYOUT_ROW_TITLE, payouts),
         (AD_ROW_TITLE, advertising),
         ("Bridge", bridge),
@@ -1952,6 +1994,70 @@ mod tests {
                 _ => None,
             });
         assert_eq!(legend_format, Some(&Value::from("{{status}}")));
+    }
+
+    #[test]
+    fn range_boost_metrics_render_in_row() {
+        let metrics = vec![Metric {
+            name: "range_boost_forwarder_fail_total".into(),
+            description: "RangeBoost forwarder failures observed".into(),
+            unit: String::new(),
+            deprecated: false,
+        }];
+
+        let dashboard = generate(&metrics, None).expect("dashboard generation");
+        let panels = match &dashboard {
+            Value::Object(map) => match map.get("panels") {
+                Some(Value::Array(items)) => items,
+                _ => panic!("panels missing"),
+            },
+            _ => panic!("dashboard is not an object"),
+        };
+
+        assert_eq!(panels.len(), 2, "expected Range Boost row and panel");
+
+        let row = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if matches!(map.get("type"), Some(Value::String(kind)) if kind == "row") =>
+                {
+                    Some(map)
+                }
+                _ => None,
+            })
+            .expect("range boost row present");
+        assert_eq!(row.get("title"), Some(&Value::from(RANGE_BOOST_ROW_TITLE)));
+
+        let panel = panels
+            .iter()
+            .find_map(|panel| match panel {
+                Value::Object(map)
+                    if map
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(|title| title == RANGE_BOOST_FORWARDER_FAIL_PANEL_TITLE)
+                        .unwrap_or(false) =>
+                {
+                    Some(map)
+                }
+                _ => None,
+            })
+            .expect("range boost panel present");
+
+        let expr = panel
+            .get("targets")
+            .and_then(|value| match value {
+                Value::Array(items) => items.first(),
+                _ => None,
+            })
+            .and_then(|value| match value {
+                Value::Object(map) => map.get("expr"),
+                _ => None,
+            })
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(expr, RANGE_BOOST_FORWARDER_FAIL_EXPR);
     }
 
     #[test]

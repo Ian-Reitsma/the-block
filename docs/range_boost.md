@@ -114,7 +114,10 @@ RangeBoost emits both peer-discovery gauges and queue-level instrumentation:
 
 These counters land in the existing Prometheus registry and back the new
 `test-range-boost` Justfile recipe, letting CI exercise mesh-mode telemetry
-without compiling auxiliary tooling.
+without compiling auxiliary tooling. Grafana now exposes a **Range Boost** row
+for the forwarder/error/toggle metrics, and the
+`RangeBoostForwarderFailures` alert pages when retries accumulate without
+operators intentionally flipping the mesh toggle.
 
 ## Example
 
