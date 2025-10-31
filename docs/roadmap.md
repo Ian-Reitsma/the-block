@@ -705,7 +705,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
    - Record `compute_sla_violation_total` metrics and integrate with the reputation store.
    - Document remediation expectations in `docs/compute_market.md`.
 7. **Prototype incentive-backed DHT storage**
-   - Extend `storage_market` to price replicas, tracking deposits and proofs in `storage_market/src/lib.rs`.
+   - Extend `storage_market` to price replicas, tracking deposits and proofs in `storage_market/src/lib.rs`. (Persistence now rides the in-house `storage_engine` adapter and handwritten JSON codecs; the remaining work centres on pricing.)
    - Add explorer visibility into outstanding storage contracts and payouts.
    - Simulate churn within the `sim` crate to calibrate incentives before deployment.
 8. **Deliver multisig wallet UX**

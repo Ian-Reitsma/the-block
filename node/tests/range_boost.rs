@@ -1,5 +1,18 @@
 #![cfg(feature = "integration-tests")]
-use the_block::range_boost::{HopProof, RangeBoost};
+#[cfg(feature = "telemetry")]
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "telemetry")]
+use std::thread;
+#[cfg(feature = "telemetry")]
+use std::time::Duration;
+
+use the_block::range_boost::{self, FaultMode, HopProof, RangeBoost};
+
+#[cfg(feature = "telemetry")]
+use the_block::telemetry::{
+    RANGE_BOOST_ENQUEUE_ERROR_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
+    RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
+};
 
 #[test]
 fn bundle_queue_works() {
@@ -33,4 +46,47 @@ fn range_boost_toggle_stress() {
     }
     the_block::range_boost::set_enabled(false);
     assert!(!the_block::range_boost::is_enabled());
+}
+
+#[cfg(feature = "telemetry")]
+#[test]
+fn range_boost_toggle_latency_records_histogram() {
+    let start = RANGE_BOOST_TOGGLE_LATENCY_SECONDS.get_sample_count();
+    for i in 0..32 {
+        let enable = i % 2 == 0;
+        range_boost::set_enabled(enable);
+    }
+    range_boost::set_enabled(false);
+    assert!(RANGE_BOOST_TOGGLE_LATENCY_SECONDS.get_sample_count() > start);
+}
+
+#[cfg(feature = "telemetry")]
+#[test]
+fn range_boost_fault_injection_counts_failures() {
+    let baseline = RANGE_BOOST_FORWARDER_FAIL_TOTAL.value();
+    let queue = Arc::new(Mutex::new(RangeBoost::new()));
+    range_boost::spawn_forwarder(&queue);
+    range_boost::set_enabled(true);
+    range_boost::set_forwarder_fault_mode(FaultMode::ForceEncode);
+    queue.lock().unwrap().enqueue(vec![1, 2, 3, 4]);
+    for _ in 0..20 {
+        if RANGE_BOOST_FORWARDER_FAIL_TOTAL.value() > baseline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    range_boost::set_forwarder_fault_mode(FaultMode::None);
+    range_boost::set_enabled(false);
+    assert!(RANGE_BOOST_FORWARDER_FAIL_TOTAL.value() >= baseline + 1);
+}
+
+#[cfg(feature = "telemetry")]
+#[test]
+fn range_boost_enqueue_injection_drops_bundle() {
+    let baseline = RANGE_BOOST_ENQUEUE_ERROR_TOTAL.value();
+    range_boost::inject_enqueue_error();
+    let mut rb = RangeBoost::new();
+    rb.enqueue(vec![9]);
+    assert_eq!(rb.pending(), 0);
+    assert_eq!(RANGE_BOOST_ENQUEUE_ERROR_TOTAL.value(), baseline + 1);
 }

@@ -17,6 +17,18 @@ block. Contracts are funded from CT balances via the wallet CLI (legacy industri
 (`blockctl storage upload`), reserving `price_per_block * retention` upfront and
 only paying for successful storage.
 
+## Persistence & codecs
+
+Contract and proof accounting now persist exclusively through the in-house
+`storage_engine` facade. `StorageMarket::open` acquires a first-party engine
+handle and the crate serialises `ContractRecord` values manually via
+`foundation_serialization::json` so no serde stubs or sled adapters leak back
+in. `storage_market/tests/engine_paths.rs` exercises registration,
+success/failure recording, and reopen semantics against the new adapter while
+the legacy unit test continues to cover internal bookkeeping. Because the
+market writes JSON blobs through the facade, FIRST_PARTY_ONLY builds no longer
+link the compatibility `sled` layer just to run storage integration tests.
+
 ## Proof of Retrievability
 Clients may issue random chunk challenges to providers. Successful proofs
 increment `retrieval_success_total`; failures result in slashing, removal from

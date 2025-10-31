@@ -772,8 +772,8 @@ version = "0.1.0"
 dependencies = [
  "foundation_serde",
  "foundation_serialization",
- "sled",
  "storage",
+ "storage_engine",
  "sys",
  "thiserror",
 ]

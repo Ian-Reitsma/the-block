@@ -3,7 +3,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -173,6 +173,7 @@ fn treasury_executor_stages_and_executes() {
             })
         },
         dependency_check: None,
+        nonce_floor: Arc::new(AtomicU64::new(0)),
     };
     let handle = store.spawn_treasury_executor(config);
 
@@ -203,6 +204,12 @@ fn treasury_executor_stages_and_executes() {
         "signer should run exactly once"
     );
     assert!(submit_calls.load(Ordering::SeqCst) >= 1);
+    for _ in 0..10 {
+        if store.execution_intents().expect("intents").is_empty() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
     assert!(store.execution_intents().expect("intents").is_empty());
     handle.shutdown();
     handle.join();
@@ -247,6 +254,7 @@ fn treasury_executor_reuses_staged_intents() {
         },
         submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
         dependency_check: None,
+        nonce_floor: Arc::new(AtomicU64::new(0)),
     };
     let handle = store.spawn_treasury_executor(config);
     let mut attempts = 0;
@@ -331,6 +339,7 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
             })
         },
         dependency_check: None,
+        nonce_floor: Arc::new(AtomicU64::new(0)),
     };
     let handle = store.spawn_treasury_executor(config);
     let mut observed_error = None;
@@ -354,5 +363,120 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
     let staged = store.execution_intent(disbursement.id)?;
     assert!(staged.is_some(), "failed intent should remain staged");
     assert!(error_count.load(Ordering::SeqCst) > 0);
+    Ok(())
+}
+
+#[test]
+fn executor_failover_preserves_nonce_watermark() -> Result<()> {
+    let dir = tempdir()?;
+    let db_path = dir.path().join("gov.db");
+    let store = GovStore::open(&db_path);
+    store.record_treasury_accrual(5_000, 0)?;
+
+    let first = store.queue_disbursement("failover-a", 250, 0, "", 0)?;
+    let second = store.queue_disbursement("failover-b", 250, 0, "", 0)?;
+
+    let make_config = |identity: &str,
+                       gate: Arc<AtomicU64>,
+                       dependency: Option<
+        Arc<
+            dyn Fn(
+                    &GovStore,
+                    &TreasuryDisbursement,
+                ) -> std::result::Result<bool, governance::TreasuryExecutorError>
+                + Send
+                + Sync,
+        >,
+    >| {
+        governance::TreasuryExecutorConfig {
+            identity: identity.into(),
+            poll_interval: Duration::from_millis(25),
+            lease_ttl: Duration::from_millis(250),
+            epoch_source: Arc::new(|| 1),
+            signer: {
+                let hint = Arc::clone(&gate);
+                Arc::new(move |disbursement: &TreasuryDisbursement| {
+                    let nonce = hint.load(Ordering::SeqCst).saturating_add(1);
+                    Ok(governance::SignedExecutionIntent::new(
+                        disbursement.id,
+                        Vec::new(),
+                        format!("failover-intent-{}", nonce),
+                        nonce,
+                    ))
+                })
+            },
+            submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
+            dependency_check: dependency,
+            nonce_floor: gate,
+        }
+    };
+
+    let allow_only_first: Arc<
+        dyn Fn(
+                &GovStore,
+                &TreasuryDisbursement,
+            ) -> std::result::Result<bool, governance::TreasuryExecutorError>
+            + Send
+            + Sync,
+    > = Arc::new(move |_store: &GovStore, d: &TreasuryDisbursement| Ok(d.id == first.id));
+
+    let config_a = make_config(
+        "exec-a",
+        Arc::new(AtomicU64::new(0)),
+        Some(allow_only_first.clone()),
+    );
+    let handle_a = store.spawn_treasury_executor(config_a);
+
+    for _ in 0..40 {
+        let disbursements = store.disbursements()?;
+        if disbursements
+            .iter()
+            .any(|d| matches!(d.status, DisbursementStatus::Executed { .. }) && d.id == first.id)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    handle_a.shutdown();
+    handle_a.join();
+
+    let config_b = make_config("exec-b", Arc::new(AtomicU64::new(0)), None);
+    let handle_b = store.spawn_treasury_executor(config_b);
+
+    for _ in 0..40 {
+        let disbursements = store.disbursements()?;
+        if disbursements
+            .iter()
+            .any(|d| matches!(d.status, DisbursementStatus::Executed { .. }) && d.id == second.id)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    handle_b.shutdown();
+    handle_b.join();
+
+    let disbursements = store.disbursements()?;
+    let mut executed = disbursements
+        .into_iter()
+        .filter_map(|d| match d.status {
+            DisbursementStatus::Executed { tx_hash, .. } => Some((d.id, tx_hash)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    executed.sort_by_key(|(id, _)| *id);
+    assert_eq!(executed.len(), 2);
+    assert_eq!(executed[0].1, "failover-intent-1");
+    assert_eq!(executed[1].1, "failover-intent-2");
+
+    let snapshot = store
+        .executor_snapshot()
+        .expect("load snapshot")
+        .expect("snapshot present");
+    assert_eq!(snapshot.lease_last_nonce, Some(2));
+    assert_eq!(snapshot.last_submitted_nonce, Some(2));
+
     Ok(())
 }

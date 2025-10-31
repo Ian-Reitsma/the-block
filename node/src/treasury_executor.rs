@@ -6,7 +6,10 @@ use crate::transaction::{binary, sign_tx, RawTxPayload};
 use crate::{Account, Blockchain, TxAdmissionError, EPOCH_BLOCKS};
 use crypto_suite::hex;
 use foundation_serialization::json::{self, Value};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 pub type DependencyCheck = Arc<
@@ -104,6 +107,7 @@ fn signer_closure(
     blockchain: Arc<Mutex<Blockchain>>,
     treasury_account: String,
     signing_key: Arc<Vec<u8>>,
+    nonce_floor: Arc<AtomicU64>,
 ) -> Arc<
     dyn Fn(&TreasuryDisbursement) -> Result<SignedExecutionIntent, TreasuryExecutorError>
         + Send
@@ -131,9 +135,11 @@ fn signer_closure(
                     "insufficient treasury IT balance",
                 ));
             }
+            let candidate = next_available_nonce(account);
+            let floor = nonce_floor.load(Ordering::SeqCst);
             (
                 guard.base_fee,
-                next_available_nonce(account),
+                candidate.max(floor.saturating_add(1)),
                 guard.min_fee_per_byte_consumer,
                 available_consumer,
             )
@@ -236,10 +242,12 @@ pub fn spawn_executor(
         dependency_check,
     } = params;
     let epoch_source = epoch_source_closure(Arc::clone(&blockchain));
+    let nonce_floor = Arc::new(AtomicU64::new(0));
     let signer = signer_closure(
         Arc::clone(&blockchain),
         treasury_account.clone(),
         Arc::clone(&signing_key),
+        Arc::clone(&nonce_floor),
     );
     let submitter = submitter_closure(blockchain);
     let dependency_check = dependency_check.unwrap_or_else(memo_dependency_check);
@@ -251,6 +259,7 @@ pub fn spawn_executor(
         signer,
         submitter,
         dependency_check: Some(dependency_check),
+        nonce_floor,
     };
     store.spawn_treasury_executor(config)
 }

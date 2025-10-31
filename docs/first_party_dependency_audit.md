@@ -1,5 +1,19 @@
 # First-Party Dependency Migration Audit
 
+> **2025-10-31 update (storage market engine, RangeBoost fault hooks, treasury watermark):**
+> `storage_market` now opens contract state through the shared
+> `storage_engine` facade; JSON encoding/decoding runs through
+> `foundation_serialization` so FIRST_PARTY_ONLY builds no longer link the sled
+> compatibility layer. RangeBoost’s new `set_forwarder_fault_mode` and
+> `inject_enqueue_error` helpers drive stress tests entirely inside the in-tree
+> queue and telemetry facades—no external mesh harnesses or serde stubs were
+> required—and the accompanying metrics (`range_boost_forwarder_fail_total`,
+> `range_boost_enqueue_error_total`, `range_boost_toggle_latency_seconds`) hang
+> off the existing registry. The treasury executor now preserves the shared
+> nonce watermark (`lease_last_nonce`) across lease holders via the same handwritten
+> codecs, and the signer closure clamps candidate nonces against that floor
+> using first-party atomics, keeping failover continuity hermetic.
+>
 > **2025-10-30 update (treasury executor automation & conversion telemetry):**
 > The node and governance crates now stage signed treasury intents entirely
 > through sled + `foundation_serialization` helpers, and the runtime executor

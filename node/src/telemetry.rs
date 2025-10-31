@@ -4855,6 +4855,43 @@ pub static MESH_PEER_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static RANGE_BOOST_FORWARDER_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "range_boost_forwarder_fail_total",
+        "RangeBoost forwarder failures observed",
+    )
+    .unwrap_or_else(|e| panic!("counter range boost forwarder fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost forwarder fail: {e}"));
+    c.handle()
+});
+
+pub static RANGE_BOOST_ENQUEUE_ERROR_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "range_boost_enqueue_error_total",
+        "RangeBoost enqueue attempts dropped due to injection",
+    )
+    .unwrap_or_else(|e| panic!("counter range boost enqueue error: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost enqueue error: {e}"));
+    c.handle()
+});
+
+pub static RANGE_BOOST_TOGGLE_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "range_boost_toggle_latency_seconds",
+        "Latency observed between RangeBoost enable/disable toggles",
+    );
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram range boost toggle latency: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost toggle latency: {e}"));
+    h
+});
+
 pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(

@@ -1,6 +1,6 @@
+use crate::fee;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
-use crate::fee;
 use crate::transaction::FeeLane;
 use concurrency::{mutex, MutexExt, MutexT};
 use foundation_serialization::{Deserialize, Serialize};
@@ -611,10 +611,7 @@ impl Market {
             // Legacy receipts send total payout through alias field
             proof.payout_ct = proof.total();
         }
-        if proof.payout_it == 0
-            && proof.payout_ct == total_expected
-            && expected_it > 0
-        {
+        if proof.payout_it == 0 && proof.payout_ct == total_expected && expected_it > 0 {
             // Upgrade legacy receipts to the expected split automatically.
             proof.payout_ct = expected_ct;
             proof.payout_it = expected_it;
@@ -629,11 +626,7 @@ impl Market {
             return Err("payout mismatch");
         }
         record_units_processed(slice_units);
-        settlement::Settlement::accrue_split(
-            &state.provider,
-            proof.payout_ct,
-            proof.payout_it,
-        );
+        settlement::Settlement::accrue_split(&state.provider, proof.payout_ct, proof.payout_it);
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -734,8 +727,8 @@ impl Market {
             let receipt = ExecutionReceipt {
                 reference: expected,
                 output,
-            payout_ct: units * price_per_unit,
-            payout_it: 0,
+                payout_ct: units * price_per_unit,
+                payout_it: 0,
                 proof: proof_bytes,
             };
             total += self.submit_slice(job_id, receipt)?;
