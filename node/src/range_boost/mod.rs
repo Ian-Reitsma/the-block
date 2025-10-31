@@ -32,8 +32,14 @@ pub struct Bundle {
     pub proofs: Vec<HopProof>,
 }
 
+#[derive(Clone, Debug)]
+struct QueueEntry {
+    bundle: Bundle,
+    enqueued_at: Instant,
+}
+
 pub struct RangeBoost {
-    queue: VecDeque<Bundle>,
+    queue: VecDeque<QueueEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +56,20 @@ static ENQUEUE_ERROR: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "telemetry")]
 static LAST_TOGGLE: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+
+fn record_queue_metrics(queue: &VecDeque<QueueEntry>) {
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::RANGE_BOOST_QUEUE_DEPTH.set(queue.len() as i64);
+        let oldest = queue
+            .front()
+            .map(|entry| entry.enqueued_at.elapsed().as_secs().min(i64::MAX as u64) as i64)
+            .unwrap_or(0);
+        crate::telemetry::RANGE_BOOST_QUEUE_OLDEST_SECONDS.set(oldest);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = queue;
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaultMode {
@@ -149,17 +169,17 @@ fn forwarder_loop(shutdown: Arc<AtomicBool>, weak_queue: Weak<Mutex<RangeBoost>>
         let Some(queue) = Weak::upgrade(&weak_queue) else {
             break;
         };
-        let bundle = {
+        let entry = {
             let mut guard = queue.lock().unwrap();
             guard.dequeue()
         };
-        match bundle {
-            Some(bundle) => match forward_bundle(&bundle) {
+        match entry {
+            Some(entry) => match forward_bundle(&entry.bundle) {
                 Ok(()) => {}
                 Err(err) => {
                     {
                         let mut guard = queue.lock().unwrap();
-                        guard.requeue_front(bundle);
+                        guard.requeue_front(entry);
                     }
                     #[cfg(feature = "telemetry")]
                     RANGE_BOOST_FORWARDER_FAIL_TOTAL.inc();
@@ -394,9 +414,9 @@ pub fn parse_discovery_packet(data: &[u8]) -> Option<MeshPeer> {
 
 impl RangeBoost {
     pub fn new() -> Self {
-        Self {
-            queue: VecDeque::new(),
-        }
+        let queue = VecDeque::new();
+        record_queue_metrics(&queue);
+        Self { queue }
     }
 
     pub fn enqueue(&mut self, payload: Vec<u8>) {
@@ -405,28 +425,35 @@ impl RangeBoost {
             RANGE_BOOST_ENQUEUE_ERROR_TOTAL.inc();
             return;
         }
-        self.queue.push_back(Bundle {
-            payload,
-            proofs: vec![],
+        self.queue.push_back(QueueEntry {
+            bundle: Bundle {
+                payload,
+                proofs: vec![],
+            },
+            enqueued_at: Instant::now(),
         });
+        record_queue_metrics(&self.queue);
     }
 
     pub fn record_proof(&mut self, idx: usize, proof: HopProof) {
-        if let Some(bundle) = self.queue.get_mut(idx) {
-            bundle.proofs.push(proof);
+        if let Some(entry) = self.queue.get_mut(idx) {
+            entry.bundle.proofs.push(proof);
         }
     }
 
-    pub fn dequeue(&mut self) -> Option<Bundle> {
-        self.queue.pop_front()
+    pub fn dequeue(&mut self) -> Option<QueueEntry> {
+        let entry = self.queue.pop_front();
+        record_queue_metrics(&self.queue);
+        entry
     }
 
     pub fn pending(&self) -> usize {
         self.queue.len()
     }
 
-    pub fn requeue_front(&mut self, bundle: Bundle) {
-        self.queue.push_front(bundle);
+    pub fn requeue_front(&mut self, entry: QueueEntry) {
+        self.queue.push_front(entry);
+        record_queue_metrics(&self.queue);
     }
 }
 

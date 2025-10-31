@@ -2,7 +2,14 @@
 
 mod codec;
 mod engine;
+mod importer;
 mod legacy;
+
+pub use importer::{
+    AuditEntryStatus, AuditReport, ChecksumComparison, ChecksumDigest, ChecksumScope, ImportMode,
+    ImportStats, ManifestSource, ManifestSummary, StorageImporter,
+};
+pub use legacy::{manifest_status, ManifestStatus, LEGACY_MANIFEST_FILE, MIGRATED_MANIFEST_PREFIX};
 
 use codec::{deserialize_contract_record, serialize_contract_record};
 use engine::{Engine, Tree};

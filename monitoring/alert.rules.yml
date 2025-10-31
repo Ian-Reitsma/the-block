@@ -119,6 +119,18 @@ groups:
           severity: page
         annotations:
           summary: "RangeBoost forwarder failures accumulating without recent toggles"
+      - alert: RangeBoostQueueStalled
+        expr: |
+          range_boost_queue_depth > 0
+            and on() range_boost_queue_oldest_seconds > 300
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "RangeBoost queue depth stuck"
+          description: |
+            RangeBoost queue depth has remained positive for over five minutes;
+            investigate stalled bundles.
       - alert: TreasuryLeaseWatermarkLagging
         expr: |
           clamp_min(
@@ -139,6 +151,16 @@ groups:
           severity: page
         annotations:
           summary: "Treasury executor lease watermark regressed"
+      - alert: TreasuryLeaseReleased
+        expr: treasury_executor_lease_released == 1
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Treasury executor lease released"
+          description: |
+            The executor lease has remained in a released state for over five minutes.
+            Ensure a new holder acquires the lease or investigate executor health.
       - alert: AdBudgetProgressFlat
         expr: |
           (max_over_time(ad_budget_progress[1h]) - min_over_time(ad_budget_progress[1h])) < 0.01

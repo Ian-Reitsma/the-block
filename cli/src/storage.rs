@@ -7,7 +7,20 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use crypto_suite::hex;
+use foundation_serialization::json::{
+    self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process,
+};
 use storage::{StorageContract, StorageOffer};
+use storage_market::{
+    AuditReport, ChecksumComparison, ChecksumDigest, ChecksumScope, ImportMode, ImportStats,
+    ManifestSource, ManifestStatus, ManifestSummary, StorageImporter,
+};
 use the_block::{
     generate_keypair, rpc,
     simple_db::EngineKind,
@@ -49,6 +62,528 @@ pub enum StorageCmd {
     },
     /// List stored manifests and active coding algorithms
     Manifests { limit: Option<usize>, json: bool },
+    /// Inspect and replay legacy storage manifest migrations
+    Importer(StorageImporterCmd),
+}
+
+fn default_market_dir() -> String {
+    env::var("TB_STORAGE_MARKET_DIR").unwrap_or_else(|_| "storage_market".into())
+}
+
+fn parse_manifest_source(raw: Option<String>) -> Result<ManifestSource, String> {
+    match raw {
+        None => Ok(ManifestSource::Auto),
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
+                Ok(ManifestSource::Auto)
+            } else if trimmed.eq_ignore_ascii_case("pending") {
+                Ok(ManifestSource::Pending)
+            } else if trimmed.eq_ignore_ascii_case("migrated") {
+                Ok(ManifestSource::Migrated)
+            } else {
+                Ok(ManifestSource::File(PathBuf::from(value)))
+            }
+        }
+    }
+}
+
+fn parse_checksum_scope(raw: Option<String>) -> Result<ChecksumScope, String> {
+    match raw {
+        None => Ok(ChecksumScope::ContractsOnly),
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("contracts")
+                || trimmed.eq_ignore_ascii_case("contract")
+                || trimmed.eq_ignore_ascii_case("market/contracts")
+            {
+                Ok(ChecksumScope::ContractsOnly)
+            } else if trimmed.eq_ignore_ascii_case("all")
+                || trimmed.eq_ignore_ascii_case("all-cfs")
+                || trimmed.eq_ignore_ascii_case("full")
+            {
+                Ok(ChecksumScope::AllColumnFamilies)
+            } else {
+                Err(format!("unsupported checksum scope '{trimmed}'"))
+            }
+        }
+    }
+}
+
+fn manifest_status_label(status: &ManifestStatus) -> &'static str {
+    match status {
+        ManifestStatus::Pending { .. } => "pending",
+        ManifestStatus::Migrated { .. } => "migrated",
+        ManifestStatus::Absent => "absent",
+    }
+}
+
+fn manifest_status_path(status: &ManifestStatus) -> Option<&Path> {
+    match status {
+        ManifestStatus::Pending { path } => Some(path.as_path()),
+        ManifestStatus::Migrated { path } => Some(path.as_path()),
+        ManifestStatus::Absent => None,
+    }
+}
+
+fn summary_to_json(summary: &ManifestSummary) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "status".into(),
+        JsonValue::String(manifest_status_label(&summary.status).into()),
+    );
+    if let Some(path) = manifest_status_path(&summary.status) {
+        map.insert(
+            "status_path".into(),
+            JsonValue::String(path.to_string_lossy().into_owned()),
+        );
+    }
+    if let Some(path) = summary.source_path.as_ref() {
+        map.insert(
+            "source_path".into(),
+            JsonValue::String(path.to_string_lossy().into_owned()),
+        );
+    }
+    map.insert(
+        "total_entries".into(),
+        JsonValue::Number(JsonNumber::from(summary.total_entries as u64)),
+    );
+    map.insert(
+        "present".into(),
+        JsonValue::Number(JsonNumber::from(summary.present as u64)),
+    );
+    map.insert(
+        "missing".into(),
+        JsonValue::Number(JsonNumber::from(summary.missing as u64)),
+    );
+    map.insert(
+        "duplicates".into(),
+        JsonValue::Number(JsonNumber::from(summary.duplicates as u64)),
+    );
+    JsonValue::Object(map)
+}
+
+fn stats_to_json(stats: &ImportStats) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "total_entries".into(),
+        JsonValue::Number(JsonNumber::from(stats.total_entries as u64)),
+    );
+    map.insert(
+        "applied".into(),
+        JsonValue::Number(JsonNumber::from(stats.applied as u64)),
+    );
+    map.insert(
+        "skipped_existing".into(),
+        JsonValue::Number(JsonNumber::from(stats.skipped_existing as u64)),
+    );
+    map.insert(
+        "overwritten".into(),
+        JsonValue::Number(JsonNumber::from(stats.overwritten as u64)),
+    );
+    map.insert(
+        "no_change".into(),
+        JsonValue::Number(JsonNumber::from(stats.no_change as u64)),
+    );
+    JsonValue::Object(map)
+}
+
+fn checksum_scope_label(scope: ChecksumScope) -> &'static str {
+    match scope {
+        ChecksumScope::ContractsOnly => "contracts",
+        ChecksumScope::AllColumnFamilies => "all",
+    }
+}
+
+fn checksum_to_json(digest: &ChecksumDigest) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "entries".into(),
+        JsonValue::Number(JsonNumber::from(digest.entries as u64)),
+    );
+    map.insert("hash".into(), JsonValue::String(hex::encode(digest.hash)));
+    JsonValue::Object(map)
+}
+
+fn checksum_comparison_to_json(comparison: &ChecksumComparison) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "scope".into(),
+        JsonValue::String(checksum_scope_label(comparison.scope).into()),
+    );
+    map.insert("database".into(), checksum_to_json(&comparison.database));
+    if let Some(manifest) = comparison.manifest.as_ref() {
+        map.insert("manifest".into(), checksum_to_json(manifest));
+        map.insert(
+            "matches".into(),
+            JsonValue::Bool(
+                manifest.hash == comparison.database.hash
+                    && manifest.entries == comparison.database.entries,
+            ),
+        );
+    } else {
+        map.insert("manifest".into(), JsonValue::Null);
+    }
+    JsonValue::Object(map)
+}
+
+fn audit_report_to_json(report: &AuditReport) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert("summary".into(), summary_to_json(&report.summary));
+    let entries = report
+        .entries
+        .iter()
+        .map(|entry| {
+            let mut obj = JsonMap::new();
+            obj.insert(
+                "key".into(),
+                JsonValue::String(hex::encode(entry.key.as_slice())),
+            );
+            obj.insert("present".into(), JsonValue::Bool(entry.present));
+            obj.insert("duplicate".into(), JsonValue::Bool(entry.duplicate));
+            JsonValue::Object(obj)
+        })
+        .collect();
+    map.insert("entries".into(), JsonValue::Array(entries));
+
+    let missing = report
+        .missing_keys
+        .iter()
+        .map(|key| JsonValue::String(hex::encode(key)))
+        .collect();
+    map.insert("missing_keys".into(), JsonValue::Array(missing));
+
+    let duplicates = report
+        .duplicate_keys
+        .iter()
+        .map(|key| JsonValue::String(hex::encode(key)))
+        .collect();
+    map.insert("duplicate_keys".into(), JsonValue::Array(duplicates));
+    JsonValue::Object(map)
+}
+
+fn render_manifest_summary(summary: &ManifestSummary, json: bool) {
+    if json {
+        match json::to_string_pretty(&summary_to_json(summary)) {
+            Ok(serialized) => println!("{serialized}"),
+            Err(err) => eprintln!("format failed: {err}"),
+        }
+    } else {
+        println!(
+            "legacy manifest status: {}",
+            manifest_status_label(&summary.status)
+        );
+        if let Some(path) = manifest_status_path(&summary.status) {
+            println!("status path: {}", path.display());
+        }
+        if let Some(path) = summary.source_path.as_ref() {
+            println!("resolved path: {}", path.display());
+        }
+        println!("total entries: {}", summary.total_entries);
+        println!("present entries: {}", summary.present);
+        println!("missing entries: {}", summary.missing);
+        if summary.duplicates > 0 {
+            println!("duplicate entries in manifest: {}", summary.duplicates);
+        }
+    }
+}
+
+fn render_import_result(stats: Option<&ImportStats>, summary: &ManifestSummary, json: bool) {
+    if json {
+        let mut map = JsonMap::new();
+        if let Some(stats) = stats {
+            map.insert("result".into(), stats_to_json(stats));
+        }
+        map.insert("summary".into(), summary_to_json(summary));
+        match json::to_string_pretty(&JsonValue::Object(map)) {
+            Ok(serialized) => println!("{serialized}"),
+            Err(err) => eprintln!("format failed: {err}"),
+        }
+    } else {
+        if let Some(stats) = stats {
+            println!("applied entries: {}", stats.applied);
+            println!("overwritten entries: {}", stats.overwritten);
+            println!("skipped existing entries: {}", stats.skipped_existing);
+            println!("unchanged entries: {}", stats.no_change);
+            println!("total manifest entries: {}", stats.total_entries);
+            println!();
+        }
+        render_manifest_summary(summary, false);
+    }
+}
+
+fn render_audit_report(report: &AuditReport, json: bool) {
+    if json {
+        match json::to_string_pretty(&audit_report_to_json(report)) {
+            Ok(serialized) => println!("{serialized}"),
+            Err(err) => eprintln!("format failed: {err}"),
+        }
+        return;
+    }
+
+    render_manifest_summary(&report.summary, false);
+    if !report.entries.is_empty() {
+        println!("sample entries ({} total shown):", report.entries.len());
+        for entry in &report.entries {
+            println!(
+                "  key={} present={} duplicate={}",
+                hex::encode(entry.key.as_slice()),
+                entry.present,
+                entry.duplicate
+            );
+        }
+    }
+    if !report.missing_keys.is_empty() {
+        println!(
+            "sample missing keys: {}",
+            report
+                .missing_keys
+                .iter()
+                .map(|key| hex::encode(key))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if !report.duplicate_keys.is_empty() {
+        println!(
+            "sample duplicate keys: {}",
+            report
+                .duplicate_keys
+                .iter()
+                .map(|key| hex::encode(key))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+}
+
+fn render_verify_result(comparison: &ChecksumComparison, json: bool) {
+    if json {
+        match json::to_string_pretty(&checksum_comparison_to_json(comparison)) {
+            Ok(serialized) => println!("{serialized}"),
+            Err(err) => eprintln!("format failed: {err}"),
+        }
+        return;
+    }
+
+    println!("checksum scope: {}", checksum_scope_label(comparison.scope));
+    println!("database entries: {}", comparison.database.entries);
+    println!("database hash: {}", hex::encode(comparison.database.hash));
+    if let Some(manifest) = comparison.manifest.as_ref() {
+        println!("manifest entries: {}", manifest.entries);
+        println!("manifest hash: {}", hex::encode(manifest.hash));
+        let matches = manifest.hash == comparison.database.hash
+            && manifest.entries == comparison.database.entries;
+        println!("matches: {matches}");
+    } else {
+        println!("manifest hash: (absent)");
+    }
+}
+
+fn write_json_to_file(path: &Path, value: &JsonValue) -> Result<(), String> {
+    let bytes = json::to_vec_pretty(value).map_err(|err| err.to_string())?;
+    fs::write(path, bytes).map_err(|err| err.to_string())
+}
+
+#[derive(Clone)]
+pub enum StorageImporterCmd {
+    Audit {
+        dir: String,
+        source: ManifestSource,
+        json: bool,
+        out: Option<PathBuf>,
+        allow_absent: bool,
+    },
+    Rerun {
+        dir: String,
+        source: ManifestSource,
+        mode: ImportMode,
+        dry_run: bool,
+        json: bool,
+        allow_absent: bool,
+    },
+    Verify {
+        dir: String,
+        source: ManifestSource,
+        scope: ChecksumScope,
+        json: bool,
+        allow_absent: bool,
+    },
+}
+
+impl StorageImporterCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("storage.importer"),
+            "importer",
+            "Legacy storage importer utilities",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("storage.importer.audit"),
+                "audit",
+                "Inspect legacy manifest status",
+            )
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "dir",
+                "dir",
+                "Storage market directory to inspect",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "source",
+                "source",
+                "Manifest source (auto|pending|migrated|<path>)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "out",
+                "out",
+                "Write JSON audit report to file",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "allow-absent",
+                "allow-absent",
+                "Exit successfully when no manifest is present",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("storage.importer.rerun"),
+                "rerun",
+                "Replay legacy manifest entries",
+            )
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "dir",
+                "dir",
+                "Storage market directory to operate on",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "source",
+                "source",
+                "Manifest source (auto|pending|migrated|<path>)",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "overwrite",
+                "overwrite",
+                "Overwrite existing contract records when replaying",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "dry-run",
+                "dry-run",
+                "Show summary without applying changes",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "allow-absent",
+                "allow-absent",
+                "Exit successfully when no manifest is present",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("storage.importer.verify"),
+                "verify",
+                "Compare manifest checksum against storage",
+            )
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "dir",
+                "dir",
+                "Storage market directory to inspect",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "source",
+                "source",
+                "Manifest source (auto|pending|migrated|<path>)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "scope",
+                "scope",
+                "Checksum scope (contracts|all)",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "allow-absent",
+                "allow-absent",
+                "Exit successfully when no manifest is present",
+            )))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'storage importer'".to_string())?;
+        match name {
+            "audit" => {
+                let dir = take_string(sub_matches, "dir").unwrap_or_else(default_market_dir);
+                let source = parse_manifest_source(take_string(sub_matches, "source"))?;
+                let json = sub_matches.get_flag("json");
+                let out = take_string(sub_matches, "out").map(PathBuf::from);
+                let allow_absent = sub_matches.get_flag("allow-absent");
+                Ok(Self::Audit {
+                    dir,
+                    source,
+                    json,
+                    out,
+                    allow_absent,
+                })
+            }
+            "rerun" => {
+                let dir = take_string(sub_matches, "dir").unwrap_or_else(default_market_dir);
+                let source = parse_manifest_source(take_string(sub_matches, "source"))?;
+                let mode = if sub_matches.get_flag("overwrite") {
+                    ImportMode::OverwriteExisting
+                } else {
+                    ImportMode::InsertMissing
+                };
+                let dry_run = sub_matches.get_flag("dry-run");
+                let json = sub_matches.get_flag("json");
+                let allow_absent = sub_matches.get_flag("allow-absent");
+                Ok(Self::Rerun {
+                    dir,
+                    source,
+                    mode,
+                    dry_run,
+                    json,
+                    allow_absent,
+                })
+            }
+            "verify" => {
+                let dir = take_string(sub_matches, "dir").unwrap_or_else(default_market_dir);
+                let source = parse_manifest_source(take_string(sub_matches, "source"))?;
+                let scope = parse_checksum_scope(take_string(sub_matches, "scope"))?;
+                let json = sub_matches.get_flag("json");
+                let allow_absent = sub_matches.get_flag("allow-absent");
+                Ok(Self::Verify {
+                    dir,
+                    source,
+                    scope,
+                    json,
+                    allow_absent,
+                })
+            }
+            other => Err(format!(
+                "unknown subcommand '{other}' for 'storage importer'"
+            )),
+        }
+    }
 }
 
 impl StorageCmd {
@@ -204,6 +739,7 @@ impl StorageCmd {
                 )))
                 .build(),
             )
+            .subcommand(StorageImporterCmd::command())
             .build()
     }
 
@@ -275,8 +811,134 @@ impl StorageCmd {
                 let json = sub_matches.get_flag("json");
                 Ok(StorageCmd::Manifests { limit, json })
             }
+            "importer" => {
+                let cmd = StorageImporterCmd::from_matches(sub_matches)?;
+                Ok(StorageCmd::Importer(cmd))
+            }
             other => Err(format!("unknown subcommand '{other}' for 'storage'")),
         }
+    }
+}
+
+fn handle_importer(cmd: StorageImporterCmd) {
+    match cmd {
+        StorageImporterCmd::Audit {
+            dir,
+            source,
+            json,
+            out,
+            allow_absent,
+        } => match StorageImporter::open(&dir) {
+            Ok(importer) => match importer.audit(source) {
+                Ok(report) => {
+                    if report.summary.source_path.is_none() && !allow_absent {
+                        eprintln!(
+                            "no legacy manifest found (status: {})",
+                            manifest_status_label(&report.summary.status)
+                        );
+                        process::exit(1);
+                    }
+
+                    if let Some(path) = out {
+                        let value = audit_report_to_json(&report);
+                        if let Err(err) = write_json_to_file(&path, &value) {
+                            eprintln!("failed to write audit report {}: {err}", path.display());
+                            process::exit(1);
+                        }
+                    }
+
+                    render_audit_report(&report, json);
+                }
+                Err(err) => {
+                    eprintln!("storage importer audit failed: {err}");
+                    process::exit(1);
+                }
+            },
+            Err(err) => {
+                eprintln!("failed to open storage market at {dir}: {err}");
+                process::exit(1);
+            }
+        },
+        StorageImporterCmd::Rerun {
+            dir,
+            source,
+            mode,
+            dry_run,
+            json,
+            allow_absent,
+        } => match StorageImporter::open(&dir) {
+            Ok(importer) => {
+                let summary_before = match importer.summarize(source.clone()) {
+                    Ok(summary) => summary,
+                    Err(err) => {
+                        eprintln!("storage importer inspection failed: {err}");
+                        process::exit(1);
+                    }
+                };
+                if summary_before.source_path.is_none() && !allow_absent {
+                    eprintln!(
+                        "no legacy manifest found (status: {})",
+                        manifest_status_label(&summary_before.status)
+                    );
+                    process::exit(1);
+                }
+                if dry_run {
+                    render_import_result(None, &summary_before, json);
+                    return;
+                }
+                let stats = match importer.import(source.clone(), mode) {
+                    Ok(stats) => stats,
+                    Err(err) => {
+                        eprintln!("storage importer replay failed: {err}");
+                        process::exit(1);
+                    }
+                };
+                let summary_after = match importer.summarize(source) {
+                    Ok(summary) => summary,
+                    Err(err) => {
+                        eprintln!("storage importer post-run summary failed: {err}");
+                        process::exit(1);
+                    }
+                };
+                render_import_result(Some(&stats), &summary_after, json);
+            }
+            Err(err) => {
+                eprintln!("failed to open storage market at {dir}: {err}");
+                process::exit(1);
+            }
+        },
+        StorageImporterCmd::Verify {
+            dir,
+            source,
+            scope,
+            json,
+            allow_absent,
+        } => match StorageImporter::open(&dir) {
+            Ok(importer) => match importer.verify(source, scope) {
+                Ok(comparison) => {
+                    if comparison.manifest.is_none() && !allow_absent {
+                        eprintln!("no legacy manifest available for verification");
+                        process::exit(1);
+                    }
+                    render_verify_result(&comparison, json);
+                    if let Some(manifest) = comparison.manifest.as_ref() {
+                        let matches = manifest.hash == comparison.database.hash
+                            && manifest.entries == comparison.database.entries;
+                        if !matches {
+                            process::exit(2);
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("storage importer verification failed: {err}");
+                    process::exit(1);
+                }
+            },
+            Err(err) => {
+                eprintln!("failed to open storage market at {dir}: {err}");
+                process::exit(1);
+            }
+        },
     }
 }
 
@@ -552,5 +1214,6 @@ pub fn handle(cmd: StorageCmd) {
                 println!("{}", resp);
             }
         }
+        StorageCmd::Importer(cmd) => handle_importer(cmd),
     }
 }

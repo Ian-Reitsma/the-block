@@ -9,6 +9,7 @@ use governance::{
     DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
     TreasuryDisbursement,
 };
+use std::time::Duration;
 use sys::tempfile;
 
 fn json_string(value: &str) -> JsonValue {
@@ -141,6 +142,85 @@ fn treasury_lifecycle_outputs_structured_json() {
 }
 
 #[test]
+fn treasury_executor_lease_release_marks_snapshot() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state_path = dir.path().join("gov.db");
+    let state = state_path.to_string_lossy().into_owned();
+
+    let store = GovStore::open(state.clone());
+    let (_record, acquired) = store
+        .refresh_executor_lease("holder-1", Duration::from_secs(60))
+        .expect("refresh lease");
+    assert!(acquired, "expected lease acquisition");
+
+    let mut out = Vec::new();
+    handle_with_writer(
+        GovCmd::Treasury {
+            action: GovTreasuryCmd::Executor {
+                state: state.clone(),
+                json: false,
+            },
+        },
+        &mut out,
+    )
+    .expect("executor report");
+    let initial_output = String::from_utf8(out.clone()).expect("executor utf8");
+    assert!(
+        !initial_output
+            .lines()
+            .any(|line| line.contains("Lease status: released")),
+        "unexpected released lease in initial report: {}",
+        initial_output
+    );
+
+    out.clear();
+    handle_with_writer(
+        GovCmd::Treasury {
+            action: GovTreasuryCmd::LeaseRelease {
+                state: state.clone(),
+                holder: "holder-1".into(),
+            },
+        },
+        &mut out,
+    )
+    .expect("release lease");
+    let release_msg = String::from_utf8(out.clone()).expect("release message utf8");
+    assert!(
+        release_msg.contains("lease released for holder holder-1"),
+        "expected release confirmation"
+    );
+
+    out.clear();
+    handle_with_writer(
+        GovCmd::Treasury {
+            action: GovTreasuryCmd::Executor {
+                state: state.clone(),
+                json: false,
+            },
+        },
+        &mut out,
+    )
+    .expect("executor report after release");
+    let released_output = String::from_utf8(out).expect("executor utf8 after release");
+    assert!(
+        released_output
+            .lines()
+            .any(|line| line.contains("Lease status: released")),
+        "expected released status in executor report: {}",
+        released_output
+    );
+
+    let snapshot = store.executor_snapshot().expect("snapshot");
+    assert!(
+        snapshot
+            .as_ref()
+            .map(|snap| snap.lease_released)
+            .unwrap_or(true),
+        "snapshot should reflect released lease"
+    );
+}
+
+#[test]
 fn treasury_fetch_remote_combines_responses() {
     let mut query = TreasuryDisbursementQuery::default();
     query.status = Some(RemoteTreasuryStatus::Scheduled);
@@ -187,6 +267,7 @@ fn treasury_fetch_remote_combines_responses() {
             event: TreasuryBalanceEventKind::Accrual,
             disbursement_id: None,
         }),
+        executor: None,
     };
     let history_result = RpcTreasuryHistoryResult {
         snapshots: vec![TreasuryBalanceSnapshot {
@@ -233,6 +314,36 @@ fn treasury_fetch_remote_combines_responses() {
 }
 
 #[test]
+fn treasury_executor_reports_released_state() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state_path = dir.path().join("gov.db");
+    let state = state_path.to_string_lossy().into_owned();
+    let store = GovStore::open(state.clone());
+    let ttl = Duration::from_secs(90);
+    let (_lease, acquired) = store
+        .refresh_executor_lease("executor-A", ttl)
+        .expect("acquire lease");
+    assert!(acquired);
+    store
+        .release_executor_lease("executor-A")
+        .expect("release lease");
+
+    let mut out = Vec::new();
+    handle_with_writer(
+        GovCmd::Treasury {
+            action: GovTreasuryCmd::Executor {
+                state: state.clone(),
+                json: false,
+            },
+        },
+        &mut out,
+    )
+    .expect("executor report");
+    let rendered = String::from_utf8(out).expect("utf8");
+    assert!(rendered.contains("Lease status: released (awaiting new holder)"));
+}
+
+#[test]
 fn treasury_fetch_remote_allows_missing_history() {
     let disbursement_result = RpcTreasuryDisbursementsResult {
         disbursements: vec![],
@@ -242,6 +353,7 @@ fn treasury_fetch_remote_allows_missing_history() {
         balance_ct: 0,
         balance_it: 0,
         last_snapshot: None,
+        executor: None,
     };
 
     let output = combine_treasury_fetch_results(disbursement_result, balance_result, None);

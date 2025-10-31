@@ -47,11 +47,13 @@ exist before replaying snapshots. To migrate an existing state directory:
    directories into the new format, e.g.:
 
    ```
-  cargo run -p storage-migrate -- state/legacy state/inhouse
-   ```
+ cargo run -p storage-migrate -- state/legacy state/inhouse
+  ```
 
    The tool streams column families into the in-house engine and verifies SST
    checksums before finalizing the manifest.
+   Run `tools/storage_migrate checksum state/inhouse --json` to capture the
+   resulting digest and archive it alongside the migration notes.
 3. Update `config/default.toml` so the `storage` engine defaults (or overrides
    for `state`-related handles) point at the `inhouse` backend. The
    `storage_legacy_mode` toggle can be set to `true` for one release to retain
@@ -60,6 +62,10 @@ exist before replaying snapshots. To migrate an existing state directory:
 4. Restart the node and confirm the migration with `the-block state status`.
    Snapshot restores that cross engines emit warnings in the CLI and surface the
    `storage_engine_info{name="state",engine="inhouse"}` metric for dashboards.
+5. When the node is offline, run `contract-cli storage importer verify --dir state` to
+   confirm the persisted manifest matches the live `market/contracts` column
+   family before bringing the service back online. The command reports manifest
+   and database checksums so operators can catch drift early.
 
 ### In-house compaction cadence
 

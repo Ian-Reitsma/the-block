@@ -15,7 +15,8 @@ failover while preserving a single, monotonically increasing nonce watermark.
   than the poll interval. A common deployment uses a 15s poll interval with a
   60s TTL. Shorter TTLs increase churn and should only be used in trusted lab
   environments.
-- **Hot key rotation**: rotate the signing key by releasing the lease
+- **Hot key rotation**: rotate the signing key by releasing the lease with
+  `contract-cli gov treasury lease release --state <db> --holder <executor-id>`
   (`gov.treasury.executor --state <db> --json` describes the incumbent holder),
   swapping the key material, and allowing another executor to acquire the
   lease.
@@ -55,22 +56,33 @@ starts at the correct nonce.
    `cargo test -p governance executor_failover_preserves_nonce_watermark` before
    resuming automation.
 4. **Manual release**: use `gov.treasury.executor --state <db>` to inspect the
-   snapshot. Call `GovStore::release_executor_lease` via the CLI when forcing a
-   hand-off; the release marker is set automatically.
+   snapshot. Call `contract-cli gov treasury lease release --state <db>
+   --holder <executor-id>` when forcing a hand-off; the release marker is set
+   automatically.
 
 ## Observability Checklist
 
-- Grafana dashboards expose the new treasury panel alongside Range Boost
-  telemetry (`RangeBoost forwarder failures`, `enqueue errors`, and toggle
-  latency p95).
+- Grafana dashboards expose the "treasury_executor_lease_released" panel next
+  to the executor nonce dashboards and include Range Boost queue depth/age
+  panels (`RangeBoost forwarder failures`, `RangeBoost enqueue errors`,
+  `RangeBoost toggle latency p95`, `RangeBoost queue depth`, and `RangeBoost
+  queue oldest age`).
 - Prometheus metrics to watch:
   - `treasury_executor_last_submitted_nonce`
   - `treasury_executor_lease_last_nonce`
+  - `treasury_executor_lease_released`
   - `range_boost_forwarder_fail_total`
   - `range_boost_enqueue_error_total`
   - `range_boost_toggle_latency_seconds`
+  - `range_boost_queue_depth`
+  - `range_boost_queue_oldest_seconds`
 - CI now runs `just test-range-boost` with telemetry enabled and a governance
   failover smoke test to catch regressions before merge.
+- Alerts to wire:
+  - `TreasuryLeaseWatermarkLagging`
+  - `TreasuryLeaseWatermarkRegression`
+  - `TreasuryLeaseReleased` (fires when the release flag is asserted for more
+    than five minutes)
 
 ## Related Documentation
 

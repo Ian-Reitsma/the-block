@@ -9,17 +9,44 @@ use std::path::{Path, PathBuf};
 
 use super::engine::Tree;
 
-const LEGACY_MANIFEST: &str = "legacy_manifest.json";
+pub const LEGACY_MANIFEST_FILE: &str = "legacy_manifest.json";
 pub(crate) const LEGACY_TREE_HEX: &str = "6d61726b65742f636f6e747261637473"; // "market/contracts"
-const MIGRATED_SUFFIX: &str = "legacy_manifest.migrated";
+pub const MIGRATED_MANIFEST_PREFIX: &str = "legacy_manifest.migrated";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestStatus {
+    Pending { path: PathBuf },
+    Migrated { path: PathBuf },
+    Absent,
+}
+
+pub fn pending_manifest_path(base: &Path) -> PathBuf {
+    base.join(LEGACY_MANIFEST_FILE)
+}
+
+pub fn migrated_manifest_path(base: &Path) -> PathBuf {
+    base.join(format!("{MIGRATED_MANIFEST_PREFIX}.json"))
+}
+
+pub fn manifest_status(base: &Path) -> ManifestStatus {
+    let pending = pending_manifest_path(base);
+    if pending.exists() {
+        return ManifestStatus::Pending { path: pending };
+    }
+    let migrated = migrated_manifest_path(base);
+    if migrated.exists() {
+        return ManifestStatus::Migrated { path: migrated };
+    }
+    ManifestStatus::Absent
+}
 
 pub fn migrate_if_present(base: &Path, contracts: &Tree) -> Result<()> {
-    let manifest_path = base.join(LEGACY_MANIFEST);
+    let manifest_path = pending_manifest_path(base);
     if !manifest_path.exists() {
         return Ok(());
     }
 
-    let entries = load_legacy_contracts(&manifest_path)?;
+    let entries = load_manifest_entries(&manifest_path)?;
     if entries.is_empty() {
         mark_migrated(&manifest_path)?;
         return Ok(());
@@ -97,6 +124,10 @@ fn load_legacy_contracts(path: &Path) -> Result<Vec<(Vec<u8>, ContractRecord)>> 
     Ok(records)
 }
 
+pub fn load_manifest_entries(path: &Path) -> Result<Vec<(Vec<u8>, ContractRecord)>> {
+    load_legacy_contracts(path)
+}
+
 fn mark_migrated(path: &Path) -> Result<()> {
     let target = migrated_path(path);
     fs::rename(path, target).map_err(|err| {
@@ -110,7 +141,7 @@ fn mark_migrated(path: &Path) -> Result<()> {
 
 fn migrated_path(path: &Path) -> PathBuf {
     let mut target = path.to_path_buf();
-    target.set_file_name(format!("{MIGRATED_SUFFIX}.json"));
+    target.set_file_name(format!("{MIGRATED_MANIFEST_PREFIX}.json"));
     target
 }
 

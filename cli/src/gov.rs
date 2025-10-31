@@ -13,9 +13,10 @@ use foundation_serialization::json::Value;
 use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
-    encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
-    ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
-    TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot, Vote, VoteChoice,
+    encode_transport_provider_policy, registry, DisbursementStatus, GovStore, ParamKey, Proposal,
+    ProposalStatus, ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier,
+    ReleaseVote, SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    TreasuryExecutorSnapshot, Vote, VoteChoice,
 };
 use httpd::ClientError;
 use std::io::{self, Write};
@@ -439,6 +440,10 @@ pub enum GovTreasuryCmd {
     Executor {
         state: String,
         json: bool,
+    },
+    LeaseRelease {
+        state: String,
+        holder: String,
     },
 }
 
@@ -920,6 +925,31 @@ impl GovTreasuryCmd {
             )))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.treasury.lease"),
+                "lease",
+                "Treasury executor lease controls",
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("gov.treasury.lease.release"),
+                    "release",
+                    "Mark the current executor lease as released",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("state", "state", "Path to governance state store")
+                        .default("gov.db"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "holder",
+                    "holder",
+                    "Current executor holder identifier",
+                )))
+                .build(),
+            )
+            .build(),
+        )
         .build()
     }
 
@@ -1027,6 +1057,23 @@ impl GovTreasuryCmd {
                     take_string(sub_matches, "state").unwrap_or_else(|| "gov.db".to_string());
                 let json = sub_matches.get_flag("json");
                 Ok(GovTreasuryCmd::Executor { state, json })
+            }
+            "lease" => {
+                let (lease_name, lease_matches) = sub_matches
+                    .subcommand()
+                    .ok_or_else(|| "missing subcommand for 'gov treasury lease'".to_string())?;
+                match lease_name {
+                    "release" => {
+                        let state = take_string(lease_matches, "state")
+                            .unwrap_or_else(|| "gov.db".to_string());
+                        let holder = take_string(lease_matches, "holder")
+                            .ok_or_else(|| "--holder is required".to_string())?;
+                        Ok(GovTreasuryCmd::LeaseRelease { state, holder })
+                    }
+                    other => Err(format!(
+                        "unknown subcommand '{other}' for 'gov treasury lease'"
+                    )),
+                }
             }
             other => Err(format!("unknown subcommand '{other}' for 'gov treasury'")),
         }
@@ -1440,10 +1487,14 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 .and_then(|snap| snap.lease_expires_at)
                 .and_then(|expires| expires.checked_sub(now_secs));
             let lease_last_nonce = snapshot.as_ref().and_then(|snap| snap.lease_last_nonce);
-            let lease_released = snapshot
-                .as_ref()
-                .map(|snap| snap.lease_released)
-                .unwrap_or(false);
+            let lease_released = if let Some(snap) = snapshot.as_ref() {
+                snap.lease_released
+            } else {
+                store
+                    .current_executor_lease()
+                    .map(|lease| lease.map(|record| record.released).unwrap_or(false))
+                    .unwrap_or(false)
+            };
             let staged_ids: Vec<u64> = intents
                 .iter()
                 .map(|intent| intent.disbursement_id)
@@ -1504,6 +1555,9 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                         writeln!(out, "Last error: {err}")?;
                     }
                 } else {
+                    if report.lease_released {
+                        writeln!(out, "Lease status: released (awaiting new holder)")?;
+                    }
                     writeln!(
                         out,
                         "executor snapshot unavailable; automation not yet initialised"
@@ -1526,6 +1580,15 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                     out,
                     "Provisioning guidance: launch nodes with --treasury-executor --treasury-key <KEY_ID> \n  optional flags: --treasury-executor-id <IDENTITY>, --treasury-executor-lease <seconds>."
                 )?;
+            }
+        }
+        GovTreasuryCmd::LeaseRelease { state, holder } => {
+            let store = GovStore::open(state);
+            match store.release_executor_lease(&holder) {
+                Ok(()) => {
+                    writeln!(out, "lease released for holder {holder}")?;
+                }
+                Err(err) => eprintln!("lease release failed: {err}"),
             }
         }
     }

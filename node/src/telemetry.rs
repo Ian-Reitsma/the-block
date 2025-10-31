@@ -4441,6 +4441,18 @@ pub static TREASURY_EXECUTOR_LEASE_LAST_NONCE: Lazy<IntGaugeHandle> = Lazy::new(
     g.handle()
 });
 
+pub static TREASURY_EXECUTOR_LEASE_RELEASED: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "treasury_executor_lease_released",
+        "Flag indicating the active treasury executor lease has been released",
+    )
+    .unwrap_or_else(|e| panic!("gauge treasury_executor_lease_released: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry treasury_executor_lease_released: {e}"));
+    g.handle()
+});
+
 pub static TREASURY_EXECUTOR_RESULT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -4901,6 +4913,30 @@ pub static RANGE_BOOST_ENQUEUE_ERROR_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry range boost enqueue error: {e}"));
     c.handle()
+});
+
+pub static RANGE_BOOST_QUEUE_DEPTH: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "range_boost_queue_depth",
+        "Current number of bundles pending in the RangeBoost queue",
+    )
+    .unwrap_or_else(|e| panic!("gauge range boost queue depth: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost queue depth: {e}"));
+    g.handle()
+});
+
+pub static RANGE_BOOST_QUEUE_OLDEST_SECONDS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "range_boost_queue_oldest_seconds",
+        "Age in seconds of the oldest RangeBoost queue entry",
+    )
+    .unwrap_or_else(|e| panic!("gauge range boost queue oldest: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost queue oldest: {e}"));
+    g.handle()
 });
 
 pub static RANGE_BOOST_TOGGLE_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {

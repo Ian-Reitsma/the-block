@@ -72,7 +72,54 @@ cargo run -p storage-migrate -- <legacy-path> <inhouse-path>
 
 The command is idempotent—re-running the migration compacts existing SSTs and
 replays the WAL so operators can stage migrations safely before switching the
-node configuration.
+node configuration. A companion `checksum` subcommand computes a deterministic
+BLAKE3 digest over either the full database (`--scope=all`) or the
+`market/contracts` column family (`--scope=contracts`, the default). Operators
+can capture the checksum in human-readable form or via `--json` and compare it
+against live nodes without touching the data:
+
+```
+tools/storage_migrate checksum /var/lib/the-block/storage_market --json
+tools/storage_migrate checksum /var/lib/the-block/storage_market --scope=all
+```
+
+The checksum routine is shared with the storage importer so on-disk snapshots,
+live databases, and manifests can be compared byte-for-byte.
+
+### 0.3 Legacy importer utilities
+
+The `contract-cli storage importer` subcommands were extended to simplify
+inspecting and replaying legacy manifests. The `audit` variant now understands
+`--out <path>` so operators can persist a machine-readable report while still
+printing a human summary. The JSON payload includes per-entry presence flags,
+duplicate detection, and sampled missing keys; pass `--allow-absent` to treat a
+missing manifest as a successful audit when staging new deployments.
+
+```
+contract-cli storage importer audit --dir /var/lib/the-block/storage_market \
+  --json --out audit.json
+```
+
+Replays surface richer statistics as well. `ImportStats` records applied,
+overwritten, skipped, and `no_change` counts so an audit immediately reveals
+whether values differed or were already in sync. When the importer runs in
+overwrite mode byte-identical entries are skipped without writing to disk and
+counted in `no_change`.
+
+Finally, the new `verify` command compares a legacy manifest against the live
+database without mutating either side. The CLI reports the manifest/database
+checksums and sets `matches` when both digests and entry counts line up. The
+command accepts the same manifest source selectors as the other subcommands and
+exposes the checksum scope:
+
+```
+contract-cli storage importer verify --dir /var/lib/the-block/storage_market \
+  --scope contracts --json
+```
+
+Combined, the `checksum` and `verify` flows let operators validate migrations,
+compare staging environments, and archive audit artefacts without touching the
+storage hot path.
 
 ## 1. Local Chunking & Hashing
 

@@ -36,6 +36,14 @@ impl Engine {
     pub fn base_path(&self) -> &Path {
         &self.base
     }
+
+    pub fn ensure_cf<S: AsRef<str>>(&self, name: S) -> Result<(), StorageError> {
+        self.inner.ensure_cf(name.as_ref())
+    }
+
+    pub fn list_cfs(&self) -> Result<Vec<String>, StorageError> {
+        self.inner.list_cfs()
+    }
 }
 
 #[derive(Clone)]

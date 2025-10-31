@@ -1,12 +1,14 @@
 use explorer::{
-    router, Explorer, ExplorerHttpState, TreasuryDisbursementFilter,
+    build_executor_report, router, Explorer, ExplorerHttpState, TreasuryDisbursementFilter,
     TreasuryDisbursementStatusFilter,
 };
 use foundation_serialization::json;
 use httpd::StatusCode;
 use std::sync::Arc;
+use std::time::Duration;
 use sys::tempfile;
 use the_block::governance::treasury::{mark_cancelled, mark_executed};
+use the_block::governance::GovStore;
 use the_block::governance::TreasuryDisbursement;
 
 #[test]
@@ -72,4 +74,22 @@ fn treasury_index_and_filters() {
         assert_eq!(entries[0]["id"].as_u64(), Some(executed.id));
         assert_eq!(entries[0]["status_label"].as_str(), Some("executed"));
     });
+}
+
+#[test]
+fn treasury_executor_lease_released_flag_exposed() {
+    let gov_dir = tempfile::tempdir().expect("gov temp dir");
+    let gov_path = gov_dir.path().join("gov.db");
+    let gov_state = gov_path.to_string_lossy().into_owned();
+    let store = GovStore::open(gov_state.clone());
+    let (_lease, acquired) = store
+        .refresh_executor_lease("executor-1", Duration::from_secs(60))
+        .expect("acquire lease");
+    assert!(acquired);
+    store
+        .release_executor_lease("executor-1")
+        .expect("release lease");
+
+    let report = build_executor_report(&gov_state).expect("executor report");
+    assert!(report.lease_released());
 }

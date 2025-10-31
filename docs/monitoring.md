@@ -192,6 +192,25 @@ uneven-price regression to guarantee these CT/IT totals stay within their
 governance budgets, preventing dashboards from ever reflecting double-counted
 liquidity.
 
+A neighbouring **Range Boost** row renders the first-party metrics introduced by
+the transport failover work: grouped deltas for `range_boost_forwarder_fail_total`
+and `range_boost_enqueue_error_total`, the p95 slice of
+`range_boost_toggle_latency_seconds_bucket`, plus scalar monitors for
+`range_boost_queue_depth` and `range_boost_queue_oldest_seconds`. The queue
+panels omit legends by design so the row stays compact; the grouped panels retain
+`{{__name__}}` legends for quick filtering. Operators should alert when queue
+depth grows while enqueue/forwarder deltas stay flat—the companion
+`RangeBoostQueueStalled` alert enforces this invariant by combining depth and age
+thresholds.
+
+Treasury monitoring gained a matching scalar: the
+`treasury_executor_lease_released` panel echoes the CLI/Explorer lease marker so
+executors performing drills can verify the release flag flips without inspecting
+the governance database manually. The Prometheus alert `TreasuryLeaseReleased`
+fires whenever the flag stays asserted for more than five minutes, nudging
+operators to bring a new executor online before the queue of staged intents
+backs up.
+
 A neighbouring **Treasury Execution Timeline** panel renders the new
 `Block::treasury_events` vector. Each disbursement lists the execution height,
 beneficiary, currency, USD amount, and originating transaction hash, giving

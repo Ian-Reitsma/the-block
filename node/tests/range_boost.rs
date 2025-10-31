@@ -24,9 +24,10 @@ fn bundle_queue_works() {
             relay: "loopback".into(),
         },
     );
-    let b = rb.dequeue().unwrap();
-    assert_eq!(b.payload.len(), 4);
-    assert_eq!(b.proofs[0].relay, "loopback");
+    let entry = rb.dequeue().unwrap();
+    assert_eq!(entry.bundle.payload.len(), 4);
+    assert_eq!(entry.bundle.proofs[0].relay, "loopback");
+    assert!(entry.enqueued_at.elapsed().as_secs() >= 0);
 }
 
 #[test]
