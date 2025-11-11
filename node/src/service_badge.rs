@@ -8,6 +8,16 @@ const BADGE_PHYSICAL_PRESENCE: &str = "physical_presence";
 
 static BADGE_REGISTRY: Lazy<RwLock<HashMap<String, HashSet<String>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+#[derive(Clone, Copy, Default)]
+struct VenueCrowd {
+    count: u64,
+    last_seen: u64,
+}
+
+static VENUE_COUNTS: Lazy<RwLock<HashMap<String, VenueCrowd>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static VENUE_TOKENS: Lazy<RwLock<HashMap<String, String>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 fn register_badge(provider: &str, badge: &str) {
     let mut guard = BADGE_REGISTRY
@@ -255,6 +265,67 @@ pub fn verify(token: &str) -> bool {
         current_ts() <= exp
     } else {
         false
+    }
+}
+
+/// Record a crowd-size hint for a venue identifier.
+pub fn record_venue_crowd(venue_id: &str, crowd_size: u64) {
+    let mut guard = VENUE_COUNTS
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let entry = guard.entry(venue_id.to_string()).or_default();
+    entry.count = entry.count.max(crowd_size);
+    entry.last_seen = current_ts();
+}
+
+/// Return the last recorded crowd size for a venue (0 if unknown).
+pub fn venue_status(venue_id: &str) -> u64 {
+    VENUE_COUNTS
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .get(venue_id)
+        .map(|v| v.count)
+        .unwrap_or(0)
+}
+
+/// Return detailed crowd status (count, last_seen timestamp)
+pub fn venue_status_detail(venue_id: &str) -> (u64, u64) {
+    VENUE_COUNTS
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .get(venue_id)
+        .map(|v| (v.count, v.last_seen))
+        .unwrap_or((0, 0))
+}
+
+/// Register a venue and issue a new presence token.
+pub fn register_venue(venue_id: &str) -> String {
+    let token = format!(
+        "{:x}",
+        current_ts() + BADGE_TTL_SECS.load(Ordering::Relaxed)
+    );
+    VENUE_TOKENS
+        .write()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(venue_id.to_string(), token.clone());
+    token
+}
+
+/// Rotate the presence token for a venue (returns the new token)
+pub fn rotate_venue_token(venue_id: &str) -> String {
+    register_venue(venue_id)
+}
+
+/// Verify a venue-scoped token against the registered token and TTL.
+pub fn verify_venue_token(venue_id: &str, token: &str) -> bool {
+    let ok_ttl = verify(token);
+    if !ok_ttl {
+        return false;
+    }
+    let guard = VENUE_TOKENS.read().unwrap_or_else(|p| p.into_inner());
+    match guard.get(venue_id) {
+        Some(expected) => expected == token,
+        None => false,
     }
 }
 

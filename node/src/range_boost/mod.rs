@@ -560,7 +560,7 @@ mod tests {
         assert_eq!(rb.pending(), 1);
         rb.record_proof(0, HopProof { relay: "r1".into() });
         let b = rb.dequeue().unwrap();
-        assert_eq!(b.payload, vec![1, 2, 3]);
-        assert_eq!(b.proofs.len(), 1);
+        assert_eq!(b.bundle.payload, vec![1, 2, 3]);
+        assert_eq!(b.bundle.proofs.len(), 1);
     }
 }

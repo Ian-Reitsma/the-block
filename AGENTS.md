@@ -4,68 +4,68 @@ Quick Index
 - Vision & Strategy: see §16
 - Agent Playbooks: see §17
 - Strategic Pillars: see §18
-- Monitoring Stack: see `docs/monitoring.md` and `make monitor`
+- Monitoring Stack: see [`Telemetry Wiring`, `Metrics Aggregator Ops`, and `Monitoring`](docs/operations.md#telemetry-wiring) and `make monitor`
 - First-party HTTP tooling lives under `crates/httpd`; reuse `HttpClient` or
   `BlockingClient` instead of pulling in third-party stacks (`reqwest` and
   friends are no longer linked anywhere in the workspace).
-- Status & Roadmap: see `docs/roadmap.md`
-- Progress Snapshot: see `docs/progress.md` for subsystem status and gaps
-- Networking, per-peer telemetry, & DHT recovery: see `docs/networking.md`
-- QUIC handshake & fallback rules: see `docs/quic.md`
-- Economic formulas: see `docs/economics.md`
-- Blob root scheduling: see `docs/blob_chain.md`
-- Macro-block checkpoints: see `docs/macro_block.md`
-- Law-enforcement portal & canary runbook: see `docs/le_portal.md`
-- Range-boost queue semantics: see `docs/range_boost.md`
-- Read acknowledgement batching and audit workflow: see `docs/read_receipts.md`
+- Status & Roadmap: see [`Document Map`](docs/overview.md#document-map)
+- Progress Snapshot: see [`Document Map`](docs/overview.md#document-map) for subsystem status and gaps
+- Networking, per-peer telemetry, & DHT recovery: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
+- QUIC handshake & fallback rules: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
+- Economic formulas: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
+- Blob root scheduling: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
+- Macro-block checkpoints: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
+- Law-enforcement portal & canary runbook: see [`Auxiliary Services`](docs/architecture.md#auxiliary-services)
+- Range-boost queue semantics: see [`LocalNet and Range Boost`](docs/architecture.md#localnet-and-range-boost)
+- Read acknowledgement batching and audit workflow: see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
 - RocksDB layout, crash recovery, and simulation replay: see `state/README.md`
-- Parallel execution and transaction scheduling: see `docs/scheduler.md`
-- PoH tick generator: see `docs/poh.md`
-- Commit–reveal scheme: see `docs/commit_reveal.md`
-- Service badge tracker: see `docs/service_badge.md`
-- Fee market reference: see `docs/fees.md`
-- Network fee rebates: see `docs/fee_rebates.md`
-- Transaction lifecycle and fee lanes: see `docs/transaction_lifecycle.md`
-- Compute-market courier retry logic: see `docs/compute_market_courier.md`
-- Compute-market admission quotas: see `docs/compute_market.md`
-- Compute-unit calibration: see `docs/compute_market.md`
-- Compute-market SNARK receipts: see `docs/compute_snarks.md`
-- Multi-hop trust-line routing: see `docs/dex.md`
-- DEX escrow and partial-payment proofs: see `docs/dex.md`
-- AMM pools and liquidity mining: see `docs/dex_amm.md`
-- Gateway DNS publishing and policy records (`.block` TLD or externally verified): see `docs/gateway_dns.md`
-- Gossip relay dedup and adaptive fanout: see `docs/gossip.md`
-- P2P handshake and capability negotiation: see `docs/p2p_protocol.md`
-- Light-client synchronization and security model: see `docs/light_client.md`
-- Light-client state streaming: see `docs/light_client_stream.md`
-- Bridge light-client verification: see `docs/bridges.md`
-- Jurisdiction policy packs and LE logging: see `docs/jurisdiction.md`
-- Probe CLI and metrics: see `docs/probe.md`
-- Operator QUIC configuration and difficulty monitoring: see `docs/operators/run_a_node.md`
-- Python demo walkthrough: see `docs/demo.md`
-- Telemetry summaries and histograms: see `docs/telemetry.md`
-- Simulation framework and replay semantics: see `docs/simulation_framework.md`
-- Wallet staking lifecycle: see `docs/wallets.md`
-- Remote signer workflows: see `docs/wallets.md`
-- Storage erasure coding and reconstruction: see `docs/storage_erasure.md`
-- Storage market incentives and proofs-of-retrievability: see `docs/storage_market.md`
-- KYC provider workflow: see `docs/kyc.md`
-- A* latency routing: see `docs/net_a_star.md`
-- Mempool architecture and tuning: see `docs/mempool.md`
-- Hash layout & genesis seeding: see `docs/hashlayout.md`
-- State pruning and RocksDB compaction: see `docs/state_pruning.md`
-- Cross-platform deployment methods: see `docs/deployment_guide.md`
-- Build provenance and attestation: see `docs/provenance.md`
+- Parallel execution and transaction scheduling: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- PoH tick generator: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
+- Commit–reveal scheme: see [`Proposal Lifecycle`, `Governance Parameters`, and `Risk Controls`](docs/economics_and_governance.md#proposal-lifecycle)
+- Service badge tracker: see [`Auxiliary Services`](docs/architecture.md#auxiliary-services)
+- Fee market reference: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
+- Network fee rebates: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
+- Transaction lifecycle and fee lanes: see [`Transaction and Execution Pipeline`](docs/architecture.md#transaction-and-execution-pipeline)
+- Compute-market courier retry logic: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- Compute-market admission quotas: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- Compute-unit calibration: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- Compute-market SNARK receipts: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- Multi-hop trust-line routing: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
+- DEX escrow and partial-payment proofs: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
+- AMM pools and liquidity mining: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
+- Gateway DNS publishing and policy records (`.block` TLD or externally verified): see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
+- Gossip relay dedup and adaptive fanout: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
+- P2P handshake and capability negotiation: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
+- Light-client synchronization and security model: see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
+- Light-client state streaming: see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
+- Bridge light-client verification: see [`Token Bridges`](docs/architecture.md#token-bridges)
+- Jurisdiction policy packs and LE logging: see [`KYC, Jurisdiction, and Law-Enforcement`](docs/security_and_privacy.md#kyc-jurisdiction-and-compliance)
+- Probe CLI and metrics: see [`Auxiliary Services`](docs/architecture.md#auxiliary-services)
+- Operator QUIC configuration and difficulty monitoring: see [`Bootstrap`, `Running a Node`, and `Deployment`](docs/operations.md#bootstrap-and-configuration)
+- Python demo walkthrough: see [`Python + Headless Tooling` and `Explainability`](docs/developer_handbook.md#python--headless-tooling)
+- Telemetry summaries and histograms: see [`Telemetry and Instrumentation`](docs/architecture.md#telemetry-and-instrumentation)
+- Simulation framework and replay semantics: see [`Environment Setup`, `Coding Standards`, `Testing`, `Performance`, and `Formal Methods`](docs/developer_handbook.md#environment-setup)
+- Wallet staking lifecycle: see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
+- Remote signer workflows: see [`Gateway and Client Access`](docs/architecture.md#gateway-and-client-access)
+- Storage erasure coding and reconstruction: see [`Storage and State`](docs/architecture.md#storage-and-state)
+- Storage market incentives and proofs-of-retrievability: see [`Storage and State`](docs/architecture.md#storage-and-state)
+- KYC provider workflow: see [`KYC, Jurisdiction, and Law-Enforcement`](docs/security_and_privacy.md#kyc-jurisdiction-and-compliance)
+- A* latency routing: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
+- Mempool architecture and tuning: see [`Transaction and Execution Pipeline`](docs/architecture.md#transaction-and-execution-pipeline)
+- Hash layout & genesis seeding: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
+- State pruning and RocksDB compaction: see [`Storage and State`](docs/architecture.md#storage-and-state)
+- Cross-platform deployment methods: see [`Bootstrap`, `Running a Node`, and `Deployment`](docs/operations.md#bootstrap-and-configuration)
+- Build provenance and attestation: see [`Release Provenance and Supply Chain`](docs/security_and_privacy.md#release-provenance-and-supply-chain)
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **98.3/100** with vision completion **93.3/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
-Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards, and the fully in-house TCP/UDP reactor that now underpins every HTTP, WebSocket, and gossip surface alongside the proof-rebate pipeline persisting receipts appended to coinbase outputs during block production. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, adaptive gossip fanout with LRU deduplication, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
+Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
+The stack includes multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards, and the fully in-house TCP/UDP reactor that underpins every HTTP, WebSocket, and gossip surface alongside the proof-rebate pipeline persisting receipts appended to coinbase outputs during block production. Governance tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, adaptive gossip fanout with LRU deduplication, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
-**Latest highlights (2025-10-10 update: governance/ledger/metrics aggregator encode via the first-party serialization facade and explorer/CLI/log indexer now route SQLite through the new `foundation_sqlite` wrapper; remaining serde_json/bincode usage lives in tooling):**
-- Overlay discovery, persistence, and uptime accounting now live behind the `p2p_overlay` crate with libp2p and stub backends, bincode-managed peer stores, CLI/RPC selection, telemetry gauges, and integration tests covering both implementations.
+Highlights: governance/ledger/metrics aggregator encode via the first-party serialization facade and explorer/CLI/log indexer route SQLite through the `foundation_sqlite` wrapper; remaining serde_json/bincode usage lives in tooling.
+- Overlay discovery, persistence, and uptime accounting now live behind the `p2p_overlay` crate with in-house and stub backends, bincode-managed peer stores, CLI/RPC selection, telemetry gauges, and integration tests covering both implementations.
 - Governance parameters now steer runtime, transport, and storage-engine backends end-to-end; CLI, RPC, explorer, and telemetry surfaces reflect active selections while bootstrap scripts seed default policies for clusters.
-- Governance, ledger, and the metrics aggregator now round-trip exclusively through `foundation_serialization`, removing direct `serde_json`/`bincode` usage from production crates while tooling migrations are tracked in `docs/pivot_dependency_strategy.md`.
+ - Governance, ledger, and the metrics aggregator now round-trip exclusively through `foundation_serialization`, removing direct `serde_json`/`bincode` usage from production crates while tooling migrations are tracked in [`Release Provenance and Supply Chain`](docs/security_and_privacy.md#release-provenance-and-supply-chain).
 - Release provenance now stages `cargo vendor` snapshots, records deterministic hashes in `provenance.json`/`checksums.txt`, and blocks tagging in CI unless dependency_registry snapshots pass alongside governance-policy checks.
 - Storage backends route exclusively through the `storage_engine` crate, unifying RocksDB, sled, and in-memory providers with concurrency-safe iterators/batches, temp-dir hygiene, and configuration-driven overrides so `SimpleDb` is a thin adapter.
 - The `coding` crate fronts encryption, erasure, fountain, and compression stacks with runtime-configurable factories; XOR parity and RLE compression fallbacks now sit behind audited rollout gates, surface coder/compressor labels in telemetry, and feed the bench harness comparison tooling so operators can insource dependencies without guesswork.
@@ -76,7 +76,7 @@ Recent additions now include multi-signature release approvals with explorer and
 - Compute-market matching enforces lane-aware batching with fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards, and records payouts exclusively in CT with receipts anchored directly into the consolidated subsidy ledger.
 - Mobile gateway caches persist encrypted responses and offline transactions to sled-backed storage with TTL sweeping, max-size guardrails, eviction telemetry, and CLI/RPC status & flush endpoints so mobile users can recover across restarts without leaking stale data. Sweepers drain a min-heap of expirations, boot-time replays rebuild the queue, and ChaCha20-Poly1305 keys derive from `TB_MOBILE_CACHE_KEY_HEX` (or fall back to `TB_NODE_KEY_HEX`) to harden the cache at rest.
 - Light-client device probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, stream `the_block_light_client_device_status{field,freshness}` telemetry (fresh/cached/fallback), surface gating messages in the CLI/RPC, honour overrides stored in `~/.the_block/light_client.toml`, and embed the latest device snapshot inside compressed log uploads.
-- Runtime-backed HTTP client coverage now spans the node/CLI stacks, and the metrics aggregator and gateway HTTP servers now run on the in-house `httpd` router with the first-party TLS layer; remaining HTTP migrations focus on tooling stubs documented in `docs/rpc.md` and `docs/roadmap.md`.
+ - Runtime-backed HTTP client coverage now spans the node/CLI stacks, and the metrics aggregator and gateway HTTP servers now run on the in-house `httpd` router with the first-party TLS layer; remaining HTTP migrations focus on tooling stubs documented in [`JSON-RPC`](docs/apis_and_tooling.md#json-rpc) and [`Document Map`](docs/overview.md#document-map).
 - RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose regression coverage so operators can trust bounded retry behaviour during incidents.
 - `SimpleDb` snapshot rewrites stage data through fsync’d temporary files, atomically rename into place, and retain legacy dumps until the new image lands, eliminating crash-window data loss while keeping legacy reopen logic intact.
 - Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed, recording jurisdiction languages in law-enforcement audit logs, and compiling via optional feature bundles (`full`, `wasm-metadata`, `sqlite-storage`) for memory-constrained tests.
@@ -166,7 +166,7 @@ The repository owns exactly four responsibility domains:
   \]
 
   with hysteresis `ΔN ≈ √N*` to damp flash joins/leaves.
-- See `docs/economics.md` for full derivations and worked examples.
+ - See [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) for full derivations and worked examples.
 
 ## 2 · Repository Layout
 
@@ -195,13 +195,20 @@ scripts/
   docker/
 demo.py
 docs/
-  compute_market.md
-  service_badge.md
-  wal.md
-  snapshots.md
-  monitoring.md
-  formal.md
-  detailed_updates.md
+  overview.md
+  architecture.md
+  economics_and_governance.md
+  operations.md
+  security_and_privacy.md
+  developer_handbook.md
+  apis_and_tooling.md
+  LEGACY_MAPPING.md
+  SUMMARY.md
+  book.toml
+  assets/
+  maths/
+  monitoring/
+  spec/
 AGENTS.md
 ```
 
@@ -342,11 +349,9 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 - Wallet/Swap: balances, recent tx; DEX swap (USDC↔CT); no fiat in-app.
 - Policy: emissions curve; live R(t,b); reserve inventory; jurisdiction pack hashes; transparency log.
 
-## 13. Roadmap
+## 13. Focus Areas
 
-Mainnet readiness: ~98.3/100 · Vision completion: ~93.3/100. Known blockers: finalise treasury disbursement tooling, finish bridge/DEX signer-set documentation, extend governance-driven dependency rollout playbooks to third-party operators, close the aggregator/gateway HTTP migration away from `axum`/`hyper`, and continue WAN-scale QUIC chaos drills informed by the transport provider telemetry. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
-
-**Recent**
+See [Document Map](docs/overview.md#document-map) for cross-links into the canonical docs. The list below summarizes notable capabilities across the stack.
 
 - Persistent proof-rebate tracker with governance rate caps now writes receipts to disk, injects payouts into coinbase assembly, and exposes explorer/CLI history with telemetry for pending balances.
 - Bridge module tracks per-asset channels, multi-signature quorums, and challenge windows with slashing hooks, persisted state, and expanded RPC/CLI coverage.
@@ -369,48 +374,7 @@ Mainnet readiness: ~98.3/100 · Vision completion: ~93.3/100. Known blockers: fi
 - Fuzz coverage harness that installs LLVM tools on demand and reports missing `.profraw` artifacts.
 - Operator runbook for manual DHT recovery detailing peer DB purge, bootstrap reseeding, and convergence checks.
 
-### Immediate
 
-All previously listed directives have been implemented:
-
-- Gossip chaos tests now converge deterministically under 15 % packet loss and
-  200 ms jitter with documented tie-break rules (`docs/gossip_chaos.md`) and
-  fork-injection fixtures in `tests/net_gossip.rs`.
-- Settlement audits index receipts, run periodic verification jobs via
-  `tools/settlement_audit`, raise `settle_audit_mismatch_total` alerts, and
-  include rollback coverage.
-- DHT bootstrapping persists peer databases (`net/discovery.rs`), randomizes
-  bootstrap peers, fuzzes identifier exchange, and exposes handshake failure
-  metrics.
-- Fuzz and chaos tests store reproducible seeds, randomize RPC timeouts, and
-  simulate disk-full conditions across storage paths using
-  `node/tests/gateway_rate_limit.rs` and `node/tests/storage_repair.rs`.
-
-### Near term
-
-- Launch industrial lane SLA enforcement and dashboard surfacing
-  - Enforce deadline slashing for tardy providers via `compute_market::penalize_sla` and persist bonds under `state/market/`.
-  - Visualize payout caps and missed jobs in the Grafana network dashboard (`monitoring/grafana/network_dashboard.json`).
-  - Track ETAs and on-time percentages per provider with `industrial_rejected_total{reason="SLA"}` and `industrial_eta_seconds` gauges.
-  - Ship alerting hooks for SLA violations through Prometheus rules and optional webhooks.
-  - Document remediation steps for operators in `docs/operators/incident_playbook.md`.
-- Range-boost mesh trials and mobile energy heuristics
-  - Prototype BLE/Wi-Fi Direct hop relays in `examples/localnet/` and measure hop counts.
-  - Tune lighthouse multipliers based on measured energy usage captured via `mobile_light_client` traces.
-  - Log mobile battery and CPU metrics during trials and export `mobile_energy_mwh_total` metrics.
-  - Compare mesh performance against baseline deployments, tracking throughput and failure rates.
-  - Publish heuristics guidance for application developers in `docs/mobile_light_client.md`.
-- Economic simulator runs for emission/fee policy tuning
-  - Parameterize inflation and demand scenarios under `sim/src/config/*.toml`.
-  - Run Monte Carlo batches via the bench-harness and persist results to `sim/out/`.
-  - Report top results to the governance dashboard and archive CSV outputs.
-  - Adjust fee curves based on simulation findings with proposals touching `governance/params.rs`.
-  - Version-control scenarios for reproducibility under `sim/scenarios/`.
-- Compute-backed money and instant-app groundwork
-  - Define redeem curves for compute-backed money (CBM) in `docs/economics.md`.
-  - Prototype local instant-app execution hooks under `examples/instant_app/`.
-  - Record resource consumption metrics for CBM redemption (`cbm_redeem_cpu_seconds`, `cbm_redeem_bytes`).
-  - Test edge cases in token-to-CBM conversion via `tests/compute_cbt.rs`.
   - Expose CLI plumbing for CBM redemptions through `blockctl cbm redeem` commands.
 
 ### Medium term
@@ -501,13 +465,13 @@ The following items block mainnet readiness and should be prioritized. Each task
      `cargo test -p the_block --test mempool_qos -- --nocapture` in CI so regressions in the fee floor and light-client paths are
      caught quickly.
 4. **Document targeted CLI build flags in runbooks**
-   - Update `docs/testing.md` and `docs/operators/run_a_node.md` with the current feature-gating matrix (`cli`, `telemetry`,
+   - Update [`Environment Setup`, `Coding Standards`, `Testing`, `Performance`, and `Formal Methods`](docs/developer_handbook.md#environment-setup) and [`Bootstrap`, `Running a Node`, and `Deployment`](docs/operations.md#bootstrap-and-configuration) with the current feature-gating matrix (`cli`, `telemetry`,
      `gateway`) so operators know how to reproduce the lean build used in integration tests.
 5. **Finish telemetry/privacy warning cleanup**
    - Audit modules touched by the recent gating pass (`node/src/service_badge.rs`, `node/src/le_portal.rs`, `node/src/rpc/mod.rs`)
      for lingering `_unused` placeholders and replace them with feature-gated logic or instrumentation so the code stays readable.
 6. **Track RPC retry saturation and fault clamps in docs**
-   - Keep `docs/networking.md`, `docs/rpc.md`, and `docs/testing.md` aligned with the new `MAX_BACKOFF_EXPONENT` behaviour and
+   - Keep [`Networking and Propagation`](docs/architecture.md#networking-and-propagation), [`JSON-RPC`](docs/apis_and_tooling.md#json-rpc), and [`Environment Setup`, `Coding Standards`, `Testing`, `Performance`, and `Formal Methods`](docs/developer_handbook.md#environment-setup) aligned with the new `MAX_BACKOFF_EXPONENT` behaviour and
      `[0,1]` fault-rate clamping so operators do not rely on outdated tuning advice.
 7. **Verify SimpleDb snapshot safeguards under both features**
    - Add coverage that exercises the atomic rename path with and without `storage-rocksdb` to ensure the recent crash-safe writes
@@ -562,10 +526,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Logging and observability: instrument changes; silent failures are bugs.
 - Security assumptions: treat inputs as adversarial; validations must be total and explicit.
 - Granular commits: single logical changes; every commit builds, tests, and lints cleanly.
-- Formal proofs: `make -C formal` runs `scripts/install_fstar.sh` (default `v2025.08.07`) which verifies checksums and caches an OS/arch-specific release under `formal/.fstar/<version>`. The installer exports `FSTAR_HOME` so downstream tools can reuse the path; override the pinned release with `FSTAR_VERSION` or set `FSTAR_HOME` to an existing install.
+- Formal proofs: `make -C formal` runs `scripts/install_fstar.sh`, verifies checksums, and caches an OS/arch-specific FStar release under `formal/.fstar/<version>`. The installer exports `FSTAR_HOME` so downstream tools can reuse the path; override the pinned release with `FSTAR_VERSION` or set `FSTAR_HOME` to an existing install.
 - Monitoring dashboards: run `npm ci --prefix monitoring` then `make -C monitoring lint` (via `npx jsonnet-lint`); CI lints when `monitoring/**` changes and uploads logs as artifacts.
 - WAL fuzzing (nightly toolchain required): `make fuzz-wal` stores artifacts and RNG seeds under `fuzz/wal/`; reproduce with `cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>`.
-  Use `scripts/extract_wal_seeds.sh` to list seeds and see [docs/wal.md](docs/wal.md) for failure triage.
+  Use `scripts/extract_wal_seeds.sh` to list seeds and see [Storage and State](docs/architecture.md#storage-and-state) for failure triage.
 
 - Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence. Install `cargo-nextest` (compatible with Rust 1.86) if the command is unavailable.
 - QUIC networking changes: run `cargo nextest run --profile quic` to exercise QUIC handshake, fanout, and fallback paths. The
@@ -577,7 +541,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: QUIC/TCP transport with `PeerSet`; per-peer drop reasons and reputation-aware rate limits surface via `net.peer_stats` and the `net` CLI. JSON‑RPC server in `src/bin/node.rs`; integration tests cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the CT subsidy store documented in [docs/system_changes.md](docs/system_changes.md#ct-subsidy-unification-2024) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the formula in `docs/economics.md`; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
+- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the CT subsidy store described in [Economics and Governance § CT Supply](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the same formula; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
   shocks.
@@ -603,7 +567,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations
   export `snapshot_duration_seconds`, `snapshot_fail_total`, and the
   `snapshot_interval`/`snapshot_interval_changed` gauges.
-- Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
+- Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; document the change under [Architecture § Storage and State](docs/architecture.md#storage-and-state).
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.
 - Quick start: `just demo` runs the Python walkthrough after `./scripts/bootstrap.sh` and fails fast if the virtualenv is missing.
 - Governance CLI: `gov submit`, `vote`, `exec`, and `status` persist proposals under `examples/governance/proposals.db`.
@@ -612,7 +576,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 
 ## 18 · Strategic Pillars
 
-- **Governance & Subsidy Economy** ([docs/governance.md](docs/governance.md))
+- **Governance & Subsidy Economy** ([Economics and Governance § Proposal Lifecycle](docs/economics_and_governance.md#proposal-lifecycle))
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
@@ -624,17 +588,17 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Integration tests for fault/rollback
   - [x] Release rollback helper ensures binaries revert when provenance validation fails
   - Progress: 93.5%
-  - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
+  - **Networking & Gossip** ([Architecture § Networking and Propagation](docs/architecture.md#networking-and-propagation))
     - [x] QUIC transport with TCP fallback
     - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, provider introspection, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
     - Progress: 98.1%
-- **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
+- **Storage & Free-Read Hosting** ([Architecture § Storage and State](docs/architecture.md#storage-and-state))
   - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
   - Progress: 93.6%
-  - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
+  - **Compute Marketplace & CBM** ([Architecture § Compute Marketplace](docs/architecture.md#compute-marketplace))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
     - [x] Fee floor enforcement with per-sender slot limits, percentile-configurable windows, wallet telemetry, and eviction audit trails
     - [ ] SLA arbitration and heterogeneous payments
@@ -644,27 +608,27 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
   - Progress: 87.4%
-- **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
+- **Trust Lines & DEX** ([Architecture § DEX and Trust Lines](docs/architecture.md#dex-and-trust-lines))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
   - Progress: 85.8%
-- **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
+- **Cross-Chain Bridges** ([Architecture § Token Bridges](docs/architecture.md#token-bridges))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
   - Progress: 81.8%
-  - **Wallets** ([docs/wallets.md](docs/wallets.md))
+  - **Wallets** ([Architecture § Gateway and Client Access](docs/architecture.md#gateway-and-client-access))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
     - Progress: 96.4%
     - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) and sustain mobile release hardening before tagging the next CLI release.
-  - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
+  - **Monitoring, Debugging & Profiling** ([Operations § Telemetry Wiring & Monitoring](docs/operations.md#telemetry-wiring))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
     - Progress: 95.6%
-  - **Performance** ([docs/performance.md](docs/performance.md))
+- **Performance** ([Developer Handbook § Environment Setup & Testing](docs/developer_handbook.md#environment-setup))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
@@ -676,9 +640,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - If `cargo test --test <name>` reports *no test target*, the file likely sits at the
   workspace root. Move the test under the crate that owns the code (e.g.
   `node/tests/<name>.rs`) and invoke `cargo test -p node --test <name>`.
-- `libp2p_core` and `jsonrpc_core` imports must resolve to crates declared in
-  `node/Cargo.toml`. Prefer `libp2p::PeerId` over `libp2p_core::PeerId` and add
-  `jsonrpc-core` when RPC modules depend on it.
+- Use `p2p_overlay` peer types for overlay logic and the first-party `httpd` router for RPC; do not introduce `libp2p`/`jsonrpc-core` dependencies in production crates.
 - Metrics modules are behind the optional `telemetry` feature. Guard any
   `crate::telemetry::*` imports and counters with `#[cfg(feature = "telemetry")]`
   so builds without telemetry succeed.

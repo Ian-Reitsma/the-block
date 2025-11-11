@@ -21,3 +21,4 @@ sys = { path = "../crates/sys" }
 [dev-dependencies]
 rand = { path = "../crates/rand" }
 testkit = { path = "../crates/testkit" }
+ad_market = { path = "../crates/ad_market" }

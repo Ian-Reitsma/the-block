@@ -1088,6 +1088,33 @@ fn parse_param_key(name: &str) -> Option<ParamKey> {
         "transport.provider" | "TransportProvider" => Some(ParamKey::TransportProvider),
         "storage.engine_policy" | "StorageEnginePolicy" => Some(ParamKey::StorageEnginePolicy),
         "treasury.percent_ct" | "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
+        // Dynamic readiness controls
+        "readiness.use_percentiles" | "AdUsePercentileThresholds" => {
+            Some(ParamKey::AdUsePercentileThresholds)
+        }
+        "readiness.viewer_percentile" | "AdViewerPercentile" => Some(ParamKey::AdViewerPercentile),
+        "readiness.host_percentile" | "AdHostPercentile" => Some(ParamKey::AdHostPercentile),
+        "readiness.provider_percentile" | "AdProviderPercentile" => {
+            Some(ParamKey::AdProviderPercentile)
+        }
+        "readiness.ema_smoothing_ppm" | "AdEmaSmoothingPpm" => Some(ParamKey::AdEmaSmoothingPpm),
+        "readiness.floor.unique_viewers" | "AdFloorUniqueViewers" => {
+            Some(ParamKey::AdFloorUniqueViewers)
+        }
+        "readiness.floor.hosts" | "AdFloorHostCount" => Some(ParamKey::AdFloorHostCount),
+        "readiness.floor.providers" | "AdFloorProviderCount" => {
+            Some(ParamKey::AdFloorProviderCount)
+        }
+        "readiness.cap.unique_viewers" | "AdCapUniqueViewers" => Some(ParamKey::AdCapUniqueViewers),
+        "readiness.cap.hosts" | "AdCapHostCount" => Some(ParamKey::AdCapHostCount),
+        "readiness.cap.providers" | "AdCapProviderCount" => Some(ParamKey::AdCapProviderCount),
+        "readiness.percentile_buckets" | "AdPercentileBuckets" => {
+            Some(ParamKey::AdPercentileBuckets)
+        }
+        "readiness.rehearsal.enabled" | "AdRehearsalEnabled" => Some(ParamKey::AdRehearsalEnabled),
+        "readiness.rehearsal.stability_windows" | "AdRehearsalStabilityWindows" => {
+            Some(ParamKey::AdRehearsalStabilityWindows)
+        }
         _ => None,
     }
 }

@@ -159,6 +159,9 @@ const HEADER_MESH_PEER: &str = "x-theblock-mesh-peer";
 const HEADER_MESH_TRANSPORT: &str = "x-theblock-mesh-transport";
 const HEADER_MESH_LATENCY: &str = "x-theblock-mesh-latency";
 const HEADER_MESH_HOPS: &str = "x-theblock-mesh-hop";
+const HEADER_VENUE_ID: &str = "x-theblock-venue-id";
+const HEADER_CROWD_SIZE: &str = "x-theblock-crowd-size";
+const HEADER_PRESENCE_TOKEN: &str = "x-theblock-presence-token";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AckParseError {
@@ -527,7 +530,7 @@ fn parse_signed_ack(
     let mut crm_lists = parse_crm_lists(req);
     let delivery_channel = parse_delivery_channel(req);
     let mesh = parse_mesh_context(req);
-    let ack = ReadAck {
+    let mut ack = ReadAck {
         manifest,
         path_hash,
         bytes,
@@ -552,7 +555,28 @@ fn parse_signed_ack(
         badge_soft_intent: soft_intent,
         readiness: None,
         zk_proof: None,
+        presence_badge: None,
+        venue_id: None,
+        crowd_size_hint: None,
     };
+    // Optional presence + venue attestation fields
+    if let Some(v) = req.header(HEADER_VENUE_ID) {
+        let v = v.trim();
+        if !v.is_empty() {
+            ack.venue_id = Some(v.to_string());
+        }
+    }
+    if let Some(v) = req.header(HEADER_CROWD_SIZE) {
+        if let Ok(n) = v.parse::<u32>() {
+            ack.crowd_size_hint = Some(n);
+        }
+    }
+    if let Some(v) = req.header(HEADER_PRESENCE_TOKEN) {
+        let token = v.trim();
+        if !token.is_empty() {
+            ack.presence_badge = Some(token.to_string());
+        }
+    }
     if ack.verify() {
         Ok(ack)
     } else {
@@ -613,6 +637,9 @@ fn build_read_ack(
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
+            presence_badge: None,
+            venue_id: None,
+            crowd_size_hint: None,
         }),
         Err(err) => Err(ack_error_response(err)),
     }

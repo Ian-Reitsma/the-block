@@ -1199,6 +1199,9 @@ fn spawn_read_ack_worker(
     market: Option<MarketplaceHandle>,
     readiness: Option<the_block::ad_readiness::AdReadinessHandle>,
 ) -> mpsc::Sender<ReadAck> {
+    use concurrency::Lazy;
+    use std::sync::Mutex as StdMutex;
+    static REHEARSAL_STATE: Lazy<StdMutex<(u64, u64)>> = Lazy::new(|| StdMutex::new((0, 0)));
     let (tx, mut rx) = mpsc::channel(1024);
     runtime::spawn(async move {
         let market = market.clone();
@@ -1231,11 +1234,97 @@ fn spawn_read_ack_worker(
                             handle.inc();
                         }
                     }
+                    // Rehearsal gating: optionally suppress real settlements until stability windows satisfied.
+                    let (rehearsal_enabled, required_stable_windows) = {
+                        let guard = bc.lock().unwrap();
+                        (
+                            guard.params.ad_rehearsal_enabled > 0,
+                            guard.params.ad_rehearsal_stability_windows.max(0) as u64,
+                        )
+                    };
+                    let mut allow_settlement = true;
+                    if rehearsal_enabled {
+                        if let Some(ref handle) = readiness {
+                            let snapshot = handle.snapshot();
+                            if snapshot.window_secs > 0 && snapshot.last_updated > 0 {
+                                let window_id = snapshot.last_updated / snapshot.window_secs;
+                                let mut st = REHEARSAL_STATE.lock().unwrap();
+                                if st.0 != window_id {
+                                    // new window boundary
+                                    st.0 = window_id;
+                                    if snapshot.ready {
+                                        st.1 = st.1.saturating_add(1);
+                                    } else {
+                                        st.1 = 0;
+                                    }
+                                } else if !snapshot.ready {
+                                    st.1 = 0;
+                                }
+                                if st.1 < required_stable_windows {
+                                    allow_settlement = false;
+                                }
+                            } else {
+                                allow_settlement = false;
+                            }
+                        } else {
+                            allow_settlement = false;
+                        }
+                    }
                     if let Some(market) = &market {
                         if ack.campaign_id.is_some() {
-                            if let Some(settlement) = market.commit(&reservation_key) {
-                                let mut guard = bc.lock().unwrap();
-                                guard.record_ad_settlement(&ack, settlement);
+                            // Optional presence badge enforcement for venue-grade impressions.
+                            let mut presence_ok = true;
+                            if let Some(ref token) = ack.presence_badge {
+                                if let Some(ref venue) = ack.venue_id {
+                                    if !the_block::service_badge::verify_venue_token(venue, token) {
+                                        presence_ok = false;
+                                    }
+                                } else if !the_block::service_badge::verify(token) {
+                                    presence_ok = false;
+                                }
+                            }
+                            // Record venue crowd hints if provided and enforce minimum crowd size.
+                            if let Some(ref venue) = ack.venue_id {
+                                if let Some(count) = ack.crowd_size_hint.map(|v| v as u64) {
+                                    the_block::service_badge::record_venue_crowd(venue, count);
+                                }
+                                let min_crowd = {
+                                    let guard = bc.lock().unwrap();
+                                    guard.params.presence_min_crowd_size.max(0) as u64
+                                };
+                                let current = the_block::service_badge::venue_status(venue);
+                                if current < min_crowd {
+                                    presence_ok = false;
+                                }
+                            }
+                            if !presence_ok {
+                                market.cancel(&reservation_key);
+                                #[cfg(feature = "telemetry")]
+                                {
+                                    if let Ok(h) = the_block::telemetry::AD_READINESS_SKIPPED
+                                        .ensure_handle_for_label_values(&["presence"])
+                                    {
+                                        h.inc();
+                                    }
+                                }
+                                continue;
+                            }
+                            if allow_settlement {
+                                if let Some(settlement) = market.commit(&reservation_key) {
+                                    let mut guard = bc.lock().unwrap();
+                                    guard.record_ad_settlement(&ack, settlement);
+                                }
+                            } else {
+                                // Dry-run: cancel reservation and record telemetry.
+                                market.cancel(&reservation_key);
+                                #[cfg(feature = "telemetry")]
+                                {
+                                    if let Ok(h) = the_block::telemetry::AD_READINESS_SKIPPED
+                                        .ensure_handle_for_label_values(&["rehearsal"])
+                                    {
+                                        h.inc();
+                                    }
+                                }
                             }
                         }
                     }
@@ -1417,6 +1506,7 @@ async fn async_main() -> std::process::ExitCode {
                     min_unique_viewers: guard.params.ad_readiness_min_unique_viewers.max(0) as u64,
                     min_host_count: guard.params.ad_readiness_min_host_count.max(0) as u64,
                     min_provider_count: guard.params.ad_readiness_min_provider_count.max(0) as u64,
+                    ..the_block::ad_readiness::AdReadinessConfig::default()
                 }
             };
             let readiness_path = format!("{data_dir}/ad_readiness");
@@ -1534,6 +1624,31 @@ async fn async_main() -> std::process::ExitCode {
             ));
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
+            // Persist per-epoch ad distribution policy snapshots with attestation sidecars.
+            {
+                let bc_for_snap = Arc::clone(&bc);
+                let market_for_snap = market.clone();
+                let data_dir_for_snap = data_dir.clone();
+                runtime::spawn(async move {
+                    let mut last_epoch: u64 = u64::MAX;
+                    loop {
+                        // Derive epoch from block height; EPOCH_BLOCKS = 120.
+                        let epoch = {
+                            let guard = bc_for_snap.lock().unwrap_or_else(|e| e.into_inner());
+                            guard.block_height / 120
+                        };
+                        if epoch != last_epoch {
+                            let _ = the_block::ad_policy_snapshot::persist_snapshot(
+                                &data_dir_for_snap,
+                                &market_for_snap,
+                                epoch,
+                            );
+                            last_epoch = epoch;
+                        }
+                        the_block::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                });
+            }
             #[cfg(feature = "gateway")]
             if let Some(addr) = status_addr.clone() {
                 let bc_status = Arc::clone(&bc);

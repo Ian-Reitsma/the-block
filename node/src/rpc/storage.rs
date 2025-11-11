@@ -673,6 +673,7 @@ mod tests {
         let expired = challenge(
             &object_id,
             None,
+            0,
             proof,
             contract.start_block + contract.retention_blocks + 1,
         );

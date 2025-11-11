@@ -632,6 +632,53 @@
       "type": "timeseries"
     },
     {
+      "id": 264,
+      "title": "Ad Market Policy",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "description": "Rolling median cost per role reported by the ad marketplace (USD micro-units)",
+      "id": 265,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_cost_median_usd_micros",
+          "legendFormat": "{{role}}"
+        }
+      ],
+      "title": "Ad cost medians (USD μ)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "description": "Per-epoch distribution policy drift captured by the node snapshotter (ppm from previous epoch)",
+      "id": 266,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_distribution_policy_drift_ppm",
+          "legendFormat": "{{role}}"
+        }
+      ],
+      "title": "Distribution policy drift (ppm)",
+      "type": "timeseries"
+    },
+    {
       "id": 36,
       "title": "Block Payouts",
       "type": "row"

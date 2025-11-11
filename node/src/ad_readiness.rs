@@ -19,6 +19,7 @@ const DEFAULT_MIN_VIEWERS: u64 = 250;
 const DEFAULT_MIN_HOSTS: u64 = 25;
 const DEFAULT_MIN_PROVIDERS: u64 = 10;
 const KEY_EVENTS: &str = "events";
+const KEY_CONFIG: &str = "config";
 
 fn new_privacy_seed() -> [u8; 32] {
     let now = current_timestamp();
@@ -36,6 +37,30 @@ pub struct AdReadinessConfig {
     pub min_unique_viewers: u64,
     pub min_host_count: u64,
     pub min_provider_count: u64,
+    #[serde(default)]
+    pub use_percentile_thresholds: bool,
+    #[serde(default)]
+    pub viewer_percentile: u8,
+    #[serde(default)]
+    pub host_percentile: u8,
+    #[serde(default)]
+    pub provider_percentile: u8,
+    #[serde(default)]
+    pub ema_smoothing_ppm: u32,
+    #[serde(default)]
+    pub floor_unique_viewers: u64,
+    #[serde(default)]
+    pub floor_host_count: u64,
+    #[serde(default)]
+    pub floor_provider_count: u64,
+    #[serde(default)]
+    pub cap_unique_viewers: u64,
+    #[serde(default)]
+    pub cap_host_count: u64,
+    #[serde(default)]
+    pub cap_provider_count: u64,
+    #[serde(default)]
+    pub percentile_buckets: u16,
 }
 
 impl Default for AdReadinessConfig {
@@ -45,6 +70,18 @@ impl Default for AdReadinessConfig {
             min_unique_viewers: DEFAULT_MIN_VIEWERS,
             min_host_count: DEFAULT_MIN_HOSTS,
             min_provider_count: DEFAULT_MIN_PROVIDERS,
+            use_percentile_thresholds: false,
+            viewer_percentile: 90,
+            host_percentile: 75,
+            provider_percentile: 50,
+            ema_smoothing_ppm: 200_000,
+            floor_unique_viewers: 0,
+            floor_host_count: 0,
+            floor_provider_count: 0,
+            cap_unique_viewers: 0,
+            cap_host_count: 0,
+            cap_provider_count: 0,
+            percentile_buckets: 12,
         }
     }
 }
@@ -83,6 +120,20 @@ impl AdReadinessPersistence {
         let mut guard = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
         guard.insert(KEY_EVENTS, bytes);
     }
+
+    fn persist_config(&self, cfg: &AdReadinessConfig) {
+        if let Ok(bytes) = foundation_serialization::json::to_vec(cfg) {
+            let mut guard = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
+            guard.insert(KEY_CONFIG, bytes);
+        }
+    }
+
+    fn load_config(&self) -> Option<AdReadinessConfig> {
+        let mut guard = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
+        guard.get(KEY_CONFIG).and_then(|bytes| {
+            foundation_serialization::json::from_slice::<AdReadinessConfig>(&bytes).ok()
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,6 +168,8 @@ pub struct AdReadinessSnapshot {
     pub cohort_utilization: Vec<AdReadinessCohortUtilization>,
     #[serde(default)]
     pub utilization_summary: Option<AdReadinessUtilizationSummary>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub ready_streak_windows: u64,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -141,6 +194,7 @@ impl Default for AdReadinessSnapshot {
             market_it_price_usd_micros: 0,
             cohort_utilization: Vec::new(),
             utilization_summary: None,
+            ready_streak_windows: 0,
         }
     }
 }
@@ -278,6 +332,10 @@ impl AdReadinessHandle {
     pub fn snapshot(&self) -> AdReadinessSnapshot {
         self.inner.snapshot()
     }
+
+    pub fn config(&self) -> AdReadinessConfig {
+        self.inner.config()
+    }
 }
 
 struct AdReadinessInner {
@@ -293,9 +351,16 @@ impl AdReadinessInner {
         initial_events: VecDeque<ReadinessEvent>,
     ) -> Self {
         Self::normalize_config(&mut config);
-        let state = AdReadinessState::from_events(initial_events);
+        let mut state = AdReadinessState::from_events(initial_events);
+        // If config is persisted, prefer it to keep threshold math stable across restarts.
+        let effective = if let Some(ref store) = persistence {
+            store.load_config().unwrap_or_else(|| config.clone())
+        } else {
+            config.clone()
+        };
+        state.apply_config(&effective);
         Self {
-            config: RwLock::new(config),
+            config: RwLock::new(effective),
             state: Mutex::new(state),
             persistence,
         }
@@ -315,7 +380,21 @@ impl AdReadinessInner {
         *self
             .config
             .write()
-            .unwrap_or_else(|poison| poison.into_inner()) = config;
+            .unwrap_or_else(|poison| poison.into_inner()) = config.clone();
+        if let Some(store) = &self.persistence {
+            store.persist_config(&config);
+        }
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .apply_config(&config);
+    }
+
+    fn config(&self) -> AdReadinessConfig {
+        self.config
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
 
     fn record_ack(&self, ts: u64, viewer: [u8; 32], host: &str, provider: Option<&str>) {
@@ -415,6 +494,13 @@ struct AdReadinessState {
     cohort_utilization: Vec<AdReadinessCohortUtilization>,
     utilization_summary: Option<AdReadinessUtilizationSummary>,
     last_utilization_update: u64,
+    // EMA smoothed dynamic thresholds
+    ema_min_unique_viewers: u64,
+    ema_min_host_count: u64,
+    ema_min_provider_count: u64,
+    // Rehearsal streak tracking
+    last_window_id: u64,
+    ready_streak_windows: u64,
 }
 
 impl Default for AdReadinessState {
@@ -434,6 +520,11 @@ impl Default for AdReadinessState {
             cohort_utilization: Vec::new(),
             utilization_summary: None,
             last_utilization_update: 0,
+            ema_min_unique_viewers: 0,
+            ema_min_host_count: 0,
+            ema_min_provider_count: 0,
+            last_window_id: 0,
+            ready_streak_windows: 0,
         }
     }
 }
@@ -457,6 +548,10 @@ impl AdReadinessState {
         }
         self.last_updated = event.ts;
         self.events.push_back(event);
+    }
+
+    fn apply_config(&mut self, _config: &AdReadinessConfig) {
+        // No-op placeholder: thresholds are recomputed on demand; EMA carries over.
     }
 
     fn readiness_witness(&self) -> ReadinessWitness {
@@ -641,6 +736,7 @@ impl AdReadinessState {
                 market_it_price_usd_micros: self.market_it_price_usd_micros,
                 cohort_utilization: self.cohort_utilization.clone(),
                 utilization_summary: self.utilization_summary.clone(),
+                ready_streak_windows: 0,
             };
             let statement = snapshot.to_statement();
             let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -652,14 +748,33 @@ impl AdReadinessState {
         let unique_viewers = self.viewer_counts.len() as u64;
         let host_count = self.host_counts.len() as u64;
         let provider_count = self.provider_counts.len() as u64;
+
+        // Decide thresholds (static or dynamic with EMA and floors/caps)
+        let (min_unique_viewers, min_host_count, min_provider_count) =
+            if config.use_percentile_thresholds {
+                let (pv, ph, pp) = self.compute_percentile_thresholds(now, config);
+                let ev = self.apply_ema(self.ema_min_unique_viewers, pv, config.ema_smoothing_ppm);
+                let eh = self.apply_ema(self.ema_min_host_count, ph, config.ema_smoothing_ppm);
+                let ep = self.apply_ema(self.ema_min_provider_count, pp, config.ema_smoothing_ppm);
+                self.ema_min_unique_viewers = ev;
+                self.ema_min_host_count = eh;
+                self.ema_min_provider_count = ep;
+                (ev, eh, ep)
+            } else {
+                (
+                    config.min_unique_viewers,
+                    config.min_host_count,
+                    config.min_provider_count,
+                )
+            };
         let mut blockers = Vec::new();
-        if unique_viewers < config.min_unique_viewers {
+        if unique_viewers < min_unique_viewers {
             blockers.push("insufficient_unique_viewers".to_string());
         }
-        if host_count < config.min_host_count {
+        if host_count < min_host_count {
             blockers.push("insufficient_host_diversity".to_string());
         }
-        if provider_count < config.min_provider_count {
+        if provider_count < min_provider_count {
             blockers.push("insufficient_provider_diversity".to_string());
         }
         let ready = blockers.is_empty();
@@ -678,9 +793,9 @@ impl AdReadinessState {
 
         let mut snapshot = AdReadinessSnapshot {
             window_secs: config.window_secs,
-            min_unique_viewers: config.min_unique_viewers,
-            min_host_count: config.min_host_count,
-            min_provider_count: config.min_provider_count,
+            min_unique_viewers,
+            min_host_count,
+            min_provider_count,
             unique_viewers,
             host_count,
             provider_count,
@@ -696,12 +811,94 @@ impl AdReadinessState {
             market_it_price_usd_micros: self.market_it_price_usd_micros,
             cohort_utilization: self.cohort_utilization.clone(),
             utilization_summary: self.utilization_summary.clone(),
+            ready_streak_windows: self.ready_streak_windows,
         };
+        // Update rehearsal-ready streak based on window boundaries and readiness
+        if snapshot.window_secs > 0 && snapshot.last_updated > 0 {
+            let window_id = snapshot.last_updated / snapshot.window_secs;
+            if window_id != self.last_window_id {
+                self.last_window_id = window_id;
+                if ready {
+                    self.ready_streak_windows = self.ready_streak_windows.saturating_add(1);
+                } else {
+                    self.ready_streak_windows = 0;
+                }
+            } else if !ready {
+                self.ready_streak_windows = 0;
+            }
+            snapshot.ready_streak_windows = self.ready_streak_windows;
+        }
         let statement = snapshot.to_statement();
         let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
         snapshot.zk_proof = Some(proof);
         snapshot
     }
+
+    fn apply_ema(&self, prev: u64, sample: u64, smoothing_ppm: u32) -> u64 {
+        let alpha = (smoothing_ppm as f64 / 1_000_000f64).clamp(0.0, 1.0);
+        if prev == 0 {
+            sample
+        } else {
+            (((1.0 - alpha) * (prev as f64)) + (alpha * (sample as f64))).round() as u64
+        }
+    }
+
+    fn compute_percentile_thresholds(&self, now: u64, cfg: &AdReadinessConfig) -> (u64, u64, u64) {
+        let window = cfg.window_secs.max(1);
+        let buckets = cfg.percentile_buckets.max(4) as usize;
+        let bucket_secs = (window / cfg.percentile_buckets.max(4) as u64).max(60);
+        let cutoff = now.saturating_sub(window);
+        let mut v_sets: Vec<std::collections::HashSet<[u8; 32]>> =
+            vec![Default::default(); buckets];
+        let mut h_sets: Vec<std::collections::HashSet<String>> = vec![Default::default(); buckets];
+        let mut p_sets: Vec<std::collections::HashSet<String>> = vec![Default::default(); buckets];
+        for ev in self.events.iter() {
+            if ev.ts < cutoff {
+                continue;
+            }
+            let offset = ev.ts.saturating_sub(cutoff);
+            let idx = ((offset / bucket_secs) as usize).min(buckets.saturating_sub(1));
+            v_sets[idx].insert(ev.viewer);
+            h_sets[idx].insert(ev.host.clone());
+            if let Some(ref pr) = ev.provider {
+                if !pr.is_empty() {
+                    p_sets[idx].insert(pr.clone());
+                }
+            }
+        }
+        let mut v: Vec<u64> = v_sets.iter().map(|s| s.len() as u64).collect();
+        let mut h: Vec<u64> = h_sets.iter().map(|s| s.len() as u64).collect();
+        let mut p: Vec<u64> = p_sets.iter().map(|s| s.len() as u64).collect();
+        v.sort_unstable();
+        h.sort_unstable();
+        p.sort_unstable();
+        let pv = percentile_of_sorted(&v, cfg.viewer_percentile);
+        let ph = percentile_of_sorted(&h, cfg.host_percentile);
+        let pp = percentile_of_sorted(&p, cfg.provider_percentile);
+        (
+            apply_floor_cap(pv, cfg.floor_unique_viewers, cfg.cap_unique_viewers),
+            apply_floor_cap(ph, cfg.floor_host_count, cfg.cap_host_count),
+            apply_floor_cap(pp, cfg.floor_provider_count, cfg.cap_provider_count),
+        )
+    }
+}
+
+fn apply_floor_cap(sample: u64, floor: u64, cap: u64) -> u64 {
+    let floored = sample.max(floor);
+    if cap == 0 {
+        floored
+    } else {
+        floored.min(cap)
+    }
+}
+
+fn percentile_of_sorted(data: &[u64], percentile: u8) -> u64 {
+    if data.is_empty() {
+        return 0;
+    }
+    let p = percentile.clamp(0, 100) as f64 / 100.0;
+    let idx = ((data.len() - 1) as f64 * p).round() as usize;
+    data[idx]
 }
 
 #[derive(Clone)]
@@ -820,6 +1017,7 @@ mod tests {
             min_unique_viewers: 2,
             min_host_count: 1,
             min_provider_count: 1,
+            ..AdReadinessConfig::default()
         });
         let base = current_timestamp();
         let viewer_one = [1u8; 32];
@@ -842,6 +1040,7 @@ mod tests {
             min_unique_viewers: 1,
             min_host_count: 1,
             min_provider_count: 1,
+            ..AdReadinessConfig::default()
         });
         let base = current_timestamp();
         let viewer = [7u8; 32];
@@ -863,6 +1062,7 @@ mod tests {
             min_unique_viewers: 1,
             min_host_count: 1,
             min_provider_count: 1,
+            ..AdReadinessConfig::default()
         };
         let handle = AdReadinessHandle::open_with_storage(path.to_str().unwrap(), cfg.clone());
         let now = current_timestamp();

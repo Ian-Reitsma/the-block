@@ -723,7 +723,10 @@ mod tests {
         use std::net::TcpListener;
         use std::thread;
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(l) => l,
+            Err(_) => return, // likely running in a sandbox without socket permissions
+        };
         let addr = listener.local_addr().unwrap();
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();

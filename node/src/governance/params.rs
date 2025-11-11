@@ -79,14 +79,11 @@ impl<'a> Runtime<'a> {
             Some(handle) => handle,
             None => return,
         };
-        let policy = DistributionPolicy::new(
-            self.bc.params.read_subsidy_viewer_percent.max(0) as u64,
-            self.bc.params.read_subsidy_host_percent.max(0) as u64,
-            self.bc.params.read_subsidy_hardware_percent.max(0) as u64,
-            self.bc.params.read_subsidy_verifier_percent.max(0) as u64,
-            self.bc.params.read_subsidy_liquidity_percent.max(0) as u64,
-        )
-        .with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
+        // Preserve current live distribution weights (possibly adapted from utilization),
+        // but ensure the dual-token flag reflects governance.
+        let mut policy = market.distribution();
+        policy =
+            policy.with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
         market.update_distribution(policy);
     }
 
@@ -100,6 +97,18 @@ impl<'a> Runtime<'a> {
             min_unique_viewers: self.bc.params.ad_readiness_min_unique_viewers.max(0) as u64,
             min_host_count: self.bc.params.ad_readiness_min_host_count.max(0) as u64,
             min_provider_count: self.bc.params.ad_readiness_min_provider_count.max(0) as u64,
+            use_percentile_thresholds: self.bc.params.ad_use_percentile_thresholds > 0,
+            viewer_percentile: self.bc.params.ad_viewer_percentile.clamp(0, 100) as u8,
+            host_percentile: self.bc.params.ad_host_percentile.clamp(0, 100) as u8,
+            provider_percentile: self.bc.params.ad_provider_percentile.clamp(0, 100) as u8,
+            ema_smoothing_ppm: self.bc.params.ad_ema_smoothing_ppm.clamp(0, 1_000_000) as u32,
+            floor_unique_viewers: self.bc.params.ad_floor_unique_viewers.max(0) as u64,
+            floor_host_count: self.bc.params.ad_floor_host_count.max(0) as u64,
+            floor_provider_count: self.bc.params.ad_floor_provider_count.max(0) as u64,
+            cap_unique_viewers: self.bc.params.ad_cap_unique_viewers.max(0) as u64,
+            cap_host_count: self.bc.params.ad_cap_host_count.max(0) as u64,
+            cap_provider_count: self.bc.params.ad_cap_provider_count.max(0) as u64,
+            percentile_buckets: self.bc.params.ad_percentile_buckets.clamp(4, 360) as u16,
         };
         readiness.update_config(cfg);
     }
@@ -277,6 +286,37 @@ pub struct Params {
     pub badge_expiry_secs: i64,
     pub badge_issue_uptime_percent: i64,
     pub badge_revoke_uptime_percent: i64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub ad_rehearsal_enabled: i64,
+    #[serde(default = "default_ad_rehearsal_stability_windows")]
+    pub ad_rehearsal_stability_windows: i64,
+    #[serde(default = "default_presence_min_crowd_size")]
+    pub presence_min_crowd_size: i64,
+    // Dynamic ad-readiness thresholding (governance-controlled)
+    #[serde(default)]
+    pub ad_use_percentile_thresholds: i64,
+    #[serde(default = "default_viewer_percentile")]
+    pub ad_viewer_percentile: i64,
+    #[serde(default = "default_host_percentile")]
+    pub ad_host_percentile: i64,
+    #[serde(default = "default_provider_percentile")]
+    pub ad_provider_percentile: i64,
+    #[serde(default = "default_ema_smoothing_ppm")]
+    pub ad_ema_smoothing_ppm: i64,
+    #[serde(default)]
+    pub ad_floor_unique_viewers: i64,
+    #[serde(default)]
+    pub ad_floor_host_count: i64,
+    #[serde(default)]
+    pub ad_floor_provider_count: i64,
+    #[serde(default)]
+    pub ad_cap_unique_viewers: i64,
+    #[serde(default)]
+    pub ad_cap_host_count: i64,
+    #[serde(default)]
+    pub ad_cap_provider_count: i64,
+    #[serde(default = "default_percentile_buckets")]
+    pub ad_percentile_buckets: i64,
     pub jurisdiction_region: i64,
     pub ai_diagnostics_enabled: i64,
     pub kalman_r_short: i64,
@@ -339,6 +379,21 @@ impl Default for Params {
             badge_expiry_secs: 30 * 24 * 60 * 60,
             badge_issue_uptime_percent: 99,
             badge_revoke_uptime_percent: 95,
+            ad_rehearsal_enabled: 0,
+            ad_rehearsal_stability_windows: 6,
+            presence_min_crowd_size: 5,
+            ad_use_percentile_thresholds: 0,
+            ad_viewer_percentile: default_viewer_percentile(),
+            ad_host_percentile: default_host_percentile(),
+            ad_provider_percentile: default_provider_percentile(),
+            ad_ema_smoothing_ppm: default_ema_smoothing_ppm(),
+            ad_floor_unique_viewers: 0,
+            ad_floor_host_count: 0,
+            ad_floor_provider_count: 0,
+            ad_cap_unique_viewers: 0,
+            ad_cap_host_count: 0,
+            ad_cap_provider_count: 0,
+            ad_percentile_buckets: default_percentile_buckets(),
             jurisdiction_region: 0,
             ai_diagnostics_enabled: 0,
             kalman_r_short: 1,
@@ -507,6 +562,66 @@ impl Params {
             Value::Number(self.badge_revoke_uptime_percent.into()),
         );
         map.insert(
+            "ad_rehearsal_enabled".into(),
+            Value::Number(self.ad_rehearsal_enabled.into()),
+        );
+        map.insert(
+            "ad_rehearsal_stability_windows".into(),
+            Value::Number(self.ad_rehearsal_stability_windows.into()),
+        );
+        map.insert(
+            "presence_min_crowd_size".into(),
+            Value::Number(self.presence_min_crowd_size.into()),
+        );
+        map.insert(
+            "ad_use_percentile_thresholds".into(),
+            Value::Number(self.ad_use_percentile_thresholds.into()),
+        );
+        map.insert(
+            "ad_viewer_percentile".into(),
+            Value::Number(self.ad_viewer_percentile.into()),
+        );
+        map.insert(
+            "ad_host_percentile".into(),
+            Value::Number(self.ad_host_percentile.into()),
+        );
+        map.insert(
+            "ad_provider_percentile".into(),
+            Value::Number(self.ad_provider_percentile.into()),
+        );
+        map.insert(
+            "ad_ema_smoothing_ppm".into(),
+            Value::Number(self.ad_ema_smoothing_ppm.into()),
+        );
+        map.insert(
+            "ad_floor_unique_viewers".into(),
+            Value::Number(self.ad_floor_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_floor_host_count".into(),
+            Value::Number(self.ad_floor_host_count.into()),
+        );
+        map.insert(
+            "ad_floor_provider_count".into(),
+            Value::Number(self.ad_floor_provider_count.into()),
+        );
+        map.insert(
+            "ad_cap_unique_viewers".into(),
+            Value::Number(self.ad_cap_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_cap_host_count".into(),
+            Value::Number(self.ad_cap_host_count.into()),
+        );
+        map.insert(
+            "ad_cap_provider_count".into(),
+            Value::Number(self.ad_cap_provider_count.into()),
+        );
+        map.insert(
+            "ad_percentile_buckets".into(),
+            Value::Number(self.ad_percentile_buckets.into()),
+        );
+        map.insert(
             "jurisdiction_region".into(),
             Value::Number(self.jurisdiction_region.into()),
         );
@@ -652,6 +767,66 @@ impl Params {
             badge_expiry_secs: take_i64("badge_expiry_secs")?,
             badge_issue_uptime_percent: take_i64("badge_issue_uptime_percent")?,
             badge_revoke_uptime_percent: take_i64("badge_revoke_uptime_percent")?,
+            ad_rehearsal_enabled: obj
+                .get("ad_rehearsal_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_rehearsal_stability_windows: obj
+                .get("ad_rehearsal_stability_windows")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_rehearsal_stability_windows),
+            presence_min_crowd_size: obj
+                .get("presence_min_crowd_size")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_presence_min_crowd_size),
+            ad_use_percentile_thresholds: obj
+                .get("ad_use_percentile_thresholds")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_viewer_percentile: obj
+                .get("ad_viewer_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_viewer_percentile),
+            ad_host_percentile: obj
+                .get("ad_host_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_host_percentile),
+            ad_provider_percentile: obj
+                .get("ad_provider_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_provider_percentile),
+            ad_ema_smoothing_ppm: obj
+                .get("ad_ema_smoothing_ppm")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ema_smoothing_ppm),
+            ad_floor_unique_viewers: obj
+                .get("ad_floor_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_floor_host_count: obj
+                .get("ad_floor_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_floor_provider_count: obj
+                .get("ad_floor_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_unique_viewers: obj
+                .get("ad_cap_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_host_count: obj
+                .get("ad_cap_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_provider_count: obj
+                .get("ad_cap_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_percentile_buckets: obj
+                .get("ad_percentile_buckets")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_percentile_buckets),
             jurisdiction_region: take_i64("jurisdiction_region")?,
             ai_diagnostics_enabled: take_i64("ai_diagnostics_enabled")?,
             kalman_r_short: take_i64("kalman_r_short")?,
@@ -715,6 +890,30 @@ const fn default_ad_readiness_min_host_count() -> i64 {
 
 const fn default_ad_readiness_min_provider_count() -> i64 {
     10
+}
+
+const fn default_ad_rehearsal_stability_windows() -> i64 {
+    6
+}
+
+const fn default_presence_min_crowd_size() -> i64 {
+    5
+}
+
+const fn default_viewer_percentile() -> i64 {
+    90
+}
+const fn default_host_percentile() -> i64 {
+    75
+}
+const fn default_provider_percentile() -> i64 {
+    50
+}
+const fn default_ema_smoothing_ppm() -> i64 {
+    200_000
+}
+const fn default_percentile_buckets() -> i64 {
+    12
 }
 
 const fn default_runtime_backend_policy() -> i64 {
@@ -896,6 +1095,19 @@ fn apply_ad_readiness_min_provider_count(v: i64, p: &mut Params) -> Result<(), (
     Ok(())
 }
 
+fn apply_ad_rehearsal_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_rehearsal_enabled = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
+fn apply_ad_rehearsal_stability_windows(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_rehearsal_stability_windows = v;
+    Ok(())
+}
+
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     p.kappa_cpu_sub_ct = v;
     Ok(())
@@ -1033,6 +1245,88 @@ fn apply_bridge_duty_window(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_ad_use_percentile_thresholds(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_use_percentile_thresholds = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+fn apply_ad_viewer_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_viewer_percentile = v;
+    Ok(())
+}
+fn apply_ad_host_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_host_percentile = v;
+    Ok(())
+}
+fn apply_ad_provider_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_provider_percentile = v;
+    Ok(())
+}
+fn apply_ad_ema_smoothing_ppm(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 1_000_000 {
+        return Err(());
+    }
+    p.ad_ema_smoothing_ppm = v;
+    Ok(())
+}
+fn apply_ad_floor_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_unique_viewers = v;
+    Ok(())
+}
+fn apply_ad_floor_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_host_count = v;
+    Ok(())
+}
+fn apply_ad_floor_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_provider_count = v;
+    Ok(())
+}
+fn apply_ad_cap_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_unique_viewers = v;
+    Ok(())
+}
+fn apply_ad_cap_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_host_count = v;
+    Ok(())
+}
+fn apply_ad_cap_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_provider_count = v;
+    Ok(())
+}
+fn apply_ad_percentile_buckets(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 4 || v > 360 {
+        return Err(());
+    }
+    p.ad_percentile_buckets = v;
+    Ok(())
+}
+
 fn push_bridge_incentives(
     rt: &mut Runtime,
     min_bond: Option<u64>,
@@ -1079,7 +1373,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 48] = [
+    static REGS: [ParamSpec; 62] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1329,6 +1623,32 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |v, rt| {
                 rt.bc.params.ad_readiness_min_provider_count = v;
                 rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_enabled,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_enabled = v;
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalStabilityWindows,
+            default: default_ad_rehearsal_stability_windows(),
+            min: 0,
+            max: 10_000,
+            unit: "windows",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_stability_windows,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_stability_windows = v;
                 Ok(())
             },
         },
@@ -1669,6 +1989,189 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_bridge_duty_window,
             apply_runtime: |v, rt| {
                 push_bridge_incentives(rt, None, None, None, None, Some(v as u64))
+            },
+        },
+        // --- Dynamic readiness controls ---
+        ParamSpec {
+            key: ParamKey::AdUsePercentileThresholds,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_use_percentile_thresholds,
+            apply_runtime: |v, rt| {
+                // Migration: if toggling on, preserve current minima as floors
+                let prev_on = rt
+                    .params_snapshot()
+                    .map(|p| p.ad_use_percentile_thresholds > 0)
+                    .unwrap_or(false);
+                let turning_on = v > 0 && !prev_on;
+                if turning_on {
+                    if let Some(handle) = &rt.ad_readiness {
+                        let snap = handle.snapshot();
+                        rt.bc.params.ad_floor_unique_viewers = snap.min_unique_viewers as i64;
+                        rt.bc.params.ad_floor_host_count = snap.min_host_count as i64;
+                        rt.bc.params.ad_floor_provider_count = snap.min_provider_count as i64;
+                    }
+                }
+                rt.bc.params.ad_use_percentile_thresholds = if v > 0 { 1 } else { 0 };
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdViewerPercentile,
+            default: default_viewer_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_viewer_percentile,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_viewer_percentile = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdHostPercentile,
+            default: default_host_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_host_percentile,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_host_percentile = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdProviderPercentile,
+            default: default_provider_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_provider_percentile,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_provider_percentile = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdEmaSmoothingPpm,
+            default: default_ema_smoothing_ppm(),
+            min: 0,
+            max: 1_000_000,
+            unit: "ppm",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_ema_smoothing_ppm,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_ema_smoothing_ppm = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorUniqueViewers,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_unique_viewers,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_floor_unique_viewers = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorHostCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_host_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_floor_host_count = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorProviderCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_provider_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_floor_provider_count = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdCapUniqueViewers,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_unique_viewers,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_cap_unique_viewers = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdCapHostCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_host_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_cap_host_count = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdCapProviderCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_provider_count,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_cap_provider_count = v;
+                rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdPercentileBuckets,
+            default: default_percentile_buckets(),
+            min: 4,
+            max: 360,
+            unit: "buckets",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_percentile_buckets,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_percentile_buckets = v;
+                rt.sync_ad_readiness();
+                Ok(())
             },
         },
     ];

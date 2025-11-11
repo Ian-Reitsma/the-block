@@ -47,6 +47,7 @@ const KEY_DISTRIBUTION: &[u8] = b"distribution";
 const KEY_BUDGET: &[u8] = b"budget";
 const KEY_TOKEN_REMAINDERS: &[u8] = b"token_remainders";
 const KEY_UPLIFT: &[u8] = b"uplift";
+const KEY_MEDIANS: &[u8] = b"cost_medians";
 
 pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
@@ -128,6 +129,77 @@ fn read_f64(map: &JsonMap, key: &str) -> Result<f64, PersistenceError> {
 
 fn number_from_f64(value: f64) -> JsonNumber {
     JsonNumber::from_f64(value).unwrap_or_else(|| JsonNumber::from(0))
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct RollingMedian {
+    // Keep a bounded window for simplicity
+    window: usize,
+    values: Vec<u64>,
+}
+
+impl RollingMedian {
+    fn with_window(window: usize) -> Self {
+        Self {
+            window: window.max(3),
+            values: Vec::new(),
+        }
+    }
+    fn record(&mut self, v: u64) {
+        self.values.push(v);
+        if self.values.len() > self.window {
+            let overshoot = self.values.len() - self.window;
+            self.values.drain(0..overshoot);
+        }
+    }
+    fn median(&self) -> u64 {
+        if self.values.is_empty() {
+            return 0;
+        }
+        let mut data = self.values.clone();
+        data.sort_unstable();
+        data[data.len() / 2]
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct CostMedians {
+    storage_price_per_mib_usd_micros: RollingMedian,
+    verifier_cost_usd_micros: RollingMedian,
+    host_fee_usd_micros: RollingMedian,
+}
+
+impl CostMedians {
+    fn new() -> Self {
+        Self {
+            storage_price_per_mib_usd_micros: RollingMedian::with_window(257),
+            verifier_cost_usd_micros: RollingMedian::with_window(257),
+            host_fee_usd_micros: RollingMedian::with_window(257),
+        }
+    }
+    fn from_snapshot(storage: u64, verifier: u64, host: u64) -> Self {
+        let mut med = Self::new();
+        med.record_storage(storage);
+        med.record_verifier(verifier);
+        med.record_host(host);
+        med
+    }
+    fn record_storage(&mut self, v: u64) {
+        self.storage_price_per_mib_usd_micros.record(v);
+    }
+    fn record_verifier(&mut self, v: u64) {
+        self.verifier_cost_usd_micros.record(v);
+    }
+    fn record_host(&mut self, v: u64) {
+        self.host_fee_usd_micros.record(v);
+    }
+    fn snapshot(&self) -> (u64, u64, u64) {
+        (
+            self.storage_price_per_mib_usd_micros.median(),
+            self.verifier_cost_usd_micros.median(),
+            self.host_fee_usd_micros.median(),
+        )
+    }
 }
 
 mod serde_optional_bytes {
@@ -2208,6 +2280,12 @@ pub trait Marketplace: Send + Sync {
     fn cohort_prices(&self) -> Vec<CohortPriceSnapshot>;
     fn budget_broker(&self) -> &RwLock<BudgetBroker>;
     fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError>;
+    /// Recompute distribution from current utilization indices with clamped adjustments.
+    fn recompute_distribution_from_utilization(&self);
+
+    /// Return the rolling median snapshot for cost indices in USD micros.
+    /// Order: (storage_price_per_mib, verifier_cost, host_fee)
+    fn cost_medians_usd_micros(&self) -> (u64, u64, u64);
 
     fn budget_broker_config(&self) -> BudgetBrokerConfig {
         self.budget_broker().read().unwrap().config().clone()
@@ -2260,6 +2338,7 @@ pub struct InMemoryMarketplace {
     privacy_budget: RwLock<PrivacyBudgetManager>,
     uplift: RwLock<UpliftEstimator>,
     token_remainders: RwLock<TokenRemainderLedger>,
+    medians: RwLock<CostMedians>,
 }
 
 pub struct SledMarketplace {
@@ -2279,6 +2358,7 @@ pub struct SledMarketplace {
     privacy_budget: RwLock<PrivacyBudgetManager>,
     uplift: RwLock<UpliftEstimator>,
     token_remainders: RwLock<TokenRemainderLedger>,
+    medians: RwLock<CostMedians>,
 }
 
 #[derive(Debug)]
@@ -3529,6 +3609,7 @@ impl InMemoryMarketplace {
             )),
             uplift: RwLock::new(UpliftEstimator::new(normalized.uplift.clone())),
             token_remainders: RwLock::new(TokenRemainderLedger::default()),
+            medians: RwLock::new(CostMedians::new()),
         }
     }
 
@@ -3728,6 +3809,21 @@ impl Marketplace for InMemoryMarketplace {
             &cohort,
             ctx.population_estimate,
         );
+        {
+            let mut med = self.medians.write().unwrap();
+            med.record_storage(price_per_mib);
+            med.record_verifier(floor_breakdown.verifier_usd_micros);
+            med.record_host(floor_breakdown.host_usd_micros);
+        }
+        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
+        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
+        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
+        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
+        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
+        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
+        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
+        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
+
         let resource_floor = floor_breakdown.total_usd_micros();
         if resource_floor == 0 {
             eprintln!(
@@ -4148,8 +4244,111 @@ impl Marketplace for InMemoryMarketplace {
             })
             .collect()
     }
+
+    fn recompute_distribution_from_utilization(&self) {
+        let pricing = self.pricing.read().unwrap();
+        if pricing.is_empty() {
+            return;
+        }
+        let mut sum_obs: u128 = 0;
+        let mut sum_tgt: u128 = 0;
+        let mut n: u128 = 0;
+        for (_, state) in pricing.iter() {
+            sum_obs = sum_obs.saturating_add(state.observed_utilization_ppm as u128);
+            sum_tgt = sum_tgt.saturating_add(state.target_utilization_ppm as u128);
+            n = n.saturating_add(1);
+        }
+        if n == 0 || sum_tgt == 0 {
+            return;
+        }
+        let mean_obs = (sum_obs / n) as u64;
+        let mean_tgt = (sum_tgt / n) as u64;
+        let ratio = (mean_obs as f64) / (mean_tgt as f64 + f64::EPSILON);
+        let current = self.distribution.read().unwrap().clone();
+        let mut policy = current.clone();
+        let step: i64 = 2; // percentage points per step per role
+        if ratio < 0.9 {
+            policy.host_percent = (policy.host_percent as i64 + step) as u64;
+            policy.hardware_percent = (policy.hardware_percent as i64 + step) as u64;
+            policy.viewer_percent = policy.viewer_percent.saturating_sub(step as u64);
+            policy.liquidity_percent = policy.liquidity_percent.saturating_sub(1);
+        } else if ratio > 1.1 {
+            policy.host_percent = policy.host_percent.saturating_sub(step as u64);
+            policy.hardware_percent = policy.hardware_percent.saturating_sub(step as u64);
+            policy.viewer_percent = (policy.viewer_percent as i64 + step) as u64;
+            policy.liquidity_percent = policy.liquidity_percent.saturating_add(1);
+        } else {
+            // Hold steady or nudge verifier to maintain proof coverage.
+            policy.verifier_percent = (policy.verifier_percent as i64 + 1) as u64;
+            policy.liquidity_percent = policy.liquidity_percent.saturating_sub(1);
+        }
+        // Cost-index adjustments based on rolling medians
+        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
+        let base_storage = self.config.min_price_per_mib_usd_micros.max(1);
+        let base_verifier = self.config.resource_floor.verifier_cost_usd_micros.max(1);
+        let base_host = self.config.resource_floor.host_fee_usd_micros.max(1);
+        let bump_if = |median: u64, base: u64| -> i64 {
+            if base == 0 {
+                return 0;
+            }
+            let ratio = (median as f64) / (base as f64);
+            if ratio > 1.2 {
+                1
+            } else if ratio < 0.8 {
+                -1
+            } else {
+                0
+            }
+        };
+        let hw_adj = bump_if(m_storage, base_storage);
+        let vf_adj = bump_if(m_verifier, base_verifier);
+        let host_adj = bump_if(m_host, base_host);
+        if hw_adj != 0 {
+            policy.hardware_percent = ((policy.hardware_percent as i64) + hw_adj).max(0) as u64;
+        }
+        if vf_adj != 0 {
+            policy.verifier_percent = ((policy.verifier_percent as i64) + vf_adj).max(0) as u64;
+        }
+        if host_adj != 0 {
+            policy.host_percent = ((policy.host_percent as i64) + host_adj).max(0) as u64;
+        }
+        // Normalize to 100 via liquidity adjustments.
+        let sum = policy.viewer_percent
+            + policy.host_percent
+            + policy.hardware_percent
+            + policy.verifier_percent
+            + policy.liquidity_percent;
+        let mut policy = policy.normalize();
+        if sum != 100 {
+            if sum > 100 {
+                policy.liquidity_percent = policy.liquidity_percent.saturating_sub(sum - 100);
+            } else {
+                policy.liquidity_percent = policy.liquidity_percent.saturating_add(100 - sum);
+            }
+        }
+        let normalized = policy.normalize();
+        // Policy drift telemetry per role
+        let drift =
+            |new: u64, old: u64| -> f64 { ((new as f64 - old as f64) / 100.0) * PPM_SCALE as f64 };
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.viewer_percent, current.viewer_percent), "role" => "viewer");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.host_percent, current.host_percent), "role" => "host");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.hardware_percent, current.hardware_percent), "role" => "hardware");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.verifier_percent, current.verifier_percent), "role" => "verifier");
+        *self.distribution.write().unwrap() = normalized;
+    }
+
+    fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
+        self.medians.read().unwrap().snapshot()
+    }
 }
 impl SledMarketplace {
+    fn persist_medians(&self) -> Result<(), PersistenceError> {
+        let snapshot = self.medians.read().unwrap().snapshot();
+        let bytes = foundation_serialization::json::to_vec(&snapshot)?;
+        self.metadata_tree.insert(KEY_MEDIANS, bytes)?;
+        self.metadata_tree.flush()?;
+        Ok(())
+    }
     pub fn open<P: AsRef<Path>>(
         path: P,
         config: MarketplaceConfig,
@@ -4220,6 +4419,16 @@ impl SledMarketplace {
             metadata_tree.insert(KEY_UPLIFT, bytes)?;
             metadata_tree.flush()?;
         }
+        // Load persisted cost medians if present
+        let loaded_medians = match metadata_tree.get(KEY_MEDIANS)? {
+            Some(bytes) => match json::from_slice::<(u64, u64, u64)>(&bytes) {
+                Ok((storage, verifier, host)) => {
+                    CostMedians::from_snapshot(storage, verifier, host)
+                }
+                Err(_) => CostMedians::new(),
+            },
+            None => CostMedians::new(),
+        };
 
         Ok(Self {
             _db: db,
@@ -4240,6 +4449,7 @@ impl SledMarketplace {
             )),
             uplift: RwLock::new(uplift_estimator),
             token_remainders: RwLock::new(token_remainders),
+            medians: RwLock::new(loaded_medians),
         })
     }
 
@@ -4457,6 +4667,13 @@ impl Marketplace for SledMarketplace {
             &cohort,
             ctx.population_estimate,
         );
+        {
+            let mut med = self.medians.write().unwrap();
+            med.record_storage(price_per_mib);
+            med.record_verifier(floor_breakdown.verifier_usd_micros);
+            med.record_host(floor_breakdown.host_usd_micros);
+        }
+        let _ = self.persist_medians();
         let resource_floor = floor_breakdown.total_usd_micros();
         if resource_floor == 0 {
             return None;
@@ -4939,6 +5156,102 @@ impl Marketplace for SledMarketplace {
         }
         Ok(())
     }
+
+    fn recompute_distribution_from_utilization(&self) {
+        let pricing = self.pricing.read().unwrap();
+        if pricing.is_empty() {
+            return;
+        }
+        let mut sum_obs: u128 = 0;
+        let mut sum_tgt: u128 = 0;
+        let mut n: u128 = 0;
+        for (_, state) in pricing.iter() {
+            sum_obs = sum_obs.saturating_add(state.observed_utilization_ppm as u128);
+            sum_tgt = sum_tgt.saturating_add(state.target_utilization_ppm as u128);
+            n = n.saturating_add(1);
+        }
+        if n == 0 || sum_tgt == 0 {
+            return;
+        }
+        let mean_obs = (sum_obs / n) as u64;
+        let mean_tgt = (sum_tgt / n) as u64;
+        let ratio = (mean_obs as f64) / (mean_tgt as f64 + f64::EPSILON);
+        let current = self.distribution.read().unwrap().clone();
+        let mut policy = current.clone();
+        let step: i64 = 2;
+        if ratio < 0.9 {
+            policy.host_percent = (policy.host_percent as i64 + step) as u64;
+            policy.hardware_percent = (policy.hardware_percent as i64 + step) as u64;
+            policy.viewer_percent = policy.viewer_percent.saturating_sub(step as u64);
+            policy.liquidity_percent = policy.liquidity_percent.saturating_sub(1);
+        } else if ratio > 1.1 {
+            policy.host_percent = policy.host_percent.saturating_sub(step as u64);
+            policy.hardware_percent = policy.hardware_percent.saturating_sub(step as u64);
+            policy.viewer_percent = (policy.viewer_percent as i64 + step) as u64;
+            policy.liquidity_percent = policy.liquidity_percent.saturating_add(1);
+        } else {
+            policy.verifier_percent = (policy.verifier_percent as i64 + 1) as u64;
+            policy.liquidity_percent = policy.liquidity_percent.saturating_sub(1);
+        }
+        // Cost-index adjustments
+        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
+        let base_storage = self.config.min_price_per_mib_usd_micros.max(1);
+        let base_verifier = self.config.resource_floor.verifier_cost_usd_micros.max(1);
+        let base_host = self.config.resource_floor.host_fee_usd_micros.max(1);
+        let bump_if = |median: u64, base: u64| -> i64 {
+            if base == 0 {
+                return 0;
+            }
+            let r = (median as f64) / (base as f64);
+            if r > 1.2 {
+                1
+            } else if r < 0.8 {
+                -1
+            } else {
+                0
+            }
+        };
+        let hw_adj = bump_if(m_storage, base_storage);
+        let vf_adj = bump_if(m_verifier, base_verifier);
+        let host_adj = bump_if(m_host, base_host);
+        if hw_adj != 0 {
+            policy.hardware_percent = ((policy.hardware_percent as i64) + hw_adj).max(0) as u64;
+        }
+        if vf_adj != 0 {
+            policy.verifier_percent = ((policy.verifier_percent as i64) + vf_adj).max(0) as u64;
+        }
+        if host_adj != 0 {
+            policy.host_percent = ((policy.host_percent as i64) + host_adj).max(0) as u64;
+        }
+        // Normalize to 100
+        let sum = policy.viewer_percent
+            + policy.host_percent
+            + policy.hardware_percent
+            + policy.verifier_percent
+            + policy.liquidity_percent;
+        let mut policy = policy.normalize();
+        if sum != 100 {
+            if sum > 100 {
+                policy.liquidity_percent = policy.liquidity_percent.saturating_sub(sum - 100);
+            } else {
+                policy.liquidity_percent = policy.liquidity_percent.saturating_add(100 - sum);
+            }
+        }
+        let normalized = policy.normalize();
+        // Drift telemetry
+        let drift =
+            |new: u64, old: u64| -> f64 { ((new as f64 - old as f64) / 100.0) * PPM_SCALE as f64 };
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.viewer_percent, current.viewer_percent), "role" => "viewer");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.host_percent, current.host_percent), "role" => "host");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.hardware_percent, current.hardware_percent), "role" => "hardware");
+        gauge!("ad_distribution_policy_drift_ppm", drift(normalized.verifier_percent, current.verifier_percent), "role" => "verifier");
+        let _ = self.persist_distribution(&normalized);
+        *self.distribution.write().unwrap() = normalized;
+    }
+
+    fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
+        self.medians.read().unwrap().snapshot()
+    }
 }
 struct RoleUsdParts {
     viewer: u64,
@@ -5314,6 +5627,27 @@ mod tests {
     use sys::tempfile::TempDir;
 
     const SNARK_CIRCUIT_ID: &str = "selection_argmax_v1";
+
+    #[test]
+    fn sled_marketplace_cost_medians_persist_across_reopen() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = tmp.path().join("db");
+        let config = MarketplaceConfig::default();
+        {
+            let market =
+                SledMarketplace::open(&path, config.clone()).expect("open sled marketplace");
+            {
+                let mut med = market.medians.write().unwrap();
+                med.record_storage(111);
+                med.record_verifier(222);
+                med.record_host(333);
+            }
+            market.persist_medians().expect("persist medians");
+        }
+        let reopened = SledMarketplace::open(&path, config).expect("reopen market");
+        let medians = reopened.medians.read().unwrap().snapshot();
+        assert_eq!(medians, (111, 222, 333));
+    }
 
     fn encode_bytes(bytes: &[u8]) -> String {
         let mut encoded = String::from("[");

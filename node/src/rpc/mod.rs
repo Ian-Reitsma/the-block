@@ -466,6 +466,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "dns.auctions",
     "gateway.policy",
     "gateway.reads_since",
+    "gateway.venue_status",
     "gov.release_signers",
     #[cfg(feature = "telemetry")]
     "analytics",
@@ -1036,6 +1037,43 @@ fn dispatch(
         "ad_market.budget" => ad_market::budget(market_ref),
         "ad_market.broker_state" => ad_market::broker_state(market_ref),
         "ad_market.readiness" => ad_market::readiness(market_ref, readiness_ref),
+        "ad_market.policy_snapshot" => {
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| rpc_error(-32602, "epoch required"))?;
+            let base = bc.lock().unwrap_or_else(|e| e.into_inner()).path.clone();
+            match crate::ad_policy_snapshot::load_snapshot(&base, epoch) {
+                Some(v) => v,
+                None => json_map(vec![("status", Value::String("not_found".into()))]),
+            }
+        }
+        "ad_market.policy_snapshots" => {
+            let base = bc.lock().unwrap_or_else(|e| e.into_inner()).path.clone();
+            let (start_epoch, end_epoch) = {
+                let start = req
+                    .params
+                    .get("start_epoch")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let end_default = {
+                    let g = bc.lock().unwrap_or_else(|e| e.into_inner());
+                    g.block_height / 120
+                };
+                let end = req
+                    .params
+                    .get("end_epoch")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(end_default);
+                (start, end)
+            };
+            let list = crate::ad_policy_snapshot::list_snapshots(&base, start_epoch, end_epoch);
+            let arr = list;
+            let mut map = Map::new();
+            map.insert("snapshots".into(), Value::Array(arr));
+            Value::Object(map)
+        }
         "ad_market.register_campaign" => {
             let params = req.params.as_value().clone();
             ad_market::register_campaign(market_ref, &params)?
@@ -1297,6 +1335,46 @@ fn dispatch(
         },
         "gateway.policy" => gateway::dns::gateway_policy(req.params.as_value()),
         "gateway.reads_since" => gateway::dns::reads_since(req.params.as_value()),
+        "gateway.venue_status" => {
+            let obj = req.params.as_value();
+            let venue = obj.get("venue_id").and_then(|v| v.as_str()).unwrap_or("");
+            let (count, last_seen) = crate::service_badge::venue_status_detail(venue);
+            json_map(vec![
+                ("status", Value::String("ok".into())),
+                ("crowd_size", Value::Number(Number::from(count))),
+                ("last_seen", Value::Number(Number::from(last_seen))),
+            ])
+        }
+        "gateway.venue_register" => {
+            let obj = req.params.as_value();
+            let venue = obj.get("venue_id").and_then(|v| v.as_str()).unwrap_or("");
+            if venue.is_empty() {
+                return Err(rpc_error(-32602, "venue_id required"));
+            }
+            let token = crate::service_badge::register_venue(venue);
+            let exp = u64::from_str_radix(&token, 16).unwrap_or(0);
+            json_map(vec![
+                ("status", Value::String("ok".into())),
+                ("venue_id", Value::String(venue.to_string())),
+                ("token", Value::String(token)),
+                ("expires_at", Value::Number(Number::from(exp))),
+            ])
+        }
+        "gateway.venue_rotate" => {
+            let obj = req.params.as_value();
+            let venue = obj.get("venue_id").and_then(|v| v.as_str()).unwrap_or("");
+            if venue.is_empty() {
+                return Err(rpc_error(-32602, "venue_id required"));
+            }
+            let token = crate::service_badge::rotate_venue_token(venue);
+            let exp = u64::from_str_radix(&token, 16).unwrap_or(0);
+            json_map(vec![
+                ("status", Value::String("ok".into())),
+                ("venue_id", Value::String(venue.to_string())),
+                ("token", Value::String(token)),
+                ("expires_at", Value::Number(Number::from(exp))),
+            ])
+        }
         "gateway.dns_lookup" => gateway::dns::dns_lookup(req.params.as_value()),
         "gateway.mobile_cache_status" => {
             serialize_response(gateway::mobile_cache::status_snapshot())?

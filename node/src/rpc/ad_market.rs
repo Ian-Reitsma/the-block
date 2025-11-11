@@ -780,6 +780,8 @@ pub fn readiness(
             oracle.ct_price_usd_micros,
             oracle.it_price_usd_micros,
         );
+        // Allow the market to adapt distribution weights from live utilization.
+        market_handle.recompute_distribution_from_utilization();
         distribution_value = Some(distribution_to_value(market_handle.distribution()));
     } else {
         let empty: Vec<CohortPriceSnapshot> = Vec::new();
@@ -823,9 +825,78 @@ pub fn readiness(
         Value::Number(Number::from(snapshot.min_provider_count)),
     );
     root.insert("thresholds".into(), Value::Object(thresholds));
+    // Dynamic readiness configuration surface
+    let cfg = handle.config();
+    let mut dynamic = Map::new();
+    dynamic.insert(
+        "use_percentile_thresholds".into(),
+        Value::Bool(cfg.use_percentile_thresholds),
+    );
+    dynamic.insert(
+        "viewer_percentile".into(),
+        Value::Number(Number::from(cfg.viewer_percentile as u64)),
+    );
+    dynamic.insert(
+        "host_percentile".into(),
+        Value::Number(Number::from(cfg.host_percentile as u64)),
+    );
+    dynamic.insert(
+        "provider_percentile".into(),
+        Value::Number(Number::from(cfg.provider_percentile as u64)),
+    );
+    dynamic.insert(
+        "ema_smoothing_ppm".into(),
+        Value::Number(Number::from(cfg.ema_smoothing_ppm as u64)),
+    );
+    dynamic.insert(
+        "floor_unique_viewers".into(),
+        Value::Number(Number::from(cfg.floor_unique_viewers)),
+    );
+    dynamic.insert(
+        "floor_host_count".into(),
+        Value::Number(Number::from(cfg.floor_host_count)),
+    );
+    dynamic.insert(
+        "floor_provider_count".into(),
+        Value::Number(Number::from(cfg.floor_provider_count)),
+    );
+    dynamic.insert(
+        "cap_unique_viewers".into(),
+        Value::Number(Number::from(cfg.cap_unique_viewers)),
+    );
+    dynamic.insert(
+        "cap_host_count".into(),
+        Value::Number(Number::from(cfg.cap_host_count)),
+    );
+    dynamic.insert(
+        "cap_provider_count".into(),
+        Value::Number(Number::from(cfg.cap_provider_count)),
+    );
+    dynamic.insert(
+        "percentile_buckets".into(),
+        Value::Number(Number::from(cfg.percentile_buckets as u64)),
+    );
+    root.insert("dynamic".into(), Value::Object(dynamic));
     root.insert(
         "last_updated".into(),
         Value::Number(Number::from(snapshot.last_updated)),
+    );
+    root.insert(
+        "ready_streak_windows".into(),
+        Value::Number(Number::from(snapshot.ready_streak_windows)),
+    );
+    // Rehearsal fields from governance params snapshot
+    let (rehearsal_enabled, rehearsal_windows) = {
+        let guard = super::GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            guard.ad_rehearsal_enabled > 0,
+            guard.ad_rehearsal_stability_windows.max(0) as u64,
+        )
+    };
+    root.insert("rehearsal_enabled".into(), Value::Bool(rehearsal_enabled));
+    root.insert(
+        "rehearsal_required_windows".into(),
+        Value::Number(Number::from(rehearsal_windows)),
     );
     root.insert(
         "total_usd_micros".into(),
