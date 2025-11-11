@@ -165,8 +165,7 @@ const TLS_WARNING_SNAPSHOT_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 static TLS_WARNING_RETENTION_SECS: AtomicU64 = AtomicU64::new(TLS_WARNING_SNAPSHOT_RETENTION_SECS);
 static BRIDGE_REMEDIATION_DISPATCH_SEQ: AtomicU64 = AtomicU64::new(1);
 const BRIDGE_REMEDIATION_MAX_DISPATCH_LOG: usize = 256;
-const BRIDGE_REMEDIATION_RUNBOOK_PATH: &str =
-    "docs/operators/incident_playbook.md#bridge-liquidity-remediation";
+const BRIDGE_REMEDIATION_RUNBOOK_PATH: &str = "docs/operations.md#incident-response";
 const BRIDGE_REMEDIATION_DISPATCH_ENDPOINT: &str = "/remediation/bridge/dispatches";
 const BRIDGE_REMEDIATION_ACK_PANEL: &str = "bridge_remediation_dispatch_ack_total (5m delta)";
 const BRIDGE_REMEDIATION_ACK_LATENCY_PANEL: &str =

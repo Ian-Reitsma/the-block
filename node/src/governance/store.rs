@@ -2794,6 +2794,24 @@ impl GovStore {
                                 ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
                                 ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
                                 ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+                                ParamKey::AdUsePercentileThresholds => {
+                                    params.ad_use_percentile_thresholds
+                                }
+                                ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+                                ParamKey::AdHostPercentile => params.ad_host_percentile,
+                                ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+                                ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+                                ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+                                ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+                                ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+                                ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+                                ParamKey::AdCapHostCount => params.ad_cap_host_count,
+                                ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+                                ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+                                ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+                                ParamKey::AdRehearsalStabilityWindows => {
+                                    params.ad_rehearsal_stability_windows
+                                }
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -3012,6 +3030,21 @@ impl GovStore {
                 ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
                 ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
                 ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+                // Dynamic readiness controls
+                ParamKey::AdUsePercentileThresholds => params.ad_use_percentile_thresholds,
+                ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+                ParamKey::AdHostPercentile => params.ad_host_percentile,
+                ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+                ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+                ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+                ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+                ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+                ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+                ParamKey::AdCapHostCount => params.ad_cap_host_count,
+                ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+                ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+                ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+                ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -3066,6 +3099,20 @@ impl GovStore {
             ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
             ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
             ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+            ParamKey::AdUsePercentileThresholds => params.ad_use_percentile_thresholds,
+            ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+            ParamKey::AdHostPercentile => params.ad_host_percentile,
+            ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+            ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+            ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+            ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+            ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+            ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+            ParamKey::AdCapHostCount => params.ad_cap_host_count,
+            ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+            ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+            ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+            ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
         };
         self.persist_param_change(
             &hist_dir,

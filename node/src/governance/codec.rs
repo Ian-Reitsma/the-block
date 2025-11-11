@@ -294,6 +294,21 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::AdReadinessMinUniqueViewers => 45,
         ParamKey::AdReadinessMinHostCount => 46,
         ParamKey::AdReadinessMinProviderCount => 47,
+        // New dynamic readiness params begin at 48
+        ParamKey::AdUsePercentileThresholds => 48,
+        ParamKey::AdViewerPercentile => 49,
+        ParamKey::AdHostPercentile => 50,
+        ParamKey::AdProviderPercentile => 51,
+        ParamKey::AdEmaSmoothingPpm => 52,
+        ParamKey::AdFloorUniqueViewers => 53,
+        ParamKey::AdFloorHostCount => 54,
+        ParamKey::AdFloorProviderCount => 55,
+        ParamKey::AdCapUniqueViewers => 56,
+        ParamKey::AdCapHostCount => 57,
+        ParamKey::AdCapProviderCount => 58,
+        ParamKey::AdPercentileBuckets => 59,
+        ParamKey::AdRehearsalEnabled => 60,
+        ParamKey::AdRehearsalStabilityWindows => 61,
     }
 }
 
@@ -347,6 +362,20 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         45 => ParamKey::AdReadinessMinUniqueViewers,
         46 => ParamKey::AdReadinessMinHostCount,
         47 => ParamKey::AdReadinessMinProviderCount,
+        48 => ParamKey::AdUsePercentileThresholds,
+        49 => ParamKey::AdViewerPercentile,
+        50 => ParamKey::AdHostPercentile,
+        51 => ParamKey::AdProviderPercentile,
+        52 => ParamKey::AdEmaSmoothingPpm,
+        53 => ParamKey::AdFloorUniqueViewers,
+        54 => ParamKey::AdFloorHostCount,
+        55 => ParamKey::AdFloorProviderCount,
+        56 => ParamKey::AdCapUniqueViewers,
+        57 => ParamKey::AdCapHostCount,
+        58 => ParamKey::AdCapProviderCount,
+        59 => ParamKey::AdPercentileBuckets,
+        60 => ParamKey::AdRehearsalEnabled,
+        61 => ParamKey::AdRehearsalStabilityWindows,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -1107,6 +1136,20 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::AdReadinessMinUniqueViewers => "AdReadinessMinUniqueViewers",
         ParamKey::AdReadinessMinHostCount => "AdReadinessMinHostCount",
         ParamKey::AdReadinessMinProviderCount => "AdReadinessMinProviderCount",
+        ParamKey::AdUsePercentileThresholds => "AdUsePercentileThresholds",
+        ParamKey::AdViewerPercentile => "AdViewerPercentile",
+        ParamKey::AdHostPercentile => "AdHostPercentile",
+        ParamKey::AdProviderPercentile => "AdProviderPercentile",
+        ParamKey::AdEmaSmoothingPpm => "AdEmaSmoothingPpm",
+        ParamKey::AdFloorUniqueViewers => "AdFloorUniqueViewers",
+        ParamKey::AdFloorHostCount => "AdFloorHostCount",
+        ParamKey::AdFloorProviderCount => "AdFloorProviderCount",
+        ParamKey::AdCapUniqueViewers => "AdCapUniqueViewers",
+        ParamKey::AdCapHostCount => "AdCapHostCount",
+        ParamKey::AdCapProviderCount => "AdCapProviderCount",
+        ParamKey::AdPercentileBuckets => "AdPercentileBuckets",
+        ParamKey::AdRehearsalEnabled => "AdRehearsalEnabled",
+        ParamKey::AdRehearsalStabilityWindows => "AdRehearsalStabilityWindows",
     }
 }
 
@@ -1160,6 +1203,20 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "AdReadinessMinUniqueViewers" => Ok(ParamKey::AdReadinessMinUniqueViewers),
         "AdReadinessMinHostCount" => Ok(ParamKey::AdReadinessMinHostCount),
         "AdReadinessMinProviderCount" => Ok(ParamKey::AdReadinessMinProviderCount),
+        "AdUsePercentileThresholds" => Ok(ParamKey::AdUsePercentileThresholds),
+        "AdViewerPercentile" => Ok(ParamKey::AdViewerPercentile),
+        "AdHostPercentile" => Ok(ParamKey::AdHostPercentile),
+        "AdProviderPercentile" => Ok(ParamKey::AdProviderPercentile),
+        "AdEmaSmoothingPpm" => Ok(ParamKey::AdEmaSmoothingPpm),
+        "AdFloorUniqueViewers" => Ok(ParamKey::AdFloorUniqueViewers),
+        "AdFloorHostCount" => Ok(ParamKey::AdFloorHostCount),
+        "AdFloorProviderCount" => Ok(ParamKey::AdFloorProviderCount),
+        "AdCapUniqueViewers" => Ok(ParamKey::AdCapUniqueViewers),
+        "AdCapHostCount" => Ok(ParamKey::AdCapHostCount),
+        "AdCapProviderCount" => Ok(ParamKey::AdCapProviderCount),
+        "AdPercentileBuckets" => Ok(ParamKey::AdPercentileBuckets),
+        "AdRehearsalEnabled" => Ok(ParamKey::AdRehearsalEnabled),
+        "AdRehearsalStabilityWindows" => Ok(ParamKey::AdRehearsalStabilityWindows),
         other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
     }
 }
@@ -1170,4 +1227,25 @@ pub fn json_to_bytes(value: &Value) -> Vec<u8> {
 
 pub fn json_from_bytes(bytes: &[u8]) -> Result<Value> {
     json::value_from_slice(bytes).map_err(|e| codec_error(format!("json decode: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rehearsal_param_keys_roundtrip() {
+        let keys = [
+            ParamKey::AdRehearsalEnabled,
+            ParamKey::AdRehearsalStabilityWindows,
+        ];
+        for key in keys {
+            let tag = param_key_to_tag(key);
+            let decoded = param_key_from_tag(tag).expect("decode tag");
+            assert_eq!(decoded, key);
+            let string = param_key_to_string(key);
+            let parsed = param_key_from_string(string).expect("decode string");
+            assert_eq!(parsed, key);
+        }
+    }
 }

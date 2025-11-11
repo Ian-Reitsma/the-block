@@ -876,7 +876,7 @@ fn bridge_remediation_exposes_actions() {
         assert!(annotation.contains("bridge-node"));
         assert_eq!(
             action.runbook_path.as_deref(),
-            Some("docs/operators/incident_playbook.md#bridge-liquidity-remediation")
+            Some("docs/operations.md#incident-response")
         );
         assert_eq!(
             action.dispatch_endpoint.as_deref(),
@@ -972,7 +972,7 @@ fn bridge_remediation_emits_throttle_playbook() {
         assert!(annotation.contains("incentive throttle"));
         assert_eq!(
             action.runbook_path.as_deref(),
-            Some("docs/operators/incident_playbook.md#bridge-liquidity-remediation")
+            Some("docs/operations.md#incident-response")
         );
         assert!(action
             .response_sequence
@@ -1094,7 +1094,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
                 .get("runbook_path")
                 .and_then(Value::as_str)
                 .expect("runbook path"),
-            "docs/operators/incident_playbook.md#bridge-liquidity-remediation",
+            "docs/operations.md#incident-response",
         );
         assert_eq!(
             object

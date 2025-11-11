@@ -1,8 +1,9 @@
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue};
+use sys::tempfile;
 
 #[test]
 fn inhouse_recovers_after_restart() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     {
         let db = InhouseEngine::open(dir.path().to_string_lossy().as_ref()).expect("open db");
         db.ensure_cf("default").expect("ensure cf");

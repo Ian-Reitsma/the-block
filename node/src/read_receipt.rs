@@ -68,6 +68,15 @@ pub struct ReadAck {
     #[serde(default)]
     /// Privacy proof binding this acknowledgement to its readiness commitment.
     pub zk_proof: Option<ReadAckPrivacyProof>,
+    #[serde(default)]
+    /// Optional presence badge token for venue-grade attestations.
+    pub presence_badge: Option<String>,
+    #[serde(default)]
+    /// Optional venue identifier associated with the presence badge.
+    pub venue_id: Option<String>,
+    #[serde(default)]
+    /// Optional crowd-size hint provided by the client (number of devices present).
+    pub crowd_size_hint: Option<u32>,
 }
 
 impl ReadAck {

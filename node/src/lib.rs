@@ -63,6 +63,7 @@ use std::thread;
 use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
+pub mod ad_policy_snapshot;
 pub mod ad_readiness;
 pub mod config;
 pub mod dkg;
@@ -5902,6 +5903,9 @@ mod tests {
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
+            presence_badge: None,
+            venue_id: None,
+            crowd_size_hint: None,
         };
         let mut hasher = Hasher::new();
         hasher.update(&ack.manifest);

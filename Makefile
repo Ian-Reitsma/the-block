@@ -22,3 +22,7 @@ doc-ci:
 
 dependency-check:
 	cargo run -p dependency_registry -- --check config/dependency_policies.toml
+
+.PHONY: audit-policy-snapshots
+audit-policy-snapshots:
+	bash scripts/audit_policy_attestations.sh

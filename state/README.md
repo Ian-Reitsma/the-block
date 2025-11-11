@@ -1,6 +1,5 @@
 # State Storage
-> **Review (2025-09-25):** Synced State Storage guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+Guidance aligns with the dependency-sovereignty pivot; runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced.
 
 State persistence uses a RocksDB key-value store located under the path
 supplied to the node via `--db-path` (default `~/.block/db`). Keys are stored
@@ -33,4 +32,3 @@ in `state::schema`, preserving existing data.
 The `sim` crate can replay scenarios against RocksDB by selecting the
 `Backend::RocksDb` option and setting `SIM_DB_PATH`. Each simulation step is
 serialized with a compact first-party binary format and stored keyed by step number for later analysis.
-

@@ -245,6 +245,7 @@ dependencies = [
 name = "explorer"
 version = "0.1.0"
 dependencies = [
+ "ad_market",
  "codec",
  "concurrency",
  "crypto_suite",

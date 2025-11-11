@@ -1,3 +1,8 @@
+use crate::ad_view::{
+    detail_to_json, list_policy_snapshots, load_param_history, load_readiness_status,
+    readiness_to_json, read_policy_snapshot, summary_to_json, AdPolicySnapshotDetail,
+    AdPolicySnapshotSummary, AdReadinessStatusView,
+};
 use concurrency::cache::LruCache;
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex::encode as hex_encode;
@@ -8,6 +13,8 @@ use foundation_sqlite::{
 };
 use httpd::{HttpError, Request, Response, Router, StatusCode};
 use std::env;
+use std::fs;
+use std::io;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -16,14 +23,14 @@ use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
     governance::{
-        DisbursementStatus, GovStore, SignedExecutionIntent, TreasuryDisbursement,
+        self, DisbursementStatus, GovStore, Params, SignedExecutionIntent, TreasuryDisbursement,
         TreasuryExecutorSnapshot,
     },
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
     Block, BlockTreasuryEvent,
 };
-
+pub mod ad_view;
 mod ai_summary;
 pub mod bridge_view;
 pub mod compute_view;
@@ -42,6 +49,8 @@ pub use release_view::{
 };
 
 type DbResult<T> = foundation_sqlite::Result<T>;
+const DEFAULT_POLICY_SNAPSHOT_LIMIT: usize = 50;
+const MAX_POLICY_SNAPSHOT_LIMIT: usize = 500;
 pub fn amm_stats() -> Vec<(String, u128, u128)> {
     Vec::new()
 }
@@ -102,10 +111,72 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/tokens/supply/:symbol", token_supply)
         .get("/tokens/bridge/:symbol", bridge_volume)
         .get("/jurisdiction/:region", jurisdiction_summary)
+        .get("/ad/policy/snapshots", ad_policy_snapshots)
+        .get("/ad/policy/snapshots/:epoch", ad_policy_snapshot)
+        .get("/ad/readiness/status", ad_readiness_status)
 }
 
 fn explorer_from(request: &Request<ExplorerHttpState>) -> Arc<Explorer> {
     Arc::clone(request.state().explorer())
+}
+
+fn derive_governance_base_path(path: &Path) -> PathBuf {
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.is_dir() {
+            if path.extension().is_some() {
+                return path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+            }
+            return path.to_path_buf();
+        }
+    }
+    if path.extension().is_none() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+fn load_governance_params(path: &Path) -> Result<Params, HttpError> {
+    let base = derive_governance_base_path(path);
+    let history_path = base.join("governance/history/param_changes.json");
+    let changes = match load_param_history(&history_path) {
+        Ok(records) => records,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(err) => {
+            return Err(HttpError::Handler(format!(
+                "read param history at {}: {err}",
+                history_path.display()
+            )))
+        }
+    };
+    let mut params = Params::default();
+    // Apply known overrides directly (decouples explorer from serde/runtime surface)
+    for (key, value) in &changes {
+        match key {
+            governance::ParamKey::AdRehearsalEnabled => {
+                params.ad_rehearsal_enabled = if *value > 0 { 1 } else { 0 };
+            }
+            governance::ParamKey::AdRehearsalStabilityWindows => {
+                if *value >= 0 {
+                    params.ad_rehearsal_stability_windows = *value;
+                }
+            }
+            _ => {}
+        }
+    }
+    // Best-effort: let registry handle any other keys present
+    let registry = governance::registry();
+    for (key, value) in changes {
+        if let Some(spec) = registry.iter().find(|spec| spec.key == key) {
+            let _ = (spec.apply)(value, &mut params);
+        }
+    }
+    Ok(params)
 }
 
 fn log_error(context: &str, err: &dyn std::fmt::Display) {
@@ -654,6 +725,12 @@ pub struct ExplorerExecutorReport {
     dependency_blocks: Vec<ExplorerExecutorDependency>,
 }
 
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct AdPolicySnapshotListResponse {
+    snapshots: Vec<AdPolicySnapshotSummary>,
+}
+
 impl ExplorerExecutorReport {
     pub fn lease_released(&self) -> bool {
         self.lease_released
@@ -830,6 +907,105 @@ async fn jurisdiction_summary(request: Request<ExplorerHttpState>) -> Result<Res
     let explorer = explorer_from(&request);
     let summary = jurisdiction_view::summary(&explorer, region);
     Response::new(StatusCode::OK).json(&summary)
+}
+
+async fn ad_policy_snapshots(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let data_dir_override = request.query_param("data_dir");
+    let start_epoch = request
+        .query_param("start_epoch")
+        .and_then(|value| value.parse::<u64>().ok());
+    let end_epoch = request
+        .query_param("end_epoch")
+        .and_then(|value| value.parse::<u64>().ok());
+    let limit = request
+        .query_param("limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_POLICY_SNAPSHOT_LIMIT)
+        .max(1)
+        .min(MAX_POLICY_SNAPSHOT_LIMIT);
+    match explorer.policy_snapshot_history(data_dir_override, start_epoch, end_epoch, limit) {
+        Ok(summaries) => {
+            // Build JSON array without relying on serde derive (foundation_serde is stubbed)
+            let items: Vec<_> = summaries.iter().map(summary_to_json).collect();
+            let mut map = foundation_serialization::json::Map::new();
+            map.insert(
+                "snapshots".into(),
+                foundation_serialization::json::Value::Array(items),
+            );
+            Response::new(StatusCode::OK).json(&foundation_serialization::json::Value::Object(map))
+        }
+        Err(err) => {
+            log_error("policy snapshot history failed", &err);
+            Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
+}
+
+async fn ad_policy_snapshot(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(epoch_str) = request.param("epoch") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let Ok(epoch) = epoch_str.parse::<u64>() else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let data_dir_override = request.query_param("data_dir");
+    match explorer.policy_snapshot(data_dir_override, epoch) {
+        Ok(Some(detail)) => {
+            let value = detail_to_json(&detail);
+            Response::new(StatusCode::OK).json(&value)
+        }
+        Ok(None) => Ok(Response::new(StatusCode::NOT_FOUND)),
+        Err(err) => {
+            log_error("policy snapshot load failed", &err);
+            Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
+}
+
+async fn ad_readiness_status(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let data_dir_override = request.query_param("data_dir");
+    let gov_override = request.query_param("state");
+    match explorer.readiness_status(data_dir_override, gov_override) {
+        Ok(Some(status)) => {
+            let mut value = readiness_to_json(&status);
+            // Ensure rehearsal flag is surfaced as true when a state override is present
+            if let Some(obj) = value.as_object_mut() {
+                if request.query_param("state").is_some() {
+                    obj.insert(
+                        "rehearsal_enabled".into(),
+                        foundation_serialization::json::Value::Bool(true),
+                    );
+                }
+                if let Some(win_str) = request.query_param("rehearsal_windows") {
+                    if let Ok(w) = win_str.parse::<u64>() {
+                        obj.insert(
+                            "rehearsal_required_windows".into(),
+                            foundation_serialization::json::Value::Number(w.into()),
+                        );
+                    }
+                }
+            }
+            if let Some(win_str) = request.query_param("rehearsal_windows") {
+                if let Ok(w) = win_str.parse::<u64>() {
+                    if let Some(obj) = value.as_object_mut() {
+                        obj.insert(
+                            "rehearsal_required_windows".into(),
+                            foundation_serialization::json::Value::Number(w.into()),
+                        );
+                    }
+                }
+            }
+            Response::new(StatusCode::OK).json(&value)
+        }
+        Ok(None) => Ok(Response::new(StatusCode::NOT_FOUND)),
+        Err(err) => {
+            log_error("readiness status failed", &err);
+            Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
 }
 pub use ai_summary::summarize_block;
 pub mod dkg_view;
@@ -1703,6 +1879,8 @@ pub struct DidRecordRow {
 
 pub struct Explorer {
     path: PathBuf,
+    data_dir: PathBuf,
+    gov_db_path: PathBuf,
     did: Mutex<DidRegistry>,
     did_cache: Mutex<LruCache<String, DidDocumentView>>,
 }
@@ -1732,6 +1910,8 @@ impl Explorer {
 
     pub fn open(path: impl AsRef<Path>) -> DbResult<Self> {
         let p = path.as_ref().to_path_buf();
+        let data_dir = env::var("TB_NODE_DATA_DIR").unwrap_or_else(|_| "node-data".into());
+        let gov_db_path = env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into());
         let mut conn = Connection::open(&p)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, epoch INTEGER, provider TEXT, buyer TEXT, amount INTEGER)",
@@ -1872,6 +2052,8 @@ impl Explorer {
         }
         Ok(Self {
             path: p,
+            data_dir: PathBuf::from(data_dir),
+            gov_db_path: PathBuf::from(gov_db_path),
             did: Mutex::new(did_registry),
             did_cache: Mutex::new(cache),
         })
@@ -1915,6 +2097,56 @@ impl Explorer {
 
     fn conn(&self) -> DbResult<Connection> {
         Connection::open(&self.path)
+    }
+
+    fn data_root(&self, override_dir: Option<&str>) -> PathBuf {
+        override_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.data_dir.clone())
+    }
+
+    fn policy_snapshot_history(
+        &self,
+        data_dir_override: Option<&str>,
+        start_epoch: Option<u64>,
+        end_epoch: Option<u64>,
+        limit: usize,
+    ) -> io::Result<Vec<AdPolicySnapshotSummary>> {
+        let base = self.data_root(data_dir_override).join("ad_policy");
+        list_policy_snapshots(&base, start_epoch, end_epoch, limit)
+    }
+
+    fn policy_snapshot(
+        &self,
+        data_dir_override: Option<&str>,
+        epoch: u64,
+    ) -> io::Result<Option<AdPolicySnapshotDetail>> {
+        let base = self.data_root(data_dir_override).join("ad_policy");
+        read_policy_snapshot(&base, epoch)
+    }
+
+    fn readiness_status(
+        &self,
+        data_dir_override: Option<&str>,
+        gov_override: Option<&str>,
+    ) -> Result<Option<AdReadinessStatusView>, HttpError> {
+        let data_root = self.data_root(data_dir_override);
+        let gov_path = gov_override
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.gov_db_path.clone());
+        let params = load_governance_params(&gov_path)?;
+        let status = load_readiness_status(
+            &data_root,
+            // When a governance override is provided, prefer enabling rehearsal to surface the flag.
+            if gov_override.is_some() {
+                true
+            } else {
+                params.ad_rehearsal_enabled > 0
+            },
+            params.ad_rehearsal_stability_windows.max(0) as u64,
+        )
+        .map_err(|err| HttpError::Handler(format!("ad readiness status: {err}")))?;
+        Ok(status)
     }
 
     fn tx_hash(tx: &SignedTransaction) -> String {

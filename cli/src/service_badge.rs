@@ -10,11 +10,30 @@ use foundation_serialization::json::Value;
 
 pub enum ServiceBadgeCmd {
     /// Verify a badge token via RPC
-    Verify { badge: String, url: String },
+    Verify {
+        badge: String,
+        url: String,
+    },
     /// Issue a new badge via RPC
-    Issue { url: String },
+    Issue {
+        url: String,
+    },
     /// Revoke the current badge via RPC
-    Revoke { url: String },
+    Revoke {
+        url: String,
+    },
+    VenueRegister {
+        url: String,
+        venue: String,
+    },
+    VenueRotate {
+        url: String,
+        venue: String,
+    },
+    VenueStatus {
+        url: String,
+        venue: String,
+    },
 }
 
 impl ServiceBadgeCmd {
@@ -61,6 +80,59 @@ impl ServiceBadgeCmd {
             ))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("service-badge.venue"),
+                "venue",
+                "Venue management",
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("service-badge.venue.register"),
+                    "register",
+                    "Register a venue and issue a presence token",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "venue",
+                    "Venue identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("service-badge.venue.rotate"),
+                    "rotate",
+                    "Rotate a venue presence token",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "venue",
+                    "Venue identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("service-badge.venue.status"),
+                    "status",
+                    "Show last recorded venue crowd status",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "venue",
+                    "Venue identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .build(),
+        )
         .build()
     }
 
@@ -85,6 +157,31 @@ impl ServiceBadgeCmd {
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
                 Ok(ServiceBadgeCmd::Revoke { url })
+            }
+            "venue" => {
+                let (venue_cmd, venue_matches) = sub_matches
+                    .subcommand()
+                    .ok_or_else(|| "missing subcommand for 'service-badge venue'".to_string())?;
+                match venue_cmd {
+                    "register" => Ok(ServiceBadgeCmd::VenueRegister {
+                        venue: require_positional(venue_matches, "venue")?,
+                        url: take_string(venue_matches, "url")
+                            .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                    }),
+                    "rotate" => Ok(ServiceBadgeCmd::VenueRotate {
+                        venue: require_positional(venue_matches, "venue")?,
+                        url: take_string(venue_matches, "url")
+                            .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                    }),
+                    "status" => Ok(ServiceBadgeCmd::VenueStatus {
+                        venue: require_positional(venue_matches, "venue")?,
+                        url: take_string(venue_matches, "url")
+                            .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                    }),
+                    other => Err(format!(
+                        "unknown subcommand '{other}' for 'service-badge venue'"
+                    )),
+                }
             }
             other => Err(format!("unknown subcommand '{other}' for 'service-badge'")),
         }
@@ -128,6 +225,36 @@ pub fn handle(cmd: ServiceBadgeCmd) {
             let client = RpcClient::from_env();
             let payload = revoke_request();
             if let Ok(resp) = client.call(&url, &payload) {
+                if let Ok(text) = resp.text() {
+                    println!("{}", text);
+                }
+            }
+        }
+        ServiceBadgeCmd::VenueRegister { url, venue } => {
+            let client = RpcClient::from_env();
+            let payload = json_object_from([("venue_id", json_string(&venue))]);
+            let envelope = json_rpc_request("gateway.venue_register", payload);
+            if let Ok(resp) = client.call(&url, &envelope) {
+                if let Ok(text) = resp.text() {
+                    println!("{}", text);
+                }
+            }
+        }
+        ServiceBadgeCmd::VenueRotate { url, venue } => {
+            let client = RpcClient::from_env();
+            let payload = json_object_from([("venue_id", json_string(&venue))]);
+            let envelope = json_rpc_request("gateway.venue_rotate", payload);
+            if let Ok(resp) = client.call(&url, &envelope) {
+                if let Ok(text) = resp.text() {
+                    println!("{}", text);
+                }
+            }
+        }
+        ServiceBadgeCmd::VenueStatus { url, venue } => {
+            let client = RpcClient::from_env();
+            let payload = json_object_from([("venue_id", json_string(&venue))]);
+            let envelope = json_rpc_request("gateway.venue_status", payload);
+            if let Ok(resp) = client.call(&url, &envelope) {
                 if let Ok(text) = resp.text() {
                     println!("{}", text);
                 }
