@@ -36,6 +36,7 @@ pub mod names {
     pub const GATEWAY_DNS: &str = "gateway_dns";
     pub const GATEWAY_AD_READINESS: &str = "gateway_ad_readiness";
     pub const GOSSIP_RELAY: &str = "gossip_relay";
+    pub const GOVERNOR: &str = "launch_governor";
     pub const IDENTITY_DID: &str = "identity_did";
     pub const IDENTITY_HANDLES: &str = "identity_handle_registry";
     pub const LIGHT_CLIENT_PROOFS: &str = "light_client_proofs";

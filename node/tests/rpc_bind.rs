@@ -38,6 +38,7 @@ fn rpc_server_logs_bind_conflict() {
             Arc::new(AtomicBool::new(false)),
             None,
             None,
+            None,
             addr.to_string(),
             RpcConfig::default(),
             ready_tx,

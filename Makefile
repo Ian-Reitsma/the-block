@@ -26,3 +26,7 @@ dependency-check:
 .PHONY: audit-policy-snapshots
 audit-policy-snapshots:
 	bash scripts/audit_policy_attestations.sh
+
+.PHONY: localnet-two-node
+localnet-two-node:
+	PROFILE=LOCAL_TWO_NODE bash scripts/local_two_node.sh

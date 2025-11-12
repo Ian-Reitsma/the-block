@@ -2,7 +2,7 @@ use super::ParamKey;
 use crate::ad_readiness::AdReadinessConfig;
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
-use ad_market::{DistributionPolicy, MarketplaceHandle};
+use ad_market::MarketplaceHandle;
 use bridge_types::BridgeIncentiveParameters;
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::info;
@@ -111,6 +111,15 @@ impl<'a> Runtime<'a> {
             percentile_buckets: self.bc.params.ad_percentile_buckets.clamp(4, 360) as u16,
         };
         readiness.update_config(cfg);
+    }
+
+    pub fn set_launch_operational(&mut self, enabled: bool) {
+        self.bc.params.launch_operational_flag = if enabled { 1 } else { 0 };
+    }
+
+    pub fn set_dns_rehearsal(&mut self, enabled: bool) {
+        self.bc.params.dns_rehearsal_enabled = if enabled { 1 } else { 0 };
+        crate::gateway::dns::set_rehearsal(enabled);
     }
 
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
@@ -259,6 +268,10 @@ pub struct Params {
     pub read_subsidy_liquidity_percent: i64,
     #[serde(default = "default_dual_token_settlement_enabled")]
     pub dual_token_settlement_enabled: i64,
+    #[serde(default)]
+    pub launch_operational_flag: i64,
+    #[serde(default = "default_dns_rehearsal_enabled")]
+    pub dns_rehearsal_enabled: i64,
     #[serde(default = "default_ad_readiness_window_secs")]
     pub ad_readiness_window_secs: i64,
     #[serde(default = "default_ad_readiness_min_unique_viewers")]
@@ -358,6 +371,8 @@ impl Default for Params {
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
             dual_token_settlement_enabled: default_dual_token_settlement_enabled(),
+            launch_operational_flag: 0,
+            dns_rehearsal_enabled: default_dns_rehearsal_enabled(),
             ad_readiness_window_secs: default_ad_readiness_window_secs(),
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
@@ -485,6 +500,14 @@ impl Params {
         map.insert(
             "dual_token_settlement_enabled".into(),
             Value::Number(self.dual_token_settlement_enabled.into()),
+        );
+        map.insert(
+            "launch_operational_flag".into(),
+            Value::Number(self.launch_operational_flag.into()),
+        );
+        map.insert(
+            "dns_rehearsal_enabled".into(),
+            Value::Number(self.dns_rehearsal_enabled.into()),
         );
         map.insert(
             "ad_readiness_window_secs".into(),
@@ -734,6 +757,14 @@ impl Params {
                 .get("dual_token_settlement_enabled")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_dual_token_settlement_enabled),
+            launch_operational_flag: obj
+                .get("launch_operational_flag")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            dns_rehearsal_enabled: obj
+                .get("dns_rehearsal_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_dns_rehearsal_enabled),
             ad_readiness_window_secs: obj
                 .get("ad_readiness_window_secs")
                 .and_then(Value::as_i64)
@@ -874,6 +905,10 @@ const fn default_read_subsidy_liquidity_percent() -> i64 {
 
 const fn default_dual_token_settlement_enabled() -> i64 {
     0
+}
+
+const fn default_dns_rehearsal_enabled() -> i64 {
+    1
 }
 
 const fn default_ad_readiness_window_secs() -> i64 {

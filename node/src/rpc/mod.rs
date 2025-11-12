@@ -5,7 +5,7 @@ use crate::{
     gateway,
     governance::{Params, NODE_GOV_STORE},
     identity::{handle_registry::HandleRegistry, DidRegistry},
-    kyc,
+    kyc, launch_governor,
     localnet::{validate_proximity, AssistReceipt},
     net,
     net::peer::{DropReason, HandshakeError, PeerMetrics, PeerReputation},
@@ -61,6 +61,7 @@ pub mod compute_market;
 pub mod consensus;
 pub mod dex;
 pub mod governance;
+pub mod governor;
 pub mod htlc;
 pub mod identity;
 pub mod inflation;
@@ -334,6 +335,7 @@ struct RpcState {
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
     ad_readiness: Option<crate::ad_readiness::AdReadinessHandle>,
+    governor: Option<Arc<launch_governor::GovernorHandle>>,
     clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
     tokens_per_sec: f64,
     ban_secs: u64,
@@ -516,6 +518,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "compute.job_requirements",
     "compute.job_cancel",
     "compute.provider_hardware",
+    "governor.status",
+    "governor.decisions",
+    "governor.snapshot",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -705,6 +710,7 @@ fn execute_rpc(
             Arc::clone(&runtime_cfg),
             state.market.clone(),
             state.ad_readiness.clone(),
+            state.governor.clone(),
             auth,
         )
     };
@@ -1012,6 +1018,7 @@ fn dispatch(
     runtime_cfg: Arc<RpcRuntimeConfig>,
     market: Option<MarketplaceHandle>,
     readiness: Option<crate::ad_readiness::AdReadinessHandle>,
+    governor: Option<Arc<launch_governor::GovernorHandle>>,
     auth: Option<&str>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
@@ -1081,6 +1088,23 @@ fn dispatch(
         "ad_market.record_conversion" => {
             let params = req.params.as_value().clone();
             ad_market::record_conversion(market_ref, &params, auth)?
+        }
+        "governor.status" => governor::status(governor.clone())?,
+        "governor.decisions" => {
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10);
+            governor::decisions(governor.clone(), limit as usize)?
+        }
+        "governor.snapshot" => {
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| rpc_error(-32602, "epoch required"))?;
+            governor::snapshot(governor.clone(), epoch)?
         }
         "set_difficulty" => {
             let val = req
@@ -2938,6 +2962,7 @@ pub async fn run_rpc_server_with_market(
     mining: Arc<AtomicBool>,
     market: Option<MarketplaceHandle>,
     readiness: Option<crate::ad_readiness::AdReadinessHandle>,
+    governor: Option<Arc<launch_governor::GovernorHandle>>,
     addr: String,
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
@@ -2995,6 +3020,7 @@ pub async fn run_rpc_server_with_market(
         runtime_cfg: Arc::clone(&runtime_cfg),
         market,
         ad_readiness: readiness,
+        governor,
         clients,
         tokens_per_sec,
         ban_secs,
@@ -3025,7 +3051,7 @@ pub async fn run_rpc_server(
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
 ) -> std::io::Result<()> {
-    run_rpc_server_with_market(bc, mining, None, None, addr, cfg, ready).await
+    run_rpc_server_with_market(bc, mining, None, None, None, addr, cfg, ready).await
 }
 
 #[cfg(any(test, feature = "fuzzy", feature = "integration-tests"))]

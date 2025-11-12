@@ -41,9 +41,29 @@ else
 fi
 
 NATIVE_MONITOR=0
-for arg in "$@"; do
-  [[ "$arg" == "--native-monitor" ]] && NATIVE_MONITOR=1
+PROFILE=""
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --native-monitor)
+      NATIVE_MONITOR=1
+      shift
+      ;;
+    --profile)
+      PROFILE="$2"
+      shift 2
+      ;;
+    --profile=*)
+      PROFILE="${1#*=}"
+      shift
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
 done
+set -- "${ARGS[@]}"
 
 FAILED_STEPS=()
 SKIPPED_STEPS=()
@@ -116,6 +136,15 @@ if [[ -f node/.env.example ]]; then
   for k in ${missing:-}; do grep "^$k=" node/.env.example >> node/.env; cecho green "   + added env key $k"; done
 else
   cecho yellow "   → No node/.env.example found, skipping env sync."
+fi
+
+if [[ "$PROFILE" == "LOCAL_TWO_NODE" ]]; then
+  cecho cyan "→ Applying LOCAL_TWO_NODE profile (short epochs + governor)."
+  export TB_GOVERNOR_ENABLED=1
+  export TB_GOVERNOR_WINDOW_SECS="${TB_GOVERNOR_WINDOW_SECS:-60}"
+  export TB_GOVERNOR_SIGN="${TB_GOVERNOR_SIGN:-0}"
+  export TB_PURGE_LOOP_SECS="${TB_PURGE_LOOP_SECS:-1}"
+  export RUST_LOG="${RUST_LOG:-info,the_block::telemetry=trace}"
 fi
 
 # requirements.txt/package.json sanity
