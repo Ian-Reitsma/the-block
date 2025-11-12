@@ -38,7 +38,7 @@ use the_block::treasury_executor::{
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     gateway::dns::{install_ledger_context, BlockchainLedger},
-    generate_keypair,
+    generate_keypair, launch_governor,
     rpc::run_rpc_server_with_market,
     sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
     ShutdownFlag,
@@ -1542,6 +1542,11 @@ async fn async_main() -> std::process::ExitCode {
                 Arc::clone(&bc),
                 treasury_account,
             )));
+            let governor = launch_governor::spawn(
+                Arc::clone(&bc),
+                launch_governor::GovernorConfig::from_env(&data_dir),
+            )
+            .map(Arc::new);
             let market_path = format!("{data_dir}/ad_market");
             let market: MarketplaceHandle = Arc::new(
                 SledMarketplace::open(
@@ -1618,6 +1623,7 @@ async fn async_main() -> std::process::ExitCode {
                 Arc::clone(&mining),
                 Some(market.clone()),
                 Some(readiness.clone()),
+                governor.clone(),
                 rpc_addr.clone(),
                 rpc_cfg,
                 tx,

@@ -1,6 +1,6 @@
 use crate::ad_view::{
     detail_to_json, list_policy_snapshots, load_param_history, load_readiness_status,
-    readiness_to_json, read_policy_snapshot, summary_to_json, AdPolicySnapshotDetail,
+    read_policy_snapshot, readiness_to_json, summary_to_json, AdPolicySnapshotDetail,
     AdPolicySnapshotSummary, AdReadinessStatusView,
 };
 use concurrency::cache::LruCache;

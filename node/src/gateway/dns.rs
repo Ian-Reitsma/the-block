@@ -13,7 +13,7 @@ use diagnostics::tracing::warn;
 use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as BinaryWriter};
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -34,6 +34,7 @@ static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
 static ALLOW_EXTERNAL: AtomicBool = AtomicBool::new(false);
 static DISABLE_VERIFY: AtomicBool = AtomicBool::new(false);
 const VERIFY_TTL: Duration = Duration::from_secs(3600);
+static REHEARSAL: AtomicBool = AtomicBool::new(true);
 
 type TxtResolver = Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
 static TXT_RESOLVER: Lazy<Mutex<TxtResolver>> =
@@ -47,6 +48,11 @@ static TREASURY_HOOK: Lazy<Mutex<Option<Arc<dyn Fn(u64) + Send + Sync>>>> =
 static LEDGER_CONTEXT: Lazy<Mutex<Option<Arc<dyn DomainLedger + Send + Sync>>>> =
     Lazy::new(|| Mutex::new(None));
 static LEDGER_COUNTER: AtomicU64 = AtomicU64::new(1);
+static SANDBOX_LEDGER: Lazy<Arc<dyn DomainLedger + Send + Sync>> =
+    Lazy::new(|| Arc::new(SandboxLedger::new()) as Arc<dyn DomainLedger + Send + Sync>);
+const DNS_METRIC_CAPACITY: usize = 4096;
+static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
+    Lazy::new(|| Mutex::new(VecDeque::with_capacity(DNS_METRIC_CAPACITY)));
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
@@ -191,6 +197,124 @@ impl LedgerBatchCommand {
 pub struct LedgerBatchResult {
     pub account: String,
     pub tx_ref: String,
+}
+
+fn push_metric(kind: DnsMetricKind) {
+    let mut guard = DNS_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    guard.push_back(DnsMetricEvent { ts: now_ts(), kind });
+    while guard.len() > DNS_METRIC_CAPACITY {
+        guard.pop_front();
+    }
+}
+
+fn record_txt_result(ok: bool) {
+    push_metric(DnsMetricKind::TxtResult { ok });
+}
+
+fn record_auction_completed(duration_secs: u64, settlement_ct: u64) {
+    push_metric(DnsMetricKind::AuctionCompleted {
+        duration_secs,
+        settlement_ct,
+    });
+}
+
+fn record_auction_cancelled() {
+    push_metric(DnsMetricKind::AuctionCancelled);
+}
+
+fn record_stake_lock(amount_ct: u64) {
+    if amount_ct > 0 {
+        push_metric(DnsMetricKind::StakeLock { amount_ct });
+    }
+}
+
+fn record_stake_unlock(amount_ct: u64) {
+    if amount_ct > 0 {
+        push_metric(DnsMetricKind::StakeUnlock { amount_ct });
+    }
+}
+
+pub fn governance_metrics_snapshot(window_secs: u64) -> DnsMetricsSnapshot {
+    let cutoff = now_ts().saturating_sub(window_secs.max(1));
+    let mut snapshot = DnsMetricsSnapshot::default();
+    let guard = DNS_METRICS.lock().unwrap_or_else(|e| e.into_inner());
+    for event in guard.iter().rev() {
+        if event.ts < cutoff {
+            break;
+        }
+        match &event.kind {
+            DnsMetricKind::TxtResult { ok } => {
+                snapshot.txt_attempts = snapshot.txt_attempts.saturating_add(1);
+                if *ok {
+                    snapshot.txt_successes = snapshot.txt_successes.saturating_add(1);
+                }
+            }
+            DnsMetricKind::AuctionCompleted {
+                duration_secs,
+                settlement_ct,
+            } => {
+                snapshot.auction_completions = snapshot.auction_completions.saturating_add(1);
+                snapshot.settle_durations_secs.push(*duration_secs);
+                snapshot.settlement_amounts_ct.push(*settlement_ct);
+            }
+            DnsMetricKind::AuctionCancelled => {
+                snapshot.auction_cancels = snapshot.auction_cancels.saturating_add(1);
+            }
+            DnsMetricKind::StakeUnlock { .. } => {
+                snapshot.stake_unlock_events = snapshot.stake_unlock_events.saturating_add(1);
+            }
+            DnsMetricKind::StakeLock { .. } => {}
+        }
+    }
+    snapshot
+}
+
+pub fn total_locked_stake() -> u64 {
+    let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+    let mut total = 0u64;
+    for key in db.keys_with_prefix("dns_stake/") {
+        if let Some(bytes) = db.get(&key) {
+            if let Ok(record) = decode_stake(&bytes) {
+                total = total.saturating_add(record.locked_ct);
+            }
+        }
+    }
+    total
+}
+
+#[derive(Clone, Debug)]
+struct DnsMetricEvent {
+    ts: u64,
+    kind: DnsMetricKind,
+}
+
+#[derive(Clone, Debug)]
+enum DnsMetricKind {
+    TxtResult {
+        ok: bool,
+    },
+    AuctionCompleted {
+        duration_secs: u64,
+        settlement_ct: u64,
+    },
+    AuctionCancelled,
+    StakeLock {
+        amount_ct: u64,
+    },
+    StakeUnlock {
+        amount_ct: u64,
+    },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DnsMetricsSnapshot {
+    pub txt_attempts: u64,
+    pub txt_successes: u64,
+    pub auction_completions: u64,
+    pub auction_cancels: u64,
+    pub settle_durations_secs: Vec<u64>,
+    pub settlement_amounts_ct: Vec<u64>,
+    pub stake_unlock_events: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -344,6 +468,88 @@ impl DomainLedger for BlockchainLedger {
             });
         }
 
+        Ok(results)
+    }
+}
+
+#[derive(Default)]
+struct SandboxLedger {
+    seq: AtomicU64,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct SandboxCommandRecord {
+    kind: String,
+    account: Option<String>,
+    amount_ct: u64,
+    memo: String,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct SandboxLedgerRecord {
+    ts: u64,
+    commands: Vec<SandboxCommandRecord>,
+}
+
+impl SandboxLedger {
+    fn new() -> Self {
+        Self {
+            seq: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, commands: &[LedgerBatchCommand]) {
+        if commands.is_empty() {
+            return;
+        }
+        let entries: Vec<SandboxCommandRecord> = commands
+            .iter()
+            .map(|cmd| SandboxCommandRecord {
+                kind: match cmd.kind() {
+                    LedgerBatchKind::Debit => "debit".into(),
+                    LedgerBatchKind::Credit => "credit".into(),
+                    LedgerBatchKind::CreditTreasury => "credit_treasury".into(),
+                },
+                account: cmd.account_label().map(|s| s.to_string()),
+                amount_ct: cmd.amount_ct(),
+                memo: cmd.memo().to_string(),
+            })
+            .collect();
+        let record = SandboxLedgerRecord {
+            ts: now_ts(),
+            commands: entries,
+        };
+        if let Ok(bytes) = foundation_serialization::json::to_vec(&record) {
+            let key = format!(
+                "dns_sandbox/{:020}",
+                self.seq.fetch_add(1, Ordering::SeqCst)
+            );
+            let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = db.insert(&key, bytes);
+        }
+    }
+}
+
+impl DomainLedger for SandboxLedger {
+    fn apply_batch(
+        &self,
+        commands: &[LedgerBatchCommand],
+    ) -> Result<Vec<LedgerBatchResult>, AuctionError> {
+        self.record(commands);
+        let ts = now_ts();
+        let mut results = Vec::with_capacity(commands.len());
+        for (idx, command) in commands.iter().enumerate() {
+            let account = command
+                .account_label()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "sandbox".into());
+            results.push(LedgerBatchResult {
+                account,
+                tx_ref: format!("sandbox-{ts}-{idx}"),
+            });
+        }
         Ok(results)
     }
 }
@@ -565,6 +771,9 @@ fn record_treasury_fee(amount_ct: u64) {
 }
 
 fn ledger_handle() -> Result<Arc<dyn DomainLedger + Send + Sync>, AuctionError> {
+    if REHEARSAL.load(Ordering::Relaxed) {
+        return Ok(SANDBOX_LEDGER.clone());
+    }
     LEDGER_CONTEXT
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -627,6 +836,14 @@ pub fn install_ledger_context(ctx: Arc<dyn DomainLedger + Send + Sync>) {
 #[cfg(any(test, feature = "integration-tests"))]
 pub fn clear_ledger_context() {
     LEDGER_CONTEXT.lock().unwrap().take();
+}
+
+pub fn set_rehearsal(enabled: bool) {
+    REHEARSAL.store(enabled, Ordering::Relaxed);
+}
+
+pub fn rehearsal_enabled() -> bool {
+    REHEARSAL.load(Ordering::Relaxed)
 }
 
 #[cfg(any(test, feature = "integration-tests"))]
@@ -775,6 +992,7 @@ pub fn withdraw_stake(params: &Value) -> Result<Value, AuctionError> {
                 let _ = persist_stake(&mut db, &record);
                 return Err(err);
             }
+            record_stake_unlock(withdraw);
             Ok(json_map(vec![
                 ("status", Value::String("ok".to_string())),
                 ("withdrawn_ct", Value::Number(Number::from(withdraw))),
@@ -874,6 +1092,7 @@ pub fn cancel_sale(params: &Value) -> Result<Value, AuctionError> {
     record.end_ts = now_ts();
     let bytes = encode_auction(&record)?;
     db.insert(&key, bytes);
+    record_auction_cancelled();
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -1705,6 +1924,7 @@ pub fn place_bid(params: &Value) -> Result<Value, AuctionError> {
                 return Err(AuctionError::BidInsufficientStake);
             }
             stake_record.lock(record.stake_requirement_ct)?;
+            record_stake_lock(record.stake_requirement_ct);
             locked_amount = record.stake_requirement_ct;
             persist_stake(&mut db, &stake_record)?;
         }
@@ -1730,6 +1950,7 @@ pub fn place_bid(params: &Value) -> Result<Value, AuctionError> {
             {
                 let mut stake_record = load_stake_or_err(&db, reference)?;
                 stake_record.unlock(amount);
+                record_stake_unlock(amount);
                 persist_stake(&mut db, &stake_record)?;
             }
         }
@@ -1776,6 +1997,7 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
             record.status = AuctionStatus::Cancelled;
             let bytes = encode_auction(&record)?;
             db.insert(&key, bytes);
+            record_auction_cancelled();
             return Err(AuctionError::NoBids);
         }
     };
@@ -1828,6 +2050,7 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
             let refund_amount = stake_record.unlock(stake_record.locked_ct);
             persist_stake(&mut db, &stake_record)?;
             if refund_amount > 0 {
+                record_stake_unlock(refund_amount);
                 if let Some(seller) = record.seller_account.as_ref() {
                     plan.push((
                         LedgerEventKind::RefundStake,
@@ -1923,6 +2146,8 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
     record.end_ts = now;
     let bytes = encode_auction(&record)?;
     db.insert(&key, bytes);
+    let duration_secs = now.saturating_sub(record.start_ts);
+    record_auction_completed(duration_secs, winning_bid.amount_ct);
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -2108,6 +2333,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
     let now = Instant::now();
     if let Some((ok, ts)) = VERIFY_CACHE.lock().unwrap().get(&key) {
         if now.duration_since(*ts) < VERIFY_TTL {
+            record_txt_result(*ok);
             return *ok;
         }
     }
@@ -2118,6 +2344,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
     let needle = format!("tb-verification={}", node_id);
     let ok = txts.iter().any(|t| t.contains(&needle));
     VERIFY_CACHE.lock().unwrap().insert(key, (ok, now));
+    record_txt_result(ok);
     #[cfg(feature = "telemetry")]
     {
         let status = if ok { "verified" } else { "rejected" };
@@ -2568,5 +2795,25 @@ mod tests {
             db.remove(&stake_key("stake-b"));
         }
         clear_domain_state(domain);
+    }
+
+    #[test]
+    fn governance_metrics_snapshot_captures_events() {
+        DNS_METRICS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        record_txt_result(true);
+        record_txt_result(false);
+        record_auction_completed(5, 42);
+        record_auction_cancelled();
+        record_stake_unlock(10);
+        let snap = governance_metrics_snapshot(60);
+        assert_eq!(snap.txt_attempts, 2);
+        assert_eq!(snap.txt_successes, 1);
+        assert_eq!(snap.auction_completions, 1);
+        assert_eq!(snap.auction_cancels, 1);
+        assert_eq!(snap.stake_unlock_events, 1);
+        assert_eq!(snap.settlement_amounts_ct, vec![42]);
     }
 }

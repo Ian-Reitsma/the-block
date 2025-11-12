@@ -428,7 +428,10 @@ pub fn summary_to_json(summary: &AdPolicySnapshotSummary) -> JsonValue {
         JsonValue::Bool(summary.distribution.dual_token_settlement_enabled),
     );
     if let Some(norm) = summary.distribution.normalized_liquidity_ppm {
-        dist.insert("normalized_liquidity_ppm".into(), JsonValue::Number(norm.into()));
+        dist.insert(
+            "normalized_liquidity_ppm".into(),
+            JsonValue::Number(norm.into()),
+        );
     }
     root.insert("distribution".into(), JsonValue::Object(dist));
     // medians
@@ -481,7 +484,10 @@ pub fn detail_to_json(detail: &AdPolicySnapshotDetail) -> JsonValue {
     };
     if let Some(att) = &detail.attestation {
         let mut obj = JsonMap::new();
-        obj.insert("pubkey_hex".into(), JsonValue::String(att.pubkey_hex.clone()));
+        obj.insert(
+            "pubkey_hex".into(),
+            JsonValue::String(att.pubkey_hex.clone()),
+        );
         obj.insert(
             "payload_hash_hex".into(),
             JsonValue::String(att.payload_hash_hex.clone()),
@@ -499,7 +505,10 @@ pub fn readiness_to_json(view: &AdReadinessStatusView) -> JsonValue {
     let mut root = JsonMap::new();
     // config
     let mut cfg = JsonMap::new();
-    cfg.insert("window_secs".into(), JsonValue::Number(view.config.window_secs.into()));
+    cfg.insert(
+        "window_secs".into(),
+        JsonValue::Number(view.config.window_secs.into()),
+    );
     cfg.insert(
         "min_unique_viewers".into(),
         JsonValue::Number(view.config.min_unique_viewers.into()),
@@ -663,11 +672,17 @@ pub fn readiness_to_json(view: &AdReadinessStatusView) -> JsonValue {
     snap.insert("cohort_utilization".into(), JsonValue::Array(cohorts));
     if let Some(us) = &view.snapshot.utilization_summary {
         let mut m = JsonMap::new();
-        m.insert("cohort_count".into(), JsonValue::Number(us.cohort_count.into()));
+        m.insert(
+            "cohort_count".into(),
+            JsonValue::Number(us.cohort_count.into()),
+        );
         m.insert("mean_ppm".into(), JsonValue::Number(us.mean_ppm.into()));
         m.insert("min_ppm".into(), JsonValue::Number(us.min_ppm.into()));
         m.insert("max_ppm".into(), JsonValue::Number(us.max_ppm.into()));
-        m.insert("last_updated".into(), JsonValue::Number(us.last_updated.into()));
+        m.insert(
+            "last_updated".into(),
+            JsonValue::Number(us.last_updated.into()),
+        );
         snap.insert("utilization_summary".into(), JsonValue::Object(m));
     } else {
         snap.insert("utilization_summary".into(), JsonValue::Null);
@@ -721,8 +736,8 @@ pub fn load_param_history(path: &Path) -> io::Result<Vec<(the_block::governance:
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let value: JsonValue = json::from_slice(&bytes)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let value: JsonValue =
+        json::from_slice(&bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let arr = match value.as_array() {
         Some(a) => a,
         None => return Ok(Vec::new()),
@@ -736,10 +751,12 @@ pub fn load_param_history(path: &Path) -> io::Result<Vec<(the_block::governance:
             ) {
                 // Map only the keys we need for explorer readiness stitching.
                 let key_opt = match key_str {
-                    "AdRehearsalEnabled" => Some(the_block::governance::ParamKey::AdRehearsalEnabled),
-                    "AdRehearsalStabilityWindows" => Some(
-                        the_block::governance::ParamKey::AdRehearsalStabilityWindows,
-                    ),
+                    "AdRehearsalEnabled" => {
+                        Some(the_block::governance::ParamKey::AdRehearsalEnabled)
+                    }
+                    "AdRehearsalStabilityWindows" => {
+                        Some(the_block::governance::ParamKey::AdRehearsalStabilityWindows)
+                    }
                     _ => None,
                 };
                 if let Some(key) = key_opt {

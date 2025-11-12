@@ -1,4 +1,3 @@
-use crate::fee;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;

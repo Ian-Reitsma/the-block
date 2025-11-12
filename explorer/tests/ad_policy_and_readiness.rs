@@ -7,11 +7,11 @@ use crypto_suite::{
 use explorer::{router, Explorer, ExplorerHttpState};
 use foundation_serialization::json::{self, Value as JsonValue};
 use httpd::StatusCode;
-use the_block::ad_policy_snapshot::persist_snapshot;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use sys::tempfile::TempDir;
+use the_block::ad_policy_snapshot::persist_snapshot;
 
 fn tmp_path(dir: &TempDir, name: &str) -> PathBuf {
     dir.path().join(name)
@@ -35,7 +35,10 @@ fn ad_policy_snapshots_empty() {
             "/ad/policy/snapshots?data_dir={}",
             data_dir.to_string_lossy()
         );
-        let resp = app.handle(app.request_builder().path(&url).build()).await.expect("response");
+        let resp = app
+            .handle(app.request_builder().path(&url).build())
+            .await
+            .expect("response");
         assert_eq!(resp.status(), StatusCode::OK);
         let value = decode_json(resp.body());
         let obj = value.as_object().expect("object");
@@ -59,7 +62,8 @@ fn ad_policy_snapshot_with_attestation() {
         let base = data_dir.to_string_lossy();
 
         // Prepare market and write a signed snapshot
-        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig::default()));
+        let market: MarketplaceHandle =
+            Arc::new(InMemoryMarketplace::new(MarketplaceConfig::default()));
         // fixed 32-byte hex key (0x07 repeated)
         let key_hex = hex::encode([7u8; 32]);
         std::env::set_var("TB_NODE_KEY_HEX", key_hex);
@@ -71,32 +75,83 @@ fn ad_policy_snapshot_with_attestation() {
             "/ad/policy/snapshots/42?data_dir={}",
             data_dir.to_string_lossy()
         );
-        let resp = app.handle(app.request_builder().path(&url).build()).await.expect("response");
+        let resp = app
+            .handle(app.request_builder().path(&url).build())
+            .await
+            .expect("response");
         assert_eq!(resp.status(), StatusCode::OK);
         let value = decode_json(resp.body());
         let obj = value.as_object().expect("object");
 
         // Validate summary keys
         assert_eq!(obj.get("epoch").and_then(JsonValue::as_u64), Some(42));
-        assert!(obj.get("generated_at").and_then(JsonValue::as_u64).is_some());
-        let dist = obj.get("distribution").and_then(JsonValue::as_object).expect("distribution");
-        assert!(dist.get("viewer_percent").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("host_percent").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("hardware_percent").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("verifier_percent").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("liquidity_percent").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("liquidity_split_ct_ppm").and_then(JsonValue::as_u64).is_some());
-        assert!(dist.get("dual_token_settlement_enabled").and_then(JsonValue::as_bool).is_some());
+        assert!(obj
+            .get("generated_at")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        let dist = obj
+            .get("distribution")
+            .and_then(JsonValue::as_object)
+            .expect("distribution");
+        assert!(dist
+            .get("viewer_percent")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("host_percent")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("hardware_percent")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("verifier_percent")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("liquidity_percent")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("liquidity_split_ct_ppm")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(dist
+            .get("dual_token_settlement_enabled")
+            .and_then(JsonValue::as_bool)
+            .is_some());
         // medians present
-        let med = obj.get("medians").and_then(JsonValue::as_object).expect("medians");
-        assert!(med.get("storage_price_per_mib_usd_micros").and_then(JsonValue::as_u64).is_some());
-        assert!(med.get("verifier_cost_usd_micros").and_then(JsonValue::as_u64).is_some());
-        assert!(med.get("host_fee_usd_micros").and_then(JsonValue::as_u64).is_some());
+        let med = obj
+            .get("medians")
+            .and_then(JsonValue::as_object)
+            .expect("medians");
+        assert!(med
+            .get("storage_price_per_mib_usd_micros")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(med
+            .get("verifier_cost_usd_micros")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(med
+            .get("host_fee_usd_micros")
+            .and_then(JsonValue::as_u64)
+            .is_some());
 
         // Attestation present and valid
-        let att = obj.get("attestation").and_then(JsonValue::as_object).expect("attestation");
-        let pub_hex = att.get("pubkey_hex").and_then(JsonValue::as_str).expect("pubkey_hex");
-        let sig_hex = att.get("signature_hex").and_then(JsonValue::as_str).expect("signature_hex");
+        let att = obj
+            .get("attestation")
+            .and_then(JsonValue::as_object)
+            .expect("attestation");
+        let pub_hex = att
+            .get("pubkey_hex")
+            .and_then(JsonValue::as_str)
+            .expect("pubkey_hex");
+        let sig_hex = att
+            .get("signature_hex")
+            .and_then(JsonValue::as_str)
+            .expect("signature_hex");
         let hash_hex = att
             .get("payload_hash_hex")
             .and_then(JsonValue::as_str)
@@ -109,8 +164,14 @@ fn ad_policy_snapshot_with_attestation() {
         assert_eq!(hash_hex, digest.to_hex().to_string());
 
         // Verify signature
-        let pub_bytes: [u8; 32] = hex::decode(pub_hex).expect("decode pubkey").try_into().expect("pk len");
-        let sig_bytes: [u8; 64] = hex::decode(sig_hex).expect("decode sig").try_into().expect("sig len");
+        let pub_bytes: [u8; 32] = hex::decode(pub_hex)
+            .expect("decode pubkey")
+            .try_into()
+            .expect("pk len");
+        let sig_bytes: [u8; 64] = hex::decode(sig_hex)
+            .expect("decode sig")
+            .try_into()
+            .expect("sig len");
         let vk = VerifyingKey::from_bytes(&pub_bytes).expect("verifying key");
         let sig = EdSignature::from_bytes(&sig_bytes);
         vk.verify(digest.as_bytes(), &sig).expect("signature valid");
@@ -127,7 +188,8 @@ fn ad_policy_snapshots_pagination_and_bounds() {
 
         let data_dir = tmp_path(&tmp, "node-data");
         let base = data_dir.to_string_lossy();
-        let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig::default()));
+        let market: MarketplaceHandle =
+            Arc::new(InMemoryMarketplace::new(MarketplaceConfig::default()));
         // Write four epochs
         for e in 1..=4u64 {
             persist_snapshot(&base, &market, e).expect("persist snapshot");
@@ -138,7 +200,10 @@ fn ad_policy_snapshots_pagination_and_bounds() {
             "/ad/policy/snapshots?data_dir={}&start_epoch=2&end_epoch=4&limit=2",
             data_dir.to_string_lossy()
         );
-        let resp = app.handle(app.request_builder().path(&url).build()).await.expect("response");
+        let resp = app
+            .handle(app.request_builder().path(&url).build())
+            .await
+            .expect("response");
         assert_eq!(resp.status(), StatusCode::OK);
         let value = decode_json(resp.body());
         let obj = value.as_object().expect("object");
@@ -147,21 +212,37 @@ fn ad_policy_snapshots_pagination_and_bounds() {
             .and_then(JsonValue::as_array)
             .expect("snapshots array");
         assert_eq!(snaps.len(), 2);
-        let first_epoch = snaps[0].as_object().and_then(|o| o.get("epoch")).and_then(JsonValue::as_u64).unwrap();
-        let second_epoch = snaps[1].as_object().and_then(|o| o.get("epoch")).and_then(JsonValue::as_u64).unwrap();
+        let first_epoch = snaps[0]
+            .as_object()
+            .and_then(|o| o.get("epoch"))
+            .and_then(JsonValue::as_u64)
+            .unwrap();
+        let second_epoch = snaps[1]
+            .as_object()
+            .and_then(|o| o.get("epoch"))
+            .and_then(JsonValue::as_u64)
+            .unwrap();
         assert_eq!((first_epoch, second_epoch), (4, 3));
 
         // Edge cases: bad epoch param -> 400, missing file -> 404
         let bad = app
-            .handle(app.request_builder().path("/ad/policy/snapshots/not-a-number").build())
+            .handle(
+                app.request_builder()
+                    .path("/ad/policy/snapshots/not-a-number")
+                    .build(),
+            )
             .await
             .expect("response");
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
         let not_found = app
-            .handle(app.request_builder().path(&format!(
-                "/ad/policy/snapshots/999999?data_dir={}",
-                data_dir.to_string_lossy()
-            )).build())
+            .handle(
+                app.request_builder()
+                    .path(&format!(
+                        "/ad/policy/snapshots/999999?data_dir={}",
+                        data_dir.to_string_lossy()
+                    ))
+                    .build(),
+            )
             .await
             .expect("response");
         assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
@@ -213,39 +294,96 @@ fn ad_readiness_status_stitches_governance() {
             data_dir.to_string_lossy(),
             gov_root.to_string_lossy()
         );
-        let resp = app.handle(app.request_builder().path(&url).build()).await.expect("response");
+        let resp = app
+            .handle(app.request_builder().path(&url).build())
+            .await
+            .expect("response");
         assert_eq!(resp.status(), StatusCode::OK);
         let value = decode_json(resp.body());
         let obj = value.as_object().expect("object");
 
         // rehearsal flags present and typed
-        assert!(obj.get("rehearsal_enabled").and_then(JsonValue::as_bool).is_some());
+        assert!(obj
+            .get("rehearsal_enabled")
+            .and_then(JsonValue::as_bool)
+            .is_some());
         assert!(obj
             .get("rehearsal_required_windows")
             .and_then(JsonValue::as_u64)
             .is_some());
 
         // config shape and dynamic thresholds present
-        let cfg = obj.get("config").and_then(JsonValue::as_object).expect("config");
+        let cfg = obj
+            .get("config")
+            .and_then(JsonValue::as_object)
+            .expect("config");
         assert!(cfg.get("window_secs").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("min_unique_viewers").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("min_host_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("min_provider_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("use_percentile_thresholds").and_then(JsonValue::as_bool).is_some());
-        assert!(cfg.get("viewer_percentile").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("host_percentile").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("provider_percentile").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("ema_smoothing_ppm").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("floor_unique_viewers").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("floor_host_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("floor_provider_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("cap_unique_viewers").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("cap_host_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("cap_provider_count").and_then(JsonValue::as_u64).is_some());
-        assert!(cfg.get("percentile_buckets").and_then(JsonValue::as_u64).is_some());
+        assert!(cfg
+            .get("min_unique_viewers")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("min_host_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("min_provider_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("use_percentile_thresholds")
+            .and_then(JsonValue::as_bool)
+            .is_some());
+        assert!(cfg
+            .get("viewer_percentile")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("host_percentile")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("provider_percentile")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("ema_smoothing_ppm")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("floor_unique_viewers")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("floor_host_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("floor_provider_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("cap_unique_viewers")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("cap_host_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("cap_provider_count")
+            .and_then(JsonValue::as_u64)
+            .is_some());
+        assert!(cfg
+            .get("percentile_buckets")
+            .and_then(JsonValue::as_u64)
+            .is_some());
 
         // snapshot present with expected keys
-        let snap = obj.get("snapshot").and_then(JsonValue::as_object).expect("snapshot");
+        let snap = obj
+            .get("snapshot")
+            .and_then(JsonValue::as_object)
+            .expect("snapshot");
         for key in [
             "unique_viewers",
             "host_count",
