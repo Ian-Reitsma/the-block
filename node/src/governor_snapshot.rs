@@ -141,9 +141,10 @@ mod tests {
             .get("attestation")
             .and_then(|v| v.as_object())
             .expect("attestation");
+        let digest_hex = hex::encode(digest);
         assert_eq!(
             attestation.get("payload_hash_hex").and_then(|v| v.as_str()),
-            Some(&digest.to_hex().to_string())
+            Some(digest_hex.as_str())
         );
         env::remove_var("TB_GOVERNOR_SIGN");
         env::remove_var("TB_NODE_KEY_HEX");

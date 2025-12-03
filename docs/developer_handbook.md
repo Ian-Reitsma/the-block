@@ -71,6 +71,9 @@ Every change assumes main-net readiness. Treat this as the working agreement for
 ## Formal Methods and Verification
 - Formal specs (`formal/*.fst`, `docs/formal.md`) integrate with CI. Run `make -C formal` or `cargo test -p formal` to re-check F* proofs before merging math-heavy changes.
 - zk-SNARK and Dilithium proofs are stored alongside code; refer to `docs/maths/` for derivations.
+- Prover benchmarking harnesses live under `node/src/compute_market/tests/prover.rs` so you can run focused comparisons between CPU and GPU provers (`cargo test -p the_block prover_cpu_gpu_latency_smoke`).
+- `tb-cli compute proofs --limit 10` calls `compute_market.sla_history` and prints proof fingerprints, backend selection, and circuit artifacts so you can validate end-to-end traces without spelunking the settlement sled DB.
+- `tb-cli explorer sync-proofs --db explorer.db --url http://localhost:26658` takes the same RPC output, persists `Vec<ProofBundle>` records inside the explorer SQLite tables, and lets you re-verify bundles (or feed `/compute/sla/history`) without granting RPC access to dashboards.
 - Simulation framework lives under `sim/`:
   - Scenarios are regular Rust binaries (see `sim/examples/basic.rs`, `sim/fee_spike.rs`, `sim/compute_market/*`). They accept `--scenario <name> --out <dir>` flags and emit JSON summaries (latency histograms, slashing events, etc.).
   - `cargo run -p sim -- --scenario dependency_fault --config sim/src/dependency_fault_harness/config.toml` reproduces dependency-fault drills. Logs land in `sim/target/`.
@@ -86,7 +89,23 @@ Every change assumes main-net readiness. Treat this as the working agreement for
 ## Developer Support Scripts
 - `Justfile` targets include bootstrap, fmt/lint/test, docs, coverage, fuzz, and docker image builds.
 - `scripts/` directory hosts installers, overlay-store migrations, settlement audits, chaos helpers, and release scripts.
+- `scripts/deploy-worldos-testnet.sh` spins up the World OS energy stack (node + mock oracle + telemetry). Pair it with `docs/testnet/ENERGY_QUICKSTART.md` to exercise the `energy.*` RPCs locally.
 - Use `tools/` for specialist binaries (settlement audit, peer-store migrator, etc.).
+
+## Energy Market Development
+- **Crates and modules** — `crates/energy-market` owns the provider/credit/receipt data model, metrics, and serialization; `node/src/energy.rs` persists the market via `SimpleDb` (sled under `TB_ENERGY_MARKET_DIR`, default `energy_market/`), exposes health checks, and records treasury accruals. RPC handlers live in `node/src/rpc/energy.rs`, CLI glue in `cli/src/energy.rs`, oracle ingestion under `crates/oracle-adapter`, and the mock oracle service in `services/mock-energy-oracle`.
+- **Configuration** — Set `TB_ENERGY_MARKET_DIR` to relocate the sled DB (mirrors other `SimpleDb` consumers). Governance parameters (`energy_min_stake`, `energy_oracle_timeout_blocks`, `energy_slashing_rate_bps`) live in the shared `governance` crate; the runtime hooks call `node::energy::set_governance_params` so proposal activations atomically retune stakes, expiry, and slashing without code changes.
+- **RPC and CLI flows** — `tb-cli energy register|market|settle|submit-reading` speak the same JSON schema the RPC expects (see `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`). Use `--verbose` or `--format json` to dump raw payloads for automation or explorer ingestion. Example round-trip:
+  ```bash
+  tb-cli energy register 10000 120 --meter-address meter_a --jurisdiction US_CA --stake 5000 --owner acct
+  tb-cli energy market --provider-id energy-0x00 --verbose | jq .
+  tb-cli energy submit-reading --reading-json @reading.json
+  tb-cli energy settle energy-0x00 400 --meter-hash <hex> --buyer acct_consumer
+  ```
+- **Telemetry & metrics** — The crate emits `energy_providers_count`, `energy_avg_price`, `energy_kwh_traded_total`, `energy_settlements_total{provider}`, `energy_provider_fulfillment_ms`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
+- **Testing** — Run `cargo test -p energy-market` for unit coverage and `cargo test -p node --test gov_param_wiring` to ensure governance parameters round-trip correctly. Use `scripts/deploy-worldos-testnet.sh` + `docs/testnet/ENERGY_QUICKSTART.md` for integration drills (node + mock oracle + telemetry). When altering serialization, add vectors under `crates/energy-market/tests` and extend the CLI tests in `cli/tests/` to keep JSON schemas stable.
+- **Oracle adapters** — `crates/oracle-adapter` currently ships `NoopSignatureVerifier`; replacing it with the real verifier requires feeding Ed25519/Schnorr keys through env vars (`TB_ORACLE_SIGNING_KEY`, etc., to be finalised) and extending test vectors. The mock oracle service (`services/mock-energy-oracle`) exposes `/meter/:id/reading` and `/meter/:id/submit` endpoints over the in-house `httpd` router so you can simulate both fetching and submitting readings without third-party stacks.
+- **Next steps** — Signature verification, dispute RPCs, explorer visualisations, and deterministic replay coverage are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks` and summarised in `AGENTS.md`. Treat those bullets as blocking work items whenever you touch the energy crates.
 
 ## Contribution Flow
 1. Open an issue or draft PR describing the change.

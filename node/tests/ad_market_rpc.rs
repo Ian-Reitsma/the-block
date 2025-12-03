@@ -1519,7 +1519,7 @@ fn rpc_record_conversion_success() {
         .market
         .register_campaign(campaign)
         .expect("campaign registered");
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-rpc",
         "creative_id": "creative-rpc",
         "advertiser_account": "adv-rpc",
@@ -1570,7 +1570,7 @@ fn rpc_record_conversion_rejects_unknown_creative() {
     let config = MarketplaceConfig::default();
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_record_conversion_unknown", config);
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "missing-cmp",
         "creative_id": "missing-creative",
         "advertiser_account": "missing-adv",
@@ -1744,7 +1744,7 @@ fn rpc_record_conversion_requires_authorization_header() {
         .market
         .register_campaign(campaign)
         .expect("campaign registered");
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-auth",
         "creative_id": "creative-auth",
         "advertiser_account": "adv-auth",
@@ -1807,7 +1807,7 @@ fn rpc_record_conversion_rejects_invalid_token() {
         .market
         .register_campaign(campaign)
         .expect("campaign registered");
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-bad-token",
         "creative_id": "creative-bad-token",
         "advertiser_account": "adv-bad",
@@ -1858,7 +1858,7 @@ fn rpc_record_conversion_rejects_account_mismatch() {
         .market
         .register_campaign(campaign)
         .expect("campaign registered");
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-mismatch",
         "creative_id": "creative-mismatch",
         "advertiser_account": "adv-match",
@@ -1906,7 +1906,7 @@ fn rpc_record_conversion_rejects_missing_token_metadata() {
         .market
         .register_campaign(campaign)
         .expect("campaign registered");
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-missing-token",
         "creative_id": "creative-missing-token",
         "advertiser_account": "adv-missing",

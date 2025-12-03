@@ -1,0 +1,31 @@
+{
+  "title": "Compute Market Overview",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Log Events Emitted",
+      "targets": [{"expr": "log_emit_total"}]
+    },
+    {
+      "type": "graph",
+      "title": "Log Events Dropped",
+      "targets": [{"expr": "log_drop_total"}]
+    },
+    {
+      "type": "graph",
+      "title": "Backlog Factor",
+      "targets": [{"expr": "compute_backlog_factor"}]
+    },
+    {
+      "type": "graph",
+      "title": "Read Ack Outcomes (5m delta)",
+      "legend": {"show": true},
+      "targets": [
+        {
+          "expr": "sum by (result)(increase(read_ack_processed_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    }
+  ]
+}

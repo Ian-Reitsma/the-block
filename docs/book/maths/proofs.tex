@@ -1,0 +1,10 @@
+\section{Inflation Bounds}
+The inflation governor ensures epoch-by-epoch issuance follows a predefined schedule with risk-sensitive adjustments. Formal proof of convergence and Lyapunov stability is provided in Section~\ref{sec:kalman}. Additionally, a non-interactive Groth16 proof attests that the cumulative CT minted to date never exceeds the bound $S_0 (1 + I_y)$.
+
+Let $m$ be the total minted CT and $B$ the cap. The circuit enforces
+\begin{equation}
+ m + r = B, \qquad r \ge 0
+\end{equation}
+where $r$ is a non-negative slack witness. Prover and verifier generate and check a Groth16 proof $(\pi)$ with public inputs $(m,B)$; verification succeeds only when $m \le B$.
+
+Quarterly, the prover posts $(\pi, B)$ on-chain. Light clients recompute the cap from the emission schedule and verify the proof using the prepared verifying key distributed with the consensus code.

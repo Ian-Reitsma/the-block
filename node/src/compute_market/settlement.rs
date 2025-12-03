@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::compute_market::snark::ProofBundle;
 use crate::simple_db;
 use crate::simple_db::{names, SimpleDb, SimpleDbBatch};
 #[cfg(feature = "telemetry")]
@@ -35,6 +36,7 @@ const KEY_NEXT_SEQ: &str = "next_seq";
 const KEY_SLA_QUEUE: &str = "sla_queue";
 const KEY_SLA_HISTORY: &str = "sla_history";
 const SLA_HISTORY_LIMIT: usize = 256;
+const SLA_PROOF_LIMIT: usize = 16;
 
 fn json_map(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -95,6 +97,8 @@ pub struct SlaRecord {
     pub consumer_bond: u64,
     pub deadline: u64,
     pub scheduled_at: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub proofs: Vec<ProofBundle>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +120,8 @@ pub struct SlaResolution {
     pub refunded_ct: u64,
     pub deadline: u64,
     pub resolved_at: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub proofs: Vec<ProofBundle>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -267,6 +273,7 @@ impl SettlementState {
             enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
             enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
             enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
+            enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
             Ok(())
         };
 
@@ -321,6 +328,13 @@ impl SettlementState {
             self.refresh_sla_metrics();
         }
         result
+    }
+
+    fn push_resolution(&mut self, resolution: SlaResolution) {
+        if self.sla_history.len() >= SLA_HISTORY_LIMIT {
+            self.sla_history.pop_front();
+        }
+        self.sla_history.push_back(resolution);
     }
 
     fn apply_outcome(&mut self, record: SlaRecord, outcome: SlaOutcome<'_>) -> SlaResolution {
@@ -395,7 +409,7 @@ impl SettlementState {
                 }
             }
         };
-        SlaResolution {
+        let resolution = SlaResolution {
             job_id: record.job_id,
             provider: record.provider,
             buyer: record.buyer,
@@ -404,7 +418,10 @@ impl SettlementState {
             refunded_ct: refunded,
             deadline: record.deadline,
             resolved_at,
-        }
+            proofs: record.proofs,
+        };
+        self.push_resolution(resolution.clone());
+        resolution
     }
 
     fn enforce_overdue(&mut self, now: u64) -> Vec<SlaResolution> {
@@ -593,9 +610,22 @@ impl Settlement {
                 consumer_bond,
                 deadline,
                 scheduled_at: now_ts(),
+                proofs: Vec::new(),
             };
             state.insert_sla(record);
             state.persist_all();
+        });
+    }
+
+    pub fn record_proof(job_id: &str, proof: ProofBundle) {
+        with_state_mut(|state| {
+            if let Some(entry) = state.sla.iter_mut().find(|r| r.job_id == job_id) {
+                if entry.proofs.len() >= SLA_PROOF_LIMIT {
+                    entry.proofs.remove(0);
+                }
+                entry.proofs.push(proof);
+                state.persist_all();
+            }
         });
     }
 
@@ -766,6 +796,18 @@ impl Settlement {
 
     pub fn recent_roots(n: usize) -> Vec<[u8; 32]> {
         with_state(|state| state.roots.iter().rev().take(n).cloned().collect())
+    }
+
+    pub fn sla_history(limit: usize) -> Vec<SlaResolution> {
+        with_state(|state| {
+            state
+                .sla_history
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect()
+        })
     }
 }
 

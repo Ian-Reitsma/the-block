@@ -34,6 +34,21 @@ fn main() {
             treasury_path,
         );
         state.spawn_cleanup();
+        if let Ok(url) = env::var("AGGREGATOR_EXPLORER_URL") {
+            let poll_secs = env::var("AGGREGATOR_EXPLORER_POLL_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60);
+            let history_limit = env::var("AGGREGATOR_EXPLORER_HISTORY_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(50);
+            metrics_aggregator::spawn_explorer_sla_polling(
+                url,
+                history_limit.max(1),
+                poll_secs.max(1),
+            );
+        }
         let app = router(state);
         let listener = TcpListener::bind(addr).await.expect("bind listener");
         let config = ServerConfig::default();

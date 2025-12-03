@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use the_block::compute_market::{scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
+use the_block::compute_market::{scheduler, snark, ExecutionReceipt, Job, Market, Offer, Workload};
 
 #[test]
 fn invalid_proof_rejected() {
@@ -32,13 +32,15 @@ fn invalid_proof_rejected() {
         priority: scheduler::Priority::Normal,
     };
     market.submit_job(job).unwrap();
-    // Craft invalid proof
+    // Craft invalid proof by tampering with a valid bundle
+    let mut bundle = snark::prove(&wasm, &expected).expect("generate snark proof");
+    bundle.output_commitment = [0u8; 32];
     let receipt = ExecutionReceipt {
         reference: expected,
         output: expected,
         payout_ct: 5,
         payout_it: 0,
-        proof: Some(vec![0]),
+        proof: Some(bundle),
     };
     assert!(market.submit_slice("job1", receipt).is_err());
 }

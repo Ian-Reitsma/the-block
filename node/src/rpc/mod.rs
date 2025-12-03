@@ -60,6 +60,7 @@ pub mod client;
 pub mod compute_market;
 pub mod consensus;
 pub mod dex;
+pub mod energy;
 pub mod governance;
 pub mod governor;
 pub mod htlc;
@@ -500,6 +501,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "dex_escrow_proof",
     "htlc_status",
     "htlc_refund",
+    "energy.register_provider",
+    "energy.market_state",
+    "energy.settle",
+    "energy.submit_reading",
     "storage_upload",
     "storage_challenge",
     "storage.repair_history",
@@ -512,6 +517,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "compute_market.provider_balances",
     "compute_market.audit",
     "compute_market.recent_roots",
+    "compute_market.sla_history",
     "compute_market.scheduler_metrics",
     "compute_market.scheduler_stats",
     "compute.reputation_get",
@@ -2113,6 +2119,15 @@ fn dispatch(
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             serialize_response(compute_market::recent_roots(n))?
         }
+        "compute_market.sla_history" => {
+            let n = req
+                .params
+                .get("limit")
+                .or_else(|| req.params.get("n"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(16) as usize;
+            compute_market::sla_history(n)
+        }
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
         "scheduler.stats" => scheduler::stats(),
@@ -2592,6 +2607,28 @@ fn dispatch(
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let now = req.params.get("now").and_then(|v| v.as_u64()).unwrap_or(0);
             serialize_response(htlc::refund(id, now))?
+        }
+        "energy.register_provider" => energy::register(&req.params),
+        "energy.market_state" => {
+            let provider = req
+                .params
+                .get("provider_id")
+                .and_then(|value| value.as_str());
+            energy::market_state(provider)
+        }
+        "energy.settle" => {
+            let height = bc
+                .lock()
+                .map(|guard| guard.block_height)
+                .unwrap_or_default();
+            energy::settle(&req.params, height)
+        }
+        "energy.submit_reading" => {
+            let height = bc
+                .lock()
+                .map(|guard| guard.block_height)
+                .unwrap_or_default();
+            energy::submit_reading(&req.params, height)
         }
         "storage_upload" => {
             let object_id = req
@@ -3103,6 +3140,7 @@ pub fn fuzz_dispatch_request(
         runtime_cfg: Arc::clone(&runtime_cfg),
         market,
         ad_readiness: readiness,
+        governor: None,
         clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
         ban_secs: 1,

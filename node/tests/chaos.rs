@@ -2,6 +2,8 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use sys::tempfile::tempdir;
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::{net::Node, Blockchain, ShutdownFlag};
 
 fn free_addr() -> SocketAddr {

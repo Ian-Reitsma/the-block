@@ -1,8 +1,9 @@
 #![cfg(feature = "integration-tests")]
 
 use ad_market::{
-    Campaign, CampaignTargeting, Creative, DistributionPolicy, ImpressionContext,
-    InMemoryMarketplace, Marketplace, MarketplaceConfig, ReservationKey, MICROS_PER_DOLLAR,
+    Campaign, CampaignTargeting, Creative, CreativePlacement, DeliveryChannel, DistributionPolicy,
+    ImpressionContext, InMemoryMarketplace, Marketplace, MarketplaceConfig, ReservationKey,
+    MICROS_PER_DOLLAR,
 };
 use the_block::ReadAck;
 
@@ -20,9 +21,17 @@ fn stub_ack(seed: u8) -> ReadAck {
         campaign_id: None,
         creative_id: None,
         selection_receipt: None,
+        geo: None,
+        device: None,
+        crm_lists: Vec::new(),
+        delivery_channel: DeliveryChannel::Http,
+        mesh: None,
         badge_soft_intent: None,
         readiness: None,
         zk_proof: None,
+        presence_badge: None,
+        venue_id: None,
+        crowd_size_hint: None,
     }
 }
 
@@ -31,8 +40,6 @@ fn identical_paths_yield_unique_reservations() {
     let market = InMemoryMarketplace::new(MarketplaceConfig {
         distribution: DistributionPolicy::new(40, 30, 20, 5, 5),
         default_price_per_mib_usd_micros: 200_000,
-        verifier_cost_usd_micros: 0,
-        host_fee_usd_micros: 0,
         ..MarketplaceConfig::default()
     });
     market
@@ -50,10 +57,16 @@ fn identical_paths_yield_unique_reservations() {
                 badges: Vec::new(),
                 domains: vec!["example.com".into()],
                 metadata: Default::default(),
+                mesh_payload: None,
+                placement: CreativePlacement::default(),
             }],
             targeting: CampaignTargeting {
                 domains: vec!["example.com".into()],
                 badges: Vec::new(),
+                geo: Default::default(),
+                device: Default::default(),
+                crm_lists: Default::default(),
+                delivery: Default::default(),
             },
             metadata: Default::default(),
         })

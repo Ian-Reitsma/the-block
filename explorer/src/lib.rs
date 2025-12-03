@@ -5,20 +5,24 @@ use crate::ad_view::{
 };
 use concurrency::cache::LruCache;
 use crypto_suite::hashing::blake3::Hasher;
-use crypto_suite::hex::encode as hex_encode;
+use crypto_suite::hex::{self, encode as hex_encode};
 use diagnostics::anyhow::{self, Result as AnyhowResult};
 use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
 use foundation_sqlite::{
     params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
 };
 use httpd::{HttpError, Request, Response, Router, StatusCode};
+use std::convert::TryInto;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
+use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
@@ -96,6 +100,7 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/storage/manifests", storage_manifests)
         .get("/dex/order_book", dex_order_book)
         .get("/compute/jobs", compute_jobs)
+        .get("/compute/sla/history", compute_sla_history)
         .get("/dex/trust_lines", dex_trust_lines)
         .get("/subsidy/history", subsidy_history)
         .get("/metrics/:name", metric_points)
@@ -181,6 +186,44 @@ fn load_governance_params(path: &Path) -> Result<Params, HttpError> {
 
 fn log_error(context: &str, err: &dyn std::fmt::Display) {
     eprintln!("{context}: {err}");
+}
+
+fn sla_outcome_fields(kind: &SlaResolutionKind) -> (&'static str, Option<&str>) {
+    match kind {
+        SlaResolutionKind::Completed => ("completed", None),
+        SlaResolutionKind::Cancelled { reason } => ("cancelled", Some(reason)),
+        SlaResolutionKind::Violated { reason } => ("violated", Some(reason)),
+    }
+}
+
+fn backend_label(backend: SnarkBackend) -> &'static str {
+    match backend {
+        SnarkBackend::Cpu => "CPU",
+        SnarkBackend::Gpu => "GPU",
+    }
+}
+
+fn clamp_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn proof_bundle_to_record(bundle: &ProofBundle) -> ComputeSlaProofRecord {
+    ComputeSlaProofRecord {
+        fingerprint: hex_encode(bundle.fingerprint()),
+        backend: backend_label(bundle.backend).to_string(),
+        circuit_hash: hex_encode(bundle.circuit_hash),
+        program_commitment: hex_encode(bundle.program_commitment),
+        output_commitment: hex_encode(bundle.output_commitment),
+        witness_commitment: hex_encode(bundle.witness_commitment),
+        latency_ms: bundle.latency_ms,
+        verified: bundle.self_check(),
+        artifact: ComputeSlaArtifactRecord {
+            circuit_hash: hex_encode(bundle.artifact.circuit_hash),
+            wasm_hash: hex_encode(bundle.artifact.wasm_hash),
+            generated_at: bundle.artifact.generated_at,
+        },
+        proof: hex_encode(&bundle.encoded),
+    }
 }
 
 async fn block_by_hash(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
@@ -525,6 +568,23 @@ async fn compute_jobs(request: Request<ExplorerHttpState>) -> Result<Response, H
     let explorer = explorer_from(&request);
     let jobs = explorer.compute_jobs().unwrap_or_default();
     Response::new(StatusCode::OK).json(&jobs)
+}
+
+async fn compute_sla_history(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let limit = request
+        .query_param("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(25)
+        .min(256);
+    let explorer = explorer_from(&request);
+    let records = match explorer.compute_sla_history(limit) {
+        Ok(history) => history,
+        Err(err) => {
+            log_error("sla history query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&records)
 }
 
 async fn dex_trust_lines(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
@@ -1077,6 +1137,128 @@ pub struct ComputeJobRecord {
     pub buyer: String,
     pub provider: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputeSlaArtifactRecord {
+    pub circuit_hash: String,
+    pub wasm_hash: String,
+    pub generated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputeSlaProofRecord {
+    pub fingerprint: String,
+    pub backend: String,
+    pub circuit_hash: String,
+    pub program_commitment: String,
+    pub output_commitment: String,
+    pub witness_commitment: String,
+    pub latency_ms: u64,
+    pub verified: bool,
+    pub artifact: ComputeSlaArtifactRecord,
+    pub proof: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputeSlaHistoryRecord {
+    pub job_id: String,
+    pub provider: String,
+    pub buyer: String,
+    pub outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_reason: Option<String>,
+    pub burned_ct: u64,
+    pub refunded_ct: u64,
+    pub deadline: u64,
+    pub resolved_at: u64,
+    pub proofs: Vec<ComputeSlaProofRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProofRecordError {
+    Hex { field: &'static str, error: String },
+    UnknownBackend(String),
+    InvalidProof(String),
+}
+
+impl fmt::Display for ProofRecordError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProofRecordError::Hex { field, error } => {
+                write!(f, "{field} is not valid hex: {error}")
+            }
+            ProofRecordError::UnknownBackend(label) => {
+                write!(f, "unknown snark backend '{label}'")
+            }
+            ProofRecordError::InvalidProof(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for ProofRecordError {}
+
+impl ComputeSlaArtifactRecord {
+    pub fn to_artifact(&self) -> Result<CircuitArtifact, ProofRecordError> {
+        Ok(CircuitArtifact {
+            circuit_hash: decode_hex_array(&self.circuit_hash, "artifact.circuit_hash")?,
+            wasm_hash: decode_hex_array(&self.wasm_hash, "artifact.wasm_hash")?,
+            generated_at: self.generated_at,
+        })
+    }
+}
+
+impl ComputeSlaProofRecord {
+    pub fn to_bundle(&self) -> Result<ProofBundle, ProofRecordError> {
+        let backend = parse_backend_label(&self.backend)?;
+        let circuit_hash = decode_hex_array(&self.circuit_hash, "circuit_hash")?;
+        let program_commitment = decode_hex_array(&self.program_commitment, "program_commitment")?;
+        let output_commitment = decode_hex_array(&self.output_commitment, "output_commitment")?;
+        let witness_commitment = decode_hex_array(&self.witness_commitment, "witness_commitment")?;
+        let artifact = self.artifact.to_artifact()?;
+        let proof_bytes = hex::decode(&self.proof).map_err(|err| ProofRecordError::Hex {
+            field: "proof",
+            error: err.to_string(),
+        })?;
+        ProofBundle::from_encoded_parts(
+            backend,
+            circuit_hash,
+            program_commitment,
+            output_commitment,
+            witness_commitment,
+            proof_bytes,
+            self.latency_ms,
+            artifact,
+        )
+        .map_err(|err| ProofRecordError::InvalidProof(err.to_string()))
+    }
+}
+
+fn parse_backend_label(label: &str) -> Result<SnarkBackend, ProofRecordError> {
+    match label.to_ascii_lowercase().as_str() {
+        "cpu" => Ok(SnarkBackend::Cpu),
+        "gpu" => Ok(SnarkBackend::Gpu),
+        other => Err(ProofRecordError::UnknownBackend(other.to_string())),
+    }
+}
+
+fn decode_hex_array<const N: usize>(
+    input: &str,
+    field: &'static str,
+) -> Result<[u8; N], ProofRecordError> {
+    let bytes = hex::decode(input).map_err(|err| ProofRecordError::Hex {
+        field,
+        error: err.to_string(),
+    })?;
+    if bytes.len() != N {
+        return Err(ProofRecordError::Hex {
+            field,
+            error: format!("expected {N} bytes, found {}", bytes.len()),
+        });
+    }
+    let mut out = [0u8; N];
+    out.copy_from_slice(&bytes);
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1954,6 +2136,14 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS compute_sla_history (job_id TEXT PRIMARY KEY, provider TEXT NOT NULL, buyer TEXT NOT NULL, outcome TEXT NOT NULL, outcome_reason TEXT, burned_ct INTEGER NOT NULL, refunded_ct INTEGER NOT NULL, deadline INTEGER NOT NULL, resolved_at INTEGER NOT NULL)",
+            params![],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS compute_sla_proofs (job_id TEXT PRIMARY KEY, bundles BLOB NOT NULL)",
+            params![],
+        )?;
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS trust_lines (from_id TEXT, to_id TEXT, \"limit\" INTEGER)",
             params![],
         )?;
@@ -2566,6 +2756,88 @@ impl Explorer {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    pub fn record_sla_history(&self, entries: &[SlaResolution]) -> DbResult<()> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        for entry in entries {
+            let (outcome, reason) = sla_outcome_fields(&entry.outcome);
+            tx.execute(
+                "INSERT OR REPLACE INTO compute_sla_history (job_id, provider, buyer, outcome, outcome_reason, burned_ct, refunded_ct, deadline, resolved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    &entry.job_id,
+                    &entry.provider,
+                    &entry.buyer,
+                    outcome,
+                    reason.unwrap_or(""),
+                    clamp_i64(entry.burned_ct),
+                    clamp_i64(entry.refunded_ct),
+                    clamp_i64(entry.deadline),
+                    clamp_i64(entry.resolved_at),
+                ],
+            )?;
+            let bundles = binary::encode(&entry.proofs)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO compute_sla_proofs (job_id, bundles) VALUES (?1, ?2)",
+                params![&entry.job_id, bundles],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn compute_sla_history(&self, limit: usize) -> DbResult<Vec<ComputeSlaHistoryRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT job_id, provider, buyer, outcome, outcome_reason, burned_ct, refunded_ct, deadline, resolved_at FROM compute_sla_history ORDER BY resolved_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![clamp_i64(limit as u64)], |row| {
+            Ok(ComputeSlaHistoryRecord {
+                job_id: row.get(0)?,
+                provider: row.get(1)?,
+                buyer: row.get(2)?,
+                outcome: row.get(3)?,
+                outcome_reason: {
+                    let reason: String = row.get(4)?;
+                    if reason.is_empty() {
+                        None
+                    } else {
+                        Some(reason)
+                    }
+                },
+                burned_ct: row.get::<_, i64>(5)? as u64,
+                refunded_ct: row.get::<_, i64>(6)? as u64,
+                deadline: row.get::<_, i64>(7)? as u64,
+                resolved_at: row.get::<_, i64>(8)? as u64,
+                proofs: Vec::new(),
+            })
+        })?;
+        let mut out = Vec::new();
+        for rec in rows {
+            let mut record = rec?;
+            record.proofs = self.load_sla_proofs(&conn, &record.job_id)?;
+            out.push(record);
+        }
+        Ok(out)
+    }
+
+    fn load_sla_proofs(
+        &self,
+        conn: &Connection,
+        job_id: &str,
+    ) -> DbResult<Vec<ComputeSlaProofRecord>> {
+        let mut stmt = conn.prepare("SELECT bundles FROM compute_sla_proofs WHERE job_id=?1")?;
+        let rows = stmt.query_map(params![job_id], |row| row.get::<_, Vec<u8>>(0))?;
+        if let Some(row) = rows.into_iter().next() {
+            let blob = row?;
+            let bundles: Vec<ProofBundle> = binary::decode(&blob)?;
+            let proofs: Vec<ComputeSlaProofRecord> =
+                bundles.iter().map(proof_bundle_to_record).collect();
+            Ok(proofs)
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     pub fn index_trust_line(&self, from: &str, to: &str, limit: u64) -> DbResult<()> {

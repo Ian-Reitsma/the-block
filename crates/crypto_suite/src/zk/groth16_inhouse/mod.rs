@@ -6,6 +6,8 @@ use std::str::FromStr;
 
 use foundation_bigint::BigUint;
 use foundation_lazy::sync::Lazy;
+#[cfg(feature = "gpu")]
+use std::{sync::Arc, thread};
 use thiserror::Error;
 
 const MODULUS_DEC: &str =
@@ -500,6 +502,35 @@ impl Groth16Bn256 {
         })
     }
 
+    #[cfg(feature = "gpu")]
+    pub fn prove_gpu<C: Circuit, R>(
+        params: &Parameters,
+        circuit: C,
+        _rng: &mut R,
+    ) -> Result<Proof, Groth16Error> {
+        let mut cs = AssignmentCS::new(&params.shape);
+        circuit
+            .synthesize(&mut cs)
+            .map_err(Groth16Error::Synthesis)?;
+
+        if cs.public_inputs.len() != params.shape.input_indices.len() {
+            return Err(Groth16Error::Proof("public input length mismatch".into()));
+        }
+        if cs.aux_inputs.len() != params.shape.aux_indices.len() {
+            return Err(Groth16Error::Proof(
+                "auxiliary input length mismatch".into(),
+            ));
+        }
+
+        let assignments = cs.assignments();
+        verify_constraints_parallel(&cs.constraints, &assignments)?;
+
+        Ok(Proof {
+            public_inputs: cs.public_inputs,
+            aux_assignments: cs.aux_inputs,
+        })
+    }
+
     pub fn prepare_verifying_key(params: &Parameters) -> PreparedVerifyingKey {
         PreparedVerifyingKey {
             shape: params.shape.clone(),
@@ -560,4 +591,59 @@ impl Proof {
     pub fn inner(&self) -> (&[FieldElement], &[FieldElement]) {
         (&self.public_inputs, &self.aux_assignments)
     }
+
+    pub fn from_components(
+        public_inputs: Vec<FieldElement>,
+        aux_assignments: Vec<FieldElement>,
+    ) -> Self {
+        Self {
+            public_inputs,
+            aux_assignments,
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn verify_constraints_parallel(
+    constraints: &[Constraint],
+    assignments: &[FieldElement],
+) -> Result<(), Groth16Error> {
+    if constraints.is_empty() {
+        return Ok(());
+    }
+    let workers = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .max(1);
+    let chunk_size = (constraints.len() + workers - 1) / workers;
+    let assignments = Arc::new(assignments.to_vec());
+    let shared = Arc::new(constraints.to_vec());
+    let mut handles = Vec::new();
+    for (idx, start) in (0..shared.len()).step_by(chunk_size).enumerate() {
+        let assignments = Arc::clone(&assignments);
+        let constraints = Arc::clone(&shared);
+        let end = ((idx + 1) * chunk_size).min(constraints.len());
+        handles.push(thread::spawn(move || {
+            for constraint in &constraints[start..end] {
+                if !constraint_satisfied(constraint, &assignments) {
+                    return Err(Groth16Error::Proof("constraint unsatisfied".into()));
+                }
+            }
+            Ok(())
+        }));
+    }
+    for handle in handles {
+        handle
+            .join()
+            .map_err(|_| Groth16Error::Proof("constraint worker panicked".into()))??;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "gpu")]
+fn constraint_satisfied(constraint: &Constraint, assignments: &[FieldElement]) -> bool {
+    let a = constraint.a.evaluate(assignments);
+    let b = constraint.b.evaluate(assignments);
+    let c = constraint.c.evaluate(assignments);
+    a.clone() * b.clone() == c
 }

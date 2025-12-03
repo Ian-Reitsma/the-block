@@ -1,0 +1,7 @@
+[book]
+title = "The-Block Documentation"
+authors = ["The-Block Developers"]
+src = "."
+
+[build]
+create-missing = false

@@ -185,6 +185,13 @@ const PAYOUT_AD_STALENESS_PANEL_TITLE: &str = "Advertising payout staleness (sec
 const PAYOUT_AD_STALENESS_EXPR: &str =
     "clamp_min(time() - max by (role)(explorer_block_payout_ad_last_seen_timestamp), 0)";
 const PAYOUT_ROLE_LEGEND: &str = "{{role}}";
+const SLA_OUTCOME_PANEL_TITLE: &str = "Explorer compute SLA outcomes";
+const SLA_OUTCOME_EXPR: &str = "explorer_compute_sla_outcome_total";
+const SLA_OUTCOME_LEGEND: &str = "{{outcome}}";
+const SLA_FRESHNESS_PANEL_TITLE: &str = "Explorer compute SLA staleness (seconds)";
+const SLA_FRESHNESS_EXPR: &str = "clamp_min(time() - explorer_compute_sla_last_seen_timestamp, 0)";
+const SLA_POLL_ERROR_PANEL_TITLE: &str = "Explorer compute SLA poll errors";
+const SLA_POLL_ERROR_EXPR: &str = "explorer_compute_sla_poll_error_total";
 const BRIDGE_REWARD_CLAIMS_PANEL_TITLE: &str = "bridge_reward_claims_total (5m delta)";
 const BRIDGE_REWARD_CLAIMS_EXPR: &str = "increase(bridge_reward_claims_total[5m])";
 const BRIDGE_REWARD_APPROVALS_PANEL_TITLE: &str =
@@ -582,6 +589,31 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
                 PAYOUT_AD_PANEL_TITLE,
                 PAYOUT_AD_EXPR,
                 PAYOUT_ROLE_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_compute_sla_outcome_total" {
+            payouts.push(build_grouped_delta_panel(
+                SLA_OUTCOME_PANEL_TITLE,
+                SLA_OUTCOME_EXPR,
+                SLA_OUTCOME_LEGEND,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_compute_sla_last_seen_timestamp" {
+            payouts.push(build_simple_timeseries_panel(
+                SLA_FRESHNESS_PANEL_TITLE,
+                SLA_FRESHNESS_EXPR,
+                metric,
+            ));
+            continue;
+        }
+        if metric.name == "explorer_compute_sla_poll_error_total" {
+            payouts.push(build_simple_timeseries_panel(
+                SLA_POLL_ERROR_PANEL_TITLE,
+                SLA_POLL_ERROR_EXPR,
                 metric,
             ));
             continue;

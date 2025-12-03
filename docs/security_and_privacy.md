@@ -18,6 +18,14 @@ Security is enforced in code, not promises. This guide consolidates the former t
 - Release provenance (`node/src/provenance.rs`) verifies binary hashes against signed allow lists; attested binaries roll back automatically if hashes drift.
 - Environment variables `TB_RELEASE_SIGNERS`, `TB_RELEASE_SIGNERS_FILE` override defaults for air-gapped deployments.
 
+## Energy Oracle Safety
+- **Key sourcing** — Oracle adapters (`crates/oracle-adapter`) must draw signing keys from hardened storage (`TB_ORACLE_KEY_HEX`, hardware modules, or governance-approved secret stores). Never embed keys in code or logs. The forthcoming Ed25519 verifier replaces `NoopSignatureVerifier`; once landed, every meter reading must carry a valid signature over `MeterReadingPayload::signing_bytes()`.
+- **Transport & auth** — Oracle adapters send readings through the same HTTP/TLS stack as all other tooling (first-party `httpd::Client`). Configure mutual-TLS or RPC auth tokens (`TB_RPC_AUTH_TOKEN`) before enabling public ingestion. Rate limiting (`node/src/rpc/mod.rs::check_rate_limit`) applies to `energy.*` endpoints, so adapters should honour `429` responses and retry with jitter.
+- **Telemetry redaction** — Meter readings flow through `node/src/rpc/energy.rs`. Logs must omit raw signatures and meter values unless `RUST_LOG=trace` is explicitly set. Oracle adapters should scrub meter IDs and signatures before logging; dashboards rely on aggregate metrics (`energy_kwh_traded_total`, `oracle_reading_latency_seconds`) instead of raw payloads.
+- **Dispute hooks** — Until dedicated dispute RPCs ship, governance proposals (e.g., raising `energy_slashing_rate_bps`, pausing settlement) are the primary kill switch. Record suspect `meter_hash` values via `tb-cli energy market --verbose`, attach them to proposals, and document rollback steps. Once the dispute RPC/CLI pair lands they will emit ledger anchors referencing the disputed readings plus telemetry counters for slash totals.
+- **Mock oracle isolation** — `services/mock-energy-oracle` is a dev/testnet binary only. It uses mock signatures (provider_id||kwh) and intentionally relaxed auth. Never expose it to production networks; wrap it in loopback-only listeners when exercising `scripts/deploy-worldos-testnet.sh`.
+- **Release & supply chain** — Energy/oracle crates fall under the same release-provenance gates as the rest of the workspace: `cargo vendor` snapshots, `provenance.json` hashes, signed tags, and dependency audits must pass before shipping binaries that include `crates/energy-market` or `crates/oracle-adapter`. Secrets must be injected at runtime (env or KMS), not bundled into release artifacts.
+
 ## Privacy Layers
 - Reads stay free by logging signed `ReadAck` receipts, not payloads. Operators can redact metadata via the privacy crate (`privacy/`) when the `privacy` feature is enabled.
 - Read-ack privacy modes (`node/src/config.rs::ReadAckPrivacyMode` + `node/src/blockchain/privacy.rs`):

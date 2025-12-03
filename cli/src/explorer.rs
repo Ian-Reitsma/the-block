@@ -1,3 +1,6 @@
+use crate::compute::parse_sla_history_from_str;
+use crate::json_helpers::{json_object_from, json_rpc_request, json_u64};
+use crate::rpc::RpcClient;
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
@@ -25,6 +28,12 @@ pub enum ExplorerCmd {
         hash: Option<String>,
         height: Option<u64>,
         format: PayoutOutputFormat,
+    },
+    /// Fetch /compute_market.sla_history and persist into the explorer database
+    SyncProofs {
+        db: String,
+        url: String,
+        limit: usize,
     },
 }
 
@@ -113,6 +122,24 @@ impl ExplorerCmd {
                 ))
                 .build(),
             )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("explorer.sync_proofs"),
+                    "sync-proofs",
+                    "Persist compute_market.sla_history entries into the explorer database",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("db", "db", "Explorer database path").default("explorer.db"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("limit", "limit", "Number of SLA entries to ingest")
+                        .default("32"),
+                ))
+                .build(),
+            )
             .build()
     }
 
@@ -190,6 +217,20 @@ impl ExplorerCmd {
                     height,
                     format,
                 })
+            }
+            "sync-proofs" => {
+                let db = sub_matches
+                    .get_string("db")
+                    .unwrap_or_else(|| "explorer.db".to_string());
+                let url = sub_matches
+                    .get_string("url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let limit = sub_matches
+                    .get_string("limit")
+                    .unwrap_or_else(|| "32".to_string())
+                    .parse::<usize>()
+                    .map_err(|err| format!("invalid value for '--limit': {err}"))?;
+                Ok(ExplorerCmd::SyncProofs { db, url, limit })
             }
             other => Err(format!("unknown subcommand '{other}'")),
         }
@@ -294,6 +335,25 @@ pub fn handle_with_writer(cmd: ExplorerCmd, writer: &mut impl Write) -> Result<(
                     write_prometheus_payload(&breakdown, writer)?;
                 }
             }
+            Ok(())
+        }
+        ExplorerCmd::SyncProofs { db, url, limit } => {
+            let store = ExplorerStore::open(&db)
+                .map_err(|err| format!("failed to open explorer database {db}: {err}"))?;
+            let client = RpcClient::from_env();
+            let params = json_object_from([("limit", json_u64(limit as u64))]);
+            let payload = json_rpc_request("compute_market.sla_history", params);
+            let text = client
+                .call(&url, &payload)
+                .map_err(|err| format!("rpc call failed: {err}"))?
+                .text()
+                .map_err(|err| format!("failed to read rpc response: {err}"))?;
+            let entries = parse_sla_history_from_str(&text)?;
+            store
+                .record_sla_history(&entries)
+                .map_err(|err| format!("failed to persist SLA history: {err}"))?;
+            writeln!(writer, "ingested {} SLA entries", entries.len())
+                .map_err(|err| format!("failed to write output: {err}"))?;
             Ok(())
         }
     }

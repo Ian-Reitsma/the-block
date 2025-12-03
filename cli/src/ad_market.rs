@@ -411,7 +411,8 @@ fn verify_policy_snapshot(data_dir: &str, epoch: u64) -> Result<(), String> {
         .get("payload_hash_hex")
         .and_then(Value::as_str)
         .ok_or_else(|| "sidecar missing payload_hash_hex".to_string())?;
-    if hash_hex != digest.to_hex().as_str() {
+    let digest_hex = digest.to_hex().to_string();
+    if hash_hex != digest_hex {
         return Err("payload hash mismatch".into());
     }
     let pub_bytes_vec = hex::decode(pub_hex).map_err(|err| format!("decode pubkey: {err}"))?;
@@ -424,8 +425,7 @@ fn verify_policy_snapshot(data_dir: &str, epoch: u64) -> Result<(), String> {
     let sig_bytes: [u8; 64] = sig_bytes_vec
         .try_into()
         .map_err(|_| "signature has invalid length".to_string())?;
-    let signature =
-        EdSignature::from_bytes(&sig_bytes).map_err(|err| format!("invalid signature: {err}"))?;
+    let signature = EdSignature::from_bytes(&sig_bytes);
     verifying_key
         .verify(digest.as_bytes(), &signature)
         .map_err(|err| format!("signature verification failed: {err}"))?;

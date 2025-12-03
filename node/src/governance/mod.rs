@@ -118,4 +118,7 @@ pub enum ParamKey {
     AdPercentileBuckets,
     AdRehearsalEnabled,
     AdRehearsalStabilityWindows,
+    EnergyMinStake,
+    EnergyOracleTimeoutBlocks,
+    EnergySlashingRateBps,
 }

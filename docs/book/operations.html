@@ -1,0 +1,367 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Operations - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="operations"><a class="header" href="#operations">Operations</a></h1>
+<p>This guide replaces the scattered <code>docs/operators/**</code>, <code>docs/monitoring*.md</code>, <code>docs/runbook.md</code>, and similar files. Use it when running production nodes, gateways, metrics stacks, or chaos drills.</p>
+<h2 id="system-requirements"><a class="header" href="#system-requirements">System Requirements</a></h2>
+<ul>
+<li>Rust 1.86+, <code>cargo-nextest</code>, <code>cargo-fuzz</code> (nightly), Python 3.12.3 (virtualenv), Node 18+ for dashboards. <code>scripts/bootstrap.sh</code>/<code>.ps1</code> installs everything plus <code>patchelf</code> on Linux.</li>
+<li>Storage engines via SimpleDb: in-house (default), RocksDB (feature-gated), and memory (for lightweight builds). Sled is used for dedicated subsystems (for example, governance) via the <code>sled/</code> crate. Provision SSDs and enable <code>storage_engine::KeyValue::flush_wal</code> watchers to keep WAL sizes bounded.</li>
+<li>Network: QUIC-ready NICs with low jitter; TLS certificates derive directly from node keys so no external PKI is needed.</li>
+</ul>
+<h2 id="bootstrap-and-configuration"><a class="header" href="#bootstrap-and-configuration">Bootstrap and Configuration</a></h2>
+<ol>
+<li>Clone the repo, run <code>scripts/bootstrap.sh</code>, and copy <code>.env.example</code> → <code>.env</code> for node defaults.</li>
+<li><code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code> before coding; <code>just test-full</code> mirrors CI.</li>
+<li>Node configuration flows through <code>node/.env</code>, CLI flags, or env vars prefixed with <code>TB_*</code> (see <code>node/src/config.rs</code>). <code>config/</code> holds policy baselines.</li>
+<li>Use <code>scripts/bootstrap_ps1</code> on Windows/WSL; the runtime works cross-platform and telemetry pipes remain identical.</li>
+</ol>
+<h2 id="building-and-testing"><a class="header" href="#building-and-testing">Building and Testing</a></h2>
+<ul>
+<li><code>cargo build -p the_block --release</code> builds the node; <code>cargo build -p cli --bin tb-cli</code> compiles the CLI.</li>
+<li><code>cargo nextest run --all-features</code> exercises the multi-crate workspace with the telemetry feature enabled.</li>
+<li>Python demo: <code>python demo.py</code> wires the PyO3 module from <code>node/src/py.rs</code> for deterministic replay tests.</li>
+</ul>
+<h2 id="running-a-node"><a class="header" href="#running-a-node">Running a Node</a></h2>
+<ul>
+<li><code>tb-cli node start --config config/node.toml</code> (or <code>just node</code>) spawns the daemon with gateway, RPC, gossip, and compute/storage workers enabled.</li>
+<li>Gateway hosting toggles: <code>--gateway-http</code>, <code>--range-boost</code>, <code>--mobile-cache</code>. DNS publishing requires the <code>.block</code> registry key configured via <code>TB_GATEWAY_ZONE</code> env vars.</li>
+<li>Mesh + overlay migration: run <code>scripts/migrate_overlay_store.rs</code> when upgrading peer stores; reference <code>docs/architecture.md#overlay-and-peer-persistence</code> for background.</li>
+</ul>
+<h2 id="telemetry-wiring"><a class="header" href="#telemetry-wiring">Telemetry Wiring</a></h2>
+<ul>
+<li>Enable telemetry via <code>--telemetry</code> or <code>TB_ENABLE_TELEMETRY=1</code>. Metrics flow into the in-process registry (<code>node/src/telemetry.rs</code>) and are exposed on the <code>/metrics</code> HTTP endpoint.</li>
+<li>TLS warning sink: export <code>TB_HTTP_TLS</code>/<code>TB_AGGREGATOR_TLS</code> or rely on bundled roots; warnings stream to the aggregator and dashboards.</li>
+<li>Wrapper telemetry tracks runtime/transport/storage/coding metadata and enforces governance overrides; CLI: <code>tb-cli telemetry wrappers</code>.</li>
+</ul>
+<h2 id="metrics-aggregator-ops"><a class="header" href="#metrics-aggregator-ops">Metrics Aggregator Ops</a></h2>
+<ul>
+<li><code>metrics-aggregator</code> runs as its own binary; configure via env (<code>TB_AGGREGATOR_*</code>). It ingests node metrics, replicates them, archives snapshots (optional S3), and exposes admin endpoints for bridge remediation and TLS warning acknowledgements.</li>
+<li>Bridge remediation constants (<code>BRIDGE_REMEDIATION_*</code>) now reference <code>docs/operations.md#bridge-liquidity-remediation</code>; update dashboards accordingly.</li>
+<li>Set <code>TB_METRICS_ARCHIVE</code> to append raw JSON into a log for offline audit.</li>
+</ul>
+<h2 id="monitoring-and-dashboards"><a class="header" href="#monitoring-and-dashboards">Monitoring and Dashboards</a></h2>
+<ul>
+<li>Grafana/Prometheus configs live under <code>monitoring/</code>. Install with <code>npm ci --prefix monitoring &amp;&amp; make monitor</code> to render dashboards.</li>
+<li>Dashboards include compute-market fairness, gossip fanout, gateway pacing, telemetry anomalies, bridge liquidity, SLA enforcement, ANN diagnostics, and badge distributions. JSON is committed (e.g., <code>monitoring/compute_market_dashboard.json</code>).</li>
+<li>The dashboard README moved here; use <code>docs/apis_and_tooling.md#metrics-and-telemetry-apis</code> for endpoint paths.</li>
+</ul>
+<h2 id="energy-market-operations"><a class="header" href="#energy-market-operations">Energy Market Operations</a></h2>
+<ul>
+<li><strong>Scope</strong> — Everything is first-party: <code>crates/energy-market</code> (providers/credits/receipts + metrics), <code>node/src/energy.rs</code> (sled store + treasury hooks), <code>node/src/rpc/energy.rs</code> (JSON-RPC), <code>cli/src/energy.rs</code> (operator commands), <code>crates/oracle-adapter</code> (ingest client), and <code>services/mock-energy-oracle</code> (World OS drill). No third-party RPC stacks or DBs.</li>
+<li><strong>State &amp; backups</strong> — The market uses <code>SimpleDb::open_named(names::ENERGY_MARKET, path)</code> and serializes the entire <code>EnergyMarket</code> struct (providers, credits, receipts) after every mutation. <code>path</code> defaults to <code>energy_market/</code> but can be overridden with <code>TB_ENERGY_MARKET_DIR</code>. Snapshot the directory with the same fsync+rename guarantees as other <code>SimpleDb</code> stores; keep it in your backup/DR rotation alongside consensus/governance sleds.</li>
+<li><strong>Bootstrap script</strong> — <code>scripts/deploy-worldos-testnet.sh</code> builds the node with <code>--features worldos-testnet</code>, starts it with <code>--chain worldos-energy --validator</code>, launches the mock oracle (<code>cargo run --release</code> inside <code>services/mock-energy-oracle</code>), and (if <code>docker/telemetry-stack.yml</code> exists) spins up Grafana/Prometheus. This is the canonical energy drill; pair it with <code>docs/testnet/ENERGY_QUICKSTART.md</code> for CLI/RPC steps.</li>
+<li><strong>RPC/CLI usage</strong> — Operators interact through <code>tb-cli energy register|market|settle|submit-reading</code>, which sends the same JSON the RPC expects. The endpoints (<code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>) inherit mutual-TLS, <code>TB_RPC_AUTH_TOKEN</code>, and rate-limit policy from the RPC server. Always log snapshots via <code>tb-cli energy market --verbose &gt; energy_snapshot.json</code> before/after maintenance.</li>
+<li><strong>Governance params</strong> — <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code> live in the shared governance store (<code>governance/src/params.rs</code>). Proposals update them, runtime hooks call <code>node::energy::set_governance_params</code>, and the sled DB is re-snapshotted. Track activations/rollbacks with <code>tb-cli gov param history</code> or explorer timelines. Upcoming work (batch vs real-time settlement payloads, dependency validation, rollback audits) is tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>.</li>
+<li><strong>Telemetry &amp; dashboards</strong> — Metrics include <code>energy_providers_count</code>, <code>energy_avg_price</code>, <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_provider_fulfillment_ms</code>, and <code>oracle_reading_latency_seconds</code>. Health checks emit logs when pending credits exceed safe thresholds or settlements stall. Update Grafana dashboards to show provider counts, pending credits, slash totals, oracle latency, and settlement rate; alert when latency &gt; SLO, slash spikes, or settlement throughput drops.</li>
+<li><strong>Oracle hygiene</strong> — Production adapters must enforce real signature verification (forthcoming in <code>crates/oracle-adapter</code>), source keys from secure env/keystores, redact secrets from logs, and honour RPC rate limits. The mock oracle service (<code>services/mock-energy-oracle</code>, HTTP endpoints <code>/meter/:id/reading</code> and <code>/meter/:id/submit</code>) is for dev/testnet only.</li>
+<li><strong>Dispute workflow</strong> — Until dedicated <code>energy.dispute</code>/<code>energy.receipts.list</code> endpoints ship, disputes run through governance: capture the suspect <code>meter_hash</code> + provider ID via <code>energy.market_state</code>, submit a <code>gov param update</code> (tighten slashing rate or pause settlement), and document rollback steps. Keep explorers/CLI in sync so operators can see activation/rollback history.</li>
+<li><strong>Snapshot/restore drills</strong> — Practice quiescing the node, copying <code>TB_ENERGY_MARKET_DIR</code>, and restoring it on staging nodes. Mirror the SimpleDb snapshot/restore drills described earlier so operators can rehearse schema migrations or recovery from corruption. Integration tests for backward-compatibility live under <code>node/tests/gov_param_wiring.rs</code>; extend them when modifying the schema.</li>
+</ul>
+<h2 id="chaos-and-fault-drills"><a class="header" href="#chaos-and-fault-drills">Chaos and Fault Drills</a></h2>
+<ul>
+<li>Gossip chaos: <code>tests/net_gossip.rs</code> exercises packet loss/jitter; ensure convergence through tie-break rules and inspect <code>partition_watch</code> metrics.</li>
+<li>QUIC chaos: <code>node/tests/net_quic.rs</code> captures retransmit counters and handshake distributions; aggregator <code>/chaos</code> endpoints record incidents.</li>
+<li>Disk-full and repair: <code>node/tests/storage_repair.rs</code> simulates storage failures; use <code>tb-cli storage repair</code> and monitor <code>STORAGE_*</code> metrics.</li>
+<li>Range-boost drills: toggle <code>TB_PARTITION_TAG</code>, adjust mesh peers, and verify recovery with <code>tb-cli mesh status</code>.</li>
+</ul>
+<h2 id="probe-cli-and-diagnostics"><a class="header" href="#probe-cli-and-diagnostics">Probe CLI and Diagnostics</a></h2>
+<ul>
+<li><code>crates/probe</code> provides synthetic health checks: <code>probe ping-rpc</code>, <code>probe gossip-check</code>, <code>probe mine-one</code>, <code>probe tip</code>. Flags: <code>--timeout</code>, <code>--expect</code>, <code>--prom</code> for Prometheus output.</li>
+<li>Diagnostics harness: <code>tb-cli diagnostics range-boost</code>, <code>tb-cli diagnostics gossip</code>, <code>tb-cli diagnostics tls</code> expose cached stats for on-call triage.</li>
+<li>AI diagnostics toggles live in governance params; metrics and CLI output share the same flag.</li>
+</ul>
+<h2 id="deployment-and-release"><a class="header" href="#deployment-and-release">Deployment and Release</a></h2>
+<ul>
+<li>Build provenance lives in <code>node/src/provenance.rs</code> and <code>docs/security_and_privacy.md#release-provenance</code>. Release gating requires deterministic hashes and signatures listed in <code>config/release_signers.txt</code> or env overrides.</li>
+<li><code>cargo vendor</code> snapshots and <code>provenance.json</code>/<code>checksums.txt</code> block tagging unless the dependency-registry audit passes (<code>just dependency-audit</code>).</li>
+<li>Upgrades: follow <code>tb-cli gov release approve</code>, ensure metrics dashboards show <code>release_attestation_*</code>, and leverage the built-in rollback windows.</li>
+</ul>
+<h2 id="incident-response"><a class="header" href="#incident-response">Incident Response</a></h2>
+<ul>
+<li>Runbook coverage: bridge liquidity remediation, DHT recovery, gateway flush, snapshot repair. Each subsection lives below for quick linking.</li>
+<li><strong>Bridge Liquidity Remediation</strong> – aggregator dispatch endpoints <code>/remediation/bridge/*</code> plus dashboards (<strong>Bridge Remediation</strong> row) keep quorum on pending actions. Operators must acknowledge via CLI + aggregator ack endpoints.</li>
+<li><strong>DHT / Gossip Recovery</strong> – purge peer DBs (<code>simple_db::names::OVERLAY</code>), reseed via bootstrap peers, run <code>provision_overlay_store</code> helper, monitor <code>partition_watch</code> metrics.</li>
+<li><strong>Gateway Flush</strong> – use <code>tb-cli gateway mobile-cache flush</code> and <code>tb-cli read-acks export</code> before restarts.</li>
+</ul>
+<h2 id="storage-snapshots-and-wal-management"><a class="header" href="#storage-snapshots-and-wal-management">Storage, Snapshots, and WAL Management</a></h2>
+<ul>
+<li>Snapshots: <code>tb-cli snapshots create --path &lt;dir&gt;</code> writes fsync’d temp files before atomic rename. Legacy dumps stay until the new snapshot lands.</li>
+<li>WAL hygiene: <code>SimpleDb::flush_wal</code> runs before snapshots; set <code>TB_SIMPLE_DB_LIMIT_BYTES</code> to guard disk usage.</li>
+<li>Repair: <code>tb-cli storage repair --manifest &lt;file&gt;</code> reissues pulls, rebuilds Lagrange-coded shards, and flags under-replicated providers.</li>
+</ul>
+<h2 id="backup-and-restore-path-reference"><a class="header" href="#backup-and-restore-path-reference">Backup and Restore Path Reference</a></h2>
+<p>The directories below map directly onto the SimpleDb column families listed in <code>docs/system_reference.md#appendix-c--simpledb-column-family-and-prefix-map</code>, so operators can tie on-disk artifacts back to the logical subsystems referenced throughout the system reference.</p>
+<div class="table-wrapper"><table><thead><tr><th>Subsystem</th><th>Default path</th><th>Env/flag</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Overlay peer store</td><td><code>~/.the_block/overlay/overlay_peers.json</code></td><td><code>TB_OVERLAY_DB_PATH</code></td><td>JSON list of peers + last-seen timestamps (<code>p2p_overlay</code>).</td></tr>
+<tr><td>Gossip/QUIC peer caches</td><td><code>~/.the_block/peer_db</code> / <code>peer_db_quic</code></td><td><code>TB_PEER_DB_PATH</code>, <code>TB_QUIC_PEER_DB_PATH</code>, <code>TB_PEER_KEY_HISTORY_PATH</code>, <code>TB_CHUNK_DB_PATH</code></td><td>Keys, reputation history, and chunk dedup stores from <code>node/src/net/peer.rs</code>.</td></tr>
+<tr><td>DNS auctions</td><td><code>dns_db</code></td><td><code>TB_DNS_DB_PATH</code></td><td>SimpleDb backing auctions, stakes, and ownership.</td></tr>
+<tr><td>Gateway read receipts</td><td><code>gateway_receipts</code></td><td><code>TB_GATEWAY_RECEIPTS</code></td><td>Hourly CBOR batches + Merkle roots; archive before purging.</td></tr>
+<tr><td>Mobile cache</td><td><code>mobile_cache.db</code></td><td><code>TB_MOBILE_CACHE_DB</code>, <code>TB_MOBILE_CACHE_KEY_HEX</code></td><td>ChaCha20-Poly1305 encrypted sled.</td></tr>
+<tr><td>Storage pipeline</td><td><code>blobstore/</code></td><td><code>TB_STORAGE_PIPELINE_DIR</code></td><td>Holds manifests, rent-escrow records, and provider overrides.</td></tr>
+<tr><td>Storage market contracts</td><td><code>storage_market/</code></td><td><code>TB_STORAGE_MARKET_DIR</code></td><td>Sled tree (<code>market/contracts</code>) plus importer checkpoints.</td></tr>
+<tr><td>Compute scheduler</td><td><code>~/.the_block/compute/{pending,cancel,reputation}</code></td><td><code>TB_PENDING_PATH</code>, <code>TB_CANCEL_PATH</code>, <code>TB_REPUTATION_DB_PATH</code></td><td>Pending job queue, cancellation log, and reputation DB.</td></tr>
+<tr><td>Bridge sled</td><td><code>bridge_db/</code></td><td><code>TB_BRIDGE_DB_PATH</code>, <code>TB_BRIDGE_SLED_PATH</code></td><td>Persisted headers, withdrawals, and duty logs.</td></tr>
+<tr><td>Light-client proofs</td><td><code>proof_tracker</code></td><td><code>TB_PROOF_TRACKER_PATH</code> (implied)</td><td>Path is displayed by <code>tb-cli light-client rebate-status</code>; back it up with explorer data.</td></tr>
+<tr><td>LE portal</td><td><code>./le_portal</code></td><td>CLI <code>--base</code></td><td><code>le_requests.log</code>, <code>le_actions.log</code>, <code>le_evidence.log</code>, <code>warrant_canary.log</code>, plus <code>evidence/</code> blob files.</td></tr>
+</tbody></table>
+</div>
+<p>Backups should snapshot these directories before upgrades. Restores require stopping the node, restoring the directory, and restarting with the same <code>TB_*</code> overrides to avoid partial migrations.</p>
+<h2 id="network-recovery-and-chaos"><a class="header" href="#network-recovery-and-chaos">Network Recovery and Chaos</a></h2>
+<ul>
+<li>Chaos harness: <code>docs/architecture.md#telemetry-and-instrumentation</code> + <code>monitoring/grafana/...</code> capture WAN-scale drills. Use <code>tests/net_gossip.rs</code> fixtures with injected loss/latency before rolling changes.</li>
+<li>Partition drills: toggle <code>TB_PARTITION_TAG</code>, observe <code>partition_watch</code> alerts, ensure quorum recovers, document remediation in telemetry dashboards.</li>
+<li>QUIC chaos: <code>node/tests/net_quic.rs</code> and aggregator <code>/chaos</code> endpoints record retransmit counters and handshake distributions.</li>
+</ul>
+<h2 id="range-boost-and-localnet-operations"><a class="header" href="#range-boost-and-localnet-operations">Range Boost and LocalNet Operations</a></h2>
+<ul>
+<li>Enable with <code>--range-boost</code> or <code>TB_RANGE_BOOST=1</code>. Peers are configured via <code>TB_MESH_STATIC_PEERS</code> (comma-separated <code>host:port</code> list). Diagnostics: <code>tb-cli mesh status</code>, <code>tb-cli diagnostics range-boost</code>, metrics <code>RANGE_BOOST_*</code>.</li>
+<li>Forwarder control: set <code>TB_RANGE_BOOST=0</code> (or remove <code>--range-boost</code>) then restart to pause deliveries while keeping the queue on disk. <code>node/src/range_boost/mod.rs::set_enabled(false)</code> drains the forwarder gracefully; re-enable to resume.</li>
+<li>Queue handling:
+<ol>
+<li>Before reseeding peers, disable range boost and wait for <code>range_boost_queue_depth</code> to hit zero.</li>
+<li>Adjust <code>TB_MESH_STATIC_PEERS</code> / mesh discovery, then re-enable and confirm <code>range_boost_forwarder_fail_total</code> stays flat.</li>
+<li>For forced drains, delete the persisted queue directory under <code>~/.the_block/range_boost</code> (only after confirming backups) and restart.</li>
+</ol>
+</li>
+<li>Chaos drills can simulate failures with <code>FaultMode::{ForceDisabled,ForceNoPeers,ForceEncode,ForceIo}</code> (see <code>node/src/range_boost/mod.rs</code>). Build-time toggles wire these modes into diagnostic RPCs; use them to validate monitoring before production changes.</li>
+</ul>
+<h2 id="simulation-and-replay"><a class="header" href="#simulation-and-replay">Simulation and Replay</a></h2>
+<ul>
+<li>Use <code>sim/</code>, <code>examples/</code>, and <code>tests/</code> harnesses to rehearse dependency swaps, storage migrations, and governance policy changes. Replay harnesses guarantee byte-identical results across CPU architectures.</li>
+<li>Chaos + replay logs feed both the aggregator and <code>docs/developer_handbook.md#simulation-and-chaos</code> for developer workflows.</li>
+</ul>
+<h2 id="operator-checklist"><a class="header" href="#operator-checklist">Operator Checklist</a></h2>
+<ul>
+<li>Keep <code>scripts/pre-commit.sample</code> installed to enforce fmt/lint.</li>
+<li>Regenerate dependency inventories whenever <code>Cargo.lock</code> changes.</li>
+<li>Run settlement audits and badge/SLA telemetry before and after upgrades.</li>
+<li>Document incidents in the aggregator’s <code>/audit</code> endpoints and link to the relevant sections above for forensics.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="economics_and_governance.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="security_and_privacy.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="economics_and_governance.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="security_and_privacy.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

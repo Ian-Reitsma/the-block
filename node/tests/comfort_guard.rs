@@ -1,6 +1,8 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 use sys::tempfile::tempdir;
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::{
     fees::policy,
     generate_keypair, sign_tx,

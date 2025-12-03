@@ -309,6 +309,9 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::AdPercentileBuckets => 59,
         ParamKey::AdRehearsalEnabled => 60,
         ParamKey::AdRehearsalStabilityWindows => 61,
+        ParamKey::EnergyMinStake => 62,
+        ParamKey::EnergyOracleTimeoutBlocks => 63,
+        ParamKey::EnergySlashingRateBps => 64,
     }
 }
 
@@ -376,6 +379,9 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         59 => ParamKey::AdPercentileBuckets,
         60 => ParamKey::AdRehearsalEnabled,
         61 => ParamKey::AdRehearsalStabilityWindows,
+        62 => ParamKey::EnergyMinStake,
+        63 => ParamKey::EnergyOracleTimeoutBlocks,
+        64 => ParamKey::EnergySlashingRateBps,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -1150,6 +1156,9 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::AdPercentileBuckets => "AdPercentileBuckets",
         ParamKey::AdRehearsalEnabled => "AdRehearsalEnabled",
         ParamKey::AdRehearsalStabilityWindows => "AdRehearsalStabilityWindows",
+        ParamKey::EnergyMinStake => "EnergyMinStake",
+        ParamKey::EnergyOracleTimeoutBlocks => "EnergyOracleTimeoutBlocks",
+        ParamKey::EnergySlashingRateBps => "EnergySlashingRateBps",
     }
 }
 
@@ -1217,6 +1226,9 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "AdPercentileBuckets" => Ok(ParamKey::AdPercentileBuckets),
         "AdRehearsalEnabled" => Ok(ParamKey::AdRehearsalEnabled),
         "AdRehearsalStabilityWindows" => Ok(ParamKey::AdRehearsalStabilityWindows),
+        "EnergyMinStake" => Ok(ParamKey::EnergyMinStake),
+        "EnergyOracleTimeoutBlocks" => Ok(ParamKey::EnergyOracleTimeoutBlocks),
+        "EnergySlashingRateBps" => Ok(ParamKey::EnergySlashingRateBps),
         other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
     }
 }

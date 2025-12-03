@@ -242,6 +242,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "energy-market"
+version = "0.1.0"
+dependencies = [
+ "crypto_suite",
+ "foundation_metrics",
+ "foundation_serde",
+ "foundation_serialization",
+ "thiserror",
+]
+
+[[package]]
 name = "explorer"
 version = "0.1.0"
 dependencies = [
@@ -588,6 +599,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-energy-oracle"
+version = "0.1.0"
+dependencies = [
+ "concurrency",
+ "energy-market",
+ "foundation_serde",
+ "foundation_serialization",
+ "httpd",
+ "oracle-adapter",
+ "runtime",
+]
+
+[[package]]
 name = "monitoring-build"
 version = "0.1.0"
 dependencies = [
@@ -603,6 +627,16 @@ name = "net-fuzz"
 version = "0.0.0"
 dependencies = [
  "p2p_overlay",
+]
+
+[[package]]
+name = "oracle-adapter"
+version = "0.1.0"
+dependencies = [
+ "energy-market",
+ "foundation_serde",
+ "foundation_serialization",
+ "thiserror",
 ]
 
 [[package]]
@@ -881,7 +915,9 @@ dependencies = [
  "dex",
  "diagnostics",
  "dkg",
+ "energy-market",
  "foundation_archive",
+ "foundation_bigint",
  "foundation_math",
  "foundation_metrics",
  "foundation_profiler",
@@ -904,6 +940,7 @@ dependencies = [
  "ledger",
  "light-client",
  "log_index",
+ "oracle-adapter",
  "p2p_overlay",
  "pqcrypto-dilithium",
  "privacy",
@@ -918,6 +955,7 @@ dependencies = [
  "sys",
  "tb-sim",
  "testkit",
+ "thiserror",
  "tls_warning",
  "transport",
  "verifier_selection",

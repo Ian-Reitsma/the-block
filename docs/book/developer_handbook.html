@@ -1,0 +1,372 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Developer Handbook - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="developer-handbook"><a class="header" href="#developer-handbook">Developer Handbook</a></h1>
+<p>Every change assumes main-net readiness. Treat this as the working agreement for engineers and AI agents.</p>
+<h2 id="environment-setup"><a class="header" href="#environment-setup">Environment Setup</a></h2>
+<ul>
+<li>Run <code>scripts/bootstrap.sh</code> (Linux/macOS) or <code>scripts/bootstrap.ps1</code> (Windows/WSL). The script installs Rust 1.86+, <code>cargo-nextest</code>, <code>cargo-fuzz</code>, Node 18+, Python 3.12.3 venv, and OS packages (<code>patchelf</code>, <code>llvm-tools-preview</code>).</li>
+<li>Set <code>PATH=.venv/bin:$PATH</code> to pick up the Python shim, and ensure <code>rustup show</code> lists the workspace toolchain.</li>
+<li>Optional: install <code>just</code>, <code>nix</code>, or <code>direnv</code> if you rely on those flows; the repo ships configs for each.</li>
+</ul>
+<h2 id="workspace-layout"><a class="header" href="#workspace-layout">Workspace Layout</a></h2>
+<ul>
+<li><code>node/</code> – full node, gateway, RPC, compute/storage stacks, plus Python bindings.</li>
+<li><code>crates/</code> – first-party libraries (<code>foundation_*</code>, <code>transport</code>, <code>httpd</code>, <code>storage_engine</code>, <code>p2p_overlay</code>, <code>wallet</code>, <code>probe</code>, etc.).</li>
+<li><code>cli/</code> – user-facing CLI with governance, wallet, bridge, compute, telemetry, and remediation commands.</li>
+<li><code>metrics-aggregator/</code>, <code>monitoring/</code>, <code>explorer/</code> – ops tooling.</li>
+<li><code>bridges/</code>, <code>dex/</code>, <code>storage_market/</code>, <code>gateway/</code> – specialised crates referenced by the node.</li>
+<li><code>docs/</code> – this handbook (mdBook). Run <code>mdbook build docs</code> before submitting docs changes.</li>
+</ul>
+<h2 id="toolchain-and-commands"><a class="header" href="#toolchain-and-commands">Toolchain and Commands</a></h2>
+<ul>
+<li><code>just lint</code> → <code>cargo clippy --workspace --all-targets --all-features</code>.</li>
+<li><code>just fmt</code> → <code>cargo fmt --all</code>.</li>
+<li><code>just test-fast</code> → targeted unit tests; <code>just test-full</code> → <code>cargo test --workspace --features telemetry</code>.</li>
+<li><code>make monitor</code>, <code>make aggregator</code>, and <code>make cli</code> wrap common workflows.</li>
+<li>Use <code>cargo nextest</code> for high-parallel test runs; CI uses the same harness.</li>
+</ul>
+<h2 id="coding-standards"><a class="header" href="#coding-standards">Coding Standards</a></h2>
+<ul>
+<li><code>#![forbid(unsafe_code)]</code> across the workspace. If you think you need <code>unsafe</code>, stop and open an issue.</li>
+<li>Prefer first-party crates (<code>httpd</code>, <code>foundation_tls</code>, <code>foundation_serialization</code>, <code>foundation_sqlite</code>, <code>storage_engine</code>) over upstream dependencies.</li>
+<li>Use <code>concurrency::{MutexExt, DashMap}</code> instead of raw locks to keep poisoning + metrics consistent.</li>
+<li>Keep modules small and feature-gated; RPC code should stay in <code>node/src/rpc</code>, CLI code in <code>cli/src</code>, etc.</li>
+</ul>
+<h2 id="testing-strategy"><a class="header" href="#testing-strategy">Testing Strategy</a></h2>
+<ul>
+<li>Unit tests live next to code; integration tests under <code>node/tests</code>, <code>gateway/tests</code>, <code>bridges/tests</code>, etc.</li>
+<li>Replay harness: <code>cargo test -p the_block --test replay</code> replays ledger snapshots across architectures.</li>
+<li>Settlement audit: <code>cargo test -p the_block --test settlement_audit --release</code> must pass before merging.</li>
+<li>Fuzzing: <code>scripts/fuzz_coverage.sh</code> installs LLVM tools, runs fuzz targets (e.g., <code>cargo fuzz run storage</code>), and uploads <code>.profraw</code> artifacts. Remember to set <code>LLVM_PROFILE_FILE</code>.</li>
+<li>Chaos: <code>tests/net_gossip.rs</code>, <code>tests/net_quic.rs</code>, <code>node/tests/storage_repair.rs</code>, <code>node/tests/gateway_rate_limit.rs</code> simulate packet loss, disk-full, etc.</li>
+</ul>
+<h2 id="debugging-and-diagnostics"><a class="header" href="#debugging-and-diagnostics">Debugging and Diagnostics</a></h2>
+<ul>
+<li>Enable <code>RUST_LOG=trace</code> plus the diagnostics subscriber when chasing runtime issues; <code>diagnostics::tracing</code> is wired everywhere.</li>
+<li><code>cli/src/debug_cli.rs</code> and <code>tb-cli diagnostics …</code> provide structured dumps for mempool, scheduler, gossip, mesh, TLS, and telemetry state.</li>
+<li>Use <code>docs/operations.md#probe-cli-and-diagnostics</code> for probe commands.</li>
+</ul>
+<h2 id="performance-and-benchmarks"><a class="header" href="#performance-and-benchmarks">Performance and Benchmarks</a></h2>
+<ul>
+<li>Bench harnesses sit under <code>benches/</code>, <code>monitoring/build</code>, and <code>node/benches</code>. Publish results through the metrics exporter by setting <code>TB_BENCH_PROM_PATH</code>.</li>
+<li><code>docs/benchmarks.md</code> content moved here: store thresholds in <code>config/benchmarks/&lt;name&gt;.thresholds</code>, compare to <code>monitoring/metrics.json</code>, and watch Grafana’s <strong>Benchmarks</strong> row.</li>
+</ul>
+<h2 id="contract-and-vm-development"><a class="header" href="#contract-and-vm-development">Contract and VM Development</a></h2>
+<ul>
+<li>
+<p>WASM tooling: <code>cli/src/wasm.rs</code>, <code>node/src/vm</code>, <code>node/src/vm/debugger.rs</code>. Use <code>docs/architecture.md#virtual-machine-and-wasm</code> for runtime behaviour.</p>
+</li>
+<li>
+<p><code>docs/contract_dev.md</code>, <code>docs/wasm_contracts.md</code>, and <code>docs/vm_debugging.md</code> merged here.</p>
+</li>
+<li>
+<p>CLI flow: <code>tb-cli wasm build</code>, <code>tb-cli contract deploy</code>, <code>tb-cli contract call</code>, <code>tb-cli vm trace</code>.</p>
+</li>
+<li>
+<p>Gas model (<code>node/src/vm/gas.rs</code>):</p>
+<ul>
+<li>Each opcode has a base cost (<code>cost(op)</code>), and storage/hash-heavy ops add explicit constants (<code>GAS_STORAGE_READ</code>, <code>GAS_STORAGE_WRITE</code>, <code>GAS_HASH</code>).</li>
+<li><code>GasMeter</code> enforces limits and reports <code>used()</code> for fee accounting. ABI helpers (<code>node/src/vm/abi.rs</code>) encode <code>(gas_limit, gas_price)</code> as a 16-byte blob when interacting with wallets.</li>
+</ul>
+</li>
+<li>
+<p>Debugger + traces: <code>node/src/vm/debugger.rs</code> steps through opcodes, exposes <code>VmDebugger::into_trace()</code> (stack, gas, opcode, pc). CLI <code>tb-cli vm trace --tx &lt;hash&gt; --json</code> prints entries like:</p>
+<pre><code class="language-json">{"pc":12,"opcode":"SSTORE","gas_before":1200,"gas_after":696,"stack":[1,2,3]}
+</code></pre>
+<p>Use it alongside <code>tb-cli contract disasm</code> when diagnosing mispriced contracts.</p>
+</li>
+</ul>
+<h2 id="python--headless-tooling"><a class="header" href="#python--headless-tooling">Python + Headless Tooling</a></h2>
+<ul>
+<li><code>demo.py</code> exercises the <code>node/src/py.rs</code> bridge for deterministic ledger replay and educational demos.</li>
+<li>Headless tooling (<code>docs/headless.md</code> content) stays in <code>cli/src/headless.rs</code> and <code>docs/apis_and_tooling.md</code>.</li>
+</ul>
+<h2 id="dependency-policy"><a class="header" href="#dependency-policy">Dependency Policy</a></h2>
+<ul>
+<li>Policies live in <code>config/dependency_policies.toml</code>. Run <code>cargo run -p dependency_registry -- --check config/dependency_policies.toml</code> (or <code>just dependency-audit</code>) to refresh <code>docs/dependency_inventory*.json</code>.</li>
+<li>The pivot strategy formerly described in <code>docs/pivot_dependency_strategy.md</code> now reads: wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards.</li>
+<li>Never introduce <code>reqwest</code>, <code>serde_json</code>, <code>bincode</code>, etc. Production crates must route through the first-party facades.</li>
+</ul>
+<h2 id="formal-methods-and-verification"><a class="header" href="#formal-methods-and-verification">Formal Methods and Verification</a></h2>
+<ul>
+<li>Formal specs (<code>formal/*.fst</code>, <code>docs/formal.md</code>) integrate with CI. Run <code>make -C formal</code> or <code>cargo test -p formal</code> to re-check F* proofs before merging math-heavy changes.</li>
+<li>zk-SNARK and Dilithium proofs are stored alongside code; refer to <code>docs/maths/</code> for derivations.</li>
+<li>Prover benchmarking harnesses live under <code>node/src/compute_market/tests/prover.rs</code> so you can run focused comparisons between CPU and GPU provers (<code>cargo test -p the_block prover_cpu_gpu_latency_smoke</code>).</li>
+<li><code>tb-cli compute proofs --limit 10</code> calls <code>compute_market.sla_history</code> and prints proof fingerprints, backend selection, and circuit artifacts so you can validate end-to-end traces without spelunking the settlement sled DB.</li>
+<li><code>tb-cli explorer sync-proofs --db explorer.db --url http://localhost:26658</code> takes the same RPC output, persists <code>Vec&lt;ProofBundle&gt;</code> records inside the explorer SQLite tables, and lets you re-verify bundles (or feed <code>/compute/sla/history</code>) without granting RPC access to dashboards.</li>
+<li>Simulation framework lives under <code>sim/</code>:
+<ul>
+<li>Scenarios are regular Rust binaries (see <code>sim/examples/basic.rs</code>, <code>sim/fee_spike.rs</code>, <code>sim/compute_market/*</code>). They accept <code>--scenario &lt;name&gt; --out &lt;dir&gt;</code> flags and emit JSON summaries (latency histograms, slashing events, etc.).</li>
+<li><code>cargo run -p sim -- --scenario dependency_fault --config sim/src/dependency_fault_harness/config.toml</code> reproduces dependency-fault drills. Logs land in <code>sim/target/</code>.</li>
+<li>Use the harness before altering consensus/governance logic; CI expects new scenarios for major protocol toggles.</li>
+</ul>
+</li>
+</ul>
+<h2 id="logging-and-traceability"><a class="header" href="#logging-and-traceability">Logging and Traceability</a></h2>
+<ul>
+<li>Logging guidelines from <code>docs/logging.md</code> live here: use structured events, avoid PII, include <code>component</code>, <code>peer</code>, <code>slot</code>, <code>lane</code>, <code>job_id</code> labels.</li>
+<li>Traces feed into the metrics aggregator and optionally into external stacks via exporters (no vendor lock-in required).</li>
+</ul>
+<h2 id="explainability-and-ai-diagnostics"><a class="header" href="#explainability-and-ai-diagnostics">Explainability and AI Diagnostics</a></h2>
+<ul>
+<li><code>docs/explain.md</code> + <code>docs/ai_diagnostics.md</code> merged here. CLI commands <code>tb-cli explain tx|block|governance</code> render JSON traces; governance toggles <code>ai_diagnostics_enabled</code> to control ANN-based alerts.</li>
+</ul>
+<h2 id="developer-support-scripts"><a class="header" href="#developer-support-scripts">Developer Support Scripts</a></h2>
+<ul>
+<li><code>Justfile</code> targets include bootstrap, fmt/lint/test, docs, coverage, fuzz, and docker image builds.</li>
+<li><code>scripts/</code> directory hosts installers, overlay-store migrations, settlement audits, chaos helpers, and release scripts.</li>
+<li><code>scripts/deploy-worldos-testnet.sh</code> spins up the World OS energy stack (node + mock oracle + telemetry). Pair it with <code>docs/testnet/ENERGY_QUICKSTART.md</code> to exercise the <code>energy.*</code> RPCs locally.</li>
+<li>Use <code>tools/</code> for specialist binaries (settlement audit, peer-store migrator, etc.).</li>
+</ul>
+<h2 id="energy-market-development"><a class="header" href="#energy-market-development">Energy Market Development</a></h2>
+<ul>
+<li><strong>Crates and modules</strong> — <code>crates/energy-market</code> owns the provider/credit/receipt data model, metrics, and serialization; <code>node/src/energy.rs</code> persists the market via <code>SimpleDb</code> (sled under <code>TB_ENERGY_MARKET_DIR</code>, default <code>energy_market/</code>), exposes health checks, and records treasury accruals. RPC handlers live in <code>node/src/rpc/energy.rs</code>, CLI glue in <code>cli/src/energy.rs</code>, oracle ingestion under <code>crates/oracle-adapter</code>, and the mock oracle service in <code>services/mock-energy-oracle</code>.</li>
+<li><strong>Configuration</strong> — Set <code>TB_ENERGY_MARKET_DIR</code> to relocate the sled DB (mirrors other <code>SimpleDb</code> consumers). Governance parameters (<code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, <code>energy_slashing_rate_bps</code>) live in the shared <code>governance</code> crate; the runtime hooks call <code>node::energy::set_governance_params</code> so proposal activations atomically retune stakes, expiry, and slashing without code changes.</li>
+<li><strong>RPC and CLI flows</strong> — <code>tb-cli energy register|market|settle|submit-reading</code> speak the same JSON schema the RPC expects (see <code>docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts</code>). Use <code>--verbose</code> or <code>--format json</code> to dump raw payloads for automation or explorer ingestion. Example round-trip:
+<pre><code class="language-bash">tb-cli energy register 10000 120 --meter-address meter_a --jurisdiction US_CA --stake 5000 --owner acct
+tb-cli energy market --provider-id energy-0x00 --verbose | jq .
+tb-cli energy submit-reading --reading-json @reading.json
+tb-cli energy settle energy-0x00 400 --meter-hash &lt;hex&gt; --buyer acct_consumer
+</code></pre>
+</li>
+<li><strong>Telemetry &amp; metrics</strong> — The crate emits <code>energy_providers_count</code>, <code>energy_avg_price</code>, <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_provider_fulfillment_ms</code>, and <code>oracle_reading_latency_seconds</code>. Gate pending-credit health via <code>node::energy::check_energy_market_health</code> logs; dashboards ingest the same metrics via the metrics-aggregator.</li>
+<li><strong>Testing</strong> — Run <code>cargo test -p energy-market</code> for unit coverage and <code>cargo test -p node --test gov_param_wiring</code> to ensure governance parameters round-trip correctly. Use <code>scripts/deploy-worldos-testnet.sh</code> + <code>docs/testnet/ENERGY_QUICKSTART.md</code> for integration drills (node + mock oracle + telemetry). When altering serialization, add vectors under <code>crates/energy-market/tests</code> and extend the CLI tests in <code>cli/tests/</code> to keep JSON schemas stable.</li>
+<li><strong>Oracle adapters</strong> — <code>crates/oracle-adapter</code> currently ships <code>NoopSignatureVerifier</code>; replacing it with the real verifier requires feeding Ed25519/Schnorr keys through env vars (<code>TB_ORACLE_SIGNING_KEY</code>, etc., to be finalised) and extending test vectors. The mock oracle service (<code>services/mock-energy-oracle</code>) exposes <code>/meter/:id/reading</code> and <code>/meter/:id/submit</code> endpoints over the in-house <code>httpd</code> router so you can simulate both fetching and submitting readings without third-party stacks.</li>
+<li><strong>Next steps</strong> — Signature verification, dispute RPCs, explorer visualisations, and deterministic replay coverage are tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code> and summarised in <code>AGENTS.md</code>. Treat those bullets as blocking work items whenever you touch the energy crates.</li>
+</ul>
+<h2 id="contribution-flow"><a class="header" href="#contribution-flow">Contribution Flow</a></h2>
+<ol>
+<li>Open an issue or draft PR describing the change.</li>
+<li>Create a feature branch, keep it rebased, and avoid merge commits.</li>
+<li>Run <code>fmt</code>, <code>clippy</code>, <code>nextest</code>, relevant integration tests, and <code>mdbook build docs</code>.</li>
+<li>Update docs (this handbook + subsystem sections) as part of the same PR.</li>
+<li>Include test output + rationale in the PR description; mention any skipped suites and why.</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="security_and_privacy.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="apis_and_tooling.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="security_and_privacy.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="apis_and_tooling.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

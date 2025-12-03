@@ -3,10 +3,12 @@ use crate::compute_market::{
     matcher, price_board,
     receipt::Receipt,
     scheduler,
-    settlement::{AuditRecord, BalanceSnapshot, Settlement, SettlementEngineInfo},
+    settlement::{AuditRecord, BalanceSnapshot, Settlement, SettlementEngineInfo, SlaResolution},
+    snark::{ProofBundle, SnarkBackend},
     total_units_processed,
 };
 use crate::transaction::FeeLane;
+use crypto_suite::hex;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::Serialize;
 use std::collections::BTreeMap;
@@ -170,6 +172,117 @@ fn pending_job_to_value(job: &scheduler::PendingJob) -> Value {
         ("priority", Value::String(priority.to_string())),
         ("effective_priority", Value::Number(effective)),
     ])
+}
+
+fn proof_backend_label(backend: SnarkBackend) -> &'static str {
+    match backend {
+        SnarkBackend::Cpu => "CPU",
+        SnarkBackend::Gpu => "GPU",
+    }
+}
+
+fn proof_bundle_to_value(bundle: &ProofBundle) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "backend".to_string(),
+        Value::String(proof_backend_label(bundle.backend).to_string()),
+    );
+    map.insert(
+        "fingerprint".to_string(),
+        Value::String(hex::encode(bundle.fingerprint())),
+    );
+    map.insert(
+        "latency_ms".to_string(),
+        Value::Number(Number::from(bundle.latency_ms)),
+    );
+    map.insert(
+        "circuit_hash".to_string(),
+        Value::String(hex::encode(bundle.circuit_hash)),
+    );
+    map.insert(
+        "program_commitment".to_string(),
+        Value::String(hex::encode(bundle.program_commitment)),
+    );
+    map.insert(
+        "output_commitment".to_string(),
+        Value::String(hex::encode(bundle.output_commitment)),
+    );
+    map.insert(
+        "witness_commitment".to_string(),
+        Value::String(hex::encode(bundle.witness_commitment)),
+    );
+    map.insert(
+        "artifact".to_string(),
+        json_map(vec![
+            (
+                "circuit_hash",
+                Value::String(hex::encode(bundle.artifact.circuit_hash)),
+            ),
+            (
+                "wasm_hash",
+                Value::String(hex::encode(bundle.artifact.wasm_hash)),
+            ),
+            (
+                "generated_at",
+                Value::Number(Number::from(bundle.artifact.generated_at)),
+            ),
+        ]),
+    );
+    map.insert("verified".to_string(), Value::Bool(bundle.self_check()));
+    map.insert(
+        "proof".to_string(),
+        Value::String(hex::encode(&bundle.encoded)),
+    );
+    Value::Object(map)
+}
+
+fn sla_resolution_to_value(resolution: &SlaResolution) -> Value {
+    let (status, reason) = match &resolution.outcome {
+        crate::compute_market::settlement::SlaResolutionKind::Completed => ("completed", None),
+        crate::compute_market::settlement::SlaResolutionKind::Cancelled { reason } => {
+            ("cancelled", Some(reason))
+        }
+        crate::compute_market::settlement::SlaResolutionKind::Violated { reason } => {
+            ("violated", Some(reason))
+        }
+    };
+    let proofs = resolution
+        .proofs
+        .iter()
+        .map(proof_bundle_to_value)
+        .collect();
+    let mut map = Map::new();
+    map.insert(
+        "job_id".to_string(),
+        Value::String(resolution.job_id.clone()),
+    );
+    map.insert(
+        "provider".to_string(),
+        Value::String(resolution.provider.clone()),
+    );
+    map.insert("buyer".to_string(), Value::String(resolution.buyer.clone()));
+    map.insert("outcome".to_string(), Value::String(status.to_string()));
+    if let Some(reason) = reason {
+        map.insert("outcome_reason".to_string(), Value::String(reason.clone()));
+    }
+    map.insert(
+        "burned_ct".to_string(),
+        Value::Number(Number::from(resolution.burned_ct)),
+    );
+    map.insert(
+        "refunded_ct".to_string(),
+        Value::Number(Number::from(resolution.refunded_ct)),
+    );
+    map.insert(
+        "deadline".to_string(),
+        Value::Number(Number::from(resolution.deadline)),
+    );
+    map.insert(
+        "resolved_at".to_string(),
+        Value::Number(Number::from(resolution.resolved_at)),
+    );
+    map.insert("proofs".to_string(), Value::Array(proofs));
+    Value::Object(map)
 }
 
 fn utilization_to_value(utilization: std::collections::HashMap<String, u64>) -> Value {
@@ -390,4 +503,10 @@ pub fn recent_roots(limit: usize) -> RecentRootsResponse {
         .map(|r| crypto_suite::hex::encode(r))
         .collect();
     RecentRootsResponse { roots }
+}
+
+/// Return recent SLA resolutions along with recorded SNARK proofs.
+pub fn sla_history(limit: usize) -> Value {
+    let entries = Settlement::sla_history(limit);
+    Value::Array(entries.iter().map(sla_resolution_to_value).collect())
 }

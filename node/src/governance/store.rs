@@ -1205,6 +1205,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::AdReadinessMinUniqueViewers => "ad_readiness_min_unique_viewers",
         ParamKey::AdReadinessMinHostCount => "ad_readiness_min_host_count",
         ParamKey::AdReadinessMinProviderCount => "ad_readiness_min_provider_count",
+        ParamKey::EnergyMinStake => "energy_min_stake",
+        ParamKey::EnergyOracleTimeoutBlocks => "energy_oracle_timeout_blocks",
+        ParamKey::EnergySlashingRateBps => "energy_slashing_rate_bps",
         ParamKey::TreasuryPercentCt => "treasury_percent_ct",
         ParamKey::ProofRebateLimitCt => "proof_rebate_limit_ct",
         ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
@@ -1234,6 +1237,20 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::BridgeFailureSlash => "bridge_failure_slash",
         ParamKey::BridgeChallengeSlash => "bridge_challenge_slash",
         ParamKey::BridgeDutyWindowSecs => "bridge_duty_window_secs",
+        ParamKey::AdUsePercentileThresholds => "ad_use_percentile_thresholds",
+        ParamKey::AdViewerPercentile => "ad_viewer_percentile",
+        ParamKey::AdHostPercentile => "ad_host_percentile",
+        ParamKey::AdProviderPercentile => "ad_provider_percentile",
+        ParamKey::AdEmaSmoothingPpm => "ad_ema_smoothing_ppm",
+        ParamKey::AdFloorUniqueViewers => "ad_floor_unique_viewers",
+        ParamKey::AdFloorHostCount => "ad_floor_host_count",
+        ParamKey::AdFloorProviderCount => "ad_floor_provider_count",
+        ParamKey::AdCapUniqueViewers => "ad_cap_unique_viewers",
+        ParamKey::AdCapHostCount => "ad_cap_host_count",
+        ParamKey::AdCapProviderCount => "ad_cap_provider_count",
+        ParamKey::AdPercentileBuckets => "ad_percentile_buckets",
+        ParamKey::AdRehearsalEnabled => "ad_rehearsal_enabled",
+        ParamKey::AdRehearsalStabilityWindows => "ad_rehearsal_stability_windows",
     }
 }
 
@@ -2812,6 +2829,11 @@ impl GovStore {
                                 ParamKey::AdRehearsalStabilityWindows => {
                                     params.ad_rehearsal_stability_windows
                                 }
+                                ParamKey::EnergyMinStake => params.energy_min_stake,
+                                ParamKey::EnergyOracleTimeoutBlocks => {
+                                    params.energy_oracle_timeout_blocks
+                                }
+                                ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -3001,6 +3023,9 @@ impl GovStore {
                 ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
                 ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
                 ParamKey::AdReadinessMinProviderCount => params.ad_readiness_min_provider_count,
+                ParamKey::EnergyMinStake => params.energy_min_stake,
+                ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
+                ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
                 ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
@@ -3070,6 +3095,9 @@ impl GovStore {
             ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
             ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
             ParamKey::AdReadinessMinProviderCount => params.ad_readiness_min_provider_count,
+            ParamKey::EnergyMinStake => params.energy_min_stake,
+            ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
+            ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
             ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
             ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
             ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,

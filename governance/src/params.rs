@@ -128,6 +128,9 @@ pub trait RuntimeAdapter {
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
     fn set_storage_engine_policy(&mut self, _allowed: &[String]) {}
+    fn set_energy_min_stake(&mut self, _v: u64) {}
+    fn set_energy_oracle_timeout_blocks(&mut self, _v: u64) {}
+    fn set_energy_slashing_rate_bps(&mut self, _v: u64) {}
     fn set_bridge_incentives(
         &mut self,
         _min_bond: u64,
@@ -230,6 +233,18 @@ impl<'a> Runtime<'a> {
         self.adapter.set_storage_engine_policy(allowed);
     }
 
+    pub fn set_energy_min_stake(&mut self, value: u64) {
+        self.adapter.set_energy_min_stake(value);
+    }
+
+    pub fn set_energy_oracle_timeout_blocks(&mut self, value: u64) {
+        self.adapter.set_energy_oracle_timeout_blocks(value);
+    }
+
+    pub fn set_energy_slashing_rate_bps(&mut self, value: u64) {
+        self.adapter.set_energy_slashing_rate_bps(value);
+    }
+
     pub fn set_ad_distribution(
         &mut self,
         viewer: u64,
@@ -322,6 +337,58 @@ fn default_read_subsidy_liquidity_percent() -> i64 {
     5
 }
 
+const fn default_ad_readiness_window_secs() -> i64 {
+    6 * 60 * 60
+}
+
+const fn default_ad_readiness_min_unique_viewers() -> i64 {
+    250
+}
+
+const fn default_ad_readiness_min_host_count() -> i64 {
+    25
+}
+
+const fn default_ad_readiness_min_provider_count() -> i64 {
+    10
+}
+
+const fn default_ad_rehearsal_stability_windows() -> i64 {
+    6
+}
+
+const fn default_viewer_percentile() -> i64 {
+    90
+}
+
+const fn default_host_percentile() -> i64 {
+    75
+}
+
+const fn default_provider_percentile() -> i64 {
+    50
+}
+
+const fn default_ema_smoothing_ppm() -> i64 {
+    200_000
+}
+
+const fn default_percentile_buckets() -> i64 {
+    12
+}
+
+const fn default_energy_min_stake() -> i64 {
+    1_000
+}
+
+const fn default_energy_oracle_timeout_blocks() -> i64 {
+    720
+}
+
+const fn default_energy_slashing_rate_bps() -> i64 {
+    0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
@@ -348,6 +415,48 @@ pub struct Params {
     pub read_subsidy_liquidity_percent: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub dual_token_settlement_enabled: i64,
+    #[serde(default = "default_ad_readiness_window_secs")]
+    pub ad_readiness_window_secs: i64,
+    #[serde(default = "default_ad_readiness_min_unique_viewers")]
+    pub ad_readiness_min_unique_viewers: i64,
+    #[serde(default = "default_ad_readiness_min_host_count")]
+    pub ad_readiness_min_host_count: i64,
+    #[serde(default = "default_ad_readiness_min_provider_count")]
+    pub ad_readiness_min_provider_count: i64,
+    #[serde(default)]
+    pub ad_rehearsal_enabled: i64,
+    #[serde(default = "default_ad_rehearsal_stability_windows")]
+    pub ad_rehearsal_stability_windows: i64,
+    #[serde(default)]
+    pub ad_use_percentile_thresholds: i64,
+    #[serde(default = "default_viewer_percentile")]
+    pub ad_viewer_percentile: i64,
+    #[serde(default = "default_host_percentile")]
+    pub ad_host_percentile: i64,
+    #[serde(default = "default_provider_percentile")]
+    pub ad_provider_percentile: i64,
+    #[serde(default = "default_ema_smoothing_ppm")]
+    pub ad_ema_smoothing_ppm: i64,
+    #[serde(default)]
+    pub ad_floor_unique_viewers: i64,
+    #[serde(default)]
+    pub ad_floor_host_count: i64,
+    #[serde(default)]
+    pub ad_floor_provider_count: i64,
+    #[serde(default)]
+    pub ad_cap_unique_viewers: i64,
+    #[serde(default)]
+    pub ad_cap_host_count: i64,
+    #[serde(default)]
+    pub ad_cap_provider_count: i64,
+    #[serde(default = "default_percentile_buckets")]
+    pub ad_percentile_buckets: i64,
+    #[serde(default = "default_energy_min_stake")]
+    pub energy_min_stake: i64,
+    #[serde(default = "default_energy_oracle_timeout_blocks")]
+    pub energy_oracle_timeout_blocks: i64,
+    #[serde(default = "default_energy_slashing_rate_bps")]
+    pub energy_slashing_rate_bps: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub treasury_percent_ct: i64,
     #[serde(default = "default_proof_rebate_limit_ct")]
@@ -408,6 +517,27 @@ impl Default for Params {
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
             dual_token_settlement_enabled: 0,
+            ad_readiness_window_secs: default_ad_readiness_window_secs(),
+            ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
+            ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
+            ad_readiness_min_provider_count: default_ad_readiness_min_provider_count(),
+            ad_rehearsal_enabled: 0,
+            ad_rehearsal_stability_windows: default_ad_rehearsal_stability_windows(),
+            ad_use_percentile_thresholds: 0,
+            ad_viewer_percentile: default_viewer_percentile(),
+            ad_host_percentile: default_host_percentile(),
+            ad_provider_percentile: default_provider_percentile(),
+            ad_ema_smoothing_ppm: default_ema_smoothing_ppm(),
+            ad_floor_unique_viewers: 0,
+            ad_floor_host_count: 0,
+            ad_floor_provider_count: 0,
+            ad_cap_unique_viewers: 0,
+            ad_cap_host_count: 0,
+            ad_cap_provider_count: 0,
+            ad_percentile_buckets: default_percentile_buckets(),
+            energy_min_stake: default_energy_min_stake(),
+            energy_oracle_timeout_blocks: default_energy_oracle_timeout_blocks(),
+            energy_slashing_rate_bps: default_energy_slashing_rate_bps(),
             treasury_percent_ct: 0,
             proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
@@ -516,6 +646,90 @@ impl Params {
         map.insert(
             "dual_token_settlement_enabled".into(),
             Value::Number(self.dual_token_settlement_enabled.into()),
+        );
+        map.insert(
+            "ad_readiness_window_secs".into(),
+            Value::Number(self.ad_readiness_window_secs.into()),
+        );
+        map.insert(
+            "ad_readiness_min_unique_viewers".into(),
+            Value::Number(self.ad_readiness_min_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_readiness_min_host_count".into(),
+            Value::Number(self.ad_readiness_min_host_count.into()),
+        );
+        map.insert(
+            "ad_readiness_min_provider_count".into(),
+            Value::Number(self.ad_readiness_min_provider_count.into()),
+        );
+        map.insert(
+            "ad_rehearsal_enabled".into(),
+            Value::Number(self.ad_rehearsal_enabled.into()),
+        );
+        map.insert(
+            "ad_rehearsal_stability_windows".into(),
+            Value::Number(self.ad_rehearsal_stability_windows.into()),
+        );
+        map.insert(
+            "ad_use_percentile_thresholds".into(),
+            Value::Number(self.ad_use_percentile_thresholds.into()),
+        );
+        map.insert(
+            "ad_viewer_percentile".into(),
+            Value::Number(self.ad_viewer_percentile.into()),
+        );
+        map.insert(
+            "ad_host_percentile".into(),
+            Value::Number(self.ad_host_percentile.into()),
+        );
+        map.insert(
+            "ad_provider_percentile".into(),
+            Value::Number(self.ad_provider_percentile.into()),
+        );
+        map.insert(
+            "ad_ema_smoothing_ppm".into(),
+            Value::Number(self.ad_ema_smoothing_ppm.into()),
+        );
+        map.insert(
+            "ad_floor_unique_viewers".into(),
+            Value::Number(self.ad_floor_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_floor_host_count".into(),
+            Value::Number(self.ad_floor_host_count.into()),
+        );
+        map.insert(
+            "ad_floor_provider_count".into(),
+            Value::Number(self.ad_floor_provider_count.into()),
+        );
+        map.insert(
+            "ad_cap_unique_viewers".into(),
+            Value::Number(self.ad_cap_unique_viewers.into()),
+        );
+        map.insert(
+            "ad_cap_host_count".into(),
+            Value::Number(self.ad_cap_host_count.into()),
+        );
+        map.insert(
+            "ad_cap_provider_count".into(),
+            Value::Number(self.ad_cap_provider_count.into()),
+        );
+        map.insert(
+            "ad_percentile_buckets".into(),
+            Value::Number(self.ad_percentile_buckets.into()),
+        );
+        map.insert(
+            "energy_min_stake".into(),
+            Value::Number(self.energy_min_stake.into()),
+        );
+        map.insert(
+            "energy_oracle_timeout_blocks".into(),
+            Value::Number(self.energy_oracle_timeout_blocks.into()),
+        );
+        map.insert(
+            "energy_slashing_rate_bps".into(),
+            Value::Number(self.energy_slashing_rate_bps.into()),
         );
         map.insert(
             "treasury_percent_ct".into(),
@@ -674,6 +888,81 @@ impl Params {
                 .get("dual_token_settlement_enabled")
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
+            ad_readiness_window_secs: obj
+                .get("ad_readiness_window_secs")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_window_secs),
+            ad_readiness_min_unique_viewers: obj
+                .get("ad_readiness_min_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_unique_viewers),
+            ad_readiness_min_host_count: obj
+                .get("ad_readiness_min_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_host_count),
+            ad_readiness_min_provider_count: obj
+                .get("ad_readiness_min_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_readiness_min_provider_count),
+            ad_rehearsal_enabled: obj
+                .get("ad_rehearsal_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_rehearsal_stability_windows: obj
+                .get("ad_rehearsal_stability_windows")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_rehearsal_stability_windows),
+            ad_use_percentile_thresholds: obj
+                .get("ad_use_percentile_thresholds")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_viewer_percentile: obj
+                .get("ad_viewer_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_viewer_percentile),
+            ad_host_percentile: obj
+                .get("ad_host_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_host_percentile),
+            ad_provider_percentile: obj
+                .get("ad_provider_percentile")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_provider_percentile),
+            ad_ema_smoothing_ppm: obj
+                .get("ad_ema_smoothing_ppm")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ema_smoothing_ppm),
+            ad_floor_unique_viewers: obj
+                .get("ad_floor_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_floor_host_count: obj
+                .get("ad_floor_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_floor_provider_count: obj
+                .get("ad_floor_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_unique_viewers: obj
+                .get("ad_cap_unique_viewers")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_host_count: obj
+                .get("ad_cap_host_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_cap_provider_count: obj
+                .get("ad_cap_provider_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_percentile_buckets: obj
+                .get("ad_percentile_buckets")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_percentile_buckets),
+            energy_min_stake: take_i64("energy_min_stake")?,
+            energy_oracle_timeout_blocks: take_i64("energy_oracle_timeout_blocks")?,
+            energy_slashing_rate_bps: take_i64("energy_slashing_rate_bps")?,
             treasury_percent_ct: take_i64("treasury_percent_ct")?,
             proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
             rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
@@ -863,6 +1152,51 @@ fn apply_dual_token_settlement(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_ad_readiness_window_secs(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v <= 0 {
+        return Err(());
+    }
+    p.ad_readiness_window_secs = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_unique_viewers = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_host_count = v;
+    Ok(())
+}
+
+fn apply_ad_readiness_min_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_readiness_min_provider_count = v;
+    Ok(())
+}
+
+fn apply_ad_rehearsal_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_rehearsal_enabled = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
+fn apply_ad_rehearsal_stability_windows(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_rehearsal_stability_windows = v;
+    Ok(())
+}
+
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     p.kappa_cpu_sub_ct = v;
     Ok(())
@@ -998,6 +1332,138 @@ fn apply_bridge_duty_window(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_ad_use_percentile_thresholds(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_use_percentile_thresholds = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
+fn apply_ad_viewer_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_viewer_percentile = v;
+    Ok(())
+}
+
+fn apply_ad_host_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_host_percentile = v;
+    Ok(())
+}
+
+fn apply_ad_provider_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.ad_provider_percentile = v;
+    Ok(())
+}
+
+fn apply_ad_ema_smoothing_ppm(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 1_000_000 {
+        return Err(());
+    }
+    p.ad_ema_smoothing_ppm = v;
+    Ok(())
+}
+
+fn apply_ad_floor_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_unique_viewers = v;
+    Ok(())
+}
+
+fn apply_ad_floor_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_host_count = v;
+    Ok(())
+}
+
+fn apply_ad_floor_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_floor_provider_count = v;
+    Ok(())
+}
+
+fn apply_ad_cap_unique_viewers(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_unique_viewers = v;
+    Ok(())
+}
+
+fn apply_ad_cap_host_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_host_count = v;
+    Ok(())
+}
+
+fn apply_ad_cap_provider_count(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_cap_provider_count = v;
+    Ok(())
+}
+
+fn apply_ad_percentile_buckets(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 4 || v > 360 {
+        return Err(());
+    }
+    p.ad_percentile_buckets = v;
+    Ok(())
+}
+
+fn apply_energy_min_stake(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.energy_min_stake = v;
+    Ok(())
+}
+
+fn apply_energy_oracle_timeout_blocks(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v <= 0 {
+        return Err(());
+    }
+    p.energy_oracle_timeout_blocks = v;
+    Ok(())
+}
+
+fn apply_energy_slashing_rate_bps(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 10_000 {
+        return Err(());
+    }
+    p.energy_slashing_rate_bps = v;
+    Ok(())
+}
+
+fn apply_runtime_energy_min_stake(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    rt.set_energy_min_stake(v.max(0) as u64);
+    Ok(())
+}
+
+fn apply_runtime_energy_oracle_timeout(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    rt.set_energy_oracle_timeout_blocks(v.max(1) as u64);
+    Ok(())
+}
+
+fn apply_runtime_energy_slashing_rate(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    rt.set_energy_slashing_rate_bps(v.clamp(0, 10_000) as u64);
+    Ok(())
+}
+
 fn push_bridge_incentives(
     rt: &mut Runtime,
     min_bond: Option<u64>,
@@ -1044,7 +1510,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 44] = [
+    static REGS: [ParamSpec; 65] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -1243,6 +1709,66 @@ pub fn registry() -> &'static [ParamSpec] {
                 rt.set_dual_token_settlement_enabled(v != 0);
                 Ok(())
             },
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessWindowSecs,
+            default: default_ad_readiness_window_secs(),
+            min: 60,
+            max: 24 * 60 * 60,
+            unit: "seconds",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_window_secs,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinUniqueViewers,
+            default: default_ad_readiness_min_unique_viewers(),
+            min: 0,
+            max: 1_000_000,
+            unit: "unique viewers",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_unique_viewers,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinHostCount,
+            default: default_ad_readiness_min_host_count(),
+            min: 0,
+            max: 1_000_000,
+            unit: "hosts",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_host_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdReadinessMinProviderCount,
+            default: default_ad_readiness_min_provider_count(),
+            min: 0,
+            max: 1_000_000,
+            unit: "providers",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_readiness_min_provider_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_enabled,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalStabilityWindows,
+            default: default_ad_rehearsal_stability_windows(),
+            min: 0,
+            max: 10_000,
+            unit: "windows",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_stability_windows,
+            apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
             key: ParamKey::KappaCpuSubCt,
@@ -1582,6 +2108,156 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |v, rt| {
                 push_bridge_incentives(rt, None, None, None, None, Some(v as u64))
             },
+        },
+        ParamSpec {
+            key: ParamKey::AdUsePercentileThresholds,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_use_percentile_thresholds,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdViewerPercentile,
+            default: default_viewer_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_viewer_percentile,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdHostPercentile,
+            default: default_host_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_host_percentile,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdProviderPercentile,
+            default: default_provider_percentile(),
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_provider_percentile,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdEmaSmoothingPpm,
+            default: default_ema_smoothing_ppm(),
+            min: 0,
+            max: 1_000_000,
+            unit: "ppm",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_ema_smoothing_ppm,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorUniqueViewers,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_unique_viewers,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorHostCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_host_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdFloorProviderCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_floor_provider_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdCapUniqueViewers,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_unique_viewers,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdCapHostCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_host_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdCapProviderCount,
+            default: 0,
+            min: 0,
+            max: 10_000_000,
+            unit: "count",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_cap_provider_count,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::AdPercentileBuckets,
+            default: default_percentile_buckets(),
+            min: 4,
+            max: 360,
+            unit: "buckets",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_percentile_buckets,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::EnergyMinStake,
+            default: default_energy_min_stake(),
+            min: 0,
+            max: 1_000_000,
+            unit: "ct",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_min_stake,
+            apply_runtime: apply_runtime_energy_min_stake,
+        },
+        ParamSpec {
+            key: ParamKey::EnergyOracleTimeoutBlocks,
+            default: default_energy_oracle_timeout_blocks(),
+            min: 1,
+            max: 10_000,
+            unit: "blocks",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_oracle_timeout_blocks,
+            apply_runtime: apply_runtime_energy_oracle_timeout,
+        },
+        ParamSpec {
+            key: ParamKey::EnergySlashingRateBps,
+            default: default_energy_slashing_rate_bps(),
+            min: 0,
+            max: 10_000,
+            unit: "bps",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_slashing_rate_bps,
+            apply_runtime: apply_runtime_energy_slashing_rate,
         },
     ];
     &REGS

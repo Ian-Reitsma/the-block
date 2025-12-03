@@ -3365,6 +3365,34 @@ pub static SNARK_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     c.handle()
 });
 
+pub static SNARK_PROVER_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "snark_prover_latency_seconds",
+        "SNARK prover latency segmented by backend",
+    );
+    let hv = HistogramVec::new(opts, &["backend"])
+        .unwrap_or_else(|e| panic!("histogram snark_prover_latency_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(hv.clone()))
+        .unwrap_or_else(|e| panic!("registry snark_prover_latency_seconds: {e}"));
+    hv
+});
+
+pub static SNARK_PROVER_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "snark_prover_failure_total",
+            "SNARK prover failures segmented by backend",
+        ),
+        &["backend"],
+    )
+    .unwrap_or_else(|e| panic!("counter snark_prover_failure_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snark_prover_failure_total: {e}"));
+    c
+});
+
 pub static SHIELDED_TX_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new("shielded_tx_total", "Total shielded transactions accepted")
         .unwrap_or_else(|e| panic!("counter shielded_tx_total: {e}"));

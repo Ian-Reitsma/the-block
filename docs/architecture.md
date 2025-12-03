@@ -125,7 +125,11 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - The matcher rotates fairness windows per lane and is backed by sled state stored under `state/market`. Lane telemetrics feed `match_loop_latency_seconds{lane}`.
 
 ### Workloads and SNARK Receipts
-- Supported workloads: transcode, inference, GPU hash, SNARK. SNARK verification lives in `node/src/compute_market/snark.rs` with wasm helpers so proofs are self-contained.
+- Supported workloads: transcode, inference, GPU hash, SNARK. SNARK proofs now run through `node/src/compute_market/snark.rs`, which wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled shapes per digest, and chooses CPU/GPU provers (with telemetry exported via `snark_prover_latency_seconds{backend}` / `snark_prover_failure_total{backend}`).
+- Proof bundles carry circuit/output/witness commitments and serialized proof bytes; they are attached to SLA records in `compute_market::settlement` and surfaced over RPC via `compute_market.sla_history`.
+- Explorer ingest mirrors the same payloads: `tb-cli explorer sync-proofs --db explorer.db --url http://node:26658` streams `compute_market.sla_history(limit)` responses, persists the serialized `Vec<ProofBundle>` per job (`compute_sla_proofs` table), and exposes them under `/compute/sla/history` so dashboards can render fingerprints/artifacts without talking to the node.
+- Providers that advertise CUDA/ROCm GPUs (or dedicated accelerators) automatically attempt GPU proving first; failures fall back to CPU while feeding scheduler accelerator telemetry so providers can be reweighted.
+- Benchmark harnesses for the prover live under `node/src/compute_market/tests/prover.rs` so operators can compare CPU/GPU latency locally before enabling accelerators.
 
 ### Courier and Replay
 - Retry/courier logic (`node/src/compute_market/courier.rs`) persists inflight bundles so restarts resume outstanding work only.
@@ -133,6 +137,51 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 
 ### Compute-backed Money (CBM)
 - CBM hooks live in `node/src/compute_market/cbm.rs`. Governance toggles lane payouts, refundable deposits, and SLA slashing (`compute_market::settlement::SlaOutcome`).
+
+## Energy Market
+- Energy credits live in `crates/energy-market` with the node wrapper in `node/src/energy.rs`. Providers, credits, and receipts persist in sled via `SimpleDb::open_named(names::ENERGY_MARKET, …)`; set `TB_ENERGY_MARKET_DIR` to relocate the DB. The store snapshots to bytes (`EnergyMarket::{to_bytes,from_bytes}`) on every mutation and uses the same fsync+rename discipline as other `SimpleDb` consumers so restarts replay identical state.
+- RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, and `energy.settle`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, outstanding credits (meter hashes), and settled receipts, so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `tb-cli energy` calls.
+- Governance owns `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps`. Proposals feed those values through the shared governance crate, latch them in `node/src/governance/params.rs`, then invoke `node::energy::set_governance_params`, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.
+- Observability: `energy_market` emits gauges (`energy_providers_count`, `energy_avg_price`), counters (`energy_kwh_traded_total`, `energy_settlements_total{provider}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope.
+
+### Energy, Governance, and RPC Next Tasks
+- **Governance + Params**
+  - Add proposal payloads for energy bundles (batch vs real-time settle) with `ParamSpec` + runtime hooks.
+  - Wire explorer + CLI timelines so energy param changes and activation/rollback history stay visible.
+  - Expand dependency graph support in proposals (deps validation in the node mirror + conflict tests).
+  - Harden param persistence snapshots and rollback audits with more regression coverage.
+- **Energy + Oracle**
+  - Implement real signature verification inside `oracle-adapter` (replace `NoopSignatureVerifier`) and ship vectors.
+  - Add oracle quorum/expiry policy (multi-reading attestation) with slashing telemetry and dispute RPCs.
+  - Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.
+  - Expand CLI flows: list providers/receipts, dispute + open cases, and provider updates (price + stake top-up).
+- **RPC + CLI Hardening**
+  - Add RPC auth + rate limiting specific to the `energy.*` endpoints (aligned with gateway policy).
+  - Cover negative cases + structured errors for `energy.submit_reading` (bad signature, stale timestamp, wrong meter).
+  - Publish JSON schema snippets for energy payloads/oracle messages plus round-trip CLI tests.
+- **Telemetry + Observability**
+  - Extend Grafana dashboards: provider count, pending credits, settlement rate, slash totals.
+  - Add SLOs/alerts for oracle latency, slashing spikes, settlement stalls.
+  - Wire metrics-aggregator summary endpoints so `/wrappers` and `/telemetry/summary` expose energy stats.
+- **Network + Transport**
+  - Run QUIC chaos drills with per-provider failover simulation + fingerprint rotation tests.
+  - Add handshake capability assertions in `node/tests` for the new transport metadata paths.
+- **Storage + State**
+  - Mirror `SimpleDb` snapshots for energy (`TB_ENERGY_MARKET_DIR`) with fsync+atomic swap and document restore flow.
+  - Ship migration drill scripts/tests for energy schema evolution (backwards compatibility).
+- **Security + Supply Chain**
+  - Enforce release provenance gates for energy/oracle crates (vendor snapshot + checksums in CI).
+  - Tighten oracle adapter secret hygiene (key sourcing, redaction) + boundary fuzz tests for decoding.
+- **Performance + Correctness**
+  - Throughput benchmarks for meter ingestion + settlement (per-provider histograms).
+  - Fuzzers for the energy binary codec, RPC param decoding, and governance activation queue.
+  - Deterministic replay in CI for energy receipt reapplication across x86_64/AArch64.
+- **Docs + Explorer**
+  - Explorer views: provider table, receipts timeline, fee/slash summaries, plus SQLite schema updates.
+  - Expand `docs/testnet/ENERGY_QUICKSTART.md` with dispute flows + verifier integration.
+- **CI + Test Suite**
+  - Stabilize the full integration suite and gate merges on: governance-param wiring, RPC energy, handshake, rate limiters, ad-market RPC.
+  - Add a “fast mainnet gate” workflow that runs: unit tests + targeted integration (governance, RPC, ledger replay, transport handshake).
 
 ## Bridges, DEX, and Settlement
 ### Token Bridges

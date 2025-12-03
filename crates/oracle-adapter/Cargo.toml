@@ -1,0 +1,10 @@
+[package]
+name = "oracle-adapter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+energy-market = { path = "../energy-market" }
+foundation_serialization = { path = "../foundation_serialization" }
+thiserror = { path = "../thiserror" }
+serde = { workspace = true }

@@ -38,6 +38,7 @@ foundation_profiler = { path = "../crates/foundation_profiler" }
 foundation_archive = { path = "../crates/foundation_archive" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
 foundation_tui = { path = "../crates/foundation_tui" }
+foundation_bigint = { path = "../crates/foundation_bigint" }
 base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }
 foundation_sqlite = { path = "../crates/foundation_sqlite", optional = true }
@@ -62,6 +63,8 @@ storage = { path = "../storage" }
 storage_market = { path = "../storage_market" }
 # advertising marketplace
 ad-market = { path = "../crates/ad_market", package = "ad_market" }
+energy_market = { path = "../crates/energy-market", package = "energy-market" }
+oracle_adapter = { path = "../crates/oracle-adapter", package = "oracle-adapter" }
 zkp = { path = "../crates/zkp" }
 # hardware detection
 # light-client integration
@@ -72,6 +75,7 @@ coding = { path = "../crates/coding" }
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
 sys = { path = "../crates/sys" }
+thiserror = { path = "../crates/thiserror" }
 
 [target.'cfg(not(first_party_only))'.dependencies]
 transport = { path = "../crates/transport", optional = true, default-features = false, features = ["inhouse", "quinn", "s2n-quic"] }
@@ -80,7 +84,7 @@ transport = { path = "../crates/transport", optional = true, default-features = 
 transport = { path = "../crates/transport", optional = true, default-features = false, features = ["inhouse"] }
 
 [features]
-default = ["inhouse-storage"]
+default = ["inhouse-storage", "gpu"]
 storage-rocksdb = []
 inhouse-storage = []
 sqlite-migration = ["dep:foundation_sqlite"]
@@ -97,7 +101,7 @@ test-telemetry = ["telemetry"]
 telemetry-verbose = ["telemetry"]
 pq-crypto = ["pqcrypto-dilithium"]
 bluetooth = []
-gpu = []
+gpu = ["crypto_suite/gpu"]
 gateway = []
 quic = ["transport"]
 quinn = ["quic", "transport/quinn"]

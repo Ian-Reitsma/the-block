@@ -9,6 +9,7 @@ sha3-fallback = []
 dilithium = []
 threshold = []
 telemetry = ["foundation_metrics"]
+gpu = []
 
 [dependencies]
 rand = { path = "../rand" }

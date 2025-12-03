@@ -67,6 +67,7 @@ pub mod ad_policy_snapshot;
 pub mod ad_readiness;
 pub mod config;
 pub mod dkg;
+pub mod energy;
 pub mod exec;
 pub mod governor_snapshot;
 mod read_receipt;

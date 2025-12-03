@@ -323,21 +323,24 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 - `node/src/compute_market/receipt.rs` fields: `(version, job_id, buyer, provider, quote_price, units, dry_run flag, issued_at, idempotency_key, FeeLane)`.
 - `idempotency_key` is BLAKE3(`job_id | buyer | provider | price | units | version | lane`), guaranteeing deduplicated settlement entries even if retries occur.
-- SNARK verification stub (`node/src/compute_market/snark.rs`) hashes `wasm` + `output` until the in-house prover lands. Receipt serialization already treats `proof` as a detached blob so replacing the helper does not impact the ledger codec.
+- SNARK receipts now embed a `ProofBundle` produced by `node/src/compute_market/snark.rs`. The helper wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled circuits per digest, selects CPU or GPU provers automatically, records telemetry (`snark_prover_latency_seconds{backend}`, `snark_prover_failure_total{backend}`), and emits bundles containing the circuit/output/witness commitments plus serialized proof bytes.
+- Each proof bundle includes a `CircuitArtifact { circuit_hash, wasm_hash, generated_at }`, allowing offline re-verification and matching against CLI/explorer exports without re-running compilation.
+- CLI support lives under `cli/src/snark.rs`. `snark compile` now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and `tb-cli compute proofs --limit N` streams the latest `compute_market.sla_history` proofs (fingerprint, backend, commitments, artifact metadata) for audits.
+- Settlement persists every accepted proof via `Settlement::record_proof`, retaining the full vector of bundles per SLA and exposing them through `compute_market.sla_history`. `tb-cli explorer sync-proofs` writes the same `Vec<ProofBundle>` blobs into the explorer tables (`compute_sla_history`, `compute_sla_proofs`), and the explorer HTTP route `/compute/sla/history?limit=N` re-exports the decoded fingerprints/artifacts for dashboards and auditors.
 
 ### 6.3 SLA slashing and dashboards
 
 - Settlement engine (`node/src/compute_market/settlement.rs`) maintains:
   - `SettleMode` (`DryRun`, `Armed`, `Real`) toggled via governance or CLI.
-  - `SlaRecord { job_id, provider, buyer, provider_bond, consumer_bond, deadline, scheduled_at }`.
-  - `SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned_ct, refunded_ct }`.
+  - `SlaRecord { job_id, provider, buyer, provider_bond, consumer_bond, deadline, scheduled_at, proofs: Vec<ProofBundle> }`.
+  - `SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned_ct, refunded_ct, proofs }`.
 - Automation:
   - Violations call `SlaOutcome::Violated { reason, automated }`, burn the lesser of the bond and configured slash amount (`COMPUTE_SLA_AUTOMATED_SLASH_TOTAL`, `SLASHING_BURN_CT_TOTAL`).
   - Dashboards plot `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL`, and `COMPUTE_SLA_NEXT_DEADLINE_TS`.
 - Operator workflow:
   1. Arm settlement via `compute_arm_real` RPC, wait for the `activate_at` block height, then advance to `SettleMode::Real`.
   2. Watch aggregator dashboards for SLA thresholds; use `tb-cli compute settlement` to inspect queued records.
-  3. Use the courier appendix (below) when diagnosing stuck carry-to-earn flows.
+  3. Use the courier appendix (below) when diagnosing stuck carry-to-earn flows and pull `compute_market.sla_history` when auditing proof material alongside SLA outcomes.
 
 ### 6.4 Lane-aware matcher semantics
 
@@ -361,6 +364,33 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - `scheduler.metrics` (`node/src/rpc/compute_market.rs`) simply forwards the JSON from `scheduler::metrics()` which contains `reputation` (provider score map) and `utilization` (capability → units consumed). Use `tb-cli compute scheduler metrics --json` for scripting.
 - `scheduler.stats` returns a richer struct (`SchedulerStats`): outcome counters (`success`, `capability_mismatch`, `reputation_failure`), queue depths per priority (`queued_high/normal/low`), pending jobs with effective priority, and preemption counters.
 - Together with `compute_market.stats` these RPCs explain why a job failed to match (e.g., reputation failure vs lack of capability) without scraping node logs.
+
+### 6.7 Energy market (providers, credits, receipts)
+
+- **Core structs** (`crates/energy-market/src/lib.rs`):
+  - `EnergyProvider { provider_id, owner, location, capacity_kwh, available_kwh, price_per_kwh, reputation_score, meter_address, total_delivered_kwh, staked_balance, last_fulfillment_latency_ms, last_meter_value, last_meter_timestamp }`.
+  - `MeterReading { provider_id, meter_address, total_kwh, timestamp, signature }` with a `hash()` helper (BLAKE3 over provider/meter/kWh/timestamp/signature len + bytes) that becomes the credit key.
+  - `EnergyCredit { amount_kwh, provider, timestamp, meter_reading_hash }`, `EnergyReceipt { buyer, seller, kwh_delivered, price_paid, block_settled, treasury_fee, meter_reading_hash, slash_applied }`, and `EnergyMarketConfig { min_stake, treasury_fee_bps, ewma_alpha, jurisdiction_fee_bps, oracle_timeout_blocks, slashing_rate_bps }`.
+  - `EnergyMarket` maintains provider + meter maps, pending credits, settled receipts, EWMA totals, and `next_provider_id`. Errors bubble through `EnergyMarketError` (provider exists, meter claimed, insufficient stake/capacity/credit, stale reading, invalid meter value, expired credit) and map 1:1 to RPC error strings.
+- **Persistence & governance** (`node/src/energy.rs`):
+  - Wraps the market in `SimpleDb::open_named(names::ENERGY_MARKET, TB_ENERGY_MARKET_DIR.unwrap_or("energy_market"))`. Every mutation serializes the full market via `EnergyMarket::to_bytes()` and writes it using SimpleDb’s fsync+rename discipline.
+  - `GovernanceEnergyParams { min_stake, oracle_timeout_blocks, slashing_rate_bps }` lives in a `Lazy<Mutex<_>>`. `set_governance_params` updates the struct, applies it to the runtime config (`apply_params_to_market`), and persists the snapshot. Treasury fees/slashes flow into `NODE_GOV_STORE.record_treasury_accrual`.
+  - `check_energy_market_health()` warns when `pending_credit_count()` exceeds 25 and logs settlement heartbeats so dashboards can alert without scraping additional RPCs.
+- **RPC + CLI** (`node/src/rpc/energy.rs`, `cli/src/energy.rs`):
+  - RPC methods: `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`. Helpers enforce payload shape (`require_string`, `require_u64`, `decode_hash`, `decode_signature`) and emit canonical JSON for providers/credits/receipts.
+  - CLI mirrors the RPC schema: `tb-cli energy register <capacity> <price> --meter-address … --jurisdiction … --stake … --owner …`, `tb-cli energy market [--provider-id … --verbose]`, `tb-cli energy submit-reading --reading-json '…'`, `tb-cli energy settle <provider> <kwh> --meter-hash … --buyer …`.
+  - All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts` so meter hashes/receipts stay byte-identical everywhere.
+- **Oracle adapter + mock service** (`crates/oracle-adapter`, `services/mock-energy-oracle`):
+  - Adapter defines `SignatureVerifier`; currently `NoopSignatureVerifier` (always true) stands in until Ed25519 verification + vectors land. `MeterReadingPayload` implements `MeterReading` and exposes `signing_bytes()` so verifiers can sign/verify consistently.
+  - Mock service (in-house `httpd` router) listens on `MOCK_ENERGY_ORACLE_ADDR` (default `127.0.0.1:8080`), exposes `/meter/:id/reading` (increments totals by 250 kWh, updates timestamp, returns payload) and `/meter/:id/submit` (accepts posted readings). Used by `scripts/deploy-worldos-testnet.sh`.
+- **Telemetry**:
+  - Gauges: `energy_providers_count`, `energy_avg_price`. Counters: `energy_kwh_traded_total`, `energy_settlements_total{provider}`. Histograms: `energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`.
+  - Logs: `node::energy::check_energy_market_health` warns on backlog spikes and settlement stalls. Metrics aggregator wiring (`/wrappers`, `/telemetry/summary`) plus Grafana panels (provider counts, pending credits, slash totals, settlement rates) are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`.
+- **Governance linkage**:
+  - `ParamKey::{EnergyMinStake, EnergyOracleTimeoutBlocks, EnergySlashingRateBps}` live in `governance/src/{lib.rs,codec.rs,params.rs}`. Runtime hooks clamp values before writing to `Params` and call `node::energy::set_governance_params`.
+  - `node/tests/gov_param_wiring.rs` covers these round-trips; update it plus explorer/CLI timelines when adding new energy parameters (batch vs real-time settlement toggles, dependency graph validation, etc.).
+- **Snapshot/restore**:
+  - Use `TB_ENERGY_MARKET_DIR` to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. `docs/testnet/ENERGY_QUICKSTART.md` and `scripts/deploy-worldos-testnet.sh` document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.
 
 ---
 
@@ -1218,6 +1248,8 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `snapshot_restore_fail_total` | IntCounter | – | count | Failed snapshot restores |
 | `snark_fail_total` | IntCounter | – | count | Failed SNARK proof verifications |
 | `snark_verifications_total` | IntCounter | – | count | Successfully verified SNARK proofs |
+| `snark_prover_latency_seconds` | HistogramVec | backend | seconds | SNARK prover latency segmented by backend |
+| `snark_prover_failure_total` | IntCounterVec | backend | count | SNARK prover failures segmented by backend |
 | `startup_ttl_drop_total` | IntCounter | – | count | Expired mempool entries dropped during startup |
 | `state_stream_lag_alert_total` | IntCounter | – | count | Clients falling behind alert count |
 | `state_stream_subscribers_total` | IntCounter | – | count | Total websocket state stream subscribers |

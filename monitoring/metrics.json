@@ -235,6 +235,26 @@
     },
     {
       "deprecated": false,
+      "description": "Explorer compute SLA history entries grouped by outcome",
+      "labels": [
+        "outcome"
+      ],
+      "name": "explorer_compute_sla_outcome_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Unix timestamp for the most recent compute SLA record reported by Explorer",
+      "labels": [],
+      "name": "explorer_compute_sla_last_seen_timestamp"
+    },
+    {
+      "deprecated": false,
+      "description": "Explorer compute SLA polling failures",
+      "labels": [],
+      "name": "explorer_compute_sla_poll_error_total"
+    },
+    {
+      "deprecated": false,
       "description": "Bridge reward claim operations processed",
       "labels": [],
       "name": "bridge_reward_claims_total"

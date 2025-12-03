@@ -47,6 +47,7 @@ pub mod names {
     pub const STORAGE_FS: &str = "storage_fs";
     pub const STORAGE_PIPELINE: &str = "storage_pipeline";
     pub const STORAGE_REPAIR: &str = "storage_repair";
+    pub const ENERGY_MARKET: &str = "energy_market";
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

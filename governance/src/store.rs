@@ -2300,6 +2300,39 @@ impl GovStore {
                                 ParamKey::DualTokenSettlementEnabled => {
                                     params.dual_token_settlement_enabled
                                 }
+                                ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
+                                ParamKey::AdReadinessMinUniqueViewers => {
+                                    params.ad_readiness_min_unique_viewers
+                                }
+                                ParamKey::AdReadinessMinHostCount => {
+                                    params.ad_readiness_min_host_count
+                                }
+                                ParamKey::AdReadinessMinProviderCount => {
+                                    params.ad_readiness_min_provider_count
+                                }
+                                ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+                                ParamKey::AdRehearsalStabilityWindows => {
+                                    params.ad_rehearsal_stability_windows
+                                }
+                                ParamKey::AdUsePercentileThresholds => {
+                                    params.ad_use_percentile_thresholds
+                                }
+                                ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+                                ParamKey::AdHostPercentile => params.ad_host_percentile,
+                                ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+                                ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+                                ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+                                ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+                                ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+                                ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+                                ParamKey::AdCapHostCount => params.ad_cap_host_count,
+                                ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+                                ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+                                ParamKey::EnergyMinStake => params.energy_min_stake,
+                                ParamKey::EnergyOracleTimeoutBlocks => {
+                                    params.energy_oracle_timeout_blocks
+                                }
+                                ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -2477,6 +2510,27 @@ impl GovStore {
                 ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
                 ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
                 ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+                ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
+                ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
+                ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
+                ParamKey::AdReadinessMinProviderCount => params.ad_readiness_min_provider_count,
+                ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+                ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+                ParamKey::AdUsePercentileThresholds => params.ad_use_percentile_thresholds,
+                ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+                ParamKey::AdHostPercentile => params.ad_host_percentile,
+                ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+                ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+                ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+                ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+                ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+                ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+                ParamKey::AdCapHostCount => params.ad_cap_host_count,
+                ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+                ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+                ParamKey::EnergyMinStake => params.energy_min_stake,
+                ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
+                ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                 ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
@@ -2527,6 +2581,27 @@ impl GovStore {
             ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
             ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
             ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+            ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
+            ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
+            ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
+            ParamKey::AdReadinessMinProviderCount => params.ad_readiness_min_provider_count,
+            ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
+            ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+            ParamKey::AdUsePercentileThresholds => params.ad_use_percentile_thresholds,
+            ParamKey::AdViewerPercentile => params.ad_viewer_percentile,
+            ParamKey::AdHostPercentile => params.ad_host_percentile,
+            ParamKey::AdProviderPercentile => params.ad_provider_percentile,
+            ParamKey::AdEmaSmoothingPpm => params.ad_ema_smoothing_ppm,
+            ParamKey::AdFloorUniqueViewers => params.ad_floor_unique_viewers,
+            ParamKey::AdFloorHostCount => params.ad_floor_host_count,
+            ParamKey::AdFloorProviderCount => params.ad_floor_provider_count,
+            ParamKey::AdCapUniqueViewers => params.ad_cap_unique_viewers,
+            ParamKey::AdCapHostCount => params.ad_cap_host_count,
+            ParamKey::AdCapProviderCount => params.ad_cap_provider_count,
+            ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
+            ParamKey::EnergyMinStake => params.energy_min_stake,
+            ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
+            ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
             ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
             ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
             ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,

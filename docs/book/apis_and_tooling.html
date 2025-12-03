@@ -1,0 +1,377 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>APIs and Tooling - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="apis-and-tooling"><a class="header" href="#apis-and-tooling">APIs and Tooling</a></h1>
+<p>Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry, and schemas.</p>
+<h2 id="json-rpc"><a class="header" href="#json-rpc">JSON-RPC</a></h2>
+<ul>
+<li>Server lives in <code>node/src/rpc</code>. Namespaces: <code>consensus</code>, <code>ledger</code>, <code>storage</code>, <code>compute_market</code>, <code>ad_market</code>, <code>governance</code>, <code>peer</code>, <code>treasury</code>, <code>vm</code>, <code>logs</code>, <code>state_stream</code>, <code>analytics</code>.</li>
+<li>Transport: first-party <code>httpd</code> router (HTTP/1.1, HTTP/2, WebSocket upgrades) plus mutual-TLS derived from node keys.</li>
+<li>Fault handling: clients clamp <code>TB_RPC_FAULT_RATE</code>, saturate exponential backoff after 31 attempts, and expose regression coverage for bounded retries.</li>
+<li>Streaming: <code>state_stream</code> (light-client snapshots), <code>compute.job_cancel</code>, and telemetry correlations.</li>
+</ul>
+<h2 id="cli-tb-cli"><a class="header" href="#cli-tb-cli">CLI (<code>tb-cli</code>)</a></h2>
+<ul>
+<li>Main entry in <code>cli/src/main.rs</code>. Subcommands include: <code>node</code>, <code>gov</code>, <code>wallet</code>, <code>bridge</code>, <code>dex</code>, <code>compute</code>, <code>storage</code>, <code>gateway</code>, <code>mesh</code>, <code>light</code>, <code>telemetry</code>, <code>probe</code>, <code>diagnostics</code>, <code>service-badge</code>, <code>remediation</code>, <code>ai</code>, <code>ann</code>, <code>identity</code>.</li>
+<li><code>tb-cli energy</code> wraps the <code>energy.*</code> RPCs (<code>register</code>, <code>market</code>, <code>settle</code>, <code>submit-reading</code>). It prints friendly tables by default and supports <code>--verbose</code>/<code>--format json</code> when you need machine-readable payloads or to export providers/receipts for explorer ingestion. See <code>docs/testnet/ENERGY_QUICKSTART.md</code> for scripted walkthroughs and dispute drills.</li>
+<li>Use <code>tb-cli --help</code> or <code>tb-cli &lt;cmd&gt; --help</code>. Structured output via <code>--format json</code> for automation.</li>
+<li>CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.</li>
+</ul>
+<h3 id="energy-rpc-payloads-auth-and-error-contracts"><a class="header" href="#energy-rpc-payloads-auth-and-error-contracts">Energy RPC payloads, auth, and error contracts</a></h3>
+<ul>
+<li>Endpoints live under <code>energy.*</code> and inherit the RPC server’s mutual-TLS/auth policy (<code>TB_RPC_AUTH_TOKEN</code>, allowlists) plus IP-based rate limiting defined in <code>docs/operations.md#gateway-policy</code>. Use <code>tb-cli diagnostics rpc-policy</code> to inspect the live policy before enabling public oracle submitters.</li>
+<li>Endpoint map:</li>
+</ul>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Description</th><th>Request Body</th></tr></thead><tbody>
+<tr><td><code>energy.register_provider</code></td><td>Register capacity/jurisdiction/meter binding plus stake.</td><td><code>{ "capacity_kwh": u64, "price_per_kwh": u64, "meter_address": "string", "jurisdiction": "US_CA", "stake": u64, "owner": "account-id" }</code></td></tr>
+<tr><td><code>energy.market_state</code></td><td>Fetch snapshot of providers, outstanding meter credits, and receipts; pass <code>{"provider_id":"energy-0x01"}</code> to filter.</td><td>optional object</td></tr>
+<tr><td><code>energy.submit_reading</code></td><td>Submit signed meter total to mint a credit.</td><td><code>MeterReadingPayload</code> JSON (below)</td></tr>
+<tr><td><code>energy.settle</code></td><td>Burn credit + capacity to settle kWh and produce <code>EnergyReceipt</code>.</td><td><code>{ "provider_id": "energy-0x01", "buyer": "acct"?, "kwh_consumed": u64, "meter_hash": "0x..." }</code></td></tr>
+</tbody></table>
+</div>
+<ul>
+<li><code>energy.market_state</code> response structure:</li>
+</ul>
+<pre><code class="language-json">{
+  "status": "ok",
+  "providers": [ { "provider_id": "energy-0x00", "capacity_kwh": 10_000, "...": "..." } ],
+  "credits": [ { "provider": "energy-0x00", "meter_hash": "e3c3…", "amount_kwh": 120, "timestamp": 123456 } ],
+  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ]
+}
+</code></pre>
+<ul>
+<li><code>MeterReadingPayload</code> schema (shared by <code>oracle-adapter</code>, RPC, CLI, and explorer tooling):</li>
+</ul>
+<pre><code class="language-jsonc">{
+  "provider_id": "energy-0x00",
+  "meter_address": "mock_meter_1",
+  "kwh_reading": 12000,
+  "timestamp": 1710000000,
+  "signature": "hex-encoded ed25519/schnorr blob"
+}
+</code></pre>
+<ul>
+<li>Error strings bubble up from <code>energy_market::EnergyMarketError</code> and always return <code>{ "error": "&lt;string&gt;" }</code> so clients can check <code>.error</code>. Expect the following failure families:
+<ul>
+<li><code>ProviderExists</code>, <code>MeterAddressInUse</code>, <code>UnknownProvider</code> when IDs collide.</li>
+<li><code>InsufficientStake</code>, <code>InsufficientCapacity</code>, <code>InsufficientCredit</code> for quota/stake mismatches.</li>
+<li><code>StaleReading</code>, <code>InvalidMeterValue</code>, <code>CreditExpired</code> when timestamps regress or expiry exceeded.</li>
+<li>Signature/format errors: RPC rejects payloads where <code>meter_hash</code> is not 32 bytes, numbers are missing, or signatures fail decoding (and, once the oracle verifier lands, cryptographic verification failures).</li>
+</ul>
+</li>
+<li>Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.</li>
+<li>Observer tooling: <code>tb-cli energy market --verbose</code> dumps the whole response; <code>tb-cli diagnostics rpc-log --method energy.submit_reading</code> tails submissions with auth metadata so you can trace rate-limit hits.</li>
+<li>Per the architecture roadmap, the next RPC/CLI work items are: adding authenticated disputes + receipt listings, wiring explorer/CLI visualizations for param history, and enforcing per-endpoint rate limiting once the QUIC chaos drills complete (tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>).</li>
+</ul>
+<h2 id="gateway-http-and-cdn-surfaces"><a class="header" href="#gateway-http-and-cdn-surfaces">Gateway HTTP and CDN Surfaces</a></h2>
+<ul>
+<li><code>node/src/gateway/http.rs</code> hosts HTTP + WebSocket endpoints for content, APIs, and read receipts. Everything goes through the first-party TLS stack (<code>crates/httpd::tls</code>).</li>
+<li>Operators tag responses with <code>ReadAck</code> headers so clients can submit proofs later.</li>
+<li>Range-boost forwarding and mobile cache endpoints hang off the same router; see <code>docs/architecture.md#gateway-and-client-access</code> for internals.</li>
+</ul>
+<h2 id="http-client-and-tls-diagnostics"><a class="header" href="#http-client-and-tls-diagnostics">HTTP client and TLS diagnostics</a></h2>
+<ul>
+<li>Outbound clients live in <code>crates/httpd::{client.rs,blocking.rs}</code>. <code>httpd::Client</code> wraps the runtime <code>TcpStream</code>, supports HTTPS via the in-house TLS connector, and exposes:
+<ul>
+<li><code>ClientConfig { connect_timeout, request_timeout, max_response_bytes, tls }</code>.</li>
+<li><code>Client::with_tls_from_env(&amp;["TB_NODE_TLS","TB_HTTP_TLS"])</code> to reuse the same certs as RPC/gateway surfaces.</li>
+<li><code>RequestBuilder::json(value)</code> for canonical JSON encoding and <code>send()</code> for async execution. Blocking variants offer the same API for CLI tools.</li>
+</ul>
+</li>
+<li>TLS rotation:
+<ul>
+<li>Set <code>TB_NET_CERT_STORE_PATH</code> to control where mutual-TLS certs are stored. <code>tb-cli net rotate-cert</code> and <code>tb-cli net rotate-key</code> (see <code>cli/src/net.rs</code>) wrap the RPCs that rotate QUIC certs and peer keys.</li>
+<li>Diagnostics: <code>tb-cli net quic failures --url &lt;rpc&gt;</code> lists handshake failures; <code>tb-cli net overlay-status</code> confirms which overlay backend is active and where the peer DB lives.</li>
+</ul>
+</li>
+<li>HTTP troubleshooting: both the node and CLI honour <code>TB_RPC_TIMEOUT_MS</code>, <code>TB_RPC_TIMEOUT_JITTER_MS</code>, and <code>TB_RPC_MAX_RETRIES</code>. Use <code>tb-cli net dns verify</code> to confirm TXT records and <code>tb-cli net gossip-status</code> to inspect HTTP routing metadata exposed via gossip debug RPCs.</li>
+</ul>
+<h2 id="dns-and-naming"><a class="header" href="#dns-and-naming">DNS and Naming</a></h2>
+<ul>
+<li>Publishing: <code>node/src/gateway/dns.rs</code> writes <code>.block</code> zone files or external DNS records using schemas under <code>docs/spec/dns_record.schema.json</code>.</li>
+<li>CLI: <code>tb-cli gateway dns publish</code>, <code>tb-cli gateway dns audit</code>.</li>
+</ul>
+<h2 id="explorer-and-log-indexer"><a class="header" href="#explorer-and-log-indexer">Explorer and Log Indexer</a></h2>
+<ul>
+<li>Explorer + indexer live under <code>explorer/</code> and share the governance crate with the node. They expose HTTP APIs for proposals, treasury events, storage receipts, compute payouts, and light-client timelines.</li>
+<li>SQLite access routes through <code>foundation_sqlite</code> wrappers to keep dependency policy intact.</li>
+</ul>
+<h2 id="metrics-and-telemetry-apis"><a class="header" href="#metrics-and-telemetry-apis">Metrics and Telemetry APIs</a></h2>
+<ul>
+<li>Node <code>/metrics</code> endpoint exports Prometheus text via <code>runtime::telemetry::TextEncoder</code>.</li>
+<li>Metrics aggregator exposes <code>/metrics</code>, <code>/wrappers</code>, <code>/governance</code>, <code>/treasury</code>, <code>/bridge</code>, <code>/probe</code>, <code>/chaos</code>, <code>/audit</code>, <code>/remediation/*</code>, <code>/telemetry/summary</code>.</li>
+<li>Use <code>docs/operations.md#metrics-aggregator-ops</code> for deployment instructions and <code>monitoring/</code> for dashboards.</li>
+</ul>
+<h2 id="probe-cli"><a class="header" href="#probe-cli">Probe CLI</a></h2>
+<ul>
+<li>Binary lives in <code>crates/probe</code>. Usage examples:
+<ul>
+<li><code>probe ping-rpc --url http://127.0.0.1:3050 --timeout 5 --prom</code></li>
+<li><code>probe gossip-check --addr 127.0.0.1:3030</code></li>
+<li><code>probe mine-one --miner my-node</code></li>
+</ul>
+</li>
+<li>Emits Prometheus lines when <code>--prom</code> is set, so it doubles as a blackbox exporter.</li>
+</ul>
+<h2 id="storage-and-blob-apis"><a class="header" href="#storage-and-blob-apis">Storage and Blob APIs</a></h2>
+<ul>
+<li>CLI: <code>tb-cli storage put|get|manifest|repair</code>, <code>tb-cli blob summarize</code>, <code>tb-cli storage providers</code>.</li>
+<li>RPC: <code>storage.put_blob</code>, <code>storage.get_manifest</code>, <code>storage.list_providers</code>.</li>
+<li>Blob manifests follow the binary schema in <code>node/src/storage/manifest_binary.rs</code>; object receipts encode <code>StoreReceipt</code> structs consumed by the ledger.</li>
+</ul>
+<h2 id="compute-energy-and-ad-market-apis"><a class="header" href="#compute-energy-and-ad-market-apis">Compute, Energy, and Ad Market APIs</a></h2>
+<ul>
+<li>Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (<code>compute.job_cancel</code>). Courier snapshots stream through <code>compute_market.courier_status</code>, proof bundles (with fingerprints + circuit artifacts) are downloadable via <code>compute_market.sla_history(limit)</code>, <code>tb-cli compute proofs --limit N</code> pretty-prints recent SLA/proof entries, <code>tb-cli explorer sync-proofs --db explorer.db</code> ingests them into the explorer SQLite tables (<code>compute_sla_history</code> + <code>compute_sla_proofs</code>), and the explorer HTTP server exposes <code>/compute/sla/history?limit=N</code> so dashboards can render proof fingerprints without RPC access. The <code>snark</code> CLI (<code>cli/src/snark.rs</code>) still outputs attested circuit artifacts for out-of-band prover rollout.</li>
+<li>Energy RPC/CLI: <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.settle</code>, and <code>energy.submit_reading</code> expose the <code>crates/energy-market</code> state plus oracle submissions. Governance feeds <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code> into this module, so operators can tune the market via proposals rather than recompiling.</li>
+<li>Ad market RPC/CLI: reserve impressions, commit deliveries, record conversions, audit ANN proofs, manage mesh queues.</li>
+</ul>
+<h2 id="light-client-streaming"><a class="header" href="#light-client-streaming">Light-Client Streaming</a></h2>
+<ul>
+<li>RPC: <code>light.subscribe</code>, <code>light.get_block_range</code>, <code>light.get_device_status</code>, <code>state_stream.subscribe</code>. CLI: <code>tb-cli light sync</code>, <code>tb-cli light snapshot</code>, <code>tb-cli light device-status</code>.</li>
+<li>Mobile heuristics (battery, bandwidth, overrides) persist under <code>~/.the_block/light_client.toml</code>.</li>
+</ul>
+<h2 id="bridge-dex-and-identity-apis"><a class="header" href="#bridge-dex-and-identity-apis">Bridge, DEX, and Identity APIs</a></h2>
+<ul>
+<li>Bridge RPC: <code>bridge.submit_proof</code>, <code>bridge.challenge</code>, <code>bridge.status</code>, <code>bridge.claim_reward</code>. CLI mirrors the same set.</li>
+<li>DEX RPC/CLI: order placement, swaps, trust-line routing, escrow proofs, HTLC settlement.</li>
+<li>Identity RPC: DID registration, revocation, handle lookup; CLI uses <code>tb-cli identity</code>.</li>
+</ul>
+<h2 id="wallet-apis"><a class="header" href="#wallet-apis">Wallet APIs</a></h2>
+<ul>
+<li>CLI supports multisig, hardware signers, remote signers, and escrow-hash configuration: see <code>cli/src/wallet.rs</code> and <code>node/src/bin/wallet.rs</code>.</li>
+<li>Commands include wallet creation/import, address derivation, signing, broadcast, and governance voting (where applicable). Use <code>--format json</code> for automation.</li>
+<li>Remote signer workflows emit telemetry and enforce multisig signer-set policies documented in <code>docs/security_and_privacy.md#remote-signers-and-key-management</code>.</li>
+</ul>
+<h2 id="schemas-and-reference-files"><a class="header" href="#schemas-and-reference-files">Schemas and Reference Files</a></h2>
+<ul>
+<li>JSON schemas under <code>docs/spec/</code> define fee market inputs (<code>fee_v2.schema.json</code>) and DNS records. Keep them in sync with code when adding fields.</li>
+<li>Dependency inventory snapshots live in <code>docs/dependency_inventory*.json</code>; regenerate after dependency changes.</li>
+<li>Assets (<code>docs/assets/</code>) include RSA samples, scheduler diagrams, and architecture SVGs referenced across the docs.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="developer_handbook.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="LEGACY_MAPPING.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="developer_handbook.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="LEGACY_MAPPING.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
