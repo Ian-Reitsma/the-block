@@ -277,6 +277,19 @@ impl LiveSignalProvider {
     }
 }
 
+#[cfg(feature = "telemetry")]
+fn fee_band_sample() -> Option<FeeBand> {
+    Some(FeeBand {
+        median: crate::fees::policy::consumer_p50(),
+        p90: crate::fees::policy::consumer_p90(),
+    })
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn fee_band_sample() -> Option<FeeBand> {
+    None
+}
+
 impl SignalProvider for LiveSignalProvider {
     fn chain_sample(&self, window_secs: u64) -> ChainSample {
         let guard = self.chain.lock().unwrap_or_else(|e| e.into_inner());
@@ -310,10 +323,7 @@ impl SignalProvider for LiveSignalProvider {
             },
             replay: replay_success_ratio(&guard, window),
             peer_liveness: peer_liveness_ratio(window_secs),
-            fee_band: Some(FeeBand {
-                median: crate::fees::policy::consumer_p50(),
-                p90: crate::fees::policy::consumer_p90(),
-            }),
+            fee_band: fee_band_sample(),
         }
     }
 
@@ -776,6 +786,7 @@ fn apply_intent(
 ) {
     {
         let mut guard = chain.lock().unwrap_or_else(|e| e.into_inner());
+        let params_snapshot = guard.params.clone();
         let mut runtime = Runtime::new(&mut *guard);
         match intent.action {
             GateAction::Enter => runtime.set_launch_operational(true),
@@ -783,7 +794,7 @@ fn apply_intent(
             GateAction::Rehearsal => runtime.set_dns_rehearsal(true),
             GateAction::Trade => runtime.set_dns_rehearsal(false),
         }
-        runtime.set_current_params(&guard.params);
+        runtime.set_current_params(&params_snapshot);
     }
     intent.state = IntentState::Applied {
         epoch: intent.epoch_apply,
@@ -940,10 +951,11 @@ impl OperationalController {
         let slope = difficulty_slope(sample.difficulty.as_ref()?);
         let peer = sample.peer_liveness.and_then(|r| r.ratio()).unwrap_or(0.0);
         let replay = sample.replay.and_then(|r| r.ratio()).unwrap_or(0.0);
-        self.push_history(&mut self.smooth_history, smooth);
-        self.push_history(&mut self.slope_history, slope);
-        self.push_history(&mut self.replay_history, replay);
-        self.push_history(&mut self.peer_history, peer);
+        let history_capacity = self.history_capacity;
+        Self::push_history(&mut self.smooth_history, history_capacity, smooth);
+        Self::push_history(&mut self.slope_history, history_capacity, slope);
+        Self::push_history(&mut self.replay_history, history_capacity, replay);
+        Self::push_history(&mut self.peer_history, history_capacity, peer);
         if self.smooth_history.len() < 2
             || self.slope_history.len() < 2
             || self.replay_history.len() < 2
@@ -1036,8 +1048,8 @@ impl OperationalController {
         }
     }
 
-    fn push_history(&self, history: &mut VecDeque<f64>, value: f64) {
-        if history.len() == self.history_capacity {
+    fn push_history(history: &mut VecDeque<f64>, capacity: usize, value: f64) {
+        if history.len() == capacity {
             history.pop_front();
         }
         history.push_back(value);
@@ -1167,12 +1179,21 @@ impl NamingController {
             .and_then(|vals| median_u64(vals).map(|ms| ms as f64 / 1000.0))
             .unwrap_or(0.0);
 
-        self.push_history(&mut self.txt_history, txt_ratio);
-        self.push_history(&mut self.dispute_history, dispute_ratio);
-        self.push_history(&mut self.completion_history, completion_ratio);
-        self.push_history(&mut self.coverage_history, coverage);
-        self.push_history(&mut self.settlement_history, settle_p90);
-        self.push_history(&mut self.duration_history, duration_median);
+        let history_capacity = self.history_capacity;
+        Self::push_history(&mut self.txt_history, history_capacity, txt_ratio);
+        Self::push_history(&mut self.dispute_history, history_capacity, dispute_ratio);
+        Self::push_history(
+            &mut self.completion_history,
+            history_capacity,
+            completion_ratio,
+        );
+        Self::push_history(&mut self.coverage_history, history_capacity, coverage);
+        Self::push_history(&mut self.settlement_history, history_capacity, settle_p90);
+        Self::push_history(
+            &mut self.duration_history,
+            history_capacity,
+            duration_median,
+        );
 
         if self.txt_history.len() < 2
             || self.dispute_history.len() < 2
@@ -1289,8 +1310,8 @@ impl NamingController {
         None
     }
 
-    fn push_history(&self, history: &mut VecDeque<f64>, value: f64) {
-        if history.len() == self.history_capacity {
+    fn push_history(history: &mut VecDeque<f64>, capacity: usize, value: f64) {
+        if history.len() == capacity {
             history.pop_front();
         }
         history.push_back(value);

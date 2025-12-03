@@ -57,7 +57,7 @@ pub fn handle(cmd: SnarkCmd) {
     match cmd {
         SnarkCmd::Compile { wasm, out } => {
             let wasm_bytes = fs::read(wasm).expect("read wasm");
-            let circuit = snark::compile_wasm(&wasm_bytes);
+            let circuit = snark::compile_wasm(&wasm_bytes).expect("compile SNARK circuit");
             fs::write(out, circuit).expect("write circuit");
         }
     }

@@ -1,5 +1,6 @@
 use super::ParamKey;
 use crate::ad_readiness::AdReadinessConfig;
+use crate::energy::{self, GovernanceEnergyParams};
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
 use ad_market::MarketplaceHandle;
@@ -60,6 +61,15 @@ impl<'a> Runtime<'a> {
     pub fn set_ad_readiness(&mut self, readiness: crate::ad_readiness::AdReadinessHandle) {
         self.ad_readiness = Some(readiness);
         self.sync_ad_readiness();
+    }
+
+    fn sync_energy_params(&self) {
+        let snapshot = GovernanceEnergyParams {
+            min_stake: self.bc.params.energy_min_stake.max(0) as u64,
+            oracle_timeout_blocks: self.bc.params.energy_oracle_timeout_blocks.max(1) as u64,
+            slashing_rate_bps: self.bc.params.energy_slashing_rate_bps.clamp(0, 10_000) as u16,
+        };
+        energy::set_governance_params(snapshot);
     }
 
     pub fn set_current_params(&mut self, params: &Params) {
@@ -193,6 +203,21 @@ impl<'a> Runtime<'a> {
 
     pub fn set_storage_engine_policy(&mut self, allowed: &[String]) {
         crate::config::set_storage_engine_policy(allowed);
+    }
+
+    pub fn set_energy_min_stake(&mut self, value: u64) {
+        self.bc.params.energy_min_stake = value as i64;
+        self.sync_energy_params();
+    }
+
+    pub fn set_energy_oracle_timeout_blocks(&mut self, value: u64) {
+        self.bc.params.energy_oracle_timeout_blocks = value as i64;
+        self.sync_energy_params();
+    }
+
+    pub fn set_energy_slashing_rate_bps(&mut self, value: u64) {
+        self.bc.params.energy_slashing_rate_bps = value.min(10_000) as i64;
+        self.sync_energy_params();
     }
 
     pub fn set_bridge_incentives(
@@ -330,6 +355,12 @@ pub struct Params {
     pub ad_cap_provider_count: i64,
     #[serde(default = "default_percentile_buckets")]
     pub ad_percentile_buckets: i64,
+    #[serde(default = "default_energy_min_stake")]
+    pub energy_min_stake: i64,
+    #[serde(default = "default_energy_oracle_timeout_blocks")]
+    pub energy_oracle_timeout_blocks: i64,
+    #[serde(default = "default_energy_slashing_rate_bps")]
+    pub energy_slashing_rate_bps: i64,
     pub jurisdiction_region: i64,
     pub ai_diagnostics_enabled: i64,
     pub kalman_r_short: i64,
@@ -409,6 +440,9 @@ impl Default for Params {
             ad_cap_host_count: 0,
             ad_cap_provider_count: 0,
             ad_percentile_buckets: default_percentile_buckets(),
+            energy_min_stake: default_energy_min_stake(),
+            energy_oracle_timeout_blocks: default_energy_oracle_timeout_blocks(),
+            energy_slashing_rate_bps: default_energy_slashing_rate_bps(),
             jurisdiction_region: 0,
             ai_diagnostics_enabled: 0,
             kalman_r_short: 1,
@@ -708,6 +742,18 @@ impl Params {
             "bridge_duty_window_secs".into(),
             Value::Number(self.bridge_duty_window_secs.into()),
         );
+        map.insert(
+            "energy_min_stake".into(),
+            Value::Number(self.energy_min_stake.into()),
+        );
+        map.insert(
+            "energy_oracle_timeout_blocks".into(),
+            Value::Number(self.energy_oracle_timeout_blocks.into()),
+        );
+        map.insert(
+            "energy_slashing_rate_bps".into(),
+            Value::Number(self.energy_slashing_rate_bps.into()),
+        );
         Ok(Value::Object(map))
     }
 
@@ -858,6 +904,9 @@ impl Params {
                 .get("ad_percentile_buckets")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_percentile_buckets),
+            energy_min_stake: take_i64("energy_min_stake")?,
+            energy_oracle_timeout_blocks: take_i64("energy_oracle_timeout_blocks")?,
+            energy_slashing_rate_bps: take_i64("energy_slashing_rate_bps")?,
             jurisdiction_region: take_i64("jurisdiction_region")?,
             ai_diagnostics_enabled: take_i64("ai_diagnostics_enabled")?,
             kalman_r_short: take_i64("kalman_r_short")?,
@@ -951,6 +1000,18 @@ const fn default_percentile_buckets() -> i64 {
     12
 }
 
+const fn default_energy_min_stake() -> i64 {
+    1_000
+}
+
+const fn default_energy_oracle_timeout_blocks() -> i64 {
+    720
+}
+
+const fn default_energy_slashing_rate_bps() -> i64 {
+    0
+}
+
 const fn default_runtime_backend_policy() -> i64 {
     DEFAULT_RUNTIME_BACKEND_POLICY
 }
@@ -1008,6 +1069,21 @@ fn apply_jurisdiction_region(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 fn apply_ai_diagnostics_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
     p.ai_diagnostics_enabled = v;
+    Ok(())
+}
+
+fn apply_energy_min_stake(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.energy_min_stake = v;
+    Ok(())
+}
+
+fn apply_energy_oracle_timeout_blocks(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.energy_oracle_timeout_blocks = v;
+    Ok(())
+}
+
+fn apply_energy_slashing_rate_bps(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.energy_slashing_rate_bps = v;
     Ok(())
 }
 
@@ -1408,7 +1484,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 62] = [
+    static REGS: [ParamSpec; 65] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -2206,6 +2282,45 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |v, rt| {
                 rt.bc.params.ad_percentile_buckets = v;
                 rt.sync_ad_readiness();
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::EnergyMinStake,
+            default: default_energy_min_stake(),
+            min: 0,
+            max: 1_000_000,
+            unit: "ct",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_min_stake,
+            apply_runtime: |v, rt| {
+                rt.set_energy_min_stake(v.max(0) as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::EnergyOracleTimeoutBlocks,
+            default: default_energy_oracle_timeout_blocks(),
+            min: 1,
+            max: 10_000,
+            unit: "blocks",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_oracle_timeout_blocks,
+            apply_runtime: |v, rt| {
+                rt.set_energy_oracle_timeout_blocks(v.max(1) as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::EnergySlashingRateBps,
+            default: default_energy_slashing_rate_bps(),
+            min: 0,
+            max: 10_000,
+            unit: "bps",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_slashing_rate_bps,
+            apply_runtime: |v, rt| {
+                rt.set_energy_slashing_rate_bps(v.max(0) as u64);
                 Ok(())
             },
         },

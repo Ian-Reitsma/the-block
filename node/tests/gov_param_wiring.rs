@@ -4,6 +4,7 @@ use std::time::Duration;
 use sys::tempfile::tempdir;
 use the_block::{
     compute_market::admission,
+    energy::{self, GovernanceEnergyParams},
     generate_keypair,
     governance::{
         GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
@@ -15,6 +16,7 @@ use the_block::{
 #[cfg(feature = "telemetry")]
 use the_block::{
     fees::policy,
+    telemetry,
     telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING},
 };
 
@@ -73,6 +75,7 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid = store.submit(prop).unwrap();
     store
@@ -152,6 +155,7 @@ fn industrial_min_capacity_param_wires_and_rollback() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid = store.submit(prop).unwrap();
     store
@@ -238,6 +242,7 @@ fn scheduler_weights_apply_and_record_activation() {
             vote_deadline_epoch: 1,
             activation_epoch: None,
             status: ProposalStatus::Open,
+            deps: Vec::new(),
         };
         let pid = store.submit(proposal).unwrap();
         store
@@ -328,6 +333,7 @@ fn snapshot_interval_param_updates_runtime() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid = store.submit(prop).unwrap();
     store
@@ -359,4 +365,70 @@ fn snapshot_interval_param_updates_runtime() {
             .get(),
         60
     );
+}
+
+#[testkit::tb_serial]
+fn energy_params_update_market_runtime() {
+    struct EnergyReset(GovernanceEnergyParams);
+    impl Drop for EnergyReset {
+        fn drop(&mut self) {
+            energy::set_governance_params(self.0);
+        }
+    }
+    let baseline = energy::governance_params();
+    let _reset = EnergyReset(baseline);
+    let dir = tempdir().unwrap();
+    let store = GovStore::open(dir.path());
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    let mut rt = Runtime::new(&mut bc);
+    let mut params = Params::default();
+    rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);
+    rt.set_snapshot_interval(Duration::from_secs(
+        params.snapshot_interval_secs.max(1) as u64
+    ));
+    admission::set_min_capacity(params.industrial_admission_min_capacity as u64);
+    let mut apply_param =
+        |key: ParamKey, new_value: i64, min: i64, max: i64| -> (u64, ProposalStatus) {
+            let prop = Proposal {
+                id: 0,
+                key,
+                new_value,
+                min,
+                max,
+                proposer: "g".into(),
+                created_epoch: 0,
+                vote_deadline_epoch: 1,
+                activation_epoch: None,
+                status: ProposalStatus::Open,
+                deps: Vec::new(),
+            };
+            let pid = store.submit(prop).unwrap();
+            store
+                .vote(
+                    pid,
+                    Vote {
+                        proposal_id: pid,
+                        voter: "v".into(),
+                        choice: VoteChoice::Yes,
+                        weight: 1,
+                        received_at: 0,
+                    },
+                    0,
+                )
+                .unwrap();
+            let status = store.tally_and_queue(pid, 1).unwrap();
+            store
+                .activate_ready(1 + ACTIVATION_DELAY, &mut rt, &mut params)
+                .unwrap();
+            (pid, status)
+        };
+    let (_, status) = apply_param(ParamKey::EnergyMinStake, 5_000, 0, 1_000_000);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(energy::governance_params().min_stake, 5_000);
+    let (_, status) = apply_param(ParamKey::EnergyOracleTimeoutBlocks, 1_440, 1, 10_000);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(energy::governance_params().oracle_timeout_blocks, 1_440);
+    let (_, status) = apply_param(ParamKey::EnergySlashingRateBps, 250, 0, 10_000);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(energy::governance_params().slashing_rate_bps, 250);
 }

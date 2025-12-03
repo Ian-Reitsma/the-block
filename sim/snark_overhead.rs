@@ -11,8 +11,8 @@ fn main() {
         let data: Vec<u8> = (0..1024).map(|_| rng.gen::<u32>() as u8).collect();
         let start = Instant::now();
         // pretend to verify SNARK
-        let proof = the_block::compute_market::snark::prove(&data, &data);
-        let _ = the_block::compute_market::snark::verify(&proof, &data, &data);
+        let proof = the_block::compute_market::snark::prove(&data, &data).unwrap();
+        let _ = the_block::compute_market::snark::verify(&proof, &data, &data).unwrap();
         snark_ms += start.elapsed().as_millis();
         let start = Instant::now();
         let _ = the_block::compute_market::workloads::snark::run(&data);

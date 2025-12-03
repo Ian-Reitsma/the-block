@@ -2,6 +2,7 @@ use crate::{
     codec_helpers::json_from_str,
     json_helpers::{
         json_null, json_object_from, json_rpc_request, json_rpc_request_with_id, json_string,
+        json_u64,
     },
     parse_utils::take_string,
     rpc::RpcClient,
@@ -11,8 +12,12 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use crypto_suite::hex;
 use foundation_serialization::json::Value as JsonValue;
+use std::convert::TryInto;
 use std::io::{self, Write};
+use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
+use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
 use the_block::simple_db::EngineKind;
 
 pub enum ComputeCmd {
@@ -29,6 +34,8 @@ pub enum ComputeCmd {
     Queue { url: String },
     /// Show status for a job
     Status { job_id: String, url: String },
+    /// List recent SLA resolutions and attached SNARK proofs
+    Proofs { url: String, limit: usize },
 }
 
 impl ComputeCmd {
@@ -100,6 +107,20 @@ impl ComputeCmd {
             ))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("compute.proofs"),
+                "proofs",
+                "Show recent SLA resolutions with SNARK proofs",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Number of SLA entries to display").default("10"),
+            ))
+            .build(),
+        )
         .build()
     }
 
@@ -138,6 +159,14 @@ impl ComputeCmd {
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
                 Ok(ComputeCmd::Status { job_id, url })
+            }
+            "proofs" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let limit = take_string(sub_matches, "limit")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(10);
+                Ok(ComputeCmd::Proofs { url, limit })
             }
             other => Err(format!("unknown subcommand '{other}'")),
         }
@@ -296,6 +325,210 @@ pub fn write_provider_balances_from_str(text: &str, out: &mut dyn Write) -> io::
     Ok(())
 }
 
+pub fn write_sla_history_from_str(text: &str, out: &mut dyn Write) -> io::Result<()> {
+    if let Ok(val) = json_from_str::<JsonValue>(text) {
+        if let Some(entries) = val.get("result").and_then(|v| v.as_array()) {
+            for entry in entries {
+                let job = entry.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+                let provider = entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                let outcome = entry.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
+                let reason = entry
+                    .get("outcome_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let burned = entry.get("burned_ct").and_then(|v| v.as_u64()).unwrap_or(0);
+                let refunded = entry
+                    .get("refunded_ct")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let deadline = entry.get("deadline").and_then(|v| v.as_u64()).unwrap_or(0);
+                let resolved_at = entry
+                    .get("resolved_at")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                writeln!(
+                    out,
+                    "job {job} provider {provider} outcome {outcome} reason {reason} burned_ct {burned} refunded_ct {refunded} deadline {deadline} resolved_at {resolved_at}"
+                )?;
+                if let Some(proofs) = entry.get("proofs").and_then(|v| v.as_array()) {
+                    for proof in proofs {
+                        let fingerprint = proof
+                            .get("fingerprint")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let backend = proof.get("backend").and_then(|v| v.as_str()).unwrap_or("");
+                        let circuit = proof
+                            .get("circuit_hash")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let program = proof
+                            .get("program_commitment")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let witness = proof
+                            .get("witness_commitment")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let latency = proof
+                            .get("latency_ms")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let verified = proof
+                            .get("verified")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let generated_at = proof
+                            .get("artifact")
+                            .and_then(|v| v.get("generated_at"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        writeln!(
+                            out,
+                            "  proof {fingerprint} backend {backend} circuit {circuit} wasm {program} witness {witness} latency_ms {latency} verified {verified} generated_at {generated_at}"
+                        )?;
+                    }
+                }
+            }
+        } else {
+            writeln!(out, "{}", text)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn parse_sla_history_from_str(text: &str) -> Result<Vec<SlaResolution>, String> {
+    let val = json_from_str::<JsonValue>(text)
+        .map_err(|err| format!("parse sla history response: {err}"))?;
+    let entries = val
+        .get("result")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| "missing result array in sla history response".to_string())?;
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let job_id = expect_str(entry, "job_id")?.to_string();
+        let provider = expect_str(entry, "provider")?.to_string();
+        let buyer = expect_str(entry, "buyer")?.to_string();
+        let burned_ct = expect_u64(entry, "burned_ct")?;
+        let refunded_ct = expect_u64(entry, "refunded_ct")?;
+        let deadline = expect_u64(entry, "deadline")?;
+        let resolved_at = expect_u64(entry, "resolved_at")?;
+        let outcome = parse_outcome(entry)?;
+        let proofs = parse_proofs(entry.get("proofs"))?;
+        out.push(SlaResolution {
+            job_id,
+            provider,
+            buyer,
+            outcome,
+            burned_ct,
+            refunded_ct,
+            deadline,
+            resolved_at,
+            proofs,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_outcome(entry: &JsonValue) -> Result<SlaResolutionKind, String> {
+    let outcome = expect_str(entry, "outcome")?;
+    match outcome {
+        "completed" => Ok(SlaResolutionKind::Completed),
+        "cancelled" => {
+            let reason = entry
+                .get("outcome_reason")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("unspecified")
+                .to_string();
+            Ok(SlaResolutionKind::Cancelled { reason })
+        }
+        "violated" => {
+            let reason = entry
+                .get("outcome_reason")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("unspecified")
+                .to_string();
+            Ok(SlaResolutionKind::Violated { reason })
+        }
+        other => Err(format!("unknown SLA outcome '{other}'")),
+    }
+}
+
+fn parse_proofs(value: Option<&JsonValue>) -> Result<Vec<ProofBundle>, String> {
+    let Some(array) = value.and_then(JsonValue::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut proofs = Vec::with_capacity(array.len());
+    for proof in array {
+        let backend = parse_backend(expect_str(proof, "backend")?)?;
+        let circuit_hash = decode_hex_array(expect_str(proof, "circuit_hash")?)?;
+        let program_commitment = decode_hex_array(expect_str(proof, "program_commitment")?)?;
+        let output_commitment = decode_hex_array(expect_str(proof, "output_commitment")?)?;
+        let witness_commitment = decode_hex_array(expect_str(proof, "witness_commitment")?)?;
+        let latency_ms = expect_u64(proof, "latency_ms")?;
+        let proof_bytes = hex::decode(expect_str(proof, "proof")?)
+            .map_err(|err| format!("invalid proof hex: {err}"))?;
+        let artifact_value = proof
+            .get("artifact")
+            .ok_or_else(|| "missing artifact in proof entry".to_string())?;
+        let artifact = parse_artifact(artifact_value)?;
+        let bundle = ProofBundle::from_encoded_parts(
+            backend,
+            circuit_hash,
+            program_commitment,
+            output_commitment,
+            witness_commitment,
+            proof_bytes,
+            latency_ms,
+            artifact,
+        )
+        .map_err(|err| format!("failed to rebuild proof bundle: {err}"))?;
+        proofs.push(bundle);
+    }
+    Ok(proofs)
+}
+
+fn parse_artifact(value: &JsonValue) -> Result<CircuitArtifact, String> {
+    let circuit_hash = decode_hex_array(expect_str(value, "circuit_hash")?)?;
+    let wasm_hash = decode_hex_array(expect_str(value, "wasm_hash")?)?;
+    let generated_at = expect_u64(value, "generated_at")?;
+    Ok(CircuitArtifact {
+        circuit_hash,
+        wasm_hash,
+        generated_at,
+    })
+}
+
+fn parse_backend(label: &str) -> Result<SnarkBackend, String> {
+    match label.to_ascii_lowercase().as_str() {
+        "cpu" => Ok(SnarkBackend::Cpu),
+        "gpu" => Ok(SnarkBackend::Gpu),
+        other => Err(format!("unknown prover backend '{other}'")),
+    }
+}
+
+fn expect_str<'a>(entry: &'a JsonValue, field: &str) -> Result<&'a str, String> {
+    entry
+        .get(field)
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| format!("missing field '{field}' in sla history entry"))
+}
+
+fn expect_u64(entry: &JsonValue, field: &str) -> Result<u64, String> {
+    entry
+        .get(field)
+        .and_then(JsonValue::as_u64)
+        .ok_or_else(|| format!("missing numeric field '{field}'"))
+}
+
+fn decode_hex_array(hex_value: &str) -> Result<[u8; 32], String> {
+    let bytes =
+        hex::decode(hex_value).map_err(|err| format!("invalid hex field '{hex_value}': {err}"))?;
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("expected 32-byte array, got {} bytes", bytes.len()))
+}
+
 pub fn handle(cmd: ComputeCmd) {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
@@ -378,6 +611,16 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     writeln!(out, "{}", text)?;
+                }
+            }
+        }
+        ComputeCmd::Proofs { url, limit } => {
+            let client = RpcClient::from_env();
+            let params = json_object_from([("limit", json_u64(limit as u64))]);
+            let payload = json_rpc_request("compute_market.sla_history", params);
+            if let Ok(resp) = client.call(&url, &payload) {
+                if let Ok(text) = resp.text() {
+                    write_sla_history_from_str(&text, out)?;
                 }
             }
         }

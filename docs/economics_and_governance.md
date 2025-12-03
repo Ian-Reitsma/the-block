@@ -7,6 +7,14 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Industrial workload gauges (`industrial_backlog`, `industrial_utilization`) flow from storage/compute telemetry into `Block::industrial_subsidies()`.
 - Personal rebates are ledger entries only. They auto-apply to the submitter’s own write traffic before dipping into transferable CT and never circulate.
 
+## Energy Market Economics
+- **Single-token model** — Energy payouts settle in CT just like storage/compute. Credits (`EnergyCredit`) and receipts (`EnergyReceipt`) are internal ledger objects stored in `SimpleDb::open_named(names::ENERGY_MARKET, …)`; settlement burns meter credits, decrements provider capacity, and records `EnergyReceipt { buyer, seller, kwh_delivered, price_paid, treasury_fee, slash_applied }`.
+- **Treasury integration** — `node::energy::settle_energy_delivery` forwards `treasury_fee + slash_applied` to `NODE_GOV_STORE.record_treasury_accrual`, so explorer/CLI treasury views capture energy fees without extra plumbing. Governance proposals can earmark these accruals like any other treasury inflow.
+- **Governance parameters** — `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps` live in the shared `governance` crate (`ParamKey::EnergyMinStake`, etc.). Proposals use the same `ParamSpec` flow as other knobs; once activated, `node::energy::set_governance_params` updates the runtime config and snapshots the energy sled DB. Outstanding work adds new payloads (batch vs real-time settlement, dependency graph validation) tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`.
+- **Oracle economics** — Meter readings produce `EnergyCredit` entries keyed by the reading hash (BLAKE3 over provider, meter, readings, timestamp, signature). Credits expire after `energy_oracle_timeout_blocks`; stale readings cannot be settled and must be re-issued. `energy.submit_reading` RPC will soon enforce signature validation and multi-reading attestations, with slashing telemetry + dispute RPCs covering bad actors.
+- **CLI/RPC visibility** — `tb-cli energy market --verbose` and `energy.market_state` expose provider capacity, price, stake, outstanding credits, and receipts so explorers can mirror the same tables. Upcoming explorer work adds energy provider tables, receipt timelines, and slash summaries (see `AGENTS.md` tasks).
+- **Dispute flow** — Until dedicated dispute RPCs land, governance proposals (e.g., temporarily raising `energy_slashing_rate_bps` for a provider, pausing settlement) act as the economic kill switch. Once the dispute endpoints ship they will create ledger anchors referencing disputed meter hashes while preserving CT accounting invariants.
+
 ## Multipliers and Emissions
 - Per-epoch utilisation `U_x` feeds the “one dial” multiplier:
   \[

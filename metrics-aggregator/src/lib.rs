@@ -67,8 +67,8 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
     }
 }
 
-use foundation_serialization::json;
 use foundation_serialization::json::{Map, Number, Value};
+use foundation_serialization::{json, Deserialize};
 use foundation_telemetry::{
     AdReadinessCohortTelemetry, AdReadinessTelemetry, AdReadinessUtilizationSummary,
     MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry,
@@ -245,6 +245,9 @@ const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
     "explorer_block_payout_ad_last_seen_timestamp";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN: &str =
     "explorer_block_payout_ad_it_last_seen_timestamp";
+const METRIC_EXPLORER_COMPUTE_SLA_OUTCOME_TOTAL: &str = "explorer_compute_sla_outcome_total";
+const METRIC_EXPLORER_COMPUTE_SLA_LAST_SEEN: &str = "explorer_compute_sla_last_seen_timestamp";
+const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla_poll_error_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
@@ -282,6 +285,7 @@ const EXPLORER_PAYOUT_ROLES: [&str; 6] = [
     "liquidity",
     "miner",
 ];
+const EXPLORER_SLA_OUTCOMES: [&str; 3] = ["completed", "cancelled", "violated"];
 
 const BRIDGE_MONITORED_COUNTERS: [&str; 8] = [
     "bridge_reward_claims_total",
@@ -1839,6 +1843,9 @@ struct AggregatorMetrics {
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
     explorer_block_payout_ad_it_last_seen: GaugeVec,
+    explorer_compute_sla_outcome_total: GaugeVec,
+    explorer_compute_sla_last_seen: Gauge,
+    explorer_compute_sla_poll_error_total: Counter,
     ad_readiness_ready: Gauge,
     ad_readiness_unique_viewers: Gauge,
     ad_readiness_host_count: Gauge,
@@ -2652,6 +2659,31 @@ impl AggregatorMetrics {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .len()
+    }
+
+    fn record_explorer_sla_snapshot(&self, counts: &HashMap<String, u64>, last_seen: u64) {
+        for outcome in EXPLORER_SLA_OUTCOMES {
+            let value = counts.get(outcome).copied().unwrap_or(0) as f64;
+            match self
+                .explorer_compute_sla_outcome_total
+                .handle_for_label_values(&[outcome])
+            {
+                Ok(handle) => handle.set(value),
+                Err(err) => {
+                    warn!(
+                        target: "aggregator",
+                        outcome,
+                        ?err,
+                        "failed to update explorer SLA outcome gauge",
+                    );
+                }
+            }
+        }
+        self.explorer_compute_sla_last_seen.set(last_seen as f64);
+    }
+
+    fn record_explorer_sla_poll_error(&self) {
+        self.explorer_compute_sla_poll_error_total.inc();
     }
 }
 
@@ -3606,6 +3638,33 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &explorer_block_payout_ad_it_last_seen,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
     );
+    let explorer_compute_sla_outcome_total = GaugeVec::new(
+        Opts::new(
+            METRIC_EXPLORER_COMPUTE_SLA_OUTCOME_TOTAL,
+            "Explorer compute SLA history entries grouped by outcome",
+        ),
+        &["outcome"],
+    );
+    registry
+        .register(Box::new(explorer_compute_sla_outcome_total.clone()))
+        .expect("register explorer_compute_sla_outcome_total");
+    seed_outcome_gauge(
+        &explorer_compute_sla_outcome_total,
+        METRIC_EXPLORER_COMPUTE_SLA_OUTCOME_TOTAL,
+    );
+    let explorer_compute_sla_last_seen = registry
+        .register_gauge(
+            METRIC_EXPLORER_COMPUTE_SLA_LAST_SEEN,
+            "Unix timestamp of the most recent Explorer compute SLA history record",
+        )
+        .expect("register explorer_compute_sla_last_seen_timestamp");
+    explorer_compute_sla_last_seen.set(0.0);
+    let explorer_compute_sla_poll_error_total = registry
+        .register_counter(
+            METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL,
+            "Explorer compute SLA polling failures",
+        )
+        .expect("register explorer_compute_sla_poll_error_total");
     let ad_readiness_ready = registry
         .register_gauge(
             "ad_readiness_ready",
@@ -3817,6 +3876,9 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
         explorer_block_payout_ad_it_last_seen,
+        explorer_compute_sla_outcome_total,
+        explorer_compute_sla_last_seen,
+        explorer_compute_sla_poll_error_total,
         ad_readiness_ready,
         ad_readiness_unique_viewers,
         ad_readiness_host_count,
@@ -3871,6 +3933,90 @@ pub fn reset_bridge_remediation_dispatch_log() -> BridgeRemediationDispatchLogGu
         }
     }
     BridgeRemediationDispatchLogGuard { _lock: lock }
+}
+
+#[derive(Debug, Deserialize)]
+struct ExplorerSlaRecord {
+    outcome: String,
+    resolved_at: u64,
+}
+
+struct ExplorerSlaSnapshot {
+    counts: HashMap<String, u64>,
+    last_seen: u64,
+}
+
+impl ExplorerSlaSnapshot {
+    fn new() -> Self {
+        Self {
+            counts: HashMap::new(),
+            last_seen: 0,
+        }
+    }
+
+    fn update(&mut self, record: ExplorerSlaRecord) {
+        let outcome = record.outcome.to_ascii_lowercase();
+        *self.counts.entry(outcome).or_insert(0) += 1;
+        if record.resolved_at > self.last_seen {
+            self.last_seen = record.resolved_at;
+        }
+    }
+}
+
+pub fn spawn_explorer_sla_polling(base_url: String, limit: usize, interval_secs: u64) {
+    if interval_secs == 0 {
+        return;
+    }
+    let normalized = base_url.trim_end_matches('/').to_string();
+    let clamped_limit = limit.max(1).min(512);
+    spawn(async move {
+        let client = http_client();
+        loop {
+            match fetch_explorer_sla_snapshot(&client, &normalized, clamped_limit).await {
+                Ok(snapshot) => {
+                    aggregator_metrics()
+                        .record_explorer_sla_snapshot(&snapshot.counts, snapshot.last_seen);
+                }
+                Err(err) => {
+                    warn!(
+                        target: "aggregator",
+                        error = %err,
+                        url = %normalized,
+                        "failed to poll explorer SLA history",
+                    );
+                    aggregator_metrics().record_explorer_sla_poll_error();
+                }
+            }
+            runtime::sleep(Duration::from_secs(interval_secs)).await;
+        }
+    });
+}
+
+async fn fetch_explorer_sla_snapshot(
+    client: &HttpClient,
+    base_url: &str,
+    limit: usize,
+) -> Result<ExplorerSlaSnapshot, String> {
+    let url = format!("{}/compute/sla/history?limit={}", base_url, limit);
+    let response = client
+        .request(Method::Get, &url)
+        .map_err(|err| err.to_string())?
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if response.status() != StatusCode::OK {
+        return Err(format!(
+            "explorer returned status {} for {}",
+            response.status(),
+            url
+        ));
+    }
+    let records: Vec<ExplorerSlaRecord> = response.json().map_err(|err| err.to_string())?;
+    let mut snapshot = ExplorerSlaSnapshot::new();
+    for record in records {
+        snapshot.update(record);
+    }
+    Ok(snapshot)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -7155,6 +7301,23 @@ fn seed_role_counter(counter: &CounterVec, metric: &str) {
 fn seed_role_gauge(gauge: &GaugeVec, metric: &str) {
     for role in EXPLORER_PAYOUT_ROLES {
         set_role_gauge(gauge, metric, role, 0.0);
+    }
+}
+
+fn seed_outcome_gauge(gauge: &GaugeVec, metric: &str) {
+    for outcome in EXPLORER_SLA_OUTCOMES {
+        if let Err(err) = gauge
+            .ensure_handle_for_label_values(&[outcome])
+            .map(|handle| handle.set(0.0))
+        {
+            warn!(
+                target: "aggregator",
+                metric,
+                outcome,
+                ?err,
+                "failed to seed explorer SLA gauge",
+            );
+        }
     }
 }
 

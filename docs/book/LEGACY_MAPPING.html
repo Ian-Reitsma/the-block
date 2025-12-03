@@ -1,0 +1,280 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Legacy Mapping - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="legacy-mapping"><a class="header" href="#legacy-mapping">Legacy Mapping</a></h1>
+<p>This index records where every pre-consolidation document landed. Each bullet lists the removed file(s) and the section inside the new handbook that now hosts the canonical content. Use it to answer “where did file X go?” without trawling git history.</p>
+<h2 id="overview-docsoverviewmd"><a class="header" href="#overview-docsoverviewmd">Overview (<code>docs/overview.md</code>)</a></h2>
+<ul>
+<li><code>docs/roadmap.md</code>, <code>docs/progress.md</code>, <code>docs/detailed_updates.md</code>, <code>docs/system_changes.md</code>, <code>docs/changelog.md</code> → <a href="overview.html#document-map"><code>Document Map</code></a></li>
+<li><code>docs/architecture/README.md</code>, <code>docs/architecture/node.md</code> → <a href="overview.html#repository-layout-live-tree"><code>Repository Layout</code></a></li>
+</ul>
+<h2 id="architecture-docsarchitecturemd"><a class="header" href="#architecture-docsarchitecturemd">Architecture (<code>docs/architecture.md</code>)</a></h2>
+<ul>
+<li><code>docs/consensus.md</code>, <code>docs/difficulty.md</code>, <code>docs/poh.md</code>, <code>docs/dkg.md</code>, <code>docs/sharding.md</code>, <code>docs/macro_block.md</code>, <code>docs/blob_chain.md</code>, <code>docs/hashlayout.md</code>, <code>docs/genesis_history.md</code>, <code>docs/serialization.md</code>, <code>docs/schema_migrations/v7_recent_timestamps.md</code> → <a href="architecture.html#ledger-and-consensus"><code>Ledger and Consensus</code></a></li>
+<li><code>docs/transaction_lifecycle.md</code>, <code>docs/mempool.md</code>, <code>docs/mempool_qos.md</code>, <code>docs/account_abstraction.md</code>, <code>docs/identity.md</code>, <code>docs/tokens.md</code> → <a href="architecture.html#transaction-and-execution-pipeline"><code>Transaction and Execution Pipeline</code></a></li>
+<li><code>docs/gossip.md</code>, <code>docs/gossip_chaos.md</code>, <code>docs/networking.md</code>, <code>docs/net_bootstrap.md</code>, <code>docs/net_a_star.md</code>, <code>docs/network_partitions.md</code>, <code>docs/network_topologies.md</code>, <code>docs/p2p_protocol.md</code>, <code>docs/network_quic.md</code>, <code>docs/quic.md</code>, <code>docs/swarm.md</code> → <a href="architecture.html#networking-and-propagation"><code>Networking and Propagation</code></a></li>
+<li><code>docs/range_boost.md</code>, <code>docs/localnet.md</code>, <code>docs/headless.md</code>, <code>docs/ai_diagnostics.md</code> → <a href="architecture.html#localnet-and-range-boost"><code>LocalNet and Range Boost</code></a> and <a href="architecture.html#auxiliary-services"><code>Auxiliary Services</code></a></li>
+<li><code>docs/storage.md</code>, <code>docs/storage_pipeline.md</code>, <code>docs/storage_erasure.md</code>, <code>docs/storage_market.md</code>, <code>docs/storage/repair.md</code>, <code>docs/simple_db.md</code>, <code>docs/wal.md</code>, <code>docs/snapshots.md</code>, <code>docs/state_pruning.md</code>, <code>docs/snapshot.md</code>, <code>docs/schema_migrations/v10_industrial_subsidies.md</code> → <a href="architecture.html#storage-and-state"><code>Storage and State</code></a></li>
+<li><code>docs/compute_market.md</code>, <code>docs/compute_market_courier.md</code>, <code>docs/compute_snarks.md</code>, <code>docs/scheduler.md</code>, <code>docs/htlc_swaps.md</code> → <a href="architecture.html#compute-marketplace"><code>Compute Marketplace</code></a></li>
+<li><code>docs/dex.md</code>, <code>docs/dex_amm.md</code>, <code>docs/schema_migrations/v9_dex_escrow.md</code> → <a href="architecture.html#dex-and-trust-lines"><code>DEX and Trust Lines</code></a></li>
+<li><code>docs/bridges.md</code>, <code>docs/bridge_security.md</code>, <code>docs/schema_migrations/v8_bridge_headers.md</code> → <a href="architecture.html#token-bridges"><code>Token Bridges</code></a></li>
+<li><code>docs/wallets.md</code>, <code>docs/gateway.md</code>, <code>docs/gateway_dns.md</code>, <code>docs/mobile_gateway.md</code>, <code>docs/mobile_light_client.md</code>, <code>docs/light_client.md</code>, <code>docs/light_client_stream.md</code>, <code>docs/light_client_incentives.md</code>, <code>docs/read_receipts.md</code> → <a href="architecture.html#gateway-and-client-access"><code>Gateway and Client Access</code></a></li>
+<li><code>docs/telemetry.md</code>, <code>docs/metrics.md</code> → <a href="architecture.html#telemetry-and-instrumentation"><code>Telemetry and Instrumentation</code></a></li>
+<li><code>docs/service_badge.md</code>, <code>docs/le_portal.md</code>, <code>docs/probe.md</code> → <a href="architecture.html#auxiliary-services"><code>Auxiliary Services</code></a></li>
+</ul>
+<h2 id="economics-and-governance-docseconomics_and_governancemd"><a class="header" href="#economics-and-governance-docseconomics_and_governancemd">Economics and Governance (<code>docs/economics_and_governance.md</code>)</a></h2>
+<ul>
+<li><code>docs/economics.md</code>, <code>docs/inflation.md</code>, <code>docs/tokens.md</code>, <code>docs/fee_rebates.md</code>, <code>docs/fees.md</code>, <code>docs/settlement_switch.md</code>, <code>docs/settlement_audit.md</code> → <a href="economics_and_governance.html#ct-supply-and-sub-ledgers"><code>CT Supply</code>, <code>Fee Lanes</code>, and <code>Settlement</code></a></li>
+<li><code>docs/treasury.md</code>, <code>docs/ledger_invariants.md</code>, <code>docs/service_badge.md</code> → <a href="economics_and_governance.html#treasury-and-disbursements"><code>Treasury</code>, <code>Service Badges</code>, and <code>Ledger Invariants</code></a></li>
+<li><code>docs/governance.md</code>, <code>docs/governance_params.md</code>, <code>docs/governance_release.md</code>, <code>docs/governance_rollback.md</code>, <code>docs/governance_ui.md</code>, <code>docs/commit_reveal.md</code>, <code>docs/system_changes.md</code>, <code>docs/audit_handbook.md</code>, <code>docs/risk_register.md</code> → <a href="economics_and_governance.html#proposal-lifecycle"><code>Proposal Lifecycle</code>, <code>Governance Parameters</code>, and <code>Risk Controls</code></a></li>
+</ul>
+<h2 id="operations-docsoperationsmd"><a class="header" href="#operations-docsoperationsmd">Operations (<code>docs/operations.md</code>)</a></h2>
+<ul>
+<li><code>docs/deployment.md</code>, <code>docs/deployment_guide.md</code>, <code>docs/runbook.md</code>, <code>docs/operators/README.md</code>, <code>docs/operators/run_a_node.md</code>, <code>docs/operators/upgrade.md</code> → <a href="operations.html#bootstrap-and-configuration"><code>Bootstrap</code>, <code>Running a Node</code>, and <code>Deployment</code></a></li>
+<li><code>docs/monitoring.md</code>, <code>docs/monitoring/README.md</code>, <code>docs/dashboard.md</code>, <code>docs/telemetry_ops.md</code>, <code>docs/metrics.md</code>, <code>docs/operators/telemetry.md</code> → <a href="operations.html#telemetry-wiring"><code>Telemetry Wiring</code>, <code>Metrics Aggregator Ops</code>, and <code>Monitoring</code></a></li>
+<li><code>docs/probe.md</code>, <code>docs/operators/incident_playbook.md</code>, <code>docs/settlement_audit.md</code>, <code>docs/settlement_switch.md</code> → <a href="operations.html#probe-cli-and-diagnostics"><code>Probe CLI and Diagnostics</code></a> and <a href="operations.html#incident-response"><code>Incident Response</code></a></li>
+<li><code>docs/storage/repair.md</code>, <code>docs/snapshots.md</code>, <code>docs/snapshot.md</code>, <code>docs/wal.md</code> → <a href="operations.html#storage-snapshots-and-wal-management"><code>Storage, Snapshots, and WAL Management</code></a></li>
+<li><code>docs/range_boost.md</code>, <code>docs/localnet.md</code> → <a href="operations.html#range-boost-and-localnet-operations"><code>Range Boost and LocalNet Operations</code></a></li>
+<li><code>docs/system_changes.md</code>, <code>docs/detailed_updates.md</code>, <code>docs/changelog.md</code> → <a href="operations.html#operator-checklist"><code>Operator Checklist</code></a></li>
+</ul>
+<h2 id="security-and-privacy-docssecurity_and_privacymd"><a class="header" href="#security-and-privacy-docssecurity_and_privacymd">Security and Privacy (<code>docs/security_and_privacy.md</code>)</a></h2>
+<ul>
+<li><code>docs/crypto.md</code>, <code>docs/crypto_migration.md</code>, <code>docs/remote_signer_security.md</code>, <code>docs/threat_model/README.md</code>, <code>docs/threat_model/hosting.md</code>, <code>docs/threat_model/storage.md</code> → <a href="security_and_privacy.html#threat-model"><code>Threat Model</code>, <code>Cryptography</code>, and <code>Remote Signers</code></a></li>
+<li><code>docs/kyc.md</code>, <code>docs/jurisdiction.md</code>, <code>docs/jurisdiction_authoring.md</code>, <code>docs/privacy_layer.md</code>, <code>docs/privacy_compliance.md</code>, <code>docs/le_portal.md</code> → <a href="security_and_privacy.html#kyc-jurisdiction-and-compliance"><code>KYC, Jurisdiction, and Law-Enforcement</code></a></li>
+<li><code>docs/supply_chain.md</code>, <code>docs/repro.md</code>, <code>docs/reproducible_builds.md</code>, <code>docs/provenance.md</code>, <code>docs/release_provenance.md</code>, <code>docs/pivot_dependency_strategy.md</code> → <a href="security_and_privacy.html#release-provenance-and-supply-chain"><code>Release Provenance and Supply Chain</code></a></li>
+<li><code>docs/bridge_security.md</code>, <code>docs/htlc_swaps.md</code>, <code>docs/risk_register.md</code>, <code>docs/audit_handbook.md</code> → <a href="security_and_privacy.html#bridge-and-cross-chain-security"><code>Bridge and Cross-Chain Security</code> and <code>Risk Register</code></a></li>
+</ul>
+<h2 id="developer-handbook-docsdeveloper_handbookmd"><a class="header" href="#developer-handbook-docsdeveloper_handbookmd">Developer Handbook (<code>docs/developer_handbook.md</code>)</a></h2>
+<ul>
+<li><code>docs/developer_setup.md</code>, <code>docs/development.md</code>, <code>docs/concurrency.md</code>, <code>docs/logging.md</code>, <code>docs/debugging.md</code>, <code>docs/testing.md</code>, <code>docs/performance.md</code>, <code>docs/benchmarks.md</code>, <code>docs/formal.md</code>, <code>docs/simulation_framework.md</code> → <a href="developer_handbook.html#environment-setup"><code>Environment Setup</code>, <code>Coding Standards</code>, <code>Testing</code>, <code>Performance</code>, and <code>Formal Methods</code></a></li>
+<li><code>docs/contract_dev.md</code>, <code>docs/wasm_contracts.md</code>, <code>docs/vm_debugging.md</code>, <code>docs/vm.md</code> → <a href="developer_handbook.html#contract-and-vm-development"><code>Contract and VM Development</code></a></li>
+<li><code>docs/demo.md</code>, <code>docs/headless.md</code>, <code>docs/explain.md</code>, <code>docs/ai_diagnostics.md</code> → <a href="developer_handbook.html#python--headless-tooling"><code>Python + Headless Tooling</code> and <code>Explainability</code></a></li>
+<li><code>docs/pivot_dependency_strategy.md</code>, <code>docs/dependency_inventory.md</code>, <code>docs/first_party_dependency_audit.md</code>, <code>docs/contributing.md</code> → <a href="developer_handbook.html#dependency-policy"><code>Dependency Policy</code> and <code>Contribution Flow</code></a></li>
+</ul>
+<h2 id="apis-and-tooling-docsapis_and_toolingmd"><a class="header" href="#apis-and-tooling-docsapis_and_toolingmd">APIs and Tooling (<code>docs/apis_and_tooling.md</code>)</a></h2>
+<ul>
+<li><code>docs/rpc.md</code>, <code>docs/first_party_rpc_blockers.md</code> → <a href="apis_and_tooling.html#json-rpc"><code>JSON-RPC</code></a></li>
+<li><code>docs/gateway.md</code>, <code>docs/mobile_gateway.md</code>, <code>docs/gateway_dns.md</code>, <code>docs/wallets.md</code> → <a href="apis_and_tooling.html#gateway-http-and-cdn-surfaces"><code>Gateway HTTP and CDN Surfaces</code></a> and <a href="apis_and_tooling.html#dns-and-naming"><code>DNS and Naming</code></a></li>
+<li><code>docs/explorer.md</code>, <code>docs/service_badge.md</code>, <code>docs/telemetry.md</code> → <a href="apis_and_tooling.html#explorer-and-log-indexer"><code>Explorer and Log Indexer</code></a> and <a href="apis_and_tooling.html#metrics-and-telemetry-apis"><code>Metrics and Telemetry APIs</code></a></li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="apis_and_tooling.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="apis_and_tooling.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

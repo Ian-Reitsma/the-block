@@ -1,0 +1,548 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Architecture - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
+<p>Everything below reflects what ships in <code>main</code> today. Paths reference the exact modules so engineers can cross-check behaviour while hacking.</p>
+<h2 id="ledger-and-consensus"><a class="header" href="#ledger-and-consensus">Ledger and Consensus</a></h2>
+<h3 id="block-format-and-state"><a class="header" href="#block-format-and-state">Block Format and State</a></h3>
+<ul>
+<li><code>node/src/blockchain</code> and <code>node/src/ledger_binary.rs</code> define the canonical block/ledger codecs using <code>codec::profiles</code>. Ledger snapshots embed service-badge flags, governance params, subsidy buckets, and AI-diagnostics toggles so upgrades round-trip without drift.</li>
+<li>Macro-block checkpoints (<code>node/src/macro_block.rs</code>) record per-shard state roots and finalize batches of 1-second blocks for light clients and replay harnesses.</li>
+<li>Genesis material stays in <code>hash_genesis.rs</code>; the compile-time assertion in <code>node/src/consensus/mod.rs</code> panics if <code>GENESIS_HASH</code> drifts from the serialized baseline.</li>
+<li>Blob chain and root assembly live in <code>node/src/blob_chain.rs</code>; roots are scheduled deterministically alongside block production.</li>
+</ul>
+<h3 id="serialization--codecs"><a class="header" href="#serialization--codecs">Serialization &amp; Codecs</a></h3>
+<ul>
+<li>Canonical codecs are implemented via the <code>foundation_serialization</code> facade and the <code>codec</code> crate. Binary layouts used by the node, CLI, explorer, and metrics aggregator round-trip under these profiles.</li>
+<li>JSON schemas under <code>docs/spec/</code> (for example, <code>dns_record.schema.json</code> and <code>fee_v2.schema.json</code>) document public payloads; cross-language vectors live in tests and fuzz targets (<code>fuzz/rpc</code>, <code>explorer/tests</code>).</li>
+<li>Hash layout and binary struct helpers live in <code>node/src/util/binary_struct.rs</code> and <code>node/src/util/binary_codec.rs</code>. Production crates use the serialization facade; <code>serde_json</code> and <code>bincode</code> appear only in tooling.</li>
+</ul>
+<h3 id="proof-of-work-and-service"><a class="header" href="#proof-of-work-and-service">Proof of Work and Service</a></h3>
+<ul>
+<li>The hybrid PoW/PoS engine lives under <code>node/src/consensus</code>. <code>pow.rs</code> covers hash-based leaders, <code>pos.rs</code> handles stake selection, and <code>leader.rs</code> coordinates their votes before block assembly.</li>
+<li>Service-aware weighting feeds through <code>node/src/service_badge.rs</code>; badge-earned weight modifies scheduler fairness plus governance quorum checks.</li>
+<li><code>node/src/exec.rs</code> binds work proofs into block production, ensuring compute/storage receipts attach directly to the coinbase ledger entries.</li>
+</ul>
+<h3 id="sharding"><a class="header" href="#sharding">Sharding</a></h3>
+<ul>
+<li>Per-shard state roots are tracked and finalized in macro blocks. Inter-shard coordination, including cross-shard dependencies and reorg handling, lives in <code>node/src/blockchain/inter_shard.rs</code> with tests in <code>node/src/blockchain/tests</code>.</li>
+<li>Shard identifiers and layout are defined alongside ledger codecs; helper types are under <code>ledger::address::ShardId</code>.</li>
+</ul>
+<h3 id="difficulty-and-proof-of-history"><a class="header" href="#difficulty-and-proof-of-history">Difficulty and Proof of History</a></h3>
+<ul>
+<li><code>node/src/consensus/difficulty*.rs</code> implement Kalman retargeting with clamped deltas. VDF checkpoints feed <code>node/src/poh.rs</code> so propagation remains deterministic even under adversarial timing.</li>
+<li>PoH ticks emit telemetry and are replayed by <code>tests/poh.rs</code> plus the Python harness under <code>demo.py</code>.</li>
+</ul>
+<h3 id="macro-blocks-and-finality"><a class="header" href="#macro-blocks-and-finality">Macro Blocks and Finality</a></h3>
+<ul>
+<li><code>node/src/consensus/finality.rs</code> collects validator attestations, rotates stakes, and records dispute evidence in sled (<code>state/</code>).</li>
+<li>The DKG helper crate <code>dkg/</code> plus <code>node/src/dkg.rs</code> coordinates committee key refresh without exposing transcripts.</li>
+</ul>
+<h2 id="transaction-and-execution-pipeline"><a class="header" href="#transaction-and-execution-pipeline">Transaction and Execution Pipeline</a></h2>
+<h3 id="transaction-lifecycle"><a class="header" href="#transaction-lifecycle">Transaction Lifecycle</a></h3>
+<ul>
+<li><code>node/src/transaction.rs</code> and <code>node/src/tx</code> encode canonical transaction envelopes shared with CLI/explorer via <code>foundation_serialization</code>. Account abstraction hooks (<code>docs/account_abstraction.md</code> equivalent) now live in <code>node/src/identity/handle_registry.rs</code> and <code>node/src/transaction/fee.rs</code>.</li>
+<li>Pipeline: mempool admission → QoS lanes → scheduler → execution → receipts anchored in ledger.</li>
+</ul>
+<h3 id="fee-lanes-and-rebates"><a class="header" href="#fee-lanes-and-rebates">Fee Lanes and Rebates</a></h3>
+<ul>
+<li>Fee lanes are typed via <code>node/src/transaction::FeeLane</code> and <code>node/src/fee</code>, with rebate hooks under <code>node/src/fees</code> and <code>node/src/fee/readiness</code>. Governance controls floors through <code>governance/src/params.rs</code> and telemetry tracks enforcement (<code>gateway_fee_floor_*</code> metrics).</li>
+<li>Rebates post ledger entries that auto-apply to the submitter before consuming liquid CT. Reference detail lives in <code>docs/economics_and_governance.md#fee-lanes-and-rebates</code>.</li>
+</ul>
+<h3 id="mempool-admission-and-eviction"><a class="header" href="#mempool-admission-and-eviction">Mempool Admission and Eviction</a></h3>
+<ul>
+<li>Admission and QoS live under <code>node/src/mempool/admission.rs</code>; scoring and eviction policies are in <code>node/src/mempool/scoring.rs</code>. Tests live in <code>node/src/mempool/tests</code>.</li>
+<li>Fee floors and EIP‑1559‑style base fee nudges are applied per block; telemetry exposes <code>mempool_fee_floor_*</code> and target fullness gauges.</li>
+</ul>
+<h3 id="scheduler-and-parallel-execution"><a class="header" href="#scheduler-and-parallel-execution">Scheduler and Parallel Execution</a></h3>
+<ul>
+<li><code>node/src/scheduler.rs</code> coordinates lane-aware batches with fairness timeouts. Workloads feed into <code>node/src/parallel.rs</code> so CPU-heavy tasks (GPU hashing, SNARK verification) stay deterministic.</li>
+<li>The compute scheduler reuses the same fairness machinery via <code>node/src/compute_market/scheduler</code> and <code>workloads.rs</code>.</li>
+</ul>
+<h3 id="virtual-machine-and-wasm"><a class="header" href="#virtual-machine-and-wasm">Virtual Machine and WASM</a></h3>
+<ul>
+<li><code>node/src/vm</code> embeds the bytecode VM, while WASM execution and debugging helpers sit in <code>node/src/vm/debugger.rs</code> plus <code>docs/developer_handbook.md#contract-and-vm-development</code>.</li>
+<li>Contracts interact with both UTXO and account space; CLI helpers live in <code>cli/src/wasm.rs</code> and <code>cli/src/contract_dev.rs</code>.</li>
+</ul>
+<h3 id="account-abstraction-and-identity"><a class="header" href="#account-abstraction-and-identity">Account Abstraction and Identity</a></h3>
+<ul>
+<li>Distributed handles, DIDs, and registry logic live in <code>node/src/identity</code>. Binary codecs for handles/DIDs ensure explorers, wallets, and RPC share the same storage bytes.</li>
+<li>Light clients rely on this identity layer for DID revocation proofs and remote signer flows (<code>node/src/light_client</code>).</li>
+</ul>
+<h2 id="networking-and-propagation"><a class="header" href="#networking-and-propagation">Networking and Propagation</a></h2>
+<h3 id="p2p-handshake"><a class="header" href="#p2p-handshake">P2P Handshake</a></h3>
+<ul>
+<li><code>node/src/p2p/handshake.rs</code> negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the <code>p2p_overlay</code> crate with in-house and stub adapters.</li>
+<li>Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.</li>
+</ul>
+<h3 id="p2p-wire-protocol"><a class="header" href="#p2p-wire-protocol">P2P Wire Protocol</a></h3>
+<ul>
+<li>Message framing and compatibility shims live under <code>node/src/p2p/wire_binary.rs</code>. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.</li>
+</ul>
+<h3 id="quic-transport"><a class="header" href="#quic-transport">QUIC Transport</a></h3>
+<ul>
+<li>The transport crate (<code>crates/transport</code>) exposes provider traits with backends for Quinn and s2n (feature-gated) plus an in-house stub for tests. Providers advertise capabilities to the handshake layer.</li>
+<li>TLS configuration is applied per provider during instance creation (e.g., <code>apply_quinn_tls</code>, <code>apply_s2n_tls</code>), with resets ensuring only one provider’s TLS stack is active at a time.</li>
+<li>Callbacks propagate connect/disconnect/handshake statistics into telemetry for dashboards and incident analysis.</li>
+</ul>
+<h3 id="overlay-and-peer-persistence"><a class="header" href="#overlay-and-peer-persistence">Overlay and Peer Persistence</a></h3>
+<ul>
+<li>Overlay persistence relies on <code>SimpleDb</code> namespaces (<code>node/src/net/peer.rs</code>, <code>net/overlay_store</code>). Operators migrate peer DBs via <code>scripts/migrate_overlay_store.rs</code> with guidance captured in <code>docs/operations.md#overlay-stores</code>.</li>
+<li>Uptime accounting flows through <code>p2p_overlay::uptime</code>; governance reward issuances reuse the same sled-backed snapshots.</li>
+</ul>
+<h3 id="gossip-relay"><a class="header" href="#gossip-relay">Gossip Relay</a></h3>
+<ul>
+<li><code>node/src/gossip/relay.rs</code> implements TTL-bound dedup, shard-aware peer sets, and latency + reputation scoring. Fanout metrics live in <code>node/src/telemetry.rs</code> (<code>GOSSIP_*</code> series) and the relay persists shard membership so partitions recover quickly.</li>
+<li>Range-boost deliveries and ANN payloads register as gossip hops, keeping mesh telemetry side-by-side with QUIC counts.</li>
+</ul>
+<h3 id="quic-transport-1"><a class="header" href="#quic-transport-1">QUIC Transport</a></h3>
+<ul>
+<li>The in-house transport crate (<code>crates/transport</code>) abstracts Quinn and s2n providers. <code>node/src/net/quic.rs</code> publishes diag snapshots through RPC/CLI (<code>tb-cli net quic-stats</code>).</li>
+<li>Mutual-TLS materials derive from node keys, are cached, and rotate via governance toggles. Chaos tooling lives in <code>docs/operations.md#chaos-and-fault-drills</code>.</li>
+</ul>
+<h3 id="localnet-and-range-boost"><a class="header" href="#localnet-and-range-boost">LocalNet and Range Boost</a></h3>
+<ul>
+<li>Device-to-device mesh lives in <code>node/src/localnet</code> (proximity proofs) and <code>node/src/range_boost</code> (queue, forwarder, telemetry). CLI toggles match env vars <code>TB_MESH_STATIC_PEERS</code> &amp; <code>--range-boost</code>.</li>
+<li>Range boost ties into ad-market ANN snapshots: <code>node/src/ad_policy_snapshot.rs</code> persists signed JSON + <code>.sig</code> files for operator audits.</li>
+</ul>
+<h3 id="network-recovery-and-topologies"><a class="header" href="#network-recovery-and-topologies">Network Recovery and Topologies</a></h3>
+<ul>
+<li>Partition detection sits in <code>node/src/net/partition_watch.rs</code>; remediation helpers live in <code>docs/operations.md#network-recovery</code> and CLI commands under <code>cli/src/remediation.rs</code>.</li>
+<li>A* routing heuristics, swarm presets, and bootstrap flow are summarized from the former <code>docs/net_a_star.md</code>, <code>docs/swarm.md</code>, <code>docs/net_bootstrap.md</code>, and <code>docs/network_topologies.md</code> into this section.</li>
+</ul>
+<h2 id="storage-and-state"><a class="header" href="#storage-and-state">Storage and State</a></h2>
+<h3 id="storage-pipeline"><a class="header" href="#storage-pipeline">Storage Pipeline</a></h3>
+<ul>
+<li><code>node/src/storage/pipeline.rs</code> handles chunk sizing, erasure coding, encryption/compression selection, and provider placement. <code>coding/</code> supplies the compressor/erasure backends with runtime switches recorded in telemetry.</li>
+<li>Manifest handling uses <code>manifest_binary.rs</code> and <code>pipeline/binary</code> for compatibility across CLI/SDK.</li>
+</ul>
+<h3 id="storage-market"><a class="header" href="#storage-market">Storage Market</a></h3>
+<ul>
+<li><code>storage_market/</code> unifies sled, RocksDB, and memory via the <code>storage_engine</code> crate and the new policy layer. Rent escrows, provider profiles, and governance overrides for redundancy all sit here.</li>
+<li>Proof-of-retrievability, chunk repair, and simulator hooks now share the same store (see <code>node/src/storage/repair.rs</code>).</li>
+</ul>
+<h3 id="simpledb-and-storage-engines"><a class="header" href="#simpledb-and-storage-engines">SimpleDb and Storage Engines</a></h3>
+<ul>
+<li><code>node/src/simple_db</code> wraps the <code>storage_engine</code> traits; engines include in-house, RocksDB (feature-gated), and a memory engine for lightweight integration. Runtime selection is governed by <code>EngineConfig</code> and per-name overrides.</li>
+<li>Snapshot rewrites atomically replace column families using fsync’d temp files.</li>
+<li>The sled store remains in use for dedicated subsystems (for example, governance and explorer stores via the <code>sled/</code> crate), but it is not a SimpleDb backend.</li>
+<li>See also <code>state/README.md</code> and <code>docs/operations.md#storage-snapshots-and-wal-management</code> for crash replay and compaction guidance.</li>
+</ul>
+<h3 id="snapshots-and-state-pruning"><a class="header" href="#snapshots-and-state-pruning">Snapshots and State Pruning</a></h3>
+<ul>
+<li>WAL + snapshot lifecycle is inside <code>node/src/storage/wal.rs</code>, <code>docs/operations.md#wal-and-snapshots</code>, and CLI commands <code>tb-cli snapshots ...</code>.</li>
+<li>State pruning logic lives under <code>node/src/state_pruning.rs</code>; governance knobs guard pruning depth and compaction windows.</li>
+</ul>
+<h3 id="repair-and-simulation"><a class="header" href="#repair-and-simulation">Repair and Simulation</a></h3>
+<ul>
+<li><code>node/src/storage/repair</code> + <code>docs/operations.md#storage-repair</code> outline provider scoring, erasure thresholds, and CLI triggers.</li>
+<li>Simulation harnesses (<code>docs/simulation_framework.md</code> content) now live here with references to <code>sim/</code> and <code>fuzz/</code> suites.</li>
+</ul>
+<h3 id="schema-migrations"><a class="header" href="#schema-migrations">Schema Migrations</a></h3>
+<ul>
+<li>On-disk schema changes are introduced behind version bumps and lossless migrations. Historical notes from <code>docs/schema_migrations/*</code> are consolidated here and inline in code where applicable.</li>
+<li>Examples: bridge header persistence (v8), DEX escrow (v9), and industrial subsidies (v10). Migrations run during startup with telemetry for progress and error handling.</li>
+</ul>
+<h2 id="compute-marketplace"><a class="header" href="#compute-marketplace">Compute Marketplace</a></h2>
+<h3 id="offers-and-matching"><a class="header" href="#offers-and-matching">Offers and Matching</a></h3>
+<ul>
+<li>Computation lives under <code>node/src/compute_market</code>. Offers, bids, and receipts serialize through <code>foundation_serialization</code> and are exposed over RPC (<code>node/src/rpc/compute_market.rs</code>).</li>
+<li>Providers stake bonds (<code>compute_market::Offer</code>), schedule workloads, and settle receipts via <code>compute_market::settlement</code>.</li>
+</ul>
+<h3 id="lane-scheduler"><a class="header" href="#lane-scheduler">Lane Scheduler</a></h3>
+<ul>
+<li>The matcher rotates fairness windows per lane and is backed by sled state stored under <code>state/market</code>. Lane telemetrics feed <code>match_loop_latency_seconds{lane}</code>.</li>
+</ul>
+<h3 id="workloads-and-snark-receipts"><a class="header" href="#workloads-and-snark-receipts">Workloads and SNARK Receipts</a></h3>
+<ul>
+<li>Supported workloads: transcode, inference, GPU hash, SNARK. SNARK proofs now run through <code>node/src/compute_market/snark.rs</code>, which wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled shapes per digest, and chooses CPU/GPU provers (with telemetry exported via <code>snark_prover_latency_seconds{backend}</code> / <code>snark_prover_failure_total{backend}</code>).</li>
+<li>Proof bundles carry circuit/output/witness commitments and serialized proof bytes; they are attached to SLA records in <code>compute_market::settlement</code> and surfaced over RPC via <code>compute_market.sla_history</code>.</li>
+<li>Explorer ingest mirrors the same payloads: <code>tb-cli explorer sync-proofs --db explorer.db --url http://node:26658</code> streams <code>compute_market.sla_history(limit)</code> responses, persists the serialized <code>Vec&lt;ProofBundle&gt;</code> per job (<code>compute_sla_proofs</code> table), and exposes them under <code>/compute/sla/history</code> so dashboards can render fingerprints/artifacts without talking to the node.</li>
+<li>Providers that advertise CUDA/ROCm GPUs (or dedicated accelerators) automatically attempt GPU proving first; failures fall back to CPU while feeding scheduler accelerator telemetry so providers can be reweighted.</li>
+<li>Benchmark harnesses for the prover live under <code>node/src/compute_market/tests/prover.rs</code> so operators can compare CPU/GPU latency locally before enabling accelerators.</li>
+</ul>
+<h3 id="courier-and-replay"><a class="header" href="#courier-and-replay">Courier and Replay</a></h3>
+<ul>
+<li>Retry/courier logic (<code>node/src/compute_market/courier.rs</code>) persists inflight bundles so restarts resume outstanding work only.</li>
+<li><code>docs/compute_market_courier.md</code> content moved here; CLI commands under <code>cli/src/compute.rs</code> manage the queue.</li>
+</ul>
+<h3 id="compute-backed-money-cbm"><a class="header" href="#compute-backed-money-cbm">Compute-backed Money (CBM)</a></h3>
+<ul>
+<li>CBM hooks live in <code>node/src/compute_market/cbm.rs</code>. Governance toggles lane payouts, refundable deposits, and SLA slashing (<code>compute_market::settlement::SlaOutcome</code>).</li>
+</ul>
+<h2 id="energy-market"><a class="header" href="#energy-market">Energy Market</a></h2>
+<ul>
+<li>Energy credits live in <code>crates/energy-market</code> with the node wrapper in <code>node/src/energy.rs</code>. Providers, credits, and receipts persist in sled via <code>SimpleDb::open_named(names::ENERGY_MARKET, …)</code>; set <code>TB_ENERGY_MARKET_DIR</code> to relocate the DB. The store snapshots to bytes (<code>EnergyMarket::{to_bytes,from_bytes}</code>) on every mutation and uses the same fsync+rename discipline as other <code>SimpleDb</code> consumers so restarts replay identical state.</li>
+<li>RPC wiring (<code>node/src/rpc/energy.rs</code>) exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, and <code>energy.settle</code>. The CLI (<code>cli/src/energy.rs</code>) emits the same JSON schema and prints providers, outstanding credits (meter hashes), and settled receipts, so oracle adapters (<code>crates/oracle-adapter</code>) and explorers stay aligned. <code>docs/testnet/ENERGY_QUICKSTART.md</code> covers bootstrap, signature validation, dispute rehearsal, and how to script <code>tb-cli energy</code> calls.</li>
+<li>Governance owns <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code>. Proposals feed those values through the shared governance crate, latch them in <code>node/src/governance/params.rs</code>, then invoke <code>node::energy::set_governance_params</code>, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.</li>
+<li>Observability: <code>energy_market</code> emits gauges (<code>energy_providers_count</code>, <code>energy_avg_price</code>), counters (<code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>), histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>), and simple health probes (<code>node::energy::check_energy_market_health</code>). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope.</li>
+</ul>
+<h3 id="energy-governance-and-rpc-next-tasks"><a class="header" href="#energy-governance-and-rpc-next-tasks">Energy, Governance, and RPC Next Tasks</a></h3>
+<ul>
+<li><strong>Governance + Params</strong>
+<ul>
+<li>Add proposal payloads for energy bundles (batch vs real-time settle) with <code>ParamSpec</code> + runtime hooks.</li>
+<li>Wire explorer + CLI timelines so energy param changes and activation/rollback history stay visible.</li>
+<li>Expand dependency graph support in proposals (deps validation in the node mirror + conflict tests).</li>
+<li>Harden param persistence snapshots and rollback audits with more regression coverage.</li>
+</ul>
+</li>
+<li><strong>Energy + Oracle</strong>
+<ul>
+<li>Implement real signature verification inside <code>oracle-adapter</code> (replace <code>NoopSignatureVerifier</code>) and ship vectors.</li>
+<li>Add oracle quorum/expiry policy (multi-reading attestation) with slashing telemetry and dispute RPCs.</li>
+<li>Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.</li>
+<li>Expand CLI flows: list providers/receipts, dispute + open cases, and provider updates (price + stake top-up).</li>
+</ul>
+</li>
+<li><strong>RPC + CLI Hardening</strong>
+<ul>
+<li>Add RPC auth + rate limiting specific to the <code>energy.*</code> endpoints (aligned with gateway policy).</li>
+<li>Cover negative cases + structured errors for <code>energy.submit_reading</code> (bad signature, stale timestamp, wrong meter).</li>
+<li>Publish JSON schema snippets for energy payloads/oracle messages plus round-trip CLI tests.</li>
+</ul>
+</li>
+<li><strong>Telemetry + Observability</strong>
+<ul>
+<li>Extend Grafana dashboards: provider count, pending credits, settlement rate, slash totals.</li>
+<li>Add SLOs/alerts for oracle latency, slashing spikes, settlement stalls.</li>
+<li>Wire metrics-aggregator summary endpoints so <code>/wrappers</code> and <code>/telemetry/summary</code> expose energy stats.</li>
+</ul>
+</li>
+<li><strong>Network + Transport</strong>
+<ul>
+<li>Run QUIC chaos drills with per-provider failover simulation + fingerprint rotation tests.</li>
+<li>Add handshake capability assertions in <code>node/tests</code> for the new transport metadata paths.</li>
+</ul>
+</li>
+<li><strong>Storage + State</strong>
+<ul>
+<li>Mirror <code>SimpleDb</code> snapshots for energy (<code>TB_ENERGY_MARKET_DIR</code>) with fsync+atomic swap and document restore flow.</li>
+<li>Ship migration drill scripts/tests for energy schema evolution (backwards compatibility).</li>
+</ul>
+</li>
+<li><strong>Security + Supply Chain</strong>
+<ul>
+<li>Enforce release provenance gates for energy/oracle crates (vendor snapshot + checksums in CI).</li>
+<li>Tighten oracle adapter secret hygiene (key sourcing, redaction) + boundary fuzz tests for decoding.</li>
+</ul>
+</li>
+<li><strong>Performance + Correctness</strong>
+<ul>
+<li>Throughput benchmarks for meter ingestion + settlement (per-provider histograms).</li>
+<li>Fuzzers for the energy binary codec, RPC param decoding, and governance activation queue.</li>
+<li>Deterministic replay in CI for energy receipt reapplication across x86_64/AArch64.</li>
+</ul>
+</li>
+<li><strong>Docs + Explorer</strong>
+<ul>
+<li>Explorer views: provider table, receipts timeline, fee/slash summaries, plus SQLite schema updates.</li>
+<li>Expand <code>docs/testnet/ENERGY_QUICKSTART.md</code> with dispute flows + verifier integration.</li>
+</ul>
+</li>
+<li><strong>CI + Test Suite</strong>
+<ul>
+<li>Stabilize the full integration suite and gate merges on: governance-param wiring, RPC energy, handshake, rate limiters, ad-market RPC.</li>
+<li>Add a “fast mainnet gate” workflow that runs: unit tests + targeted integration (governance, RPC, ledger replay, transport handshake).</li>
+</ul>
+</li>
+</ul>
+<h2 id="bridges-dex-and-settlement"><a class="header" href="#bridges-dex-and-settlement">Bridges, DEX, and Settlement</a></h2>
+<h3 id="token-bridges"><a class="header" href="#token-bridges">Token Bridges</a></h3>
+<ul>
+<li>The <code>bridges/</code> crate handles POW header verification, relayer sets, telemetry, and dispute handling. RPC wiring lives in <code>node/src/rpc/bridge.rs</code>.</li>
+<li>Verified headers persist in sled (schema migration v8) and CLI commands under <code>cli/src/bridge.rs</code> manage challenge windows.</li>
+</ul>
+<h3 id="dex-and-trust-lines"><a class="header" href="#dex-and-trust-lines">DEX and Trust Lines</a></h3>
+<ul>
+<li><code>node/src/dex</code> + <code>dex/</code> supply order books, trust-line routing, escrow constraints, and adapters (Uniswap/Osmosis). Trust-line state is sled-backed and streamed to explorers/CLI.</li>
+</ul>
+<h3 id="htlc-and-cross-chain"><a class="header" href="#htlc-and-cross-chain">HTLC and Cross-Chain</a></h3>
+<ul>
+<li>Atomic swap primitives (<code>docs/htlc_swaps.md</code> replacement) were folded into <code>node/src/dex/htlc.rs</code> with RPC + CLI helpers. Governance tracks lane quotas and telemetry under <code>DEX_*</code> metrics.</li>
+</ul>
+<h2 id="gateway-and-client-access"><a class="header" href="#gateway-and-client-access">Gateway and Client Access</a></h2>
+<h3 id="http-gateway"><a class="header" href="#http-gateway">HTTP Gateway</a></h3>
+<ul>
+<li><code>node/src/gateway/http.rs</code> uses <code>crates/httpd</code> for the router, TLS, and WebSocket upgrades. Gateways serve static content, APIs, and compute relays from the embedded storage pipeline.</li>
+<li>CLI + explorer insight commands surfaced from old <code>docs/gateway.md</code> now live in <code>docs/apis_and_tooling.md#gateway</code>.</li>
+</ul>
+<h3 id="dns-publishing"><a class="header" href="#dns-publishing">DNS Publishing</a></h3>
+<ul>
+<li>DNS + <code>.block</code> records are handled by <code>node/src/gateway/dns.rs</code> with schemas archived under <code>docs/spec/dns_record.schema.json</code>.</li>
+</ul>
+<h3 id="dns-auctions-and-staking"><a class="header" href="#dns-auctions-and-staking">DNS Auctions and Staking</a></h3>
+<ul>
+<li>Gateway domain auctions use stake-backed bids and escrowed CT recorded under <code>node/src/gateway/dns.rs</code> (see <code>StakeEscrowRecord</code>). RPC/CLI support deposit, withdraw, and refund flows with error codes under the same module.</li>
+</ul>
+<h3 id="mobile-gateway-cache"><a class="header" href="#mobile-gateway-cache">Mobile Gateway Cache</a></h3>
+<ul>
+<li>Mobile caches persist ChaCha20-Poly1305 encrypted blobs in sled (<code>node/src/gateway/mobile_cache.rs</code>). TTL sweeps and CLI flush commands ensure offline support without stale data.</li>
+</ul>
+<h3 id="light-clients"><a class="header" href="#light-clients">Light Clients</a></h3>
+<ul>
+<li><code>node/src/light_client</code> streams headers, DID updates, and proofs. Streaming endpoints live in <code>node/src/rpc/state_stream.rs</code> and CLI commands under <code>cli/src/light_sync.rs</code>.</li>
+<li>Mobile updates plus power/bandwidth heuristics from the old <code>docs/mobile_light_client.md</code> live here and in <code>docs/apis_and_tooling.md#light-client-streaming</code>.</li>
+</ul>
+<h3 id="read-receipts"><a class="header" href="#read-receipts">Read Receipts</a></h3>
+<ul>
+<li><code>node/src/gateway/read_receipt.rs</code> records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for <code>READ_SUB_CT</code> live in <code>docs/economics_and_governance.md</code>.</li>
+</ul>
+<h2 id="telemetry-and-instrumentation"><a class="header" href="#telemetry-and-instrumentation">Telemetry and Instrumentation</a></h2>
+<h3 id="runtime-telemetry"><a class="header" href="#runtime-telemetry">Runtime Telemetry</a></h3>
+<ul>
+<li><code>node/src/telemetry.rs</code> registers every metric (TLS warnings, coding results, gossip fanout, SLA counters). CLI + aggregator share the same registry via <code>runtime::telemetry</code>.</li>
+<li>Wrapper telemetry exports runtime/transport/overlay/storage/coding metadata so governance policy violations are visible.</li>
+</ul>
+<h3 id="metrics-aggregator"><a class="header" href="#metrics-aggregator">Metrics Aggregator</a></h3>
+<ul>
+<li><code>metrics-aggregator/</code> collects node metrics, correlates them, exposes TLS warning audits, bridge remediation, and governance telemetry. HTTP endpoints live in the same <code>httpd</code> router, and optional S3 uploads reuse <code>foundation_object_store</code>.</li>
+</ul>
+<h3 id="monitoring-stack"><a class="header" href="#monitoring-stack">Monitoring Stack</a></h3>
+<ul>
+<li><code>monitoring/</code> provides Grafana dashboards and Prometheus rules. JSON dashboards (e.g., <code>monitoring/compute_market_dashboard.json</code>) are kept in-tree; see <code>docs/operations.md#monitoring</code> for install steps.</li>
+</ul>
+<h2 id="auxiliary-services"><a class="header" href="#auxiliary-services">Auxiliary Services</a></h2>
+<h3 id="service-badges"><a class="header" href="#service-badges">Service Badges</a></h3>
+<ul>
+<li><code>node/src/service_badge.rs</code> tracks uptime, latency, renewals, and issuance/revocation logic. Governance toggles TTL, uptime thresholds, and telemetry is emitted as <code>BADGE_*</code> counters.</li>
+</ul>
+<h3 id="ad-marketplace"><a class="header" href="#ad-marketplace">Ad Marketplace</a></h3>
+<ul>
+<li>Ad market crates (<code>ad_market</code>, <code>node/src/ad_policy_snapshot.rs</code>, <code>node/src/ad_readiness.rs</code>) manage policy snapshots, ANN proofs, conversion tokens, and mesh deliveries. CLI + RPC surfaces sit in <code>cli/src/ad_market.rs</code> and <code>node/src/rpc/ad_market.rs</code>.</li>
+</ul>
+<h3 id="law-enforcement-portal-and-jurisdiction-packs"><a class="header" href="#law-enforcement-portal-and-jurisdiction-packs">Law-enforcement Portal and Jurisdiction Packs</a></h3>
+<ul>
+<li>LE logging (<code>node/src/le_portal.rs</code>) records requests, actions, canaries, and evidence logs, with privacy redaction optional. Jurisdiction packs (<code>jurisdiction/</code>, <code>docs/security_and_privacy.md#jurisdiction-packs</code>) scope consent defaults and audit hooks.</li>
+</ul>
+<h3 id="range-boost-and-localnet-telemetry"><a class="header" href="#range-boost-and-localnet-telemetry">Range-Boost and LocalNet Telemetry</a></h3>
+<ul>
+<li>Mesh queue depth, hop latency, and fault toggles are exported via <code>node/src/range_boost</code> metrics. Operators manage peers and mesh policies through the CLI + <code>docs/operations.md#range-boost</code>.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="system_reference.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="economics_and_governance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="system_reference.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="economics_and_governance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

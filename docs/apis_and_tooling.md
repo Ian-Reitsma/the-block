@@ -10,8 +10,52 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 ## CLI (`tb-cli`)
 - Main entry in `cli/src/main.rs`. Subcommands include: `node`, `gov`, `wallet`, `bridge`, `dex`, `compute`, `storage`, `gateway`, `mesh`, `light`, `telemetry`, `probe`, `diagnostics`, `service-badge`, `remediation`, `ai`, `ann`, `identity`.
+- `tb-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `settle`, `submit-reading`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
 - Use `tb-cli --help` or `tb-cli <cmd> --help`. Structured output via `--format json` for automation.
 - CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.
+
+### Energy RPC payloads, auth, and error contracts
+- Endpoints live under `energy.*` and inherit the RPC server’s mutual-TLS/auth policy (`TB_RPC_AUTH_TOKEN`, allowlists) plus IP-based rate limiting defined in `docs/operations.md#gateway-policy`. Use `tb-cli diagnostics rpc-policy` to inspect the live policy before enabling public oracle submitters.
+- Endpoint map:
+
+| Method | Description | Request Body |
+| --- | --- | --- |
+| `energy.register_provider` | Register capacity/jurisdiction/meter binding plus stake. | `{ "capacity_kwh": u64, "price_per_kwh": u64, "meter_address": "string", "jurisdiction": "US_CA", "stake": u64, "owner": "account-id" }` |
+| `energy.market_state` | Fetch snapshot of providers, outstanding meter credits, and receipts; pass `{"provider_id":"energy-0x01"}` to filter. | optional object |
+| `energy.submit_reading` | Submit signed meter total to mint a credit. | `MeterReadingPayload` JSON (below) |
+| `energy.settle` | Burn credit + capacity to settle kWh and produce `EnergyReceipt`. | `{ "provider_id": "energy-0x01", "buyer": "acct"?, "kwh_consumed": u64, "meter_hash": "0x..." }` |
+
+- `energy.market_state` response structure:
+
+```json
+{
+  "status": "ok",
+  "providers": [ { "provider_id": "energy-0x00", "capacity_kwh": 10_000, "...": "..." } ],
+  "credits": [ { "provider": "energy-0x00", "meter_hash": "e3c3…", "amount_kwh": 120, "timestamp": 123456 } ],
+  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ]
+}
+```
+
+- `MeterReadingPayload` schema (shared by `oracle-adapter`, RPC, CLI, and explorer tooling):
+
+```jsonc
+{
+  "provider_id": "energy-0x00",
+  "meter_address": "mock_meter_1",
+  "kwh_reading": 12000,
+  "timestamp": 1710000000,
+  "signature": "hex-encoded ed25519/schnorr blob"
+}
+```
+
+- Error strings bubble up from `energy_market::EnergyMarketError` and always return `{ "error": "<string>" }` so clients can check `.error`. Expect the following failure families:
+  - `ProviderExists`, `MeterAddressInUse`, `UnknownProvider` when IDs collide.
+  - `InsufficientStake`, `InsufficientCapacity`, `InsufficientCredit` for quota/stake mismatches.
+  - `StaleReading`, `InvalidMeterValue`, `CreditExpired` when timestamps regress or expiry exceeded.
+  - Signature/format errors: RPC rejects payloads where `meter_hash` is not 32 bytes, numbers are missing, or signatures fail decoding (and, once the oracle verifier lands, cryptographic verification failures).
+- Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.
+- Observer tooling: `tb-cli energy market --verbose` dumps the whole response; `tb-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits.
+- Per the architecture roadmap, the next RPC/CLI work items are: adding authenticated disputes + receipt listings, wiring explorer/CLI visualizations for param history, and enforcing per-endpoint rate limiting once the QUIC chaos drills complete (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`).
 
 ## Gateway HTTP and CDN Surfaces
 - `node/src/gateway/http.rs` hosts HTTP + WebSocket endpoints for content, APIs, and read receipts. Everything goes through the first-party TLS stack (`crates/httpd::tls`).
@@ -53,8 +97,9 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - RPC: `storage.put_blob`, `storage.get_manifest`, `storage.list_providers`.
 - Blob manifests follow the binary schema in `node/src/storage/manifest_binary.rs`; object receipts encode `StoreReceipt` structs consumed by the ledger.
 
-## Compute and Ad Market APIs
-- Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (`compute.job_cancel`). Courier snapshots stream through `compute_market.courier_status`.
+## Compute, Energy, and Ad Market APIs
+- Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (`compute.job_cancel`). Courier snapshots stream through `compute_market.courier_status`, proof bundles (with fingerprints + circuit artifacts) are downloadable via `compute_market.sla_history(limit)`, `tb-cli compute proofs --limit N` pretty-prints recent SLA/proof entries, `tb-cli explorer sync-proofs --db explorer.db` ingests them into the explorer SQLite tables (`compute_sla_history` + `compute_sla_proofs`), and the explorer HTTP server exposes `/compute/sla/history?limit=N` so dashboards can render proof fingerprints without RPC access. The `snark` CLI (`cli/src/snark.rs`) still outputs attested circuit artifacts for out-of-band prover rollout.
+- Energy RPC/CLI: `energy.register_provider`, `energy.market_state`, `energy.settle`, and `energy.submit_reading` expose the `crates/energy-market` state plus oracle submissions. Governance feeds `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps` into this module, so operators can tune the market via proposals rather than recompiling.
 - Ad market RPC/CLI: reserve impressions, commit deliveries, record conversions, audit ANN proofs, manage mesh queues.
 
 ## Light-Client Streaming

@@ -37,6 +37,7 @@ mod config;
 mod debug_cli;
 mod dex;
 mod difficulty;
+mod energy;
 mod explorer;
 mod fee_estimator;
 mod gateway;
@@ -76,6 +77,8 @@ use config::handle as handle_config;
 use debug_cli::run as run_debugger;
 use dex::handle as handle_dex;
 use difficulty::handle as handle_difficulty;
+use energy::handle as handle_energy;
+use energy::EnergyCmd;
 use explorer::handle as handle_explorer;
 use gateway::handle as handle_gateway;
 use gov::handle as handle_gov;
@@ -224,6 +227,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_ad_market(cmd);
             Ok(())
         }
+        "energy" => {
+            let cmd = EnergyCmd::from_matches(sub_matches)?;
+            handle_energy(cmd);
+            Ok(())
+        }
         "compute" => {
             let cmd = ComputeCmd::from_matches(sub_matches)?;
             handle_compute(cmd);
@@ -354,6 +362,7 @@ fn build_root_command() -> Command {
         .subcommand(VersionCmd::command())
         .subcommand(AdMarketCmd::command())
         .subcommand(AiCmd::command())
+        .subcommand(EnergyCmd::command())
         .subcommand(ComputeCmd::command())
         .subcommand(DexCmd::command())
         .subcommand(DifficultyCmd::command())

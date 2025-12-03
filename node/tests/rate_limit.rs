@@ -8,6 +8,8 @@ use the_block::net::{
     peer_stats, record_ip_drop, set_max_peer_metrics, DropReason, Hello, Message, Payload, PeerSet,
     Transport, LOCAL_FEATURES, PROTOCOL_VERSION,
 };
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::Blockchain;
 
 #[test]
@@ -88,7 +90,7 @@ fn rate_limit_drop_records_reason() {
                 .get()
                 >= 1
         );
-        assert!(PEER_METRICS_ACTIVE.get() >= 1);
+        assert!(PEER_METRICS_ACTIVE.get().get() >= 1);
     }
 
     // Avoid leaking the overridden rate limit to other tests in this binary.

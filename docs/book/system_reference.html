@@ -1,0 +1,1751 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>System Reference Manual - The-Block Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The-Block Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="system-reference-manual"><a class="header" href="#system-reference-manual">System Reference Manual</a></h1>
+<p>This document consolidates the consensus, networking, storage, marketplace, governance, security, and tooling notes that previously lived across dozens of Markdown files. Every section points back to the exact modules that implement the behaviour so engineers and agents can cross‑check details against code before shipping changes.</p>
+<hr />
+<h2 id="1-consensus-serialization-and-sharding"><a class="header" href="#1-consensus-serialization-and-sharding">1. Consensus, Serialization, and Sharding</a></h2>
+<h3 id="11-genesis-history-invariants-and-test-vectors"><a class="header" href="#11-genesis-history-invariants-and-test-vectors">1.1 Genesis history, invariants, and test vectors</a></h3>
+<ul>
+<li>The compile‑time genesis block is derived in <code>node/src/hash_genesis.rs</code>. Every field of <code>BlockEncoder</code> is zeroed except the fixed difficulty (<code>8</code>) and subsidy buckets. <code>calculate_genesis_hash()</code> is invoked inside a <code>const</code> context so <code>GENESIS_HASH</code> is embedded during compilation and asserted at runtime (<code>node/src/consensus/mod.rs</code>).</li>
+<li>Invariants:
+<ul>
+<li><code>prev</code>, <code>fee_checksum</code>, and <code>state_root</code> point to <code>ZERO_HASH</code>.</li>
+<li>All subsidy fields (<code>storage_sub</code>, <code>read_sub_*</code>, <code>compute_sub</code>) plus advertiser counters are zero to guarantee deterministic coinbase accounting.</li>
+<li><code>read_root</code>, <code>vdf_commit</code>, <code>vdf_output</code> are 32‑byte zero arrays; <code>vdf_proof</code>, <code>tx_ids</code>, and <code>l2_*</code> arrays are empty.</li>
+</ul>
+</li>
+<li>Test vectors: <code>node/src/hash_genesis.rs</code> exposes <code>calculate_genesis_hash_runtime()</code> and a regression test that ensures runtime and compile‑time hashes match. <code>node/tests/light_sync.rs</code> ships a minimal light‑client genesis header fixture to validate sync and PoH replay.</li>
+</ul>
+<h3 id="12-poh-and-vdf-parameters"><a class="header" href="#12-poh-and-vdf-parameters">1.2 PoH and VDF parameters</a></h3>
+<ul>
+<li>PoH ticks are generated by <code>node/src/poh.rs</code>. Each tick is a BLAKE3 hash of the previous tick; optional GPU acceleration piggybacks on the compute workloads.</li>
+<li><code>timestamp_ticks</code> for mempool ordering and purge loops are recorded in nanoseconds (<code>SystemTime::now().duration_since(UNIX_EPOCH).as_nanos()</code>, see <code>node/src/lib.rs</code> around the mempool admission path). Block timestamps continue to use milliseconds for ledger compatibility.</li>
+<li>VDF settings live in <code>node/src/config.rs::InflationConfig</code>. Defaults:
+<ul>
+<li><code>vdf_kappa = 1 &lt;&lt; 28</code> rounds (clamped via <code>set_vdf_kappa</code> when loading inflation files).</li>
+<li>Hybrid PoW/PoS difficulty retune feeds the VDF by calling <code>node/src/consensus/vdf.rs</code>.</li>
+</ul>
+</li>
+<li>Checkpoints:
+<ul>
+<li>Macro blocks emit every 100 micro‑blocks by default (<code>macro_interval</code> in <code>node/src/lib.rs</code>), anchoring shard roots and VDF outputs.</li>
+<li>Replay harnesses (<code>tests/poh.rs</code>, <code>demo.py</code>) enforce deterministic replay by recomputing every tick and verifying <code>vdf_commit</code>, <code>vdf_output</code>, and proof bytes.</li>
+</ul>
+</li>
+<li>Replay constraints: verifiers must recompute ticks sequentially, verify VDF proofs (currently sequential hash stand‑ins), and reject headers where <code>timestamp_ticks</code> drifts from the PoH timeline.</li>
+</ul>
+<h3 id="13-dkg-specifics"><a class="header" href="#13-dkg-specifics">1.3 DKG specifics</a></h3>
+<ul>
+<li>Implementation lives in the standalone <code>dkg/</code> crate. <code>SecretKeySet::random()</code> generates a deterministic polynomial seed per committee; shares authenticate themselves by XORing the digest with a derived per‑participant token.</li>
+<li>Rotation schedule: <code>node/src/dkg.rs::run(participants, threshold)</code> is called by the consensus stack whenever validator sets rotate (macro‑block checkpoints plus governance toggles). <code>DKG_ROUND_TOTAL</code> tracks successful rounds so operators can confirm every rotation via telemetry.</li>
+<li>Transcript materials:
+<ul>
+<li>Each participant keeps a <code>SecretKeyShare</code> (<code>id</code>, <code>seed</code>).</li>
+<li>Aggregators collect <code>(participant_id, SignatureShare)</code> pairs, verify them via <code>combine_signatures</code>, and publish the resulting group signature/state inside sled.</li>
+<li>Failure modes include <code>NotEnoughShares</code>, <code>InvalidShare</code>, and <code>MismatchedShares</code>; all map to RPC/CLI errors and increment telemetry counters for audit.</li>
+</ul>
+</li>
+<li>Rotations reuse existing seeds to keep transcripts lightweight while the in‑house threshold scheme is finalized. The temporary design keeps transcripts in memory and never writes share material to disk.</li>
+</ul>
+<h3 id="14-hash-layout"><a class="header" href="#14-hash-layout">1.4 Hash layout</a></h3>
+<p><code>node/src/hashlayout.rs</code> lists the canonical order for block fields. Highlights:</p>
+<div class="table-wrapper"><table><thead><tr><th>Field order</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>index</code>, <code>prev</code>, <code>timestamp</code>, <code>nonce</code>, <code>difficulty</code>, <code>retune_hint</code>, <code>base_fee</code></td><td>Header core; <code>retune_hint</code> is a signed byte summarising the Kalman filter trend.</td></tr>
+<tr><td>Subsidy buckets (<code>coin_c</code>, <code>coin_i</code>, <code>storage_sub</code>, <code>read_sub</code>, <code>read_sub_{viewer,host,hardware,verifier,liquidity}</code>, ad* fields, <code>compute_sub</code>, <code>proof_rebate</code>, industrial sub‑ledgers)</td><td>Every reward lane is hashed before state roots so subsidies bind to the ledger.</td></tr>
+<tr><td><code>read_root</code>, <code>fee_checksum</code>, <code>state_root</code></td><td>Merkle roots; <code>fee_checksum</code> protects the per‑block fee accumulator.</td></tr>
+<tr><td><code>l2_roots</code>, <code>l2_sizes</code> (variable length)</td><td>Deterministic ordering; lengths are encoded before bytes.</td></tr>
+<tr><td><code>vdf_commit</code>, <code>vdf_output</code>, <code>len(vdf_proof)</code>, <code>vdf_proof</code>, <code>tx_ids</code></td><td>Final section to keep PoH/VDF data and transaction IDs adjacent.</td></tr>
+</tbody></table>
+</div>
+<p>Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests.</p>
+<h3 id="15-schema-migrations-v7v10"><a class="header" href="#15-schema-migrations-v7v10">1.5 Schema migrations (v7–v10)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Version</th><th>Scope</th><th>Pre‑migration state</th><th>Post‑migration state</th><th>Operator expectations</th></tr></thead><tbody>
+<tr><td>v7</td><td>Recent timestamp journaling (<code>docs/schema_migrations/v7_recent_timestamps.md</code> ➜ <code>Blockchain::recent_timestamps</code>)</td><td>Mempool entries only tracked <code>timestamp_millis</code>; restarts lost ordering guarantees.</td><td><code>timestamp_ticks</code> persisted alongside millis so QoS lanes continue after restarts (<code>node/tests/reopen.rs</code>).</td><td>Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring <code>telemetry::STARTUP_TTL_DROP_TOTAL</code>.</td></tr>
+<tr><td>v8</td><td>Bridge header persistence (<code>docs/schema_migrations/v8_bridge_headers.md</code>)</td><td>Bridge proofs not materialised in sled; challenge windows could not replay after crash.</td><td><code>simple_db::names::BRIDGE</code> stores verified headers and pending withdrawals; CLI exposes `tb-cli bridge pending</td><td>disputes`.</td></tr>
+<tr><td>v9</td><td>DEX escrow snapshots</td><td>Escrow state stored only in memory; C/R flows risked desync.</td><td><code>simple_db::names::DEX_STORAGE</code> now stores <code>EscrowState</code> (orders, locks, HTLC proofs).</td><td>Before upgrading, pause matching, run <code>tb-cli dex escrow export</code>; after upgrade confirm <code>dex.order_book</code> RPC matches expectations.</td></tr>
+<tr><td>v10</td><td>Industrial subsidy buckets</td><td>Subsidy accounting was aggregated; per‑lane reporting missing.</td><td><code>Block::industrial_subsidies()</code> writes <code>storage_sub_it</code>, <code>read_sub_it</code>, <code>compute_sub_it</code>; governance surfaces via explorer and CLI.</td><td>Update dashboards to use the new metrics (<code>INDUSTRIAL_SUBSIDY_*</code>); re-run treasury audits to ensure ledgers reconcile.</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="2-transactions-fees-and-mempool"><a class="header" href="#2-transactions-fees-and-mempool">2. Transactions, Fees, and Mempool</a></h2>
+<h3 id="21-account-abstraction-specifics"><a class="header" href="#21-account-abstraction-specifics">2.1 Account abstraction specifics</a></h3>
+<ul>
+<li>Handle registry (<code>node/src/identity/handle_registry.rs</code>) replaces the former <code>account_abstraction.md</code>: handles normalize via NFKC, reject <code>sys/</code> &amp; <code>admin/</code> prefixes, and require strictly increasing nonces. Records are stored under <code>simple_db::names::IDENTITY_HANDLES</code>.</li>
+<li>Fee hooks (<code>node/src/fees.rs</code>, <code>node/src/fee/policy.rs</code>) enforce percentile‑based fee floors per lane. Wallets and RPC clients read <code>FeeLane</code> metadata to decide whether to dip into rebates before CT.</li>
+<li>When submitting transactions:
+<ul>
+<li>Signature threshold vs signer set is checked before admission; failing multisig payloads are staged in <code>pending_multisig</code>.</li>
+<li>Session keys (account‑level) live in sled with expiration timestamps so headless clients can register ephemeral signing keys.</li>
+</ul>
+</li>
+</ul>
+<h3 id="22-base-fee-algorithm"><a class="header" href="#22-base-fee-algorithm">2.2 Base fee algorithm</a></h3>
+<p><code>node/src/fees.rs::next_base_fee</code> implements an EIP‑1559‑style update:</p>
+<pre><code>Δ = prev * (gas_used - target) / target / 8
+next = max(prev + Δ, 1)
+</code></pre>
+<ul>
+<li><code>TARGET_GAS_PER_BLOCK = 1_000_000</code>.</li>
+<li><code>Δ</code> is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑CT per byte).</li>
+<li>Telemetry: <code>base_fee</code> gauge plus <code>mempool_fee_floor_*</code> histograms show nudges per block. <code>node/tests/base_fee.rs</code> exercises the path.</li>
+</ul>
+<h3 id="23-qos-accounting-ttl-math-and-rpc-surfaces"><a class="header" href="#23-qos-accounting-ttl-math-and-rpc-surfaces">2.3 QoS accounting, TTL math, and RPC surfaces</a></h3>
+<ul>
+<li>Admission + per‑sender limits (<code>node/src/mempool/admission.rs</code>): <code>AdmissionState::reserve_sender</code> tracks outstanding slots keyed by <code>(sender, lane)</code>. Defaults:
+<ul>
+<li><code>max_pending_per_account = 16</code> (overrideable via <code>tb-cli node mempool set-cap</code> or <code>TB_MEMPOOL_ACCOUNT_CAP</code>).</li>
+<li><code>max_mempool_size_{consumer,industrial} = 1_024</code> entries each.</li>
+<li><code>min_fee_per_byte_{consumer,industrial}</code> defaults to 1 µCT/byte but is immediately clamped to the rolling floor.</li>
+</ul>
+</li>
+<li>Rolling floor: every admitted transaction records its <code>fee_per_byte</code>. The percentile window is configured by governance (<code>fee_floor_window</code>, <code>fee_floor_percentile</code>) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post <code>mempool.qos_event</code> we log overrides (<code>FEE_FLOOR_WARNING_TOTAL</code> / <code>FEE_FLOOR_OVERRIDE_TOTAL</code>).</li>
+<li>TTL ordering: <code>MempoolEntry::expires_at = timestamp_millis + (tx_ttl * 1000)</code> (<code>node/src/lib.rs:806–834</code>). <code>mempool_cmp</code> sorts by:
+<ol>
+<li><code>tip / serialized_size</code> (descending),</li>
+<li>soonest expiry,</li>
+<li>transaction hash.
+Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is dropped during <code>purge_expired()</code>, contributing to <code>TTL_DROP_TOTAL</code>.</li>
+</ol>
+</li>
+<li>Lane rotation: consumers and industrial transactions live in separate <code>DashMap</code>s but are merged before block assembly (<code>Blockchain::mine_block_with_ts</code>). Because both lanes share the same comparator they naturally interleave when fees are comparable, yet state accounting stays lane-aware via <code>FeeLane</code> and <code>fee::decompose</code>.</li>
+<li>Deferred nonces: while iterating the merged list we only include a sender’s next expected nonce. Higher nonces accumulate in <code>deferred</code> until the gap closes, preventing starvation from users who pre-sign long sequences.</li>
+<li>Tx errors: <code>TxAdmissionError</code> carries the numeric code returned to RPC clients. Relevant constants live near <code>node/src/lib.rs:6238</code>. The table below helps map RPC failures to on-chain causes.</li>
+</ul>
+<div class="table-wrapper"><table><thead><tr><th>Error</th><th>Code (<code>TxAdmissionError::code</code>)</th><th>Typical RPC code</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>FeeTooLow</code></td><td>10</td><td><code>error_value("FeeTooLow")</code></td><td>Floor check failed – inspect <code>mempool.stats.fee_floor</code>.</td></tr>
+<tr><td><code>MempoolFull</code></td><td>11</td><td><code>error_value("MempoolFull")</code></td><td>Both lanes at capacity; eviction refused.</td></tr>
+<tr><td><code>PendingLimitReached</code></td><td>13</td><td><code>error_value("PendingLimitReached")</code></td><td>Sender already has <code>max_pending_per_account</code> entries.</td></tr>
+<tr><td><code>PendingSignatures</code></td><td>17</td><td><code>status="pending_signatures"</code></td><td>Multisig payload staged in <code>pending_multisig</code>.</td></tr>
+<tr><td><code>SessionExpired</code></td><td>18</td><td><code>error_value("SessionExpired")</code></td><td>Session keys (CLI <code>--session</code>) expired; renew before resubmitting.</td></tr>
+<tr><td><code>UnknownSender</code>, <code>NonceGap</code>, <code>InsufficientBalance</code>, …</td><td>See <code>node/src/lib.rs</code></td><td><code>error_value("&lt;Variant&gt;")</code></td><td>Surfaced directly from the admission path.</td></tr>
+</tbody></table>
+</div>
+<ul>
+<li>QoS telemetry: <code>submit_tx</code> increments <code>TX_SUBMITTED_TOTAL</code>; successful admissions increment <code>TX_ADMITTED_TOTAL</code> and log the caller’s jurisdiction for compliance. Rejections emit <code>tx_rejected_total{reason}</code> samples so dashboards can correlate floods.</li>
+</ul>
+<h4 id="mempoolstats-payload"><a class="header" href="#mempoolstats-payload"><code>mempool.stats</code> payload</a></h4>
+<p>RPC <code>mempool.stats</code> (<code>node/src/rpc/mod.rs:1445</code>) reads the current lane snapshot without mutating the pool. Each field is in milliseconds or micro‑CT as noted below.</p>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>size</code></td><td>Number of entries in the requested lane.</td></tr>
+<tr><td><code>age_p50</code> / <code>age_p95</code></td><td>Milliseconds since admission (median / 95th percentile).</td></tr>
+<tr><td><code>fee_p50</code> / <code>fee_p90</code></td><td>Raw <code>tip</code> percentiles (µCT). Divide by serialized size for fee per byte.</td></tr>
+<tr><td><code>fee_floor</code></td><td>Current percentile floor after min‑fee clamps.</td></tr>
+</tbody></table>
+</div>
+<p>Example:</p>
+<pre><code class="language-json">{
+  "size": 742,
+  "age_p50": 1184,
+  "age_p95": 5443,
+  "fee_p50": 1200,
+  "fee_p90": 3500,
+  "fee_floor": 900
+}
+</code></pre>
+<p>When consumer latency jumps above <code>comfort_threshold_p90</code> (governance parameter) the scheduler raises the base fee which in turn bumps lane floors; watch <code>mempool_fee_floor_current{lane}</code> for confirmation.</p>
+<h3 id="24-transaction-scheduler-fairness-windows-and-conflict-guards"><a class="header" href="#24-transaction-scheduler-fairness-windows-and-conflict-guards">2.4 Transaction scheduler, fairness windows, and conflict guards</a></h3>
+<ul>
+<li><code>node/src/scheduler.rs</code> drives the service pipeline. <code>ServiceScheduler</code> owns three classes (<code>gossip</code>, <code>compute</code>, <code>storage</code>) with weights exposed as governance parameters (<code>scheduler_weight_gossip</code>, <code>scheduler_weight_compute</code>, <code>scheduler_weight_storage</code>). <code>governance::registry</code> plumbs new values directly into the atomic defaults so the change is visible to the next block without restarting.</li>
+<li>Pick logic: in re‑entrant builds we maintain <code>(current_class, budget, last_idx)</code>. Each dequeue consumes one unit of the class budget; once the budget hits zero or the queue empties we rotate to the next non‑empty class. In non‑re‑entrant builds we rotate a ring buffer of <code>(class, queue_len)</code> pairs so large bursts cannot starve lower-weight lanes.</li>
+<li>Batch size: callers (e.g., the gossip reactor or execution pipeline) pass <code>limit</code> into <code>drain(limit)</code> or <code>execute_ready(limit)</code>. A typical block assembly requests <code>limit = dynamic_block_limit()</code>; gossip workers usually ask for 64 messages. Because the scheduler enforces per-class weights the effective fairness window equals <code>weight</code> dequeues before the class yields to its peers.</li>
+<li>Starvation guards: <code>ServiceSchedulerStats</code> exposes <code>queue_depths</code> + <code>weights</code> via diagnostics so operators can confirm configuration. If a class enters <code>reentrant_enabled</code> mode with weight zero its queues will still be scanned periodically to avoid livelock. For transaction execution, <code>TxScheduler</code> builds read/write sets (<code>TxRwSet</code>) and refuses to schedule transactions whose inputs or outputs overlap an active run (“RW conflict”). Conflicts are surfaced as <code>ScheduleError::Conflict(txid)</code> so block builders can defer the losing transaction without discarding it.</li>
+<li>Governance knobs: to bias toward consumer traffic during incidents set <code>scheduler_weight_gossip=4</code>, <code>scheduler_weight_compute=1</code>, <code>scheduler_weight_storage=1</code>, then monitor <code>scheduler.stats</code> RPC to ensure queue depths drop as expected. <code>tb-cli diagnostics scheduler</code> prints the same struct locally.</li>
+</ul>
+<hr />
+<h2 id="3-networking-overlay-and-p2p"><a class="header" href="#3-networking-overlay-and-p2p">3. Networking, Overlay, and P2P</a></h2>
+<h3 id="31-wire-protocol-catalog"><a class="header" href="#31-wire-protocol-catalog">3.1 Wire protocol catalog</a></h3>
+<p><code>node/src/net/message.rs</code> defines signed envelopes plus the payloads below (see Appendix D for field tables). Compatibility notes:</p>
+<ul>
+<li><code>Payload::Handshake(Hello)</code> negotiates <code>proto_version</code>, feature bits, transport capabilities, and QUIC certificate fingerprints (<code>p2p/handshake.rs</code>).</li>
+<li><code>Hello(Vec&lt;SocketAddr&gt;)</code> is the legacy peer advertisement message; it remains for bootstrap compatibility.</li>
+<li><code>Tx</code>, <code>BlobTx</code>, <code>Block</code>, <code>Chain</code> propagate consensus data. Transactions include full serialization so mempools can revalidate.</li>
+<li><code>BlobChunk</code> carries erasure‑coded shards with <code>index</code>/<code>total</code> metadata; peers deduplicate by root.</li>
+<li><code>Reputation(Vec&lt;ReputationUpdate&gt;)</code> syncs peer scores between overlay nodes.</li>
+</ul>
+<h3 id="32-quic-handshake-and-fallback-rules"><a class="header" href="#32-quic-handshake-and-fallback-rules">3.2 QUIC handshake and fallback rules</a></h3>
+<ul>
+<li>Hello extensions (<code>p2p/handshake.rs</code>):
+<ul>
+<li><code>quic_provider</code>: optional provider ID; resolved to Quinn, s2n‑quic, or the in‑house transport at runtime.</li>
+<li><code>quic_capabilities</code>: vector of feature strings (<code>certificate_rotation</code>, <code>mtls</code>, etc.).</li>
+<li><code>quic_cert</code> + <code>quic_fingerprint{,_previous}</code>: remote certificate payload and rolling fingerprints.</li>
+</ul>
+</li>
+<li>Validation flow:
+<ol>
+<li>Ensure <code>network_id</code> and <code>proto_version</code> match (<code>SUPPORTED_VERSION = 1</code>).</li>
+<li>Check required feature bits (governance toggles). Missing bits ➜ <code>HandshakeError::MissingFeatures</code>.</li>
+<li>If the peer advertises QUIC, infer the provider, verify the cert (in‑house adapter for s2n), and compare fingerprints. Failures increment <code>QUIC_HANDSHAKE_FAIL_TOTAL{peer,reason}</code>.</li>
+<li>Replay protection: accepted peers are recorded in <code>PEERS</code> (lazy mutex). <code>peer_provider</code>/<code>peer_capabilities</code> surfaces this cache for diagnostics.</li>
+</ol>
+</li>
+<li>Fallbacks: if QUIC is unavailable or misconfigured, the node retains TCP transport and advertises <code>Transport::Tcp</code>.</li>
+</ul>
+<h3 id="33-a-heuristics-swarm-presets-and-bootstrap"><a class="header" href="#33-a-heuristics-swarm-presets-and-bootstrap">3.3 A* heuristics, swarm presets, and bootstrap</a></h3>
+<ul>
+<li><code>node/src/net/a_star.rs</code> caches ASN latency floors with an LRU of configurable capacity. Heuristic = floor latency + <code>μ * (1 - uptime)</code>, where <code>μ</code> defaults to <code>governance::heuristic_mu_milli / 1000</code>.</li>
+<li>Swarm/bootstrap:
+<ul>
+<li>Static peers via <code>TB_BOOTSTRAP_PEERS</code> or CLI seeds; overlay peer stores live in <code>p2p_overlay</code>.</li>
+<li>Gossip mesh uses <code>TB_PARTITION_TAG</code> to segregate drill traffic; range-boost peers are configured via <code>TB_MESH_STATIC_PEERS</code>.</li>
+</ul>
+</li>
+<li>Topologies:
+<ul>
+<li>Core swarm: fanout picks peers with lowest heuristic, bounded by shard affinity.</li>
+<li>Range Boost: <code>node/src/range_boost/mod.rs</code> maintains TLS/Unix/TCP peer latency caches, resynchronises forwarder threads, and enqueues bundles with exponential backoff.</li>
+</ul>
+</li>
+</ul>
+<h3 id="34-partition-detection-runbook"><a class="header" href="#34-partition-detection-runbook">3.4 Partition detection runbook</a></h3>
+<ul>
+<li><code>PartitionWatch</code> (<code>node/src/net/partition_watch.rs</code>) tracks unreachable peers; default threshold = 8.</li>
+<li>When <code>mark_unreachable</code> pushes the count past the threshold, <code>PARTITION_EVENTS_TOTAL</code> increments and <code>active=true</code>. Operators should:
+<ol>
+<li>Query <code>tb-cli net partition</code> (via diagnostics) to list isolated peer IDs.</li>
+<li>Inspect <code>partition_watch.current_marker()</code> to correlate with dashboards/incident logs.</li>
+<li>Run the recovery recipe: flush peer bans, reseed overlay via CLI, confirm <code>is_partitioned()</code> flips back to false.</li>
+</ol>
+</li>
+</ul>
+<h3 id="35-overlay-store-and-peer-persistence"><a class="header" href="#35-overlay-store-and-peer-persistence">3.5 Overlay store and peer persistence</a></h3>
+<ul>
+<li>Backends: <code>node/src/config.rs</code> exposes <code>overlay.backend = inhouse | stub</code>. The in-house backend (<code>crates/p2p_overlay::InhouseOverlay</code>) persists peers under <code>TB_OVERLAY_DB_PATH</code> (defaults to <code>~/.the_block/overlay</code>). Records are pretty‑printed JSON containing the base58 peer ID, socket address, and <code>last_seen</code> epoch seconds. The stub backend (memory only) is useful for deterministic tests.</li>
+<li>Discovery + RPC selection: <code>node/src/net/discovery.rs</code> re‑exports the trait so CLI/RPC consumers can issue <code>net.overlay_status</code> and <code>tb-cli net overlay-status --format json</code>. Switching backend at runtime is safe; <code>net::overlay_service()</code> holds the chosen implementation in a read/write lock, and <code>governance::registry</code> wires up policy changes.</li>
+<li>Migration: <code>scripts/migrate_overlay_store.rs</code> converts legacy bincode sled trees into the new JSON format. Invoke it before flipping <code>overlay.backend</code> on existing nodes so peer histories are retained.</li>
+<li>Peer metrics store: <code>node/src/net/peer_metrics_store.rs</code> writes compressed records into <code>sled</code> (<code>peer_metrics</code> tree). Values are encoded via <code>peer_metrics_binary::{encode, decode}</code> (compact bincode) and keyed by <code>&lt;peer-pk&gt;&lt;timestamp&gt;</code> which enables retention pruning. <code>peer.metrics_export</code> CLI/RPC commands also read from this tree.</li>
+<li>Ban store: <code>node/src/net/ban_store.rs</code> keeps bans in <code>SimpleDb::open_named(names::NET_BANS, TB_BAN_DB)</code>. Entries are hex peer IDs with an 8‑byte timestamp payload; <code>ban_store::purge_expired()</code> enforces TTL and updates <code>BANNED_PEERS_TOTAL</code>.</li>
+<li>Ancillary stores: <code>TB_PEER_DB_PATH</code> and <code>TB_QUIC_PEER_DB_PATH</code> house the bincode peer reputation cache (<code>peer.rs</code>), <code>TB_PEER_METRICS_PATH</code> controls on-disk export, and <code>TB_NET_CERT_STORE_PATH</code> stores mutual-TLS cert chains. Back them up together when migrating a node.</li>
+</ul>
+<hr />
+<h2 id="4-localnet-range-boost-and-headlessai-tooling"><a class="header" href="#4-localnet-range-boost-and-headlessai-tooling">4. LocalNet, Range Boost, and Headless/AI Tooling</a></h2>
+<h3 id="41-range-boost-queue-semantics"><a class="header" href="#41-range-boost-queue-semantics">4.1 Range-boost queue semantics</a></h3>
+<ul>
+<li>Queue is a <code>VecDeque&lt;QueueEntry&gt;</code> guarded by a mutex; every enqueue records <code>enqueued_at</code>.</li>
+<li>Configurable fault modes (<code>FaultMode::{ForceDisabled,ForceNoPeers,ForceEncode,ForceIo}</code>) inject chaos for drills.</li>
+<li>Courier/forwarder loop:
+<ul>
+<li>Sleep durations: idle = 200 ms, retry = 250 ms, disabled = 1 s.</li>
+<li>Forward failures requeue the bundle at the front to preserve FIFO semantics.</li>
+<li>Metrics: <code>RANGE_BOOST_QUEUE_DEPTH</code>, <code>RANGE_BOOST_QUEUE_OLDEST_SECONDS</code>, <code>RANGE_BOOST_FORWARDER_FAIL_TOTAL</code>, <code>MESH_PEER_LATENCY_MS</code>.</li>
+</ul>
+</li>
+</ul>
+<h3 id="42-localnet-proximity-proofs"><a class="header" href="#42-localnet-proximity-proofs">4.2 LocalNet proximity proofs</a></h3>
+<p><code>node/src/localnet/proximity.rs</code> + <code>config/localnet_devices.toml</code> define class‑specific RSSI/RTT envelopes:</p>
+<div class="table-wrapper"><table><thead><tr><th>Device class</th><th>Minimum RSSI</th><th>Maximum RTT</th></tr></thead><tbody>
+<tr><td>Phone</td><td>−75 dBm</td><td>150 ms</td></tr>
+<tr><td>Laptop</td><td>−80 dBm</td><td>200 ms</td></tr>
+<tr><td>Router</td><td>−85 dBm</td><td>250 ms</td></tr>
+</tbody></table>
+</div>
+<p><code>LocalNet::validate_proximity</code> returns <code>false</code> for out‑of‑range readings; callers include RPC methods (<code>localnet.submit_receipt</code>) and diagnostics tools. Receipts (<code>AssistReceipt</code>) embed provider, region, device class, RSSI, RTT, and Ed25519 signatures hashed via BLAKE3 for anchoring.</p>
+<h3 id="43-headless-and-ai-diagnostics"><a class="header" href="#43-headless-and-ai-diagnostics">4.3 Headless and AI diagnostics</a></h3>
+<ul>
+<li>CLI (<code>cli/src/ai.rs</code>):
+<ul>
+<li><code>tb-cli ai diagnose --snapshot metrics.json</code> loads a JSON blob, evaluates heuristics (currently latency thresholds), and prints remediation tips.</li>
+<li><code>Metrics</code> struct contains <code>avg_latency_ms</code>; extend it as headless tooling matures.</li>
+</ul>
+</li>
+<li>Governance parameter <code>ai_diagnostics_enabled</code> (see §10) gates ANN‑based alerts in node + aggregator.</li>
+<li>Headless flows share the same JSON codec helpers as RPC so suggestions are deterministic and auditable.</li>
+</ul>
+<hr />
+<h2 id="5-storage-state-simpledb-and-persistence"><a class="header" href="#5-storage-state-simpledb-and-persistence">5. Storage, State, SimpleDb, and Persistence</a></h2>
+<h3 id="51-pipeline-stages-and-knobs"><a class="header" href="#51-pipeline-stages-and-knobs">5.1 Pipeline stages and knobs</a></h3>
+<p><code>node/src/storage/pipeline.rs</code> stages:</p>
+<div class="table-wrapper"><table><thead><tr><th>Stage</th><th>Knobs / defaults</th><th>Effect</th></tr></thead><tbody>
+<tr><td>Chunk sizing</td><td><code>settings::chunk_defaults()</code> (default 1 MiB with ladder <code>[256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB]</code>).</td><td><code>clamp_to_ladder</code> adjusts chunk size to hit 3 s target writes.</td></tr>
+<tr><td>Compression</td><td><code>settings::compression_level()</code> and algorithm selection; fallback/per‑algorithm telemetry via <code>record_coding_result</code>.</td><td>Chooses compressor (e.g., zstd, RLE fallback) per manifest.</td></tr>
+<tr><td>Encryption</td><td><code>settings::encryptor()</code> or per‑manifest override.</td><td>Wraps chunk bytes before erasure coding.</td></tr>
+<tr><td>Erasure coding</td><td><code>settings::erasure_counts()</code> plus <code>ErasureParams</code>.</td><td>Default Reed–Solomon with fountain overlay (see §5.2).</td></tr>
+<tr><td>Placement</td><td><code>storage::placement::{NodeCatalog, NodeHandle}</code>.</td><td>Selects providers respecting rent escrow, redundancy, RTT telemetry.</td></tr>
+<tr><td>Repair</td><td><code>storage::repair</code> monitors health, reissues pulls, updates readiness metrics.</td><td></td></tr>
+</tbody></table>
+</div>
+<h3 id="52-erasure-coding-parameters"><a class="header" href="#52-erasure-coding-parameters">5.2 Erasure coding parameters</a></h3>
+<ul>
+<li>Default (governance overrideable): RS data/parity counts from <code>settings::erasure_counts()</code>; overlay adds 3 fountain shards over the first 2 RS shards.</li>
+<li>Failure tolerance: RS handles up to <code>parity_shards</code> losses; overlay can reconstruct early losses (<code>try_fill_from_overlay</code>) even when the first two shards vanish.</li>
+<li>Encoding/decoding record success/failure under <code>erasure_encode</code> and <code>erasure_reconstruct</code> metrics; any fallback/enforced coder is logged as an emergency event if <code>TB_CODING_FALLBACK_EMERGENCY_*</code> envs are set.</li>
+</ul>
+<h3 id="53-storage-market-incentives"><a class="header" href="#53-storage-market-incentives">5.3 Storage-market incentives</a></h3>
+<ul>
+<li><code>storage_market/src/lib.rs</code> models each contract as <code>ContractRecord { contract: StorageContract, replicas: Vec&lt;ReplicaIncentive&gt; }</code>.</li>
+<li><code>ReplicaIncentive</code> fields: <code>allocated_shares</code>, <code>price_per_block</code>, <code>deposit_ct</code>, success/failure counters, last proof block, last outcome.</li>
+<li>SLAs recorded via <code>record_proof_outcome</code>:
+<ul>
+<li>Success ➜ increment <code>proof_successes</code>, no slashing.</li>
+<li>Failure ➜ deduct <code>min(price_per_block, deposit_ct)</code> and increment <code>proof_failures</code>.</li>
+</ul>
+</li>
+<li>CLI/RPC:
+<ul>
+<li><code>storage_market.provider_balances</code>, <code>storage_market.audit_log</code>, and explorer views show deposits, accrued CT, and slashes.</li>
+</ul>
+</li>
+</ul>
+<h3 id="54-simpledb-keyspaces"><a class="header" href="#54-simpledb-keyspaces">5.4 SimpleDb keyspaces</a></h3>
+<p>SimpleDb uses named column families (CFs) declared in <code>node/src/simple_db/mod.rs::names</code>. See Appendix C for the complete cf→subsystem map and prefix conventions.</p>
+<h3 id="55-wal-snapshots-and-pruning"><a class="header" href="#55-wal-snapshots-and-pruning">5.5 WAL, snapshots, and pruning</a></h3>
+<ul>
+<li>WAL: in-house engine writes JSON lines per CF at <code>&lt;cf_path&gt;/wal.log</code> (<code>crates/storage_engine/src/inhouse_engine.rs</code>). After each memtable flush the WAL is truncated to keep replay bounded. Operators can force a flush via <code>SimpleDb::flush_wal()</code>.</li>
+<li>Ledger snapshots:
+<ul>
+<li><code>node/src/blockchain/snapshot.rs</code> writes account snapshots plus diffs under <code>&lt;data_dir&gt;/snapshots/&lt;height&gt;.bin</code>.</li>
+<li>CLI helper (<code>node/src/bin/snapshot.rs</code>) supports <code>snapshot create|apply|list</code>.</li>
+<li>State snapshots (<code>state/src/snapshot.rs</code>) capture trie contents, keep the last <code>keep</code> images, and log engine migrations.</li>
+</ul>
+</li>
+<li>Pruning: <code>SnapshotManager::prune()</code> sorts snapshots by mtime, retains <code>keep</code>, and deletes the rest. Set <code>TB_SNAPSHOT_KEEP</code> to change the retention window.</li>
+</ul>
+<h3 id="56-manifest--storereceipt-layout"><a class="header" href="#56-manifest--storereceipt-layout">5.6 Manifest + <code>StoreReceipt</code> layout</a></h3>
+<ul>
+<li>Binary schema lives in <code>node/src/storage/manifest_binary.rs</code>. Each object encodes:
+<ul>
+<li>Core fields: <code>version</code>, <code>total_len</code>, <code>chunk_len</code>, redundancy (<code>Redundancy::ReedSolomon { data, parity }</code> or <code>None</code>), encrypted content key, and BLAKE3 digest.</li>
+<li>Chunk metadata: plaintext/compressed/cipher lengths plus <code>ChunkRef { id, nodes, provider_chunks[] }</code> so repair can fall back to either manifest-level providers or per-chunk overrides.</li>
+<li>Provider hints: <code>provider_chunks</code> map providers to the chunk indices they host and carry per-provider encryption keys when overrides are enabled.</li>
+</ul>
+</li>
+<li>Receipts (<code>storage::types::StoreReceipt</code>) mirror the manifest hash, chunk count, redundancy enum, and lane label (<code>consumer</code> or <code>industrial</code>). They are serialized via the same helper and embedded into coinbase accounting so explorers can correlate manifests with payouts.</li>
+</ul>
+<h3 id="57-rent-escrow-releases-and-proofs"><a class="header" href="#57-rent-escrow-releases-and-proofs">5.7 Rent escrow, releases, and proofs</a></h3>
+<ul>
+<li><code>RentEscrow</code> (<code>node/src/storage/fs.rs</code>) persists deposits in <code>SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)</code>. API summary:
+<ul>
+<li><code>lock(id, depositor, amount, expiry)</code> writes a record and increments <code>RENT_ESCROW_LOCKED_CT_TOTAL</code>.</li>
+<li><code>release(id)</code> removes the record, refunds 90 % to the depositor, burns 10 % (tracked via <code>RENT_ESCROW_REFUNDED_CT_TOTAL</code>/<code>RENT_ESCROW_BURNED_CT_TOTAL</code>), and returns <code>(account, refund, burn)</code>.</li>
+<li><code>purge_expired(now)</code> sweeps stale locks and emits identical telemetry. Expiry checks happen before every rent escrow lookup so operators only need to call it when clocks skew.</li>
+</ul>
+</li>
+<li>Receipts tie escrows to manifests: <code>storage::pipeline</code> pre-funds rent via escrow IDs, and the settlement engine drops a receipt only when both manifest and escrow landed on disk. Explorer endpoints display the rent escrow balance alongside the <code>StoreReceipt</code>.</li>
+</ul>
+<h3 id="58-provider-profile-schema-and-telemetry"><a class="header" href="#58-provider-profile-schema-and-telemetry">5.8 Provider profile schema and telemetry</a></h3>
+<ul>
+<li>Profiles (<code>node/src/storage/pipeline.rs::ProviderProfile</code>) record the EWMA throughput, RTT, and loss history per provider together with rolling success rates and maintenance flags. They ensure we down-rank providers whose recent uploads failed.</li>
+<li>Binary encoding lives in <code>node/src/storage/pipeline/binary.rs</code>: 13 fixed fields captured as <code>f64</code>/<code>u32</code>/<code>u64</code> triplets. The profile snapshot (<code>ProviderProfileSnapshot { provider, profile, quota_bytes }</code>) drives explorer dashboards and CLI dumps.</li>
+<li>Governance knobs indirectly influence profiles: chunk ladder defaults, erasure parameters, and rent escrow requirements all change the amount of traffic a provider sees, which in turn updates the EWMA. <code>storage.provider_profiles</code> RPC returns the serialized profile objects for post-processing.</li>
+</ul>
+<h3 id="59-storage-importer-and-audit-cli"><a class="header" href="#59-storage-importer-and-audit-cli">5.9 Storage importer and audit CLI</a></h3>
+<ul>
+<li>Legacy manifests still exist under <code>storage_market/legacy/</code>. <code>storage_market/src/importer.rs</code> provides an ergonomic wrapper around that filesystem for audits and replay:
+<ul>
+<li><code>tb-cli storage importer audit --dir &lt;market&gt;</code> scans the pending/migrated manifest directories, samples up to 32 entries (<code>AUDIT_SAMPLE_LIMIT</code>), and reports duplicates/missing keys.</li>
+<li><code>tb-cli storage importer rerun --overwrite</code> replays a manifest into the sled <code>market/contracts</code> tree. Modes: <code>InsertMissing</code> (default) or <code>OverwriteExisting</code>. Use <code>--dry-run</code> to see the counts first.</li>
+<li><code>tb-cli storage importer verify --scope {contracts,all}</code> compares manifest checksums (deterministic hash over <code>(&lt;cf&gt;, key, value)</code> pairs) with the live database.</li>
+</ul>
+</li>
+<li>All importer commands honor <code>--allow-absent</code> so CI can skip legacy steps when the manifests were already migrated. Reports can be written to disk (<code>--out report.json</code>) and are encoded with <code>foundation_serialization::json</code> for reproducibility.</li>
+</ul>
+<hr />
+<h2 id="6-compute-marketplace"><a class="header" href="#6-compute-marketplace">6. Compute Marketplace</a></h2>
+<h3 id="61-courier-retries-and-resume-semantics"><a class="header" href="#61-courier-retries-and-resume-semantics">6.1 Courier retries and resume semantics</a></h3>
+<ul>
+<li><code>CourierStore::flush</code> (sync) and <code>flush_async</code> attempt up to five deliveries per receipt. Backoff starts at 100 ms and doubles (100 → 200 → 400 → 800 → 1 600 ms). Failures increment <code>COURIER_FLUSH_FAILURE_TOTAL</code>.</li>
+<li>Receipts persist in a sled tree (<code>courier</code> namespace). On restart, the flush loop replays unacknowledged receipts; <code>acknowledged=true</code> entries are left untouched for audit until the queue is compacted.</li>
+<li>Capability gating: <code>send_for_capability</code> checks scheduler inventory before enqueuing work, preventing overload on providers that lack the requested hardware.</li>
+</ul>
+<h3 id="62-snark-receipts"><a class="header" href="#62-snark-receipts">6.2 SNARK receipts</a></h3>
+<ul>
+<li><code>node/src/compute_market/receipt.rs</code> fields: <code>(version, job_id, buyer, provider, quote_price, units, dry_run flag, issued_at, idempotency_key, FeeLane)</code>.</li>
+<li><code>idempotency_key</code> is BLAKE3(<code>job_id | buyer | provider | price | units | version | lane</code>), guaranteeing deduplicated settlement entries even if retries occur.</li>
+<li>SNARK receipts now embed a <code>ProofBundle</code> produced by <code>node/src/compute_market/snark.rs</code>. The helper wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled circuits per digest, selects CPU or GPU provers automatically, records telemetry (<code>snark_prover_latency_seconds{backend}</code>, <code>snark_prover_failure_total{backend}</code>), and emits bundles containing the circuit/output/witness commitments plus serialized proof bytes.</li>
+<li>Each proof bundle includes a <code>CircuitArtifact { circuit_hash, wasm_hash, generated_at }</code>, allowing offline re-verification and matching against CLI/explorer exports without re-running compilation.</li>
+<li>CLI support lives under <code>cli/src/snark.rs</code>. <code>snark compile</code> now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and <code>tb-cli compute proofs --limit N</code> streams the latest <code>compute_market.sla_history</code> proofs (fingerprint, backend, commitments, artifact metadata) for audits.</li>
+<li>Settlement persists every accepted proof via <code>Settlement::record_proof</code>, retaining the full vector of bundles per SLA and exposing them through <code>compute_market.sla_history</code>. <code>tb-cli explorer sync-proofs</code> writes the same <code>Vec&lt;ProofBundle&gt;</code> blobs into the explorer tables (<code>compute_sla_history</code>, <code>compute_sla_proofs</code>), and the explorer HTTP route <code>/compute/sla/history?limit=N</code> re-exports the decoded fingerprints/artifacts for dashboards and auditors.</li>
+</ul>
+<h3 id="63-sla-slashing-and-dashboards"><a class="header" href="#63-sla-slashing-and-dashboards">6.3 SLA slashing and dashboards</a></h3>
+<ul>
+<li>Settlement engine (<code>node/src/compute_market/settlement.rs</code>) maintains:
+<ul>
+<li><code>SettleMode</code> (<code>DryRun</code>, <code>Armed</code>, <code>Real</code>) toggled via governance or CLI.</li>
+<li><code>SlaRecord { job_id, provider, buyer, provider_bond, consumer_bond, deadline, scheduled_at, proofs: Vec&lt;ProofBundle&gt; }</code>.</li>
+<li><code>SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned_ct, refunded_ct, proofs }</code>.</li>
+</ul>
+</li>
+<li>Automation:
+<ul>
+<li>Violations call <code>SlaOutcome::Violated { reason, automated }</code>, burn the lesser of the bond and configured slash amount (<code>COMPUTE_SLA_AUTOMATED_SLASH_TOTAL</code>, <code>SLASHING_BURN_CT_TOTAL</code>).</li>
+<li>Dashboards plot <code>COMPUTE_SLA_PENDING_TOTAL</code>, <code>COMPUTE_SLA_VIOLATIONS_TOTAL</code>, and <code>COMPUTE_SLA_NEXT_DEADLINE_TS</code>.</li>
+</ul>
+</li>
+<li>Operator workflow:
+<ol>
+<li>Arm settlement via <code>compute_arm_real</code> RPC, wait for the <code>activate_at</code> block height, then advance to <code>SettleMode::Real</code>.</li>
+<li>Watch aggregator dashboards for SLA thresholds; use <code>tb-cli compute settlement</code> to inspect queued records.</li>
+<li>Use the courier appendix (below) when diagnosing stuck carry-to-earn flows and pull <code>compute_market.sla_history</code> when auditing proof material alongside SLA outcomes.</li>
+</ol>
+</li>
+</ul>
+<h3 id="64-lane-aware-matcher-semantics"><a class="header" href="#64-lane-aware-matcher-semantics">6.4 Lane-aware matcher semantics</a></h3>
+<ul>
+<li><code>node/src/compute_market/matcher.rs</code> maintains per-lane order books. Each <code>LaneState</code> carries <code>LaneMetadata { fairness_window, max_queue_depth }</code>. Defaults come from env (<code>TB_COMPUTE_FAIRNESS_MS</code>, <code>TB_COMPUTE_LANE_CAP</code>); fairness defaults to 5 ms, capacity to 1 024 entries.</li>
+<li><code>match_batch(batch)</code> snapshots the set of lanes, then loops:
+<ol>
+<li>Iterate lanes in order, skipping empty queues.</li>
+<li>While <code>matched.len() &lt; batch</code>, peek <code>front()</code> bid/ask. If the bid price covers the ask price the pair is popped and recorded; otherwise break.</li>
+<li>If the lane already matched once during this pass and <code>Instant::now() &gt; fairness_deadline</code>, we break early so other lanes get time.</li>
+<li>Set <code>state.last_match_at</code> and clear starvation warnings whenever progress occurs.</li>
+</ol>
+</li>
+<li>Batch size defaults to <code>TB_COMPUTE_MATCH_BATCH</code> (32). After every full pass we stop if no progress was made; otherwise we loop until <code>matched.len() == batch</code>.</li>
+<li>Starvation guard: <code>collect_starvation(Duration::from_secs(TB_COMPUTE_STARVATION_SECS))</code> inspects queue heads and records <code>LaneWarning { lane, oldest_job, waited_for, updated_at }</code> whenever a job waits longer than the threshold (default 30 s). RPC <code>compute_market.stats</code> exposes these warnings so operators can alert on stuck jobs.</li>
+</ul>
+<h3 id="65-price-board-backlog-and-units"><a class="header" href="#65-price-board-backlog-and-units">6.5 Price board, backlog, and units</a></h3>
+<ul>
+<li><code>node/src/compute_market/price_board.rs</code> keeps a sliding window of <code>(price, weighted_price)</code> entries for each lane. <code>record_price</code> appends entries, <code>bands(lane)</code> returns <code>(min, weighted_median, max)</code>, and <code>spot_price_per_unit</code> falls back to raw medians when weighted samples are unavailable.</li>
+<li><code>backlog_utilization()</code> summarises outstanding demand (<code>industrial_backlog</code>) and realised throughput (<code>industrial_utilization</code>). Both figures appear in <code>compute_market.stats</code> and the CLI.</li>
+<li>Workload normalisation lives in <code>node/src/compute_market/workload.rs</code> (<code>ComputeUnits</code>, <code>compute_units(data)</code>, <code>calibrate_gpu</code>). Every workload is expressed in units per second so bids/asks remain comparable regardless of raw byte size.</li>
+</ul>
+<h3 id="66-scheduler-metrics-rpc"><a class="header" href="#66-scheduler-metrics-rpc">6.6 Scheduler metrics RPC</a></h3>
+<ul>
+<li><code>scheduler.metrics</code> (<code>node/src/rpc/compute_market.rs</code>) simply forwards the JSON from <code>scheduler::metrics()</code> which contains <code>reputation</code> (provider score map) and <code>utilization</code> (capability → units consumed). Use <code>tb-cli compute scheduler metrics --json</code> for scripting.</li>
+<li><code>scheduler.stats</code> returns a richer struct (<code>SchedulerStats</code>): outcome counters (<code>success</code>, <code>capability_mismatch</code>, <code>reputation_failure</code>), queue depths per priority (<code>queued_high/normal/low</code>), pending jobs with effective priority, and preemption counters.</li>
+<li>Together with <code>compute_market.stats</code> these RPCs explain why a job failed to match (e.g., reputation failure vs lack of capability) without scraping node logs.</li>
+</ul>
+<h3 id="67-energy-market-providers-credits-receipts"><a class="header" href="#67-energy-market-providers-credits-receipts">6.7 Energy market (providers, credits, receipts)</a></h3>
+<ul>
+<li><strong>Core structs</strong> (<code>crates/energy-market/src/lib.rs</code>):
+<ul>
+<li><code>EnergyProvider { provider_id, owner, location, capacity_kwh, available_kwh, price_per_kwh, reputation_score, meter_address, total_delivered_kwh, staked_balance, last_fulfillment_latency_ms, last_meter_value, last_meter_timestamp }</code>.</li>
+<li><code>MeterReading { provider_id, meter_address, total_kwh, timestamp, signature }</code> with a <code>hash()</code> helper (BLAKE3 over provider/meter/kWh/timestamp/signature len + bytes) that becomes the credit key.</li>
+<li><code>EnergyCredit { amount_kwh, provider, timestamp, meter_reading_hash }</code>, <code>EnergyReceipt { buyer, seller, kwh_delivered, price_paid, block_settled, treasury_fee, meter_reading_hash, slash_applied }</code>, and <code>EnergyMarketConfig { min_stake, treasury_fee_bps, ewma_alpha, jurisdiction_fee_bps, oracle_timeout_blocks, slashing_rate_bps }</code>.</li>
+<li><code>EnergyMarket</code> maintains provider + meter maps, pending credits, settled receipts, EWMA totals, and <code>next_provider_id</code>. Errors bubble through <code>EnergyMarketError</code> (provider exists, meter claimed, insufficient stake/capacity/credit, stale reading, invalid meter value, expired credit) and map 1:1 to RPC error strings.</li>
+</ul>
+</li>
+<li><strong>Persistence &amp; governance</strong> (<code>node/src/energy.rs</code>):
+<ul>
+<li>Wraps the market in <code>SimpleDb::open_named(names::ENERGY_MARKET, TB_ENERGY_MARKET_DIR.unwrap_or("energy_market"))</code>. Every mutation serializes the full market via <code>EnergyMarket::to_bytes()</code> and writes it using SimpleDb’s fsync+rename discipline.</li>
+<li><code>GovernanceEnergyParams { min_stake, oracle_timeout_blocks, slashing_rate_bps }</code> lives in a <code>Lazy&lt;Mutex&lt;_&gt;&gt;</code>. <code>set_governance_params</code> updates the struct, applies it to the runtime config (<code>apply_params_to_market</code>), and persists the snapshot. Treasury fees/slashes flow into <code>NODE_GOV_STORE.record_treasury_accrual</code>.</li>
+<li><code>check_energy_market_health()</code> warns when <code>pending_credit_count()</code> exceeds 25 and logs settlement heartbeats so dashboards can alert without scraping additional RPCs.</li>
+</ul>
+</li>
+<li><strong>RPC + CLI</strong> (<code>node/src/rpc/energy.rs</code>, <code>cli/src/energy.rs</code>):
+<ul>
+<li>RPC methods: <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>. Helpers enforce payload shape (<code>require_string</code>, <code>require_u64</code>, <code>decode_hash</code>, <code>decode_signature</code>) and emit canonical JSON for providers/credits/receipts.</li>
+<li>CLI mirrors the RPC schema: <code>tb-cli energy register &lt;capacity&gt; &lt;price&gt; --meter-address … --jurisdiction … --stake … --owner …</code>, <code>tb-cli energy market [--provider-id … --verbose]</code>, <code>tb-cli energy submit-reading --reading-json '…'</code>, <code>tb-cli energy settle &lt;provider&gt; &lt;kwh&gt; --meter-hash … --buyer …</code>.</li>
+<li>All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in <code>docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts</code> so meter hashes/receipts stay byte-identical everywhere.</li>
+</ul>
+</li>
+<li><strong>Oracle adapter + mock service</strong> (<code>crates/oracle-adapter</code>, <code>services/mock-energy-oracle</code>):
+<ul>
+<li>Adapter defines <code>SignatureVerifier</code>; currently <code>NoopSignatureVerifier</code> (always true) stands in until Ed25519 verification + vectors land. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes <code>signing_bytes()</code> so verifiers can sign/verify consistently.</li>
+<li>Mock service (in-house <code>httpd</code> router) listens on <code>MOCK_ENERGY_ORACLE_ADDR</code> (default <code>127.0.0.1:8080</code>), exposes <code>/meter/:id/reading</code> (increments totals by 250 kWh, updates timestamp, returns payload) and <code>/meter/:id/submit</code> (accepts posted readings). Used by <code>scripts/deploy-worldos-testnet.sh</code>.</li>
+</ul>
+</li>
+<li><strong>Telemetry</strong>:
+<ul>
+<li>Gauges: <code>energy_providers_count</code>, <code>energy_avg_price</code>. Counters: <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>. Histograms: <code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>.</li>
+<li>Logs: <code>node::energy::check_energy_market_health</code> warns on backlog spikes and settlement stalls. Metrics aggregator wiring (<code>/wrappers</code>, <code>/telemetry/summary</code>) plus Grafana panels (provider counts, pending credits, slash totals, settlement rates) are tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>.</li>
+</ul>
+</li>
+<li><strong>Governance linkage</strong>:
+<ul>
+<li><code>ParamKey::{EnergyMinStake, EnergyOracleTimeoutBlocks, EnergySlashingRateBps}</code> live in <code>governance/src/{lib.rs,codec.rs,params.rs}</code>. Runtime hooks clamp values before writing to <code>Params</code> and call <code>node::energy::set_governance_params</code>.</li>
+<li><code>node/tests/gov_param_wiring.rs</code> covers these round-trips; update it plus explorer/CLI timelines when adding new energy parameters (batch vs real-time settlement toggles, dependency graph validation, etc.).</li>
+</ul>
+</li>
+<li><strong>Snapshot/restore</strong>:
+<ul>
+<li>Use <code>TB_ENERGY_MARKET_DIR</code> to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. <code>docs/testnet/ENERGY_QUICKSTART.md</code> and <code>scripts/deploy-worldos-testnet.sh</code> document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="7-dex-trust-lines-and-htlcs"><a class="header" href="#7-dex-trust-lines-and-htlcs">7. DEX, Trust Lines, and HTLCs</a></h2>
+<h3 id="71-amm-pool-math"><a class="header" href="#71-amm-pool-math">7.1 AMM pool math</a></h3>
+<ul>
+<li>Constant-product pools live in <code>dex/src/amm.rs</code>.</li>
+<li>Share minting:
+<ul>
+<li>First LP: <code>share = sqrt(ct * it)</code>.</li>
+<li>Subsequent LPs: <code>share = min(total_shares * ct / reserve_ct, total_shares * it / reserve_it)</code>.</li>
+</ul>
+</li>
+<li>Swaps preserve <code>k = reserve_ct * reserve_it</code>; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.</li>
+</ul>
+<h3 id="72-trust-line-routing"><a class="header" href="#72-trust-line-routing">7.2 Trust-line routing</a></h3>
+<ul>
+<li>Ledger (<code>node/src/dex/trust_lines.rs</code>) keeps a <code>HashMap&lt;(from,to), TrustLine { balance, limit, authorized }&gt;</code> pair.</li>
+<li>Path finding:
+<ul>
+<li>BFS yields any viable path.</li>
+<li><code>find_best_path</code> uses Dijkstra for the shortest hop path, then <code>max_slack_path</code> to maximise residual capacity (slack = <code>limit - |balance| - amount</code>).</li>
+<li>Fallback route excludes edges chosen by the slack path to provide a disjoint backup.</li>
+</ul>
+</li>
+<li><code>settle_path</code> applies debits/credits across hops atomically; failures roll back all adjustments.</li>
+</ul>
+<h3 id="73-htlc-proofs-and-replay-constraints"><a class="header" href="#73-htlc-proofs-and-replay-constraints">7.3 HTLC proofs and replay constraints</a></h3>
+<ul>
+<li><code>dex/src/htlc_router.rs</code> keeps pending intents (<code>VecDeque&lt;HtlcIntent { chain, amount, hash, timeout }</code>).</li>
+<li>Submit flow:
+<ol>
+<li>Caller posts an intent; router matches against existing intents with identical hash+amount.</li>
+<li>Upon match, the router returns both intents plus deterministic scripts <code>htlc:&lt;hash_hex&gt;:&lt;timeout&gt;</code> for each chain. Scripts embed the hashed secret to avoid mismatched preimages.</li>
+</ol>
+</li>
+<li>Replay protection: matched pairs are removed from the queue; repeated submissions with the same hash+amount/time window are rejected. Timeouts must be ordered (chain A &lt; chain B) per best practices.</li>
+</ul>
+<h3 id="74-escrow-state-machine-and-explorer-payloads"><a class="header" href="#74-escrow-state-machine-and-explorer-payloads">7.4 Escrow state machine and explorer payloads</a></h3>
+<ul>
+<li><code>dex/src/escrow.rs</code> implements a Merkle-based escrow ledger:
+<ul>
+<li><code>EscrowEntry { from, to, total, released, payments, root, algo }</code> tracks aggregate state and supports both BLAKE3 and SHA3 hash commitments.</li>
+<li>Every partial release appends to <code>payments</code>, recomputes the Merkle root, and returns <code>PaymentProof { leaf, path, algo }</code> so wallets can prove redemption without revealing unrelated payments.</li>
+<li>When <code>released == total</code> the entry is deleted and <code>total_locked</code> drops accordingly (<code>dex_escrow_locked</code> gauge).</li>
+</ul>
+</li>
+<li>Persistence and RPC:
+<ul>
+<li>Escrow tables live in sled (<code>dex::storage::DexStore</code>) and are exported via <code>node/src/dex/storage_binary.rs</code> (bincode helpers for order books, escrow snapshots, proofs).</li>
+<li>RPC <code>dex_escrow_status</code>/<code>dex_escrow_release</code>/<code>dex_escrow_proof</code> expose the state machine; CLI mirrors them via <code>tb-cli dex escrow status|release|proof</code>.</li>
+</ul>
+</li>
+<li>Explorer + metrics:
+<ul>
+<li><code>GET /dex/order_book</code> and <code>GET /dex/trust_lines</code> return the indexed order book and trust-line graph, respectively.</li>
+<li>Metrics <code>dex_escrow_locked</code> and <code>dex_escrow_pending</code> (see <code>node/src/telemetry.rs</code>) feed the default dashboards so operators can spot runaway collateral.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="8-bridges-and-security"><a class="header" href="#8-bridges-and-security">8. Bridges and Security</a></h2>
+<h3 id="81-header-layout-and-proof-encoding"><a class="header" href="#81-header-layout-and-proof-encoding">8.1 Header layout and proof encoding</a></h3>
+<ul>
+<li>External chains share a canonical header schema (<code>bridges/src/header.rs::PowHeader</code>):
+<ul>
+<li><code>chain_id</code> (string), <code>height</code> (u64), <code>merkle_root</code> (target tree), <code>signature</code> (BLAKE3 hash of prior fields), <code>nonce</code>, and difficulty <code>target</code>.</li>
+<li><code>hash_header</code> concatenates those bytes and feeds BLAKE3; <code>verify_pow</code> compares the 64-bit prefix against <code>target</code>.</li>
+</ul>
+</li>
+<li>Light-client payloads (<code>bridges/src/light_client.rs</code>):
+<ul>
+<li><code>Header { chain_id, height, merkle_root, signature }</code> plus <code>Proof { leaf, path[] }</code>.</li>
+<li><code>header_hash</code> is <code>BLAKE3(chain_id || height || merkle_root)</code> and must match <code>signature</code>.</li>
+<li>Merkle paths are stored as <code>Vec&lt;[u8;32]&gt;</code>; verification always hashes <code>(acc || sibling)</code> in insertion order, so callers must supply the path exactly as emitted by the origin chain.</li>
+</ul>
+</li>
+<li>Within the node:
+<ul>
+<li>Headers are persisted via <code>simple_db::names::BRIDGE_HEADERS</code> and replayed during startup.</li>
+<li>RPC <code>bridge.verify_deposit</code> decodes <code>ExternalSettlementProof</code>, validates the Merkle path, then records a <code>DepositReceipt</code>.</li>
+<li>Proof encoding lives in <code>bridge_types::settlement_proof_digest</code>; receipts carry the digest so explorers can hyperlink deposits ↔ withdrawals.</li>
+</ul>
+</li>
+</ul>
+<h3 id="82-challenge-math-duty-windows-and-errors"><a class="header" href="#82-challenge-math-duty-windows-and-errors">8.2 Challenge math, duty windows, and errors</a></h3>
+<ul>
+<li><code>PendingWithdrawal</code> (<code>node/src/bridge/mod.rs:389</code>) tracks <code>commitment</code>, <code>asset</code>, <code>user</code>, <code>amount</code>, <code>initiated_at</code>, <code>deadline = initiated_at + channel.config.challenge_period_secs</code>, and <code>challenged</code> flags. Default challenge window is 30 s, overrideable per channel.</li>
+<li>Duty timing:
+<ol>
+<li><code>bridge.request_withdrawal</code> locks the relayer bond (<code>bridge_min_bond</code>) and schedules a duty (<code>DutyRecord</code>) with deadline <code>initiated_at + bridge_duty_window_secs</code>.</li>
+<li>Challengers call <code>bridge.challenge_withdrawal { commitment, challenger }</code>. If accepted, <code>BridgeError::AlreadyChallenged</code> prevents duplicates and <code>bridge_challenge_slash</code> refunds challengers after burning the bond.</li>
+<li>If no challenge arrives before <code>deadline</code>, <code>bridge.finalize_withdrawal</code> releases funds and credits <code>bridge_duty_reward</code>.</li>
+</ol>
+</li>
+<li>Error surface (<code>BridgeError</code>):
+<ul>
+<li><code>InvalidProof</code>, <code>SettlementProofHashMismatch</code>, <code>SettlementProofChainMismatch</code> return <code>-32071</code> style RPC codes.</li>
+<li><code>ChallengeWindowOpen</code> / <code>AlreadyChallenged</code> bubble to clients so they know whether to retry later.</li>
+<li>Missing rows (<code>UnknownChannel</code>, <code>WithdrawalMissing</code>) map to <code>-32072</code>.</li>
+</ul>
+</li>
+<li>Diagnostics: <code>bridge.pending_withdrawals</code>, <code>bridge.active_challenges</code>, <code>bridge.duty_log</code>, and explorer dashboards show live commitments, deadlines, and slashing events. Telemetry families <code>BRIDGE_CHALLENGE_TOTAL</code>, <code>BRIDGE_SETTLEMENT_RESULTS_TOTAL{result,reason}</code>, and <code>BRIDGE_DISPUTE_OUTCOMES_TOTAL{kind,outcome}</code> back the Grafana bridge row.</li>
+</ul>
+<h3 id="83-risk-register-and-audit-playbooks"><a class="header" href="#83-risk-register-and-audit-playbooks">8.3 Risk register and audit playbooks</a></h3>
+<ul>
+<li><code>docs/security_and_privacy.md</code> consolidates the previous risk register:
+<ul>
+<li>Consensus: monitor QUIC stalls, DKG leaks.</li>
+<li>Networking: peer DB corruption, overlay exhaustion.</li>
+<li>Storage/Compute: erasure threshold violations, SLA slashing anomalies.</li>
+<li>Governance: treasury drains, badge forgery attempts.</li>
+</ul>
+</li>
+<li>Audit tooling:
+<ul>
+<li>Aggregator <code>/audit</code> endpoint stores incident logs.</li>
+<li><code>scripts/settlement_audit.rs</code>, <code>tools/settlement_audit</code>, and <code>tb-cli gov treasury audit</code> compare ledger projections vs settlement state.</li>
+<li>Risk reviews must cite relevant sections here before patching code.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="9-gateway-dns-and-read-receipts"><a class="header" href="#9-gateway-dns-and-read-receipts">9. Gateway, DNS, and Read Receipts</a></h2>
+<h3 id="91-dns-auctions-and-cli-flows"><a class="header" href="#91-dns-auctions-and-cli-flows">9.1 DNS auctions and CLI flows</a></h3>
+<ul>
+<li>
+<p><code>node/src/gateway/dns.rs</code> maintains auctions (<code>DomainAuctionRecord</code>) and stakes (<code>StakeEscrowRecord</code>) under <code>SimpleDb::open_named(names::GATEWAY_DNS, path)</code>.</p>
+</li>
+<li>
+<p>Auction lifecycle:</p>
+<ol>
+<li>Seller lists via <code>tb-cli gateway domain list &lt;domain&gt; &lt;min_bid&gt; --seller &lt;acct&gt; ...</code>.</li>
+<li>Bidders lock stake references (<code>register_stake</code>) and submit bids (<code>tb-cli gateway domain bid ... --stake-ref ref1</code>). Bids must exceed both <code>min_bid_ct</code> and previous <code>highest_bid</code>.</li>
+<li>Seller (or governance) completes the sale (<code>tb-cli gateway domain complete</code>) once <code>end_ts</code> passes; ledger events (<code>LedgerEventRecord</code>) debit bidders, credit seller/royalty/treasury, and refund unused stake.</li>
+<li>If no bids, <code>cancel</code> reopens the domain.</li>
+</ol>
+</li>
+<li>
+<p>Escrow bookkeeping handles stake reuse, lock/unlock flows, and ledger references for audit reports.</p>
+</li>
+<li>
+<p>DNS TXT schema: publications must conform to <code>docs/spec/dns_record.schema.json</code> (<code>{domain, txt, pubkey, sig}</code>). Example TXT record for <code>club.block</code>:</p>
+<pre><code>club.block TXT "tb-domain=club.block;pubkey=0c2e...;sig=5fb9..."
+</code></pre>
+<p><code>pubkey</code>/<code>sig</code> are lowercase hex (Ed25519). <code>dns_lookup</code> fetches TXT via the configured resolver (default <code>runtime::net::lookup_txt</code>), caches verdicts for <code>VERIFY_TTL = 3600s</code>, and persists them under <code>TB_DNS_DB_PATH</code> (<code>dns_db</code> by default).</p>
+</li>
+<li>
+<p>Verification and auditing:</p>
+<ul>
+<li>RPC <code>gateway.policy</code> returns the active TXT policy parsed via <code>gateway::dns::gateway_policy</code>.</li>
+<li><code>gateway.dns_lookup</code> exposes the cached verdict (<code>verified</code>, <code>pending</code>, <code>failed</code>) so explorers can show trust badges.</li>
+<li>CLI <code>tb-cli net dns verify &lt;domain&gt;</code> exercises the same path and prints cache hits/misses.</li>
+</ul>
+</li>
+</ul>
+<h3 id="92-read-receipts-batching-and-audit-workflow"><a class="header" href="#92-read-receipts-batching-and-audit-workflow">9.2 Read receipts, batching, and audit workflow</a></h3>
+<ul>
+<li>Client acknowledgements (<code>node/src/read_receipt.rs::ReadAck</code>) contain manifest ID, path hash, bytes served, client hash, domain/provider metadata, optional ad readiness proofs, and Ed25519 signatures. <code>ReadAck::verify()</code> checks both signature and privacy proof.</li>
+<li>Gateway receipts (<code>node/src/gateway/read_receipt.rs</code>):
+<ul>
+<li>Stored per hour (<code>current_epoch(ts) = ts / 3600</code>). Files are binary CBOR or legacy CBOR for compatibility.</li>
+<li><code>batch(epoch)</code> loads all receipts, computes a BLAKE3 Merkle root, writes <code>&lt;epoch&gt;.root</code>, combines with execution receipts (<code>exec::batch</code>), and submits the final anchor to the settlement engine.</li>
+<li><code>reads_since(epoch, domain)</code> returns <code>(count, last_ts)</code> for CLI/RPC reporting.</li>
+</ul>
+</li>
+<li>CLI runbook:
+<ol>
+<li><code>tb-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600</code> (custom script) polls the RPC <code>gateway.reads_since</code>.</li>
+<li><code>tb-cli gateway mobile-cache flush</code> before maintenance to force anchors.</li>
+<li>Inspect anchors via <code>compute_market.recent_roots</code> to ensure READ_SUB_CT credits landed.</li>
+</ol>
+</li>
+</ul>
+<h3 id="93-mobile-gateway-cache"><a class="header" href="#93-mobile-gateway-cache">9.3 Mobile gateway cache</a></h3>
+<ul>
+<li>Config (<code>MobileCacheConfig::from_env</code>):
+<ul>
+<li>TTL: <code>TB_MOBILE_CACHE_TTL_SECS</code> (default 300 s).</li>
+<li>Sweep interval: <code>TB_MOBILE_CACHE_SWEEP_SECS</code> (default 30 s).</li>
+<li>Entry cap: <code>TB_MOBILE_CACHE_MAX_ENTRIES</code> (default 512) and payload cap (<code>64 KiB</code> default).</li>
+<li>Queue cap: <code>TB_MOBILE_CACHE_MAX_QUEUE</code> (default 256) for offline submissions.</li>
+<li>Encryption key: <code>TB_MOBILE_CACHE_KEY_HEX</code> (falls back to <code>TB_NODE_KEY_HEX</code>).</li>
+</ul>
+</li>
+<li>The cache uses ChaCha20‑Poly1305; entries persist <code>stored_at</code>, <code>expires_at</code>, and ciphertext bytes. TTL enforcement sweeps expired records, increments <code>MOBILE_CACHE_STALE_TOTAL</code>, and updates <code>MOBILE_CACHE_QUEUE_BYTES</code>.</li>
+<li>CLI:
+<ul>
+<li><code>tb-cli gateway mobile-cache status --url http://node:26658 --pretty</code>.</li>
+<li><code>tb-cli gateway mobile-cache flush</code> to drop encrypted responses and offline queue state.</li>
+</ul>
+</li>
+</ul>
+<h3 id="94-light-clients-state-streams-and-explorer-payloads"><a class="header" href="#94-light-clients-state-streams-and-explorer-payloads">9.4 Light clients, state streams, and explorer payloads</a></h3>
+<ul>
+<li>
+<p>Streaming protocol (<code>node/src/rpc/state_stream.rs</code>):</p>
+<ul>
+<li>Upgrades the JSON-RPC connection to a WebSocket and repeatedly sends <code>StateChunk { seq, tip_height, accounts[], root, compressed }</code>.</li>
+<li>Accounts are serialized as sorted sequences (<code>AccountChunk { address, balance, account_seq, proof }</code>); proofs are the Merkle siblings from <code>state::MerkleTrie::prove</code>.</li>
+<li>Default cadence: 1 chunk per second; set by the loop delay inside <code>run_stream</code>. Errors close the socket; clients should reconnect and resume from the latest <code>seq</code>.</li>
+</ul>
+</li>
+<li>
+<p>Light-client crate (<code>crates/light-client</code>):</p>
+<ul>
+<li><code>SyncOptions</code> gate by Wi-Fi/charging/battery and compute <code>GatingReason</code>. Device probes feed <code>DeviceStatusSnapshot</code> which feeds CLI via <code>tb-cli light-client device status --json</code>.</li>
+<li>Headers (<code>light_client::Header</code>) mirror the canonical layout (height, prev hash, Merkle roots, VDF data, optional validator key/sig). <code>verify_and_append</code> enforces PoW and checkpoint rules.</li>
+<li><code>state_stream</code> consumers persist deltas under <code>~/.the_block/light_client.toml</code> and reuse <code>fetch_signed</code> to load jurisdiction-specific overrides.</li>
+</ul>
+</li>
+<li>
+<p>Rebate + explorer endpoints:</p>
+<ul>
+<li>
+<p>RPC <code>light_client.rebate_status</code>/<code>light_client.rebate_history</code> query the on-disk proof tracker (<code>node/src/light_client/proof_tracker.rs</code>). Results power explorer endpoints:</p>
+<pre><code class="language-json">GET /light_client/top_relayers -&gt; [
+  {"id":"aa12…", "pending":3, "total_proofs":42, "total_claimed":100, "last_claim_height":18432}
+]
+GET /light_client/rebate_history?limit=2 -&gt; {
+  "receipts":[
+    {"height":17700,"amount":15,"relayers":[{"id":"aa12…","amount":10},{"id":"bb34…","amount":5}]}
+  ],
+  "next":null
+}
+</code></pre>
+</li>
+</ul>
+</li>
+<li>
+<p>CLI quick start:</p>
+<ol>
+<li><code>tb-cli light-client rebate-status --url http://node:26658</code> prints local balances.</li>
+<li><code>tb-cli light-client rebate-history --limit 5 --json</code> paginates receipts (set <code>--relayer &lt;hex&gt;</code> to filter).</li>
+<li><code>tb-cli light-client device status --json</code> confirms gating vs overrides before enabling background sync.</li>
+</ol>
+</li>
+<li>
+<p>Failure modes:</p>
+<ul>
+<li>Missing proofs ➜ <code>state_stream</code> closes the socket and logs <code>StateStreamError::InvalidProof</code>.</li>
+<li>Device gating ➜ <code>SyncOptions::gating_reason</code> returns <code>WifiUnavailable</code>, <code>RequiresCharging</code>, or <code>BatteryTooLow</code>, bubbled to CLI and RPC so users know why sync paused.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="10-governance-economics-and-treasury"><a class="header" href="#10-governance-economics-and-treasury">10. Governance, Economics, and Treasury</a></h2>
+<h3 id="101-emission-curves-and-multipliers"><a class="header" href="#101-emission-curves-and-multipliers">10.1 Emission curves and multipliers</a></h3>
+<ul>
+<li>Logistic base reward <code>R₀(N) = R_max / (1 + e^{ξ (N - N*)})</code> (see <code>node/src/consensus/leader.rs</code>). Default <code>R_max</code> and slope parameters live in <code>governance::Params</code>.</li>
+<li>Subsidy multipliers per lane follow the “one dial” formula described in the economic model; governance can clamp or trigger <code>kill_switch_subsidy_reduction</code>.</li>
+<li>Explorer and CLI display live multipliers via shared serialization (<code>foundation_serialization</code>).</li>
+</ul>
+<h3 id="102-fee-rebates"><a class="header" href="#102-fee-rebates">10.2 Fee rebates</a></h3>
+<ul>
+<li>Rebates are ledger entries keyed to sender accounts. <code>node/src/fees/mod.rs</code> charges consumer traffic by applying rebates first; <code>FeeLane::Industrial</code> bypasses rebates and bills direct CT.</li>
+<li>RPC: <code>peer.rebate_status</code>, <code>peer.rebate_claim</code>. CLI: <code>tb-cli fees status</code>, <code>tb-cli fees claim</code>.</li>
+<li>Ordering: when submitting a transaction <code>submit_tx</code> calculates <code>total_consumer = amount_consumer + fee</code>, subtracts available rebate credits, and only then debits CT.</li>
+</ul>
+<h3 id="103-governance-parameters"><a class="header" href="#103-governance-parameters">10.3 Governance parameters</a></h3>
+<ul>
+<li><code>governance/src/params.rs</code> holds the canonical list and defaults. Appendix E summarises the most important knobs: snapshot cadence, fee floors, subsidy scalars, badge thresholds, scheduler weights, runtime/storage policy selectors, bridge incentive constants, etc.</li>
+<li>Parameters can be toggled via governance proposals or RPC <code>gov_params</code>. Explorer <code>/governance/dependency_policy</code> exposes history.</li>
+</ul>
+<h3 id="104-release-rollback-and-ui-flows"><a class="header" href="#104-release-rollback-and-ui-flows">10.4 Release, rollback, and UI flows</a></h3>
+<ul>
+<li>CLI:
+<ul>
+<li><code>tb-cli gov release propose --hash &lt;build_hash&gt; --artifact &lt;url&gt;</code> registers new releases; provenance signatures must match <code>config/release_signers.txt</code> or env overrides.</li>
+<li><code>tb-cli gov release approve --proposal &lt;id&gt;</code> collects signatures/quorum.</li>
+<li><code>tb-cli gov release rollback --proposal &lt;id&gt;</code> triggers rollback windows; explorer <code>GET /releases</code> surfaces history.</li>
+</ul>
+</li>
+<li>UI flows mirror CLI commands via explorer endpoints; log indexer ensures wallet + explorer display identical release states.</li>
+<li>Provenance controls (<code>node/src/provenance.rs</code>):
+<ul>
+<li>
+<p>Signer list: load from <code>TB_RELEASE_SIGNERS</code>, <code>TB_RELEASE_SIGNERS_FILE</code>, or <code>config/release_signers.txt</code>. <code>tb-cli gov release signers</code> prints the active keys.</p>
+</li>
+<li>
+<p>Attestation payloads look like:</p>
+<pre><code class="language-json">{
+  "build_hash": "f8c3c5a…",
+  "artifact": "https://artifacts.theblock.dev/the-block-f8c3.tar.zst",
+  "signatures": [
+    {"signer":"41b2…","signature":"0f9d…"},
+    {"signer":"9ad0…","signature":"ab21…"}
+  ]
+}
+</code></pre>
+<p>Each signature is computed over <code>release:{build_hash}</code> using Ed25519 keys published in the signer list.</p>
+</li>
+<li>
+<p><code>verify_release_signature</code> ensures at least one configured signer matches; <code>verify_artifact_signature</code> checks the downloaded artifact hash against the attestation. Failures increment <code>BUILD_PROVENANCE_INVALID_TOTAL</code> and the release proposal is marked quarantined until remediated.</p>
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="105-treasury-invariants"><a class="header" href="#105-treasury-invariants">10.5 Treasury invariants</a></h3>
+<ul>
+<li><code>governance/src/treasury.rs</code> enforces:
+<ul>
+<li>Non‑negative balances (<code>ct</code>, <code>industrial</code>) tracked in sled.</li>
+<li>Streaming caps and kill switches (<code>kill_switch_subsidy_reduction</code>, <code>treasury_percent_ct</code>).</li>
+<li>Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.</li>
+</ul>
+</li>
+<li>Executor snapshots (CLI <code>tb-cli gov treasury executor</code>) must show monotonic <code>last_tick_at</code>. Settlement anchors are hashed and appended to the audit log for replayability.</li>
+</ul>
+<h3 id="106-service-badge-lifecycle"><a class="header" href="#106-service-badge-lifecycle">10.6 Service badge lifecycle</a></h3>
+<ul>
+<li>Tracker (<code>node/src/service_badge.rs</code>):
+<ul>
+<li>Maintains uptime counters, latency samples, and expiry metadata. Badges mint once <code>total_epochs &gt;= BADGE_MIN_EPOCHS</code> (default 90) and uptime ≥ <code>BADGE_ISSUE_UPTIME</code> (99 %). Revocation triggers when uptime falls below <code>BADGE_REVOKE_UPTIME</code> (95 %) or <code>expiry</code> passes (<code>BADGE_TTL_SECS</code>, default 30 days).</li>
+<li>Minting calls <code>register_physical_presence(provider)</code>, stores a <code>token</code>, increments <code>BADGE_ISSUED_TOTAL</code>, and records timestamps (<code>BADGE_LAST_CHANGE_SECONDS</code>). Burning calls <code>revoke_provider_badge</code> and updates <code>BADGE_ACTIVE</code>.</li>
+</ul>
+</li>
+<li>CLI (<code>cli/src/service_badge.rs</code>):
+<ul>
+<li><code>tb-cli service-badge issue|revoke</code> wrap the RPC methods for automation.</li>
+<li><code>tb-cli service-badge verify &lt;token&gt;</code> confirms authenticity (good for explorer tooltips).</li>
+<li><code>tb-cli service-badge venue register|rotate|status &lt;name&gt;</code> manages venue presence tokens tracked in <code>VENUE_TOKENS</code>.</li>
+</ul>
+</li>
+<li>Explorer + telemetry:
+<ul>
+<li>Explorer surfaces badges under <code>/auxiliary/services</code> alongside venue crowd snapshots (<code>VENUE_COUNTS</code>).</li>
+<li>Metrics <code>BADGE_ACTIVE</code>, <code>BADGE_LAST_CHANGE_SECONDS</code>, and <code>service_badge_token_age_seconds</code> back the default dashboards so operators can verify SLA compliance before badges expire.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="11-security-privacy-and-provenance"><a class="header" href="#11-security-privacy-and-provenance">11. Security, Privacy, and Provenance</a></h2>
+<h3 id="111-crypto-migration-steps"><a class="header" href="#111-crypto-migration-steps">11.1 Crypto migration steps</a></h3>
+<ul>
+<li>PQ upgrades compile by enabling the <code>pq-crypto</code> feature; <code>node/src/commit_reveal.rs</code> switches commits to Dilithium, while <code>dkg/</code> and <code>wallet/remote_signer</code> can operate in both classic and PQ modes.</li>
+<li>Migration playbook:
+<ol>
+<li>Build both PQ and classic binaries; verify <code>crypto_suite</code> self‑tests.</li>
+<li>Rotate commit‑reveal keys using CLI (<code>tb-cli gov commit-reveal rotate</code> when available) while telemetry <code>CRYPTO_MIGRATION_*</code> metrics stay zero.</li>
+<li>Roll out PQ wallets by updating <code>TB_WALLET_SCHEME=dalek|dilithium</code>; the wallet crate auto‑detects remote signer capability.</li>
+</ol>
+</li>
+</ul>
+<h3 id="112-remote-signer-security"><a class="header" href="#112-remote-signer-security">11.2 Remote signer security</a></h3>
+<ul>
+<li><code>crates/wallet/src/remote_signer.rs</code> enforces:
+<ul>
+<li>Mutual TLS with rotating certificates (<code>RemoteSigner::connect_multi</code>).</li>
+<li>Threshold enforcement for multisig (errors: <code>insufficient_signers</code>, <code>invalid_signature</code>, <code>timeout</code>).</li>
+<li>Telemetry: <code>remote_signer_request_total</code>, <code>remote_signer_success_total</code>, <code>remote_signer_latency_seconds</code>, <code>remote_signer_key_rotation_total</code>, <code>remote_signer_error_total</code>.</li>
+</ul>
+</li>
+<li>Threat model mitigations: CLI refuses mixing seeds and remote signers, remote signer addresses must be provided explicitly, and governance audits endpoints via aggregator dashboards.</li>
+</ul>
+<h3 id="113-kyc-and-jurisdiction-authoring"><a class="header" href="#113-kyc-and-jurisdiction-authoring">11.3 KYC and jurisdiction authoring</a></h3>
+<ul>
+<li><code>crates/jurisdiction</code> parses signed policy packs: <code>PolicyPack { region, consent_required, features, parent }</code>, <code>SignedPack { pack, signature }</code>.</li>
+<li>Authoring flow:
+<ol>
+<li>Draft JSON (<code>examples/jurisdiction/*.json</code>), embed inheritance via <code>parent</code>.</li>
+<li>Sign with Ed25519; store signature as byte array or base64.</li>
+<li>Publish via RPC/CLI (<code>jurisdiction.set</code>), referencing governance proposals for region changes.</li>
+</ol>
+</li>
+<li>Verification: nodes fetch packs via HTTP (<code>TB_JURISDICTION_FEED</code>), verify signatures against configured keys, and expose diffs through <code>jurisdiction.policy_diff</code>.</li>
+</ul>
+<h3 id="114-privacy-compliance-mappings"><a class="header" href="#114-privacy-compliance-mappings">11.4 Privacy compliance mappings</a></h3>
+<ul>
+<li><code>docs/security_and_privacy.md</code> now owns retention guidance:
+<ul>
+<li>Read receipts store signatures only, hashed client IDs, and optional ad proofs. TTL per region is defined in jurisdiction packs.</li>
+<li>Law-enforcement portal logs metadata (request, action, result) and can redact evidence while keeping hash commitments.</li>
+<li>Mobile cache encrypts everything at rest; eviction policy ensures no stale responses leak when TTL expires.</li>
+</ul>
+</li>
+</ul>
+<h3 id="115-release-provenance-and-supply-chain"><a class="header" href="#115-release-provenance-and-supply-chain">11.5 Release provenance and supply chain</a></h3>
+<ul>
+<li>Provenance enforcement (<code>node/src/provenance.rs</code>) loads signer lists from <code>TB_RELEASE_SIGNERS</code> or <code>config/release_signers.txt</code>, verifies <code>release:{hash}</code> signatures, and checks <code>env!("BUILD_BIN_HASH")</code> against the current executable.</li>
+<li>Artifacts: <code>provenance.json</code> &amp; <code>checksums.txt</code> (CI generated) plus <code>cargo vendor</code> snapshots. Tagging is blocked unless the dependency registry audit passes.</li>
+<li>CLI <code>contract-cli system dependencies</code> + aggregator <code>/wrappers</code> expose runtime/transport/storage/coding backend info for compliance review.</li>
+</ul>
+<hr />
+<h2 id="12-apis-explorer-and-tooling"><a class="header" href="#12-apis-explorer-and-tooling">12. APIs, Explorer, and Tooling</a></h2>
+<h3 id="121-rpc-method-index"><a class="header" href="#121-rpc-method-index">12.1 RPC method index</a></h3>
+<p>See Appendix A for the full method → namespace → params → errors table. Highlights:</p>
+<ul>
+<li>Governance: <code>gov_list</code>, <code>gov_params</code>, <code>gov_propose</code>, <code>gov_vote</code>, <code>gov.release_signers</code>, <code>gov.treasury.*</code>.</li>
+<li>Bridge: <code>bridge.relayer_status</code>, <code>bridge.request_withdrawal</code>, <code>bridge.challenge_withdrawal</code>, etc., all returning structured JSON with error codes mapped from <code>BridgeError</code>.</li>
+<li>Compute: <code>compute_market.stats</code>, <code>compute.job_status</code>, <code>compute.job_cancel</code>.</li>
+<li>Gateway: <code>dns.*</code>, <code>gateway.mobile_cache_*</code>, <code>gateway.reads_since</code>.</li>
+<li>Diagnostics: <code>net.peer_stats*</code>, <code>anomaly.label</code>, <code>metrics</code> (OTLP snapshots), <code>mempool.stats</code>.</li>
+</ul>
+<h3 id="122-explorer-endpoints-and-schemas"><a class="header" href="#122-explorer-endpoints-and-schemas">12.2 Explorer endpoints and schemas</a></h3>
+<p><code>explorer/src/lib.rs::router</code> exposes REST endpoints:</p>
+<div class="table-wrapper"><table><thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>GET /blocks/:hash</code>, <code>/blocks/:hash/summary</code>, <code>/blocks/:hash/payouts</code>, <code>/blocks/:hash/proof</code></td><td>Block inspection + proof generation.</td></tr>
+<tr><td><code>GET /txs/:hash</code></td><td>Transaction details.</td></tr>
+<tr><td><code>GET /gov/proposals/:id</code>, <code>/governance/treasury/*</code>, <code>/governance/dependency_policy</code></td><td>Governance history, treasury status, dependency overrides.</td></tr>
+<tr><td><code>GET /releases</code></td><td>Release history with attestation metadata.</td></tr>
+<tr><td><code>GET /storage/providers</code>, <code>/storage/manifests</code></td><td>Storage pipeline views.</td></tr>
+<tr><td><code>GET /dex/order_book</code>, <code>/dex/trust_lines</code></td><td>DEX/per‑path data.</td></tr>
+<tr><td><code>GET /compute/jobs</code></td><td>Active compute orders and receipts.</td></tr>
+<tr><td><code>GET /light_client/top_relayers</code>, <code>/light_client/rebate_history</code></td><td>Light-client stream telemetry.</td></tr>
+<tr><td><code>GET /receipts/provider/:id</code>, <code>/receipts/domain/:id</code></td><td>Read-receipt history for audit.</td></tr>
+<tr><td><code>GET /ad/policy/snapshots*</code>, <code>/ad/readiness/status</code></td><td>Ad policy and readiness snapshots.</td></tr>
+</tbody></table>
+</div>
+<p>Explorer uses <code>foundation_sqlite</code> and shares codec crates, so HTTP responses line up with RPC schemas.</p>
+<h3 id="123-first-party-rpc-blockers-edge-cases--migration-tips"><a class="header" href="#123-first-party-rpc-blockers-edge-cases--migration-tips">12.3 First-party RPC blockers (edge cases &amp; migration tips)</a></h3>
+<ul>
+<li>Long‑running methods (<code>storage_upload</code>, <code>compute.job_cancel</code>) stream progress; legacy clients may block. Use the HTTP client in <code>crates/httpd</code> or <code>cli</code> wrappers to inherit timeouts/backoffs.</li>
+<li>Governance RPC errors map to <code>-320xx</code> codes (see <code>AuctionError::code</code>, bridge errors, treasury errors). Legacy JSON-RPC 1.0 clients that assume <code>code=-32603</code> must be updated.</li>
+<li><code>metrics</code> endpoint emits Prometheus text; when migrating from external telemetry stacks ensure scrapers handle embedded wrapper metrics and TLS (mutual TLS by default).</li>
+<li>Large responses (e.g., <code>storage.manifests</code>, <code>dex.order_book</code>) require pagination; explorer endpoints and CLI support filtering to reduce payloads.</li>
+</ul>
+<h3 id="124-schema-inventory"><a class="header" href="#124-schema-inventory">12.4 Schema inventory</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Schema</th><th>Location</th><th>When to update</th></tr></thead><tbody>
+<tr><td>Fee submission schema</td><td><code>docs/spec/fee_v2.schema.json</code></td><td>Any time RPC fee payloads gain/rename fields.</td></tr>
+<tr><td>DNS record schema</td><td><code>docs/spec/dns_record.schema.json</code></td><td>When adding DNS TXT attributes or <code>.block</code> metadata.</td></tr>
+</tbody></table>
+</div>
+<p>Keep the schemas in sync with RPC structs and rerun <code>mdbook build docs</code> before merging.</p>
+<hr />
+<h2 id="13-telemetry-monitoring-and-probe-clis"><a class="header" href="#13-telemetry-monitoring-and-probe-clis">13. Telemetry, Monitoring, and Probe CLIs</a></h2>
+<h3 id="131-metric-inventory-and-alerting"><a class="header" href="#131-metric-inventory-and-alerting">13.1 Metric inventory and alerting</a></h3>
+<p>See Appendix B for detailed metric descriptions. Key highlights:</p>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Meaning</th><th>Labels</th><th>Units</th><th>Suggested alert</th></tr></thead><tbody>
+<tr><td><code>base_fee</code></td><td>Current per-byte base fee</td><td>n/a</td><td>micro‑CT</td><td>Alert if <code>&gt;10x</code> baseline for &gt;5 min (congestion).</td></tr>
+<tr><td><code>mempool_fee_floor_{consumer,industrial}</code></td><td>Rolling fee floors</td><td>lane</td><td>micro‑CT</td><td>Alert if consumer floor moves &gt;50 % in &lt;60 s (possible spam).</td></tr>
+<tr><td><code>MEMPOOL_EVICTIONS_TOTAL</code></td><td>Evicted tx count</td><td>lane</td><td>count</td><td>Alert if derivative spikes unexpectedly.</td></tr>
+<tr><td><code>PARTITION_EVENTS_TOTAL</code></td><td>Partition incidents</td><td>n/a</td><td>count</td><td>Alert on increments; cross‑link to runbook.</td></tr>
+<tr><td><code>QUIC_HANDSHAKE_FAIL_TOTAL</code></td><td>Failed QUIC handshakes</td><td>peer,reason</td><td>count</td><td>Alert on surge for specific provider.</td></tr>
+<tr><td><code>RANGE_BOOST_QUEUE_DEPTH</code></td><td>Pending mesh bundles</td><td>n/a</td><td>count</td><td>Alert if &gt; queue cap (default 256).</td></tr>
+<tr><td><code>MOBILE_CACHE_*</code></td><td>Cache hits/misses/sweeps</td><td>action</td><td>count</td><td>Alert on sustained misses and queue overflows.</td></tr>
+<tr><td><code>COMPUTE_SLA_VIOLATIONS_TOTAL</code></td><td>SLA breaches</td><td>reason</td><td>count</td><td>Alert &gt;0 while in <code>SettleMode::Real</code>.</td></tr>
+<tr><td><code>BRIDGE_CHALLENGE_TOTAL</code></td><td>Bridge challenges</td><td>asset</td><td>count</td><td>Alert if &gt;0 without operator action.</td></tr>
+<tr><td><code>TREASURY_BALANCE_CT</code></td><td>Treasury CT balance</td><td>n/a</td><td>CT</td><td>Alert if drops &gt;X% per day outside scheduled disbursements.</td></tr>
+<tr><td><code>WRAPPER_DEPENDENCY_POLICY_VIOLATION</code></td><td>Dependency drift</td><td>wrapper</td><td>count</td><td>Alert immediately; governance override required.</td></tr>
+</tbody></table>
+</div>
+<h3 id="132-probe-cli-cookbook"><a class="header" href="#132-probe-cli-cookbook">13.2 Probe CLI cookbook</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Purpose</th><th>Expected output</th><th>Typical use</th></tr></thead><tbody>
+<tr><td><code>probe ping-rpc --url http://node:3050 --timeout 5 --prom</code></td><td>Measures RPC latency and emits Prometheus sample <code>probe_rpc_ping_seconds</code>.</td><td>JSON summary + <code>probe_rpc_ping_seconds{}</code> sample.</td><td>Blackbox RPC monitoring.</td></tr>
+<tr><td><code>probe gossip-check --addr 1.2.3.4:4040 --expect-peers 16</code></td><td>Ensures gossip port reachable and peer count ≥ threshold.</td><td>Exit 0 when <code>peer_count &gt;= expect</code>.</td><td>Overlay health checks.</td></tr>
+<tr><td><code>probe mine-one --miner my-node</code></td><td>Mines a single block via RPC template submit.</td><td>Block hash or error.</td><td>Regression testing for PoW/PoS pipeline.</td></tr>
+<tr><td><code>probe tip --rpc http://node:3050</code></td><td>Prints current height/hash; optional Prom output.</td><td><code>{"height":123,...}</code>.</td><td>Alert when local tip stalls vs peers.</td></tr>
+</tbody></table>
+</div>
+<p>Pair probes with dashboards (see <code>monitoring/README.md</code>) and aggregator targets for unified observability.</p>
+<hr />
+<h2 id="14-developer-handbook-highlights"><a class="header" href="#14-developer-handbook-highlights">14. Developer Handbook Highlights</a></h2>
+<ul>
+<li><strong>Concurrency &amp; Logging</strong>: Use <code>concurrency::{MutexExt, DashMap}</code> to avoid poisoned locks; log via <code>diagnostics::tracing</code> with structured fields (<code>component</code>, <code>peer</code>, <code>lane</code>, etc.). Never log PII; privacy filters exist for the LE portal only.</li>
+<li><strong>Debugging</strong>: <code>tb-cli diagnostics {mempool,gossip,mesh,tls}</code> surfaces cached stats. Enable <code>RUST_LOG=trace</code> plus diagnostics subscriber when reproducing issues. Probe CLI (above) complements runtime diagnostics.</li>
+<li><strong>Performance &amp; Benchmarks</strong>: Bench harnesses under <code>benches/</code> and Grafana dashboards compare results against thresholds in <code>config/benchmarks/*.thresholds</code>. Export histograms via <code>TB_BENCH_PROM_PATH</code>.</li>
+<li><strong>Formal Methods &amp; Simulation</strong>: <code>formal/</code> crate plus <code>docs/formal.md</code> house model checks. <code>sim/</code> contains scenario harnesses (dependency faults, DKG latency, bridge threats); run them before altering consensus or governance logic.</li>
+<li><strong>WASM/VM Debug</strong>: <code>cli/src/wasm.rs</code>, <code>node/src/vm</code>, <code>node/src/vm/debugger.rs</code> provide contract deployment, tracing, and debugging. Workflow: <code>tb-cli wasm build</code> → <code>tb-cli contract deploy</code> → <code>tb-cli contract call</code> → <code>tb-cli vm trace --tx &lt;hash&gt;</code>.</li>
+</ul>
+<hr />
+<h2 id="appendices"><a class="header" href="#appendices">Appendices</a></h2>
+<h3 id="appendix-a--rpc-method-index"><a class="header" href="#appendix-a--rpc-method-index">Appendix A · RPC Method Index</a></h3>
+<p><em>All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house <code>httpd</code> router. Every request must carry <code>{"jsonrpc":"2.0","id":&lt;id&gt;,"method":...,"params":...}</code>; responses mirror the standard result/error envelope. Objects below list field names, types, and whether they are optional (<code>?</code>). Unless noted otherwise, numeric fee values are expressed in micro-CT and heights/epochs use unsigned 64-bit integers.</em></p>
+<h4 id="ad_market-nodesrcrpcad_marketrs"><a class="header" href="#ad_market-nodesrcrpcad_marketrs">ad_market.* (<code>node/src/rpc/ad_market.rs</code>)</a></h4>
+<p><strong>Objects</strong></p>
+<ul>
+<li><code>CampaignSummary</code>: <code>{id, advertiser_account, remaining_budget_usd_micros, reserved_budget_usd_micros, creatives[]}</code>.</li>
+<li><code>DistributionPolicy</code>: <code>{viewer_percent, host_percent, hardware_percent, verifier_percent}</code>.</li>
+<li><code>CohortPriceSnapshot</code>: <code>{domain, provider?, badges[], price_per_mib_usd_micros, target_utilization_ppm, observed_utilization_ppm}</code>.</li>
+<li><code>BudgetSnapshot</code>: top-level fields <code>generated_at_micros</code>, <code>config</code> (see <code>BudgetBrokerConfig</code>), <code>campaigns[]</code> (each with <code>id</code>, <code>kappa</code>, <code>epoch_spend_total_usd_micros</code>, <code>remaining_usd_micros</code>, <code>cohorts[]</code>).</li>
+<li><code>ReadinessSnapshot</code>: <code>{ready, window_secs, unique_viewers, host_count, provider_count, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, utilization{cohort-&gt;{domain,viewer_ppm,host_ppm}}, distribution?}</code>.</li>
+<li><code>PolicySnapshot</code>: stored in <code>node/ad_policy_snapshot.rs</code>; serialized as <code>{epoch, weights[], governance_hash}</code>.</li>
+<li><code>CampaignRegistration</code>: canonical ad campaign object (ID, advertiser account, creatives, metadata map, budgets) as accepted by <code>ad_market::campaign_from_value</code>.</li>
+<li><code>ConversionRecord</code>: <code>{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, occurred_at_micros?}</code>. Requires <code>Authorization: Advertiser &lt;account&gt;:&lt;token&gt;</code> header; token hash stored under <code>metadata["conversion_token_hash"]</code>.</li>
+</ul>
+<p><strong>Common errors</strong>: <code>-32602</code> invalid params, <code>-32603</code> internal/disabled, <code>-32000</code> duplicate campaign, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030..-32033</code> advertiser auth failures.</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>ad_market.inventory</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot]}</code></td><td><code>-32603</code> when the market handle is not configured</td></tr>
+<tr><td><code>ad_market.list_campaigns</code></td><td>none</td><td><code>{status:"ok",campaigns:[CampaignSummary]}</code></td><td><code>-32603</code> when disabled</td></tr>
+<tr><td><code>ad_market.distribution</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy}</code></td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.budget</code></td><td>none</td><td><code>{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...}}</code> mirroring <code>budget_snapshot_to_value</code></td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.broker_state</code></td><td>none</td><td>Same payload as <code>ad_market.budget</code> (includes pacing deltas and analytics)</td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.readiness</code></td><td>none</td><td><code>ReadinessSnapshot</code> plus optional <code>distribution</code> (only when coupled with live market data)</td><td><code>-32603</code> when readiness handle unset</td></tr>
+<tr><td><code>ad_market.policy_snapshot</code></td><td><code>{epoch}</code></td><td>Snapshot JSON from <code>ad_policy_snapshot::load_snapshot</code> or <code>{status:"not_found"}</code></td><td><code>-32602</code> missing epoch</td></tr>
+<tr><td><code>ad_market.policy_snapshots</code></td><td><code>{start_epoch?,end_epoch?}</code> (<code>end_epoch</code> defaults to <code>chain_height/120</code>)</td><td><code>{snapshots:[PolicySnapshot]}</code></td><td>none (empty list when no snapshots)</td></tr>
+<tr><td><code>ad_market.register_campaign</code></td><td><code>CampaignRegistration</code></td><td><code>{status:"ok"}</code> on success</td><td><code>-32603</code> when market disabled/persistence error, <code>-32602</code> invalid payload, <code>-32000</code> duplicate campaign</td></tr>
+<tr><td><code>ad_market.record_conversion</code></td><td><code>ConversionRecord</code> body + advertiser auth header</td><td><code>{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?}}</code></td><td><code>-32603</code> disabled/internal, <code>-32602</code> invalid payload, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030</code> auth missing, <code>-32031</code> advertiser mismatch, <code>-32032</code> token missing, <code>-32033</code> invalid token</td></tr>
+</tbody></table>
+</div>
+<h4 id="analytics-anomaly-labeling-and-settlement-probes"><a class="header" href="#analytics-anomaly-labeling-and-settlement-probes">Analytics, anomaly labeling, and settlement probes</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>analytics</code> (<code>node/src/rpc/analytics.rs</code>)</td><td><code>{domain?}</code> filters aggregator buckets</td><td><code>AnalyticsStats { domain, bytes, requests, distribution }</code> as defined in <code>crate::rpc::analytics</code></td><td><code>-32603</code> when telemetry feature disabled</td></tr>
+<tr><td><code>anomaly.label</code></td><td><code>{label}</code> string used for ML feedback</td><td><code>{status:"ok"}</code></td><td>none</td></tr>
+<tr><td><code>settlement_status</code></td><td><code>{provider?}</code></td><td>`{mode:"dryrun"</td><td>"real"</td></tr>
+<tr><td><code>settlement.audit</code></td><td>none</td><td>Full settlement audit JSON (<code>compute_market::settlement_audit</code>) with balances, SLA queue, outstanding receipts</td><td>propagates <code>MarketError</code> codes (<code>-32040</code> range)</td></tr>
+</tbody></table>
+</div>
+<h4 id="account-queries-and-ledger-helpers"><a class="header" href="#account-queries-and-ledger-helpers">Account queries and ledger helpers</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>balance</code></td><td><code>{address}</code></td><td><code>{consumer,industrial}</code> balances pulled from <code>accounts</code> map (0 when missing)</td><td>none</td></tr>
+<tr><td><code>ledger.shard_of</code></td><td><code>{address}</code></td><td><code>{shard}</code> numeric shard ID as computed by <code>ledger::shard_of</code></td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="bridge-nodesrcrpcbridgers"><a class="header" href="#bridge-nodesrcrpcbridgers">Bridge (<code>node/src/rpc/bridge.rs</code>)</a></h4>
+<p><strong>Objects</strong></p>
+<ul>
+<li><code>RelayerStatusRequest</code>: <code>{relayer,String, asset?}</code>.</li>
+<li><code>BondRelayerRequest</code>: <code>{relayer,String, amount,u64}</code>.</li>
+<li><code>ClaimRewardsRequest</code>: <code>{relayer,String, amount,u64, approval_key}</code>.</li>
+<li><code>VerifyDepositRequest</code>: <code>{asset?, relayer?, user?, amount?, header:PowHeader, proof:Proof, relayer_proofs:RelayerProof[]}</code>.</li>
+<li><code>RequestWithdrawalRequest</code>: <code>{asset?, relayer?, user?, amount?, relayer_proofs[]}</code>.</li>
+<li><code>ChallengeWithdrawalRequest</code>: <code>{asset?, commitment, challenger}</code>.</li>
+<li><code>FinalizeWithdrawalRequest</code>: <code>{asset?, commitment}</code>.</li>
+<li><code>SubmitSettlementRequest</code>: <code>{asset?, settlement:ExternalSettlementProof}</code>.</li>
+<li><code>PendingWithdrawalsRequest</code>: <code>{asset?, relayer?, limit?, cursor?}</code> → paginated list of <code>PendingWithdrawalInfo</code>.</li>
+<li><code>ActiveChallengesRequest</code>: <code>{asset?, limit?, cursor?}</code>.</li>
+<li><code>RelayerQuorumRequest</code>: <code>{asset?, epoch?}</code> returns <code>RelayerQuorumInfo</code>.</li>
+<li><code>RewardClaimsRequest</code> / <code>RewardAccrualsRequest</code>: <code>{asset?, relayer?, limit?, cursor?}</code>.</li>
+<li><code>SettlementLogRequest</code>: <code>{asset?, limit?, cursor?}</code> returning historical <code>SettlementRecord</code> entries.</li>
+<li><code>RelayerAccountingRequest</code>: <code>{asset?, relayer}</code> summarising stakes, duties, and payouts.</li>
+<li><code>DutyLogRequest</code>: <code>{asset?, relayer?, duty_kind?, cursor?, limit?}</code>.</li>
+<li><code>DepositHistoryRequest</code>: <code>{asset?, relayer?, user?, cursor?, limit?}</code>.</li>
+<li><code>SlashLogRequest</code>: <code>{asset?, relayer?, cursor?, limit?}</code>.</li>
+<li><code>AssetsRequest</code>: <code>{}</code> → returns <code>BridgeAssetSnapshot</code> entries.</li>
+<li><code>ConfigureAssetRequest</code>: <code>{asset, channel_config:ChannelConfig}</code> for governance.</li>
+</ul>
+<p><strong>Common errors</strong> map bridge errors to RPC codes (<code>-32002</code> invalid proof, <code>-32007</code> duplicate withdrawal, <code>-32010</code> challenge window open, etc.) plus <code>-32602</code> invalid params and <code>-32000</code> busy DB lock.</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>bridge.relayer_status</code></td><td><code>RelayerStatusRequest</code></td><td><code>RelayerInfo {relayer,bond_ct,pending_rewards_ct,duty_state}</code></td><td>bridge error codes</td></tr>
+<tr><td><code>bridge.bond_relayer</code></td><td><code>BondRelayerRequest</code></td><td><code>{status:"ok"}</code></td><td><code>-32014</code> insufficient bond, storage errors</td></tr>
+<tr><td><code>bridge.claim_rewards</code></td><td><code>ClaimRewardsRequest</code></td><td><code>{claimed_ct, pending_ct}</code></td><td><code>-32015/-32017</code> reward validation errors</td></tr>
+<tr><td><code>bridge.verify_deposit</code></td><td><code>VerifyDepositRequest</code></td><td><code>DepositReceipt</code> (+ emission details) when proof checks succeed</td><td>proof errors <code>-32002</code>, replay <code>-32006</code>, storage <code>-32013</code></td></tr>
+<tr><td><code>bridge.request_withdrawal</code></td><td><code>RequestWithdrawalRequest</code></td><td><code>PendingWithdrawalInfo</code> plus commitment hash</td><td>duplicates <code>-32007</code>, insufficient bond <code>-32014</code></td></tr>
+<tr><td><code>bridge.challenge_withdrawal</code></td><td><code>ChallengeWithdrawalRequest</code></td><td><code>{status:"ok", challenge:ChallengeRecord}</code></td><td><code>-32008</code> missing withdrawal, <code>-32009</code> already challenged</td></tr>
+<tr><td><code>bridge.finalize_withdrawal</code></td><td><code>FinalizeWithdrawalRequest</code></td><td><code>{status:"ok"}</code> upon releasing funds</td><td><code>-32010</code> challenge window open</td></tr>
+<tr><td><code>bridge.submit_settlement</code></td><td><code>SubmitSettlementRequest</code></td><td><code>{status:"ok"}</code> after settlement proof accepted</td><td>settlement proof errors <code>-32018..-32023</code></td></tr>
+<tr><td><code>bridge.pending_withdrawals</code></td><td><code>PendingWithdrawalsRequest</code></td><td><code>{items:[PendingWithdrawalInfo], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.active_challenges</code></td><td><code>ActiveChallengesRequest</code></td><td><code>{items:[ChallengeRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.relayer_quorum</code></td><td><code>RelayerQuorumRequest</code></td><td><code>RelayerQuorumInfo {epoch, members[], threshold}</code></td><td>none</td></tr>
+<tr><td><code>bridge.reward_claims</code></td><td><code>RewardClaimsRequest</code></td><td><code>{items:[RewardClaimRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.reward_accruals</code></td><td><code>RewardAccrualsRequest</code></td><td><code>{items:[RewardAccrualRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.settlement_log</code></td><td><code>SettlementLogRequest</code></td><td><code>{items:[SettlementRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.dispute_audit</code></td><td><code>DisputeAuditRequest</code></td><td><code>{items:[DisputeAuditRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.relayer_accounting</code></td><td><code>RelayerAccountingRequest</code></td><td><code>{relayer, stake_ct, duty_totals, slash_totals}</code></td><td>none</td></tr>
+<tr><td><code>bridge.duty_log</code></td><td><code>DutyLogRequest</code></td><td><code>{items:[DutyRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.deposit_history</code></td><td><code>DepositHistoryRequest</code></td><td><code>{items:[DepositReceipt], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.slash_log</code></td><td><code>SlashLogRequest</code></td><td><code>{items:[SlashRecord], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>bridge.assets</code></td><td><code>AssetsRequest</code></td><td><code>{assets:[BridgeAssetSnapshot]}</code></td><td>none</td></tr>
+<tr><td><code>bridge.configure_asset</code></td><td><code>ConfigureAssetRequest</code></td><td><code>{status:"ok"}</code> after writing channel config</td><td>governance rejects via bridge error codes</td></tr>
+</tbody></table>
+</div>
+<h4 id="domain-registry-and-gateway-surfaces-nodesrcgatewaydnsrs-nodesrcservice_badgers-nodesrcgatewaymobile_cachers"><a class="header" href="#domain-registry-and-gateway-surfaces-nodesrcgatewaydnsrs-nodesrcservice_badgers-nodesrcgatewaymobile_cachers">Domain registry and gateway surfaces (<code>node/src/gateway/dns.rs</code>, <code>node/src/service_badge.rs</code>, <code>node/src/gateway/mobile_cache.rs</code>)</a></h4>
+<p>DNS methods share the JSON schema under <code>docs/spec/dns_record.schema.json</code>. Auctions/stakes use sled-backed objects <code>{domain, owner, reserve_ct, bidders[], expires_at}</code>.</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>dns.publish_record</code></td><td><code>DnsRecord</code> JSON (TXT + proof metadata)</td><td><code>{status:"ok", record_hash}</code></td><td>schema validation errors surfaced via <code>gateway::dns::Error</code> codes (forwarded via <code>rpc_error</code>)</td></tr>
+<tr><td><code>dns.list_for_sale</code></td><td><code>{domain,reserve_ct, ttl_blocks}</code></td><td><code>{status:"ok"}</code> once sale is staged</td><td>same as above</td></tr>
+<tr><td><code>dns.place_bid</code></td><td><code>{domain,bid_ct,bidder}</code></td><td><code>{status:"ok", leading_bid}</code></td><td>bidding window/price errors via dns error codes</td></tr>
+<tr><td><code>dns.complete_sale</code></td><td><code>{domain}</code></td><td><code>{status:"ok", new_owner}</code></td><td><code>not_found</code>, <code>auction_open</code> style dns errors</td></tr>
+<tr><td><code>dns.cancel_sale</code></td><td><code>{domain}</code></td><td><code>{status:"ok"}</code></td><td>dns errors</td></tr>
+<tr><td><code>dns.register_stake</code></td><td><code>{domain,stake_ct}</code></td><td><code>{status:"ok", stake_id}</code></td><td>dns errors</td></tr>
+<tr><td><code>dns.withdraw_stake</code></td><td><code>{stake_id}</code></td><td><code>{status:"ok"}</code></td><td>dns errors</td></tr>
+<tr><td><code>dns.stake_status</code></td><td><code>{stake_id?}</code></td><td><code>{stakes:[{domain, owner, stake_ct, expires_at}]}</code> or single entry when ID supplied</td><td>dns errors</td></tr>
+<tr><td><code>dns.auctions</code></td><td><code>{domain?}</code> filter</td><td><code>{auctions:[{domain,status,reserve_ct,bids,closes_at}]}</code></td><td>dns errors</td></tr>
+<tr><td><code>gateway.policy</code></td><td><code>{}</code> or filters (<code>region?</code>)</td><td>Current gateway policy JSON (rate limits, read-ack requirements, privacy toggles)</td><td>none</td></tr>
+<tr><td><code>gateway.reads_since</code></td><td><code>{since_ms}</code></td><td><code>{count, buckets:[{ts_ms,count}]}</code> built from read-ack batches</td><td>none</td></tr>
+<tr><td><code>gateway.venue_status</code></td><td><code>{venue_id}</code></td><td><code>{status:"ok", crowd_size, last_seen}</code> from <code>service_badge::venue_status_detail</code></td><td><code>-32602</code> missing venue_id</td></tr>
+<tr><td><code>gateway.venue_register</code></td><td><code>{venue_id}</code></td><td><code>{status:"ok", venue_id, token, expires_at}</code></td><td><code>-32602</code> missing ID</td></tr>
+<tr><td><code>gateway.venue_rotate</code></td><td><code>{venue_id}</code></td><td><code>{status:"ok", token, expires_at}</code> with freshly issued badge</td><td><code>-32602</code> missing ID</td></tr>
+<tr><td><code>gateway.dns_lookup</code></td><td><code>{domain}</code></td><td>DNS proof bundle as returned by <code>gateway::dns::dns_lookup</code> (includes TXT contents and audit trail)</td><td>dns errors</td></tr>
+<tr><td><code>gateway.mobile_cache_status</code></td><td>none</td><td>Snapshot from <code>gateway::mobile_cache::status_snapshot()</code> (entry counts, hits/misses)</td><td>none</td></tr>
+<tr><td><code>gateway.mobile_cache_flush</code></td><td>none</td><td><code>{status:"ok", flushed_entries}</code></td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="compute-control-plane-nodesrcrpccompute_marketrs-nodesrccompute_marketmatcherrs"><a class="header" href="#compute-control-plane-nodesrcrpccompute_marketrs-nodesrccompute_marketmatcherrs">Compute control plane (<code>node/src/rpc/compute_market.rs</code>, <code>node/src/compute_market/matcher.rs</code>)</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>compute.job_requirements</code></td><td><code>{job_id}</code></td><td>Requirements for a queued job (<code>{slices, profile, deadline_ms, fairness_lane}</code>)</td><td><code>MarketError</code> codes (propagated)</td></tr>
+<tr><td><code>compute.job_status</code></td><td><code>{job_id}</code></td><td><code>{status, submitted_at, matched_at?, provider?, receipts[]}</code></td><td>market errors</td></tr>
+<tr><td><code>compute.job_cancel</code></td><td><code>{job_id, reason?, requester}</code> (WebSocket upgrade supported)</td><td><code>{status:"ok"}</code> and cancels active batch</td><td><code>MarketError::Canceled</code> style codes</td></tr>
+<tr><td><code>compute.provider_hardware</code></td><td><code>{provider}</code></td><td>Provider hardware manifest (CPU, GPU, mem, lanes) from registry</td><td><code>MarketError::UnknownProvider</code></td></tr>
+<tr><td><code>compute.reputation_get</code></td><td><code>{provider}</code></td><td><code>{score, last_updated, evidence[]}</code></td><td>same as above</td></tr>
+<tr><td><code>compute_arm_real</code></td><td><code>{}</code></td><td><code>{status:"ok"}</code> after toggling settlement to <code>SettleMode::Real</code></td><td>restricted; returns <code>-32601</code> when not compiled</td></tr>
+<tr><td><code>compute_cancel_arm</code></td><td>none</td><td><code>{status:"ok"}</code> switching back to dry-run</td><td>restricted</td></tr>
+<tr><td><code>compute_back_to_dry_run</code></td><td>none</td><td><code>{status:"ok"}</code> (alias)</td><td>restricted</td></tr>
+</tbody></table>
+</div><div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>compute_market.stats</code></td><td>`{accelerator?:"fpga"</td><td>"tpu"}` filter</td><td>Aggregated market stats <code>{lanes:[{lane, queued, matched, avg_fee}], receipts_pending}</code></td></tr>
+<tr><td><code>compute_market.scheduler_stats</code></td><td>none</td><td>Raw scheduler view (per-lane queues, fairness windows)</td><td>none</td></tr>
+<tr><td><code>compute_market.scheduler_metrics</code></td><td>none</td><td><code>scheduler::Metrics</code> structure (latency, starvation counters, lane deadlines)</td><td>none</td></tr>
+<tr><td><code>compute_market.recent_roots</code></td><td><code>{n?}</code></td><td>Latest <code>n</code> micro-shard roots used for receipts</td><td>none</td></tr>
+<tr><td><code>compute_market.provider_balances</code></td><td>none</td><td><code>{providers:[{id, pending_ct, settled_ct, sla_bond_ct}]}</code></td><td>none</td></tr>
+<tr><td><code>compute_market.audit</code></td><td>none</td><td>Extended audit log incl. fairness window snapshots, outstanding SLA records</td><td><code>MarketError</code> codes</td></tr>
+</tbody></table>
+</div>
+<h4 id="configuration-and-consensus"><a class="header" href="#configuration-and-consensus">Configuration and consensus</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>config.reload</code></td><td><code>{compaction_secs?, sample_rate_ppm?}</code></td><td><code>{status:"ok", sample_rate_ppm, compaction_secs}</code> and updates telemetry config</td><td>none (values sanitized)</td></tr>
+<tr><td><code>consensus.difficulty</code></td><td><code>{window?}</code></td><td>Returns difficulty window stats (EMA short/med/long, next target)</td><td>none</td></tr>
+<tr><td><code>consensus.pos.register</code></td><td><code>{validator, stake_ct, proof}</code></td><td><code>{status:"ok"}</code> once validator registered</td><td>PoS errors (<code>-32060</code> range)</td></tr>
+<tr><td><code>consensus.pos.bond</code></td><td><code>{validator, stake_delta}</code></td><td><code>{status:"ok"}</code></td><td>same</td></tr>
+<tr><td><code>consensus.pos.unbond</code></td><td><code>{validator, amount}</code></td><td><code>{status:"ok"}</code> after queueing unbond</td><td>same</td></tr>
+<tr><td><code>consensus.pos.slash</code></td><td><code>{validator, reason, proof}</code></td><td><code>{status:"ok"}</code> after slash recorded</td><td>same</td></tr>
+<tr><td><code>pow.get_template</code></td><td><code>{miner}</code> optional metadata</td><td><code>{block_template}</code> with header, transactions, and PoH tick info</td><td><code>-32070</code> when mining disabled</td></tr>
+<tr><td><code>pow.submit</code></td><td><code>{block}</code> serialized candidate</td><td><code>{status:"ok", accepted:bool}</code></td><td><code>-32071</code> invalid PoW</td></tr>
+</tbody></table>
+</div>
+<h4 id="identity-jurisdiction-kyc-and-legal-portals"><a class="header" href="#identity-jurisdiction-kyc-and-legal-portals">Identity, jurisdiction, KYC, and legal portals</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>register_handle</code></td><td><code>{address, handle}</code></td><td><code>{status:"ok"}</code> once handle stored</td><td><code>-32602</code> invalid strings, <code>-32080</code> handle taken</td></tr>
+<tr><td><code>resolve_handle</code></td><td><code>{handle}</code></td><td><code>{address}</code> or <code>{status:"unknown"}</code></td><td>none</td></tr>
+<tr><td><code>identity.anchor</code></td><td><code>{address, did_document}</code> uses DID schema</td><td><code>{status:"ok", anchor_hash}</code></td><td><code>kyc::Error</code> mapped to <code>-32081</code> family</td></tr>
+<tr><td><code>identity.resolve</code></td><td><code>{address}</code></td><td>Latest DID document + timeline</td><td>none</td></tr>
+<tr><td><code>jurisdiction.status</code></td><td><code>{}</code></td><td>Active jurisdiction pack metadata (hashes, version, enabled modules)</td><td>none</td></tr>
+<tr><td><code>jurisdiction.set</code></td><td><code>{pack_json, signature}</code></td><td><code>{status:"ok"}</code> once stored in sled-backed <code>GovStore</code></td><td>signature errors -&gt; <code>-32090</code></td></tr>
+<tr><td><code>jurisdiction.policy_diff</code></td><td><code>{from, to}</code> pack hashes</td><td><code>{diff:{added[], removed[], changed[]}}</code></td><td>none</td></tr>
+<tr><td><code>kyc.verify</code></td><td><code>{provider, payload}</code> forwarded to configured KYC plugin</td><td><code>{status, provider_receipt}</code></td><td>provider-specific errors</td></tr>
+<tr><td><code>record_le_request</code></td><td><code>{request:LawEnforcementRequest}</code> per <code>node/src/le_portal.rs</code></td><td><code>{status:"ok", request_id}</code></td><td><code>-32603</code> when LE portal disabled</td></tr>
+<tr><td><code>le.list_requests</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{id, agency, type, opened_at, status}], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>le.record_action</code></td><td><code>{request_id, action, actor, notes?}</code></td><td><code>{status:"ok"}</code></td><td><code>-32095</code> missing request</td></tr>
+<tr><td><code>le.upload_evidence</code></td><td><code>{request_id, filename, content_base64}</code></td><td><code>{status:"ok"}</code> plus evidence hash</td><td><code>-32095</code></td></tr>
+<tr><td><code>warrant_canary</code></td><td><code>{status, signed_at, signature}</code></td><td><code>{status:"ok"}</code> after atomic append to log</td><td>signature check failures -&gt; <code>-32096</code></td></tr>
+</tbody></table>
+</div>
+<h4 id="light-clients-nodesrcrpclightrs-nodesrcrpclight_clientrs-nodesrcrpcstate_streamrs"><a class="header" href="#light-clients-nodesrcrpclightrs-nodesrcrpclight_clientrs-nodesrcrpcstate_streamrs">Light clients (<code>node/src/rpc/light.rs</code>, <code>node/src/rpc/light_client.rs</code>, <code>node/src/rpc/state_stream.rs</code>)</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>light.headers</code></td><td><code>{from_height, count}</code></td><td><code>{headers:[{height,header_fields...}]}</code> chunked for device syncing</td><td>none</td></tr>
+<tr><td><code>light.latest_header</code></td><td>none</td><td><code>{height, header}</code> for best tip</td><td>none</td></tr>
+<tr><td><code>light_client.rebate_status</code></td><td><code>{device_id}</code></td><td><code>{pending_ct, claimed_ct, last_claim_ts, proofs[]}</code></td><td><code>-32030</code> unauthorized when device not registered</td></tr>
+<tr><td><code>light_client.rebate_history</code></td><td><code>{device_id, limit?, cursor?}</code></td><td><code>{items:[{epoch,ct,receipt_hash}], next_cursor?}</code></td><td>same as above</td></tr>
+<tr><td><code>state_stream.subscribe</code></td><td>WebSocket upgrade, no body</td><td>Streams <code>{height, root, accounts_changed, proofs}</code> batches</td><td>HTTP 429 when subscriber cap reached</td></tr>
+</tbody></table>
+</div>
+<h4 id="localnet-and-range-boost-helpers"><a class="header" href="#localnet-and-range-boost-helpers">LocalNet and range-boost helpers</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>localnet.submit_receipt</code></td><td><code>{receipt}</code> hex-encoded <code>AssistReceipt</code></td><td><code>{status:"ok"}</code> if new; <code>{status:"ignored"}</code> when duplicate</td><td><code>-32602</code> invalid hex or receipt, <code>-32002</code> invalid proximity</td></tr>
+<tr><td><code>mempool.stats</code></td><td>`{lane:"consumer"</td><td>"industrial"}`</td><td><code>{queue_depth, avg_fee, ttl_ms, evictions, qos:{admission_slots, lane}, fee_floor}</code> from <code>Blockchain::mempool_stats</code></td></tr>
+<tr><td><code>mempool.qos_event</code></td><td><code>{lane, window_ms}</code> recorded for QoS debugging</td><td><code>{status:"ok"}</code></td><td>none</td></tr>
+<tr><td><code>mesh.peers</code></td><td>none</td><td>Current range-boost mesh peers (<code>{id, addr, last_seen_ms}</code>)</td><td>none</td></tr>
+<tr><td><code>microshard.roots.last</code></td><td><code>{n?}</code> (default 1)</td><td>Last <code>n</code> micro-shard roots with timestamps</td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="metrics-telemetry-and-observability"><a class="header" href="#metrics-telemetry-and-observability">Metrics, telemetry, and observability</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>metrics</code></td><td>none</td><td>Prometheus text exposition from <code>runtime::telemetry::TextEncoder</code></td><td>none</td></tr>
+<tr><td><code>telemetry.configure</code></td><td><code>{sample_rate_ppm?, compaction_secs?}</code> (telemetry builds only)</td><td><code>{status:"ok", sample_rate_ppm, compaction_secs}</code> after adjusting runtime knobs</td><td><code>-32603</code> when telemetry compiled out</td></tr>
+</tbody></table>
+</div>
+<h4 id="networking-and-peer-management-nodesrcrpcnetrs-plus-inlined-helpers"><a class="header" href="#networking-and-peer-management-nodesrcrpcnetrs-plus-inlined-helpers">Networking and peer management (<code>node/src/rpc/net.rs</code> plus inlined helpers)</a></h4>
+<p>Most methods share the JSON structures defined in <code>node/src/net/peer.rs</code>: <code>PeerMetrics</code>, <code>PeerReputation</code>, QUIC cert summaries, etc.</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>net.overlay_status</code></td><td>none</td><td>`{backend:"inhouse"</td><td>"stub", path, last_persist_ms, peers:{active,persisted}}`</td></tr>
+<tr><td><code>net.peer_stats</code></td><td><code>{peer_id}</code> (base58)</td><td>Full <code>PeerMetrics</code> struct converted to JSON</td><td><code>-32602</code> invalid peer ID</td></tr>
+<tr><td><code>net.peer_stats_all</code></td><td>none</td><td><code>{peers:{id:PeerMetrics}}</code></td><td>none</td></tr>
+<tr><td><code>net.peer_stats_reset</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok"}</code> after zeroing counters</td><td>validation errors</td></tr>
+<tr><td><code>net.peer_stats_export</code></td><td><code>{path}</code></td><td><code>{status:"ok", path}</code> after writing JSON export</td><td>IO errors -&gt; <code>-32010</code> style messages</td></tr>
+<tr><td><code>net.peer_stats_export_all</code></td><td><code>{path}</code></td><td>same as above but includes all peers</td><td>IO errors</td></tr>
+<tr><td><code>net.peer_stats_persist</code></td><td>none</td><td><code>{status:"ok"}</code> after writing sled snapshot of peer metrics</td><td>none</td></tr>
+<tr><td><code>net.peer_throttle</code></td><td><code>{peer_id, backoff_secs}</code></td><td><code>{status:"ok"}</code> after updating throttle map</td><td>invalid IDs -&gt; <code>-32602</code></td></tr>
+<tr><td><code>net.backpressure_clear</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok"}</code> clearing throttle/backpressure state</td><td>invalid IDs</td></tr>
+<tr><td><code>net.reputation_sync</code></td><td><code>{source?}</code></td><td><code>{status:"ok", synced}</code> after forcing reputation gossip</td><td>none</td></tr>
+<tr><td><code>net.rotate_cert</code> / <code>net.key_rotate</code></td><td><code>{}</code></td><td><code>{status:"ok", fingerprint}</code> after rotating TLS/peer certs</td><td><code>-32020</code> when rotation disabled</td></tr>
+<tr><td><code>net.handshake_failures</code></td><td>none</td><td><code>{failures:{reason:count}}</code> aggregated counters</td><td>none</td></tr>
+<tr><td><code>net.quic_stats</code></td><td>none</td><td>QUIC stats snapshot (<code>{established,total_handshakes,rtt_ms}</code>)</td><td>none</td></tr>
+<tr><td><code>net.quic_certs</code></td><td>none</td><td><code>{current:{fingerprint, expires_at}, previous?}</code></td><td>none</td></tr>
+<tr><td><code>net.quic_certs_refresh</code></td><td>none</td><td><code>{status:"ok"}</code> after forcing re-read from disk</td><td>none</td></tr>
+<tr><td><code>net.config_reload</code></td><td><code>{}</code></td><td><code>{status:"ok"}</code> after reloading peer config from disk</td><td>IO errors</td></tr>
+<tr><td><code>net.reputation_show</code></td><td><code>{peer_id}</code></td><td><code>{score,last_update}</code></td><td>invalid IDs</td></tr>
+<tr><td><code>net.gossip_status</code></td><td>none</td><td><code>{fanout, duplicates_dropped, partition_tags[]}</code></td><td>none</td></tr>
+<tr><td><code>net.dns_verify</code></td><td><code>{domain}</code></td><td><code>{status:"ok", proof}</code> after verifying <code>.block</code> record</td><td>dns errors</td></tr>
+</tbody></table>
+</div>
+<h4 id="node-rpc-toggles"><a class="header" href="#node-rpc-toggles">Node RPC toggles</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>node.get_ack_privacy</code></td><td>none</td><td>`{mode:"enforce"</td><td>"permissive"</td></tr>
+<tr><td><code>node.set_ack_privacy</code></td><td><code>{mode}</code></td><td><code>{status:"ok"}</code> after updating <code>ReadAckPrivacyMode</code> (enforced via governance guardrails)</td><td><code>-32602</code> invalid mode</td></tr>
+</tbody></table>
+</div>
+<h4 id="peer-rebate-rent-escrow-scheduler-and-storage-helpers"><a class="header" href="#peer-rebate-rent-escrow-scheduler-and-storage-helpers">Peer rebate, rent escrow, scheduler and storage helpers</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>peer.rebate_status</code></td><td><code>{peer_id}</code></td><td><code>{pending_ct, claimed_ct, receipts[]}</code></td><td>invalid ID</td></tr>
+<tr><td><code>peer.rebate_claim</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok", claimed_ct}</code> once receipts consumed</td><td>invalid ID</td></tr>
+<tr><td><code>rent.escrow.balance</code></td><td><code>{provider}</code></td><td><code>{balance_ct, locked_until}</code> from <code>RentEscrow</code> sled</td><td>none</td></tr>
+<tr><td><code>scheduler.stats</code></td><td>none</td><td>Scheduler debug payload <code>{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}</code></td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="governance-treasury-and-service-badges"><a class="header" href="#governance-treasury-and-service-badges">Governance, treasury, and service badges</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>gov_propose</code> / <code>submit_proposal</code></td><td><code>{proposer, key, new_value, min, max, deps?, epoch, vote_deadline?}</code></td><td><code>{proposal_id}</code></td><td><code>-32040</code> invalid proposal, <code>-32041</code> when deps invalid</td></tr>
+<tr><td><code>gov_vote</code> / <code>vote_proposal</code></td><td>`{voter, proposal_id, choice:"yes"</td><td>"no"</td><td>"abstain", epoch}`</td></tr>
+<tr><td><code>gov_list</code></td><td>none</td><td><code>{proposals:[... active DAG ...]}</code></td><td>none</td></tr>
+<tr><td><code>gov_params</code></td><td><code>{epoch?}</code></td><td><code>{params}</code> snapshot from <code>GOV_PARAMS</code></td><td>none</td></tr>
+<tr><td><code>gov_rollback_last</code> / <code>gov_rollback</code></td><td><code>{epoch}</code> / <code>{proposal_id, epoch}</code></td><td><code>{status:"ok"}</code> after reverting governance store</td><td><code>-32043</code> rollback guardrails</td></tr>
+<tr><td><code>gov.release_signers</code></td><td>none</td><td><code>{signers:[{name,pubkey}]} </code></td><td>none</td></tr>
+<tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{ct, industrial_ct, usd_estimate}</code> from treasury sled</td><td>none</td></tr>
+<tr><td><code>gov.treasury.balance_history</code></td><td><code>{start?, end?}</code></td><td><code>{entries:[{epoch,ct}], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>gov.treasury.disbursements</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{proposal_id, amount_ct, recipient, executed_at}], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>service_badge_issue</code></td><td><code>{subject, badge}</code> (requires signer badge header)</td><td><code>{status:"ok"}</code> and records issuance</td><td><code>-32602</code> invalid payload, <code>-32050</code> when badge invalid</td></tr>
+<tr><td><code>service_badge_revoke</code></td><td><code>{subject, badge}</code></td><td><code>{status:"ok"}</code></td><td>same</td></tr>
+<tr><td><code>service_badge_verify</code></td><td><code>{token}</code></td><td><code>{valid:bool, subject?, expires_at?}</code></td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="settlement-toggles-startstop-mining-and-tpu-aids"><a class="header" href="#settlement-toggles-startstop-mining-and-tpu-aids">Settlement toggles, start/stop mining, and TPU aids</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>set_snapshot_interval</code></td><td><code>{interval}</code> blocks</td><td><code>{status:"ok"}</code> updating snapshot cadence (<code>SimpleDb::snapshot_interval</code>)</td><td><code>-32602</code> invalid interval, <code>-32050</code> when below minimum</td></tr>
+<tr><td><code>start_mining</code> / <code>stop_mining</code></td><td>none</td><td><code>{status:"ok"}</code> toggling local POW miner thread</td><td><code>-32601</code> when miner compiled out</td></tr>
+<tr><td><code>set_difficulty</code></td><td><code>{value}</code> (debug)</td><td><code>{status:"ok"}</code> force-sets PoW difficulty (tests only)</td><td>debug-only</td></tr>
+<tr><td><code>tpu</code></td><td><code>{action}</code> (legacy hook)</td><td><code>{status:"ok"}</code> stub used by integration tests</td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="economic-tooling-dexhtlc-industrial-stats-and-price-board"><a class="header" href="#economic-tooling-dexhtlc-industrial-stats-and-price-board">Economic tooling, DEX/HTLC, industrial stats, and price board</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>industrial</code></td><td>none</td><td><code>{backlog, utilization_ppm, multiplier}</code> from subsidy governor</td><td>none</td></tr>
+<tr><td><code>price_board_get</code></td><td><code>{lane}</code></td><td><code>{lane, base_fee, tip_histogram}</code> used by wallet coaching</td><td>none</td></tr>
+<tr><td><code>dex_escrow_status</code></td><td><code>{escrow_id}</code></td><td><code>{status, deposits, releases}</code> from <code>dex::escrow</code> sled</td><td><code>-32060</code> unknown escrow</td></tr>
+<tr><td><code>dex_escrow_release</code></td><td><code>{escrow_id, proof}</code></td><td><code>{status:"ok"}</code></td><td>same as above</td></tr>
+<tr><td><code>dex_escrow_proof</code></td><td><code>{escrow_id}</code></td><td>Proof bundle for explorer/CLI</td><td>same</td></tr>
+<tr><td><code>htlc_status</code></td><td><code>{swap_id}</code></td><td><code>{status, expires_at, tx_refs}</code></td><td>unknown swap -&gt; <code>-32061</code></td></tr>
+<tr><td><code>htlc_refund</code></td><td><code>{swap_id}</code></td><td><code>{status:"ok"}</code> after enforcing refund</td><td>same</td></tr>
+<tr><td><code>analytics</code> already covered; <code>metrics</code> above.</td><td></td><td></td><td></td></tr>
+</tbody></table>
+</div>
+<h4 id="vm-and-contract-debugging-nodesrcrpcvmrs"><a class="header" href="#vm-and-contract-debugging-nodesrcrpcvmrs">VM and contract debugging (<code>node/src/rpc/vm.rs</code>)</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>vm.estimate_gas</code></td><td><code>{bytecode, calldata, state_root?}</code></td><td><code>{gas_used, trace?}</code> for WASM execution</td><td><code>-32070</code> invalid contract</td></tr>
+<tr><td><code>vm.exec_trace</code></td><td><code>{tx_hash}</code></td><td><code>ExecTrace {steps[], state_changes}</code></td><td>same</td></tr>
+<tr><td><code>vm.storage_read</code></td><td><code>{contract, key}</code></td><td><code>{value}</code></td><td>none</td></tr>
+<tr><td><code>vm.storage_write</code></td><td><code>{contract, key, value}</code></td><td><code>{status:"ok"}</code> (debug only)</td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="miscellaneous-roots-whoami-metrics-handles"><a class="header" href="#miscellaneous-roots-whoami-metrics-handles">Miscellaneous roots (whoami, metrics, handles)</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>whoami</code></td><td>none</td><td><code>{agent, version, features}</code></td><td>none</td></tr>
+<tr><td><code>analytics</code> / <code>metrics</code> already covered.</td><td></td><td></td><td></td></tr>
+</tbody></table>
+</div>
+<h4 id="transactions-and-fee-markets"><a class="header" href="#transactions-and-fee-markets">Transactions and fee markets</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>submit_tx</code></td><td><code>{tx}</code> hex-encoded <code>SignedTransaction</code> plus optional <code>{max_fee, tip}</code> overrides</td><td><code>{status:"ok"}</code> when enqueued; <code>{status:"error", error}</code> when mempool rejects</td><td><code>-32602</code> malformed hex/transaction, propagation errors as strings</td></tr>
+<tr><td><code>price_board_get</code></td><td><code>{lane}</code></td><td><code>{lane, base_fee, tip_histogram:[{percentile, tip_micro_ct}]}</code> mirroring <code>node/src/fees.rs</code> board</td><td>none</td></tr>
+<tr><td><code>industrial</code></td><td>none</td><td><code>{backlog_bytes, utilization_ppm, multiplier}</code> from subsidy governor gauges (see § CT subsidy)</td><td>none</td></tr>
+<tr><td><code>inflation.params</code></td><td>none</td><td><code>{emission_curve:{start_height,end_height,rate}, decay_factor, treasury_split}</code> read from <code>docs/economics_and_governance.md</code> constants</td><td>none</td></tr>
+</tbody></table>
+</div>
+<h4 id="staking--pos-helpers-nodesrcrpcposrs"><a class="header" href="#staking--pos-helpers-nodesrcrpcposrs">Staking / PoS helpers (<code>node/src/rpc/pos.rs</code>)</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>stake.role</code></td><td><code>{id, role?}</code> (role defaults to <code>validator</code>)</td><td><code>{id, role, stake}</code> from in-memory PoS state</td><td><code>-32602</code> missing ID</td></tr>
+</tbody></table>
+</div>
+<h4 id="storage-pipeline-convenience-rpcs"><a class="header" href="#storage-pipeline-convenience-rpcs">Storage pipeline convenience RPCs</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
+<tr><td><code>storage_upload</code></td><td><code>{object_id, provider_id, original_bytes, shares, price_per_block, start_block, retention_blocks}</code></td><td>Delegates to <code>storage::upload</code>, returning manifest receipt (<code>{status:"ok", contract_id}</code>)</td><td>storage errors bubble up via <code>rpc_error(-32603,...)</code></td></tr>
+<tr><td><code>storage_challenge</code></td><td><code>{object_id, provider_id?, chunk_idx, proof, current_block}</code></td><td><code>{status:"ok", challenge_id}</code> if proof accepted</td><td><code>-32602</code> invalid inputs; storage errors</td></tr>
+<tr><td><code>storage.manifests</code></td><td><code>{limit?}</code></td><td><code>{manifests:[{object_id, provider_id, shares, retention_blocks, status}]}</code> limited to latest <code>limit</code> entries</td><td>none</td></tr>
+<tr><td><code>storage_provider_profiles</code></td><td>none</td><td><code>{providers:[{id, capacity_bytes, maintenance, uptime_ppm}]}</code></td><td>none</td></tr>
+<tr><td><code>storage_provider_set_maintenance</code></td><td><code>{provider, maintenance:bool}</code></td><td><code>{status:"ok"}</code> after toggling provider availability</td><td><code>-32030</code> unknown provider</td></tr>
+<tr><td><code>storage_incentives</code></td><td>none</td><td><code>{rent_escrow:{credits_ct, debits_ct}, rebate_rates:{lane, ppm}}</code></td><td>none</td></tr>
+</tbody></table>
+</div>
+<h3 id="appendix-b--metric-index"><a class="header" href="#appendix-b--metric-index">Appendix B · Metric Index</a></h3>
+<p>The table below is generated directly from <code>node/src/telemetry.rs</code>. Run <code>python tools/extract_metrics.py --format markdown</code> whenever the telemetry file changes to keep the appendix in sync. For deployment guidance see <code>docs/operations.md#metrics-aggregator-ops</code> and <code>monitoring/README.md</code>.</p>
+<div class="table-wrapper"><table><thead><tr><th>Name</th><th>Type</th><th>Labels</th><th>Units</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>active_miners</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>effective active miners</td></tr>
+<tr><td><code>ad_budget_snapshot_generated_at_micros</code></td><td>IntGauge</td><td>–</td><td>microseconds</td><td>Timestamp of the most recent budget snapshot in microseconds</td></tr>
+<tr><td><code>aggregator_ingest_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total peer metric ingests</td></tr>
+<tr><td><code>amm_swap_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total AMM swaps executed</td></tr>
+<tr><td><code>anomaly_alarm_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of anomaly alarms raised</td></tr>
+<tr><td><code>anomaly_labels_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Anomaly labels submitted for model feedback</td></tr>
+<tr><td><code>badge_active</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Whether a service badge is active (1/0)</td></tr>
+<tr><td><code>badge_issued_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Service badges issued</td></tr>
+<tr><td><code>badge_last_change_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Unix timestamp of the last badge mint/burn</td></tr>
+<tr><td><code>badge_revoked_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Service badges revoked</td></tr>
+<tr><td><code>balance_overflow_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions rejected due to balance overflow</td></tr>
+<tr><td><code>banned_peers_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Total peers currently banned</td></tr>
+<tr><td><code>base_fee</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>current base fee</td></tr>
+<tr><td><code>base_reward_ct</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>base reward after logistic factor</td></tr>
+<tr><td><code>block_apply_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Blocks that failed atomic application</td></tr>
+<tr><td><code>block_mined_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total mined blocks</td></tr>
+<tr><td><code>build_provenance_invalid_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Build provenance checks that failed</td></tr>
+<tr><td><code>build_provenance_valid_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Build provenance checks that succeeded</td></tr>
+<tr><td><code>cluster_peer_active_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Unique peers tracked by aggregator</td></tr>
+<tr><td><code>codec_payload_bytes</code></td><td>HistogramVec</td><td>codec, direction, profile, version</td><td>bytes</td><td>Serialized payload size grouped by codec profile</td></tr>
+<tr><td><code>compute_job_timeout_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs exceeding declared deadlines</td></tr>
+<tr><td><code>compute_sla_automated_slash_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Count of SLA penalties applied automatically by the settlement engine</td></tr>
+<tr><td><code>compute_sla_next_deadline_ts</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Unix timestamp of the next pending compute SLA deadline</td></tr>
+<tr><td><code>compute_sla_pending_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Number of compute jobs with active SLA tracking</td></tr>
+<tr><td><code>config_reload_last_ts</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Unix timestamp of the last successful config reload</td></tr>
+<tr><td><code>consumer_fee_p50</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Median consumer fee</td></tr>
+<tr><td><code>consumer_fee_p90</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>p90 consumer fee</td></tr>
+<tr><td><code>courier_flush_attempt_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total courier receipt flush attempts</td></tr>
+<tr><td><code>courier_flush_failure_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Failed courier receipt flush attempts</td></tr>
+<tr><td><code>dex_escrow_locked</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Total funds locked in DEX escrow</td></tr>
+<tr><td><code>dex_escrow_pending</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Number of pending DEX escrows</td></tr>
+<tr><td><code>dex_liquidity_locked_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Total liquidity currently locked in DEX escrow</td></tr>
+<tr><td><code>dex_trade_volume</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total matched trade quantity across all DEX pairs</td></tr>
+<tr><td><code>did_anchor_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of anchored DID documents</td></tr>
+<tr><td><code>difficulty_clamp_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Retarget calculations clamped to bounds</td></tr>
+<tr><td><code>difficulty_retarget_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Number of difficulty retarget calculations</td></tr>
+<tr><td><code>difficulty_window_long</code></td><td>IntGauge</td><td>–</td><td>milliseconds</td><td>Long-term EMA of block intervals in ms</td></tr>
+<tr><td><code>difficulty_window_med</code></td><td>IntGauge</td><td>–</td><td>milliseconds</td><td>Medium-term EMA of block intervals in ms</td></tr>
+<tr><td><code>difficulty_window_short</code></td><td>IntGauge</td><td>–</td><td>milliseconds</td><td>Short-term EMA of block intervals in ms</td></tr>
+<tr><td><code>dkg_round_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Completed DKG rounds</td></tr>
+<tr><td><code>dns_verification_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total DNS verification failures</td></tr>
+<tr><td><code>drop_not_found_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>drop_transaction failures for missing entries</td></tr>
+<tr><td><code>dup_tx_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions rejected as duplicate</td></tr>
+<tr><td><code>evictions_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total mempool evictions</td></tr>
+<tr><td><code>fee_floor_current</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Current dynamically computed fee floor</td></tr>
+<tr><td><code>fee_floor_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions rejected for low fee</td></tr>
+<tr><td><code>fee_floor_window_changed_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Total governance-triggered fee floor policy reconfigurations</td></tr>
+<tr><td><code>fib_window_base_secs</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>base seconds for Fibonacci smoothing</td></tr>
+<tr><td><code>gossip_convergence_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Time for all peers to agree on the network tip</td></tr>
+<tr><td><code>gossip_duplicate_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Duplicate gossip messages dropped</td></tr>
+<tr><td><code>gossip_fanout_gauge</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Current gossip fanout</td></tr>
+<tr><td><code>gossip_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Observed latency hints used for adaptive gossip fanout</td></tr>
+<tr><td><code>gossip_ttl_drop_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Gossip dedup entries removed due to TTL expiry</td></tr>
+<tr><td><code>gov_open_proposals</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Open governance proposals</td></tr>
+<tr><td><code>gov_proposals_pending</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Governance proposals pending activation</td></tr>
+<tr><td><code>gov_quorum_required</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Governance quorum</td></tr>
+<tr><td><code>haar_eta_milli</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>eta parameter for burst veto x1000</td></tr>
+<tr><td><code>hash_ops_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Total number of hash operations measured via perf counters</td></tr>
+<tr><td><code>heuristic_mu_milli</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>A* heuristic mu x1000</td></tr>
+<tr><td><code>htlc_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>HTLC contracts created</td></tr>
+<tr><td><code>htlc_refunded_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>HTLC contracts refunded</td></tr>
+<tr><td><code>identity_nonce_skips_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Non-contiguous nonce submissions</td></tr>
+<tr><td><code>identity_replays_blocked_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Rejected identity replay attempts</td></tr>
+<tr><td><code>industrial_admitted_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Industrial lane transactions admitted</td></tr>
+<tr><td><code>industrial_backlog</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Pending industrial compute slices</td></tr>
+<tr><td><code>industrial_deferred_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Industrial lane submissions deferred</td></tr>
+<tr><td><code>industrial_multiplier</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Current industrial subsidy multiplier</td></tr>
+<tr><td><code>industrial_price_per_unit</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Latest price per compute unit</td></tr>
+<tr><td><code>industrial_units_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total normalized compute units processed</td></tr>
+<tr><td><code>industrial_utilization</code></td><td>IntGauge</td><td>–</td><td>percent</td><td>Industrial compute utilisation percentage</td></tr>
+<tr><td><code>inter_shard_replay_evict_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total inter-shard replay cache evictions</td></tr>
+<tr><td><code>invalid_selector_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions rejected for invalid fee selector</td></tr>
+<tr><td><code>job_age_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Time a job waited in the scheduler queue</td></tr>
+<tr><td><code>job_resubmitted_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs resubmitted after provider failure</td></tr>
+<tr><td><code>key_rotation_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Successful peer key rotations</td></tr>
+<tr><td><code>kill_switch_trigger_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Times the subsidy kill switch was activated</td></tr>
+<tr><td><code>light_client_stream_overhead_bytes_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Bytes of overhead for light-client streaming</td></tr>
+<tr><td><code>liquidity_rewards_disbursed_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Liquidity mining rewards distributed</td></tr>
+<tr><td><code>lock_poison_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Lock acquisition failures due to poisoning</td></tr>
+<tr><td><code>log_correlation_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Correlation lookups that returned no matching log entries</td></tr>
+<tr><td><code>log_entries_indexed_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total JSON log entries processed by the offline indexer</td></tr>
+<tr><td><code>log_size_bytes</code></td><td>Histogram</td><td>–</td><td>bytes</td><td>Size of serialized log events in bytes</td></tr>
+<tr><td><code>match_loop_latency_seconds</code></td><td>HistogramVec</td><td>lane</td><td>seconds</td><td>Settlement loop latency</td></tr>
+<tr><td><code>mempool_evictions_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total transactions evicted from the mempool</td></tr>
+<tr><td><code>mempool_size</code></td><td>IntGaugeVec</td><td>lane</td><td>unitless</td><td>Current mempool size</td></tr>
+<tr><td><code>mempool_size</code></td><td>GaugeVec</td><td>lane</td><td>unitless</td><td>Current mempool size</td></tr>
+<tr><td><code>miner_reward_recalc_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Times the miner reward logistic factor was recalculated</td></tr>
+<tr><td><code>mobile_cache_entry_bytes</code></td><td>IntGauge</td><td>–</td><td>bytes</td><td>Total bytes stored in the mobile cache</td></tr>
+<tr><td><code>mobile_cache_entry_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Active mobile cache entries</td></tr>
+<tr><td><code>mobile_cache_evict_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Expired or purged mobile cache entries</td></tr>
+<tr><td><code>mobile_cache_hit_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total mobile cache hits</td></tr>
+<tr><td><code>mobile_cache_miss_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total mobile cache misses</td></tr>
+<tr><td><code>mobile_cache_queue_bytes</code></td><td>IntGauge</td><td>–</td><td>bytes</td><td>Bytes buffered in the mobile offline queue</td></tr>
+<tr><td><code>mobile_cache_queue_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Offline transactions queued for replay</td></tr>
+<tr><td><code>mobile_cache_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Mobile cache insertions rejected by limits</td></tr>
+<tr><td><code>mobile_cache_stale_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Mobile cache entries dropped due to TTL expiry</td></tr>
+<tr><td><code>mobile_cache_sweep_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Number of mobile cache TTL sweeps</td></tr>
+<tr><td><code>mobile_cache_sweep_window_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Configured sweep interval for the mobile cache</td></tr>
+<tr><td><code>mobile_tx_queue_depth</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Queued mobile transactions awaiting send</td></tr>
+<tr><td><code>orphan_sweep_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions dropped because the sender account is missing</td></tr>
+<tr><td><code>parallel_execute_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Elapsed wall-clock time for ParallelExecutor batches</td></tr>
+<tr><td><code>partition_events_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Number of detected network partitions</td></tr>
+<tr><td><code>partition_recover_blocks</code></td><td>IntCounter</td><td>–</td><td>unitless</td><td>Blocks replayed during partition recovery</td></tr>
+<tr><td><code>peer_metrics_active</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Number of peers currently tracked for telemetry</td></tr>
+<tr><td><code>peer_metrics_dropped_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Websocket peer metrics frames dropped</td></tr>
+<tr><td><code>peer_metrics_memory_bytes</code></td><td>IntGauge</td><td>–</td><td>bytes</td><td>Approximate memory used by peer metrics map</td></tr>
+<tr><td><code>peer_metrics_subscribers</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Active peer metrics websocket subscribers</td></tr>
+<tr><td><code>price_weight_applied_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total price entries adjusted by reputation weight</td></tr>
+<tr><td><code>priority_boost_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs whose priority was boosted due to aging</td></tr>
+<tr><td><code>privacy_sanitization_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total sanitized payloads</td></tr>
+<tr><td><code>proof_rebates_amount_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT awarded via proof rebates</td></tr>
+<tr><td><code>proof_rebates_claimed_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total proof rebate claims</td></tr>
+<tr><td><code>proof_rebates_pending_total</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>Pending CT rebates awaiting claim</td></tr>
+<tr><td><code>quic_bytes_recv_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Total bytes received over QUIC</td></tr>
+<tr><td><code>quic_bytes_sent_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Total bytes sent over QUIC</td></tr>
+<tr><td><code>quic_conn_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>QUIC connection handshake latency</td></tr>
+<tr><td><code>quic_endpoint_reuse_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total QUIC endpoint reuse count</td></tr>
+<tr><td><code>quic_fallback_tcp_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total times QUIC connections fell back to TCP</td></tr>
+<tr><td><code>quic_retransmit_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total QUIC packet retransmissions</td></tr>
+<tr><td><code>range_boost_enqueue_error_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>RangeBoost enqueue attempts dropped due to injection</td></tr>
+<tr><td><code>range_boost_forwarder_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>RangeBoost forwarder failures observed</td></tr>
+<tr><td><code>range_boost_queue_depth</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Current number of bundles pending in the RangeBoost queue</td></tr>
+<tr><td><code>range_boost_queue_oldest_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Age in seconds of the oldest RangeBoost queue entry</td></tr>
+<tr><td><code>range_boost_toggle_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Latency observed between RangeBoost enable/disable toggles</td></tr>
+<tr><td><code>read_selection_proof_latency_seconds</code></td><td>HistogramVec</td><td>attestation</td><td>seconds</td><td>Selection proof verification latency by attestation</td></tr>
+<tr><td><code>rebate_claims_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Peer rebate claims submitted</td></tr>
+<tr><td><code>rebate_issued_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Rebate vouchers issued</td></tr>
+<tr><td><code>receipt_corrupt_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Corrupted receipt entries on load</td></tr>
+<tr><td><code>receipt_persist_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Receipt persistence failures</td></tr>
+<tr><td><code>release_installs_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Nodes booted with governance-approved releases</td></tr>
+<tr><td><code>release_quorum_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Release submissions rejected due to insufficient provenance signatures</td></tr>
+<tr><td><code>remote_signer_key_rotation_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Remote signer key rotations</td></tr>
+<tr><td><code>remote_signer_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Remote signer latency</td></tr>
+<tr><td><code>remote_signer_request_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total remote signer requests</td></tr>
+<tr><td><code>remote_signer_success_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Successful remote signer responses</td></tr>
+<tr><td><code>rent_escrow_burned_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT burned from rent escrow</td></tr>
+<tr><td><code>rent_escrow_locked_ct_total</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>Total CT locked in rent escrow</td></tr>
+<tr><td><code>rent_escrow_refunded_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT refunded from rent escrow</td></tr>
+<tr><td><code>reputation_gossip_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Reputation updates that failed verification or were stale</td></tr>
+<tr><td><code>reputation_gossip_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Propagation latency for reputation updates</td></tr>
+<tr><td><code>retrieval_failure_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total failed proof-of-retrievability challenges</td></tr>
+<tr><td><code>retrieval_success_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total successful proof-of-retrievability challenges</td></tr>
+<tr><td><code>rpc_bans_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total RPC bans issued</td></tr>
+<tr><td><code>rpc_latency_seconds</code></td><td>HistogramVec</td><td>module</td><td>seconds</td><td>Latency histogram per RPC module</td></tr>
+<tr><td><code>rpc_rate_limit_attempt_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>RPC requests checked against the rate limiter</td></tr>
+<tr><td><code>rpc_rate_limit_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>RPC requests rejected by the rate limiter</td></tr>
+<tr><td><code>runtime_pending_tasks</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Pending async tasks managed by the runtime</td></tr>
+<tr><td><code>runtime_spawn_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Latency observed when spawning tasks on the runtime</td></tr>
+<tr><td><code>scheduler_accelerator_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Accelerator jobs that failed or were cancelled</td></tr>
+<tr><td><code>scheduler_accelerator_miss_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs requiring accelerators that could not be matched</td></tr>
+<tr><td><code>scheduler_accelerator_util_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs requiring accelerators that started successfully</td></tr>
+<tr><td><code>scheduler_active_jobs</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Number of currently assigned jobs</td></tr>
+<tr><td><code>scheduler_class_wait_seconds</code></td><td>HistogramVec</td><td>class</td><td>seconds</td><td>Wait time per service class before execution</td></tr>
+<tr><td><code>scheduler_match_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Time to perform a scheduler match</td></tr>
+<tr><td><code>scheduler_priority_miss_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>High-priority jobs exceeding wait threshold</td></tr>
+<tr><td><code>scheduler_provider_reputation</code></td><td>Histogram</td><td>–</td><td>unitless</td><td>Distribution of provider reputation scores</td></tr>
+<tr><td><code>scheduler_thread_count</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Current compute scheduler worker threads</td></tr>
+<tr><td><code>session_key_expired_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Expired session keys encountered</td></tr>
+<tr><td><code>session_key_issued_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Session keys issued</td></tr>
+<tr><td><code>settle_applied_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Receipts applied</td></tr>
+<tr><td><code>settle_audit_mismatch_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Receipts failing settlement audit</td></tr>
+<tr><td><code>shard_cache_evict_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total shard cache evictions</td></tr>
+<tr><td><code>shielded_pool_size</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Number of pending shielded nullifiers</td></tr>
+<tr><td><code>shielded_tx_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total shielded transactions accepted</td></tr>
+<tr><td><code>sigverify_ops_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of signature verifications measured via perf counters</td></tr>
+<tr><td><code>slashing_burn_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT burned from slashing penalties</td></tr>
+<tr><td><code>snapshot_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total snapshots created</td></tr>
+<tr><td><code>snapshot_duration_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Snapshot operation duration</td></tr>
+<tr><td><code>snapshot_fail_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Total snapshot operation failures</td></tr>
+<tr><td><code>snapshot_interval</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Snapshot interval in blocks</td></tr>
+<tr><td><code>snapshot_interval_changed</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Last requested snapshot interval</td></tr>
+<tr><td><code>snapshot_restore_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Failed snapshot restores</td></tr>
+<tr><td><code>snark_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Failed SNARK proof verifications</td></tr>
+<tr><td><code>snark_verifications_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Successfully verified SNARK proofs</td></tr>
+<tr><td><code>snark_prover_latency_seconds</code></td><td>HistogramVec</td><td>backend</td><td>seconds</td><td>SNARK prover latency segmented by backend</td></tr>
+<tr><td><code>snark_prover_failure_total</code></td><td>IntCounterVec</td><td>backend</td><td>count</td><td>SNARK prover failures segmented by backend</td></tr>
+<tr><td><code>startup_ttl_drop_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Expired mempool entries dropped during startup</td></tr>
+<tr><td><code>state_stream_lag_alert_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Clients falling behind alert count</td></tr>
+<tr><td><code>state_stream_subscribers_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total websocket state stream subscribers</td></tr>
+<tr><td><code>state_sync_overhead_bytes_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Bytes of overhead for state sync streaming</td></tr>
+<tr><td><code>storage_chunk_size_bytes</code></td><td>Histogram</td><td>–</td><td>bytes</td><td>Size of chunks put into storage</td></tr>
+<tr><td><code>storage_compaction_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Number of RocksDB compaction operations</td></tr>
+<tr><td><code>storage_compression_ratio</code></td><td>HistogramVec</td><td>algorithm</td><td>ratio</td><td>Compression ratios achieved per algorithm</td></tr>
+<tr><td><code>storage_contract_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of storage contracts created</td></tr>
+<tr><td><code>storage_disk_full_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Number of storage writes that failed due to disk exhaustion</td></tr>
+<tr><td><code>storage_final_chunk_size</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Final preferred chunk size after upload</td></tr>
+<tr><td><code>storage_initial_chunk_size</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Initial chunk size used for object upload</td></tr>
+<tr><td><code>storage_provider_loss_rate</code></td><td>HistogramVec</td><td>provider</td><td>unitless</td><td>Observed provider loss rate</td></tr>
+<tr><td><code>storage_provider_rtt_ms</code></td><td>HistogramVec</td><td>provider</td><td>milliseconds</td><td>Observed provider RTT in milliseconds</td></tr>
+<tr><td><code>storage_put_chunk_seconds</code></td><td>HistogramVec</td><td>erasure, compression</td><td>seconds</td><td>Time to put a single chunk</td></tr>
+<tr><td><code>storage_put_eta_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Estimated time to upload object in seconds</td></tr>
+<tr><td><code>storage_put_object_seconds</code></td><td>HistogramVec</td><td>erasure, compression</td><td>seconds</td><td>End-to-end latency for StoragePipeline::put_object</td></tr>
+<tr><td><code>storage_repair_bytes_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Total bytes reconstructed by repair loop</td></tr>
+<tr><td><code>subsidy_auto_reduced_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Multiplier auto-reduction events due to inflation guard</td></tr>
+<tr><td><code>subsidy_cpu_ms_total</code></td><td>IntCounter</td><td>–</td><td>milliseconds</td><td>Total subsidized compute time in ms</td></tr>
+<tr><td><code>telemetry_alloc_bytes</code></td><td>IntGauge</td><td>–</td><td>bytes</td><td>Telemetry memory allocation in bytes</td></tr>
+<tr><td><code>threshold_signature_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Failed threshold signature verifications</td></tr>
+<tr><td><code>token_bridge_volume_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Volume bridged via token bridge</td></tr>
+<tr><td><code>tokens_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of registered tokens</td></tr>
+<tr><td><code>treasury_executor_last_error_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Timestamp of the last treasury executor error</td></tr>
+<tr><td><code>treasury_executor_last_submitted_nonce</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Latest nonce submitted by the treasury executor</td></tr>
+<tr><td><code>treasury_executor_last_success_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Timestamp of the last successful treasury executor run</td></tr>
+<tr><td><code>treasury_executor_last_tick_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Timestamp of the last treasury executor tick</td></tr>
+<tr><td><code>treasury_executor_lease_last_nonce</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Lease watermark nonce retained across treasury executor holders</td></tr>
+<tr><td><code>treasury_executor_lease_released</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Flag indicating the active treasury executor lease has been released</td></tr>
+<tr><td><code>treasury_executor_pending_matured</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Matured treasury disbursements pending execution</td></tr>
+<tr><td><code>treasury_executor_staged_intents</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Staged treasury execution intents awaiting submission</td></tr>
+<tr><td><code>ttl_drop_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Transactions dropped due to TTL expiration</td></tr>
+<tr><td><code>tx_admitted_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total admitted transactions</td></tr>
+<tr><td><code>tx_submitted_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total submitted transactions</td></tr>
+<tr><td><code>util_var_threshold_milli</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>utilisation variance threshold x1000</td></tr>
+<tr><td><code>vm_gas_used_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total gas consumed by VM executions</td></tr>
+<tr><td><code>vm_out_of_gas_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>VM executions that ran out of gas</td></tr>
+<tr><td><code>vm_trace_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total VM trace sessions</td></tr>
+<tr><td><code>wal_corrupt_recovery_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>WAL entries skipped due to checksum mismatch</td></tr>
+<tr><td><code>wasm_contract_executions_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total WASM contract executions</td></tr>
+<tr><td><code>wasm_gas_consumed_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total gas used by WASM contracts</td></tr>
+</tbody></table>
+</div>
+<h3 id="appendix-c--simpledb-column-family-and-prefix-map"><a class="header" href="#appendix-c--simpledb-column-family-and-prefix-map">Appendix C · SimpleDb Column Family and Prefix Map</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Name</th><th>Purpose</th><th>Common prefixes/keys</th></tr></thead><tbody>
+<tr><td><code>default</code></td><td>Legacy chain state (fallback).</td><td><code>chain</code>, <code>accounts</code>.</td></tr>
+<tr><td><code>bridge</code></td><td>Bridge headers, pending withdrawals.</td><td><code>header:&lt;height&gt;</code>, <code>withdrawal:&lt;commitment&gt;</code>.</td></tr>
+<tr><td><code>compute_settlement</code></td><td>Settlement engine state (balances, audit log).</td><td><code>ledger_ct</code>, <code>ledger_it</code>, <code>sla_queue</code>, <code>sla_history</code>.</td></tr>
+<tr><td><code>dex_storage</code></td><td>Order book, trades, escrow locks, AMM pools.</td><td><code>book</code>, <code>trade:*</code>, <code>escrow</code>, <code>amm/&lt;pool_id&gt;</code>.</td></tr>
+<tr><td><code>gateway_dns</code></td><td>Domain auctions, stakes, ownership.</td><td><code>auction:&lt;domain&gt;</code>, <code>stake:&lt;ref&gt;</code>, <code>ownership:&lt;domain&gt;</code>.</td></tr>
+<tr><td><code>gateway_ad_readiness</code></td><td>Readiness snapshots for ad flows.</td><td><code>snapshot:&lt;epoch&gt;</code>.</td></tr>
+<tr><td><code>gossip_relay</code></td><td>Peer relay state for overlay dedup.</td><td><code>peer:&lt;id&gt;</code>.</td></tr>
+<tr><td><code>identity_did</code></td><td>DID registry entries.</td><td><code>did:&lt;addr&gt;</code>.</td></tr>
+<tr><td><code>identity_handle_registry</code></td><td>Handle → account mappings.</td><td><code>handles/&lt;handle&gt;</code>, <code>owners/&lt;address&gt;</code>, <code>nonces/&lt;address&gt;</code>.</td></tr>
+<tr><td><code>light_client_proofs</code></td><td>Light-client proof cache.</td><td><code>header:&lt;height&gt;</code>.</td></tr>
+<tr><td><code>localnet_receipts</code></td><td>LocalNet assist receipts.</td><td><code>receipt:&lt;hash&gt;</code>.</td></tr>
+<tr><td><code>net_peer_chunks</code></td><td>Gossip chunk tracking.</td><td><code>chunk:&lt;root&gt;:&lt;idx&gt;</code>.</td></tr>
+<tr><td><code>net_bans</code></td><td>Peer ban records.</td><td><code>peer:&lt;id&gt;</code>.</td></tr>
+<tr><td><code>rpc_bridge</code></td><td>RPC bridge caches.</td><td>Implementation-specific.</td></tr>
+<tr><td><code>storage_fs</code></td><td>Storage pipeline manifests, receipts.</td><td><code>manifest:&lt;hash&gt;</code>.</td></tr>
+<tr><td><code>storage_pipeline</code></td><td>Chunk placement metadata.</td><td><code>chunk:&lt;id&gt;</code>.</td></tr>
+<tr><td><code>storage_repair</code></td><td>Repair state/counters.</td><td><code>repair:&lt;provider&gt;</code>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="appendix-d--p2p-wire-payloads"><a class="header" href="#appendix-d--p2p-wire-payloads">Appendix D · P2P Wire Payloads</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Payload</th><th>Fields (order)</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>Handshake</code></td><td><code>Hello</code> struct: <code>network_id[4], proto_version, feature_bits, agent, nonce, transport, quic_addr?, quic_cert?, quic_fingerprint?, quic_fingerprint_previous[], quic_provider?, quic_capabilities[]</code>.</td><td>First message every session.</td></tr>
+<tr><td><code>Hello</code></td><td><code>Vec&lt;SocketAddr&gt;</code></td><td>Legacy peer advertisement.</td></tr>
+<tr><td><code>Tx</code></td><td><code>SignedTransaction</code> (foundation serialization).</td><td>Used for gossip/broadcast.</td></tr>
+<tr><td><code>BlobTx</code></td><td><code>BlobTx</code> struct (commitment, payload).</td><td>For L2 blobspace.</td></tr>
+<tr><td><code>Block</code></td><td><code>(ShardId, Block)</code></td><td>Shard IDs live under <code>ledger::address::ShardId</code>.</td></tr>
+<tr><td><code>Chain</code></td><td><code>Vec&lt;Block&gt;</code></td><td>Fork resolution snapshots.</td></tr>
+<tr><td><code>BlobChunk</code></td><td><code>root[32], index, total, data</code></td><td>Erasure-coded shard.</td></tr>
+<tr><td><code>Reputation</code></td><td><code>Vec&lt;ReputationUpdate { peer, delta, reason }&gt;</code></td><td>Synchronises overlay reputation.</td></tr>
+</tbody></table>
+</div>
+<p>All payloads are serialized via <code>foundation_serialization::binary_cursor</code> to avoid serde drift.</p>
+<h3 id="appendix-e--governance-parameter-catalog-partial"><a class="header" href="#appendix-e--governance-parameter-catalog-partial">Appendix E · Governance Parameter Catalog (partial)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>snapshot_interval_secs</code></td><td>30</td><td>Block cadence for ledger snapshots.</td></tr>
+<tr><td><code>consumer_fee_comfort_p90_microunits</code></td><td>2 500</td><td>Wallet fee guidance (p90).</td></tr>
+<tr><td><code>fee_floor_window</code> / <code>fee_floor_percentile</code></td><td>256 / 75</td><td>Rolling window size and percentile for fee floors.</td></tr>
+<tr><td><code>industrial_admission_min_capacity</code></td><td>10</td><td>Minimum queue capacity before opening industrial lane.</td></tr>
+<tr><td><code>fairshare_global_max_ppm</code></td><td>250 000</td><td>QoS cap per account in parts‑per‑million.</td></tr>
+<tr><td><code>burst_refill_rate_per_s_ppm</code></td><td>500 000 (≈30 tx/min)</td><td>Token bucket refill rate.</td></tr>
+<tr><td><code>beta_storage_sub_ct</code>, <code>gamma_read_sub_ct</code>, <code>kappa_cpu_sub_ct</code>, <code>lambda_bytes_out_sub_ct</code></td><td>50/20/10/5</td><td>Subsidy multipliers (basis points).</td></tr>
+<tr><td><code>read_subsidy_*_percent</code></td><td>Derived defaults</td><td>Split READ_SUB_CT across viewer/host/hardware/verifier/liquidity.</td></tr>
+<tr><td><code>kill_switch_subsidy_reduction</code></td><td>0</td><td>Emergency knob to damp multipliers.</td></tr>
+<tr><td><code>miner_reward_logistic_target</code>, <code>logistic_slope_milli</code>, <code>miner_hysteresis</code></td><td>100 / ~230 / 10</td><td>Shape of logistic emission curve.</td></tr>
+<tr><td><code>badge_expiry_secs</code>, <code>badge_issue/revoke_uptime_percent</code></td><td>30 days / 99 % / 95 %</td><td>Service badge policy.</td></tr>
+<tr><td><code>jurisdiction_region</code></td><td>0</td><td>Active policy pack region (int ID).</td></tr>
+<tr><td><code>ai_diagnostics_enabled</code></td><td>0</td><td>Toggles ANN diagnostics.</td></tr>
+<tr><td><code>kalman_r_{short,med,long}</code></td><td>1 / 3 / 8</td><td>Kalman filter variance terms for difficulty retune.</td></tr>
+<tr><td><code>scheduler_weight_{gossip,compute,storage}</code></td><td>3 / 2 / 1</td><td>Weight of fairness window per workload type.</td></tr>
+<tr><td><code>runtime_backend_policy</code>, <code>transport_provider_policy</code>, <code>storage_engine_policy</code></td><td>0× defaults</td><td>Governance-enforced backend selections.</td></tr>
+<tr><td><code>bridge_min_bond</code>, <code>bridge_duty_reward</code>, <code>bridge_failure_slash</code>, <code>bridge_challenge_slash</code>, <code>bridge_duty_window_secs</code></td><td>From <code>BridgeIncentiveParameters</code></td><td>Bridge incentive/penalty knobs.</td></tr>
+</tbody></table>
+</div>
+<p>(Refer to <code>governance/src/params.rs</code> for the exhaustive list and serialization order.)</p>
+<h3 id="appendix-f--dns--read-receipt-flowchart"><a class="header" href="#appendix-f--dns--read-receipt-flowchart">Appendix F · DNS &amp; Read-Receipt Flowchart</a></h3>
+<ol>
+<li><code>tb-cli gateway domain list</code> → RPC <code>dns.list_for_sale</code> → SimpleDb <code>auction:&lt;domain&gt;</code> record.</li>
+<li><code>tb-cli gateway domain bid</code> (optionally register stake first) → RPC <code>dns.place_bid</code>.</li>
+<li><code>tb-cli gateway domain complete</code> → RPC <code>dns.complete_sale</code> → ledger events (seller, royalties, treasury) + CLI confirmation.</li>
+<li>Gateway serves content; clients issue reads with <code>ReadAck</code> headers (<code>X-TB-Read-Ack</code>).</li>
+<li>Gateway writes receipts (<code>read/&lt;epoch&gt;/&lt;seq&gt;.bin</code>), batches hourly via RPC <code>gateway.reads_since</code> &amp; <code>gateway.batch_read_receipts</code>, anchors root through settlement.</li>
+</ol>
+<h3 id="appendix-g--compute-courier-and-sla-quick-reference"><a class="header" href="#appendix-g--compute-courier-and-sla-quick-reference">Appendix G · Compute Courier and SLA Quick Reference</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Component</th><th>Behaviour</th></tr></thead><tbody>
+<tr><td>Courier queue</td><td>sled <code>courier</code> tree storing <code>CourierReceipt</code>. Automatic retries (5 attempts, 100 ms exponential backoff).</td></tr>
+<tr><td>SLA scheduler</td><td><code>Settlement::sla</code> vector holds active deadlines; <code>SLA_HISTORY_LIMIT = 256</code>.</td></tr>
+<tr><td>CLI hooks</td><td><code>tb-cli compute courier status</code>, <code>tb-cli compute settlement audit</code> (future extension) read <code>compute_market.*</code> RPC responses.</td></tr>
+</tbody></table>
+</div>
+<h3 id="appendix-h--amm--htlc-math-reference"><a class="header" href="#appendix-h--amm--htlc-math-reference">Appendix H · AMM &amp; HTLC Math Reference</a></h3>
+<ul>
+<li>AMM invariants:
+<ul>
+<li><code>k = reserve_ct * reserve_it</code>.</li>
+<li>Share minting uses geometric mean for first LP; later LPs mint shares proportional to contributions.</li>
+<li>No fee term yet; add <code>fee_bps</code> multiplier before recomputing <code>k</code> if needed.</li>
+</ul>
+</li>
+<li>HTLC scripts:
+<ul>
+<li>Two intents match if <code>hash</code> and <code>amount</code> match. Scripts follow <code>htlc:&lt;hash_hex&gt;:&lt;timeout&gt;</code>.</li>
+<li>Ensure <code>timeout_B &gt; timeout_A + safety_margin</code> so refunds propagate in opposite order.</li>
+<li>Replay safety: matched intents are removed; duplicates require a new hash.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<p><strong>Reminder:</strong> always cross‑check these summaries against the referenced source files before modifying behaviour. If a doc section drifts from the code, patch this file first to keep the expectations self‑consistent.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="architecture.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="architecture.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

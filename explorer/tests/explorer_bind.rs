@@ -1,11 +1,19 @@
 use diagnostics::internal;
+use std::io;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use the_block::net::listener;
 
 #[test]
 fn explorer_listener_conflict_logs_warning() {
-    let holder = TcpListener::bind("127.0.0.1:0").expect("bind holder");
+    let holder = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping explorer_listener_conflict_logs_warning: {err}");
+            return;
+        }
+        Err(err) => panic!("bind holder: {err}"),
+    };
     let addr = holder.local_addr().expect("listener addr");
 
     let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));

@@ -1,3 +1,4 @@
+use self::snark::{SnarkBackend, SnarkError};
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
@@ -141,7 +142,7 @@ pub struct ExecutionReceipt {
         default = "foundation_serialization::defaults::default",
         skip_serializing_if = "foundation_serialization::skip::option_is_none"
     )]
-    pub proof: Option<Vec<u8>>,
+    pub proof: Option<snark::ProofBundle>,
 }
 
 impl ExecutionReceipt {
@@ -150,14 +151,14 @@ impl ExecutionReceipt {
         if self.reference != self.output {
             return false;
         }
-        if let Some(ref proof) = self.proof {
-            if let Workload::Snark(ref wasm) = workload {
-                return snark::verify(proof, wasm, &self.output);
-            } else {
-                return false;
+        match (&self.proof, workload) {
+            (Some(bundle), Workload::Snark(wasm)) => {
+                snark::verify(bundle, wasm, &self.output).unwrap_or(false)
             }
+            (None, Workload::Snark(_)) => false,
+            (Some(_), _) => false,
+            _ => true,
         }
-        true
     }
 
     pub fn total(&self) -> u64 {
@@ -284,6 +285,7 @@ pub struct Job {
 struct JobState {
     job: Job,
     provider: String,
+    provider_capability: scheduler::Capability,
     provider_bond: u64,
     price_per_unit: u64,
     fee_pct_ct: u8,
@@ -443,6 +445,7 @@ impl Market {
         let state = JobState {
             job,
             provider: offer.provider.clone(),
+            provider_capability: offer.capability.clone(),
             provider_bond: offer.provider_bond,
             price_per_unit: offer.price_per_unit,
             fee_pct_ct: offer.fee_pct_ct,
@@ -585,22 +588,26 @@ impl Market {
             }
             return Err("reference mismatch");
         }
-        if !proof.verify(&state.job.workloads[state.paid_slices]) {
+        let workload = &state.job.workloads[state.paid_slices];
+        if !proof.verify(workload) {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
             }
-            #[cfg(feature = "telemetry")]
-            crate::telemetry::SNARK_FAIL_TOTAL.inc();
+            if matches!(workload, Workload::Snark(_)) {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SNARK_FAIL_TOTAL.inc();
+            }
             return Err("invalid proof");
         }
-        if proof.proof.is_some() {
+        if let (Workload::Snark(_), Some(bundle)) = (workload, &proof.proof) {
             #[cfg(feature = "telemetry")]
             crate::telemetry::SNARK_VERIFICATIONS_TOTAL.inc();
+            settlement::Settlement::record_proof(job_id, bundle.clone());
         }
-        let slice_units = state.job.workloads[state.paid_slices].units();
+        let slice_units = workload.units();
         let total_expected = slice_units
             .checked_mul(state.price_per_unit)
             .ok_or("payout overflow")?;
@@ -699,12 +706,14 @@ impl Market {
 
     /// Execute a job by submitting slice outputs and returning total payout.
     pub async fn execute_job(&mut self, job_id: &str) -> Result<u64, &'static str> {
-        let (slices, workloads, price_per_unit) = {
+        let (slices, workloads, price_per_unit, capability, provider_id) = {
             let state = self.jobs.get(job_id).ok_or("unknown job")?;
             (
                 state.job.slices.clone(),
                 state.job.workloads.clone(),
                 state.price_per_unit,
+                state.provider_capability.clone(),
+                state.provider.clone(),
             )
         };
         let runner = WorkloadRunner::new();
@@ -719,8 +728,12 @@ impl Market {
             .zip(results.into_iter().zip(workloads.into_iter()))
         {
             let units = w.units();
-            let proof_bytes = match &w {
-                Workload::Snark(wasm) => Some(snark::prove(wasm, &output)),
+            let proof_bundle = match &w {
+                Workload::Snark(wasm) => {
+                    let bundle = prove_with_capability(wasm, &output, &capability, &provider_id)
+                        .map_err(|_| "snark_prover_failed")?;
+                    Some(bundle)
+                }
                 _ => None,
             };
             let receipt = ExecutionReceipt {
@@ -728,7 +741,7 @@ impl Market {
                 output,
                 payout_ct: units * price_per_unit,
                 payout_it: 0,
-                proof: proof_bytes,
+                proof: proof_bundle,
             };
             total += self.submit_slice(job_id, receipt)?;
         }
@@ -756,6 +769,49 @@ impl Market {
         } else {
             1.0 + pending as f64 / capacity as f64
         }
+    }
+}
+
+fn prefer_gpu_backend(capability: &scheduler::Capability) -> bool {
+    capability
+        .gpu
+        .as_ref()
+        .map(|gpu| !gpu.is_empty())
+        .unwrap_or(false)
+        || capability
+            .frameworks
+            .iter()
+            .any(|fw| fw.eq_ignore_ascii_case("cuda") || fw.eq_ignore_ascii_case("rocm"))
+        || capability
+            .accelerator
+            .as_ref()
+            .map(|acc| matches!(acc, Accelerator::Fpga | Accelerator::Tpu))
+            .unwrap_or(false)
+}
+
+fn prove_with_capability(
+    wasm: &[u8],
+    output: &[u8],
+    capability: &scheduler::Capability,
+    provider: &str,
+) -> Result<snark::ProofBundle, SnarkError> {
+    if prefer_gpu_backend(capability) {
+        match snark::prove_with_backend(wasm, output, SnarkBackend::Gpu) {
+            Ok(bundle) => {
+                scheduler::record_accelerator_success(provider);
+                Ok(bundle)
+            }
+            Err(SnarkError::GpuUnavailable) => {
+                scheduler::record_accelerator_failure(provider);
+                snark::prove_with_backend(wasm, output, SnarkBackend::Cpu)
+            }
+            Err(err) => {
+                scheduler::record_accelerator_failure(provider);
+                Err(err)
+            }
+        }
+    } else {
+        snark::prove(wasm, output)
     }
 }
 
@@ -800,6 +856,10 @@ impl PriceBoard {
             .map(|(_, median, _)| adjust_price(median, backlog_factor))
     }
 }
+
+#[cfg(test)]
+#[path = "tests/prover.rs"]
+mod prover_benches;
 
 #[cfg(test)]
 mod tests {

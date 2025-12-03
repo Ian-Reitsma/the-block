@@ -1,0 +1,13 @@
+[package]
+name = "mock-energy-oracle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+httpd = { path = "../../crates/httpd" }
+runtime = { path = "../../crates/runtime", default-features = false, features = ["inhouse-backend"] }
+oracle-adapter = { path = "../../crates/oracle-adapter", package = "oracle-adapter" }
+energy-market = { path = "../../crates/energy-market", package = "energy-market" }
+foundation_serialization = { path = "../../crates/foundation_serialization" }
+concurrency = { path = "../../crates/concurrency" }
+serde = { workspace = true }

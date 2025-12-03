@@ -43,9 +43,17 @@ fn build_signed_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
         campaign_id: Some("cmp-1".into()),
         creative_id: Some("creative-1".into()),
         selection_receipt: None,
+        geo: None,
+        device: None,
+        crm_lists: Vec::new(),
+        delivery_channel: DeliveryChannel::Http,
+        mesh: None,
         badge_soft_intent: None,
         readiness: None,
         zk_proof: None,
+        presence_badge: None,
+        venue_id: None,
+        crowd_size_hint: None,
     }
 }
 
@@ -64,6 +72,10 @@ fn dummy_receipt(
             badges: Vec::new(),
             bytes: 0,
             price_per_mib_usd_micros: 0,
+            delivery_channel: DeliveryChannel::Http,
+            mesh_peer: None,
+            mesh_transport: None,
+            mesh_latency_ms: None,
         },
         candidates: vec![SelectionCandidateTrace {
             campaign_id: campaign_id.into(),
@@ -84,6 +96,8 @@ fn dummy_receipt(
             uplift_ece: 0.0,
             shadow_price: 0.0,
             dual_price: 0.0,
+            delivery_channel: DeliveryChannel::Http,
+            preferred_delivery_match: false,
         }],
         winner_index: 0,
         resource_floor_usd_micros: resource_floor,
@@ -92,6 +106,12 @@ fn dummy_receipt(
         clearing_price_usd_micros: clearing_price,
         attestation: None,
         proof_metadata: None,
+        verifier_committee: None,
+        verifier_stake_snapshot: None,
+        verifier_transcript: Vec::new(),
+        badge_soft_intent: None,
+        badge_soft_intent_snapshot: None,
+        uplift_assignment: None,
     }
 }
 
