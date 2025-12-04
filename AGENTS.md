@@ -4,6 +4,7 @@ Quick Index
 - Vision & Strategy: see §16
 - Agent Playbooks: see §17
 - Strategic Pillars: see §18
+- Subsystem Atlas & workspace map: see [`docs/subsystem_atlas.md`](docs/subsystem_atlas.md)
 - Monitoring Stack: see [`Telemetry Wiring`, `Metrics Aggregator Ops`, and `Monitoring`](docs/operations.md#telemetry-wiring) and `make monitor`
 - First-party HTTP tooling lives under `crates/httpd`; reuse `HttpClient` or
   `BlockingClient` instead of pulling in third-party stacks (`reqwest` and
@@ -90,6 +91,14 @@ Quick Index
 - Break-glass procedures live in [`docs/operations.md#troubleshooting-playbook`](docs/operations.md#troubleshooting-playbook). When you discover a new failure mode, update the runbook immediately.
 - Deferred or follow-up work belongs in §15 “Outstanding Blockers & Directives.” Mirror any TODOs you add in code to that section to keep the backlog visible.
 
+### 0.6 Spec & Quality Guardrails
+- **Spec-first confirmation loop** — Before scheduling work, diff the current implementation against the canonical spec lines in this file (`§0.1`, `AGENTS.md:65‑91`) and [`docs/overview.md:5‑67`](docs/overview.md#mission). File a documentation patch for any drift, route it through the Document Map owners listed in `docs/overview.md`, and only green-light code once the spec reflects the desired behaviour. Every workstream summary should cite the doc PR/issue that captured the delta.
+- **Test cadence baked into checklists** — Standardize on `just lint`, `just fmt`, `just test-fast`, the applicable tier of `just test-full`, `cargo test -p the_block --test replay`, the settlement audit (`cargo test -p the_block --test settlement_audit --release`), and `scripts/fuzz_coverage.sh` before review. Embed this list inside subsystem work checklists, and attach the command transcript (or CI link) to review descriptions so no change lands without its gate artifacts.
+- **Observability contract** — Route every new metric, CLI flag, or API surface through `node/src/telemetry`, then update `metrics-aggregator/` and `monitoring/` snapshots (`npm ci --prefix monitoring && make monitor`). Document the `/wrappers` exposure and dashboard edits in [`docs/operations.md#telemetry-wiring`](docs/operations.md#telemetry-wiring) and reference the relevant Grafana panel in the PR body.
+- **Runtime knobs + dependency governance** — All knobs must flow through `node/src/config.rs` with `TB_*` names. When tooling crates or dependencies change, update [`docs/developer_handbook.md`](docs/developer_handbook.md#environment-setup) and `config/dependency_policies.toml`, then immediately rerun `cargo vendor`, refresh `provenance.json`, and regenerate `checksums.txt` so release provenance stays accurate.
+- **TODO mirroring + incident hygiene** — Every new TODO or deferred fix must be mirrored into §15 (include file path + owner) so the backlog stays visible to subsystem leads. Post-incident learnings go straight into [`docs/operations.md#troubleshooting-playbook`](docs/operations.md#troubleshooting-playbook) with reproduction steps and telemetry pivots so on-call engineers never hunt for tribal knowledge.
+- **Subsystem atlas coverage** — When you add, move, or rename a module, update [`docs/subsystem_atlas.md`](docs/subsystem_atlas.md) so newcomers can map file paths to real-world concepts without spelunking code. Treat the atlas as part of the spec; CI reviewers should reject PRs that strand new modules without documentation.
+
 ---
 
 Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
@@ -128,7 +137,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 
 **Energy + Governance Next Tasks (see `docs/architecture.md#energy-governance-and-rpc-next-tasks` for detail)**
 - Governance/Params: land proposal payloads for batch vs real-time energy settlement, surface explorer/CLI history, expand dependency graphs, and harden param snapshots/rollback audits.
-- Energy/Oracle: replace `NoopSignatureVerifier`, add quorum/expiry policy + slashing telemetry, persist receipts in ledger/sled trees, and extend CLI with provider/receipt/dispute management.
+- Energy/Oracle: production Ed25519 verification now ships in `crates/energy-market` and `crates/oracle-adapter`; provider trust roots load from `config/default.toml` via the `energy.provider_keys` array, which hot-reloads the verifier registry. Remaining work covers quorum/expiry policy + advanced slashing telemetry, persisting receipts in ledger/sled trees, and wiring explorer timelines once the new dispute/receipt RPCs settle.
 - RPC/CLI Hardening: enforce auth + rate-limit parity for `energy.*`, add structured errors for signature/timestamp/meter failures, and publish JSON schema snippets with round-trip CLI tests.
 - Telemetry/Observability: extend Grafana dashboards (providers, pending credits, slash totals), wire SLO/alerting for oracle latency + settlement stalls, and expose summary metrics via `/wrappers` + `/telemetry/summary`.
 - Network/Transport & Storage/State: run QUIC chaos drills with failover/fingerprint rotation, assert new transport capabilities in tests, and clone the `SimpleDb` snapshot/restore drill for `TB_ENERGY_MARKET_DIR` plus forward/backward-compatible migrations.
@@ -523,6 +532,67 @@ The following items block mainnet readiness and should be prioritized. Each task
    - The build currently fails fast because documentation lags behind implementation; require a `docs/` update in every follow-up
      PR that touches staking, governance, RPC, or telemetry so contributors keep operator guidance accurate.
 
+### 15.A Governance & Treasury Surface
+- **Treasury payload alignment** — Extend the governance DAG schemas (`governance/`), `node/src/governance`, `cli/src/governance`, explorer dashboards, and `node/src/treasury_executor.rs` to express multi-stage treasury approvals with attested release bundles before permitting external submissions. Reference lines `AGENTS.md:121-122` in every PR thread so reviewers can trace the stalled dependency.
+- **UX + telemetry updates** — Document the refreshed process in [`docs/economics_and_governance.md`](docs/economics_and_governance.md#treasury) and wire coinbase-facing telemetry counters (disbursement lag, reject reasons) through `metrics-aggregator/` so dashboards expose lag/failure trends. Ensure `tb-cli` JSON snapshots surface the same payloads the explorer renders.
+- **Determinism + fuzz gates** — Add ledger-level tests inside the governance crate and `node/tests/` to prove streaming, rollback, and kill-switch behaviour survives deterministic replay, and record the associated `scripts/fuzz_coverage.sh` `.profraw` artifacts whenever consensus/governance code paths change.
+- **Observability hooks** — Push governance state diffs into `/wrappers` metadata and add Grafana timelines for service badges, fee-floor policies, and treasury deltas. Update [`docs/operations.md`](docs/operations.md#telemetry-wiring) with a runbook for “treasury stuck” scenarios, including CLI commands, RPCs, and log fingerprints.
+- **Explorer + CLI parity** — Work with the explorer maintainers so badge history, policy timelines, and treasury dashboards load from a single canonical snapshot JSON (shared between `cli/`, `explorer/`, and `metrics-aggregator/`), preventing drift across operator tooling.
+
+### 15.B Compute Market & SLA Controls
+- **SLA-aware matcher** — Layer slashing logic atop the lane-aware matcher in `node/src/compute_market/matcher.rs`, coordinating with `lane scheduler` modules and `ReceiptStore` durability so failed work emits slash receipts anchored in the CT subsidy sub-ledger (per `AGENTS.md:95-105` and `AGENTS.md:123`).
+- **Docs + status surfaces** — Describe the slashing lifecycle in [`docs/architecture.md#compute-marketplace`](docs/architecture.md#compute-marketplace), update CLI/explorer lane health views, and expose telemetry such as `match_loop_latency_seconds{lane}`, fairness counters, and slash totals via the metrics aggregator.
+- **Test coverage** — Expand `node/src/compute_market/tests/` and top-level `tests/` to cover fairness windows, starvation protection, SLA triggers, receipt persistence, and replay after restarts; include deterministic replays that validate persisted receipts, plus fuzzing for receipt serialization.
+- **Remediation tooling** — Ship Grafana panels (sourced from `monitoring/`) and CLI commands that summarize per-lane degradation so operators can triage slashed jobs rapidly.
+- **Ledger integration** — Ensure slashing updates propagate through `node/src/treasury_executor.rs`, ledger snapshots, and governance reporting so payouts and per-lane quotas remain in sync with the unified CT ledger.
+
+### 15.C Networking, Transport & Range-Boost Reliability
+- **Chaos drill automation** — Script WAN-scale QUIC chaos drills (fault injection across providers) touching `node/src/net`, `node/src/p2p`, and `range_boost/`, validating handshake fallback, fanout scoring, mutual-TLS rotation, and recovery flows (`AGENTS.md:124`).
+- **Documentation + runbooks** — Update [`docs/architecture.md#networking-and-propagation`](docs/architecture.md#networking-and-propagation) and [`docs/operations.md`](docs/operations.md#bootstrap-and-configuration) with mitigation recipes, cross-provider failover guides, and CLI/RPC introspection examples derived from the new telemetry traces.
+- **Regression coverage** — Add tests for transport capability advertisement, failover timing, and range-boost TTL/fanout invariants. Make sure fuzz/nextest suites exercise both in-house and stub overlay backends.
+- **Diagnostics wiring** — Instrument `p2p_overlay` and `crates/transport` to emit dedup drops, handshake negotiation details, and capability mismatches; surface them via `/wrappers` metadata and Grafana overlays.
+- **TLS + automation parity** — Refresh metrics-aggregator TLS configs and document the chaos drill workflow in `docs/operations.md#bootstrap-and-configuration`; ensure scripts in `scripts/` reproduce the drills inside CI/staging.
+
+### 15.D Wallet, Remote Signer & CLI UX
+- **Multisig polish** — Implement batched signer discovery, richer CLI prompts, JSON automation hooks, and remote-signer telemetry inside `cli/src/wallet`, `node/src/identity`, and `remote_signer/` so production workflows are smooth (`AGENTS.md:125`).
+- **Compliance docs** — Update [`docs/security_and_privacy.md#kyc-jurisdiction-and-compliance`](docs/security_and_privacy.md#kyc-jurisdiction-and-compliance) with the new signer flows, audit logging, LE portal integration, and telemetry notes; ensure portal metrics mirror wallet changes.
+- **Regression suite** — Expand `tests/remote_signer_*.rs` and wallet integration tests to cover batched discovery, failure prompts, telemetry toggles, and config flag propagation via `node/src/config.rs`.
+- **Messaging parity** — Align CLI/explorer messaging for fee-floor warnings, signer prompts, and JSON output. Document command help in [`docs/apis_and_tooling.md`](docs/apis_and_tooling.md#cli), and expose signer health dashboards plus `/wrappers` telemetry for availability/latency/audit trail completeness.
+
+### 15.E Bridges, DEX & Cross-Chain Documentation
+- **Doc expansion** — Enrich [`docs/architecture.md#token-bridges`](docs/architecture.md#token-bridges) and [`docs/architecture.md#dex-and-trust-lines`](docs/architecture.md#dex-and-trust-lines) with signer-set payloads, telemetry pipelines, and release-verifier guidance, mirrored into [`docs/operations.md`](docs/operations.md#auxiliary-services) runbooks (`AGENTS.md:33-41`, `AGENTS.md:126`).
+- **Implementation alignment** — Keep `bridges/`, `dex/`, and explorer views in sync so escrow proofs, partial-payment artifacts, and trust-line metrics are exposed consistently through CLI, RPC, and dashboards. Update `foundation_serialization` profiles for any new payloads.
+- **Testing + telemetry** — Strengthen regression coverage for bridge light-client verification, DEX AMM math, multi-hop trust-line routing, and escrow settlement replay. Export bridge/DEX-specific counters (escrow fulfillment, signer rotations, partial-payment retries) to the aggregator and Grafana.
+- **Release provenance** — Document release-verifier scripts and attestation steps under [`docs/security_and_privacy.md#release-provenance-and-supply-chain`](docs/security_and_privacy.md#release-provenance-and-supply-chain) to guarantee cross-chain binaries meet provenance gating.
+
+### 15.F Storage, Snapshot & Dependency Drill Automation
+- **Drill automation** — Script `SimpleDb` snapshot/restore drills across `state/`, `storage/`, `node/src/simple_db`, and `storage_market/`, then document the workflow plus telemetry expectations inside [`docs/operations.md#storage-and-state`](docs/operations.md#storage-and-state). Base the instructions on the RocksDB layout guidance referenced in `AGENTS.md:21`.
+- **CI harnesses** — Build CI-friendly harnesses (likely `scripts/` + `formal/`) that exercise dependency fault injection (coder/compressor swaps from `coding/`, storage backend toggles) and verify ledger/state parity afterward.
+- **Telemetry exposure** — Emit snapshot/migration telemetry (duration, failures, time-to-restore) and surface it via Grafana + `/wrappers` metadata so operators track drills in real time.
+- **Crash-safety validation** — Explicitly validate `SimpleDb` fsync+rename semantics on Linux/macOS/Windows to uphold crash-safe guarantees (`AGENTS.md:113-116`), capturing findings in docs and integration tests.
+
+### 15.G Energy Governance & Oracle Controls
+- **Proposal payloads** — Implement governance payloads that distinguish batch vs real-time settlement, extend explorer/CLI history, and harden snapshot/rollback auditing across `governance/`, `node/src/energy.rs`, and `cli/src/energy.rs` (`AGENTS.md:130`; `docs/overview.md:44-49`).
+- **Oracle verifier** — Production Ed25519 verification now lives inside `crates/energy-market` and `crates/oracle-adapter`; next steps are enforcing quorum + expiry policies, logging slashing telemetry, and persisting receipts to both sled trees and ledger checkpoints (`AGENTS.md:131`).
+- **CLI + schema parity** — Harden the new provider/receipt/dispute CLI flows with JSON schema exports aligned to [`docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`](docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts). Back the endpoints with deterministic replay and fuzz coverage across provider mixes.
+- **Documentation refresh** — Update [`docs/economics_and_governance.md`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) and [`docs/architecture.md#energy-governance-and-rpc-next-tasks`](docs/architecture.md#energy-governance-and-rpc-next-tasks) with the new governance hooks, rollback auditing steps, and oracle dependency graphs.
+
+### 15.H Energy Interfaces & Telemetry
+- **RPC parity + schemas** — Enforce auth/rate-limit parity for all `energy.*` RPCs, add structured errors for signature/timestamp/meter failures, and publish JSON schema snippets with round-trip CLI tests (per `AGENTS.md:132`).
+- **Dashboards + alerts** — Extend Grafana dashboards with provider counts, pending credits, dispute backlog, slash totals, and SLO/alerting for oracle latency + settlement stalls. Surface the new summary metrics (`energy_provider_total`, `energy_pending_credits_total`, `energy_active_disputes_total`, `energy_settlement_total{provider}`, etc.) through `/wrappers` and `/telemetry/summary` (`AGENTS.md:133`).
+- **State drills** — Clone the `SimpleDb` snapshot/restore drill for `TB_ENERGY_MARKET_DIR`, layering forward/backward-compatible migrations plus QUIC chaos validation for oracle transport as described in `AGENTS.md:134`.
+- **Docs alignment** — Keep [`docs/testnet/ENERGY_QUICKSTART.md`](docs/testnet/ENERGY_QUICKSTART.md) and [`docs/operations.md#energy-market-operations`](docs/operations.md#energy-market-operations) current with telemetry panels, health checks, and troubleshooting escalations. Ensure explorer timelines show the same aggregated data emitted by `tb-cli energy`.
+
+### 15.I Energy Reliability, Security & CI
+- **Supply-chain enforcement** — Enforce release-provenance gates, secret hygiene, and log redaction for energy/oracle crates. Add throughput benchmarks, fuzzers, and deterministic replay coverage for receipts, capturing `.profraw` summaries whenever consensus/governance paths touch settlement logic (`AGENTS.md:135`).
+- **Fast-mainnet CI gate** — Update CI to include a fast-mainnet gate that runs governance param checks, energy RPC suites, ledger replay, transport handshake, and ad-market verifications (`AGENTS.md:136`). Stabilize integration suites accordingly.
+- **Explorer timelines + disputes** — Ship explorer tables/time series for receipts and disputes (`docs/testnet/ENERGY_QUICKSTART.md`), aligning CLI/explorer outputs with governance snapshots for traceability.
+- **Security docs + telemetry** — Document rate-limit/auth policies, signature requirements, and log redaction in [`docs/security_and_privacy.md#energy-oracle-safety`](docs/security_and_privacy.md#energy-oracle-safety). Wire telemetry alerts for policy violations or misconfigurations.
+- **Release tooling** — Coordinate with release tooling so attested binaries include the updated energy/oracle components, and archive the fuzz coverage artifacts with every release candidate.
+
+### 15.J Next Steps Sequencing
+- Confirm the scope of this multi-track plan with subsystem owners, then attack spec/docs alignment (Sections 0.6 + 15.A) before coding changes. Governance/treasury and energy governance deliverables unblock downstream compute, networking, and wallet work, so treat them as the immediate gate for the remaining backlog.
+
 ---
 This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.
 
@@ -828,7 +898,7 @@ A trait-based, multi-provider signature verification system for energy market or
   - Uses `crypto_suite::signatures::ed25519::VerifyingKey` and `Signature`
 - **Shadow Mode Strategy**:
   - Providers without registered keys bypass verification (for backwards compatibility)
-  - Allows incremental rollout: register keys gradually, monitor `energy_oracle_verification_failures_total{provider,reason}` metric
+  - Allows incremental rollout: register keys gradually, monitor `energy_signature_failure_total{provider,reason}` metric
   - Once all providers registered, can enforce universal verification
 
 #### Testing Coverage
@@ -846,11 +916,11 @@ A trait-based, multi-provider signature verification system for energy market or
 - [ ] Persist energy receipts into ledger/sled trees (currently in-memory)
 - [ ] Auth and rate-limits for `energy.*` RPC handlers (currently no auth)
 - [ ] Structured error taxonomy for energy RPC
-- [ ] CLI commands (`tb-cli energy providers|readings|settle|disputes --json --schema`)
+- [x] CLI commands (`tb-cli energy market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute --json`)
 - [ ] Integration tests for sustained load with mixed valid/invalid readings
 - [ ] Schema export via CLI (`--schema` flag)
-- [ ] Energy market dashboards (Grafana panels for `energy_provider_fulfillment_ms`, `energy_kwh_traded_total`, `oracle_reading_latency_seconds`, `energy_settlements_total`, `energy_oracle_verification_failures_total{provider,reason}`)
-- [ ] Dispute workflow (CLI-submitted disputes referencing reading hash)
+- [ ] Energy market dashboards (Grafana panels for `energy_provider_fulfillment_ms`, `energy_kwh_traded_total`, `oracle_reading_latency_seconds`, `energy_settlements_total`, `energy_signature_failure_total{provider,reason}`)
+- [x] Dispute workflow (CLI-submitted disputes referencing reading hash)
 - [ ] Provider restart tests with persisted baseline across sled
 
 ---
@@ -913,18 +983,16 @@ A trait-based, multi-provider signature verification system for energy market or
    - `tb-cli gov disburse rollback <id> --reason <reason>` - cancel/rollback
    - **Estimated effort**: 1-2 days (can reuse existing `cli/src/gov.rs` patterns)
 
-2. **CLI Commands for Energy Market** (`cli/src/energy/*.rs`)
-   - `tb-cli energy providers list` - list all providers
-   - `tb-cli energy readings submit --json <file>` - submit signed meter reading
-   - `tb-cli energy settle <provider-id> <kwh> <reading-hash>` - settle energy delivery
-   - `tb-cli energy disputes submit <reading-hash> --reason <reason>` - submit dispute
-   - `tb-cli energy --schema` - export JSON schemas for all commands
+2. **Energy CLI schema export + automation** (`cli/src/energy/*.rs`)
+   - `tb-cli energy --schema` - export JSON schemas for the register/settle/receipt/dispute payloads
+   - Deterministic replay + fuzz coverage for the new `receipts|credits|disputes|flag-dispute|resolve-dispute` commands
+   - Provider update helpers (price adjustments, stake top-ups) once governance payloads are available
    - **Estimated effort**: 2-3 days
 
-3. **Telemetry Metrics for Treasury & Energy** (`node/src/telemetry.rs`, `governance/src/treasury.rs`)
+3. **Telemetry Metrics for Treasury & Dashboards** (`node/src/telemetry.rs`, `governance/src/treasury.rs`, `monitoring/`)
    - Treasury: `governance_disbursements_total{status}`, `treasury_balance_ct`, `treasury_disbursement_backlog`
-   - Energy: `energy_oracle_verification_failures_total{provider,reason}`, `energy_rpc_rate_limited_total{method}`, `energy_disputes_total{status}`
-   - **Estimated effort**: 1 day (metrics are straightforward, just need wiring)
+   - Wire the newly added energy metrics (`energy_provider_total`, `energy_pending_credits_total`, `energy_active_disputes_total`, `energy_settlement_total{provider}`, etc.) into dashboards + `/wrappers`
+   - **Estimated effort**: 1 day (metrics are defined; need dashboards + treasury wiring)
 
 4. **Auth and Rate-Limits for Energy RPC** (`node/src/rpc/energy.rs`, `node/src/rpc/limiter.rs`)
    - Apply same auth middleware used for other RPC namespaces
@@ -939,7 +1007,7 @@ A trait-based, multi-provider signature verification system for energy market or
 
 6. **Energy Market Dashboards** (`monitoring/src/dashboard.rs`, Grafana JSON)
    - Provider health panel: `energy_provider_fulfillment_ms`, `energy_kwh_traded_total`
-   - Oracle verification panel: `energy_oracle_verification_failures_total{provider,reason}`
+   - Oracle verification panel: `energy_signature_failure_total{provider,reason}`
    - Rate-limit panel: `energy_rpc_rate_limited_total{method}`
    - **Estimated effort**: 1 day (dashboard JSON generation + tests)
 
@@ -955,7 +1023,7 @@ A trait-based, multi-provider signature verification system for energy market or
 
 9. **Governance State Machine** (`governance/src/proposals.rs`)
    - Implement draft→voting→queued→timelocked→executed→finalized/rolled-back transitions
-   - Currently disbursements skip voting (go straight to queued)
+  - Disbursements now flow through Draft → Voting → Queued → Timelocked; queue RPC enforces vote windows + timelocks so operators can observe each transition before execution
    - **Estimated effort**: 5-7 days (involves proposal DAG validation, quorum logic)
 
 10. **Integration Tests** (`tests/`)
@@ -967,18 +1035,21 @@ A trait-based, multi-provider signature verification system for energy market or
 
 ### 19.7 Technical Debt & Known Issues
 
+#### Treasury CLI + Telemetry
+- Added `tb-cli gov disburse queue` to wrap `gov.treasury.queue_disbursement`; the CLI fetches the node’s current epoch when one is not provided and still exposes an `--epoch` override for manual testing.
+- Metrics aggregator and explorer now emit the full Draft/Voting/Queued/Timelocked/Executed/Finalized/RolledBack series (legacy `scheduled`/`cancelled` filters remain as aliases for compatibility).
+
 #### Compilation Warnings
 - **Energy Market**: 13 warnings about `pq-crypto` feature not being defined in `Cargo.toml`
   - **Resolution**: Add `pq-crypto` feature to `crates/energy-market/Cargo.toml` with optional `pqcrypto-dilithium` dependency
   - **Impact**: Low (doesn't affect Ed25519 path, only Dilithium)
 
 #### Placeholder TODOs in Code
-- `node/src/rpc/treasury.rs:531`: `queue_disbursement()` returns error saying "should be called during initial submission via submit_disbursement"
-  - **Rationale**: `store.queue_disbursement()` creates NEW disbursements; separate state transition logic needed
-  - **Resolution**: Implement proper state machine transitions in Task 1 follow-up
+- `node/src/rpc/treasury.rs:531`: `queue_disbursement()` returns error saying "should be called during initial submission via submit_disbursement"`
+  - **Status**: ✅ Resolved — RPC now calls `GovStore::advance_disbursement_status`, enforcing vote windows and timelocks before execution.
 
-- `node/src/rpc/treasury.rs:621`: `rollback_disbursement()` has TODO: "Create compensating ledger entry if it was already executed"
-  - **Resolution**: Part of ledger journal entries work (Task 1 low-priority item #8)
+- `node/src/rpc/treasury.rs:621`: `rollback_disbursement()` has TODO: "Create compensating ledger entry if it was already executed"`
+  - **Status**: ✅ Resolved — `GovStore::cancel_disbursement` now differentiates cancellations vs rollbacks and records positive CT/IT deltas when undoing an executed payout.
 
 #### Missing Store Methods
 The following methods were referenced in early drafts but don't exist in `governance/src/store.rs`:
@@ -998,7 +1069,7 @@ The following methods were referenced in early drafts but don't exist in `govern
 1. **Week 1**: Deploy with `verifier_registry` empty (all providers bypass verification)
    - Monitor `energy_rpc_total{method="energy.record_meter_reading"}` for baseline
 2. **Week 2**: Register 10% of providers with Ed25519 keys
-   - Monitor `energy_oracle_verification_failures_total{provider,reason}` for false positives
+   - Monitor `energy_signature_failure_total{provider,reason}` for false positives
    - Expect zero failures (keys match expected signatures)
 3. **Week 3**: Expand to 50% of providers
 4. **Week 4**: Expand to 100% of providers
@@ -1080,4 +1151,3 @@ When new metrics ship, operators must:
 ---
 
 **End of Section 19**
-

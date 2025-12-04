@@ -1,0 +1,137 @@
+# Subsystem Atlas
+
+This atlas supplements `AGENTS.md`, `docs/overview.md`, and the subsystem specs by mapping every major path in the repository to plain-language descriptions. Treat it as the first stop for new contributors (or agents) who need to understand where a concept lives without digging through source code. Each entry lists the canonical files, the kind of work that happens there, and the doc sections that provide deeper context.
+
+## Workspace Atlas
+
+| Path | What it contains | Key docs / notes |
+| --- | --- | --- |
+| `node/` | Full node (consensus, networking, storage, compute, RPC, gateway, CLI helpers). Contains every runtime component that actually runs on validators and gateways. | `docs/architecture.md`, `docs/operations.md`, `docs/apis_and_tooling.md` |
+| `crates/` | Reusable first-party libraries: transport, HTTP/TLS, serialization, telemetry helpers, overlay store, wallet SDKs, probes, oracle adapters, etc. | Each crate has inline docs; `docs/developer_handbook.md#workspace-layout` |
+| `cli/` | `tb-cli` binary. Implements governance commands, wallet flows, compute/energy tooling, diagnostics, explorer helpers. | `docs/apis_and_tooling.md#cli` |
+| `metrics-aggregator/` | Service that ingests `/metrics` feeds, performs correlation, exposes `/wrappers` + `/telemetry/summary`, archives TLS warnings, and serves Grafana datasources. | `docs/operations.md#metrics-aggregator-ops` |
+| `monitoring/` | Grafana dashboards, Prometheus rules, `make monitor` scripts. All dashboard JSON lives here. | `docs/operations.md#monitoring-and-dashboards` |
+| `bridges/` | Cross-chain light clients, relayer state machines, HTLC helpers used by the node and CLI. | `docs/architecture.md#token-bridges`, `docs/security_and_privacy.md#bridge-and-cross-chain-security` |
+| `dex/` | Decentralized exchange logic: trust lines, escrow proofs, AMM math, routing. Linked into the node + CLI. | `docs/architecture.md#dex-and-trust-lines` |
+| `storage_market/`, `storage/`, `state/` | Storage contracts, blob pipelines, sled-backed metadata, RocksDB integration, snapshot tooling. | `docs/architecture.md#storage-and-state`, `docs/operations.md#storage-and-state` |
+| `governance/`, `examples/governance/` | Governance DAG, proposal store, CLI samples, replay harnesses. | `docs/economics_and_governance.md` |
+| `ledger/`, `utxo/`, `transaction/`, `tx/` | Ledger data structures, UTXO tracking, transaction serialization, test vectors. | `docs/architecture.md#ledger-and-consensus` |
+| `energy/`, `crates/energy-market`, `crates/oracle-adapter`, `services/mock-energy-oracle` | Energy market runtime, oracle adapters, mock services for drills. | `docs/architecture.md#energy-governance-and-rpc-next-tasks`, `docs/testnet/ENERGY_QUICKSTART.md`, `config/default.toml` (`energy.provider_keys`), `docs/operations.md#energy-market-operations` |
+| `compute_market/` (under `node/` + `crates/`) | Compute workloads, SNARK receipts, SLA enforcement, courier queues, lane scheduler. | `docs/architecture.md#compute-marketplace` |
+| `gateway/`, `web/` | HTTP surface, DNS publisher, mobile cache, read receipt batching, explorer web artifacts. | `docs/architecture.md#gateway-and-client-access` |
+| `scripts/`, `tools/`, `deploy/`, `nix/`, `Justfile`, `Makefile` | Automation for bootstrap, CI, release, chaos drills, reproducible builds. | `docs/developer_handbook.md`, `docs/operations.md` |
+| `tests/`, `node/tests/`, `gateway/tests/`, `bridges/tests/`, `fuzz/`, `formal/`, `sim/` | Deterministic replay harnesses, integration suites, fuzzers, simulation frameworks. | `docs/developer_handbook.md#testing-strategy`, `docs/developer_handbook.md#formal-methods` |
+
+The remaining directories (`crypto/`, `inflation/`, `privacy/`, `services/`, `examples/`, `explorer/`, etc.) each host standalone binaries, proofs, or sample artifacts. Use `rg --files` plus this atlas to jump into the relevant code when the doc map alone is not enough.
+
+## Node Subsystem Index
+
+The `node/` crate is densely packed. This index spells out every module so that even contributors with zero blockchain experience can map functionality to files.
+
+### Ledger, Blocks, and Serialization
+
+| Path | Description |
+| --- | --- |
+| `node/src/blockchain/` | Core ledger state machine. Handles block application, forks, replay helpers, genesis wiring. |
+| `node/src/block_binary.rs`, `node/src/ledger_binary.rs`, `node/src/legacy_cbor.rs` | Canonical serialization profiles (current binary, legacy CBOR) plus helpers used by explorers/tests. |
+| `node/src/hash_genesis.rs`, `node/src/hashlayout.rs`, `node/src/blob_chain.rs` | Genesis hash seeds, Merkle layout definitions, blob-chain glue code for storage-backed ledger data. |
+| `node/src/ledger_binary.rs` | Binary ledger snapshots and deterministic serialization for audit tooling. |
+| `node/src/update.rs` | Handles self-upgrade metadata, release channels, and hotfix tracking. |
+
+### Consensus, PoH, and Scheduling
+
+| Path | Description |
+| --- | --- |
+| `node/src/consensus/` | Hybrid PoW/PoS engine with macro-block checkpoints, fork choice, and Kalman difficulty retune. |
+| `node/src/poh.rs` | Proof-of-History tick generator feeding the consensus engine. |
+| `node/src/parallel.rs` | Conflict-aware executor used by the scheduler to run non-overlapping tasks in parallel. For newcomers: each `Task` declares read/write keys; the executor groups non-conflicting tasks and runs them on scoped threads while exporting telemetry (`PARALLEL_EXECUTE_SECONDS`). |
+| `node/src/scheduler.rs` | Multi-lane scheduler that batches consumer, industrial, and compute workloads. Integrates with `compute_market/` fairness windows and exposes QoS metrics. |
+| `node/src/partition_recover.rs` | Replay helper that re-validates blocks after a network partition heals. Uses `validate_and_apply` plus `ExecutionContext` to keep the ledger deterministic and increments `PARTITION_RECOVER_BLOCKS` telemetry counters. |
+| `node/src/poh.rs`, `node/src/constants.rs` | Timing constants and tick generators referenced across consensus, gossip, and range-boost code. |
+
+### Transactions, Fees, and Accounts
+
+| Path | Description |
+| --- | --- |
+| `node/src/transaction.rs`, `tx/`, `transaction/` | Transaction structs, signatures, serialization formats, and CLI-friendly helpers. |
+| `node/src/fee/`, `node/src/fees.rs`, `node/src/fees/` | Fee-floor enforcement, QoS logic, telemetry for congestion, used by mempool + scheduler. |
+| `node/src/accounts/` | Session policies and pluggable account validation (`AccountValidation`, `SessionPolicy`). Useful when building wallet abstractions or remote signers. |
+| `node/src/mempool/` | Admission queues, gossip integration, QoS counters, admissions policies. |
+| `node/src/utxo/`, `node/src/liquidity/` | UTXO tracking and liquidity routing helpers for DEX/treasury integrations. |
+
+### Compute, Storage, and Marketplaces
+
+| Path | Description |
+| --- | --- |
+| `node/src/compute_market/` | Offers, matcher, courier, settlement, SNARK proving, SLA slashing plumbing. Lane health telemetry and slash receipts live here. |
+| `node/src/storage/`, `storage_market/`, `state/` | Blob storage pipeline, erasure coding, proofs-of-retrievability, rent accounting, sled snapshots. |
+| `node/src/simple_db/` | SimpleDb snapshot layer used across subsystems (energy market, storage, governance). Implements fsync + atomic rename semantics and cross-platform safeguards. |
+| `node/src/treasury_executor.rs` | CT ledger hooks that convert compute/storage receipts and treasury disbursements into coinbase outputs. |
+| `node/src/blob_chain.rs`, `node/src/storage/` | Glue between on-chain blob commitments and the actual storage backends. |
+
+### Energy Market
+
+| Path | Description |
+| --- | --- |
+| `node/src/energy.rs` | Wraps `crates/energy-market`: provider registry, credit persistence, settlement logic, governance hooks, and health checks. |
+| `node/src/rpc/energy.rs`, `cli/src/energy.rs` | JSON-RPC handlers plus CLI surfaces for registering providers, submitting readings, and settling receipts. |
+| `services/mock-energy-oracle/` | Dev/testnet oracle shim for World OS drills. |
+
+### Governance, Treasury, and Badges
+
+| Path | Description |
+| --- | --- |
+| `node/src/governance/`, `governance/` | Canonical governance crate, DAG store, bicameral voting, proposal lifecycles. |
+| `node/src/governor_snapshot.rs`, `node/src/launch_governor/` | Snapshot tooling for live governance state, bootstrap helpers for testnets. |
+| `node/src/treasury_executor.rs` | Multi-stage disbursement executors, attested release flow, kill-switch integration. |
+| `node/src/service_badge.rs` | Badge issuance/revocation logic, uptime tracking, telemetry. |
+| `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | Ad marketplace snapshots, readiness checks, signature trails persisted under `ad_policy/`. |
+| `node/src/le_portal.rs` | Law-enforcement portal logging, warrant canaries, evidence store. |
+
+### Networking, Overlay, and Range Boost
+
+| Path | Description |
+| --- | --- |
+| `node/src/net/`, `node/src/gossip/`, `node/src/p2p/` | TCP/UDP/QUIC reactors, peer stores, gossip propagation, capability negotiation. |
+| `node/src/range_boost/`, `node/src/localnet/` | Range-boost mesh (proximity relays), LocalNet overlays, TTL scheduling, partition drills. |
+| `node/src/gateway/` | HTTP ingress, DNS publisher, mobile cache, read receipt batching, gateway policy enforcement. |
+| `node/src/read_receipt.rs` | Signed acknowledgement batching, ledger integration, CLI metrics. |
+| `node/src/http_client.rs` | First-party HTTP client used by node, CLI, and services (no third-party stacks). |
+| `node/src/log_indexer.rs` | Structured log exporter feeding explorers/CLI/telemetry dashboards. |
+
+### Security, Identity, and Remote Signers
+
+| Path | Description |
+| --- | --- |
+| `node/src/identity/`, `node/src/kyc.rs` | DID registries, KYC policy hooks, jurisdiction enforcement. |
+| `node/src/commit_reveal.rs` | Commit–reveal scheme shared by governance, bridge proofs, and treasury releases. |
+| `node/src/dkg.rs` | Distributed key generation for committees, bridges, and badge issuers. |
+| `node/src/service_badge.rs`, `node/src/le_portal.rs` | Telemetry + logging for badges and law-enforcement portals. |
+
+### Telemetry, RPC, and Tooling
+
+| Path | Description |
+| --- | --- |
+| `node/src/rpc/` | JSON-RPC namespaces (`energy.*`, `governance.*`, `compute.*`, `node.*`, etc.), rate-limit enforcement, auth middleware. |
+| `node/src/telemetry/`, `node/src/telemetry.rs` | Metric definitions, sampling helpers, `/metrics` endpoint wiring. |
+| `node/src/logging.rs`, `node/src/util/`, `node/src/http_client.rs` | Logging facades, utility helpers, HTTP/TLS wrappers. |
+| `node/src/bin/` | Node entry points, CLI-compatible binaries, test harness executables. |
+| `node/src/py.rs` | PyO3 bindings for deterministic replay + Python demos. |
+| `node/src/web/` | HTTP handlers for the embedded admin panel and test UI endpoints. |
+
+### Recovery, Provenance, and Miscellaneous
+
+| Path | Description |
+| --- | --- |
+| `node/src/provenance.rs` | Build provenance attestations, dependency hash enforcement, release gating. |
+| `node/src/partition_recover.rs` | Block replay helper after partitions (also referenced above under consensus). |
+| `node/src/log_indexer.rs` | Indexes structured logs for explorers/CLI queries. |
+| `node/src/simple_db/` | Cross-platform snapshot layer powering energy storage, governance, and more. |
+| `node/src/util/`, `node/src/constants.rs` | Misc helpers, constants, and shared utilities across modules. |
+
+## How to Use This Atlas
+
+1. **Find the path** that matches the area you need to change. If you bump into an unfamiliar file name, use `rg --files` with that name and locate its entry here.
+2. **Jump to the linked doc section** for deeper requirements and telemetry expectations. For example, `node/src/parallel.rs` references the compute marketplace and telemetry obligations documented in `docs/architecture.md#compute-marketplace`.
+3. **Record TODOs** in `AGENTS.md §15` whenever you discover missing documentation or future work; mirror your code comments so the backlog remains transparent.
+4. **Keep this atlas current**—if you add a new module, update this file (and link it from the Document Map) so the next contributor has instant context.

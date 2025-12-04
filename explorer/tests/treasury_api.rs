@@ -35,6 +35,7 @@ fn treasury_index_and_filters() {
     assert_eq!(full_page.disbursements[1].id, scheduled.id);
     assert_eq!(full_page.disbursements[2].id, cancelled.id);
     assert_eq!(full_page.disbursements[0].status_label, "executed");
+    assert_eq!(full_page.disbursements[2].status_label, "rolled_back");
     assert_eq!(
         full_page.disbursements[0].executed_tx_hash.as_deref(),
         Some("0xabc")
@@ -45,7 +46,7 @@ fn treasury_index_and_filters() {
             0,
             10,
             TreasuryDisbursementFilter {
-                status: Some(TreasuryDisbursementStatusFilter::Scheduled),
+                status: Some(TreasuryDisbursementStatusFilter::Draft),
                 ..Default::default()
             },
         )

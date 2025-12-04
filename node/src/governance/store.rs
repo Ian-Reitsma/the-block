@@ -17,9 +17,9 @@ use concurrency::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::treasury::{
-    mark_cancelled, mark_executed, DisbursementStatus, SignedExecutionIntent,
-    TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
-    TreasuryExecutorSnapshot,
+    mark_cancelled, mark_executed, mark_rolled_back, DisbursementPayload, DisbursementReceipt,
+    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
@@ -253,7 +253,7 @@ fn run_executor_tick(
         };
         match (config.submitter)(&intent) {
             Ok(tx_hash) => {
-                store.execute_disbursement(disbursement.id, &tx_hash)?;
+                store.execute_disbursement(disbursement.id, &tx_hash, Vec::new())?;
                 let _ = store.remove_execution_intent(disbursement.id);
                 store.record_executor_nonce(&config.identity, intent.nonce)?;
                 snapshot.record_nonce(intent.nonce);
@@ -2426,11 +2426,7 @@ impl GovStore {
 
     pub fn queue_disbursement(
         &self,
-        destination: &str,
-        amount_ct: u64,
-        amount_it: u64,
-        memo: &str,
-        scheduled_epoch: u64,
+        payload: DisbursementPayload,
     ) -> sled::Result<TreasuryDisbursement> {
         let mut records = self.load_disbursements()?;
         let next_id = records
@@ -2439,14 +2435,7 @@ impl GovStore {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
-        let record = TreasuryDisbursement::new(
-            next_id,
-            destination.to_string(),
-            amount_ct,
-            amount_it,
-            memo.to_string(),
-            scheduled_epoch,
-        );
+        let record = TreasuryDisbursement::from_payload(next_id, payload);
         records.push(record.clone());
         self.persist_disbursements(&records)?;
         self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0, 0)?;
@@ -2457,21 +2446,119 @@ impl GovStore {
         self.load_disbursements()
     }
 
+    pub fn advance_disbursement_status(
+        &self,
+        id: u64,
+        current_epoch: u64,
+    ) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let mut updated: Option<(TreasuryDisbursement, bool)> = None;
+        for entry in records.iter_mut() {
+            if entry.id != id {
+                continue;
+            }
+            let proposal = entry.proposal.as_ref().ok_or_else(|| {
+                sled::Error::Unsupported(
+                    "disbursement missing proposal metadata; cannot advance state".into(),
+                )
+            })?;
+            let now = unix_now();
+            let mut changed = true;
+            match entry.status {
+                DisbursementStatus::Draft { .. } => {
+                    let vote_deadline_epoch =
+                        current_epoch.saturating_add(proposal.vote_window_epochs);
+                    entry.status = DisbursementStatus::Voting {
+                        vote_deadline_epoch,
+                    };
+                }
+                DisbursementStatus::Voting {
+                    vote_deadline_epoch,
+                } => {
+                    if current_epoch < vote_deadline_epoch {
+                        return Err(sled::Error::Unsupported(
+                            format!(
+                                "vote window for disbursement {id} open until epoch {vote_deadline_epoch}"
+                            )
+                            .into(),
+                        ));
+                    }
+                    let activation_epoch = current_epoch.saturating_add(proposal.timelock_epochs);
+                    entry.status = DisbursementStatus::Queued {
+                        queued_at: now,
+                        activation_epoch,
+                    };
+                }
+                DisbursementStatus::Queued {
+                    activation_epoch, ..
+                } => {
+                    if current_epoch < activation_epoch {
+                        return Err(sled::Error::Unsupported(
+                            format!(
+                                "disbursement {id} timelock expires at epoch {activation_epoch}"
+                            )
+                            .into(),
+                        ));
+                    }
+                    entry.status = DisbursementStatus::Timelocked {
+                        ready_epoch: current_epoch,
+                    };
+                }
+                DisbursementStatus::Timelocked { .. }
+                | DisbursementStatus::Executed { .. }
+                | DisbursementStatus::Finalized { .. }
+                | DisbursementStatus::RolledBack { .. } => {
+                    changed = false;
+                }
+            }
+            updated = Some((entry.clone(), changed));
+            break;
+        }
+        let Some((record, changed)) = updated else {
+            return Err(sled::Error::Unsupported(
+                format!("unknown treasury disbursement id {id}").into(),
+            ));
+        };
+        if changed {
+            self.persist_disbursements(&records)?;
+        }
+        Ok(record)
+    }
+
     pub fn execute_disbursement(
         &self,
         id: u64,
         tx_hash: &str,
+        receipts: Vec<DisbursementReceipt>,
     ) -> sled::Result<TreasuryDisbursement> {
         let mut records = self.load_disbursements()?;
         let mut record = None;
         for entry in records.iter_mut() {
             if entry.id == id {
+                match entry.status {
+                    DisbursementStatus::Timelocked { .. } => {}
+                    DisbursementStatus::Queued { .. } => {
+                        return Err(sled::Error::Unsupported(
+                            format!("disbursement {id} still timelocked; advance state before execution").into(),
+                        ));
+                    }
+                    _ => {
+                        return Err(sled::Error::Unsupported(
+                            format!(
+                                "cannot execute disbursement {id} from status {:?}",
+                                entry.status
+                            )
+                            .into(),
+                        ));
+                    }
+                }
                 let balances = self.treasury_balances()?;
                 if balances.consumer < entry.amount_ct || balances.industrial < entry.amount_it {
                     return Err(sled::Error::Unsupported(
                         format!("treasury balance insufficient for disbursement {id}").into(),
                     ));
                 }
+                entry.receipts = receipts.clone();
                 mark_executed(entry, tx_hash.to_string());
                 record = Some(entry.clone());
                 break;
@@ -2502,14 +2589,41 @@ impl GovStore {
         let mut record = None;
         for entry in records.iter_mut() {
             if entry.id == id {
-                mark_cancelled(entry, reason.to_string());
-                record = Some(entry.clone());
+                let executed_already = matches!(
+                    entry.status,
+                    DisbursementStatus::Executed { .. } | DisbursementStatus::Finalized { .. }
+                );
+                if executed_already {
+                    mark_rolled_back(entry, reason.to_string());
+                } else {
+                    mark_cancelled(entry, reason.to_string());
+                }
+                record = Some((entry.clone(), executed_already));
                 break;
             }
         }
-        if let Some(updated) = record.clone() {
+        if let Some((updated, executed_before)) = record.clone() {
             self.persist_disbursements(&records)?;
-            self.record_balance_event(TreasuryBalanceEventKind::Cancelled, Some(updated.id), 0, 0)?;
+            let delta_ct = if executed_before {
+                i64::try_from(updated.amount_ct).map_err(|_| {
+                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
+                })?
+            } else {
+                0
+            };
+            let delta_it = if executed_before {
+                i64::try_from(updated.amount_it).map_err(|_| {
+                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
+                })?
+            } else {
+                0
+            };
+            self.record_balance_event(
+                TreasuryBalanceEventKind::Cancelled,
+                Some(updated.id),
+                delta_ct,
+                delta_it,
+            )?;
             Ok(updated)
         } else {
             Err(sled::Error::Unsupported(
