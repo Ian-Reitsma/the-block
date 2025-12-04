@@ -2829,6 +2829,119 @@ pub static AD_PRESENCE_RESERVATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
+pub static AD_SEGMENT_READY_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_segment_ready_total",
+            "Ready cohort counts per domain tier, interest tag, or presence bucket",
+        ),
+        &["domain_tier", "presence_bucket", "interest_tag"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad segment ready total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad segment ready total: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+static AD_SEGMENT_READY_LABELS: Lazy<Mutex<HashSet<(String, String, String)>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+#[cfg(feature = "telemetry")]
+pub static AD_AUCTION_TOP_BID_USD: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_auction_top_bid_usd_micros",
+            "Top clearing bid per selector in USD micros",
+        ),
+        &["selector"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad auction top bid: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad auction top bid: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_AUCTION_WIN_RATE: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_auction_win_rate",
+            "Auction win rate per selector (parts-per-million)",
+        ),
+        &["selector"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad auction win rate: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad auction win rate: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BID_SHADING_FACTOR_BPS: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_bid_shading_factor_bps",
+            "Bid shading factor per selector in basis points",
+        ),
+        &["selector"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad bid shading factor: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad bid shading factor: {e}"));
+    g
+});
+
+pub static AD_PRIVACY_DENIAL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_privacy_denial_total",
+            "Privacy guardrail denials partitioned by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad privacy denial: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad privacy denial: {e}"));
+    c
+});
+
+pub static AD_PRIVACY_BUDGET_UTILIZATION_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "ad_privacy_budget_utilization_ratio",
+            "Privacy budget utilization ratio per selector",
+        ),
+        &["selector"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad privacy utilization: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad privacy utilization: {e}"));
+    g
+});
+
+pub static AD_CONVERSION_VALUE_CT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_conversion_value_ct_total",
+            "Aggregated conversion value in CT per selector",
+        ),
+        &["selector"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad conversion value ct: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad conversion value ct: {e}"));
+    c
+});
+
+#[cfg(feature = "telemetry")]
 pub static AD_MARKET_UTILIZATION_OBSERVED: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new(
@@ -4494,6 +4607,187 @@ pub fn update_ad_market_utilization_metrics(
     }
 }
 
+pub fn update_ad_segment_ready_metrics(segment: Option<&crate::ad_readiness::AdSegmentReadiness>) {
+    #[cfg(feature = "telemetry")]
+    {
+        let mut next_labels: HashSet<(String, String, String)> = HashSet::new();
+        if let Some(readiness) = segment {
+            for (tier, stats) in &readiness.domain_tiers {
+                let label = (tier.clone(), "none".to_string(), "none".to_string());
+                set_segment_ready_metric(&label, stats.cohort_count as i64);
+                next_labels.insert(label);
+            }
+            for (tag, stats) in &readiness.interest_tags {
+                let label = ("none".to_string(), "none".to_string(), tag.clone());
+                set_segment_ready_metric(&label, stats.cohort_count as i64);
+                next_labels.insert(label);
+            }
+            for (bucket_id, bucket) in &readiness.presence_buckets {
+                let label = ("none".to_string(), bucket_id.clone(), "none".to_string());
+                set_segment_ready_metric(&label, bucket.ready_slots as i64);
+                next_labels.insert(label);
+            }
+        }
+        let mut active = AD_SEGMENT_READY_LABELS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous: Vec<(String, String, String)> = active.iter().cloned().collect();
+        for label in previous {
+            if !next_labels.contains(&label) {
+                let values = [label.0.as_str(), label.1.as_str(), label.2.as_str()];
+                let _ = AD_SEGMENT_READY_TOTAL.remove_label_values(&values);
+            }
+        }
+        active.clear();
+        active.extend(next_labels);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = segment;
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn set_segment_ready_metric(labels: &(String, String, String), value: i64) {
+    let label_values = [labels.0.as_str(), labels.1.as_str(), labels.2.as_str()];
+    AD_SEGMENT_READY_TOTAL
+        .ensure_handle_for_label_values(&label_values)
+        .unwrap_or_else(|e| panic!("ad segment ready labels: {e}"))
+        .set(value);
+}
+
+pub fn record_ad_privacy_denial(reason: &str) {
+    #[cfg(feature = "telemetry")]
+    sampled_inc_vec(&AD_PRIVACY_DENIAL_TOTAL, &[reason]);
+    #[cfg(not(feature = "telemetry"))]
+    let _ = reason;
+}
+
+pub fn update_ad_privacy_budget_ratio(selector: &str, ratio: f64) {
+    #[cfg(feature = "telemetry")]
+    {
+        let clamped = ratio.clamp(0.0, 1.0);
+        AD_PRIVACY_BUDGET_UTILIZATION_RATIO
+            .get_metric_with_label_values(&[selector])
+            .unwrap_or_else(|e| panic!("ad privacy utilization labels: {e}"))
+            .set(clamped);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (selector, ratio);
+    }
+}
+
+pub fn update_ad_auction_top_bid(selector: &str, bid_usd_micros: u64) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_AUCTION_TOP_BID_USD
+            .get_metric_with_label_values(&[selector])
+            .unwrap_or_else(|e| panic!("ad auction top bid labels: {e}"))
+            .set(bid_usd_micros as f64);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (selector, bid_usd_micros);
+    }
+}
+
+pub fn update_ad_bid_shading(selector: &str, shading_factor_bps: u32) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_BID_SHADING_FACTOR_BPS
+            .get_metric_with_label_values(&[selector])
+            .unwrap_or_else(|e| panic!("ad bid shading labels: {e}"))
+            .set(shading_factor_bps as f64);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (selector, shading_factor_bps);
+    }
+}
+
+pub fn update_ad_auction_win_rate(selector: &str, win_rate_ppm: u32) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_AUCTION_WIN_RATE
+            .get_metric_with_label_values(&[selector])
+            .unwrap_or_else(|e| panic!("ad auction win rate labels: {e}"))
+            .set(win_rate_ppm as f64);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (selector, win_rate_ppm);
+    }
+}
+
+pub fn add_ad_conversion_ct_value(selector: &str, value_ct_micros: u64) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_CONVERSION_VALUE_CT_TOTAL
+            .with_label_values(&[selector])
+            .unwrap_or_else(|e| panic!("ad conversion value labels: {e}"))
+            .inc_by(value_ct_micros);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (selector, value_ct_micros);
+    }
+}
+
+pub fn record_dns_auction_completed(duration_secs: u64, settlement_ct: u64) {
+    #[cfg(feature = "telemetry")]
+    {
+        DNS_AUCTION_OUTCOME_TOTAL
+            .with_label_values(&["settled"])
+            .unwrap_or_else(|e| panic!("dns auction outcome labels: {e}"))
+            .inc();
+        DNS_AUCTION_DURATION_SECONDS.observe(duration_secs as f64);
+        DNS_AUCTION_SETTLEMENT_CT.observe(settlement_ct as f64);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (duration_secs, settlement_ct);
+    }
+}
+
+pub fn record_dns_auction_cancelled() {
+    #[cfg(feature = "telemetry")]
+    {
+        DNS_AUCTION_OUTCOME_TOTAL
+            .with_label_values(&["cancelled"])
+            .unwrap_or_else(|e| panic!("dns auction outcome labels: {e}"))
+            .inc();
+    }
+}
+
+pub fn adjust_dns_stake_locked(delta_ct: i64) {
+    #[cfg(feature = "telemetry")]
+    {
+        DNS_STAKE_LOCKED_CT.add(delta_ct);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = delta_ct;
+    }
+}
+
+pub fn update_dns_auction_status_metrics(active: u64, settled: u64, cancelled: u64) {
+    #[cfg(feature = "telemetry")]
+    {
+        let statuses = [("active", active), ("settled", settled), ("cancelled", cancelled)];
+        for (status, count) in statuses {
+            DNS_AUCTION_STATUS_TOTAL
+                .ensure_handle_for_label_values(&[status])
+                .unwrap_or_else(|e| panic!("dns auction status labels: {e}"))
+                .set(count.min(i64::MAX as u64) as i64);
+        }
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (active, settled, cancelled);
+    }
+}
+
 pub static GOV_OPEN_PROPOSALS: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new("gov_open_proposals", "Open governance proposals")
         .unwrap_or_else(|e| panic!("gauge gov_open_proposals: {e}"));
@@ -5637,6 +5931,76 @@ pub static DNS_VERIFICATION_FAIL_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c.handle()
+});
+
+pub static DNS_AUCTION_STATUS_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "dns_auction_status_total",
+            "Number of DNS auctions partitioned by status",
+        ),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("gauge dns auction status total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry dns auction status total: {e}"));
+    g
+});
+
+pub static DNS_AUCTION_OUTCOME_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "dns_auction_outcome_total",
+            "DNS auction outcomes grouped by status",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter dns auction outcome total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry dns auction outcome total: {e}"));
+    c
+});
+
+pub static DNS_AUCTION_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "dns_auction_duration_seconds",
+        "Observed DNS auction durations in seconds",
+    )
+    .buckets(telemetry::exponential_buckets(60.0, 2.0, 12));
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram dns auction duration: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry dns auction duration: {e}"));
+    h
+});
+
+pub static DNS_AUCTION_SETTLEMENT_CT: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "dns_auction_settlement_ct",
+        "DNS auction settlement amounts denominated in CT",
+    )
+    .buckets(telemetry::exponential_buckets(1.0, 2.0, 18));
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram dns auction settlement ct: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry dns auction settlement ct: {e}"));
+    h
+});
+
+pub static DNS_STAKE_LOCKED_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "dns_stake_locked_ct",
+        "Total CT currently locked in DNS stake escrows",
+    )
+    .unwrap_or_else(|e| panic!("gauge dns stake locked ct: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry dns stake locked ct: {e}"));
+    g.handle()
 });
 
 pub static GOSSIP_DUPLICATE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {

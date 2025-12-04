@@ -6,7 +6,7 @@ use std::io::{Error as IoError, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ad_market::{DomainTier, DistributionPolicy, MarketplaceHandle};
+use ad_market::{DistributionPolicy, DomainTier, MarketplaceHandle};
 use crypto_suite::{encoding::hex, hashing::blake3, signatures::ed25519::SigningKey};
 use foundation_serialization::json::{
     self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
@@ -230,7 +230,10 @@ pub fn persist_snapshot(base: &str, market: &MarketplaceHandle, epoch: u64) -> s
             JsonValue::Number(JsonNumber::from(ppm)),
         );
     }
-    root.insert("domain_tier_supply_ppm".into(), JsonValue::Object(tier_supply_map));
+    root.insert(
+        "domain_tier_supply_ppm".into(),
+        JsonValue::Object(tier_supply_map),
+    );
 
     // Interest tag supply in ppm (top 20 tags only to limit snapshot size)
     let mut tag_supply: Vec<_> = interest_tag_supply.into_iter().collect();
@@ -260,7 +263,10 @@ pub fn persist_snapshot(base: &str, market: &MarketplaceHandle, epoch: u64) -> s
         "ready_slots".into(),
         JsonValue::Number(JsonNumber::from(presence_ready_slots)),
     );
-    root.insert("presence_bucket_stats".into(), JsonValue::Object(presence_map));
+    root.insert(
+        "presence_bucket_stats".into(),
+        JsonValue::Object(presence_map),
+    );
 
     // Selectors version
     let selectors_version = cohort_prices

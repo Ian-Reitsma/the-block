@@ -282,11 +282,16 @@ impl std::fmt::Display for DisbursementValidationError {
             Self::InvalidDestination(dest) => write!(f, "invalid destination address: {}", dest),
             Self::ZeroAmount => write!(f, "disbursement amount must be greater than zero"),
             Self::ZeroScheduledEpoch => write!(f, "scheduled epoch must be greater than zero"),
-            Self::InvalidQuorum => write!(f, "quorum percentages must be between 0 and 1000000 ppm"),
+            Self::InvalidQuorum => {
+                write!(f, "quorum percentages must be between 0 and 1000000 ppm")
+            }
             Self::InvalidVoteWindow => write!(f, "vote window must be at least 1 epoch"),
             Self::InvalidTimelock => write!(f, "timelock must be at least 1 epoch"),
             Self::InvalidRollbackWindow => write!(f, "rollback window must be at least 1 epoch"),
-            Self::ExpectedReceiptsMismatch { expected_total, actual } => write!(
+            Self::ExpectedReceiptsMismatch {
+                expected_total,
+                actual,
+            } => write!(
                 f,
                 "expected receipts total {} does not match disbursement amount {}",
                 expected_total, actual
@@ -340,9 +345,10 @@ pub fn validate_disbursement_payload(
 
     // Validate destination address format (basic check - starts with "ct" for mainnet)
     if !payload.disbursement.destination.starts_with("ct1") {
-        return Err(DisbursementValidationError::InvalidDestination(
-            format!("address must start with 'ct1', got: {}", payload.disbursement.destination),
-        ));
+        return Err(DisbursementValidationError::InvalidDestination(format!(
+            "address must start with 'ct1', got: {}",
+            payload.disbursement.destination
+        )));
     }
 
     if payload.disbursement.amount_ct == 0 && payload.disbursement.amount_it == 0 {
@@ -445,7 +451,10 @@ mod tests {
         let mut payload = valid_payload();
         payload.proposal.vote_window_epochs = 0;
         let err = validate_disbursement_payload(&payload).unwrap_err();
-        assert!(matches!(err, DisbursementValidationError::InvalidVoteWindow));
+        assert!(matches!(
+            err,
+            DisbursementValidationError::InvalidVoteWindow
+        ));
     }
 
     #[test]

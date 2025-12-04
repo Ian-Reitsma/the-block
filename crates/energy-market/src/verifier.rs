@@ -73,11 +73,7 @@ impl SignatureScheme {
 /// Trait for signature verification providers
 pub trait SignatureVerifier: Send + Sync {
     /// Verify a signature over the canonical meter reading payload
-    fn verify(
-        &self,
-        reading: &MeterReading,
-        public_key: &[u8],
-    ) -> Result<(), VerificationError>;
+    fn verify(&self, reading: &MeterReading, public_key: &[u8]) -> Result<(), VerificationError>;
 
     /// Return the scheme identifier
     fn scheme(&self) -> SignatureScheme;
@@ -87,11 +83,7 @@ pub trait SignatureVerifier: Send + Sync {
 pub struct Ed25519Verifier;
 
 impl SignatureVerifier for Ed25519Verifier {
-    fn verify(
-        &self,
-        reading: &MeterReading,
-        public_key: &[u8],
-    ) -> Result<(), VerificationError> {
+    fn verify(&self, reading: &MeterReading, public_key: &[u8]) -> Result<(), VerificationError> {
         // Extract 32-byte public key
         if public_key.len() != 32 {
             return Err(VerificationError::MalformedPublicKey(format!(
@@ -121,23 +113,22 @@ impl SignatureVerifier for Ed25519Verifier {
             .try_into()
             .map_err(|_| VerificationError::MalformedPublicKey("conversion failed".into()))?;
 
-        let vk = crypto_suite::signatures::ed25519::VerifyingKey::from_bytes(pk_array)
-            .map_err(|e| {
+        let vk =
+            crypto_suite::signatures::ed25519::VerifyingKey::from_bytes(pk_array).map_err(|e| {
                 VerificationError::MalformedPublicKey(format!("ed25519 key parse failed: {}", e))
             })?;
 
-        let sig_array: &[u8; 64] = reading.signature[..].try_into().map_err(|_| {
-            VerificationError::MalformedSignature("conversion failed".into())
-        })?;
+        let sig_array: &[u8; 64] = reading.signature[..]
+            .try_into()
+            .map_err(|_| VerificationError::MalformedSignature("conversion failed".into()))?;
 
         let sig = crypto_suite::signatures::ed25519::Signature::from_bytes(sig_array);
 
-        vk.verify(message.as_bytes(), &sig).map_err(|e| {
-            VerificationError::InvalidSignature {
+        vk.verify(message.as_bytes(), &sig)
+            .map_err(|e| VerificationError::InvalidSignature {
                 provider_id: reading.provider_id.clone(),
                 reason: format!("ed25519 verification failed: {}", e),
-            }
-        })
+            })
     }
 
     fn scheme(&self) -> SignatureScheme {
@@ -163,11 +154,7 @@ impl DilithiumVerifier {
 
 #[cfg(feature = "pq-crypto")]
 impl SignatureVerifier for DilithiumVerifier {
-    fn verify(
-        &self,
-        reading: &MeterReading,
-        public_key: &[u8],
-    ) -> Result<(), VerificationError> {
+    fn verify(&self, reading: &MeterReading, public_key: &[u8]) -> Result<(), VerificationError> {
         // Compute canonical message
         let mut hasher = Blake3::new();
         hasher.update(reading.provider_id.as_bytes());

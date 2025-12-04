@@ -3,8 +3,8 @@
 use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{
     BudgetBrokerConfig, BudgetBrokerSnapshot, Campaign, CampaignBudgetSnapshot,
-    CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy,
-    DomainTier, MarketplaceHandle, PresenceBucketRef, PresenceKind, UpliftHoldoutAssignment,
+    CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy, DomainTier,
+    MarketplaceHandle, PresenceBucketRef, PresenceKind, UpliftHoldoutAssignment,
 };
 use concurrency::Lazy;
 use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
@@ -792,6 +792,7 @@ pub fn readiness(
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::update_ad_market_utilization_metrics(&snapshot.cohort_utilization);
+        crate::telemetry::update_ad_segment_ready_metrics(snapshot.segment_readiness.as_ref());
     }
     let mut root = Map::new();
     root.insert("status".into(), Value::String("ok".into()));
@@ -1148,7 +1149,10 @@ const ERR_HOLDOUT_OVERLAP: i32 = -32038;
 const ERR_SELECTOR_WEIGHT_MISMATCH: i32 = -32039;
 
 fn err_invalid_presence_bucket() -> RpcError {
-    RpcError::new(ERR_INVALID_PRESENCE_BUCKET, "invalid or expired presence bucket")
+    RpcError::new(
+        ERR_INVALID_PRESENCE_BUCKET,
+        "invalid or expired presence bucket",
+    )
 }
 
 fn err_forbidden_selector_combo() -> RpcError {
@@ -1486,10 +1490,7 @@ pub fn reserve_presence(
     // Build response
     let mut result = Map::new();
     result.insert("status".into(), Value::String("ok".into()));
-    result.insert(
-        "reservation_id".into(),
-        Value::String(reservation_id),
-    );
+    result.insert("reservation_id".into(), Value::String(reservation_id));
     result.insert(
         "expires_at_micros".into(),
         Value::Number(Number::from(effective_expires)),
@@ -1501,10 +1502,7 @@ pub fn reserve_presence(
     result.insert("effective_selectors".into(), Value::Array(Vec::new()));
 
     #[cfg(feature = "telemetry")]
-    crate::telemetry::sampled_inc_vec(
-        &crate::telemetry::AD_PRESENCE_RESERVATION_TOTAL,
-        &["ok"],
-    );
+    crate::telemetry::sampled_inc_vec(&crate::telemetry::AD_PRESENCE_RESERVATION_TOTAL, &["ok"]);
 
     Ok(Value::Object(result))
 }

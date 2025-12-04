@@ -3524,10 +3524,7 @@ fn cohort_key_snapshot_to_value(snapshot: &CohortKeySnapshot) -> JsonValue {
         map.insert("interest_tags".into(), JsonValue::Array(tags));
     }
     if let Some(bucket) = snapshot.presence_bucket.as_ref() {
-        map.insert(
-            "presence_bucket".into(),
-            presence_bucket_to_value(bucket),
-        );
+        map.insert("presence_bucket".into(), presence_bucket_to_value(bucket));
     }
     if snapshot.selectors_version != cohort_selector_version_default() {
         map.insert(

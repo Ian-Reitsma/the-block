@@ -436,10 +436,10 @@ impl Default for Params {
             ad_rehearsal_enabled: 0,
             ad_rehearsal_stability_windows: 6,
             presence_min_crowd_size: 5,
-            presence_ttl_secs: 86400,           // 24 hours
-            presence_radius_meters: 500,         // 500m default aggregation radius
-            presence_proof_cache_size: 10000,    // Max cached PresenceReceipt entries
-            presence_min_confidence_bps: 8000,   // 80% minimum confidence
+            presence_ttl_secs: 86400,          // 24 hours
+            presence_radius_meters: 500,       // 500m default aggregation radius
+            presence_proof_cache_size: 10000,  // Max cached PresenceReceipt entries
+            presence_min_confidence_bps: 8000, // 80% minimum confidence
             ad_use_percentile_thresholds: 0,
             ad_viewer_percentile: default_viewer_percentile(),
             ad_host_percentile: default_host_percentile(),
