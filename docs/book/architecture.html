@@ -347,9 +347,10 @@
 <h2 id="energy-market"><a class="header" href="#energy-market">Energy Market</a></h2>
 <ul>
 <li>Energy credits live in <code>crates/energy-market</code> with the node wrapper in <code>node/src/energy.rs</code>. Providers, credits, and receipts persist in sled via <code>SimpleDb::open_named(names::ENERGY_MARKET, …)</code>; set <code>TB_ENERGY_MARKET_DIR</code> to relocate the DB. The store snapshots to bytes (<code>EnergyMarket::{to_bytes,from_bytes}</code>) on every mutation and uses the same fsync+rename discipline as other <code>SimpleDb</code> consumers so restarts replay identical state.</li>
+<li>Oracle trust roots are defined in <code>config/default.toml</code> under <code>energy.provider_keys</code>. Each entry maps a provider ID to a 32-byte Ed25519 public key; reloads hot-swap the verifier registry via <code>node::energy::configure_provider_keys</code> so operators can rotate or revoke keys without restarts.</li>
 <li>RPC wiring (<code>node/src/rpc/energy.rs</code>) exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, and <code>energy.settle</code>. The CLI (<code>cli/src/energy.rs</code>) emits the same JSON schema and prints providers, outstanding credits (meter hashes), and settled receipts, so oracle adapters (<code>crates/oracle-adapter</code>) and explorers stay aligned. <code>docs/testnet/ENERGY_QUICKSTART.md</code> covers bootstrap, signature validation, dispute rehearsal, and how to script <code>tb-cli energy</code> calls.</li>
 <li>Governance owns <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code>. Proposals feed those values through the shared governance crate, latch them in <code>node/src/governance/params.rs</code>, then invoke <code>node::energy::set_governance_params</code>, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.</li>
-<li>Observability: <code>energy_market</code> emits gauges (<code>energy_providers_count</code>, <code>energy_avg_price</code>), counters (<code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>), histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>), and simple health probes (<code>node::energy::check_energy_market_health</code>). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope.</li>
+<li>Observability: <code>energy_market</code> emits gauges (<code>energy_providers_count</code>, <code>energy_avg_price</code>), counters (<code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_signature_failure_total{provider,reason}</code>), histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>), and simple health probes (<code>node::energy::check_energy_market_health</code>). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope.</li>
 </ul>
 <h3 id="energy-governance-and-rpc-next-tasks"><a class="header" href="#energy-governance-and-rpc-next-tasks">Energy, Governance, and RPC Next Tasks</a></h3>
 <ul>
@@ -363,7 +364,7 @@
 </li>
 <li><strong>Energy + Oracle</strong>
 <ul>
-<li>Implement real signature verification inside <code>oracle-adapter</code> (replace <code>NoopSignatureVerifier</code>) and ship vectors.</li>
+<li>Ed25519 verification now lives inside <code>oracle-adapter</code> (<code>Ed25519SignatureVerifier</code>) with provider-key registration. Node config (<code>energy.provider_keys</code>) defines the trusted keys and hot-swaps the verifier registry on reload; remaining work focuses on quorum/expiry policies, slashing telemetry, and dispute RPCs.</li>
 <li>Add oracle quorum/expiry policy (multi-reading attestation) with slashing telemetry and dispute RPCs.</li>
 <li>Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.</li>
 <li>Expand CLI flows: list providers/receipts, dispute + open cases, and provider updates (price + stake top-up).</li>

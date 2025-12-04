@@ -249,6 +249,7 @@ dependencies = [
  "foundation_metrics",
  "foundation_serde",
  "foundation_serialization",
+ "rand",
  "thiserror",
 ]
 
@@ -633,6 +634,7 @@ dependencies = [
 name = "oracle-adapter"
 version = "0.1.0"
 dependencies = [
+ "crypto_suite",
  "energy-market",
  "foundation_serde",
  "foundation_serialization",

@@ -773,18 +773,19 @@ impl BinaryCodec for TreasuryDisbursement {
         self.status.encode(writer);
         self.amount_it.encode(writer);
         // Use serde-based encoding for complex nested types
-        let proposal_bytes = foundation_serialization::binary::encode(&self.proposal)
-            .unwrap_or_else(|_| Vec::new());
+        let proposal_bytes =
+            foundation_serialization::binary::encode(&self.proposal).unwrap_or_else(|_| Vec::new());
         (proposal_bytes.len() as u32).encode(writer);
         writer.write_bytes(&proposal_bytes);
 
-        let expected_receipts_bytes = foundation_serialization::binary::encode(&self.expected_receipts)
-            .unwrap_or_else(|_| Vec::new());
+        let expected_receipts_bytes =
+            foundation_serialization::binary::encode(&self.expected_receipts)
+                .unwrap_or_else(|_| Vec::new());
         (expected_receipts_bytes.len() as u32).encode(writer);
         writer.write_bytes(&expected_receipts_bytes);
 
-        let receipts_bytes = foundation_serialization::binary::encode(&self.receipts)
-            .unwrap_or_else(|_| Vec::new());
+        let receipts_bytes =
+            foundation_serialization::binary::encode(&self.receipts).unwrap_or_else(|_| Vec::new());
         (receipts_bytes.len() as u32).encode(writer);
         writer.write_bytes(&receipts_bytes);
     }
@@ -1104,15 +1105,16 @@ pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
 
     // Add proposal if present
     if let Some(proposal) = &disbursement.proposal {
-        let proposal_json = foundation_serialization::json::to_value(proposal)
-            .unwrap_or(Value::Object(Map::new()));
+        let proposal_json =
+            foundation_serialization::json::to_value(proposal).unwrap_or(Value::Object(Map::new()));
         map.insert("proposal".into(), proposal_json);
     }
 
     // Add expected_receipts if non-empty
     if !disbursement.expected_receipts.is_empty() {
-        let receipts_json = foundation_serialization::json::to_value(&disbursement.expected_receipts)
-            .unwrap_or(Value::Array(vec![]));
+        let receipts_json =
+            foundation_serialization::json::to_value(&disbursement.expected_receipts)
+                .unwrap_or(Value::Array(vec![]));
         map.insert("expected_receipts".into(), receipts_json);
     }
 

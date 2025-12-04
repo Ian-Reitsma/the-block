@@ -48,6 +48,10 @@ Most blockchains focus only on sending money around. The Block goes further - it
 - **Storage providers** keep your files safe (like Dropbox, but decentralized)
 - **Compute providers** run programs for you (like AWS, but decentralized)
 - **Energy market** lets you buy and sell real-world electricity with built-in verification
+  - Configure oracle trust roots directly in `config/default.toml` via `energy.provider_keys` (each entry maps a provider ID to a 32-byte Ed25519 public key). Reloading the config hot-swaps the verifier registry so you can roll keys without restarting nodes.
+  - Meter submissions are rejected unless they carry a valid Ed25519 signature over the canonical payload (`MeterReadingPayload::signing_bytes`). Telemetry surfaces failures via `energy_signature_failure_total{provider,reason}` so operators can alert on bad or missing signatures.
+  - Dispute workflows now live behind first-party RPCs (`energy.disputes`, `energy.flag_dispute`, `energy.resolve_dispute`, `energy.receipts`, `energy.credits`) and the matching CLI (`tb-cli energy disputes|receipts|credits|flag-dispute|resolve-dispute`). Operators can page through outstanding credits/receipts, flag a `meter_hash`, and record resolutions without spelunking sled snapshots or pushing ad-hoc governance proposals.
+  - Energy telemetry exports provider/credit/dispute gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`) plus counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`). Dashboards wire these straight into Grafana via the metrics-aggregator.
 
 Instead of paying these providers per request with transaction fees (which gets expensive fast), The Block pays them automatically when new blocks are mined - similar to how Bitcoin pays miners, but for many types of useful work.
 
@@ -79,6 +83,7 @@ Think of this repository like a city with different neighborhoods:
 
 ### Recent Major Additions
 - **Treasury Disbursement System**: Complete end-to-end workflow for governance-approved fund distributions with RPC handlers (`gov.treasury.submit_disbursement`, `execute_disbursement`, `rollback_disbursement`) and full validation
+- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `tb-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
 - **Energy Market Signature Verification**: Trait-based multi-provider signature system with Ed25519 (always available) and Dilithium (post-quantum, feature-gated), enabling oracle meter readings to be cryptographically verified
 - **Comprehensive Testing**: 100+ new unit tests covering signature verification, credit persistence across provider restarts, oracle timeout enforcement, and disbursement validation
 

@@ -52,7 +52,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     let scheduled = fetch_disbursement(&state, 1);
     assert_eq!(scheduled.destination, "dest-1");
     assert_eq!(scheduled.amount_ct, 500);
-    assert!(matches!(scheduled.status, DisbursementStatus::Scheduled));
+    assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     let first_created_at = scheduled.created_at;
 
     out.clear();
@@ -74,7 +74,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     assert_eq!(queued_second.destination, "dest-2");
     assert!(matches!(
         queued_second.status,
-        DisbursementStatus::Scheduled
+        DisbursementStatus::Draft { .. }
     ));
 
     let store = GovStore::open(state.clone());
@@ -120,11 +120,12 @@ fn treasury_lifecycle_outputs_structured_json() {
     .expect("cancel disbursement");
     let cancelled = fetch_disbursement(&state, 2);
     match cancelled.status {
-        DisbursementStatus::Cancelled {
-            cancelled_at,
+        DisbursementStatus::RolledBack {
+            rolled_back_at,
             ref reason,
+            ..
         } => {
-            assert!(cancelled_at >= queued_second.created_at);
+            assert!(rolled_back_at >= queued_second.created_at);
             assert_eq!(reason, "policy update");
         }
         other => panic!("unexpected status after cancel: {other:?}"),
@@ -138,7 +139,7 @@ fn treasury_lifecycle_outputs_structured_json() {
         .any(|entry| matches!(entry.status, DisbursementStatus::Executed { .. })));
     assert!(entries
         .iter()
-        .any(|entry| matches!(entry.status, DisbursementStatus::Cancelled { .. })));
+        .any(|entry| matches!(entry.status, DisbursementStatus::RolledBack { .. })));
 }
 
 #[test]
@@ -223,12 +224,12 @@ fn treasury_executor_lease_release_marks_snapshot() {
 #[test]
 fn treasury_fetch_remote_combines_responses() {
     let mut query = TreasuryDisbursementQuery::default();
-    query.status = Some(RemoteTreasuryStatus::Scheduled);
+    query.status = Some(RemoteTreasuryStatus::Draft);
     query.after_id = Some(3);
     query.limit = Some(4);
     let disbursement_params = treasury_disbursement_params(&query);
     let expected_disb_params = json_object([
-        ("status", json_string("scheduled")),
+        ("status", json_string("draft")),
         ("after_id", json_number_u64(3)),
         ("limit", json_number_u64(4)),
     ]);
@@ -250,7 +251,9 @@ fn treasury_fetch_remote_combines_responses() {
             memo: "ops".into(),
             scheduled_epoch: 9000,
             created_at: 1_700_000_000,
-            status: DisbursementStatus::Scheduled,
+            status: DisbursementStatus::Draft {
+                created_at: 1_700_000_000,
+            },
         }],
         next_cursor: Some(12),
     };
@@ -302,7 +305,7 @@ fn treasury_fetch_remote_combines_responses() {
             .disbursements
             .first()
             .map(|entry| entry.status.clone()),
-        Some(DisbursementStatus::Scheduled)
+        Some(DisbursementStatus::Draft { .. })
     ));
     let history = output
         .balance_history

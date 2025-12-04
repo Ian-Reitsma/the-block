@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 energy-market = { path = "../energy-market" }
 foundation_serialization = { path = "../foundation_serialization" }
+crypto_suite = { path = "../crypto_suite" }
 thiserror = { path = "../thiserror" }
 serde = { workspace = true }

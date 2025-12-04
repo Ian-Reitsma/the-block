@@ -112,8 +112,12 @@ fn rpc_treasury_endpoints_surface_history() {
         for entry in &list {
             match entry.status {
                 DisbursementStatus::Executed { .. } => executed = true,
-                DisbursementStatus::Cancelled { .. } => cancelled = true,
-                DisbursementStatus::Scheduled => {}
+                DisbursementStatus::RolledBack { .. } => cancelled = true,
+                DisbursementStatus::Draft { .. }
+                | DisbursementStatus::Voting { .. }
+                | DisbursementStatus::Queued { .. }
+                | DisbursementStatus::Timelocked { .. } => {}
+                DisbursementStatus::Finalized { .. } => {}
             }
         }
         assert!(executed, "missing executed disbursement");

@@ -597,6 +597,11 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li><code>check_energy_market_health()</code> warns when <code>pending_credit_count()</code> exceeds 25 and logs settlement heartbeats so dashboards can alert without scraping additional RPCs.</li>
 </ul>
 </li>
+<li><strong>Provider trust roots</strong>:
+<ul>
+<li><code>config/default.toml</code> exposes <code>energy.provider_keys = [{ provider_id = "...", public_key_hex = "..." }, …]</code>. Reloads invoke <code>node::energy::configure_provider_keys</code>, clearing and repopulating the sled-backed verifier registry so ops can rotate or revoke keys without restarts.</li>
+</ul>
+</li>
 <li><strong>RPC + CLI</strong> (<code>node/src/rpc/energy.rs</code>, <code>cli/src/energy.rs</code>):
 <ul>
 <li>RPC methods: <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>. Helpers enforce payload shape (<code>require_string</code>, <code>require_u64</code>, <code>decode_hash</code>, <code>decode_signature</code>) and emit canonical JSON for providers/credits/receipts.</li>
@@ -606,13 +611,13 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </li>
 <li><strong>Oracle adapter + mock service</strong> (<code>crates/oracle-adapter</code>, <code>services/mock-energy-oracle</code>):
 <ul>
-<li>Adapter defines <code>SignatureVerifier</code>; currently <code>NoopSignatureVerifier</code> (always true) stands in until Ed25519 verification + vectors land. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes <code>signing_bytes()</code> so verifiers can sign/verify consistently.</li>
+<li>Adapter defines <code>SignatureVerifier</code>; the default <code>Ed25519SignatureVerifier</code> enforces signatures for every provider with a registered key. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes the canonical <code>signing_bytes()</code> digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.</li>
 <li>Mock service (in-house <code>httpd</code> router) listens on <code>MOCK_ENERGY_ORACLE_ADDR</code> (default <code>127.0.0.1:8080</code>), exposes <code>/meter/:id/reading</code> (increments totals by 250 kWh, updates timestamp, returns payload) and <code>/meter/:id/submit</code> (accepts posted readings). Used by <code>scripts/deploy-worldos-testnet.sh</code>.</li>
 </ul>
 </li>
 <li><strong>Telemetry</strong>:
 <ul>
-<li>Gauges: <code>energy_providers_count</code>, <code>energy_avg_price</code>. Counters: <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>. Histograms: <code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>.</li>
+<li>Gauges: <code>energy_providers_count</code>, <code>energy_avg_price</code>. Counters: <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_signature_failure_total{provider,reason}</code>. Histograms: <code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>.</li>
 <li>Logs: <code>node::energy::check_energy_market_health</code> warns on backlog spikes and settlement stalls. Metrics aggregator wiring (<code>/wrappers</code>, <code>/telemetry/summary</code>) plus Grafana panels (provider counts, pending credits, slash totals, settlement rates) are tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>.</li>
 </ul>
 </li>
