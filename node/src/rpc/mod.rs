@@ -2885,6 +2885,26 @@ fn dispatch(
             let params = parse_params::<treasury::TreasuryDisbursementsRequest>(&req.params)?;
             serialize_response(treasury::disbursements(&NODE_GOV_STORE, params)?)?
         }
+        "gov.treasury.submit_disbursement" => {
+            let params = parse_params::<treasury::SubmitDisbursementRequest>(&req.params)?;
+            serialize_response(treasury::submit_disbursement(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.treasury.disbursement" => {
+            let params = parse_params::<treasury::GetDisbursementRequest>(&req.params)?;
+            serialize_response(treasury::get_disbursement(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.treasury.queue_disbursement" => {
+            let params = parse_params::<treasury::QueueDisbursementRequest>(&req.params)?;
+            serialize_response(treasury::queue_disbursement(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.treasury.execute_disbursement" => {
+            let params = parse_params::<treasury::ExecuteDisbursementRequest>(&req.params)?;
+            serialize_response(treasury::execute_disbursement(&NODE_GOV_STORE, params)?)?
+        }
+        "gov.treasury.rollback_disbursement" => {
+            let params = parse_params::<treasury::RollbackDisbursementRequest>(&req.params)?;
+            serialize_response(treasury::rollback_disbursement(&NODE_GOV_STORE, params)?)?
+        }
         "gov.treasury.balance" => serialize_response(treasury::balance(&NODE_GOV_STORE)?)?,
         "gov.treasury.balance_history" => {
             let params = parse_params::<treasury::TreasuryBalanceHistoryRequest>(&req.params)?;

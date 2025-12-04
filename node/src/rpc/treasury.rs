@@ -1,10 +1,10 @@
 use super::RpcError;
 use crate::governance::GovStore;
 use foundation_serialization::{Deserialize, Serialize};
-use governance_spec::treasury::{
-    DisbursementStatus as GovDisbursementStatus, TreasuryBalanceEventKind as GovBalanceEventKind,
-    TreasuryBalanceSnapshot as GovBalanceSnapshot, TreasuryDisbursement as GovDisbursement,
-    TreasuryExecutorSnapshot as GovExecutorSnapshot,
+use governance::{
+    DisbursementPayload, DisbursementStatus as GovDisbursementStatus,
+    TreasuryBalanceEventKind as GovBalanceEventKind, TreasuryBalanceSnapshot as GovBalanceSnapshot,
+    TreasuryDisbursement as GovDisbursement, TreasuryExecutorSnapshot as GovExecutorSnapshot,
 };
 
 const DEFAULT_LIMIT: u64 = 50;
@@ -413,4 +413,165 @@ fn default_limit() -> u64 {
 fn normalize_limit(limit: u64) -> usize {
     let effective = if limit == 0 { default_limit() } else { limit };
     effective.clamp(1, MAX_LIMIT) as usize
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct SubmitDisbursementRequest {
+    pub payload: DisbursementPayload,
+    #[serde(default)]
+    pub signature: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct SubmitDisbursementResponse {
+    pub id: u64,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct GetDisbursementRequest {
+    pub id: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct GetDisbursementResponse {
+    pub disbursement: TreasuryDisbursementRecord,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct QueueDisbursementRequest {
+    pub id: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ExecuteDisbursementRequest {
+    pub id: u64,
+    pub tx_hash: String,
+    pub receipts: Vec<DisbursementReceiptInput>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DisbursementReceiptInput {
+    pub account: String,
+    pub amount_ct: u64,
+    pub amount_it: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RollbackDisbursementRequest {
+    pub id: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct DisbursementOperationResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+pub fn submit_disbursement(
+    store: &GovStore,
+    request: SubmitDisbursementRequest,
+) -> Result<SubmitDisbursementResponse, RpcError> {
+    // Validate payload
+    governance::validate_disbursement_payload(&request.payload).map_err(|e| {
+        RpcError::new(
+            -32600,
+            &format!("disbursement validation failed: {}", e),
+        )
+    })?;
+
+    // Queue disbursement using existing store method
+    let disbursement = store
+        .queue_disbursement(
+            &request.payload.disbursement.destination,
+            request.payload.disbursement.amount_ct,
+            request.payload.disbursement.amount_it,
+            &request.payload.disbursement.memo,
+            request.payload.disbursement.scheduled_epoch,
+        )
+        .map_err(storage_error)?;
+
+    Ok(SubmitDisbursementResponse {
+        id: disbursement.id,
+        created_at: disbursement.created_at,
+    })
+}
+
+pub fn get_disbursement(
+    store: &GovStore,
+    request: GetDisbursementRequest,
+) -> Result<GetDisbursementResponse, RpcError> {
+    let all_disbursements = store.disbursements().map_err(storage_error)?;
+
+    let disbursement = all_disbursements
+        .into_iter()
+        .find(|d| d.id == request.id)
+        .ok_or_else(|| RpcError::new(-32001, &format!("disbursement {} not found", request.id)))?;
+
+    Ok(GetDisbursementResponse {
+        disbursement: TreasuryDisbursementRecord::from(disbursement),
+    })
+}
+
+pub fn queue_disbursement(
+    store: &GovStore,
+    request: QueueDisbursementRequest,
+) -> Result<DisbursementOperationResponse, RpcError> {
+    // Note: store.queue_disbursement creates new disbursements,
+    // but for RPC we might want to transition existing ones.
+    // For now, return an error stating this is not implemented.
+    Err(RpcError::new(
+        -32601,
+        "queue_disbursement should be called during initial submission via submit_disbursement",
+    ))
+}
+
+pub fn execute_disbursement(
+    store: &GovStore,
+    request: ExecuteDisbursementRequest,
+) -> Result<DisbursementOperationResponse, RpcError> {
+    let disbursement = store
+        .execute_disbursement(request.id, &request.tx_hash)
+        .map_err(storage_error)?;
+
+    Ok(DisbursementOperationResponse {
+        ok: true,
+        message: Some(format!(
+            "disbursement {} executed: {}",
+            disbursement.id, request.tx_hash
+        )),
+    })
+}
+
+pub fn rollback_disbursement(
+    store: &GovStore,
+    request: RollbackDisbursementRequest,
+) -> Result<DisbursementOperationResponse, RpcError> {
+    let disbursement = store
+        .cancel_disbursement(request.id, &request.reason)
+        .map_err(storage_error)?;
+
+    Ok(DisbursementOperationResponse {
+        ok: true,
+        message: Some(format!("disbursement {} cancelled", disbursement.id)),
+    })
+}
+
+fn now_ts() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

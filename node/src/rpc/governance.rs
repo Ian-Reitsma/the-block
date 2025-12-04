@@ -1,11 +1,9 @@
 use super::RpcError;
 use crate::governance::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
 use foundation_serialization::{binary, Serialize};
-use governance_spec::{
-    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
-};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]

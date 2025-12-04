@@ -1,11 +1,21 @@
 #![forbid(unsafe_code)]
 
+pub mod verifier;
+
 use crypto_suite::hashing::blake3::Hasher as Blake3;
 use foundation_metrics::{gauge, histogram, increment_counter, recorder_installed};
 use foundation_serialization::{binary, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+pub use verifier::{
+    Ed25519Verifier, ProviderKey, SignatureScheme, SignatureVerifier, VerificationError,
+    VerifierRegistry,
+};
+
+#[cfg(feature = "pq-crypto")]
+pub use verifier::DilithiumVerifier;
 
 pub type ProviderId = String;
 pub type AccountId = String;
@@ -147,6 +157,8 @@ pub enum EnergyMarketError {
     },
     #[error("meter reading {0:?} expired")]
     CreditExpired(H256),
+    #[error("signature verification failed: {0}")]
+    SignatureVerificationFailed(#[from] VerificationError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +172,8 @@ pub struct EnergyMarket {
     next_provider_id: u64,
     total_price_paid: u128,
     total_kwh_settled: u64,
+    #[serde(default)]
+    verifier_registry: VerifierRegistry,
 }
 
 impl Default for EnergyMarket {
@@ -173,6 +187,7 @@ impl Default for EnergyMarket {
             next_provider_id: 0,
             total_price_paid: 0,
             total_kwh_settled: 0,
+            verifier_registry: VerifierRegistry::new(),
         }
     }
 }
@@ -207,6 +222,24 @@ impl EnergyMarket {
 
     pub fn receipts(&self) -> &[EnergyReceipt] {
         &self.receipts
+    }
+
+    pub fn verifier_registry(&self) -> &VerifierRegistry {
+        &self.verifier_registry
+    }
+
+    pub fn verifier_registry_mut(&mut self) -> &mut VerifierRegistry {
+        &mut self.verifier_registry
+    }
+
+    pub fn register_provider_key(
+        &mut self,
+        provider_id: ProviderId,
+        public_key: Vec<u8>,
+        scheme: SignatureScheme,
+    ) {
+        self.verifier_registry
+            .register(provider_id, public_key, scheme);
     }
 
     pub fn register_energy_provider(
@@ -258,6 +291,12 @@ impl EnergyMarket {
         reading: MeterReading,
         block: BlockNumber,
     ) -> Result<EnergyCredit, EnergyMarketError> {
+        // Verify signature if provider has registered a key
+        // During shadow mode, this is optional; once enforced, will reject unregistered providers
+        if self.verifier_registry.get(&reading.provider_id).is_some() {
+            self.verifier_registry.verify(&reading)?;
+        }
+
         let provider = self
             .providers
             .get_mut(&reading.provider_id)
@@ -281,9 +320,10 @@ impl EnergyMarket {
                 });
             }
         }
+        let previous_value = provider.last_meter_value.unwrap_or(0);
         let delta = reading
             .total_kwh
-            .saturating_sub(provider.last_meter_value.unwrap_or(reading.total_kwh));
+            .saturating_sub(previous_value);
         provider.last_meter_timestamp = Some(reading.timestamp);
         provider.last_meter_value = Some(reading.total_kwh);
         let hash = reading.hash();
@@ -429,5 +469,262 @@ impl EnergyMarket {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         binary::decode::<Self>(bytes).map_err(|err| err.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn market_with_provider() -> (EnergyMarket, ProviderId, OracleAddress) {
+        let mut market = EnergyMarket::default();
+        let meter_address = "meter-1".to_string();
+        let min_stake = market.config().min_stake;
+        let provider_id = market
+            .register_energy_provider(
+                "owner-1".into(),
+                1_000,
+                2,
+                meter_address.clone(),
+                "jurisdiction-1".into(),
+                min_stake,
+            )
+            .expect("provider registration succeeds");
+        (market, provider_id, meter_address)
+    }
+
+    fn mk_reading(
+        provider_id: &ProviderId,
+        meter_address: &str,
+        total_kwh: u64,
+        timestamp: UnixTimestamp,
+    ) -> MeterReading {
+        MeterReading {
+            provider_id: provider_id.clone(),
+            meter_address: meter_address.to_string(),
+            total_kwh,
+            timestamp,
+            signature: Vec::new(),
+        }
+    }
+
+    fn mk_signed_reading(
+        provider_id: &ProviderId,
+        meter_address: &str,
+        total_kwh: u64,
+        timestamp: UnixTimestamp,
+        signing_key: &crypto_suite::signatures::ed25519::SigningKey,
+    ) -> MeterReading {
+        use crypto_suite::hashing::blake3::Hasher as Blake3;
+        use crypto_suite::signatures::Signer;
+
+        // Compute canonical message
+        let mut hasher = Blake3::new();
+        hasher.update(provider_id.as_bytes());
+        hasher.update(meter_address.as_bytes());
+        hasher.update(&total_kwh.to_le_bytes());
+        hasher.update(&timestamp.to_le_bytes());
+        let message = hasher.finalize();
+
+        let sig = signing_key.sign(message.as_bytes());
+        let sig_bytes: [u8; 64] = sig.into();
+
+        MeterReading {
+            provider_id: provider_id.clone(),
+            meter_address: meter_address.to_string(),
+            total_kwh,
+            timestamp,
+            signature: sig_bytes.to_vec(),
+        }
+    }
+
+    #[test]
+    fn first_reading_accrues_usage_from_zero_baseline() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+        let reading = mk_reading(&provider_id, &meter_address, 42, 1);
+        let credit = market
+            .record_meter_reading(reading, 10)
+            .expect("recording succeeds");
+        assert_eq!(credit.amount_kwh, 42);
+    }
+
+    #[test]
+    fn subsequent_readings_only_credit_increments() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+        let first = mk_reading(&provider_id, &meter_address, 100, 10);
+        let second = mk_reading(&provider_id, &meter_address, 180, 20);
+
+        let first_credit = market
+            .record_meter_reading(first, 11)
+            .expect("first reading succeeds");
+        assert_eq!(first_credit.amount_kwh, 100);
+
+        let second_credit = market
+            .record_meter_reading(second, 21)
+            .expect("second reading succeeds");
+        assert_eq!(second_credit.amount_kwh, 80);
+    }
+
+    #[test]
+    fn provider_restart_preserves_baseline() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        // First reading establishes baseline
+        let first = mk_reading(&provider_id, &meter_address, 100, 10);
+        let first_credit = market
+            .record_meter_reading(first, 11)
+            .expect("first reading succeeds");
+        assert_eq!(first_credit.amount_kwh, 100);
+
+        // Serialize and deserialize to simulate restart
+        let serialized = market.to_bytes().expect("serialization succeeds");
+        let mut restored = EnergyMarket::from_bytes(&serialized).expect("deserialization succeeds");
+
+        // Second reading after restart should use persisted baseline
+        let second = mk_reading(&provider_id, &meter_address, 180, 20);
+        let second_credit = restored
+            .record_meter_reading(second, 21)
+            .expect("second reading succeeds");
+        assert_eq!(second_credit.amount_kwh, 80); // Delta from 100, not 180
+    }
+
+    #[test]
+    fn signature_verification_succeeds_with_valid_key() {
+        let mut rng = rand::thread_rng();
+        let signing_key = crypto_suite::signatures::ed25519::SigningKey::generate(&mut rng);
+        let verifying_key = signing_key.verifying_key();
+        let pk_bytes = verifying_key.to_bytes();
+
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        // Register provider key
+        market.register_provider_key(provider_id.clone(), pk_bytes.to_vec(), SignatureScheme::Ed25519);
+
+        // Create signed reading
+        let reading = mk_signed_reading(&provider_id, &meter_address, 42, 1, &signing_key);
+
+        // Should succeed with valid signature
+        let credit = market
+            .record_meter_reading(reading, 10)
+            .expect("valid signature accepted");
+        assert_eq!(credit.amount_kwh, 42);
+    }
+
+    #[test]
+    fn signature_verification_rejects_invalid_signature() {
+        let mut rng = rand::thread_rng();
+        let signing_key = crypto_suite::signatures::ed25519::SigningKey::generate(&mut rng);
+        let verifying_key = signing_key.verifying_key();
+        let pk_bytes = verifying_key.to_bytes();
+
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        // Register provider key
+        market.register_provider_key(provider_id.clone(), pk_bytes.to_vec(), SignatureScheme::Ed25519);
+
+        // Create reading with wrong signature
+        let mut reading = mk_reading(&provider_id, &meter_address, 42, 1);
+        reading.signature = vec![0u8; 64]; // Invalid signature
+
+        // Should reject invalid signature
+        let err = market
+            .record_meter_reading(reading, 10)
+            .expect_err("invalid signature rejected");
+
+        match err {
+            EnergyMarketError::SignatureVerificationFailed(_) => {}
+            _ => panic!("expected SignatureVerificationFailed, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn signature_verification_skipped_when_no_key_registered() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        // No key registered - signature verification should be skipped (shadow mode)
+        let reading = mk_reading(&provider_id, &meter_address, 42, 1);
+        let credit = market
+            .record_meter_reading(reading, 10)
+            .expect("reading accepted without signature check");
+        assert_eq!(credit.amount_kwh, 42);
+    }
+
+    #[test]
+    fn stale_reading_timestamp_rejected() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        let first = mk_reading(&provider_id, &meter_address, 100, 20);
+        market
+            .record_meter_reading(first, 11)
+            .expect("first reading succeeds");
+
+        // Try to submit reading with earlier timestamp
+        let stale = mk_reading(&provider_id, &meter_address, 120, 10);
+        let err = market
+            .record_meter_reading(stale, 12)
+            .expect_err("stale timestamp rejected");
+
+        match err {
+            EnergyMarketError::StaleReading { .. } => {}
+            _ => panic!("expected StaleReading, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn decreasing_meter_value_rejected() {
+        let (mut market, provider_id, meter_address) = market_with_provider();
+
+        let first = mk_reading(&provider_id, &meter_address, 100, 10);
+        market
+            .record_meter_reading(first, 11)
+            .expect("first reading succeeds");
+
+        // Try to submit reading with lower total
+        let decreasing = mk_reading(&provider_id, &meter_address, 80, 20);
+        let err = market
+            .record_meter_reading(decreasing, 12)
+            .expect_err("decreasing value rejected");
+
+        match err {
+            EnergyMarketError::InvalidMeterValue { .. } => {}
+            _ => panic!("expected InvalidMeterValue, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn credit_expiry_enforcement() {
+        let mut config = EnergyMarketConfig::default();
+        config.oracle_timeout_blocks = 10; // Credits expire after 10 blocks
+        let mut market = EnergyMarket::new(config);
+
+        let meter_address = "meter-exp".to_string();
+        let min_stake = market.config().min_stake;
+        let provider_id = market
+            .register_energy_provider(
+                "owner-exp".into(),
+                1_000,
+                2,
+                meter_address.clone(),
+                "jurisdiction-1".into(),
+                min_stake,
+            )
+            .expect("provider registration succeeds");
+
+        // Record reading at block 100
+        let reading = mk_reading(&provider_id, &meter_address, 50, 1);
+        let credit = market
+            .record_meter_reading(reading, 100)
+            .expect("recording succeeds");
+
+        // Try to settle at block 111 (beyond expiry)
+        let hash = credit.meter_reading_hash;
+        let err = market
+            .settle_energy_delivery("buyer-1".into(), &provider_id, 10, 111, hash)
+            .expect_err("expired credit rejected");
+
+        match err {
+            EnergyMarketError::CreditExpired(_) => {}
+            _ => panic!("expected CreditExpired, got {:?}", err),
+        }
     }
 }
