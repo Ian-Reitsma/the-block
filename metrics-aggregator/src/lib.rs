@@ -264,7 +264,15 @@ const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta_ct
 const METRIC_TREASURY_BALANCE_LAST_DELTA_IT: &str = "treasury_balance_last_delta_it";
 const METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT: &str = "treasury_balance_snapshot_count";
 const METRIC_TREASURY_BALANCE_EVENT_AGE: &str = "treasury_balance_last_event_age_seconds";
-const TREASURY_STATUS_LABELS: [&str; 3] = ["scheduled", "executed", "cancelled"];
+const TREASURY_STATUS_LABELS: [&str; 7] = [
+    "draft",
+    "voting",
+    "queued",
+    "timelocked",
+    "executed",
+    "finalized",
+    "rolled_back",
+];
 
 const LABEL_PREFIX_CODE: [&str; 2] = ["prefix", "code"];
 const LABEL_PREFIX_CODE_ORIGIN: [&str; 3] = ["prefix", "code", "origin"];
@@ -8469,19 +8477,36 @@ fn parse_event_field(value: Option<&Value>) -> io::Result<TreasuryBalanceEventKi
     }
 }
 
+#[derive(Default, Default)]
+struct StatusBucket {
+    count: u64,
+    amount_ct: u64,
+    amount_it: u64,
+}
+
+impl StatusBucket {
+    fn record(&mut self, record: &TreasuryDisbursement) {
+        self.count = self.count.saturating_add(1);
+        self.amount_ct = self.amount_ct.saturating_add(record.amount_ct);
+        self.amount_it = self.amount_it.saturating_add(record.amount_it);
+    }
+
+    fn tuple(&self) -> (u64, u64, u64) {
+        (self.count, self.amount_ct, self.amount_it)
+    }
+}
+
 #[derive(Default)]
 struct TreasurySummary {
-    scheduled_count: u64,
-    scheduled_amount: u64,
-    scheduled_amount_it: u64,
-    executed_count: u64,
-    executed_amount: u64,
-    executed_amount_it: u64,
-    cancelled_count: u64,
-    cancelled_amount: u64,
-    cancelled_amount_it: u64,
+    draft: StatusBucket,
+    voting: StatusBucket,
+    queued: StatusBucket,
+    timelocked: StatusBucket,
+    executed: StatusBucket,
+    finalized: StatusBucket,
+    rolled_back: StatusBucket,
     latest_timestamp: Option<u64>,
-    oldest_scheduled_created: Option<u64>,
+    oldest_pending_created: Option<u64>,
     next_epoch: Option<u64>,
 }
 
@@ -8490,37 +8515,36 @@ impl TreasurySummary {
         let mut summary = TreasurySummary::default();
         for record in records {
             match &record.status {
-                DisbursementStatus::Scheduled => {
-                    summary.scheduled_count = summary.scheduled_count.saturating_add(1);
-                    summary.scheduled_amount =
-                        summary.scheduled_amount.saturating_add(record.amount_ct);
-                    summary.scheduled_amount_it =
-                        summary.scheduled_amount_it.saturating_add(record.amount_it);
-                    summary.update_latest(record.created_at);
-                    summary.oldest_scheduled_created = match summary.oldest_scheduled_created {
-                        Some(oldest) => Some(oldest.min(record.created_at)),
-                        None => Some(record.created_at),
-                    };
-                    summary.next_epoch = match summary.next_epoch {
-                        Some(epoch) => Some(epoch.min(record.scheduled_epoch)),
-                        None => Some(record.scheduled_epoch),
-                    };
+                DisbursementStatus::Draft { created_at } => {
+                    summary.draft.record(record);
+                    summary.observe_pending(*created_at, Some(record.scheduled_epoch));
+                }
+                DisbursementStatus::Voting { .. } => {
+                    summary.voting.record(record);
+                    summary.observe_pending(record.created_at, Some(record.scheduled_epoch));
+                }
+                DisbursementStatus::Queued {
+                    queued_at,
+                    activation_epoch,
+                } => {
+                    summary.queued.record(record);
+                    summary.observe_pending(*queued_at, Some(*activation_epoch));
+                }
+                DisbursementStatus::Timelocked { ready_epoch } => {
+                    summary.timelocked.record(record);
+                    summary.observe_pending(record.created_at, Some(*ready_epoch));
                 }
                 DisbursementStatus::Executed { executed_at, .. } => {
-                    summary.executed_count = summary.executed_count.saturating_add(1);
-                    summary.executed_amount =
-                        summary.executed_amount.saturating_add(record.amount_ct);
-                    summary.executed_amount_it =
-                        summary.executed_amount_it.saturating_add(record.amount_it);
+                    summary.executed.record(record);
                     summary.update_latest(*executed_at);
                 }
-                DisbursementStatus::Cancelled { cancelled_at, .. } => {
-                    summary.cancelled_count = summary.cancelled_count.saturating_add(1);
-                    summary.cancelled_amount =
-                        summary.cancelled_amount.saturating_add(record.amount_ct);
-                    summary.cancelled_amount_it =
-                        summary.cancelled_amount_it.saturating_add(record.amount_it);
-                    summary.update_latest(*cancelled_at);
+                DisbursementStatus::Finalized { finalized_at, .. } => {
+                    summary.finalized.record(record);
+                    summary.update_latest(*finalized_at);
+                }
+                DisbursementStatus::RolledBack { rolled_back_at, .. } => {
+                    summary.rolled_back.record(record);
+                    summary.update_latest(*rolled_back_at);
                 }
             }
         }
@@ -8536,22 +8560,28 @@ impl TreasurySummary {
 
     fn metrics_for_status(&self, status: &str) -> (u64, u64, u64) {
         match status {
-            "scheduled" => (
-                self.scheduled_count,
-                self.scheduled_amount,
-                self.scheduled_amount_it,
-            ),
-            "executed" => (
-                self.executed_count,
-                self.executed_amount,
-                self.executed_amount_it,
-            ),
-            "cancelled" => (
-                self.cancelled_count,
-                self.cancelled_amount,
-                self.cancelled_amount_it,
-            ),
+            "draft" => self.draft.tuple(),
+            "voting" => self.voting.tuple(),
+            "queued" => self.queued.tuple(),
+            "timelocked" => self.timelocked.tuple(),
+            "executed" => self.executed.tuple(),
+            "finalized" => self.finalized.tuple(),
+            "rolled_back" => self.rolled_back.tuple(),
             _ => (0, 0, 0),
+        }
+    }
+
+    fn observe_pending(&mut self, timestamp: u64, epoch: Option<u64>) {
+        self.update_latest(timestamp);
+        self.oldest_pending_created = Some(match self.oldest_pending_created {
+            Some(prev) => prev.min(timestamp),
+            None => timestamp,
+        });
+        if let Some(next) = epoch {
+            self.next_epoch = Some(match self.next_epoch {
+                Some(prev) => prev.min(next),
+                None => next,
+            });
         }
     }
 
@@ -8562,7 +8592,7 @@ impl TreasurySummary {
     }
 
     fn scheduled_oldest_age(&self, now: u64) -> u64 {
-        self.oldest_scheduled_created
+        self.oldest_pending_created
             .map(|ts| now.saturating_sub(ts))
             .unwrap_or(0)
     }

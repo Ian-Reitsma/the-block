@@ -36,6 +36,11 @@ If you're new to blockchain development, here's a quick reference:
 - `bridges/`, `dex/`, `storage_market/`, `gateway/` – specialised crates referenced by the node.
 - `docs/` – this handbook (mdBook). Run `mdbook build docs` before submitting docs changes.
 
+## Spec, Docs, and Owners
+- Read `AGENTS.md` + this handbook once, then operate as if you authored them. Implementation never outruns docs: diff behaviour vs `AGENTS.md §0.6` + [`docs/overview.md`](overview.md) before touching code, patch the spec first, route it through the Document Map owner, and cite the doc PR/issue in the code review.
+- No TODOs without visibility. Mirror every new TODO (file + owner) into `AGENTS.md §15` and link back to the originating doc paragraph so operations can see the backlog.
+- Observability parity is mandatory: any new metric/CLI/API must be wired through `node/src/telemetry`, `metrics-aggregator/`, `monitoring/`, and documented inside [`docs/operations.md`](operations.md#telemetry-wiring) plus `/wrappers` metadata. Attach Grafana screenshots (JSON references) to the PR.
+
 ## Toolchain and Commands
 - `just lint` → `cargo clippy --workspace --all-targets --all-features`.
 - `just fmt` → `cargo fmt --all`.
@@ -48,6 +53,7 @@ If you're new to blockchain development, here's a quick reference:
 - Prefer first-party crates (`httpd`, `foundation_tls`, `foundation_serialization`, `foundation_sqlite`, `storage_engine`) over upstream dependencies.
 - Use `concurrency::{MutexExt, DashMap}` instead of raw locks to keep poisoning + metrics consistent.
 - Keep modules small and feature-gated; RPC code should stay in `node/src/rpc`, CLI code in `cli/src`, etc.
+- Runtime knobs must live in `node/src/config.rs` with `TB_*` names. When you add a knob or touch dependency policy, update [`docs/operations.md`](operations.md#bootstrap-and-configuration), [`docs/overview.md`](overview.md#execution-backlog--ownership-handoff), and `config/dependency_policies.toml`, then immediately run `cargo vendor`, refresh `provenance.json`, and update `checksums.txt`.
 
 ## Testing Strategy
 
@@ -66,6 +72,7 @@ If you're new to blockchain development, here's a quick reference:
 - Settlement audit: `cargo test -p the_block --test settlement_audit --release` must pass before merging.
 - Fuzzing: `scripts/fuzz_coverage.sh` installs LLVM tools, runs fuzz targets (e.g., `cargo fuzz run storage`), and uploads `.profraw` artifacts. Remember to set `LLVM_PROFILE_FILE`.
 - Chaos: `tests/net_gossip.rs`, `tests/net_quic.rs`, `node/tests/storage_repair.rs`, `node/tests/gateway_rate_limit.rs` simulate packet loss, disk-full, etc.
+- Reviews should include the full gate transcript from `AGENTS.md §0.6` (lint, fmt, `just test-fast`, tiered `just test-full`, replay, settlement audit, fuzz). Attach command output or CI links plus the `.profraw` summary. Ad market touches add the readiness checklist from [`docs/overview.md#ad--targeting-readiness-checklist`](overview.md#ad--targeting-readiness-checklist)—log `npm ci --prefix monitoring && make monitor`, `/wrappers` hashes, and selector dashboards alongside the standard gates.
 
 ## Debugging and Diagnostics
 - Enable `RUST_LOG=trace` plus the diagnostics subscriber when chasing runtime issues; `diagnostics::tracing` is wired everywhere.
@@ -97,6 +104,7 @@ If you're new to blockchain development, here's a quick reference:
 
 ## Dependency Policy
 - Policies live in `config/dependency_policies.toml`. Run `cargo run -p dependency_registry -- --check config/dependency_policies.toml` (or `just dependency-audit`) to refresh `docs/dependency_inventory*.json`.
+- After dependency changes: run `cargo vendor`, regenerate `provenance.json` + `checksums.txt`, and update [`docs/security_and_privacy.md#release-provenance-and-supply-chain`](security_and_privacy.md#release-provenance-and-supply-chain) with the attestation summary. CI rejects PRs that skip these artifacts.
 - The pivot strategy formerly described in `docs/pivot_dependency_strategy.md` now reads: wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards.
 - Never introduce `reqwest`, `serde_json`, `bincode`, etc. Production crates must route through the first-party facades.
 
@@ -127,17 +135,18 @@ If you're new to blockchain development, here's a quick reference:
 ## Energy Market Development
 - **Crates and modules** — `crates/energy-market` owns the provider/credit/receipt data model, metrics, and serialization; `node/src/energy.rs` persists the market via `SimpleDb` (sled under `TB_ENERGY_MARKET_DIR`, default `energy_market/`), exposes health checks, and records treasury accruals. RPC handlers live in `node/src/rpc/energy.rs`, CLI glue in `cli/src/energy.rs`, oracle ingestion under `crates/oracle-adapter`, and the mock oracle service in `services/mock-energy-oracle`.
 - **Configuration** — Set `TB_ENERGY_MARKET_DIR` to relocate the sled DB (mirrors other `SimpleDb` consumers). Governance parameters (`energy_min_stake`, `energy_oracle_timeout_blocks`, `energy_slashing_rate_bps`) live in the shared `governance` crate; the runtime hooks call `node::energy::set_governance_params` so proposal activations atomically retune stakes, expiry, and slashing without code changes.
-- **RPC and CLI flows** — `tb-cli energy register|market|settle|submit-reading` speak the same JSON schema the RPC expects (see `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`). Use `--verbose` or `--format json` to dump raw payloads for automation or explorer ingestion. Example round-trip:
+- **Provider keys** — Oracle trust roots live in node config (`energy.provider_keys` array inside `config/default.toml`). Each entry is a `{ provider_id, public_key_hex }` pair; reloading the config hot-swaps the verifier registry via `node::energy::configure_provider_keys` so ops can rotate/revoke keys without restarts.
+- **RPC and CLI flows** — `tb-cli energy register|market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute` speak the same JSON schema the RPC expects (see `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`). Use `--verbose` or `--format json` to dump raw payloads for automation or explorer ingestion. Example round-trip:
   ```bash
   tb-cli energy register 10000 120 --meter-address meter_a --jurisdiction US_CA --stake 5000 --owner acct
   tb-cli energy market --provider-id energy-0x00 --verbose | jq .
   tb-cli energy submit-reading --reading-json @reading.json
   tb-cli energy settle energy-0x00 400 --meter-hash <hex> --buyer acct_consumer
   ```
-- **Telemetry & metrics** — The crate emits `energy_providers_count`, `energy_avg_price`, `energy_kwh_traded_total`, `energy_settlements_total{provider}`, `energy_provider_fulfillment_ms`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
+- **Telemetry & metrics** — The crate emits `energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_signature_failure_total{provider,reason}`, `energy_provider_fulfillment_ms`, `energy_avg_price`, `energy_kwh_traded_total`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
 - **Testing** — Run `cargo test -p energy-market` for unit coverage and `cargo test -p node --test gov_param_wiring` to ensure governance parameters round-trip correctly. Use `scripts/deploy-worldos-testnet.sh` + `docs/testnet/ENERGY_QUICKSTART.md` for integration drills (node + mock oracle + telemetry). When altering serialization, add vectors under `crates/energy-market/tests` and extend the CLI tests in `cli/tests/` to keep JSON schemas stable.
-- **Oracle adapters** — `crates/oracle-adapter` currently ships `NoopSignatureVerifier`; replacing it with the real verifier requires feeding Ed25519/Schnorr keys through env vars (`TB_ORACLE_SIGNING_KEY`, etc., to be finalised) and extending test vectors. The mock oracle service (`services/mock-energy-oracle`) exposes `/meter/:id/reading` and `/meter/:id/submit` endpoints over the in-house `httpd` router so you can simulate both fetching and submitting readings without third-party stacks.
-- **Next steps** — Signature verification, dispute RPCs, explorer visualisations, and deterministic replay coverage are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks` and summarised in `AGENTS.md`. Treat those bullets as blocking work items whenever you touch the energy crates.
+- **Oracle adapters** — `crates/oracle-adapter` now ships the production `Ed25519SignatureVerifier`. Register provider public keys (pulled from governance or ops config) before forwarding readings; any provider without a key remains in shadow mode so you can roll out gradually. Signing keys still come from env/KMS (`TB_ORACLE_SIGNING_KEY`, etc.). The mock oracle service (`services/mock-energy-oracle`) exposes `/meter/:id/reading` and `/meter/:id/submit` endpoints over the in-house `httpd` router so you can simulate both fetching and submitting readings without third-party stacks.
+- **Next steps** — Oracle quorum/expiry policy, ledger anchoring for receipts, explorer visualisations, and deterministic replay coverage are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks` and summarised in `AGENTS.md`. Treat those bullets as blocking work items whenever you touch the energy crates.
 
 ## Contribution Flow
 1. Open an issue or draft PR describing the change.

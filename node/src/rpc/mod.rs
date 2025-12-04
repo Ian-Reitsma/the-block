@@ -13,7 +13,7 @@ use crate::{
     simple_db::{names, SimpleDb},
     storage::fs::RentEscrow,
     transaction::FeeLane,
-    Blockchain, SignedTransaction,
+    Blockchain, SignedTransaction, EPOCH_BLOCKS,
 };
 use ::ad_market::MarketplaceHandle;
 use ::storage::{contract::StorageContract, offer::StorageOffer};
@@ -503,8 +503,13 @@ const PUBLIC_METHODS: &[&str] = &[
     "htlc_refund",
     "energy.register_provider",
     "energy.market_state",
+    "energy.receipts",
+    "energy.credits",
+    "energy.disputes",
     "energy.settle",
     "energy.submit_reading",
+    "energy.flag_dispute",
+    "energy.resolve_dispute",
     "storage_upload",
     "storage_challenge",
     "storage.repair_history",
@@ -2616,6 +2621,9 @@ fn dispatch(
                 .and_then(|value| value.as_str());
             energy::market_state(provider)
         }
+        "energy.receipts" => energy::receipts(&req.params),
+        "energy.credits" => energy::credits(&req.params),
+        "energy.disputes" => energy::disputes(&req.params),
         "energy.settle" => {
             let height = bc
                 .lock()
@@ -2629,6 +2637,20 @@ fn dispatch(
                 .map(|guard| guard.block_height)
                 .unwrap_or_default();
             energy::submit_reading(&req.params, height)
+        }
+        "energy.flag_dispute" => {
+            let height = bc
+                .lock()
+                .map(|guard| guard.block_height)
+                .unwrap_or_default();
+            energy::flag_dispute(&req.params, height)
+        }
+        "energy.resolve_dispute" => {
+            let height = bc
+                .lock()
+                .map(|guard| guard.block_height)
+                .unwrap_or_default();
+            energy::resolve_dispute(&req.params, height)
         }
         "storage_upload" => {
             let object_id = req
@@ -2894,7 +2916,14 @@ fn dispatch(
             serialize_response(treasury::get_disbursement(&NODE_GOV_STORE, params)?)?
         }
         "gov.treasury.queue_disbursement" => {
-            let params = parse_params::<treasury::QueueDisbursementRequest>(&req.params)?;
+            let mut params = parse_params::<treasury::QueueDisbursementRequest>(&req.params)?;
+            if params.current_epoch == 0 {
+                let epoch = bc
+                    .lock()
+                    .map(|guard| guard.block_height / EPOCH_BLOCKS)
+                    .unwrap_or_default();
+                params.current_epoch = epoch;
+            }
             serialize_response(treasury::queue_disbursement(&NODE_GOV_STORE, params)?)?
         }
         "gov.treasury.execute_disbursement" => {

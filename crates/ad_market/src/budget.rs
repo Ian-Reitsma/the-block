@@ -1,4 +1,6 @@
-use crate::CohortKey;
+use crate::{
+    cohort_selector_version_default, CohortKey, DomainTier, InterestTagId, PresenceBucketRef,
+};
 use crypto_suite::hashing::blake3;
 use foundation_metrics::{gauge, histogram, increment_counter};
 use foundation_serialization::{Deserialize, Serialize};
@@ -451,11 +453,23 @@ pub struct CohortBudgetSnapshot {
     pub realized_spend: f64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct CohortKeySnapshot {
     pub domain: String,
+    #[serde(default)]
     pub provider: Option<String>,
+    #[serde(default)]
     pub badges: Vec<String>,
+    #[serde(default)]
+    pub domain_tier: DomainTier,
+    #[serde(default)]
+    pub domain_owner: Option<String>,
+    #[serde(default)]
+    pub interest_tags: Vec<InterestTagId>,
+    #[serde(default)]
+    pub presence_bucket: Option<PresenceBucketRef>,
+    #[serde(default = "cohort_selector_version_default")]
+    pub selectors_version: u16,
 }
 
 impl CohortBudgetState {
@@ -600,13 +614,34 @@ impl CohortKeySnapshot {
             domain: key.domain.clone(),
             provider: key.provider.clone(),
             badges: key.badges.clone(),
+            domain_tier: key.domain_tier,
+            domain_owner: key.domain_owner.clone(),
+            interest_tags: key.interest_tags.clone(),
+            presence_bucket: key.presence_bucket.clone(),
+            selectors_version: key.selectors_version(),
         }
     }
 
     pub(crate) fn into_key(mut self) -> CohortKey {
         self.badges.sort();
         self.badges.dedup();
-        CohortKey::new(self.domain, self.provider, self.badges)
+        self.interest_tags.sort();
+        self.interest_tags.dedup();
+        let version = if self.selectors_version == 0 {
+            cohort_selector_version_default()
+        } else {
+            self.selectors_version
+        };
+        CohortKey::with_selectors(
+            self.domain,
+            self.domain_tier,
+            self.domain_owner,
+            self.provider,
+            self.badges,
+            self.interest_tags,
+            self.presence_bucket,
+            version,
+        )
     }
 }
 
@@ -638,6 +673,7 @@ mod tests {
                 domain: domain.to_string(),
                 provider: Some("wallet".into()),
                 badges: vec!["badge".into()],
+                ..Default::default()
             },
             kappa,
             smoothed_error: error,

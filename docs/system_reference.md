@@ -376,15 +376,17 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Wraps the market in `SimpleDb::open_named(names::ENERGY_MARKET, TB_ENERGY_MARKET_DIR.unwrap_or("energy_market"))`. Every mutation serializes the full market via `EnergyMarket::to_bytes()` and writes it using SimpleDb’s fsync+rename discipline.
   - `GovernanceEnergyParams { min_stake, oracle_timeout_blocks, slashing_rate_bps }` lives in a `Lazy<Mutex<_>>`. `set_governance_params` updates the struct, applies it to the runtime config (`apply_params_to_market`), and persists the snapshot. Treasury fees/slashes flow into `NODE_GOV_STORE.record_treasury_accrual`.
   - `check_energy_market_health()` warns when `pending_credit_count()` exceeds 25 and logs settlement heartbeats so dashboards can alert without scraping additional RPCs.
+- **Provider trust roots**:
+  - `config/default.toml` exposes `energy.provider_keys = [{ provider_id = "...", public_key_hex = "..." }, …]`. Reloads invoke `node::energy::configure_provider_keys`, clearing and repopulating the sled-backed verifier registry so ops can rotate or revoke keys without restarts. Entries are authoritative—omitting a provider removes it from the registry and puts it back into shadow mode.
 - **RPC + CLI** (`node/src/rpc/energy.rs`, `cli/src/energy.rs`):
   - RPC methods: `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`. Helpers enforce payload shape (`require_string`, `require_u64`, `decode_hash`, `decode_signature`) and emit canonical JSON for providers/credits/receipts.
   - CLI mirrors the RPC schema: `tb-cli energy register <capacity> <price> --meter-address … --jurisdiction … --stake … --owner …`, `tb-cli energy market [--provider-id … --verbose]`, `tb-cli energy submit-reading --reading-json '…'`, `tb-cli energy settle <provider> <kwh> --meter-hash … --buyer …`.
   - All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts` so meter hashes/receipts stay byte-identical everywhere.
 - **Oracle adapter + mock service** (`crates/oracle-adapter`, `services/mock-energy-oracle`):
-  - Adapter defines `SignatureVerifier`; currently `NoopSignatureVerifier` (always true) stands in until Ed25519 verification + vectors land. `MeterReadingPayload` implements `MeterReading` and exposes `signing_bytes()` so verifiers can sign/verify consistently.
+- Adapter defines `SignatureVerifier`; the default (`Ed25519SignatureVerifier`) enforces signatures for every provider with a registered key. `MeterReadingPayload` implements `MeterReading` and exposes the canonical `signing_bytes()` digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.
   - Mock service (in-house `httpd` router) listens on `MOCK_ENERGY_ORACLE_ADDR` (default `127.0.0.1:8080`), exposes `/meter/:id/reading` (increments totals by 250 kWh, updates timestamp, returns payload) and `/meter/:id/submit` (accepts posted readings). Used by `scripts/deploy-worldos-testnet.sh`.
 - **Telemetry**:
-  - Gauges: `energy_providers_count`, `energy_avg_price`. Counters: `energy_kwh_traded_total`, `energy_settlements_total{provider}`. Histograms: `energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`.
+  - Gauges: `energy_providers_count`, `energy_avg_price`. Counters: `energy_kwh_traded_total`, `energy_settlements_total{provider}`, `energy_signature_failure_total{provider,reason}`. Histograms: `energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`.
   - Logs: `node::energy::check_energy_market_health` warns on backlog spikes and settlement stalls. Metrics aggregator wiring (`/wrappers`, `/telemetry/summary`) plus Grafana panels (provider counts, pending credits, slash totals, settlement rates) are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`.
 - **Governance linkage**:
   - `ParamKey::{EnergyMinStake, EnergyOracleTimeoutBlocks, EnergySlashingRateBps}` live in `governance/src/{lib.rs,codec.rs,params.rs}`. Runtime hooks clamp values before writing to `Params` and call `node::energy::set_governance_params`.
@@ -772,29 +774,37 @@ _All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house `httpd` router. E
 
 #### ad_market.* (`node/src/rpc/ad_market.rs`)
 **Objects**
-- `CampaignSummary`: `{id, advertiser_account, remaining_budget_usd_micros, reserved_budget_usd_micros, creatives[]}`.
-- `DistributionPolicy`: `{viewer_percent, host_percent, hardware_percent, verifier_percent}`.
-- `CohortPriceSnapshot`: `{domain, provider?, badges[], price_per_mib_usd_micros, target_utilization_ppm, observed_utilization_ppm}`.
-- `BudgetSnapshot`: top-level fields `generated_at_micros`, `config` (see `BudgetBrokerConfig`), `campaigns[]` (each with `id`, `kappa`, `epoch_spend_total_usd_micros`, `remaining_usd_micros`, `cohorts[]`).
-- `ReadinessSnapshot`: `{ready, window_secs, unique_viewers, host_count, provider_count, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, utilization{cohort->{domain,viewer_ppm,host_ppm}}, distribution?}`.
-- `PolicySnapshot`: stored in `node/ad_policy_snapshot.rs`; serialized as `{epoch, weights[], governance_hash}`.
-- `CampaignRegistration`: canonical ad campaign object (ID, advertiser account, creatives, metadata map, budgets) as accepted by `ad_market::campaign_from_value`.
-- `ConversionRecord`: `{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, occurred_at_micros?}`. Requires `Authorization: Advertiser <account>:<token>` header; token hash stored under `metadata["conversion_token_hash"]`.
+- `DomainTier`: enum string `"premium" | "reserved" | "community" | "unverified"` derived from `.block` auctions (`node/src/gateway/dns.rs`). Premium/reserved entries require proof of stake ownership before targeting.
+- `PresenceBucket`: `{bucket_id,String, kind:"localnet"|"range_boost", beacon_id,String, radius_meters,u16, minted_at_micros,u64, expires_at_micros,u64, confidence_bps,u16, venue_id?, crowd_size_hint?, presence_badge?}`. Proofs originate from LocalNet/Range Boost receipts and expire per `TB_PRESENCE_TTL_SECS`.
+- `CohortKeyV2`: `{domain,String, domain_tier:DomainTier, domain_owner?:AccountId, provider?:String, badges:Vec<BadgeId>, interest_tags:Vec<InterestTagId>, presence_bucket?:PresenceBucket, selectors_version,u16}`. Keys serialize under `cohort_v2:<hash>`; v1 tuple keys remain readable for downgrade migrations.
+- `SelectorBidSpec`: `{selector_id,String, clearing_price_usd_micros,u64, shading_factor_bps,u16, slot_cap,u32, max_pacing_ppm,u32}`. Used anywhere `selector_budget` appears.
+- `CampaignSummary`: `{id, advertiser_account, remaining_budget_usd_micros, reserved_budget_usd_micros, selector_budget:Vec<SelectorBidSpec>, creatives[], badges[], interest_tags[], presence_filters[], domain_filters?{include?:DomainTier[],exclude?:DomainTier[]}}`.
+- `DistributionPolicy`: `{viewer_percent, host_percent, hardware_percent, verifier_percent}` (unchanged) but now annotated in responses with `selector_overrides?` whenever governance sets selector-specific payouts.
+- `CohortPriceSnapshot`: `{key:CohortKeyV2, price_per_mib_usd_micros, selector_budget:Vec<SelectorBidSpec>, target_utilization_ppm, observed_utilization_ppm, privacy_budget_remaining_ppm}`.
+- `BudgetSnapshot`: `{generated_at_micros,u64, config:BudgetBrokerConfig, privacy_budget:{total_ppm,u32, remaining_ppm,u32}, campaigns:[{id, kappa,f64, epoch_spend_total_usd_micros, remaining_usd_micros, selector_budget:Vec<SelectorBidSpec>, cohorts[CohortKeyV2]}], uplift?:{selector:String, holdout_fraction_bps,u16, estimated_roas,f64}[]}`.
+- `ReadinessSnapshot`: `{ready,bool, window_secs,u32, unique_viewers,u64, host_count,u64, provider_count,u64, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, segments:{domain_tier->{supply_ppm, readiness_score}, interest_tag->{supply_ppm, readiness_score}, presence_bucket->{freshness_histogram, ready_slots}}, privacy_budget:{remaining_ppm,u32, denied:int}, uplift_summary:{selector:String, holdout_fraction_bps,u16, delta_ctr_ppm,i64}, distribution?}`.
+- `PolicySnapshot`: stored in `node/ad_policy_snapshot.rs`; serialized as `{epoch,u64, cohort_schema_version,u16, selector_weights[], governance_hash}`.
+- `CampaignRegistration`: payload accepted by `ad_market::campaign_from_value`. Schema: `{id,String, advertiser_account,String, creatives[], metadata, selector_budget:Vec<SelectorBidSpec>, interest_tags:Vec<InterestTagId>, badges:Vec<BadgeId>, presence_filters?:{allow?:PresenceBucketSpec[], deny?:PresenceBucketSpec[]}, domain_filters?:{include?:DomainTier[], exclude?:DomainTier[]}, conversion_value_rules?:{currency_code?,"USD" default, default_value_usd_micros?, value_ct?, attribution_window_secs?, selector_weights?:[{selector_id, weight_ppm,u32}]}}`.
+- `ConversionRecord`: `{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, value_ct?, currency_code?, attribution_window_secs?, selector_weights?:[{selector_id,String, value_weight_ppm,u32}], occurred_at_micros?}`. Requires `Authorization: Advertiser <account>:<token>`; token hash stored under `metadata["conversion_token_hash"]`.
+- `PresenceCohortSummary`: `{bucket:PresenceBucket, ready_slots,u64, privacy_guardrail:String, selector_prices:Vec<SelectorBidSpec>}` returned by `ad_market.list_presence_cohorts`.
 
 **Common errors**: `-32602` invalid params, `-32603` internal/disabled, `-32000` duplicate campaign, `-32001` unknown campaign, `-32002` unknown creative, `-32030..-32033` advertiser auth failures.
+Additional selector-specific errors: `-32034` invalid presence bucket (expired/unsupported), `-32035` forbidden selector combination per privacy policy, `-32036` unknown interest tag/domain tier, `-32037` insufficient privacy budget, `-32038` holdout overlap, `-32039` mismatched selector weights.
 
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
-| `ad_market.inventory` | none | `{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot]}` | `-32603` when the market handle is not configured |
-| `ad_market.list_campaigns` | none | `{status:"ok",campaigns:[CampaignSummary]}` | `-32603` when disabled |
-| `ad_market.distribution` | none | `{status:"ok",distribution:DistributionPolicy}` | `-32603` |
-| `ad_market.budget` | none | `{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...}}` mirroring `budget_snapshot_to_value` | `-32603` |
-| `ad_market.broker_state` | none | Same payload as `ad_market.budget` (includes pacing deltas and analytics) | `-32603` |
-| `ad_market.readiness` | none | `ReadinessSnapshot` plus optional `distribution` (only when coupled with live market data) | `-32603` when readiness handle unset |
+| `ad_market.inventory` | `{selector_filter?:{domain_tier?,interest_tag?,presence_bucket_id?,badge?}}` | `{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot],selector_prices:Vec<SelectorBidSpec>}` | `-32603` when the market handle is not configured, `-32035` selector violates privacy |
+| `ad_market.list_campaigns` | `{selector_filter?}` | `{status:"ok",campaigns:[CampaignSummary]}` | `-32603` when disabled |
+| `ad_market.distribution` | `{selector_id?}` | `{status:"ok",distribution:DistributionPolicy,selector_overrides?:Vec<SelectorBidSpec>}` | `-32603` |
+| `ad_market.budget` | `{campaign_id?}` | `{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...},privacy_budget:{...}}` mirroring `budget_snapshot_to_value` | `-32603` |
+| `ad_market.broker_state` | none | Same payload as `ad_market.budget` plus pacing deltas and competitiveness analytics per selector | `-32603` |
+| `ad_market.readiness` | `{selector_filter?}` | `ReadinessSnapshot` including per-selector inventory depth, presence-proof freshness histograms, and privacy budget gauges; optional `distribution` only when live market data is attached | `-32603` when readiness handle unset, `-32037` privacy guardrail triggered |
 | `ad_market.policy_snapshot` | `{epoch}` | Snapshot JSON from `ad_policy_snapshot::load_snapshot` or `{status:"not_found"}` | `-32602` missing epoch |
 | `ad_market.policy_snapshots` | `{start_epoch?,end_epoch?}` (`end_epoch` defaults to `chain_height/120`) | `{snapshots:[PolicySnapshot]}` | none (empty list when no snapshots) |
 | `ad_market.register_campaign` | `CampaignRegistration` | `{status:"ok"}` on success | `-32603` when market disabled/persistence error, `-32602` invalid payload, `-32000` duplicate campaign |
-| `ad_market.record_conversion` | `ConversionRecord` body + advertiser auth header | `{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?}}` | `-32603` disabled/internal, `-32602` invalid payload, `-32001` unknown campaign, `-32002` unknown creative, `-32030` auth missing, `-32031` advertiser mismatch, `-32032` token missing, `-32033` invalid token |
+| `ad_market.record_conversion` | `ConversionRecord` body + advertiser auth header | `{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?,value_totals:{usd_micros?,ct?}}}` | `-32603` disabled/internal, `-32602` invalid payload, `-32001` unknown campaign, `-32002` unknown creative, `-32030` auth missing, `-32031` advertiser mismatch, `-32032` token missing, `-32033` invalid token, `-32039` selector weight mismatch |
+| `ad_market.list_presence_cohorts` | `{region?,domain_tier?,min_confidence_bps?,interest_tag?}` | `{status:"ok",cohorts:[PresenceCohortSummary],privacy_budget:{remaining_ppm}}` | `-32602` invalid filter, `-32034` stale bucket, `-32037` privacy guardrail |
+| `ad_market.reserve_presence` | `{campaign_id,String, presence_bucket_id,String, slot_count,u32, expires_at_micros?, selector_budget?:Vec<SelectorBidSpec>}` | `{status:"ok",reservation_id,String,expires_at_micros,u64}` | `-32001` unknown campaign, `-32034` invalid bucket, `-32035` forbidden selector combo, `-32037` insufficient privacy budget |
 
 #### Analytics, anomaly labeling, and settlement probes
 | Method | Request | Response | Error codes |

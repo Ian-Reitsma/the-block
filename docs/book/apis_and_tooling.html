@@ -188,6 +188,7 @@
 <ul>
 <li>Main entry in <code>cli/src/main.rs</code>. Subcommands include: <code>node</code>, <code>gov</code>, <code>wallet</code>, <code>bridge</code>, <code>dex</code>, <code>compute</code>, <code>storage</code>, <code>gateway</code>, <code>mesh</code>, <code>light</code>, <code>telemetry</code>, <code>probe</code>, <code>diagnostics</code>, <code>service-badge</code>, <code>remediation</code>, <code>ai</code>, <code>ann</code>, <code>identity</code>.</li>
 <li><code>tb-cli energy</code> wraps the <code>energy.*</code> RPCs (<code>register</code>, <code>market</code>, <code>settle</code>, <code>submit-reading</code>). It prints friendly tables by default and supports <code>--verbose</code>/<code>--format json</code> when you need machine-readable payloads or to export providers/receipts for explorer ingestion. See <code>docs/testnet/ENERGY_QUICKSTART.md</code> for scripted walkthroughs and dispute drills.</li>
+<li>Provider trust roots live in <code>config/default.toml</code> under <code>energy.provider_keys</code>. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings are rejected once keys are registered.</li>
 <li>Use <code>tb-cli --help</code> or <code>tb-cli &lt;cmd&gt; --help</code>. Structured output via <code>--format json</code> for automation.</li>
 <li>CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.</li>
 </ul>

@@ -13,9 +13,9 @@ use foundation_serialization::json::Value;
 use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
-    encode_transport_provider_policy, registry, validate_disbursement_payload,
-    DisbursementDetails, DisbursementPayload, DisbursementProposalMetadata, DisbursementQuorum,
-    DisbursementReceipt, DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
+    encode_transport_provider_policy, registry, validate_disbursement_payload, DisbursementDetails,
+    DisbursementPayload, DisbursementProposalMetadata, DisbursementQuorum, DisbursementReceipt,
+    DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
     Vote, VoteChoice,
@@ -47,26 +47,40 @@ impl ReleaseVerifier for CliReleaseVerifier {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RemoteTreasuryStatus {
-    Scheduled,
+    Draft,
+    Voting,
+    Queued,
+    Timelocked,
     Executed,
-    Cancelled,
+    Finalized,
+    RolledBack,
 }
 
 impl RemoteTreasuryStatus {
     fn parse(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
-            "scheduled" => Some(Self::Scheduled),
+            "draft" => Some(Self::Draft),
+            "voting" => Some(Self::Voting),
+            "queued" => Some(Self::Queued),
+            "timelocked" => Some(Self::Timelocked),
             "executed" => Some(Self::Executed),
-            "cancelled" => Some(Self::Cancelled),
+            "finalized" => Some(Self::Finalized),
+            "rolled_back" => Some(Self::RolledBack),
+            "scheduled" => Some(Self::Draft),
+            "cancelled" => Some(Self::RolledBack),
             _ => None,
         }
     }
 
     fn as_str(self) -> &'static str {
         match self {
-            Self::Scheduled => "scheduled",
+            Self::Draft => "draft",
+            Self::Voting => "voting",
+            Self::Queued => "queued",
+            Self::Timelocked => "timelocked",
             Self::Executed => "executed",
-            Self::Cancelled => "cancelled",
+            Self::Finalized => "finalized",
+            Self::RolledBack => "rolled_back",
         }
     }
 }
@@ -414,21 +428,17 @@ pub enum GovParamCmd {
 
 pub enum GovDisbursementCmd {
     /// Validate and preview a disbursement JSON payload
-    Preview {
-        json_path: String,
-    },
+    Preview { json_path: String },
     /// Create a disbursement JSON template
-    Create {
-        output: String,
-    },
+    Create { output: String },
     /// Submit a disbursement proposal via RPC
-    Submit {
-        json_path: String,
-        rpc: String,
-    },
+    Submit { json_path: String, rpc: String },
     /// Show a specific disbursement by ID via RPC
-    Show {
+    Show { id: u64, rpc: String },
+    /// Advance a disbursement through the governance state machine via RPC
+    Queue {
         id: u64,
+        epoch: Option<u64>,
         rpc: String,
     },
     /// Execute a disbursement via RPC
@@ -1165,8 +1175,7 @@ impl GovDisbursementCmd {
                 "Path to disbursement JSON file",
             )))
             .arg(ArgSpec::Option(
-                OptionSpec::new("rpc", "rpc", "RPC endpoint")
-                    .default("http://127.0.0.1:26658"),
+                OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
             ))
             .build(),
         )
@@ -1181,8 +1190,27 @@ impl GovDisbursementCmd {
                 "Disbursement identifier",
             )))
             .arg(ArgSpec::Option(
-                OptionSpec::new("rpc", "rpc", "RPC endpoint")
-                    .default("http://127.0.0.1:26658"),
+                OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.queue"),
+                "queue",
+                "Advance a disbursement to the next governance stage",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "epoch",
+                "epoch",
+                "Override current epoch (defaults to node-derived epoch)",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
             ))
             .build(),
         )
@@ -1200,12 +1228,13 @@ impl GovDisbursementCmd {
                 "tx-hash",
                 "Transaction hash authorizing the disbursement",
             )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "receipts",
+                "receipts",
+                "Path to receipts JSON file",
+            )))
             .arg(ArgSpec::Option(
-                OptionSpec::new("receipts", "receipts", "Path to receipts JSON file"),
-            ))
-            .arg(ArgSpec::Option(
-                OptionSpec::new("rpc", "rpc", "RPC endpoint")
-                    .default("http://127.0.0.1:26658"),
+                OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
             ))
             .build(),
         )
@@ -1224,8 +1253,7 @@ impl GovDisbursementCmd {
                 "Reason for rollback",
             )))
             .arg(ArgSpec::Option(
-                OptionSpec::new("rpc", "rpc", "RPC endpoint")
-                    .default("http://127.0.0.1:26658"),
+                OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
             ))
             .build(),
         )
@@ -1258,6 +1286,13 @@ impl GovDisbursementCmd {
                 let rpc = take_string(sub_matches, "rpc")
                     .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
                 Ok(GovDisbursementCmd::Show { id, rpc })
+            }
+            "queue" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let epoch = parse_u64(take_string(sub_matches, "epoch"), "epoch")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovDisbursementCmd::Queue { id, epoch, rpc })
             }
             "execute" => {
                 let id = parse_positional_u64(sub_matches, "id")?;
@@ -1601,7 +1636,18 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
         } => {
             let store = GovStore::open(state);
             let memo_value = memo.unwrap_or_default();
-            match store.queue_disbursement(&destination, amount, amount_it, &memo_value, epoch) {
+            let payload = governance::DisbursementPayload {
+                proposal: governance::DisbursementProposalMetadata::default(),
+                disbursement: governance::DisbursementDetails {
+                    destination,
+                    amount_ct: amount,
+                    amount_it,
+                    memo: memo_value.clone(),
+                    scheduled_epoch: epoch,
+                    expected_receipts: Vec::new(),
+                },
+            };
+            match store.queue_disbursement(payload) {
                 Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
                     Ok(serialized) => writeln!(out, "{serialized}")?,
                     Err(_) => writeln!(out, "queued disbursement {}", record.id)?,
@@ -1611,7 +1657,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
         }
         GovTreasuryCmd::Execute { id, tx_hash, state } => {
             let store = GovStore::open(state);
-            match store.execute_disbursement(id, &tx_hash) {
+            match store.execute_disbursement(id, &tx_hash, Vec::new()) {
                 Ok(record) => match foundation_serialization::json::to_string_pretty(&record) {
                     Ok(serialized) => writeln!(out, "{serialized}")?,
                     Err(_) => writeln!(out, "executed disbursement {id}")?,
@@ -1702,7 +1748,15 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             })?;
             let blocked: Vec<ExecutorDependency> = disbursements
                 .into_iter()
-                .filter(|d| matches!(d.status, DisbursementStatus::Scheduled))
+                .filter(|d| {
+                    matches!(
+                        d.status,
+                        DisbursementStatus::Draft { .. }
+                            | DisbursementStatus::Voting { .. }
+                            | DisbursementStatus::Queued { .. }
+                            | DisbursementStatus::Timelocked { .. }
+                    )
+                })
                 .filter_map(|d| {
                     let deps = parse_dependency_list(&d.memo);
                     if deps.is_empty() {
@@ -1844,21 +1898,14 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             })?;
             let payload: governance::DisbursementPayload =
                 foundation_serialization::json::from_str(&content).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("failed to parse JSON: {err}"),
-                    )
+                    io::Error::new(io::ErrorKind::Other, format!("failed to parse JSON: {err}"))
                 })?;
             match governance::validate_disbursement_payload(&payload) {
                 Ok(()) => {
                     writeln!(out, "Validation: PASSED")?;
                     writeln!(out, "Title: {}", payload.proposal.title)?;
                     writeln!(out, "Summary: {}", payload.proposal.summary)?;
-                    writeln!(
-                        out,
-                        "Destination: {}",
-                        payload.disbursement.destination
-                    )?;
+                    writeln!(out, "Destination: {}", payload.disbursement.destination)?;
                     writeln!(out, "Amount CT: {}", payload.disbursement.amount_ct)?;
                     writeln!(out, "Amount IT: {}", payload.disbursement.amount_it)?;
                     writeln!(
@@ -1920,10 +1967,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             })?;
             let payload: governance::DisbursementPayload =
                 foundation_serialization::json::from_str(&content).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("failed to parse JSON: {err}"),
-                    )
+                    io::Error::new(io::ErrorKind::Other, format!("failed to parse JSON: {err}"))
                 })?;
 
             #[derive(Serialize)]
@@ -1971,9 +2015,43 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             let envelope: RpcEnvelope<GetResponse> =
                 call_rpc_envelope(&client, &rpc, "gov.treasury.disbursement", request)?;
             let response = unwrap_rpc_result(envelope)?;
-            let serialized = foundation_serialization::json::to_string_pretty(&response.disbursement)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+            let serialized =
+                foundation_serialization::json::to_string_pretty(&response.disbursement)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
             writeln!(out, "{serialized}")?;
+        }
+        GovDisbursementCmd::Queue { id, epoch, rpc } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct QueueRequest {
+                id: u64,
+                current_epoch: u64,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct QueueResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+
+            let client = RpcClient::from_env();
+            let request = QueueRequest {
+                id,
+                current_epoch: epoch.unwrap_or(0),
+            };
+            let envelope: RpcEnvelope<QueueResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.queue_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement {id} advanced successfully")?;
+            } else {
+                writeln!(out, "Queue request failed for disbursement {id}")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
+            }
         }
         GovDisbursementCmd::Execute {
             id,

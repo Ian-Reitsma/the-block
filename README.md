@@ -18,9 +18,10 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
 **Key Features for Beginners:**
 - **Proof-of-Work (PoW)**: Like Bitcoin, miners compete to solve puzzles to add new blocks. This makes attacking the network extremely expensive.
 - **Proof-of-Service**: Unlike Bitcoin which only rewards miners, The Block also rewards people who provide useful services like:
-  - **Storage** (keeping files safe) — see [`storage_market/`](storage_market/), [`node/src/storage`](node/src/storage), [`docs/architecture.md#storage-and-state`](docs/architecture.md#storage-and-state)
-  - **Computation** (running programs) — see [`node/src/compute_market`](node/src/compute_market), [`docs/architecture.md#compute-marketplace`](docs/architecture.md#compute-marketplace)
-  - **Bandwidth/Networking** (LocalNet + Range Boost) — see [`node/src/localnet`](node/src/localnet), [`node/src/range_boost`](node/src/range_boost), [`docs/architecture.md#localnet-and-range-boost`](docs/architecture.md#localnet-and-range-boost)
+  - **Storage** (keeping files safe)
+  - **Computation** (running programs)
+  - **Bandwidth** (helping data move around)
+- **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving “cohorts” defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
 - **Single Currency (CT - Consumer Token)**: You can send and receive CT just like Bitcoin or cash, but it also pays for services on the network.
 - **Governance**: Instead of a small group deciding how the blockchain works, CT holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
 
@@ -56,7 +57,7 @@ This means when you run The Block, you're not duct-taping together 50 different 
 
 ## Technical Summary
 
-The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (CT), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue.
+The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (CT), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
 
 ---
 
@@ -67,6 +68,10 @@ Most blockchains focus only on sending money around. The Block goes further - it
 - **Storage providers** keep your files safe (like Dropbox, but decentralized)
 - **Compute providers** run programs for you (like AWS, but decentralized)
 - **Energy market** lets you buy and sell real-world electricity with built-in verification
+  - Configure oracle trust roots directly in `config/default.toml` via `energy.provider_keys` (each entry maps a provider ID to a 32-byte Ed25519 public key). Reloading the config hot-swaps the verifier registry so you can roll keys without restarting nodes.
+  - Meter submissions are rejected unless they carry a valid Ed25519 signature over the canonical payload (`MeterReadingPayload::signing_bytes`). Telemetry surfaces failures via `energy_signature_failure_total{provider,reason}` so operators can alert on bad or missing signatures.
+  - Dispute workflows now live behind first-party RPCs (`energy.disputes`, `energy.flag_dispute`, `energy.resolve_dispute`, `energy.receipts`, `energy.credits`) and the matching CLI (`tb-cli energy disputes|receipts|credits|flag-dispute|resolve-dispute`). Operators can page through outstanding credits/receipts, flag a `meter_hash`, and record resolutions without spelunking sled snapshots or pushing ad-hoc governance proposals.
+  - Energy telemetry exports provider/credit/dispute gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`) plus counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`). Dashboards wire these straight into Grafana via the metrics-aggregator.
 
 Instead of paying these providers per request with transaction fees (which gets expensive fast), The Block pays them automatically when new blocks are mined - similar to how Bitcoin pays miners, but for many types of useful work.
 
@@ -99,6 +104,7 @@ Think of this repository like a city with different neighborhoods:
 
 ### Recent Major Additions
 - **Treasury Disbursement System**: Complete end-to-end workflow for governance-approved fund distributions with RPC handlers (`gov.treasury.submit_disbursement`, `execute_disbursement`, `rollback_disbursement`) and full validation
+- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `tb-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
 - **Energy Market Signature Verification**: Trait-based multi-provider signature system with Ed25519 (always available) and Dilithium (post-quantum, feature-gated), enabling oracle meter readings to be cryptographically verified
 - **Comprehensive Testing**: 100+ new unit tests covering signature verification, credit persistence across provider restarts, oracle timeout enforcement, and disbursement validation
 
@@ -180,7 +186,8 @@ Everything is kept in sync with `mdbook`; CI blocks merges if documentation drif
 ---
 
 ## Contributing & support
-- **New contributors:** read [`AGENTS.md`](AGENTS.md) once and work like you authored it. It documents expectations, testing gates, release policy, and escalation paths for every agent.
+- **New contributors:** read [`AGENTS.md`](AGENTS.md) once and work like you authored it. It documents expectations, testing gates, release policy, escalation paths, and the Document Map owners you must loop in before touching each subsystem. The spec-first contract applies even to README/handbook updates—patch docs first, cite them in your PR, then change code.
+- **Ad-market track:** With the cohort/presence spec locked in this README + `docs/`, implementation now moves to the backlog in `AGENTS.md §15.K`. Code/CLI/RPC changes must cite the doc sections updated here and include the readiness checklist artifacts (`docs/overview.md#ad--targeting-readiness-checklist`).
 - **Repeatable workflows:** prefer `just` targets and the scripts under `scripts/` instead of ad-hoc commands. Hook `scripts/pre-commit.sample` if you want automatic fmt/lint before each commit.
 - **Issues/questions:** open an issue describing the doc/code mismatch before changing behavior—spec drift is treated as a bug.
 - **Licensing:** Apache 2.0 (`LICENSE`) governs the entire repo, including generated artifacts.

@@ -13,6 +13,7 @@ use sled::{Config as SledConfig, Db as SledDb, Tree as SledTree};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
@@ -52,6 +53,116 @@ const KEY_MEDIANS: &[u8] = b"cost_medians";
 pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
 const BYTES_PER_MIB: u64 = 1_048_576;
+
+pub const COHORT_SELECTOR_VERSION_V1: u16 = 1;
+pub const COHORT_SELECTOR_VERSION_V2: u16 = 2;
+pub const CURRENT_COHORT_SELECTOR_VERSION: u16 = COHORT_SELECTOR_VERSION_V2;
+
+pub fn cohort_selector_version_default() -> u16 {
+    COHORT_SELECTOR_VERSION_V1
+}
+
+pub type InterestTagId = String;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum DomainTier {
+    Premium,
+    Reserved,
+    Community,
+    Unverified,
+}
+
+impl DomainTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DomainTier::Premium => "premium",
+            DomainTier::Reserved => "reserved",
+            DomainTier::Community => "community",
+            DomainTier::Unverified => "unverified",
+        }
+    }
+}
+
+impl Default for DomainTier {
+    fn default() -> Self {
+        DomainTier::Unverified
+    }
+}
+
+impl FromStr for DomainTier {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "premium" => Ok(DomainTier::Premium),
+            "reserved" => Ok(DomainTier::Reserved),
+            "community" => Ok(DomainTier::Community),
+            "unverified" => Ok(DomainTier::Unverified),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceKind {
+    LocalNet,
+    RangeBoost,
+    Unknown,
+}
+
+impl Default for PresenceKind {
+    fn default() -> Self {
+        PresenceKind::Unknown
+    }
+}
+
+impl PresenceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PresenceKind::LocalNet => "localnet",
+            PresenceKind::RangeBoost => "range_boost",
+            PresenceKind::Unknown => "unknown",
+        }
+    }
+}
+
+impl FromStr for PresenceKind {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "localnet" => Ok(PresenceKind::LocalNet),
+            "range_boost" => Ok(PresenceKind::RangeBoost),
+            "unknown" => Ok(PresenceKind::Unknown),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PresenceBucketRef {
+    pub bucket_id: String,
+    #[serde(default)]
+    pub kind: PresenceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub radius_meters: u16,
+    #[serde(default)]
+    pub confidence_bps: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minted_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_micros: Option<u64>,
+}
+
+impl PresenceBucketRef {
+    fn bucket_label(&self) -> &str {
+        self.bucket_id.as_str()
+    }
+}
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -116,6 +227,25 @@ fn read_u32(map: &JsonMap, key: &str) -> Result<u32, PersistenceError> {
             .ok_or_else(|| invalid(format!("{key} must be an unsigned 32-bit integer"))),
         Some(_) => Err(invalid(format!("{key} must be an unsigned integer"))),
         None => Err(invalid(format!("missing {key}"))),
+    }
+}
+
+fn read_string_array(
+    value: Option<&JsonValue>,
+    field: &str,
+) -> Result<Vec<String>, PersistenceError> {
+    match value {
+        None => Ok(Vec::new()),
+        Some(JsonValue::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| invalid(format!("{field} entries must be strings")))
+            })
+            .collect::<Result<Vec<_>, _>>(),
+        Some(_) => Err(invalid(format!("{field} must be an array"))),
     }
 }
 
@@ -560,18 +690,73 @@ impl Default for MarketplaceConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CohortKey {
     domain: String,
+    domain_tier: DomainTier,
+    domain_owner: Option<String>,
     provider: Option<String>,
     badges: Vec<String>,
+    interest_tags: Vec<InterestTagId>,
+    presence_bucket: Option<PresenceBucketRef>,
+    selectors_version: u16,
 }
 
 impl CohortKey {
-    fn new(domain: String, provider: Option<String>, mut badges: Vec<String>) -> Self {
-        badges.sort();
-        badges.dedup();
-        Self {
+    fn new(domain: String, provider: Option<String>, badges: Vec<String>) -> Self {
+        Self::with_selectors(
             domain,
+            DomainTier::default(),
+            None,
             provider,
             badges,
+            Vec::new(),
+            None,
+            COHORT_SELECTOR_VERSION_V1,
+        )
+    }
+
+    fn from_context(ctx: &ImpressionContext) -> Self {
+        Self::with_selectors(
+            ctx.domain.clone(),
+            ctx.domain_tier,
+            ctx.domain_owner.clone(),
+            ctx.provider.clone(),
+            ctx.badges.clone(),
+            ctx.interest_tags.clone(),
+            ctx.presence_bucket.clone(),
+            ctx.selectors_version,
+        )
+    }
+
+    fn with_selectors(
+        domain: String,
+        domain_tier: DomainTier,
+        domain_owner: Option<String>,
+        provider: Option<String>,
+        mut badges: Vec<String>,
+        mut interest_tags: Vec<InterestTagId>,
+        presence_bucket: Option<PresenceBucketRef>,
+        selectors_version: u16,
+    ) -> Self {
+        badges.sort();
+        badges.dedup();
+        interest_tags.sort();
+        interest_tags.dedup();
+        Self {
+            domain,
+            domain_tier,
+            domain_owner,
+            provider,
+            badges,
+            interest_tags,
+            presence_bucket,
+            selectors_version,
+        }
+    }
+
+    fn selectors_version(&self) -> u16 {
+        if self.selectors_version == 0 {
+            COHORT_SELECTOR_VERSION_V1
+        } else {
+            self.selectors_version
         }
     }
 }
@@ -579,8 +764,16 @@ impl CohortKey {
 impl Hash for CohortKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.domain.hash(state);
+        self.domain_tier.as_str().hash(state);
+        self.domain_owner.hash(state);
         self.provider.hash(state);
         self.badges.hash(state);
+        self.interest_tags.hash(state);
+        if let Some(bucket) = &self.presence_bucket {
+            bucket.bucket_id.hash(state);
+            bucket.kind.hash(state);
+        }
+        self.selectors_version().hash(state);
     }
 }
 
@@ -588,34 +781,71 @@ impl Hash for CohortKey {
 struct CohortTelemetryId {
     cohort_hash: String,
     domain: String,
+    domain_tier: DomainTier,
     provider: Option<String>,
     badge_hash: String,
+    interest_hash: String,
+    presence_bucket: Option<String>,
 }
 
 impl CohortTelemetryId {
     fn from_key(key: &CohortKey) -> Self {
         let mut cohort_hasher = blake3::Hasher::new();
         cohort_hasher.update(key.domain.as_bytes());
+        cohort_hasher.update(key.domain_tier.as_str().as_bytes());
+        if let Some(owner) = &key.domain_owner {
+            cohort_hasher.update(owner.as_bytes());
+        }
         if let Some(provider) = &key.provider {
             cohort_hasher.update(provider.as_bytes());
         }
         for badge in &key.badges {
             cohort_hasher.update(badge.as_bytes());
         }
+        for tag in &key.interest_tags {
+            cohort_hasher.update(tag.as_bytes());
+        }
+        if let Some(bucket) = &key.presence_bucket {
+            cohort_hasher.update(bucket.bucket_id.as_bytes());
+            cohort_hasher.update(bucket.kind.as_str().as_bytes());
+        }
         let mut badge_hasher = blake3::Hasher::new();
         for badge in &key.badges {
             badge_hasher.update(badge.as_bytes());
         }
+        let mut interest_hasher = blake3::Hasher::new();
+        for tag in &key.interest_tags {
+            interest_hasher.update(tag.as_bytes());
+        }
+        let presence_bucket = key
+            .presence_bucket
+            .as_ref()
+            .map(|bucket| bucket.bucket_id.clone());
         Self {
             cohort_hash: cohort_hasher.finalize().to_hex().to_hex_string(),
             domain: key.domain.clone(),
+            domain_tier: key.domain_tier,
             provider: key.provider.clone(),
             badge_hash: badge_hasher.finalize().to_hex().to_hex_string(),
+            interest_hash: interest_hasher.finalize().to_hex().to_hex_string(),
+            presence_bucket,
         }
     }
 
     fn provider_label(&self) -> &str {
         self.provider.as_deref().unwrap_or("-")
+    }
+
+    fn domain_tier_label(&self) -> &'static str {
+        self.domain_tier.as_str()
+    }
+
+    fn interest_label(&self) -> &str {
+        self.interest_hash.as_str()
+    }
+
+    fn presence_label(&self) -> &str {
+        self.presence_bucket.as_deref().unwrap_or("-")
     }
 }
 
@@ -715,6 +945,9 @@ impl CohortPricingState {
             "domain" => self.telemetry.domain.as_str(),
             "provider" => self.telemetry.provider_label(),
             "badges" => self.telemetry.badge_hash.as_str(),
+            "domain_tier" => self.telemetry.domain_tier_label(),
+            "interest" => self.telemetry.interest_label(),
+            "presence_bucket" => self.telemetry.presence_label(),
         );
         gauge!(
             "ad_price_pi_integral",
@@ -1268,8 +1501,18 @@ pub struct CampaignSummary {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ImpressionContext {
     pub domain: String,
+    #[serde(default)]
+    pub domain_tier: DomainTier,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_owner: Option<String>,
     pub provider: Option<String>,
     pub badges: Vec<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: Vec<InterestTagId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_bucket: Option<PresenceBucketRef>,
+    #[serde(default = "cohort_selector_version_default")]
+    pub selectors_version: u16,
     pub bytes: u64,
     pub attestations: Vec<SelectionAttestation>,
     pub population_estimate: Option<u64>,
@@ -1378,10 +1621,20 @@ pub struct ConversionEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelectionCohortTrace {
     pub domain: String,
+    #[serde(default)]
+    pub domain_tier: DomainTier,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub badges: Vec<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: Vec<InterestTagId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_bucket: Option<PresenceBucketRef>,
+    #[serde(default = "cohort_selector_version_default")]
+    pub selectors_version: u16,
     pub bytes: u64,
     pub price_per_mib_usd_micros: u64,
     #[serde(default)]
@@ -2252,10 +2505,20 @@ fn soft_intent_artifacts(
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CohortPriceSnapshot {
     pub domain: String,
+    #[serde(default)]
+    pub domain_tier: DomainTier,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub badges: Vec<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: Vec<InterestTagId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_bucket: Option<PresenceBucketRef>,
+    #[serde(default = "cohort_selector_version_default")]
+    pub selectors_version: u16,
     pub price_per_mib_usd_micros: u64,
     pub target_utilization_ppm: u32,
     #[serde(default)]
@@ -3238,6 +3501,36 @@ fn cohort_key_snapshot_to_value(snapshot: &CohortKeySnapshot) -> JsonValue {
         .map(JsonValue::String)
         .collect();
     map.insert("badges".into(), JsonValue::Array(badges));
+    if snapshot.domain_tier != DomainTier::default() {
+        map.insert(
+            "domain_tier".into(),
+            JsonValue::String(snapshot.domain_tier.as_str().into()),
+        );
+    }
+    if let Some(owner) = &snapshot.domain_owner {
+        map.insert("domain_owner".into(), JsonValue::String(owner.clone()));
+    }
+    if !snapshot.interest_tags.is_empty() {
+        let tags = snapshot
+            .interest_tags
+            .iter()
+            .cloned()
+            .map(JsonValue::String)
+            .collect();
+        map.insert("interest_tags".into(), JsonValue::Array(tags));
+    }
+    if let Some(bucket) = snapshot.presence_bucket.as_ref() {
+        map.insert(
+            "presence_bucket".into(),
+            presence_bucket_to_value(bucket),
+        );
+    }
+    if snapshot.selectors_version != cohort_selector_version_default() {
+        map.insert(
+            "selectors_version".into(),
+            JsonValue::Number(JsonNumber::from(snapshot.selectors_version)),
+        );
+    }
     JsonValue::Object(map)
 }
 
@@ -3253,23 +3546,133 @@ fn cohort_key_snapshot_from_value(
         Some(JsonValue::Null) | None => None,
         Some(_) => return Err(invalid("provider must be a string or null")),
     };
-    let badges = match map.get("badges") {
-        None => Vec::new(),
-        Some(JsonValue::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| invalid("badge entries must be strings"))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => return Err(invalid("badges must be an array")),
+    let badges = read_string_array(map.get("badges"), "badges")?;
+    let domain_tier = match map.get("domain_tier") {
+        Some(JsonValue::String(value)) => DomainTier::from_str(value)
+            .map_err(|_| invalid("domain_tier must be premium|reserved|community|unverified"))?,
+        Some(_) => return Err(invalid("domain_tier must be a string")),
+        None => DomainTier::default(),
+    };
+    let domain_owner = match map.get("domain_owner") {
+        Some(JsonValue::String(value)) => Some(value.clone()),
+        Some(JsonValue::Null) | None => None,
+        Some(_) => return Err(invalid("domain_owner must be a string or null")),
+    };
+    let interest_tags = read_string_array(map.get("interest_tags"), "interest_tags")?;
+    let presence_bucket = match map.get("presence_bucket") {
+        Some(value) => Some(presence_bucket_from_value(value)?),
+        None => None,
+    };
+    let selectors_version = match map.get("selectors_version") {
+        Some(JsonValue::Number(num)) => num
+            .as_u64()
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or_else(|| invalid("selectors_version must fit into u16"))?,
+        Some(_) => return Err(invalid("selectors_version must be an unsigned integer")),
+        None => cohort_selector_version_default(),
     };
     Ok(CohortKeySnapshot {
         domain,
         provider,
         badges,
+        domain_tier,
+        domain_owner,
+        interest_tags,
+        presence_bucket,
+        selectors_version,
+    })
+}
+
+fn presence_bucket_to_value(bucket: &PresenceBucketRef) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "bucket_id".into(),
+        JsonValue::String(bucket.bucket_id.clone()),
+    );
+    map.insert(
+        "kind".into(),
+        JsonValue::String(bucket.kind.as_str().into()),
+    );
+    if let Some(region) = &bucket.region {
+        map.insert("region".into(), JsonValue::String(region.clone()));
+    }
+    if bucket.radius_meters > 0 {
+        map.insert(
+            "radius_meters".into(),
+            JsonValue::Number(JsonNumber::from(bucket.radius_meters)),
+        );
+    }
+    if bucket.confidence_bps > 0 {
+        map.insert(
+            "confidence_bps".into(),
+            JsonValue::Number(JsonNumber::from(bucket.confidence_bps)),
+        );
+    }
+    if let Some(minted) = bucket.minted_at_micros {
+        map.insert(
+            "minted_at_micros".into(),
+            JsonValue::Number(JsonNumber::from(minted)),
+        );
+    }
+    if let Some(expires) = bucket.expires_at_micros {
+        map.insert(
+            "expires_at_micros".into(),
+            JsonValue::Number(JsonNumber::from(expires)),
+        );
+    }
+    JsonValue::Object(map)
+}
+
+fn presence_bucket_from_value(value: &JsonValue) -> Result<PresenceBucketRef, PersistenceError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid("presence_bucket must be an object"))?;
+    let bucket_id = read_string(map, "bucket_id")?;
+    let kind = match map.get("kind") {
+        Some(JsonValue::String(value)) => PresenceKind::from_str(value)
+            .map_err(|_| invalid("presence kind must be localnet|range_boost|unknown"))?,
+        Some(_) => return Err(invalid("presence kind must be a string")),
+        None => PresenceKind::default(),
+    };
+    let region = match map.get("region") {
+        Some(JsonValue::String(value)) => Some(value.clone()),
+        Some(JsonValue::Null) | None => None,
+        Some(_) => return Err(invalid("presence region must be a string")),
+    };
+    let radius_meters = match map.get("radius_meters") {
+        Some(JsonValue::Number(num)) => num
+            .as_u64()
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or_else(|| invalid("radius_meters must fit into u16"))?,
+        Some(_) => return Err(invalid("radius_meters must be an unsigned integer")),
+        None => 0,
+    };
+    let confidence_bps = match map.get("confidence_bps") {
+        Some(JsonValue::Number(num)) => num
+            .as_u64()
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or_else(|| invalid("confidence_bps must fit into u16"))?,
+        Some(_) => return Err(invalid("confidence_bps must be an unsigned integer")),
+        None => 0,
+    };
+    let minted_at_micros = match map.get("minted_at_micros") {
+        Some(JsonValue::Number(num)) => num.as_u64(),
+        Some(_) => return Err(invalid("minted_at_micros must be an unsigned integer")),
+        None => None,
+    };
+    let expires_at_micros = match map.get("expires_at_micros") {
+        Some(JsonValue::Number(num)) => num.as_u64(),
+        Some(_) => return Err(invalid("expires_at_micros must be an unsigned integer")),
+        None => None,
+    };
+    Ok(PresenceBucketRef {
+        bucket_id,
+        kind,
+        region,
+        radius_meters,
+        confidence_bps,
+        minted_at_micros,
+        expires_at_micros,
     })
 }
 
@@ -3688,7 +4091,7 @@ impl InMemoryMarketplace {
     }
 
     fn cohort_key(ctx: &ImpressionContext) -> CohortKey {
-        CohortKey::new(ctx.domain.clone(), ctx.provider.clone(), ctx.badges.clone())
+        CohortKey::from_context(ctx)
     }
 
     fn get_price_and_state<'a>(
@@ -3983,8 +4386,13 @@ impl Marketplace for InMemoryMarketplace {
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: ctx.domain.clone(),
+                domain_tier: ctx.domain_tier,
+                domain_owner: ctx.domain_owner.clone(),
                 provider: ctx.provider.clone(),
                 badges: ctx.badges.clone(),
+                interest_tags: ctx.interest_tags.clone(),
+                presence_bucket: ctx.presence_bucket.clone(),
+                selectors_version: ctx.selectors_version,
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
                 delivery_channel: ctx.delivery_channel,
@@ -4236,8 +4644,13 @@ impl Marketplace for InMemoryMarketplace {
             .iter()
             .map(|(key, state)| CohortPriceSnapshot {
                 domain: key.domain.clone(),
+                domain_tier: key.domain_tier,
+                domain_owner: key.domain_owner.clone(),
                 provider: key.provider.clone(),
                 badges: key.badges.clone(),
+                interest_tags: key.interest_tags.clone(),
+                presence_bucket: key.presence_bucket.clone(),
+                selectors_version: key.selectors_version(),
                 price_per_mib_usd_micros: state.price_per_mib_usd_micros(),
                 target_utilization_ppm: state.target_utilization_ppm,
                 observed_utilization_ppm: state.observed_utilization_ppm(),
@@ -4829,8 +5242,13 @@ impl Marketplace for SledMarketplace {
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: ctx.domain.clone(),
+                domain_tier: ctx.domain_tier,
+                domain_owner: ctx.domain_owner.clone(),
                 provider: ctx.provider.clone(),
                 badges: ctx.badges.clone(),
+                interest_tags: ctx.interest_tags.clone(),
+                presence_bucket: ctx.presence_bucket.clone(),
+                selectors_version: ctx.selectors_version,
                 bytes: ctx.bytes,
                 price_per_mib_usd_micros: price_per_mib,
                 delivery_channel: ctx.delivery_channel,
@@ -5114,8 +5532,13 @@ impl Marketplace for SledMarketplace {
             .iter()
             .map(|(key, state)| CohortPriceSnapshot {
                 domain: key.domain.clone(),
+                domain_tier: key.domain_tier,
+                domain_owner: key.domain_owner.clone(),
                 provider: key.provider.clone(),
                 badges: key.badges.clone(),
+                interest_tags: key.interest_tags.clone(),
+                presence_bucket: key.presence_bucket.clone(),
+                selectors_version: key.selectors_version(),
                 price_per_mib_usd_micros: state.price_per_mib_usd_micros(),
                 target_utilization_ppm: state.target_utilization_ppm,
                 observed_utilization_ppm: state.observed_utilization_ppm(),
@@ -5666,8 +6089,13 @@ mod tests {
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "example.test".into(),
+                domain_tier: DomainTier::default(),
+                domain_owner: None,
                 provider: Some("wallet".into()),
                 badges: vec!["badge-a".into(), "badge-b".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: COHORT_SELECTOR_VERSION_V1,
                 bytes: BYTES_PER_MIB,
                 price_per_mib_usd_micros: 120,
                 delivery_channel: DeliveryChannel::Http,
@@ -6194,8 +6622,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "example.com".into(),
+                domain_tier: DomainTier::default(),
+                domain_owner: None,
                 provider: Some("edge".into()),
                 badges: vec!["a".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: COHORT_SELECTOR_VERSION_V1,
                 bytes: 1_024,
                 price_per_mib_usd_micros: 120,
                 delivery_channel: DeliveryChannel::Http,
@@ -6272,8 +6705,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "example.com".into(),
+                domain_tier: DomainTier::default(),
+                domain_owner: None,
                 provider: None,
                 badges: Vec::new(),
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: COHORT_SELECTOR_VERSION_V1,
                 bytes: 512,
                 price_per_mib_usd_micros: 90,
                 delivery_channel: DeliveryChannel::Http,
@@ -6353,8 +6791,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "example.com".into(),
+                domain_tier: DomainTier::default(),
+                domain_owner: None,
                 provider: Some("edge".into()),
                 badges: vec!["badge".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: COHORT_SELECTOR_VERSION_V1,
                 bytes: 256,
                 price_per_mib_usd_micros: 80,
                 delivery_channel: DeliveryChannel::Http,

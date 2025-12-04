@@ -1,10 +1,11 @@
 use super::RpcError;
 use crate::governance::GovStore;
 use foundation_serialization::{Deserialize, Serialize};
-use governance::{
-    DisbursementPayload, DisbursementStatus as GovDisbursementStatus,
-    TreasuryBalanceEventKind as GovBalanceEventKind, TreasuryBalanceSnapshot as GovBalanceSnapshot,
-    TreasuryDisbursement as GovDisbursement, TreasuryExecutorSnapshot as GovExecutorSnapshot,
+use governance_spec::treasury::{
+    validate_disbursement_payload, DisbursementPayload,
+    DisbursementStatus as GovDisbursementStatus, TreasuryBalanceEventKind as GovBalanceEventKind,
+    TreasuryBalanceSnapshot as GovBalanceSnapshot, TreasuryDisbursement as GovDisbursement,
+    TreasuryExecutorSnapshot as GovExecutorSnapshot,
 };
 
 const DEFAULT_LIMIT: u64 = 50;
@@ -98,26 +99,71 @@ pub struct TreasuryBalanceHistoryResponse {
 #[serde(crate = "foundation_serialization::serde")]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TreasuryDisbursementStatus {
-    Scheduled,
-    Executed { tx_hash: String, executed_at: u64 },
-    Cancelled { reason: String, cancelled_at: u64 },
+    Draft {
+        created_at: u64,
+    },
+    Voting {
+        vote_deadline_epoch: u64,
+    },
+    Queued {
+        queued_at: u64,
+        activation_epoch: u64,
+    },
+    Timelocked {
+        ready_epoch: u64,
+    },
+    Executed {
+        tx_hash: String,
+        executed_at: u64,
+    },
+    Finalized {
+        tx_hash: String,
+        executed_at: u64,
+        finalized_at: u64,
+    },
+    RolledBack {
+        reason: String,
+        rolled_back_at: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prior_tx: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
 #[serde(rename_all = "snake_case")]
 pub enum TreasuryDisbursementStatusFilter {
-    Scheduled,
+    Draft,
+    Voting,
+    Queued,
+    Timelocked,
     Executed,
+    Finalized,
+    RolledBack,
+    #[serde(alias = "scheduled")]
+    Scheduled,
+    #[serde(alias = "cancelled")]
     Cancelled,
 }
 
 impl TreasuryDisbursementStatusFilter {
     fn matches(&self, status: &GovDisbursementStatus) -> bool {
         match (self, status) {
-            (Self::Scheduled, GovDisbursementStatus::Scheduled) => true,
+            (Self::Draft, GovDisbursementStatus::Draft { .. }) => true,
+            (Self::Voting, GovDisbursementStatus::Voting { .. }) => true,
+            (Self::Queued, GovDisbursementStatus::Queued { .. }) => true,
+            (Self::Timelocked, GovDisbursementStatus::Timelocked { .. }) => true,
             (Self::Executed, GovDisbursementStatus::Executed { .. }) => true,
-            (Self::Cancelled, GovDisbursementStatus::Cancelled { .. }) => true,
+            (Self::Finalized, GovDisbursementStatus::Finalized { .. }) => true,
+            (Self::RolledBack, GovDisbursementStatus::RolledBack { .. }) => true,
+            (
+                Self::Scheduled,
+                GovDisbursementStatus::Draft { .. }
+                | GovDisbursementStatus::Voting { .. }
+                | GovDisbursementStatus::Queued { .. }
+                | GovDisbursementStatus::Timelocked { .. },
+            ) => true,
+            (Self::Cancelled, GovDisbursementStatus::RolledBack { .. }) => true,
             _ => false,
         }
     }
@@ -269,7 +315,24 @@ impl From<GovDisbursement> for TreasuryDisbursementRecord {
 impl From<GovDisbursementStatus> for TreasuryDisbursementStatus {
     fn from(value: GovDisbursementStatus) -> Self {
         match value {
-            GovDisbursementStatus::Scheduled => TreasuryDisbursementStatus::Scheduled,
+            GovDisbursementStatus::Draft { created_at } => {
+                TreasuryDisbursementStatus::Draft { created_at }
+            }
+            GovDisbursementStatus::Voting {
+                vote_deadline_epoch,
+            } => TreasuryDisbursementStatus::Voting {
+                vote_deadline_epoch,
+            },
+            GovDisbursementStatus::Queued {
+                queued_at,
+                activation_epoch,
+            } => TreasuryDisbursementStatus::Queued {
+                queued_at,
+                activation_epoch,
+            },
+            GovDisbursementStatus::Timelocked { ready_epoch } => {
+                TreasuryDisbursementStatus::Timelocked { ready_epoch }
+            }
             GovDisbursementStatus::Executed {
                 tx_hash,
                 executed_at,
@@ -277,12 +340,23 @@ impl From<GovDisbursementStatus> for TreasuryDisbursementStatus {
                 tx_hash,
                 executed_at,
             },
-            GovDisbursementStatus::Cancelled {
+            GovDisbursementStatus::Finalized {
+                tx_hash,
+                executed_at,
+                finalized_at,
+            } => TreasuryDisbursementStatus::Finalized {
+                tx_hash,
+                executed_at,
+                finalized_at,
+            },
+            GovDisbursementStatus::RolledBack {
                 reason,
-                cancelled_at,
-            } => TreasuryDisbursementStatus::Cancelled {
+                rolled_back_at,
+                prior_tx,
+            } => TreasuryDisbursementStatus::RolledBack {
                 reason,
-                cancelled_at,
+                rolled_back_at,
+                prior_tx,
             },
         }
     }
@@ -385,9 +459,15 @@ fn matches_request(record: &GovDisbursement, request: &TreasuryDisbursementsRequ
         }
     }
     let status_timestamp = match &record.status {
-        GovDisbursementStatus::Scheduled => record.created_at,
+        GovDisbursementStatus::Draft { created_at } => *created_at,
+        GovDisbursementStatus::Voting {
+            vote_deadline_epoch,
+        } => *vote_deadline_epoch,
+        GovDisbursementStatus::Queued { queued_at, .. } => *queued_at,
+        GovDisbursementStatus::Timelocked { ready_epoch } => *ready_epoch,
         GovDisbursementStatus::Executed { executed_at, .. } => *executed_at,
-        GovDisbursementStatus::Cancelled { cancelled_at, .. } => *cancelled_at,
+        GovDisbursementStatus::Finalized { finalized_at, .. } => *finalized_at,
+        GovDisbursementStatus::RolledBack { rolled_back_at, .. } => *rolled_back_at,
     };
     if let Some(min_status_ts) = request.min_status_ts {
         if status_timestamp < min_status_ts {
@@ -446,6 +526,8 @@ pub struct GetDisbursementResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct QueueDisbursementRequest {
     pub id: u64,
+    #[serde(default, alias = "epoch")]
+    pub current_epoch: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -484,22 +566,12 @@ pub fn submit_disbursement(
     request: SubmitDisbursementRequest,
 ) -> Result<SubmitDisbursementResponse, RpcError> {
     // Validate payload
-    governance::validate_disbursement_payload(&request.payload).map_err(|e| {
-        RpcError::new(
-            -32600,
-            &format!("disbursement validation failed: {}", e),
-        )
-    })?;
+    validate_disbursement_payload(&request.payload)
+        .map_err(|e| RpcError::new(-32600, format!("disbursement validation failed: {e}")))?;
 
     // Queue disbursement using existing store method
     let disbursement = store
-        .queue_disbursement(
-            &request.payload.disbursement.destination,
-            request.payload.disbursement.amount_ct,
-            request.payload.disbursement.amount_it,
-            &request.payload.disbursement.memo,
-            request.payload.disbursement.scheduled_epoch,
-        )
+        .queue_disbursement(request.payload)
         .map_err(storage_error)?;
 
     Ok(SubmitDisbursementResponse {
@@ -517,7 +589,7 @@ pub fn get_disbursement(
     let disbursement = all_disbursements
         .into_iter()
         .find(|d| d.id == request.id)
-        .ok_or_else(|| RpcError::new(-32001, &format!("disbursement {} not found", request.id)))?;
+        .ok_or_else(|| RpcError::new(-32001, format!("disbursement {} not found", request.id)))?;
 
     Ok(GetDisbursementResponse {
         disbursement: TreasuryDisbursementRecord::from(disbursement),
@@ -528,21 +600,33 @@ pub fn queue_disbursement(
     store: &GovStore,
     request: QueueDisbursementRequest,
 ) -> Result<DisbursementOperationResponse, RpcError> {
-    // Note: store.queue_disbursement creates new disbursements,
-    // but for RPC we might want to transition existing ones.
-    // For now, return an error stating this is not implemented.
-    Err(RpcError::new(
-        -32601,
-        "queue_disbursement should be called during initial submission via submit_disbursement",
-    ))
+    let record = store
+        .advance_disbursement_status(request.id, request.current_epoch)
+        .map_err(storage_error)?;
+    Ok(DisbursementOperationResponse {
+        ok: true,
+        message: Some(format!(
+            "disbursement {} advanced to {:?}",
+            record.id, record.status
+        )),
+    })
 }
 
 pub fn execute_disbursement(
     store: &GovStore,
     request: ExecuteDisbursementRequest,
 ) -> Result<DisbursementOperationResponse, RpcError> {
+    let receipts: Vec<governance_spec::treasury::DisbursementReceipt> = request
+        .receipts
+        .into_iter()
+        .map(|r| governance_spec::treasury::DisbursementReceipt {
+            account: r.account,
+            amount_ct: r.amount_ct,
+            amount_it: r.amount_it,
+        })
+        .collect();
     let disbursement = store
-        .execute_disbursement(request.id, &request.tx_hash)
+        .execute_disbursement(request.id, &request.tx_hash, receipts)
         .map_err(storage_error)?;
 
     Ok(DisbursementOperationResponse {
@@ -566,12 +650,4 @@ pub fn rollback_disbursement(
         ok: true,
         message: Some(format!("disbursement {} cancelled", disbursement.id)),
     })
-}
-
-fn now_ts() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }

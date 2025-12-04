@@ -49,7 +49,10 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Streaming: `state_stream` (light-client snapshots), `compute.job_cancel`, and telemetry correlations.
 
 ## CLI (`tb-cli`)
-- Main entry in `cli/src/main.rs`. Use `tb-cli --help` or `tb-cli <cmd> --help`. Structured output via `--format json` for automation.
+- Main entry in `cli/src/main.rs`. Subcommands include: `node`, `gov`, `wallet`, `bridge`, `dex`, `compute`, `storage`, `gateway`, `mesh`, `light`, `telemetry`, `probe`, `diagnostics`, `service-badge`, `remediation`, `ai`, `ann`, `identity`.
+- `tb-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
+- Provider trust roots live in `config/default.toml` under `energy.provider_keys`. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings will be rejected once keys are registered.
+- Use `tb-cli --help` or `tb-cli <cmd> --help`. Structured output via `--format json` for automation.
 - CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.
 
 ### CLI Command Reference
@@ -94,9 +97,14 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 | Method | Description | Request Body |
 | --- | --- | --- |
 | `energy.register_provider` | Register capacity/jurisdiction/meter binding plus stake. | `{ "capacity_kwh": u64, "price_per_kwh": u64, "meter_address": "string", "jurisdiction": "US_CA", "stake": u64, "owner": "account-id" }` |
-| `energy.market_state` | Fetch snapshot of providers, outstanding meter credits, and receipts; pass `{"provider_id":"energy-0x01"}` to filter. | optional object |
+| `energy.market_state` | Fetch snapshot of providers, outstanding meter credits, receipts, and open disputes; pass `{"provider_id":"energy-0x01"}` to filter. | optional object |
 | `energy.submit_reading` | Submit signed meter total to mint a credit. | `MeterReadingPayload` JSON (below) |
 | `energy.settle` | Burn credit + capacity to settle kWh and produce `EnergyReceipt`. | `{ "provider_id": "energy-0x01", "buyer": "acct"?, "kwh_consumed": u64, "meter_hash": "0x..." }` |
+| `energy.receipts` | Paginated settlement history (optionally filtered by provider). | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
+| `energy.credits` | Paginated meter-credit listing (optionally filtered by provider). | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
+| `energy.disputes` | Paginated dispute log with optional filters (provider, status, meter hash). | `{ "provider_id"?: "energy-0x00", "status"?: "open", "meter_hash"?: "hex", "page"?: u64, "page_size"?: u64 }` |
+| `energy.flag_dispute` | Open a dispute tied to a `meter_hash`. | `{ "meter_hash": "hex", "reason": "string", "reporter"?: "account" }` |
+| `energy.resolve_dispute` | Resolve an existing dispute, recording a resolver/note. | `{ "dispute_id": u64, "resolver"?: "account", "resolution_note"?: "string" }` |
 
 - `energy.market_state` response structure:
 
@@ -105,7 +113,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   "status": "ok",
   "providers": [ { "provider_id": "energy-0x00", "capacity_kwh": 10_000, "...": "..." } ],
   "credits": [ { "provider": "energy-0x00", "meter_hash": "e3c3…", "amount_kwh": 120, "timestamp": 123456 } ],
-  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ]
+  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ],
+  "disputes": [ { "id": 1, "meter_hash": "e3c3…", "provider_id": "energy-0x00", "status": "open", "reason": "bad reading", "opened_at": 1234567890 } ]
 }
 ```
 
@@ -127,8 +136,53 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `StaleReading`, `InvalidMeterValue`, `CreditExpired` when timestamps regress or expiry exceeded.
   - Signature/format errors: RPC rejects payloads where `meter_hash` is not 32 bytes, numbers are missing, or signatures fail decoding (and, once the oracle verifier lands, cryptographic verification failures).
 - Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.
-- Observer tooling: `tb-cli energy market --verbose` dumps the whole response; `tb-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits.
-- Per the architecture roadmap, the next RPC/CLI work items are: adding authenticated disputes + receipt listings, wiring explorer/CLI visualizations for param history, and enforcing per-endpoint rate limiting once the QUIC chaos drills complete (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`).
+- Observer tooling: `tb-cli energy market --verbose` dumps the whole response, `tb-cli energy receipts|credits --json` streams paginated settlements/credits, and `tb-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits. `tb-cli energy disputes|flag-dispute|resolve-dispute` mirrors the RPC contracts for dispute management.
+- Remaining RPC/CLI work items (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`) focus on explorer timelines, richer governance payloads, and tightening per-endpoint rate limiting once the QUIC chaos drills complete.
+
+### Treasury disbursement CLI, RPC, and schema
+- Disbursement proposals live inside the governance namespace. CLI entrypoints sit under `tb-cli gov disburse`:
+  - `create` scaffolds a JSON template (see `examples/governance/disbursement_example.json`) and fills in proposer defaults (badge identity, default timelock/rollback windows).
+  - `preview --json <file>` validates the payload against the schema and prints the derived timeline: quorum requirements, vote window, activation epoch, timelock height, and resulting treasury deltas.
+  - `submit --json <file>` posts the signed proposal to the node via `gov.treasury.submit_disbursement`; dry-run with `--check` to ensure hashes match before sending live traffic.
+  - `show --id <proposal-id>` renders the explorer-style timeline (metadata, quorum/vote tallies, timelock window, execution tx hash, receipts, rollback annotations).
+  - `queue`, `execute`, and `rollback` mirror the on-chain transitions for operators who hold the treasury executor lease. `queue` acknowledges that the proposal passed and seeds the executor queue (it derives the current epoch from the node unless `--epoch` is supplied), `execute` pushes the signed transaction (recording `tx_hash`, nonce, receipts), and `rollback` reverts executions within the bounded window.
+- `DisbursementPayload` JSON schema (shared by CLI, explorer, RPC, and tests):
+
+```jsonc
+{
+  "proposal": {
+    "title": "2024-Q2 Core Grants",
+    "summary": "Fund three core contributors + auditor retainer.",
+    "deps": [1203, 1207],
+    "attachments": [
+      { "name": "proposal-pdf", "uri": "ipfs://bafy..." }
+    ],
+    "quorum": { "operators": 0.67, "builders": 0.67 },
+    "vote_window_epochs": 6,
+    "timelock_epochs": 2,
+    "rollback_window_epochs": 1
+  },
+  "disbursement": {
+    "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+    "amount_ct": 125_000_000,
+    "amount_it": 0,
+    "memo": "Core grants Q2",
+    "scheduled_epoch": 180_500,
+    "expected_receipts": [
+      { "account": "foundation", "amount_ct": 100_000_000 },
+      { "account": "audit-retainer", "amount_ct": 25_000_000 }
+    ]
+  }
+}
+```
+
+- RPC exposure:
+  - `gov.treasury.submit_disbursement { payload, signature }` – create proposal from JSON.
+  - `gov.treasury.disbursement { id }` – fetch canonical status/timeline for a single record.
+  - `gov.treasury.queue_disbursement { id, current_epoch? }`, `gov.treasury.execute_disbursement { id, tx_hash, receipts }`, `gov.treasury.rollback_disbursement { id, reason }` – maintenance hooks for executor operators (all auth gated). Passing `current_epoch = 0` tells the node to derive it from block height automatically.
+  - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings.
+- CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `tb-cli gov disburse preview --json … --check` during docs tests.
+- Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see `explorer/src/treasury.rs`.
 
 ### Treasury disbursement CLI, RPC, and schema
 - Disbursement proposals live inside the governance namespace. CLI entrypoints sit under `tb-cli gov disburse`:
@@ -218,7 +272,12 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 ## Compute, Energy, and Ad Market APIs
 - Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (`compute.job_cancel`). Courier snapshots stream through `compute_market.courier_status`, proof bundles (with fingerprints + circuit artifacts) are downloadable via `compute_market.sla_history(limit)`, `tb-cli compute proofs --limit N` pretty-prints recent SLA/proof entries, `tb-cli explorer sync-proofs --db explorer.db` ingests them into the explorer SQLite tables (`compute_sla_history` + `compute_sla_proofs`), and the explorer HTTP server exposes `/compute/sla/history?limit=N` so dashboards can render proof fingerprints without RPC access. The `snark` CLI (`cli/src/snark.rs`) still outputs attested circuit artifacts for out-of-band prover rollout.
 - Energy RPC/CLI: `energy.register_provider`, `energy.market_state`, `energy.settle`, and `energy.submit_reading` expose the `crates/energy-market` state plus oracle submissions. Governance feeds `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps` into this module, so operators can tune the market via proposals rather than recompiling.
-- Ad market RPC/CLI: reserve impressions, commit deliveries, record conversions, audit ANN proofs, manage mesh queues.
+- Ad market RPC/CLI: campaigns now target multi-signal cohorts (domain tiers, badge mixes, interest tags, and proof-of-presence buckets). Key endpoints:
+  - `ad_market.inventory`, `ad_market.list_campaigns`, `ad_market.distribution`, `ad_market.budget`, `ad_market.broker_state`, `ad_market.readiness` return selector-aware snapshots. Every `CohortPriceSnapshot`/`ReadinessSnapshot` carries `selectors_version`, `domain_tier`, `interest_tags`, optional `presence_bucket`, and privacy-budget gauges so downstream tooling can render per-segment pricing/utilization/freshness.
+  - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `tb-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
+  - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `tb-cli ad-market presence list|reserve`.
+  - Conversion/value APIs: `ad_market.record_conversion` now supports `value_ct`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `tb-cli ad-market record-conversion --file conversion.json`.
+Dashboards must be refreshed (per `docs/operations.md#telemetry-wiring`) whenever new selectors or RPC knobs land; capture the `/wrappers` hash plus Grafana screenshots in every PR.
 
 ## Light-Client Streaming
 - RPC: `light.subscribe`, `light.get_block_range`, `light.get_device_status`, `state_stream.subscribe`. CLI: `tb-cli light sync`, `tb-cli light snapshot`, `tb-cli light device-status`.
