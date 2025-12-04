@@ -14,7 +14,7 @@ use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as 
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
@@ -22,6 +22,10 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::telemetry::{
+    adjust_dns_stake_locked, record_dns_auction_cancelled, record_dns_auction_completed,
+    update_dns_auction_status_metrics,
+};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL};
 use runtime::net::lookup_txt;
@@ -216,10 +220,12 @@ fn record_auction_completed(duration_secs: u64, settlement_ct: u64) {
         duration_secs,
         settlement_ct,
     });
+    record_dns_auction_completed(duration_secs, settlement_ct);
 }
 
 fn record_auction_cancelled() {
     push_metric(DnsMetricKind::AuctionCancelled);
+    record_dns_auction_cancelled();
 }
 
 fn record_stake_lock(amount_ct: u64) {
@@ -227,6 +233,7 @@ fn record_stake_lock(amount_ct: u64) {
         push_metric(DnsMetricKind::StakeLock {
             _amount_ct: amount_ct,
         });
+        adjust_dns_stake_locked(i64::try_from(amount_ct).unwrap_or(i64::MAX));
     }
 }
 
@@ -235,6 +242,62 @@ fn record_stake_unlock(amount_ct: u64) {
         push_metric(DnsMetricKind::StakeUnlock {
             _amount_ct: amount_ct,
         });
+        adjust_dns_stake_locked(-i64::try_from(amount_ct).unwrap_or(i64::MAX));
+    }
+}
+
+fn percentile_from_sorted(sorted: &[u64], quantile: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let clamped = quantile.clamp(0.0, 1.0);
+    let idx = ((sorted.len() as f64 - 1.0) * clamped)
+        .round()
+        .clamp(0.0, (sorted.len() - 1) as f64) as usize;
+    sorted[idx]
+}
+
+fn stats_value(samples: &[u64]) -> Value {
+    if samples.is_empty() {
+        return Value::Null;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    json_map(vec![
+        (
+            "p50",
+            Value::Number(Number::from(percentile_from_sorted(&sorted, 0.50))),
+        ),
+        (
+            "p90",
+            Value::Number(Number::from(percentile_from_sorted(&sorted, 0.90))),
+        ),
+        (
+            "max",
+            Value::Number(Number::from(*sorted.last().unwrap_or(&0))),
+        ),
+        (
+            "samples",
+            Value::Number(Number::from(sorted.len() as u64)),
+        ),
+    ])
+}
+
+fn value_or_null(value: Option<u64>) -> Value {
+    value
+        .map(|v| Value::Number(Number::from(v)))
+        .unwrap_or(Value::Null)
+}
+
+fn ppm_ratio(numerator: u64, denominator: u64) -> u64 {
+    if denominator == 0 {
+        0
+    } else {
+        numerator
+            .saturating_mul(1_000_000)
+            .checked_div(denominator)
+            .unwrap_or(1_000_000)
+            .min(1_000_000)
     }
 }
 
@@ -2183,11 +2246,19 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
         .get("domain")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string());
+    let metrics_window_secs = params
+        .get("metrics_window_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3600);
 
     let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
     let mut auctions = Vec::new();
     let mut ownerships = Vec::new();
     let mut history = Vec::new();
+    let mut status_counts: HashMap<AuctionStatus, u64> = HashMap::new();
+    let mut next_end_ts: Option<u64> = None;
+    let mut last_end_ts: Option<u64> = None;
+    let mut coverage_demand_ct = 0u64;
 
     let domains: Vec<String> = if let Some(domain) = filter.clone() {
         vec![domain]
@@ -2201,6 +2272,24 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
     for domain in domains {
         if let Some(bytes) = db.get(&auction_key(&domain)) {
             let record = decode_auction(&bytes)?;
+             let entry = status_counts.entry(record.status).or_insert(0);
+             *entry = entry.saturating_add(1);
+             if matches!(record.status, AuctionStatus::Active) {
+                 next_end_ts = Some(match next_end_ts {
+                     Some(current) => current.min(record.end_ts),
+                     None => record.end_ts,
+                 });
+                 last_end_ts = Some(match last_end_ts {
+                     Some(current) => current.max(record.end_ts),
+                     None => record.end_ts,
+                 });
+                 let coverage = record
+                     .highest_bid
+                     .as_ref()
+                     .map(|bid| bid.amount_ct)
+                     .unwrap_or(record.min_bid_ct);
+                 coverage_demand_ct = coverage_demand_ct.saturating_add(coverage);
+             }
             auctions.push(auction_to_json(&record));
         }
         if let Some(bytes) = db.get(&ownership_key(&domain)) {
@@ -2226,11 +2315,97 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
             .collect(),
     );
 
+    let snapshot = governance_metrics_snapshot(metrics_window_secs);
+    let total_locked = total_locked_stake();
+    let coverage_ratio_ppm = ppm_ratio(total_locked, coverage_demand_ct);
+    let active = *status_counts.get(&AuctionStatus::Active).unwrap_or(&0);
+    let settled = *status_counts.get(&AuctionStatus::Settled).unwrap_or(&0);
+    let cancelled = *status_counts
+        .get(&AuctionStatus::Cancelled)
+        .unwrap_or(&0);
+    update_dns_auction_status_metrics(active, settled, cancelled);
+
+    let mut counts_map = Map::new();
+    counts_map.insert("active".into(), Value::Number(Number::from(active)));
+    counts_map.insert("settled".into(), Value::Number(Number::from(settled)));
+    counts_map.insert("cancelled".into(), Value::Number(Number::from(cancelled)));
+
+    let mut timing_map = Map::new();
+    timing_map.insert("next_end_ts".into(), value_or_null(next_end_ts));
+    timing_map.insert("last_end_ts".into(), value_or_null(last_end_ts));
+
+    let mut stake_map = Map::new();
+    stake_map.insert(
+        "total_locked_ct".into(),
+        Value::Number(Number::from(total_locked)),
+    );
+    stake_map.insert(
+        "coverage_ratio_ppm".into(),
+        Value::Number(Number::from(coverage_ratio_ppm)),
+    );
+    stake_map.insert(
+        "coverage_demand_ct".into(),
+        Value::Number(Number::from(coverage_demand_ct)),
+    );
+
+    let txt_ratio = ppm_ratio(snapshot.txt_successes, snapshot.txt_attempts);
+    let completion_ratio = ppm_ratio(
+        snapshot.auction_completions,
+        snapshot
+            .auction_completions
+            .saturating_add(snapshot.auction_cancels),
+    );
+    let metrics_value = json_map(vec![
+        (
+            "window_secs",
+            Value::Number(Number::from(metrics_window_secs)),
+        ),
+        (
+            "txt_attempts",
+            Value::Number(Number::from(snapshot.txt_attempts)),
+        ),
+        (
+            "txt_successes",
+            Value::Number(Number::from(snapshot.txt_successes)),
+        ),
+        (
+            "txt_success_ratio_ppm",
+            Value::Number(Number::from(txt_ratio)),
+        ),
+        (
+            "auction_completions",
+            Value::Number(Number::from(snapshot.auction_completions)),
+        ),
+        (
+            "auction_cancels",
+            Value::Number(Number::from(snapshot.auction_cancels)),
+        ),
+        (
+            "auction_completion_ratio_ppm",
+            Value::Number(Number::from(completion_ratio)),
+        ),
+        (
+            "settlement_stats",
+            stats_value(&snapshot.settlement_amounts_ct),
+        ),
+        (
+            "duration_stats",
+            stats_value(&snapshot.settle_durations_secs),
+        ),
+    ]);
+
+    let mut summary_map = Map::new();
+    summary_map.insert("auction_counts".into(), Value::Object(counts_map));
+    summary_map.insert("timing".into(), Value::Object(timing_map));
+    summary_map.insert("stake_snapshot".into(), Value::Object(stake_map));
+    summary_map.insert("metrics".into(), metrics_value);
+
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
         ("auctions", Value::Array(auctions)),
         ("ownership", Value::Array(ownerships)),
         ("history", history_value),
+        ("summary", Value::Object(summary_map)),
     ]))
 }
 

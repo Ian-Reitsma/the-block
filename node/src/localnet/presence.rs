@@ -187,9 +187,8 @@ impl PresenceCache {
         }
 
         let key = receipt.cache_key();
-        let value = json::to_vec(receipt).map_err(|e| {
-            sled::Error::Io(format!("serialization error: {e}"))
-        })?;
+        let value = json::to_vec(receipt)
+            .map_err(|e| sled::Error::Io(format!("serialization error: {e}")))?;
 
         self.tree.insert(key.as_bytes(), value)?;
 
@@ -206,9 +205,8 @@ impl PresenceCache {
         let key = format!("{beacon_id}:{bucket_id}");
         match self.tree.get(key.as_bytes())? {
             Some(bytes) => {
-                let receipt: PresenceReceipt = json::from_slice(&bytes).map_err(|e| {
-                    sled::Error::Io(format!("deserialization error: {e}"))
-                })?;
+                let receipt: PresenceReceipt = json::from_slice(&bytes)
+                    .map_err(|e| sled::Error::Io(format!("deserialization error: {e}")))?;
 
                 // Check expiry
                 if receipt.is_expired() {
@@ -373,7 +371,8 @@ impl PresenceCache {
         // Convert to ppm
         if total > 0 {
             histogram.under_1h_ppm = ((histogram.under_1h as u64 * 1_000_000) / total) as u32;
-            histogram.hours_1_to_6_ppm = ((histogram.hours_1_to_6 as u64 * 1_000_000) / total) as u32;
+            histogram.hours_1_to_6_ppm =
+                ((histogram.hours_1_to_6 as u64 * 1_000_000) / total) as u32;
             histogram.hours_6_to_24_ppm =
                 ((histogram.hours_6_to_24 as u64 * 1_000_000) / total) as u32;
             histogram.over_24h_ppm = ((histogram.over_24h as u64 * 1_000_000) / total) as u32;

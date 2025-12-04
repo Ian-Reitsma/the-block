@@ -550,7 +550,6 @@ pub mod kqueue {
     const EV_ADD: u16 = 0x0001;
     const EV_ENABLE: u16 = 0x0004;
     const EV_CLEAR: u16 = 0x0020;
-
 }
 
 pub mod process {
