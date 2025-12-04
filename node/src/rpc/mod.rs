@@ -439,6 +439,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "ad_market.broker_state",
     "ad_market.readiness",
     "ad_market.record_conversion",
+    "ad_market.list_presence_cohorts",
+    "ad_market.reserve_presence",
     "register_handle",
     "resolve_handle",
     "whoami",
@@ -1099,6 +1101,14 @@ fn dispatch(
         "ad_market.record_conversion" => {
             let params = req.params.as_value().clone();
             ad_market::record_conversion(market_ref, &params, auth)?
+        }
+        "ad_market.list_presence_cohorts" => {
+            let params = req.params.as_value().clone();
+            ad_market::list_presence_cohorts(market_ref, &params)?
+        }
+        "ad_market.reserve_presence" => {
+            let params = req.params.as_value().clone();
+            ad_market::reserve_presence(market_ref, &params)?
         }
         "governor.status" => governor::status(governor.clone())?,
         "governor.decisions" => {

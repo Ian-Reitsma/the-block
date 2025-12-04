@@ -4,11 +4,11 @@ use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::ops::{Deref, DerefMut};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
 use std::process::Command;
-use std::ops::{Deref, DerefMut};
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
     Arc, Mutex, Weak,

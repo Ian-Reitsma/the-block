@@ -13,9 +13,10 @@ use sys::tempfile::TempDir;
 
 use ad_market::{
     Campaign, CampaignTargeting, Creative, CreativePlacement, DeliveryChannel, DistributionPolicy,
-    ImpressionContext, InMemoryMarketplace, Marketplace, MarketplaceConfig, MarketplaceHandle,
-    MeshContext, ReservationKey, SelectionAttestation, SelectionAttestationKind, SelectionReceipt,
-    SledMarketplace, VerifierCommitteeConfig, MICROS_PER_DOLLAR,
+    DomainTier, ImpressionContext, InMemoryMarketplace, Marketplace, MarketplaceConfig,
+    MarketplaceHandle, MeshContext, PresenceBucketRef, PresenceKind, ReservationKey,
+    SelectionAttestation, SelectionAttestationKind, SelectionReceipt, SledMarketplace,
+    VerifierCommitteeConfig, MICROS_PER_DOLLAR,
 };
 use crypto_suite::{encoding::hex, hashing::blake3, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
@@ -139,6 +140,44 @@ fn build_in_memory_harness(
     });
 
     (dir, harness, readiness)
+}
+
+fn seed_presence_bucket(
+    market: &InMemoryMarketplace,
+    bucket_id: &str,
+    region: &str,
+    kind: PresenceKind,
+) -> PresenceBucketRef {
+    let now_micros = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let bucket = PresenceBucketRef {
+        bucket_id: bucket_id.to_string(),
+        kind,
+        region: Some(region.to_string()),
+        radius_meters: 250,
+        confidence_bps: 9000,
+        minted_at_micros: Some(now_micros.saturating_sub(1_000_000)),
+        expires_at_micros: Some(now_micros + 86_400_000),
+    };
+    let ctx = ImpressionContext {
+        domain: format!("{bucket_id}.example.block"),
+        domain_tier: DomainTier::Premium,
+        provider: Some("provider-a".into()),
+        badges: vec!["beta".into()],
+        presence_bucket: Some(bucket.clone()),
+        bytes: 1_048_576,
+        population_estimate: Some(5_000),
+        ..ImpressionContext::default()
+    };
+    let key = ReservationKey {
+        manifest: [0x11; 32],
+        path_hash: [0x22; 32],
+        discriminator: [0x33; 32],
+    };
+    let _ = market.reserve_impression(key, ctx);
+    bucket
 }
 
 const SELECTION_CIRCUIT_ID: &str = "selection_argmax_v1";
@@ -1940,4 +1979,76 @@ fn rpc_record_conversion_rejects_malformed_payload() {
         Some("Advertiser adv-malformed:token".into()),
     ));
     assert_eq!(error.code(), -32602);
+}
+
+#[testkit::tb_serial]
+fn presence_listing_and_reservation_flow() {
+    let (_dir, harness, _) =
+        build_in_memory_harness("presence_flow", MarketplaceConfig::default());
+    let market_impl = harness
+        .in_memory_market
+        .as_ref()
+        .expect("in-memory market");
+
+    let mut metadata = HashMap::new();
+    metadata.insert("conversion_token_hash".to_string(), "deadbeef".to_string());
+    let campaign = Campaign {
+        id: "cmp-presence".to_string(),
+        advertiser_account: "presence-advertiser".to_string(),
+        budget_usd_micros: MICROS_PER_DOLLAR,
+        creatives: Vec::new(),
+        targeting: CampaignTargeting::default(),
+        metadata,
+    };
+    market_impl
+        .register_campaign(campaign)
+        .expect("campaign registered");
+
+    let bucket_us =
+        seed_presence_bucket(market_impl, "bucket-us", "US", PresenceKind::LocalNet);
+    let _bucket_eu =
+        seed_presence_bucket(market_impl, "bucket-eu", "NL", PresenceKind::RangeBoost);
+
+    let list_all = expect_ok(harness.call("ad_market.list_presence_cohorts", parse_json("{}")));
+    let cohorts = list_all["cohorts"]
+        .as_array()
+        .expect("cohorts array")
+        .clone();
+    assert!(
+        cohorts.len() >= 2,
+        "expected multiple presence cohorts in listing"
+    );
+
+    let list_us = expect_ok(harness.call(
+        "ad_market.list_presence_cohorts",
+        parse_json("{\"region\":\"US\"}"),
+    ));
+    let us_cohorts = list_us["cohorts"].as_array().expect("us cohorts");
+    assert_eq!(us_cohorts.len(), 1);
+    assert_eq!(
+        us_cohorts[0]["bucket"]["bucket_id"].as_str(),
+        Some(bucket_us.bucket_id.as_str())
+    );
+
+    let missing_bucket = parse_json(
+        "{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"missing\",\"slot_count\":5}",
+    );
+    let err = expect_error(harness.call("ad_market.reserve_presence", missing_bucket));
+    assert_eq!(err.code(), -32034);
+
+    let ok_params = parse_json(&format!(
+        "{{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"{}\",\"slot_count\":12}}",
+        bucket_us.bucket_id
+    ));
+    let reserve = expect_ok(harness.call("ad_market.reserve_presence", ok_params));
+    assert_eq!(reserve["status"].as_str(), Some("ok"));
+    assert!(reserve["reservation_id"]
+        .as_str()
+        .expect("reservation id")
+        .len()
+        > 8);
+    assert!(
+        reserve["expires_at_micros"].as_u64().is_some(),
+        "reservation expiry returned"
+    );
 }

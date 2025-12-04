@@ -277,6 +277,278 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `tb-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
   - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `tb-cli ad-market presence list|reserve`.
   - Conversion/value APIs: `ad_market.record_conversion` now supports `value_ct`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `tb-cli ad-market record-conversion --file conversion.json`.
+
+### Presence Cohort JSON Schemas
+
+#### `ad_market.list_presence_cohorts` — Request Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ListPresenceCohortsRequest",
+  "type": "object",
+  "properties": {
+    "region": {
+      "type": "string",
+      "description": "ISO 3166-1 alpha-2 region filter (e.g., 'US', 'EU')",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "domain_tier": {
+      "type": "string",
+      "enum": ["premium", "reserved", "community", "unverified"],
+      "description": "Filter by domain tier from .block auctions"
+    },
+    "min_confidence_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "description": "Minimum presence confidence in basis points (0-10000)"
+    },
+    "interest_tag": {
+      "type": "string",
+      "description": "Filter by interest tag ID from governance registry"
+    },
+    "beacon_id": {
+      "type": "string",
+      "description": "Filter by specific beacon/venue identifier"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["localnet", "range_boost"],
+      "description": "Filter by presence proof source"
+    },
+    "include_expired": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include buckets past TB_PRESENCE_TTL_SECS (for debugging)"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 100,
+      "description": "Maximum cohorts to return"
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Pagination cursor from previous response"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `ad_market.list_presence_cohorts` — Response Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ListPresenceCohortsResponse",
+  "type": "object",
+  "required": ["status", "cohorts", "privacy_budget"],
+  "properties": {
+    "status": { "type": "string", "const": "ok" },
+    "cohorts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PresenceCohortSummary"
+      }
+    },
+    "privacy_budget": {
+      "type": "object",
+      "required": ["remaining_ppm"],
+      "properties": {
+        "remaining_ppm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "Remaining privacy budget in parts per million"
+        },
+        "denied_count": {
+          "type": "integer",
+          "description": "Number of cohorts redacted due to k-anonymity"
+        }
+      }
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Cursor for next page (absent when no more results)"
+    }
+  },
+  "definitions": {
+    "PresenceCohortSummary": {
+      "type": "object",
+      "required": ["bucket", "ready_slots", "privacy_guardrail", "selector_prices"],
+      "properties": {
+        "bucket": { "$ref": "#/definitions/PresenceBucket" },
+        "ready_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Available impression slots meeting readiness thresholds"
+        },
+        "privacy_guardrail": {
+          "type": "string",
+          "enum": ["ok", "k_anonymity_redacted", "budget_exhausted", "opt_in_required"],
+          "description": "Reason code if data is limited"
+        },
+        "selector_prices": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SelectorBidSpec" }
+        },
+        "freshness_histogram": {
+          "type": "object",
+          "description": "Distribution of proof ages (buckets: <1h, 1-6h, 6-24h, >24h)",
+          "properties": {
+            "under_1h_ppm": { "type": "integer" },
+            "1h_to_6h_ppm": { "type": "integer" },
+            "6h_to_24h_ppm": { "type": "integer" },
+            "over_24h_ppm": { "type": "integer" }
+          }
+        },
+        "domain_tier_supply": {
+          "type": "object",
+          "description": "Supply breakdown by domain tier within this presence bucket",
+          "additionalProperties": { "type": "integer" }
+        }
+      }
+    },
+    "PresenceBucket": {
+      "type": "object",
+      "required": ["bucket_id", "kind", "beacon_id", "radius_meters", "minted_at_micros", "expires_at_micros", "confidence_bps"],
+      "properties": {
+        "bucket_id": { "type": "string", "description": "Deterministic hash of bucket parameters" },
+        "kind": { "type": "string", "enum": ["localnet", "range_boost"] },
+        "beacon_id": { "type": "string", "description": "Venue/beacon identifier" },
+        "radius_meters": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "minted_at_micros": { "type": "integer", "description": "Unix timestamp in microseconds" },
+        "expires_at_micros": { "type": "integer", "description": "Expiry per TB_PRESENCE_TTL_SECS" },
+        "confidence_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "venue_id": { "type": "string" },
+        "crowd_size_hint": { "type": "integer", "minimum": 0 },
+        "presence_badge": { "type": "string", "description": "Badge token for venue-grade attestations" }
+      }
+    },
+    "SelectorBidSpec": {
+      "type": "object",
+      "required": ["selector_id", "clearing_price_usd_micros"],
+      "properties": {
+        "selector_id": { "type": "string", "description": "blake3(domain||domain_tier||interest_tags||presence_bucket||version)" },
+        "clearing_price_usd_micros": { "type": "integer", "minimum": 0 },
+        "shading_factor_bps": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 0 },
+        "slot_cap": { "type": "integer", "minimum": 0 },
+        "max_pacing_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  }
+}
+```
+
+#### `ad_market.reserve_presence` — Request Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReservePresenceRequest",
+  "type": "object",
+  "required": ["campaign_id", "presence_bucket_id", "slot_count"],
+  "properties": {
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Existing campaign ID from ad_market.register_campaign"
+    },
+    "presence_bucket_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bucket ID from ad_market.list_presence_cohorts"
+    },
+    "slot_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "description": "Number of impression slots to reserve"
+    },
+    "expires_at_micros": {
+      "type": "integer",
+      "description": "Optional explicit expiry; defaults to bucket expiry or TB_PRESENCE_TTL_SECS"
+    },
+    "selector_budget": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SelectorBidSpec" },
+      "description": "Optional per-selector bid overrides for this reservation"
+    },
+    "max_bid_usd_micros": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum bid cap for this reservation"
+    }
+  },
+  "definitions": {
+    "SelectorBidSpec": {
+      "type": "object",
+      "required": ["selector_id", "clearing_price_usd_micros"],
+      "properties": {
+        "selector_id": { "type": "string" },
+        "clearing_price_usd_micros": { "type": "integer", "minimum": 0 },
+        "shading_factor_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "slot_cap": { "type": "integer", "minimum": 0 },
+        "max_pacing_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `ad_market.reserve_presence` — Response Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReservePresenceResponse",
+  "type": "object",
+  "required": ["status", "reservation_id", "expires_at_micros"],
+  "properties": {
+    "status": { "type": "string", "const": "ok" },
+    "reservation_id": {
+      "type": "string",
+      "description": "Unique reservation key for cancellation/inspection"
+    },
+    "expires_at_micros": {
+      "type": "integer",
+      "description": "When this reservation expires (bucket expiry or custom)"
+    },
+    "reserved_budget_usd_micros": {
+      "type": "integer",
+      "description": "Budget committed to this reservation"
+    },
+    "effective_selectors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SelectorBidSpec" },
+      "description": "Merged selector specs after applying reservation overrides"
+    }
+  }
+}
+```
+
+### Presence & Privacy Error Codes
+
+| Code | Name | Description | Resolution |
+|------|------|-------------|------------|
+| `-32034` | `INVALID_PRESENCE_BUCKET` | Presence bucket is expired, malformed, or not found | Check `expires_at_micros` against `TB_PRESENCE_TTL_SECS`; refresh bucket via `ad_market.list_presence_cohorts` |
+| `-32035` | `FORBIDDEN_SELECTOR_COMBO` | Selector combination violates privacy policy (e.g., premium domain + tight presence without opt-in) | Review `presence_filters` and `domain_filters` in campaign; may require explicit opt-in in metadata |
+| `-32036` | `UNKNOWN_SELECTOR` | Interest tag or domain tier not in governance registry | Query `governance.interest_tags` or DNS tier registry |
+| `-32037` | `INSUFFICIENT_PRIVACY_BUDGET` | Request would exceed per-selector or per-family epsilon/delta limits | Wait for budget decay (per `PrivacyBudgetManager` cooldown), reduce request scope, or aggregate selectors |
+| `-32038` | `HOLDOUT_OVERLAP` | Reservation conflicts with active holdout assignment | Cancel conflicting reservation or wait for holdout window to close |
+| `-32039` | `SELECTOR_WEIGHT_MISMATCH` | `selector_weights[]` in conversion record don't sum to 1,000,000 ppm | Adjust weights; total must equal exactly 1,000,000 ppm |
+
+### Governance Knobs for Presence
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `presence_ttl_secs` | `TB_PRESENCE_TTL_SECS` | 86400 | Maximum age of presence proofs before expiry |
+| `presence_radius_meters` | `TB_PRESENCE_RADIUS_METERS` | 500 | Default radius for presence bucket aggregation |
+| `presence_proof_cache_size` | `TB_PRESENCE_PROOF_CACHE_SIZE` | 10000 | Maximum cached `PresenceReceipt` entries per node |
+| `presence_min_crowd_size` | via governance params | 5 | Minimum crowd count for venue-grade attestations |
+| `presence_min_confidence_bps` | via governance params | 8000 | Minimum confidence for presence targeting |
+
 Dashboards must be refreshed (per `docs/operations.md#telemetry-wiring`) whenever new selectors or RPC knobs land; capture the `/wrappers` hash plus Grafana screenshots in every PR.
 
 ## Light-Client Streaming

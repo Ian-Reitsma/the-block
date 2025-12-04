@@ -330,6 +330,14 @@ pub struct Params {
     pub ad_rehearsal_stability_windows: i64,
     #[serde(default = "default_presence_min_crowd_size")]
     pub presence_min_crowd_size: i64,
+    #[serde(default = "default_presence_ttl_secs")]
+    pub presence_ttl_secs: i64,
+    #[serde(default = "default_presence_radius_meters")]
+    pub presence_radius_meters: i64,
+    #[serde(default = "default_presence_proof_cache_size")]
+    pub presence_proof_cache_size: i64,
+    #[serde(default = "default_presence_min_confidence_bps")]
+    pub presence_min_confidence_bps: i64,
     // Dynamic ad-readiness thresholding (governance-controlled)
     #[serde(default)]
     pub ad_use_percentile_thresholds: i64,
@@ -428,6 +436,10 @@ impl Default for Params {
             ad_rehearsal_enabled: 0,
             ad_rehearsal_stability_windows: 6,
             presence_min_crowd_size: 5,
+            presence_ttl_secs: 86400,          // 24 hours
+            presence_radius_meters: 500,       // 500m default aggregation radius
+            presence_proof_cache_size: 10000,  // Max cached PresenceReceipt entries
+            presence_min_confidence_bps: 8000, // 80% minimum confidence
             ad_use_percentile_thresholds: 0,
             ad_viewer_percentile: default_viewer_percentile(),
             ad_host_percentile: default_host_percentile(),
@@ -629,6 +641,22 @@ impl Params {
         map.insert(
             "presence_min_crowd_size".into(),
             Value::Number(self.presence_min_crowd_size.into()),
+        );
+        map.insert(
+            "presence_ttl_secs".into(),
+            Value::Number(self.presence_ttl_secs.into()),
+        );
+        map.insert(
+            "presence_radius_meters".into(),
+            Value::Number(self.presence_radius_meters.into()),
+        );
+        map.insert(
+            "presence_proof_cache_size".into(),
+            Value::Number(self.presence_proof_cache_size.into()),
+        );
+        map.insert(
+            "presence_min_confidence_bps".into(),
+            Value::Number(self.presence_min_confidence_bps.into()),
         );
         map.insert(
             "ad_use_percentile_thresholds".into(),
@@ -856,6 +884,22 @@ impl Params {
                 .get("presence_min_crowd_size")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_presence_min_crowd_size),
+            presence_ttl_secs: obj
+                .get("presence_ttl_secs")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_presence_ttl_secs),
+            presence_radius_meters: obj
+                .get("presence_radius_meters")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_presence_radius_meters),
+            presence_proof_cache_size: obj
+                .get("presence_proof_cache_size")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_presence_proof_cache_size),
+            presence_min_confidence_bps: obj
+                .get("presence_min_confidence_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_presence_min_confidence_bps),
             ad_use_percentile_thresholds: obj
                 .get("ad_use_percentile_thresholds")
                 .and_then(Value::as_i64)
@@ -982,6 +1026,22 @@ const fn default_ad_rehearsal_stability_windows() -> i64 {
 
 const fn default_presence_min_crowd_size() -> i64 {
     5
+}
+
+const fn default_presence_ttl_secs() -> i64 {
+    86400 // 24 hours
+}
+
+const fn default_presence_radius_meters() -> i64 {
+    500 // 500m default aggregation radius
+}
+
+const fn default_presence_proof_cache_size() -> i64 {
+    10000 // Max cached PresenceReceipt entries per node
+}
+
+const fn default_presence_min_confidence_bps() -> i64 {
+    8000 // 80% minimum confidence for presence targeting
 }
 
 const fn default_viewer_percentile() -> i64 {

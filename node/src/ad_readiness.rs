@@ -170,6 +170,8 @@ pub struct AdReadinessSnapshot {
     pub utilization_summary: Option<AdReadinessUtilizationSummary>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub ready_streak_windows: u64,
+    #[serde(default)]
+    pub segment_readiness: Option<AdSegmentReadiness>,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -195,6 +197,7 @@ impl Default for AdReadinessSnapshot {
             cohort_utilization: Vec::new(),
             utilization_summary: None,
             ready_streak_windows: 0,
+            segment_readiness: None,
         }
     }
 }
@@ -207,6 +210,12 @@ pub struct AdReadinessCohortUtilization {
     pub provider: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub badges: Vec<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_bucket_id: Option<String>,
     pub price_per_mib_usd_micros: u64,
     pub target_utilization_ppm: u32,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -227,6 +236,73 @@ pub struct AdReadinessUtilizationSummary {
     pub max_ppm: u32,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub last_updated: u64,
+}
+
+/// Per-segment readiness stats for domain tiers, interest tags, and presence buckets.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdSegmentReadiness {
+    /// Domain tier readiness: tier -> {supply_ppm, readiness_score}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub domain_tiers: std::collections::HashMap<String, SegmentReadinessStats>,
+    /// Interest tag readiness: tag -> {supply_ppm, readiness_score}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: std::collections::HashMap<String, SegmentReadinessStats>,
+    /// Presence bucket readiness: bucket_id -> {freshness_histogram, ready_slots}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub presence_buckets: std::collections::HashMap<String, PresenceBucketReadiness>,
+    /// Privacy budget status
+    #[serde(default)]
+    pub privacy_budget: Option<PrivacyBudgetStatus>,
+}
+
+/// Stats for a single segment (domain tier or interest tag).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct SegmentReadinessStats {
+    /// Supply in parts per million of total cohorts
+    pub supply_ppm: u32,
+    /// Readiness score (0-100)
+    pub readiness_score: u8,
+    /// Count of cohorts in this segment
+    pub cohort_count: u64,
+}
+
+/// Readiness stats for a presence bucket.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct PresenceBucketReadiness {
+    /// Freshness histogram: <1h, 1-6h, 6-24h, >24h (in ppm)
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub freshness_histogram: FreshnessHistogramPpm,
+    /// Number of ready impression slots
+    pub ready_slots: u64,
+    /// Source kind: "localnet" or "range_boost"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// Freshness histogram in parts per million.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FreshnessHistogramPpm {
+    pub under_1h_ppm: u32,
+    pub hours_1_to_6_ppm: u32,
+    pub hours_6_to_24_ppm: u32,
+    pub over_24h_ppm: u32,
+}
+
+/// Privacy budget status for readiness reporting.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct PrivacyBudgetStatus {
+    /// Remaining budget in ppm
+    pub remaining_ppm: u32,
+    /// Number of requests denied due to privacy budget
+    pub denied_count: u64,
+    /// Last denial reason if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_denial_reason: Option<String>,
 }
 
 impl AdReadinessSnapshot {
@@ -493,6 +569,7 @@ struct AdReadinessState {
     market_it_price_usd_micros: u64,
     cohort_utilization: Vec<AdReadinessCohortUtilization>,
     utilization_summary: Option<AdReadinessUtilizationSummary>,
+    segment_readiness: Option<AdSegmentReadiness>,
     last_utilization_update: u64,
     // EMA smoothed dynamic thresholds
     ema_min_unique_viewers: u64,
@@ -519,6 +596,7 @@ impl Default for AdReadinessState {
             market_it_price_usd_micros: 0,
             cohort_utilization: Vec::new(),
             utilization_summary: None,
+            segment_readiness: None,
             last_utilization_update: 0,
             ema_min_unique_viewers: 0,
             ema_min_host_count: 0,
@@ -614,6 +692,7 @@ impl AdReadinessState {
                 max_ppm: 0,
                 last_updated: now,
             });
+            self.segment_readiness = None;
             return;
         }
         let mut entries = Vec::with_capacity(cohorts.len());
@@ -631,6 +710,12 @@ impl AdReadinessState {
                 domain: cohort.domain.clone(),
                 provider: cohort.provider.clone(),
                 badges: cohort.badges.clone(),
+                interest_tags: cohort.interest_tags.clone(),
+                domain_tier: Some(cohort.domain_tier.as_str().to_string()),
+                presence_bucket_id: cohort
+                    .presence_bucket
+                    .as_ref()
+                    .map(|bucket| bucket.bucket_id.clone()),
                 price_per_mib_usd_micros: cohort.price_per_mib_usd_micros,
                 target_utilization_ppm: target,
                 observed_utilization_ppm: observed,
@@ -651,6 +736,7 @@ impl AdReadinessState {
             max_ppm: max,
             last_updated: now,
         });
+        self.segment_readiness = compute_segment_readiness_snapshot(cohorts, now);
     }
 
     fn prune(&mut self, now: u64, window_secs: u64) {
@@ -737,6 +823,7 @@ impl AdReadinessState {
                 cohort_utilization: self.cohort_utilization.clone(),
                 utilization_summary: self.utilization_summary.clone(),
                 ready_streak_windows: 0,
+                segment_readiness: self.segment_readiness.clone(),
             };
             let statement = snapshot.to_statement();
             let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -812,6 +899,7 @@ impl AdReadinessState {
             cohort_utilization: self.cohort_utilization.clone(),
             utilization_summary: self.utilization_summary.clone(),
             ready_streak_windows: self.ready_streak_windows,
+            segment_readiness: self.segment_readiness.clone(),
         };
         // Update rehearsal-ready streak based on window boundaries and readiness
         if snapshot.window_secs > 0 && snapshot.last_updated > 0 {
@@ -889,6 +977,204 @@ fn apply_floor_cap(sample: u64, floor: u64, cap: u64) -> u64 {
         floored
     } else {
         floored.min(cap)
+    }
+}
+
+fn compute_segment_readiness_snapshot(
+    cohorts: &[CohortPriceSnapshot],
+    now_secs: u64,
+) -> Option<AdSegmentReadiness> {
+    if cohorts.is_empty() {
+        return None;
+    }
+    let total = cohorts.len() as u64;
+    let now_micros = now_secs.saturating_mul(1_000_000);
+    let mut domain_tiers: HashMap<String, SegmentAccumulator> = HashMap::new();
+    let mut interest_tags: HashMap<String, SegmentAccumulator> = HashMap::new();
+    let mut presence_buckets: HashMap<String, PresenceAccumulator> = HashMap::new();
+
+    for cohort in cohorts {
+        let readiness = readiness_score_for_utilization(
+            cohort.observed_utilization_ppm,
+            cohort.target_utilization_ppm,
+        );
+        domain_tiers
+            .entry(cohort.domain_tier.as_str().to_string())
+            .or_insert_with(SegmentAccumulator::default)
+            .ingest(readiness);
+        for tag in &cohort.interest_tags {
+            interest_tags
+                .entry(tag.clone())
+                .or_insert_with(SegmentAccumulator::default)
+                .ingest(readiness);
+        }
+        if let Some(bucket) = &cohort.presence_bucket {
+            presence_buckets
+                .entry(bucket.bucket_id.clone())
+                .or_insert_with(|| PresenceAccumulator::new(Some(bucket.kind.as_str().to_string())))
+                .ingest(
+                    bucket,
+                    cohort.target_utilization_ppm,
+                    cohort.observed_utilization_ppm,
+                    now_micros,
+                );
+        }
+    }
+
+    let tier_stats = domain_tiers
+        .into_iter()
+        .map(|(tier, acc)| {
+            (
+                tier,
+                SegmentReadinessStats {
+                    supply_ppm: ppm_from_counts(acc.count, total) as u32,
+                    readiness_score: acc.average(),
+                    cohort_count: acc.count,
+                },
+            )
+        })
+        .collect();
+    let tag_stats = interest_tags
+        .into_iter()
+        .map(|(tag, acc)| {
+            (
+                tag,
+                SegmentReadinessStats {
+                    supply_ppm: ppm_from_counts(acc.count, total) as u32,
+                    readiness_score: acc.average(),
+                    cohort_count: acc.count,
+                },
+            )
+        })
+        .collect();
+    let presence_stats = presence_buckets
+        .into_iter()
+        .map(|(bucket_id, acc)| {
+            (
+                bucket_id,
+                PresenceBucketReadiness {
+                    freshness_histogram: acc.histogram(),
+                    ready_slots: acc.ready_slots,
+                    kind: acc.kind,
+                },
+            )
+        })
+        .collect();
+
+    Some(AdSegmentReadiness {
+        domain_tiers: tier_stats,
+        interest_tags: tag_stats,
+        presence_buckets: presence_stats,
+        privacy_budget: None,
+    })
+}
+
+#[derive(Default)]
+struct SegmentAccumulator {
+    count: u64,
+    readiness_sum: u64,
+}
+
+impl SegmentAccumulator {
+    fn ingest(&mut self, readiness: u8) {
+        self.count = self.count.saturating_add(1);
+        self.readiness_sum = self
+            .readiness_sum
+            .saturating_add(u64::from(readiness.min(100)));
+    }
+
+    fn average(&self) -> u8 {
+        if self.count == 0 {
+            0
+        } else {
+            ((self.readiness_sum / self.count).min(100)) as u8
+        }
+    }
+}
+
+struct PresenceAccumulator {
+    histogram_counts: [u64; 4],
+    total_samples: u64,
+    ready_slots: u64,
+    kind: Option<String>,
+}
+
+impl PresenceAccumulator {
+    fn new(kind: Option<String>) -> Self {
+        Self {
+            histogram_counts: [0, 0, 0, 0],
+            total_samples: 0,
+            ready_slots: 0,
+            kind,
+        }
+    }
+
+    fn ingest(
+        &mut self,
+        bucket: &ad_market::PresenceBucketRef,
+        target_utilization_ppm: u32,
+        observed_utilization_ppm: u32,
+        now_micros: u64,
+    ) {
+        let age_index = freshness_bucket_index(
+            now_micros,
+            bucket
+                .minted_at_micros
+                .or(bucket.expires_at_micros)
+                .unwrap_or(0),
+        );
+        self.histogram_counts[age_index] = self.histogram_counts[age_index].saturating_add(1);
+        self.total_samples = self.total_samples.saturating_add(1);
+        let slots = u64::from(
+            target_utilization_ppm
+                .max(observed_utilization_ppm)
+                .max(1u32),
+        );
+        self.ready_slots = self.ready_slots.saturating_add(slots);
+        if self.kind.is_none() {
+            self.kind = Some(bucket.kind.as_str().to_string());
+        }
+    }
+
+    fn histogram(&self) -> FreshnessHistogramPpm {
+        let total = self.total_samples.max(1);
+        FreshnessHistogramPpm {
+            under_1h_ppm: ppm_from_counts(self.histogram_counts[0], total) as u32,
+            hours_1_to_6_ppm: ppm_from_counts(self.histogram_counts[1], total) as u32,
+            hours_6_to_24_ppm: ppm_from_counts(self.histogram_counts[2], total) as u32,
+            over_24h_ppm: ppm_from_counts(self.histogram_counts[3], total) as u32,
+        }
+    }
+}
+
+fn freshness_bucket_index(now_micros: u64, minted_micros: u64) -> usize {
+    const HOUR_MICROS: u64 = 3_600_000_000;
+    let age = now_micros.saturating_sub(minted_micros);
+    if age < HOUR_MICROS {
+        0
+    } else if age < 6 * HOUR_MICROS {
+        1
+    } else if age < 24 * HOUR_MICROS {
+        2
+    } else {
+        3
+    }
+}
+
+fn readiness_score_for_utilization(observed: u32, target: u32) -> u8 {
+    if target == 0 {
+        return if observed == 0 { 0 } else { 100 };
+    }
+    let ratio = observed as f64 / target as f64;
+    let scaled = (ratio * 100.0).round() as i64;
+    scaled.clamp(0, 100) as u8
+}
+
+fn ppm_from_counts(count: u64, total: u64) -> u64 {
+    if total == 0 {
+        0
+    } else {
+        (count.saturating_mul(1_000_000) / total).min(1_000_000)
     }
 }
 

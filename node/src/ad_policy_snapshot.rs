@@ -6,7 +6,7 @@ use std::io::{Error as IoError, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ad_market::{DistributionPolicy, MarketplaceHandle};
+use ad_market::{DistributionPolicy, DomainTier, MarketplaceHandle};
 use crypto_suite::{encoding::hex, hashing::blake3, signatures::ed25519::SigningKey};
 use foundation_serialization::json::{
     self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
@@ -186,6 +186,97 @@ pub fn persist_snapshot(base: &str, market: &MarketplaceHandle, epoch: u64) -> s
         JsonValue::Number(number_from_u64(host)),
     );
     root.insert("medians".into(), JsonValue::Object(med));
+
+    // Compute domain tier supply from cohort prices
+    let cohort_prices = market.cohort_prices();
+    let mut domain_tier_supply: std::collections::HashMap<DomainTier, u64> =
+        std::collections::HashMap::new();
+    let mut interest_tag_supply: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    let mut presence_bucket_count = 0u64;
+    let mut presence_ready_slots = 0u64;
+
+    for cohort in &cohort_prices {
+        // Aggregate by domain tier
+        *domain_tier_supply.entry(cohort.domain_tier).or_insert(0) += 1;
+
+        // Aggregate by interest tags
+        for tag in &cohort.interest_tags {
+            *interest_tag_supply.entry(tag.clone()).or_insert(0) += 1;
+        }
+
+        // Count presence buckets
+        if cohort.presence_bucket.is_some() {
+            presence_bucket_count += 1;
+            // Placeholder: in production, ready slots would be computed from readiness snapshot
+            presence_ready_slots += 1;
+        }
+    }
+
+    let total_cohorts = cohort_prices.len().max(1) as u64;
+
+    // Domain tier supply in ppm
+    let mut tier_supply_map = JsonMap::new();
+    for tier in [
+        DomainTier::Premium,
+        DomainTier::Reserved,
+        DomainTier::Community,
+        DomainTier::Unverified,
+    ] {
+        let count = domain_tier_supply.get(&tier).copied().unwrap_or(0);
+        let ppm = (count * 1_000_000) / total_cohorts;
+        tier_supply_map.insert(
+            tier.as_str().into(),
+            JsonValue::Number(JsonNumber::from(ppm)),
+        );
+    }
+    root.insert(
+        "domain_tier_supply_ppm".into(),
+        JsonValue::Object(tier_supply_map),
+    );
+
+    // Interest tag supply in ppm (top 20 tags only to limit snapshot size)
+    let mut tag_supply: Vec<_> = interest_tag_supply.into_iter().collect();
+    tag_supply.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut tag_supply_map = JsonMap::new();
+    for (tag, count) in tag_supply.into_iter().take(20) {
+        let ppm = (count * 1_000_000) / total_cohorts;
+        tag_supply_map.insert(tag, JsonValue::Number(JsonNumber::from(ppm)));
+    }
+    root.insert(
+        "interest_tag_supply_ppm".into(),
+        JsonValue::Object(tag_supply_map),
+    );
+
+    // Presence bucket metrics
+    let mut presence_map = JsonMap::new();
+    let presence_ppm = (presence_bucket_count * 1_000_000) / total_cohorts;
+    presence_map.insert(
+        "bucket_count".into(),
+        JsonValue::Number(JsonNumber::from(presence_bucket_count)),
+    );
+    presence_map.insert(
+        "bucket_supply_ppm".into(),
+        JsonValue::Number(JsonNumber::from(presence_ppm)),
+    );
+    presence_map.insert(
+        "ready_slots".into(),
+        JsonValue::Number(JsonNumber::from(presence_ready_slots)),
+    );
+    root.insert(
+        "presence_bucket_stats".into(),
+        JsonValue::Object(presence_map),
+    );
+
+    // Selectors version
+    let selectors_version = cohort_prices
+        .first()
+        .map(|c| c.selectors_version)
+        .unwrap_or(1);
+    root.insert(
+        "selectors_version".into(),
+        JsonValue::Number(JsonNumber::from(selectors_version as u64)),
+    );
 
     if let Some(previous) = previous_snapshot_distribution(base, epoch) {
         let current = [

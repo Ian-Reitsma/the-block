@@ -448,3 +448,110 @@ fn cancelling_auction_releases_locked_stake() {
 
     clear_ledger_context();
 }
+
+#[testkit::tb_serial]
+fn dns_auction_summary_reports_metrics() {
+    configure_dns_db();
+
+    let chain = install_chain(vec![
+        account("seller-summary", 1_000),
+        account("bidder-summary", 5_000),
+        account("bidder-active", 5_000),
+        account("treasury", 0),
+    ]);
+
+    install_ledger_context(Arc::new(BlockchainLedger::new(
+        Arc::clone(&chain),
+        "treasury".to_string(),
+    )));
+
+    register_stake(&json_map(vec![
+        ("reference", Value::String("stake-summary".to_string())),
+        ("owner_account", Value::String("bidder-summary".to_string())),
+        ("deposit_ct", Value::Number(Number::from(2_000))),
+    ]))
+    .expect("register settled stake");
+    register_stake(&json_map(vec![
+        ("reference", Value::String("stake-active".to_string())),
+        ("owner_account", Value::String("bidder-active".to_string())),
+        ("deposit_ct", Value::Number(Number::from(1_200))),
+    ]))
+    .expect("register active stake");
+
+    let settled_domain = "summary-finished.block";
+    list_for_sale(&json_map(vec![
+        ("domain", Value::String(settled_domain.to_string())),
+        ("min_bid_ct", Value::Number(Number::from(1_500))),
+        ("protocol_fee_bps", Value::Number(Number::from(400))),
+        ("royalty_bps", Value::Number(Number::from(100))),
+        ("seller_account", Value::String("seller-summary".to_string())),
+    ]))
+    .expect("list settled domain");
+    place_bid(&json_map(vec![
+        ("domain", Value::String(settled_domain.to_string())),
+        ("bidder_account", Value::String("bidder-summary".to_string())),
+        ("bid_ct", Value::Number(Number::from(1_700))),
+        ("stake_reference", Value::String("stake-summary".to_string())),
+    ]))
+    .expect("settled bid");
+    complete_sale(&json_map(vec![
+        ("domain", Value::String(settled_domain.to_string())),
+        ("force", Value::Bool(true)),
+    ]))
+    .expect("settled sale");
+
+    let active_domain = "summary-active.block";
+    list_for_sale(&json_map(vec![
+        ("domain", Value::String(active_domain.to_string())),
+        ("min_bid_ct", Value::Number(Number::from(900))),
+        ("protocol_fee_bps", Value::Number(Number::from(300))),
+        ("royalty_bps", Value::Number(Number::from(50))),
+        ("seller_account", Value::String("seller-summary".to_string())),
+    ]))
+    .expect("list active domain");
+    place_bid(&json_map(vec![
+        ("domain", Value::String(active_domain.to_string())),
+        ("bidder_account", Value::String("bidder-active".to_string())),
+        ("bid_ct", Value::Number(Number::from(1_000))),
+        ("stake_reference", Value::String("stake-active".to_string())),
+    ]))
+    .expect("active bid");
+
+    let snapshot = auctions(&json_map(vec![(
+        "metrics_window_secs",
+        Value::Number(Number::from(3_600)),
+    )]))
+    .expect("auction snapshot");
+    let summary = snapshot["summary"]
+        .as_object()
+        .expect("summary object");
+    let counts = summary["auction_counts"]
+        .as_object()
+        .expect("counts map");
+    assert!(
+        counts["active"].as_u64().unwrap_or(0) >= 1,
+        "active auctions reported"
+    );
+    assert!(
+        counts["settled"].as_u64().unwrap_or(0) >= 1,
+        "settled auctions reported"
+    );
+    let stake = summary["stake_snapshot"]
+        .as_object()
+        .expect("stake snapshot");
+    assert!(
+        stake["total_locked_ct"].as_u64().unwrap_or(0) >= 1_000,
+        "stake snapshot captures locked stake"
+    );
+    let metrics = summary["metrics"].as_object().expect("metrics map");
+    assert!(
+        metrics["auction_completions"].as_u64().unwrap_or(0) >= 1,
+        "auction completions counted"
+    );
+    assert!(
+        metrics["settlement_stats"].is_object(),
+        "settlement stats present"
+    );
+
+    clear_ledger_context();
+}
