@@ -57,6 +57,51 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Observer tooling: `tb-cli energy market --verbose` dumps the whole response; `tb-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits.
 - Per the architecture roadmap, the next RPC/CLI work items are: adding authenticated disputes + receipt listings, wiring explorer/CLI visualizations for param history, and enforcing per-endpoint rate limiting once the QUIC chaos drills complete (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`).
 
+### Treasury disbursement CLI, RPC, and schema
+- Disbursement proposals live inside the governance namespace. CLI entrypoints sit under `tb-cli gov disburse`:
+  - `create` scaffolds a JSON template (see `examples/governance/disbursement_example.json`) and fills in proposer defaults (badge identity, default timelock/rollback windows).
+  - `preview --json <file>` validates the payload against the schema and prints the derived timeline: quorum requirements, vote window, activation epoch, timelock height, and resulting treasury deltas.
+  - `submit --json <file>` posts the signed proposal to the node via `gov.treasury.submit_disbursement`; dry-run with `--check` to ensure hashes match before sending live traffic.
+  - `show --id <proposal-id>` renders the explorer-style timeline (metadata, quorum/vote tallies, timelock window, execution tx hash, receipts, rollback annotations).
+  - `queue`, `execute`, and `rollback` mirror the on-chain transitions for operators who hold the treasury executor lease. `queue` acknowledges that the proposal passed and seeds the executor queue, `execute` pushes the signed transaction (recording `tx_hash`, nonce, receipts), and `rollback` reverts executions within the bounded window.
+- `DisbursementPayload` JSON schema (shared by CLI, explorer, RPC, and tests):
+
+```jsonc
+{
+  "proposal": {
+    "title": "2024-Q2 Core Grants",
+    "summary": "Fund three core contributors + auditor retainer.",
+    "deps": [1203, 1207],
+    "attachments": [
+      { "name": "proposal-pdf", "uri": "ipfs://bafy..." }
+    ],
+    "quorum": { "operators": 0.67, "builders": 0.67 },
+    "vote_window_epochs": 6,
+    "timelock_epochs": 2,
+    "rollback_window_epochs": 1
+  },
+  "disbursement": {
+    "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+    "amount_ct": 125_000_000,
+    "amount_it": 0,
+    "memo": "Core grants Q2",
+    "scheduled_epoch": 180_500,
+    "expected_receipts": [
+      { "account": "foundation", "amount_ct": 100_000_000 },
+      { "account": "audit-retainer", "amount_ct": 25_000_000 }
+    ]
+  }
+}
+```
+
+- RPC exposure:
+  - `gov.treasury.submit_disbursement { payload, signature }` – create proposal from JSON.
+  - `gov.treasury.disbursement { id }` – fetch canonical status/timeline for a single record.
+  - `gov.treasury.queue_disbursement { id }`, `gov.treasury.execute_disbursement { id, tx_hash, receipts }`, `gov.treasury.rollback_disbursement { id, reason }` – maintenance hooks for executor operators (all auth gated).
+  - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings.
+- CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `tb-cli gov disburse preview --json … --check` during docs tests.
+- Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see `explorer/src/treasury.rs`.
+
 ## Gateway HTTP and CDN Surfaces
 - `node/src/gateway/http.rs` hosts HTTP + WebSocket endpoints for content, APIs, and read receipts. Everything goes through the first-party TLS stack (`crates/httpd::tls`).
 - Operators tag responses with `ReadAck` headers so clients can submit proofs later.

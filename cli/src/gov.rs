@@ -13,10 +13,12 @@ use foundation_serialization::json::Value;
 use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
-    encode_transport_provider_policy, registry, DisbursementStatus, GovStore, ParamKey, Proposal,
-    ProposalStatus, ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier,
-    ReleaseVote, SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement,
-    TreasuryExecutorSnapshot, Vote, VoteChoice,
+    encode_transport_provider_policy, registry, validate_disbursement_payload,
+    DisbursementDetails, DisbursementPayload, DisbursementProposalMetadata, DisbursementQuorum,
+    DisbursementReceipt, DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
+    ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
+    SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
+    Vote, VoteChoice,
 };
 use httpd::ClientError;
 use std::io::{self, Write};
@@ -390,8 +392,10 @@ pub enum GovCmd {
     },
     /// Parameter management helpers
     Param { action: GovParamCmd },
-    /// Treasury disbursement helpers
+    /// Treasury disbursement helpers (local store)
     Treasury { action: GovTreasuryCmd },
+    /// Disbursement management via RPC
+    Disburse { action: GovDisbursementCmd },
 }
 
 pub enum GovParamCmd {
@@ -405,6 +409,40 @@ pub enum GovParamCmd {
         epoch: u64,
         vote_deadline: Option<u64>,
         proposer: Option<String>,
+    },
+}
+
+pub enum GovDisbursementCmd {
+    /// Validate and preview a disbursement JSON payload
+    Preview {
+        json_path: String,
+    },
+    /// Create a disbursement JSON template
+    Create {
+        output: String,
+    },
+    /// Submit a disbursement proposal via RPC
+    Submit {
+        json_path: String,
+        rpc: String,
+    },
+    /// Show a specific disbursement by ID via RPC
+    Show {
+        id: u64,
+        rpc: String,
+    },
+    /// Execute a disbursement via RPC
+    Execute {
+        id: u64,
+        tx_hash: String,
+        receipts_json: Option<String>,
+        rpc: String,
+    },
+    /// Rollback a disbursement via RPC
+    Rollback {
+        id: u64,
+        reason: String,
+        rpc: String,
     },
 }
 
@@ -565,6 +603,7 @@ impl GovCmd {
             )
             .subcommand(GovTreasuryCmd::command())
             .subcommand(GovParamCmd::command())
+            .subcommand(GovDisbursementCmd::command())
             .build()
     }
 
@@ -638,6 +677,10 @@ impl GovCmd {
             "treasury" => {
                 let cmd = GovTreasuryCmd::from_matches(sub_matches)?;
                 Ok(GovCmd::Treasury { action: cmd })
+            }
+            "disburse" => {
+                let cmd = GovDisbursementCmd::from_matches(sub_matches)?;
+                Ok(GovCmd::Disburse { action: cmd })
             }
             other => Err(format!("unknown subcommand '{other}' for 'gov'")),
         }
@@ -1080,6 +1123,167 @@ impl GovTreasuryCmd {
     }
 }
 
+impl GovDisbursementCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("gov.disburse"),
+            "disburse",
+            "Disbursement management via RPC",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.create"),
+                "create",
+                "Create a disbursement JSON template",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("output", "output", "Output file path")
+                    .default("disbursement.json"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.preview"),
+                "preview",
+                "Validate and preview a disbursement JSON payload",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "json",
+                "Path to disbursement JSON file",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.submit"),
+                "submit",
+                "Submit a disbursement proposal via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "json",
+                "Path to disbursement JSON file",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.show"),
+                "show",
+                "Show a specific disbursement by ID via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.execute"),
+                "execute",
+                "Execute a disbursement via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "tx-hash",
+                "Transaction hash authorizing the disbursement",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("receipts", "receipts", "Path to receipts JSON file"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.disburse.rollback"),
+                "rollback",
+                "Rollback a disbursement via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "reason",
+                "Reason for rollback",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'gov disburse'".to_string())?;
+
+        match name {
+            "create" => {
+                let output = take_string(sub_matches, "output")
+                    .unwrap_or_else(|| "disbursement.json".to_string());
+                Ok(GovDisbursementCmd::Create { output })
+            }
+            "preview" => {
+                let json_path = require_positional(sub_matches, "json")?;
+                Ok(GovDisbursementCmd::Preview { json_path })
+            }
+            "submit" => {
+                let json_path = require_positional(sub_matches, "json")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovDisbursementCmd::Submit { json_path, rpc })
+            }
+            "show" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovDisbursementCmd::Show { id, rpc })
+            }
+            "execute" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let tx_hash = require_positional(sub_matches, "tx-hash")?;
+                let receipts_json = take_string(sub_matches, "receipts");
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovDisbursementCmd::Execute {
+                    id,
+                    tx_hash,
+                    receipts_json,
+                    rpc,
+                })
+            }
+            "rollback" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let reason = require_positional(sub_matches, "reason")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovDisbursementCmd::Rollback { id, reason, rpc })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'gov disburse'")),
+        }
+    }
+}
+
 fn parse_param_key(name: &str) -> Option<ParamKey> {
     match name {
         "mempool.fee_floor_window" | "FeeFloorWindow" => Some(ParamKey::FeeFloorWindow),
@@ -1125,6 +1329,12 @@ pub fn handle(cmd: GovCmd) {
             let mut stdout = io::stdout();
             if let Err(err) = handle_treasury(action, &mut stdout) {
                 eprintln!("treasury command failed: {err}");
+            }
+        }
+        GovCmd::Disburse { action } => {
+            let mut stdout = io::stdout();
+            if let Err(err) = handle_disburse(action, &mut stdout) {
+                eprintln!("disburse command failed: {err}");
             }
         }
         GovCmd::List { state } => {
@@ -1371,6 +1581,7 @@ pub fn handle(cmd: GovCmd) {
 pub fn handle_with_writer(cmd: GovCmd, out: &mut dyn Write) -> io::Result<()> {
     match cmd {
         GovCmd::Treasury { action } => handle_treasury(action, out),
+        GovCmd::Disburse { action } => handle_disburse(action, out),
         other => {
             handle(other);
             Ok(())
@@ -1616,6 +1827,249 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                     writeln!(out, "lease released for holder {holder}")?;
                 }
                 Err(err) => eprintln!("lease release failed: {err}"),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Result<()> {
+    match action {
+        GovDisbursementCmd::Preview { json_path } => {
+            let content = std::fs::read_to_string(&json_path).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to read {json_path}: {err}"),
+                )
+            })?;
+            let payload: governance::DisbursementPayload =
+                foundation_serialization::json::from_str(&content).map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to parse JSON: {err}"),
+                    )
+                })?;
+            match governance::validate_disbursement_payload(&payload) {
+                Ok(()) => {
+                    writeln!(out, "Validation: PASSED")?;
+                    writeln!(out, "Title: {}", payload.proposal.title)?;
+                    writeln!(out, "Summary: {}", payload.proposal.summary)?;
+                    writeln!(
+                        out,
+                        "Destination: {}",
+                        payload.disbursement.destination
+                    )?;
+                    writeln!(out, "Amount CT: {}", payload.disbursement.amount_ct)?;
+                    writeln!(out, "Amount IT: {}", payload.disbursement.amount_it)?;
+                    writeln!(
+                        out,
+                        "Scheduled Epoch: {}",
+                        payload.disbursement.scheduled_epoch
+                    )?;
+                }
+                Err(err) => {
+                    writeln!(out, "Validation: FAILED")?;
+                    writeln!(out, "Error: {err:?}")?;
+                }
+            }
+        }
+        GovDisbursementCmd::Create { output } => {
+            let template = governance::DisbursementPayload {
+                proposal: governance::DisbursementProposalMetadata {
+                    title: "Example Disbursement Title".to_string(),
+                    summary: "Brief description of the disbursement purpose".to_string(),
+                    deps: vec![],
+                    attachments: vec![],
+                    quorum: governance::DisbursementQuorum {
+                        operators_ppm: 670000,
+                        builders_ppm: 670000,
+                    },
+                    vote_window_epochs: 6,
+                    timelock_epochs: 2,
+                    rollback_window_epochs: 1,
+                },
+                disbursement: governance::DisbursementDetails {
+                    destination: "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".to_string(),
+                    amount_ct: 100000000,
+                    amount_it: 0,
+                    memo: "Example disbursement memo".to_string(),
+                    scheduled_epoch: 180000,
+                    expected_receipts: vec![governance::DisbursementReceipt {
+                        account: "example-account".to_string(),
+                        amount_ct: 100000000,
+                        amount_it: 0,
+                    }],
+                },
+            };
+            let serialized = foundation_serialization::json::to_string_pretty(&template)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+            std::fs::write(&output, serialized).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to write {output}: {err}"),
+                )
+            })?;
+            writeln!(out, "Template written to {output}")?;
+        }
+        GovDisbursementCmd::Submit { json_path, rpc } => {
+            let content = std::fs::read_to_string(&json_path).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to read {json_path}: {err}"),
+                )
+            })?;
+            let payload: governance::DisbursementPayload =
+                foundation_serialization::json::from_str(&content).map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to parse JSON: {err}"),
+                    )
+                })?;
+
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct SubmitRequest {
+                payload: governance::DisbursementPayload,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                signature: Option<String>,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct SubmitResponse {
+                id: u64,
+                created_at: u64,
+            }
+
+            let client = RpcClient::from_env();
+            let request = SubmitRequest {
+                payload,
+                signature: None,
+            };
+            let envelope: RpcEnvelope<SubmitResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.submit_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            writeln!(out, "Disbursement submitted successfully")?;
+            writeln!(out, "ID: {}", response.id)?;
+            writeln!(out, "Created at: {}", response.created_at)?;
+        }
+        GovDisbursementCmd::Show { id, rpc } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct GetRequest {
+                id: u64,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct GetResponse {
+                disbursement: TreasuryDisbursement,
+            }
+
+            let client = RpcClient::from_env();
+            let request = GetRequest { id };
+            let envelope: RpcEnvelope<GetResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            let serialized = foundation_serialization::json::to_string_pretty(&response.disbursement)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+            writeln!(out, "{serialized}")?;
+        }
+        GovDisbursementCmd::Execute {
+            id,
+            tx_hash,
+            receipts_json,
+            rpc,
+        } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ReceiptInput {
+                account: String,
+                amount_ct: u64,
+                amount_it: u64,
+            }
+
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ExecuteRequest {
+                id: u64,
+                tx_hash: String,
+                receipts: Vec<ReceiptInput>,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ExecuteResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+
+            let receipts = if let Some(path) = receipts_json {
+                let content = std::fs::read_to_string(&path).map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to read {path}: {err}"),
+                    )
+                })?;
+                foundation_serialization::json::from_str::<Vec<ReceiptInput>>(&content).map_err(
+                    |err| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("failed to parse receipts JSON: {err}"),
+                        )
+                    },
+                )?
+            } else {
+                vec![]
+            };
+
+            let client = RpcClient::from_env();
+            let request = ExecuteRequest {
+                id,
+                tx_hash,
+                receipts,
+            };
+            let envelope: RpcEnvelope<ExecuteResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.execute_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement executed successfully")?;
+            } else {
+                writeln!(out, "Execution failed")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
+            }
+        }
+        GovDisbursementCmd::Rollback { id, reason, rpc } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct RollbackRequest {
+                id: u64,
+                reason: String,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct RollbackResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+
+            let client = RpcClient::from_env();
+            let request = RollbackRequest { id, reason };
+            let envelope: RpcEnvelope<RollbackResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.rollback_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement rolled back successfully")?;
+            } else {
+                writeln!(out, "Rollback failed")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
             }
         }
     }

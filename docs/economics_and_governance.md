@@ -38,8 +38,10 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Badges gate governance votes (Operators + Builders houses) and feed range-boost multipliers plus ANN mesh prioritisation.
 
 ## Treasury and Disbursements
-- Treasury state resides in `governance/src/treasury.rs` with shared sled persistence. Disbursement DAG validation (quorum, timelocks, rollback windows) is enforced in the `governance` crate and mirrored by explorer + CLI.
-- Treasury events emit ledger anchors, aggregator metrics (`treasury_balance_*`), and CLI history (`tb-cli gov treasury`).
+- Governance proposals now carry explicit treasury-disbursement payloads in addition to param updates. Each disbursement advances through the canonical state machine: **draft → voting → queued → timelocked → executed → finalized/rolled-back**. Drafts are local JSON payloads (stored under `examples/governance/`) validated with `foundation_serialization` schemas before the proposer signs and submits. Voting/timelock rules piggyback on the bicameral governance machinery (see `governance/src/bicameral.rs`), so disbursements inherit quorum, snapshot, and activation semantics.
+- Once a disbursement proposal passes, `GovStore` persists the queued entry in sled and snapshots the activation epoch + prior rollbacks to `provenance.json` using first-party encoding (Option A from the task brief). The rollback window remains **block-height bounded** via `governance::store::ROLLBACK_WINDOW_EPOCHS`, guaranteeing deterministic replay on both x86_64 and AArch64.
+- Executions emit CT receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.
+- Metrics wiring tracks both balances and pipeline health: `treasury_balance_ct`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator exposes `/treasury/summary` and `/governance/disbursements` so dashboards can chart backlog age, quorum wait time, and execution throughput alongside existing treasury gauges. Explorer timelines render the same data (proposal metadata, vote outcomes, timelock window, execution tx, affected accounts, receipts, and rollback annotations).
 
 ## Proposal Lifecycle
 1. Snapshot of eligible voters occurs on proposal creation (bicameral: Operators + Builders).
@@ -65,7 +67,7 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Settlement switch semantics (industrial vs consumer routing) live in `node/src/compute_market/settlement` and `node/src/storage/pipeline`. Governance toggles them via params documented here.
 
 ## Governance Tooling
-- CLI: `cli/src/gov.rs` (proposals, DAG inspection, treasury approvals), `cli/src/service_badge.rs` (badge status), `cli/src/telemetry.rs` (wrapper metadata).
+- CLI: `cli/src/gov.rs` now exposes the disbursement workflow end-to-end: `tb-cli gov disburse create|preview|submit|show|queue|execute|rollback` plus `--schema`/`--check` helpers for JSON payload validation. Existing proposal/DAG helpers remain alongside `cli/src/service_badge.rs` (badge status) and `cli/src/telemetry.rs` (wrapper metadata).
 - Explorer + log indexer share the same governance crate via `foundation_serialization` + `foundation_sqlite` wrappers.
 - Metrics aggregator publishes `/governance`, `/treasury`, `/wrappers`, and `/bridge` dashboards plus webhook outputs (`docs/operations.md#metrics-aggregator`).
 

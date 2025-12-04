@@ -645,9 +645,13 @@ impl BinaryCodec for ApprovedRelease {
 
 fn disbursement_status_to_tag(status: &DisbursementStatus) -> u8 {
     match status {
-        DisbursementStatus::Scheduled => 0,
-        DisbursementStatus::Executed { .. } => 1,
-        DisbursementStatus::Cancelled { .. } => 2,
+        DisbursementStatus::Draft { .. } => 0,
+        DisbursementStatus::Voting { .. } => 1,
+        DisbursementStatus::Queued { .. } => 2,
+        DisbursementStatus::Timelocked { .. } => 3,
+        DisbursementStatus::Executed { .. } => 4,
+        DisbursementStatus::Finalized { .. } => 5,
+        DisbursementStatus::RolledBack { .. } => 6,
     }
 }
 
@@ -655,7 +659,24 @@ impl BinaryCodec for DisbursementStatus {
     fn encode(&self, writer: &mut BinaryWriter) {
         writer.write_u8(disbursement_status_to_tag(self));
         match self {
-            DisbursementStatus::Scheduled => {}
+            DisbursementStatus::Draft { created_at } => {
+                created_at.encode(writer);
+            }
+            DisbursementStatus::Voting {
+                vote_deadline_epoch,
+            } => {
+                vote_deadline_epoch.encode(writer);
+            }
+            DisbursementStatus::Queued {
+                queued_at,
+                activation_epoch,
+            } => {
+                queued_at.encode(writer);
+                activation_epoch.encode(writer);
+            }
+            DisbursementStatus::Timelocked { ready_epoch } => {
+                ready_epoch.encode(writer);
+            }
             DisbursementStatus::Executed {
                 tx_hash,
                 executed_at,
@@ -663,20 +684,52 @@ impl BinaryCodec for DisbursementStatus {
                 tx_hash.encode(writer);
                 executed_at.encode(writer);
             }
-            DisbursementStatus::Cancelled {
+            DisbursementStatus::Finalized {
+                tx_hash,
+                executed_at,
+                finalized_at,
+            } => {
+                tx_hash.encode(writer);
+                executed_at.encode(writer);
+                finalized_at.encode(writer);
+            }
+            DisbursementStatus::RolledBack {
                 reason,
-                cancelled_at,
+                rolled_back_at,
+                prior_tx,
             } => {
                 reason.encode(writer);
-                cancelled_at.encode(writer);
+                rolled_back_at.encode(writer);
+                prior_tx.encode(writer);
             }
         }
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
         match reader.read_u8()? {
-            0 => Ok(DisbursementStatus::Scheduled),
+            0 => {
+                let created_at = u64::decode(reader)?;
+                Ok(DisbursementStatus::Draft { created_at })
+            }
             1 => {
+                let vote_deadline_epoch = u64::decode(reader)?;
+                Ok(DisbursementStatus::Voting {
+                    vote_deadline_epoch,
+                })
+            }
+            2 => {
+                let queued_at = u64::decode(reader)?;
+                let activation_epoch = u64::decode(reader)?;
+                Ok(DisbursementStatus::Queued {
+                    queued_at,
+                    activation_epoch,
+                })
+            }
+            3 => {
+                let ready_epoch = u64::decode(reader)?;
+                Ok(DisbursementStatus::Timelocked { ready_epoch })
+            }
+            4 => {
                 let tx_hash = String::decode(reader)?;
                 let executed_at = u64::decode(reader)?;
                 Ok(DisbursementStatus::Executed {
@@ -684,12 +737,24 @@ impl BinaryCodec for DisbursementStatus {
                     executed_at,
                 })
             }
-            2 => {
+            5 => {
+                let tx_hash = String::decode(reader)?;
+                let executed_at = u64::decode(reader)?;
+                let finalized_at = u64::decode(reader)?;
+                Ok(DisbursementStatus::Finalized {
+                    tx_hash,
+                    executed_at,
+                    finalized_at,
+                })
+            }
+            6 => {
                 let reason = String::decode(reader)?;
-                let cancelled_at = u64::decode(reader)?;
-                Ok(DisbursementStatus::Cancelled {
+                let rolled_back_at = u64::decode(reader)?;
+                let prior_tx = Option::<String>::decode(reader)?;
+                Ok(DisbursementStatus::RolledBack {
                     reason,
-                    cancelled_at,
+                    rolled_back_at,
+                    prior_tx,
                 })
             }
             other => Err(codec_error(format!(
@@ -709,22 +774,85 @@ impl BinaryCodec for TreasuryDisbursement {
         self.created_at.encode(writer);
         self.status.encode(writer);
         self.amount_it.encode(writer);
+        // Use serde-based encoding for complex nested types
+        let proposal_bytes = foundation_serialization::binary::encode(&self.proposal)
+            .unwrap_or_else(|_| Vec::new());
+        (proposal_bytes.len() as u32).encode(writer);
+        writer.write_bytes(&proposal_bytes);
+
+        let expected_receipts_bytes = foundation_serialization::binary::encode(&self.expected_receipts)
+            .unwrap_or_else(|_| Vec::new());
+        (expected_receipts_bytes.len() as u32).encode(writer);
+        writer.write_bytes(&expected_receipts_bytes);
+
+        let receipts_bytes = foundation_serialization::binary::encode(&self.receipts)
+            .unwrap_or_else(|_| Vec::new());
+        (receipts_bytes.len() as u32).encode(writer);
+        writer.write_bytes(&receipts_bytes);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        Ok(Self {
-            id: u64::decode(reader)?,
-            destination: String::decode(reader)?,
-            amount_ct: u64::decode(reader)?,
-            memo: String::decode(reader)?,
-            scheduled_epoch: u64::decode(reader)?,
-            created_at: u64::decode(reader)?,
-            status: DisbursementStatus::decode(reader)?,
-            amount_it: if reader.remaining() >= 8 {
-                u64::decode(reader)?
+        let id = u64::decode(reader)?;
+        let destination = String::decode(reader)?;
+        let amount_ct = u64::decode(reader)?;
+        let memo = String::decode(reader)?;
+        let scheduled_epoch = u64::decode(reader)?;
+        let created_at = u64::decode(reader)?;
+        let status = DisbursementStatus::decode(reader)?;
+        let amount_it = if reader.remaining() >= 8 {
+            u64::decode(reader)?
+        } else {
+            0
+        };
+        // Decode new fields with backwards compatibility
+        let proposal = if reader.remaining() >= 4 {
+            let len = u32::decode(reader)? as usize;
+            if len > 0 && reader.remaining() >= len {
+                let bytes = reader.read_exact(len)?;
+                foundation_serialization::binary::decode(bytes).ok()
             } else {
-                0
-            },
+                None
+            }
+        } else {
+            None
+        };
+
+        let expected_receipts = if reader.remaining() >= 4 {
+            let len = u32::decode(reader)? as usize;
+            if len > 0 && reader.remaining() >= len {
+                let bytes = reader.read_exact(len)?;
+                foundation_serialization::binary::decode(bytes).unwrap_or_default()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        let receipts = if reader.remaining() >= 4 {
+            let len = u32::decode(reader)? as usize;
+            if len > 0 && reader.remaining() >= len {
+                let bytes = reader.read_exact(len)?;
+                foundation_serialization::binary::decode(bytes).unwrap_or_default()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        Ok(Self {
+            id,
+            destination,
+            amount_ct,
+            amount_it,
+            memo,
+            scheduled_epoch,
+            created_at,
+            status,
+            proposal,
+            expected_receipts,
+            receipts,
         })
     }
 }
@@ -828,7 +956,38 @@ impl BinaryCodec for TreasuryExecutorSnapshot {
 
 fn status_value(status: &DisbursementStatus) -> Value {
     match status {
-        DisbursementStatus::Scheduled => Value::Object(Map::new()),
+        DisbursementStatus::Draft { created_at } => {
+            let mut map = Map::new();
+            map.insert("created_at".into(), Value::Number((*created_at).into()));
+            Value::Object(map)
+        }
+        DisbursementStatus::Voting {
+            vote_deadline_epoch,
+        } => {
+            let mut map = Map::new();
+            map.insert(
+                "vote_deadline_epoch".into(),
+                Value::Number((*vote_deadline_epoch).into()),
+            );
+            Value::Object(map)
+        }
+        DisbursementStatus::Queued {
+            queued_at,
+            activation_epoch,
+        } => {
+            let mut map = Map::new();
+            map.insert("queued_at".into(), Value::Number((*queued_at).into()));
+            map.insert(
+                "activation_epoch".into(),
+                Value::Number((*activation_epoch).into()),
+            );
+            Value::Object(map)
+        }
+        DisbursementStatus::Timelocked { ready_epoch } => {
+            let mut map = Map::new();
+            map.insert("ready_epoch".into(), Value::Number((*ready_epoch).into()));
+            Value::Object(map)
+        }
         DisbursementStatus::Executed {
             tx_hash,
             executed_at,
@@ -838,13 +997,31 @@ fn status_value(status: &DisbursementStatus) -> Value {
             map.insert("executed_at".into(), Value::Number((*executed_at).into()));
             Value::Object(map)
         }
-        DisbursementStatus::Cancelled {
+        DisbursementStatus::Finalized {
+            tx_hash,
+            executed_at,
+            finalized_at,
+        } => {
+            let mut map = Map::new();
+            map.insert("tx_hash".into(), Value::String(tx_hash.clone()));
+            map.insert("executed_at".into(), Value::Number((*executed_at).into()));
+            map.insert("finalized_at".into(), Value::Number((*finalized_at).into()));
+            Value::Object(map)
+        }
+        DisbursementStatus::RolledBack {
             reason,
-            cancelled_at,
+            rolled_back_at,
+            prior_tx,
         } => {
             let mut map = Map::new();
             map.insert("reason".into(), Value::String(reason.clone()));
-            map.insert("cancelled_at".into(), Value::Number((*cancelled_at).into()));
+            map.insert(
+                "rolled_back_at".into(),
+                Value::Number((*rolled_back_at).into()),
+            );
+            if let Some(tx) = prior_tx {
+                map.insert("prior_tx".into(), Value::String(tx.clone()));
+            }
             Value::Object(map)
         }
     }
@@ -852,7 +1029,40 @@ fn status_value(status: &DisbursementStatus) -> Value {
 
 fn status_from_value(variant: &str, map: &Map) -> Result<DisbursementStatus> {
     match variant {
-        "Scheduled" => Ok(DisbursementStatus::Scheduled),
+        "Draft" => {
+            let created_at = map
+                .get("created_at")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing created_at"))?;
+            Ok(DisbursementStatus::Draft { created_at })
+        }
+        "Voting" => {
+            let vote_deadline_epoch = map
+                .get("vote_deadline_epoch")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing vote_deadline_epoch"))?;
+            Ok(DisbursementStatus::Voting {
+                vote_deadline_epoch,
+            })
+        }
+        "Queued" => {
+            let queued_at = map.get("queued_at").and_then(Value::as_u64).unwrap_or(0);
+            let activation_epoch = map
+                .get("activation_epoch")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Ok(DisbursementStatus::Queued {
+                queued_at,
+                activation_epoch,
+            })
+        }
+        "Timelocked" => {
+            let ready_epoch = map
+                .get("ready_epoch")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing ready_epoch"))?;
+            Ok(DisbursementStatus::Timelocked { ready_epoch })
+        }
         "Executed" => {
             let tx_hash = map
                 .get("tx_hash")
@@ -867,20 +1077,51 @@ fn status_from_value(variant: &str, map: &Map) -> Result<DisbursementStatus> {
                 executed_at,
             })
         }
-        "Cancelled" => {
+        "Finalized" => {
+            let tx_hash = map
+                .get("tx_hash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| codec_error("treasury JSON: missing tx_hash"))?;
+            let executed_at = map
+                .get("executed_at")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing executed_at"))?;
+            let finalized_at = map
+                .get("finalized_at")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| codec_error("treasury JSON: missing finalized_at"))?;
+            Ok(DisbursementStatus::Finalized {
+                tx_hash: tx_hash.to_string(),
+                executed_at,
+                finalized_at,
+            })
+        }
+        "RolledBack" | "Cancelled" => {
+            // Support both old (Cancelled) and new (RolledBack) names for backwards compat
             let reason = map
                 .get("reason")
                 .and_then(Value::as_str)
                 .ok_or_else(|| codec_error("treasury JSON: missing reason"))?;
-            let cancelled_at = map
-                .get("cancelled_at")
+            let rolled_back_at = map
+                .get("rolled_back_at")
+                .or_else(|| map.get("cancelled_at"))
                 .and_then(Value::as_u64)
-                .ok_or_else(|| codec_error("treasury JSON: missing cancelled_at"))?;
-            Ok(DisbursementStatus::Cancelled {
+                .ok_or_else(|| codec_error("treasury JSON: missing rolled_back_at"))?;
+            let prior_tx = map
+                .get("prior_tx")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+            Ok(DisbursementStatus::RolledBack {
                 reason: reason.to_string(),
-                cancelled_at,
+                rolled_back_at,
+                prior_tx,
             })
         }
+        // Backwards compatibility for old "Scheduled" variant
+        "Scheduled" => Ok(DisbursementStatus::Queued {
+            queued_at: 0,
+            activation_epoch: 0,
+        }),
         other => Err(codec_error(format!(
             "treasury JSON: unknown disbursement status {other}"
         ))),
@@ -912,13 +1153,39 @@ pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
         Value::Number(disbursement.created_at.into()),
     );
     let status_variant = match &disbursement.status {
-        DisbursementStatus::Scheduled => "Scheduled",
+        DisbursementStatus::Draft { .. } => "Draft",
+        DisbursementStatus::Voting { .. } => "Voting",
+        DisbursementStatus::Queued { .. } => "Queued",
+        DisbursementStatus::Timelocked { .. } => "Timelocked",
         DisbursementStatus::Executed { .. } => "Executed",
-        DisbursementStatus::Cancelled { .. } => "Cancelled",
+        DisbursementStatus::Finalized { .. } => "Finalized",
+        DisbursementStatus::RolledBack { .. } => "RolledBack",
     };
     let mut status_map = Map::new();
     status_map.insert(status_variant.into(), status_value(&disbursement.status));
     map.insert("status".into(), Value::Object(status_map));
+
+    // Add proposal if present
+    if let Some(proposal) = &disbursement.proposal {
+        let proposal_json = foundation_serialization::json::to_value(proposal)
+            .unwrap_or(Value::Object(Map::new()));
+        map.insert("proposal".into(), proposal_json);
+    }
+
+    // Add expected_receipts if non-empty
+    if !disbursement.expected_receipts.is_empty() {
+        let receipts_json = foundation_serialization::json::to_value(&disbursement.expected_receipts)
+            .unwrap_or(Value::Array(vec![]));
+        map.insert("expected_receipts".into(), receipts_json);
+    }
+
+    // Add receipts if non-empty
+    if !disbursement.receipts.is_empty() {
+        let receipts_json = foundation_serialization::json::to_value(&disbursement.receipts)
+            .unwrap_or(Value::Array(vec![]));
+        map.insert("receipts".into(), receipts_json);
+    }
+
     Value::Object(map)
 }
 
@@ -965,6 +1232,24 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         .as_object()
         .ok_or_else(|| codec_error("treasury JSON: invalid status value"))?;
     let status = status_from_value(variant, payload_obj)?;
+
+    // Parse optional proposal field
+    let proposal = obj
+        .get("proposal")
+        .and_then(|v| foundation_serialization::json::from_value(v.clone()).ok());
+
+    // Parse expected_receipts (default to empty vec if missing)
+    let expected_receipts = obj
+        .get("expected_receipts")
+        .and_then(|v| foundation_serialization::json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    // Parse receipts (default to empty vec if missing)
+    let receipts = obj
+        .get("receipts")
+        .and_then(|v| foundation_serialization::json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
     Ok(TreasuryDisbursement {
         id,
         destination,
@@ -974,6 +1259,9 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         scheduled_epoch,
         created_at,
         status,
+        proposal,
+        expected_receipts,
+        receipts,
     })
 }
 
