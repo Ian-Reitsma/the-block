@@ -170,6 +170,8 @@ pub struct AdReadinessSnapshot {
     pub utilization_summary: Option<AdReadinessUtilizationSummary>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub ready_streak_windows: u64,
+    #[serde(default)]
+    pub segment_readiness: Option<AdSegmentReadiness>,
 }
 
 impl Default for AdReadinessSnapshot {
@@ -195,6 +197,7 @@ impl Default for AdReadinessSnapshot {
             cohort_utilization: Vec::new(),
             utilization_summary: None,
             ready_streak_windows: 0,
+            segment_readiness: None,
         }
     }
 }
@@ -207,6 +210,12 @@ pub struct AdReadinessCohortUtilization {
     pub provider: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub badges: Vec<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_bucket_id: Option<String>,
     pub price_per_mib_usd_micros: u64,
     pub target_utilization_ppm: u32,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -227,6 +236,73 @@ pub struct AdReadinessUtilizationSummary {
     pub max_ppm: u32,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub last_updated: u64,
+}
+
+/// Per-segment readiness stats for domain tiers, interest tags, and presence buckets.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdSegmentReadiness {
+    /// Domain tier readiness: tier -> {supply_ppm, readiness_score}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub domain_tiers: std::collections::HashMap<String, SegmentReadinessStats>,
+    /// Interest tag readiness: tag -> {supply_ppm, readiness_score}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub interest_tags: std::collections::HashMap<String, SegmentReadinessStats>,
+    /// Presence bucket readiness: bucket_id -> {freshness_histogram, ready_slots}
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub presence_buckets: std::collections::HashMap<String, PresenceBucketReadiness>,
+    /// Privacy budget status
+    #[serde(default)]
+    pub privacy_budget: Option<PrivacyBudgetStatus>,
+}
+
+/// Stats for a single segment (domain tier or interest tag).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct SegmentReadinessStats {
+    /// Supply in parts per million of total cohorts
+    pub supply_ppm: u32,
+    /// Readiness score (0-100)
+    pub readiness_score: u8,
+    /// Count of cohorts in this segment
+    pub cohort_count: u64,
+}
+
+/// Readiness stats for a presence bucket.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct PresenceBucketReadiness {
+    /// Freshness histogram: <1h, 1-6h, 6-24h, >24h (in ppm)
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub freshness_histogram: FreshnessHistogramPpm,
+    /// Number of ready impression slots
+    pub ready_slots: u64,
+    /// Source kind: "localnet" or "range_boost"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// Freshness histogram in parts per million.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FreshnessHistogramPpm {
+    pub under_1h_ppm: u32,
+    pub hours_1_to_6_ppm: u32,
+    pub hours_6_to_24_ppm: u32,
+    pub over_24h_ppm: u32,
+}
+
+/// Privacy budget status for readiness reporting.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct PrivacyBudgetStatus {
+    /// Remaining budget in ppm
+    pub remaining_ppm: u32,
+    /// Number of requests denied due to privacy budget
+    pub denied_count: u64,
+    /// Last denial reason if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_denial_reason: Option<String>,
 }
 
 impl AdReadinessSnapshot {
@@ -635,6 +711,9 @@ impl AdReadinessState {
                 target_utilization_ppm: target,
                 observed_utilization_ppm: observed,
                 delta_ppm: delta,
+                domain_tier: None,
+                interest_tags: Vec::new(),
+                presence_bucket_id: None,
             });
         }
         let count = cohorts.len() as u64;
@@ -737,6 +816,7 @@ impl AdReadinessState {
                 cohort_utilization: self.cohort_utilization.clone(),
                 utilization_summary: self.utilization_summary.clone(),
                 ready_streak_windows: 0,
+                segment_readiness: None,
             };
             let statement = snapshot.to_statement();
             let proof = zkp::readiness::prove(&statement, &self.readiness_witness());
@@ -812,6 +892,7 @@ impl AdReadinessState {
             cohort_utilization: self.cohort_utilization.clone(),
             utilization_summary: self.utilization_summary.clone(),
             ready_streak_windows: self.ready_streak_windows,
+            segment_readiness: None,
         };
         // Update rehearsal-ready streak based on window boundaries and readiness
         if snapshot.window_secs > 0 && snapshot.last_updated > 0 {

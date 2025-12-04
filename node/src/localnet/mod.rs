@@ -6,7 +6,12 @@ use crypto_suite::signatures::ed25519::{
 use foundation_serialization::{Deserialize, Serialize};
 use std::convert::TryInto;
 
+pub mod presence;
 pub mod proximity;
+
+pub use presence::{
+    FreshnessHistogram, PresenceCache, PresenceCacheConfig, PresenceHandle, PresenceReceipt,
+};
 pub use proximity::{validate_proximity, DeviceClass};
 
 #[derive(Serialize, Deserialize, Debug)]
