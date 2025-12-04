@@ -2813,6 +2813,21 @@ pub static AD_CONVERSION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static AD_PRESENCE_RESERVATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "ad_presence_reservation_total",
+            "Presence bucket reservations partitioned by status",
+        ),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter ad presence reservation: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry ad presence reservation: {e}"));
+    c
+});
+
 #[cfg(feature = "telemetry")]
 pub static AD_MARKET_UTILIZATION_OBSERVED: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(

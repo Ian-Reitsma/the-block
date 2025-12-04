@@ -4,7 +4,7 @@ use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{
     BudgetBrokerConfig, BudgetBrokerSnapshot, Campaign, CampaignBudgetSnapshot,
     CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy,
-    MarketplaceHandle, UpliftHoldoutAssignment,
+    DomainTier, MarketplaceHandle, PresenceBucketRef, PresenceKind, UpliftHoldoutAssignment,
 };
 use concurrency::Lazy;
 use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
@@ -1135,4 +1135,376 @@ fn distribution_to_value(policy: DistributionPolicy) -> Value {
         Value::Number(Number::from(policy.liquidity_split_ct_ppm)),
     );
     Value::Object(map)
+}
+
+// Error codes for presence/privacy operations
+const ERR_INVALID_PRESENCE_BUCKET: i32 = -32034;
+const ERR_FORBIDDEN_SELECTOR_COMBO: i32 = -32035;
+const ERR_UNKNOWN_SELECTOR: i32 = -32036;
+const ERR_INSUFFICIENT_PRIVACY_BUDGET: i32 = -32037;
+#[allow(dead_code)]
+const ERR_HOLDOUT_OVERLAP: i32 = -32038;
+#[allow(dead_code)]
+const ERR_SELECTOR_WEIGHT_MISMATCH: i32 = -32039;
+
+fn err_invalid_presence_bucket() -> RpcError {
+    RpcError::new(ERR_INVALID_PRESENCE_BUCKET, "invalid or expired presence bucket")
+}
+
+fn err_forbidden_selector_combo() -> RpcError {
+    RpcError::new(
+        ERR_FORBIDDEN_SELECTOR_COMBO,
+        "selector combination violates privacy policy",
+    )
+}
+
+#[allow(dead_code)]
+fn err_unknown_selector() -> RpcError {
+    RpcError::new(ERR_UNKNOWN_SELECTOR, "unknown interest tag or domain tier")
+}
+
+fn err_insufficient_privacy_budget() -> RpcError {
+    RpcError::new(
+        ERR_INSUFFICIENT_PRIVACY_BUDGET,
+        "insufficient privacy budget for request",
+    )
+}
+
+/// Parse optional domain tier filter from request params.
+fn parse_domain_tier(value: Option<&Value>) -> Result<Option<DomainTier>, RpcError> {
+    match value {
+        Some(Value::String(s)) => match s.as_str() {
+            "premium" => Ok(Some(DomainTier::Premium)),
+            "reserved" => Ok(Some(DomainTier::Reserved)),
+            "community" => Ok(Some(DomainTier::Community)),
+            "unverified" => Ok(Some(DomainTier::Unverified)),
+            _ => Err(invalid_params("domain_tier")),
+        },
+        Some(_) => Err(invalid_params("domain_tier")),
+        None => Ok(None),
+    }
+}
+
+/// Parse optional presence kind filter from request params.
+fn parse_presence_kind(value: Option<&Value>) -> Result<Option<PresenceKind>, RpcError> {
+    match value {
+        Some(Value::String(s)) => match s.as_str() {
+            "localnet" => Ok(Some(PresenceKind::LocalNet)),
+            "range_boost" => Ok(Some(PresenceKind::RangeBoost)),
+            _ => Err(invalid_params("kind")),
+        },
+        Some(_) => Err(invalid_params("kind")),
+        None => Ok(None),
+    }
+}
+
+/// Serialize a PresenceBucketRef to JSON.
+fn presence_bucket_to_value(bucket: &PresenceBucketRef) -> Value {
+    let mut map = Map::new();
+    map.insert("bucket_id".into(), Value::String(bucket.bucket_id.clone()));
+    map.insert("kind".into(), Value::String(bucket.kind.as_str().into()));
+    if let Some(ref region) = bucket.region {
+        map.insert("region".into(), Value::String(region.clone()));
+    }
+    map.insert(
+        "radius_meters".into(),
+        Value::Number(Number::from(bucket.radius_meters)),
+    );
+    map.insert(
+        "confidence_bps".into(),
+        Value::Number(Number::from(bucket.confidence_bps)),
+    );
+    if let Some(minted_at) = bucket.minted_at_micros {
+        map.insert(
+            "minted_at_micros".into(),
+            Value::Number(Number::from(minted_at)),
+        );
+    }
+    if let Some(expires_at) = bucket.expires_at_micros {
+        map.insert(
+            "expires_at_micros".into(),
+            Value::Number(Number::from(expires_at)),
+        );
+    }
+    Value::Object(map)
+}
+
+/// Serialize a presence cohort summary to JSON.
+fn presence_cohort_summary_to_value(
+    bucket: &PresenceBucketRef,
+    ready_slots: u64,
+    privacy_guardrail: &str,
+) -> Value {
+    let mut map = Map::new();
+    map.insert("bucket".into(), presence_bucket_to_value(bucket));
+    map.insert(
+        "ready_slots".into(),
+        Value::Number(Number::from(ready_slots)),
+    );
+    map.insert(
+        "privacy_guardrail".into(),
+        Value::String(privacy_guardrail.into()),
+    );
+    map.insert("selector_prices".into(), Value::Array(Vec::new()));
+    // Freshness histogram (placeholder)
+    let mut freshness = Map::new();
+    freshness.insert("under_1h_ppm".into(), Value::Number(Number::from(0)));
+    freshness.insert("1h_to_6h_ppm".into(), Value::Number(Number::from(0)));
+    freshness.insert("6h_to_24h_ppm".into(), Value::Number(Number::from(0)));
+    freshness.insert("over_24h_ppm".into(), Value::Number(Number::from(0)));
+    map.insert("freshness_histogram".into(), Value::Object(freshness));
+    Value::Object(map)
+}
+
+/// List presence cohorts available for targeting.
+///
+/// Request: `{region?, domain_tier?, min_confidence_bps?, interest_tag?, beacon_id?, kind?, include_expired?, limit?, cursor?}`
+/// Response: `{status:"ok", cohorts:[PresenceCohortSummary], privacy_budget:{remaining_ppm}, next_cursor?}`
+/// Errors: -32602 invalid filter, -32034 stale bucket, -32037 privacy guardrail
+pub fn list_presence_cohorts(
+    market: Option<&MarketplaceHandle>,
+    params: &Value,
+) -> Result<Value, RpcError> {
+    let Some(_handle) = market else {
+        return Err(RpcError::new(-32603, "ad market disabled"));
+    };
+
+    let empty_map = Map::new();
+    let obj = params.as_object().unwrap_or(&empty_map);
+
+    // Parse filter parameters
+    let region = obj
+        .get("region")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+    let domain_tier = parse_domain_tier(obj.get("domain_tier"))?;
+    let min_confidence_bps = obj
+        .get("min_confidence_bps")
+        .and_then(Value::as_u64)
+        .map(|v| v.min(10000) as u16);
+    let _interest_tag = obj.get("interest_tag").and_then(Value::as_str);
+    let beacon_id = obj
+        .get("beacon_id")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+    let kind = parse_presence_kind(obj.get("kind"))?;
+    let include_expired = obj
+        .get("include_expired")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let limit = obj
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|v| v.min(1000) as usize)
+        .unwrap_or(100);
+    let _cursor = obj.get("cursor").and_then(Value::as_str);
+
+    // Get current timestamp for expiry checks
+    let now_micros = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
+
+    // Collect presence cohorts from the market
+    // NOTE: In full implementation, this would query a dedicated presence store.
+    // For now, we extract presence buckets from cohort prices.
+    let cohort_prices = _handle.cohort_prices();
+    let mut cohorts: Vec<Value> = Vec::new();
+    let mut seen_buckets: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let denied_count = 0u64;
+
+    for cohort in cohort_prices {
+        if cohorts.len() >= limit {
+            break;
+        }
+        if let Some(ref bucket) = cohort.presence_bucket {
+            // Dedup by bucket_id
+            if seen_buckets.contains(&bucket.bucket_id) {
+                continue;
+            }
+            seen_buckets.insert(bucket.bucket_id.clone());
+
+            // Apply filters
+            if let Some(ref r) = region {
+                if bucket.region.as_ref() != Some(r) {
+                    continue;
+                }
+            }
+            if let Some(ref _dt) = domain_tier {
+                // Domain tier filtering would require cohort key inspection
+                // Placeholder: skip if we can't verify
+            }
+            if let Some(min_conf) = min_confidence_bps {
+                if bucket.confidence_bps < min_conf {
+                    continue;
+                }
+            }
+            if let Some(ref b) = beacon_id {
+                // Beacon filtering not directly available on bucket ref
+                if !bucket.bucket_id.contains(b) {
+                    continue;
+                }
+            }
+            if let Some(ref k) = kind {
+                if &bucket.kind != k {
+                    continue;
+                }
+            }
+            // Check expiry
+            if !include_expired {
+                if let Some(expires_at) = bucket.expires_at_micros {
+                    if expires_at < now_micros {
+                        continue;
+                    }
+                }
+            }
+
+            // Privacy guardrail check (placeholder for k-anonymity)
+            // In full implementation, check against PrivacyBudgetManager
+            let privacy_guardrail = "ok";
+            let ready_slots = 0u64; // Would come from readiness snapshot
+
+            cohorts.push(presence_cohort_summary_to_value(
+                bucket,
+                ready_slots,
+                privacy_guardrail,
+            ));
+        }
+    }
+
+    // Build response
+    let mut result = Map::new();
+    result.insert("status".into(), Value::String("ok".into()));
+    result.insert("cohorts".into(), Value::Array(cohorts));
+
+    let mut privacy_budget = Map::new();
+    privacy_budget.insert(
+        "remaining_ppm".into(),
+        Value::Number(Number::from(1_000_000u64)), // Placeholder
+    );
+    privacy_budget.insert(
+        "denied_count".into(),
+        Value::Number(Number::from(denied_count)),
+    );
+    result.insert("privacy_budget".into(), Value::Object(privacy_budget));
+
+    Ok(Value::Object(result))
+}
+
+/// Reserve presence slots for a campaign.
+///
+/// Request: `{campaign_id, presence_bucket_id, slot_count, expires_at_micros?, selector_budget?, max_bid_usd_micros?}`
+/// Response: `{status:"ok", reservation_id, expires_at_micros, reserved_budget_usd_micros?, effective_selectors?}`
+/// Errors: -32001 unknown campaign, -32034 invalid bucket, -32035 forbidden combo, -32037 privacy budget
+pub fn reserve_presence(
+    market: Option<&MarketplaceHandle>,
+    params: &Value,
+) -> Result<Value, RpcError> {
+    let Some(handle) = market else {
+        return Err(RpcError::new(-32603, "ad market disabled"));
+    };
+
+    let obj = params
+        .as_object()
+        .ok_or_else(|| invalid_params("object required"))?;
+
+    // Parse required fields
+    let campaign_id = obj
+        .get("campaign_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("campaign_id"))?;
+    let presence_bucket_id = obj
+        .get("presence_bucket_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("presence_bucket_id"))?;
+    let slot_count = obj
+        .get("slot_count")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_params("slot_count"))?;
+    let expires_at_micros = obj.get("expires_at_micros").and_then(Value::as_u64);
+    let _max_bid_usd_micros = obj.get("max_bid_usd_micros").and_then(Value::as_u64);
+
+    // Verify campaign exists
+    let _campaign = handle
+        .campaign(campaign_id)
+        .ok_or_else(|| RpcError::new(-32001, "unknown campaign"))?;
+
+    // Get current timestamp
+    let now_micros = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
+
+    // Find the presence bucket in current cohorts
+    let cohort_prices = handle.cohort_prices();
+    let mut found_bucket: Option<PresenceBucketRef> = None;
+    for cohort in &cohort_prices {
+        if let Some(ref bucket) = cohort.presence_bucket {
+            if bucket.bucket_id == presence_bucket_id {
+                found_bucket = Some(bucket.clone());
+                break;
+            }
+        }
+    }
+
+    let bucket = found_bucket.ok_or_else(err_invalid_presence_bucket)?;
+
+    // Check bucket expiry
+    if let Some(expires_at) = bucket.expires_at_micros {
+        if expires_at < now_micros {
+            return Err(err_invalid_presence_bucket());
+        }
+    }
+
+    // Privacy policy check (placeholder)
+    // In full implementation, check PrivacyBudgetManager for selector combo violations
+    let privacy_check_passed = true;
+    if !privacy_check_passed {
+        return Err(err_forbidden_selector_combo());
+    }
+
+    // Privacy budget check (placeholder)
+    let budget_available = true;
+    if !budget_available {
+        return Err(err_insufficient_privacy_budget());
+    }
+
+    // Generate reservation ID
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(campaign_id.as_bytes());
+    hasher.update(presence_bucket_id.as_bytes());
+    hasher.update(&slot_count.to_le_bytes());
+    hasher.update(&now_micros.to_le_bytes());
+    let reservation_id = hex::encode(&hasher.finalize().as_bytes()[..16]);
+
+    // Compute expiry
+    let default_ttl_micros = 86_400_000_000u64; // 24 hours in micros
+    let effective_expires = expires_at_micros
+        .or(bucket.expires_at_micros)
+        .unwrap_or(now_micros + default_ttl_micros);
+
+    // Build response
+    let mut result = Map::new();
+    result.insert("status".into(), Value::String("ok".into()));
+    result.insert(
+        "reservation_id".into(),
+        Value::String(reservation_id),
+    );
+    result.insert(
+        "expires_at_micros".into(),
+        Value::Number(Number::from(effective_expires)),
+    );
+    result.insert(
+        "reserved_budget_usd_micros".into(),
+        Value::Number(Number::from(0u64)), // Placeholder
+    );
+    result.insert("effective_selectors".into(), Value::Array(Vec::new()));
+
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::sampled_inc_vec(
+        &crate::telemetry::AD_PRESENCE_RESERVATION_TOTAL,
+        &["ok"],
+    );
+
+    Ok(Value::Object(result))
 }

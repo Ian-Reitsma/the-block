@@ -49,6 +49,23 @@ pub enum AdMarketCmd {
         data_dir: String,
         epoch: u64,
     },
+    PresenceList {
+        url: String,
+        auth: Option<String>,
+        pretty: bool,
+        region: Option<String>,
+        domain_tier: Option<String>,
+        min_confidence_bps: Option<u64>,
+        kind: Option<String>,
+        limit: Option<u64>,
+    },
+    PresenceReserve {
+        url: String,
+        auth: Option<String>,
+        campaign_id: String,
+        bucket_id: String,
+        slot_count: u64,
+    },
 }
 
 impl AdMarketCmd {
@@ -65,6 +82,7 @@ impl AdMarketCmd {
         .subcommand(Self::register_command())
         .subcommand(Self::readiness_command())
         .subcommand(Self::policy_command())
+        .subcommand(Self::presence_command())
         .build()
     }
 
@@ -223,6 +241,90 @@ impl AdMarketCmd {
         .build()
     }
 
+    fn presence_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.presence"),
+            "presence",
+            "Presence cohort management",
+        )
+        .subcommand(Self::presence_list_command())
+        .subcommand(Self::presence_reserve_command())
+        .build()
+    }
+
+    fn presence_list_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.presence.list"),
+            "list",
+            "List available presence cohorts for targeting",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "auth",
+            "auth",
+            "Bearer token or basic auth",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "pretty",
+            "pretty",
+            "Pretty-print JSON response",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "region",
+            "region",
+            "Filter by ISO 3166-1 alpha-2 region code",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "domain_tier",
+            "domain-tier",
+            "Filter by domain tier (premium|reserved|community|unverified)",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "min_confidence",
+            "min-confidence",
+            "Minimum presence confidence in basis points (0-10000)",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "kind",
+            "kind",
+            "Filter by presence source (localnet|range_boost)",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "limit",
+            "limit",
+            "Maximum number of cohorts to return",
+        )))
+        .build()
+    }
+
+    fn presence_reserve_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.presence.reserve"),
+            "reserve",
+            "Reserve presence slots for a campaign",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "auth",
+            "auth",
+            "Bearer token or basic auth",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("campaign", "campaign", "Campaign ID").required(true),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("bucket", "bucket", "Presence bucket ID").required(true),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("slots", "slots", "Number of slots to reserve").required(true),
+        ))
+        .build()
+    }
+
     pub fn from_matches(matches: &Matches) -> Result<Self, String> {
         let (name, sub_matches) = matches
             .subcommand()
@@ -281,6 +383,46 @@ impl AdMarketCmd {
                         Ok(Self::PolicyVerify { data_dir, epoch })
                     }
                     other => Err(format!("unknown ad-market policy subcommand '{other}'")),
+                }
+            }
+            "presence" => {
+                let (presence_sub, presence_matches) = sub_matches
+                    .subcommand()
+                    .ok_or_else(|| "missing subcommand for 'ad-market presence'".to_string())?;
+                match presence_sub {
+                    "list" => Ok(Self::PresenceList {
+                        url: take_string(presence_matches, "url")
+                            .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                        auth: take_string(presence_matches, "auth"),
+                        pretty: presence_matches.get_flag("pretty"),
+                        region: take_string(presence_matches, "region"),
+                        domain_tier: take_string(presence_matches, "domain_tier"),
+                        min_confidence_bps: take_string(presence_matches, "min_confidence")
+                            .and_then(|s| s.parse::<u64>().ok()),
+                        kind: take_string(presence_matches, "kind"),
+                        limit: take_string(presence_matches, "limit")
+                            .and_then(|s| s.parse::<u64>().ok()),
+                    }),
+                    "reserve" => {
+                        let campaign_id = take_string(presence_matches, "campaign")
+                            .ok_or_else(|| "missing '--campaign'".to_string())?;
+                        let bucket_id = take_string(presence_matches, "bucket")
+                            .ok_or_else(|| "missing '--bucket'".to_string())?;
+                        let slots_str = take_string(presence_matches, "slots")
+                            .ok_or_else(|| "missing '--slots'".to_string())?;
+                        let slot_count = slots_str
+                            .parse::<u64>()
+                            .map_err(|_| "invalid '--slots' value".to_string())?;
+                        Ok(Self::PresenceReserve {
+                            url: take_string(presence_matches, "url")
+                                .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                            auth: take_string(presence_matches, "auth"),
+                            campaign_id,
+                            bucket_id,
+                            slot_count,
+                        })
+                    }
+                    other => Err(format!("unknown ad-market presence subcommand '{other}'")),
                 }
             }
             other => Err(format!("unknown subcommand '{other}'")),
@@ -347,6 +489,58 @@ pub fn handle(cmd: AdMarketCmd) {
                     process::exit(1);
                 }
             }
+        }
+        AdMarketCmd::PresenceList {
+            url,
+            auth,
+            pretty,
+            region,
+            domain_tier,
+            min_confidence_bps,
+            kind,
+            limit,
+        } => {
+            let client = RpcClient::from_env();
+            let mut params = json::Map::new();
+            if let Some(r) = region {
+                params.insert("region".into(), Value::String(r));
+            }
+            if let Some(dt) = domain_tier {
+                params.insert("domain_tier".into(), Value::String(dt));
+            }
+            if let Some(mc) = min_confidence_bps {
+                params.insert(
+                    "min_confidence_bps".into(),
+                    Value::Number(json::Number::from(mc)),
+                );
+            }
+            if let Some(k) = kind {
+                params.insert("kind".into(), Value::String(k));
+            }
+            if let Some(l) = limit {
+                params.insert("limit".into(), Value::Number(json::Number::from(l)));
+            }
+            let payload =
+                json_rpc_request("ad_market.list_presence_cohorts", Value::Object(params));
+            print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
+        }
+        AdMarketCmd::PresenceReserve {
+            url,
+            auth,
+            campaign_id,
+            bucket_id,
+            slot_count,
+        } => {
+            let client = RpcClient::from_env();
+            let mut params = json::Map::new();
+            params.insert("campaign_id".into(), Value::String(campaign_id));
+            params.insert("presence_bucket_id".into(), Value::String(bucket_id));
+            params.insert(
+                "slot_count".into(),
+                Value::Number(json::Number::from(slot_count)),
+            );
+            let payload = json_rpc_request("ad_market.reserve_presence", Value::Object(params));
+            print_rpc_response(&client, &url, payload, auth.as_deref(), true);
         }
     }
 }
