@@ -129,7 +129,7 @@ impl AdReadinessPersistence {
     }
 
     fn load_config(&self) -> Option<AdReadinessConfig> {
-        let mut guard = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
+        let guard = self.db.lock().unwrap_or_else(|poison| poison.into_inner());
         guard.get(KEY_CONFIG).and_then(|bytes| {
             foundation_serialization::json::from_slice::<AdReadinessConfig>(&bytes).ok()
         })

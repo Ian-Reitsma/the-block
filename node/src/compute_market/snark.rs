@@ -137,6 +137,7 @@ pub enum SnarkBackend {
 }
 
 impl SnarkBackend {
+    #[allow(dead_code)]
     fn as_label(&self) -> &'static str {
         match self {
             SnarkBackend::Cpu => "cpu",

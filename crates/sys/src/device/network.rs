@@ -1,7 +1,10 @@
+#[cfg(any(target_os = "android", target_os = "linux"))]
 use std::fs;
 use std::io::{self, Error, ErrorKind};
+#[cfg(any(target_os = "android", target_os = "linux"))]
 use std::path::Path;
 
+#[cfg(any(target_os = "android", target_os = "linux"))]
 fn read_trimmed(path: &Path) -> io::Result<String> {
     let contents = fs::read_to_string(path)?;
     Ok(contents.trim().to_string())

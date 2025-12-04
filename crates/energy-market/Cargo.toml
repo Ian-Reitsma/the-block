@@ -3,12 +3,18 @@ name = "energy-market"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+pq-crypto = ["pqcrypto-dilithium"]
+telemetry = []
+
 [dependencies]
 foundation_serialization = { path = "../foundation_serialization" }
 foundation_metrics = { path = "../foundation_metrics" }
 thiserror = { path = "../thiserror" }
 serde = { workspace = true }
 crypto_suite = { path = "../crypto_suite" }
+pqcrypto-dilithium = { path = "../pqcrypto_dilithium", optional = true }
 
 [dev-dependencies]
 rand = { path = "../rand" }

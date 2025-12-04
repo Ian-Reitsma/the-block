@@ -159,6 +159,7 @@ pub struct PresenceBucketRef {
 }
 
 impl PresenceBucketRef {
+    #[allow(dead_code)]
     fn bucket_label(&self) -> &str {
         self.bucket_id.as_str()
     }
@@ -336,6 +337,7 @@ mod serde_optional_bytes {
     use foundation_serialization::serde_bytes;
     use serde::{Deserializer, Serializer};
 
+    #[allow(dead_code)]
     pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -346,6 +348,7 @@ mod serde_optional_bytes {
         }
     }
 
+    #[allow(dead_code)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
     where
         D: Deserializer<'de>,
@@ -700,6 +703,7 @@ struct CohortKey {
 }
 
 impl CohortKey {
+    #[allow(dead_code)]
     fn new(domain: String, provider: Option<String>, badges: Vec<String>) -> Self {
         Self::with_selectors(
             domain,
