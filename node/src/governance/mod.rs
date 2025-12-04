@@ -25,6 +25,9 @@ pub use governance_spec::treasury::{
 pub use governance_spec::{
     approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval,
 };
+pub use governance_spec::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use release::{

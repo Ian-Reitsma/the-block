@@ -63,7 +63,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-set -- "${ARGS[@]}"
+if ((${#ARGS[@]})); then
+  set -- "${ARGS[@]}"
+else
+  set --
+fi
 
 FAILED_STEPS=()
 SKIPPED_STEPS=()

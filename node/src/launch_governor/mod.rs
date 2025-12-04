@@ -20,6 +20,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+#[allow(dead_code)]
 const MAX_HISTORY: usize = 64;
 const INTENT_PREFIX: &str = "intent/";
 const LOG_LIMIT: usize = 64;

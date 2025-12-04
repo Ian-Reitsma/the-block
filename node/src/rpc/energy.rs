@@ -2,7 +2,7 @@
 
 use crate::energy::{self, DisputeFilter, DisputeStatus};
 use crypto_suite::hex;
-use energy_market::{EnergyCredit, EnergyProvider, EnergyReceipt, MeterReading, ProviderId, H256};
+use energy_market::{EnergyCredit, EnergyProvider, EnergyReceipt, MeterReading, H256};
 use foundation_rpc::Params;
 use foundation_serialization::json::{Map, Number, Value};
 
