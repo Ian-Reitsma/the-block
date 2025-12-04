@@ -4355,6 +4355,7 @@ mod tests {
                         domain: "example.com".into(),
                         provider: Some("wallet".into()),
                         badges: vec!["badge-a".into()],
+                        ..Default::default()
                     },
                     kappa: 0.85,
                     smoothed_error: 0.12,

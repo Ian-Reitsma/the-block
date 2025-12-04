@@ -85,17 +85,28 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | `node/src/governor_snapshot.rs`, `node/src/launch_governor/` | Snapshot tooling for live governance state, bootstrap helpers for testnets. |
 | `node/src/treasury_executor.rs` | Multi-stage disbursement executors, attested release flow, kill-switch integration. |
 | `node/src/service_badge.rs` | Badge issuance/revocation logic, uptime tracking, telemetry. |
-| `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | Ad marketplace snapshots, readiness checks, signature trails persisted under `ad_policy/`. |
+| `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | Ad marketplace policy + readiness snapshots with reversible migrations between `cohort_v1` tuple keys and `CohortKeyV2` (domain tier + interest + presence). Signed policies live here and feed RPC/explorer verifiers. |
 | `node/src/le_portal.rs` | Law-enforcement portal logging, warrant canaries, evidence store. |
+
+### Ad Market & Targeting
+
+| Path | Description |
+| --- | --- |
+| `crates/ad_market/` | Cohort schema (`CohortKeyV2`), privacy budget manager, budget broker, uplift estimator, badge guards, and presence attestation verifier. Hosts migrations, selector validation, and governance-configured registries (interest tags, domain tiers, presence knobs). |
+| `node/src/rpc/ad_market.rs`, `cli/src/ad_market.rs` | RPC + CLI entry points for selector-aware inventory, campaign registration, readiness, conversion reporting, presence cohort discovery/reservation, and privacy guardrail errors. |
+| `cli/src/gov.rs`, `cli/src/explorer.rs` | Governance CLI controls for ad-market knobs (presence TTL, selector caps, privacy budgets) and explorer summaries that break out CT/IT revenue per selector/domain tier/presence bucket. The explorer commands dump per-selector payouts so dashboards/CSV exports never miss new signals. |
+| `metrics-aggregator/src/lib.rs` (`ad_*` block), `monitoring/ad_market_dashboard.json` | Aggregates segment readiness counters, auction competitiveness histograms, privacy budget gauges, conversion totals, and publishes them over `/wrappers`. Keep Grafana JSON + screenshots in sync whenever selectors change (see `docs/operations.md#ad-market-operations`). |
+| `node/tests/ad_market_rpc.rs` | Integration coverage for badge committees, selectors, presence attestations, conversion auth, and telemetry exports. Extend when adding selectors or RPCs. |
+| `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | Ad marketplace policy + readiness snapshots with reversible migrations between `cohort_v1` tuple keys and `CohortKeyV2` (domain tier + interest + presence). Signed policies live here and feed RPC/explorer verifiers. |
 
 ### Networking, Overlay, and Range Boost
 
 | Path | Description |
 | --- | --- |
 | `node/src/net/`, `node/src/gossip/`, `node/src/p2p/` | TCP/UDP/QUIC reactors, peer stores, gossip propagation, capability negotiation. |
-| `node/src/range_boost/`, `node/src/localnet/` | Range-boost mesh (proximity relays), LocalNet overlays, TTL scheduling, partition drills. |
+| `node/src/range_boost/`, `node/src/localnet/` | Range-boost mesh (proximity relays) + LocalNet overlays that mint presence receipts (`PresenceReceipt`/`PresenceBucket`) for the ad market, enforce TTL scheduling, and power partition drills. |
 | `node/src/gateway/` | HTTP ingress, DNS publisher, mobile cache, read receipt batching, gateway policy enforcement. |
-| `node/src/read_receipt.rs` | Signed acknowledgement batching, ledger integration, CLI metrics. |
+| `node/src/read_receipt.rs` | Signed acknowledgement batching plus presence-specific fields (`presence_badge`, `venue_id`, `crowd_size_hint`, mesh/geo contexts) feeding ad readiness proofs. |
 | `node/src/http_client.rs` | First-party HTTP client used by node, CLI, and services (no third-party stacks). |
 | `node/src/log_indexer.rs` | Structured log exporter feeding explorers/CLI/telemetry dashboards. |
 

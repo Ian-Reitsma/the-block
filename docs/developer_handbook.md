@@ -40,7 +40,7 @@ Every change assumes main-net readiness. Treat this as the working agreement for
 - Settlement audit: `cargo test -p the_block --test settlement_audit --release` must pass before merging.
 - Fuzzing: `scripts/fuzz_coverage.sh` installs LLVM tools, runs fuzz targets (e.g., `cargo fuzz run storage`), and uploads `.profraw` artifacts. Remember to set `LLVM_PROFILE_FILE`.
 - Chaos: `tests/net_gossip.rs`, `tests/net_quic.rs`, `node/tests/storage_repair.rs`, `node/tests/gateway_rate_limit.rs` simulate packet loss, disk-full, etc.
-- Reviews should include the full gate transcript from `AGENTS.md §0.6` (lint, fmt, `just test-fast`, tiered `just test-full`, replay, settlement audit, fuzz). Attach command output or CI links plus the `.profraw` summary.
+- Reviews should include the full gate transcript from `AGENTS.md §0.6` (lint, fmt, `just test-fast`, tiered `just test-full`, replay, settlement audit, fuzz). Attach command output or CI links plus the `.profraw` summary. Ad market touches add the readiness checklist from [`docs/overview.md#ad--targeting-readiness-checklist`](overview.md#ad--targeting-readiness-checklist)—log `npm ci --prefix monitoring && make monitor`, `/wrappers` hashes, and selector dashboards alongside the standard gates.
 
 ## Debugging and Diagnostics
 - Enable `RUST_LOG=trace` plus the diagnostics subscriber when chasing runtime issues; `diagnostics::tracing` is wired everywhere.

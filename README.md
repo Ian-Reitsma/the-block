@@ -21,6 +21,7 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
   - **Storage** (keeping files safe)
   - **Computation** (running programs)
   - **Bandwidth** (helping data move around)
+- **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving “cohorts” defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
 - **Single Currency (CT - Consumer Token)**: You can send and receive CT just like Bitcoin or cash, but it also pays for services on the network.
 - **Governance**: Instead of a small group deciding how the blockchain works, CT holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
 
@@ -37,7 +38,7 @@ This means when you run The Block, you're not duct-taping together 50 different 
 
 ## Technical Summary
 
-The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (CT), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue.
+The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (CT), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
 
 ---
 
@@ -140,7 +141,8 @@ Everything is kept in sync with `mdbook`; CI blocks merges if documentation drif
 ---
 
 ## Contributing & support
-- **New contributors:** read [`AGENTS.md`](AGENTS.md) once and work like you authored it. It documents expectations, testing gates, release policy, and escalation paths for every agent.
+- **New contributors:** read [`AGENTS.md`](AGENTS.md) once and work like you authored it. It documents expectations, testing gates, release policy, escalation paths, and the Document Map owners you must loop in before touching each subsystem. The spec-first contract applies even to README/handbook updates—patch docs first, cite them in your PR, then change code.
+- **Ad-market track:** With the cohort/presence spec locked in this README + `docs/`, implementation now moves to the backlog in `AGENTS.md §15.K`. Code/CLI/RPC changes must cite the doc sections updated here and include the readiness checklist artifacts (`docs/overview.md#ad--targeting-readiness-checklist`).
 - **Repeatable workflows:** prefer `just` targets and the scripts under `scripts/` instead of ad-hoc commands. Hook `scripts/pre-commit.sample` if you want automatic fmt/lint before each commit.
 - **Issues/questions:** open an issue describing the doc/code mismatch before changing behavior—spec drift is treated as a bug.
 - **Licensing:** Apache 2.0 (`LICENSE`) governs the entire repo, including generated artifacts.

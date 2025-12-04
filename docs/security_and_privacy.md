@@ -35,6 +35,13 @@ Security is enforced in code, not promises. This guide consolidates the former t
   - `Disabled` — privacy proof checks are skipped (only use during incident response). RPC `node.get_ack_privacy`/`node.set_ack_privacy` change modes live; CLI wrappers should restore `enforce` after drills.
 - Law-enforcement portal (`node/src/le_portal.rs`) writes hashed case IDs and action logs; optional ChaCha20-Poly1305 evidence buckets live under `<base>/evidence/`.
 - Range-boost mesh encrypts payloads, tracks hop proofs, and never exposes raw content to intermediate peers.
+- **Ad market privacy budgets** — `crates/ad_market/src/privacy.rs` guards selector-level anonymity before readiness or inventory data leaves the node:
+  - Governance configures `PrivacyBudgetManager::Config` (k-anonymity threshold, max selector dimensions, premium-domain guard toggles, presence precision caps, and the per-epoch `budget_ppm`). These knobs ride through `node/src/config.rs` and governance proposals handled by `cli/src/gov.rs`.
+  - Selector combinations (domain tier/owner, provider, badges, interest tags, presence bucket) are hashed into a `SelectorFingerprint`. Each exposure charges against `budget_ppm`; when it hits zero, RPCs return `-32037` and dashboards emit `ad_privacy_budget_utilization_ratio` + `ad_privacy_denial_total{reason="budget_exhausted"}`.
+  - No readiness payload leaves the node unless `ready_slots >= k_anonymity_threshold` and the presence radius is ≥ `presence_precision_cap_meters`. Otherwise responses fold into aggregate domain-tier stats and log `ad_privacy_denial_total{reason="k_anonymity"}` so operators know why the data was redacted.
+  - Premium domains combined with sub-`presence_precision_cap_meters` buckets require explicit opt-in stored in campaign metadata (`presence_opt_in=true`). Violations raise `-32035` and surface in the readiness dashboard so advertisers see why cohorts were rejected.
+  - Deterministic tests next to the manager (`privacy.rs::tests::privacy_budget_respects_k_anonymity`, `privacy_budget_rejects_forbidden_selector`) must be updated whenever governance changes any bound. Mirror the same cases in `node/tests/ad_market_rpc.rs` so RPC regressions cannot bypass the privacy contract.
+  - CLI/explorer tooling must print the active privacy budget and `/wrappers` hash (`tb-cli ad-market readiness --with-privacy`) so auditors can compare what the RPC returned to what governance approved. Law-enforcement portal addenda record any override granted under subpoena along with the governance approval ID.
 
 ## KYC, Jurisdiction, and Compliance
 - KYC provider flows live in `node/src/kyc.rs` plus the `jurisdiction/` crate. Policy packs encode consent defaults, languages, and feature toggles per region.
