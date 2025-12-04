@@ -38,8 +38,8 @@ pub use store::{
 pub use treasury::{
     validate_disbursement_payload, DisbursementDetails, DisbursementPayload,
     DisbursementProposalMetadata, DisbursementStatus, DisbursementValidationError,
-    SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
-    TreasuryDisbursement, TreasuryExecutorSnapshot,
+    SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    TreasuryExecutorSnapshot,
 };
 
 /// Simplified address type reused across governance records.

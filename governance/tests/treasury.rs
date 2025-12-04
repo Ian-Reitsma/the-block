@@ -41,7 +41,7 @@ fn treasury_disbursements_roundtrip() {
         .queue_disbursement("dest-1", 42, 12, "initial memo", 100)
         .expect("queue disbursement");
     assert_eq!(scheduled.id, 1);
-    assert!(matches!(scheduled.status, DisbursementStatus::Scheduled));
+    assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     assert_eq!(store.treasury_balance().expect("balance after queue"), 100);
     assert_eq!(
         store
@@ -101,7 +101,7 @@ fn treasury_disbursements_roundtrip() {
         .cancel_disbursement(scheduled_two.id, "operator request")
         .expect("cancel disbursement");
     match cancelled.status {
-        DisbursementStatus::Cancelled { ref reason, .. } => {
+        DisbursementStatus::RolledBack { ref reason, .. } => {
             assert_eq!(reason, "operator request");
         }
         other => panic!("unexpected status after cancel: {other:?}"),

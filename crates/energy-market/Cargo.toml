@@ -9,3 +9,6 @@ foundation_metrics = { path = "../foundation_metrics" }
 thiserror = { path = "../thiserror" }
 serde = { workspace = true }
 crypto_suite = { path = "../crypto_suite" }
+
+[dev-dependencies]
+rand = { path = "../rand" }

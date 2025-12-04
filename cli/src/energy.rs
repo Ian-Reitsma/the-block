@@ -37,6 +37,41 @@ pub enum EnergyCmd {
         reading: JsonValue,
         url: String,
     },
+    Disputes {
+        provider_id: Option<String>,
+        status: Option<String>,
+        meter_hash: Option<String>,
+        page: u64,
+        page_size: u64,
+        url: String,
+        json: bool,
+    },
+    FlagDispute {
+        meter_hash: String,
+        reason: String,
+        reporter: String,
+        url: String,
+    },
+    ResolveDispute {
+        dispute_id: u64,
+        resolution_note: Option<String>,
+        resolver: String,
+        url: String,
+    },
+    Receipts {
+        provider_id: Option<String>,
+        page: u64,
+        page_size: u64,
+        url: String,
+        json: bool,
+    },
+    Credits {
+        provider_id: Option<String>,
+        page: u64,
+        page_size: u64,
+        url: String,
+        json: bool,
+    },
 }
 
 impl EnergyCmd {
@@ -154,6 +189,143 @@ impl EnergyCmd {
                 ))
                 .build(),
             )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.disputes"),
+                    "disputes",
+                    "List or filter energy disputes",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "provider_id",
+                    "provider-id",
+                    "Filter by provider identifier",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "status",
+                    "status",
+                    "Filter by status (open|resolved)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "meter_hash",
+                    "meter-hash",
+                    "Filter by meter hash",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page", "page", "Page index").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page_size", "page-size", "Page size").default("25"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit raw JSON response",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.receipts"),
+                    "receipts",
+                    "List settled energy receipts",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "provider_id",
+                    "provider-id",
+                    "Filter by provider identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page", "page", "Page index").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page_size", "page-size", "Page size").default("25"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit raw JSON response",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.credits"),
+                    "credits",
+                    "List pending energy meter credits",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "provider_id",
+                    "provider-id",
+                    "Filter by provider identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page", "page", "Page index").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page_size", "page-size", "Page size").default("25"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit raw JSON response",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.flag_dispute"),
+                    "flag-dispute",
+                    "Flag a meter reading or receipt for dispute review",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("meter_hash", "meter-hash", "Meter hash to dispute")
+                        .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("reason", "reason", "Dispute reason").required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("reporter", "reporter", "Reporter identifier")
+                        .default("anonymous"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.resolve_dispute"),
+                    "resolve-dispute",
+                    "Resolve an existing dispute",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("dispute_id", "dispute-id", "Dispute identifier")
+                        .required(true),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "resolution_note",
+                    "resolution-note",
+                    "Optional resolution note",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("resolver", "resolver", "Resolver identifier")
+                        .default("system"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
             .build()
     }
 
@@ -209,6 +381,85 @@ impl EnergyCmd {
                     .map_err(|err| format!("invalid JSON payload: {err}"))?;
                 let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
                 Ok(EnergyCmd::SubmitReading { reading, url })
+            }
+            "disputes" => {
+                let provider_id = take_string(sub_matches, "provider_id");
+                let status =
+                    take_string(sub_matches, "status").map(|value| value.to_ascii_lowercase());
+                let meter_hash = take_string(sub_matches, "meter_hash");
+                let page = parse_u64_required(take_string(sub_matches, "page"), "page")?;
+                let page_size =
+                    parse_u64_required(take_string(sub_matches, "page_size"), "page_size")?;
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                let json = sub_matches.get_flag("json");
+                Ok(EnergyCmd::Disputes {
+                    provider_id,
+                    status,
+                    meter_hash,
+                    page,
+                    page_size,
+                    url,
+                    json,
+                })
+            }
+            "flag-dispute" => {
+                let meter_hash = take_string(sub_matches, "meter_hash")
+                    .ok_or_else(|| "missing --meter-hash".to_string())?;
+                let reason = take_string(sub_matches, "reason")
+                    .ok_or_else(|| "missing --reason".to_string())?;
+                let reporter =
+                    take_string(sub_matches, "reporter").unwrap_or_else(|| "anonymous".into());
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                Ok(EnergyCmd::FlagDispute {
+                    meter_hash,
+                    reason,
+                    reporter,
+                    url,
+                })
+            }
+            "resolve-dispute" => {
+                let dispute_id =
+                    parse_u64_required(take_string(sub_matches, "dispute_id"), "dispute_id")?;
+                let resolution_note = take_string(sub_matches, "resolution_note");
+                let resolver =
+                    take_string(sub_matches, "resolver").unwrap_or_else(|| "system".into());
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                Ok(EnergyCmd::ResolveDispute {
+                    dispute_id,
+                    resolution_note,
+                    resolver,
+                    url,
+                })
+            }
+            "receipts" => {
+                let provider_id = take_string(sub_matches, "provider_id");
+                let page = parse_u64_required(take_string(sub_matches, "page"), "page")?;
+                let page_size =
+                    parse_u64_required(take_string(sub_matches, "page_size"), "page_size")?;
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                let json = sub_matches.get_flag("json");
+                Ok(EnergyCmd::Receipts {
+                    provider_id,
+                    page,
+                    page_size,
+                    url,
+                    json,
+                })
+            }
+            "credits" => {
+                let provider_id = take_string(sub_matches, "provider_id");
+                let page = parse_u64_required(take_string(sub_matches, "page"), "page")?;
+                let page_size =
+                    parse_u64_required(take_string(sub_matches, "page_size"), "page_size")?;
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                let json = sub_matches.get_flag("json");
+                Ok(EnergyCmd::Credits {
+                    provider_id,
+                    page,
+                    page_size,
+                    url,
+                    json,
+                })
             }
             other => Err(format!("unknown subcommand '{other}'")),
         }
@@ -278,6 +529,88 @@ pub fn handle(cmd: EnergyCmd) {
             let payload = json_rpc_request("energy.submit_reading", reading);
             dispatch(&client, &url, payload).map(|text| println!("{text}"))
         }
+        EnergyCmd::Disputes {
+            provider_id,
+            status,
+            meter_hash,
+            page,
+            page_size,
+            url,
+            json,
+        } => {
+            let mut pairs = vec![("page", json_u64(page)), ("page_size", json_u64(page_size))];
+            if let Some(provider) = provider_id {
+                pairs.push(("provider_id", json_string(provider)));
+            }
+            if let Some(state) = status {
+                pairs.push(("status", json_string(state)));
+            }
+            if let Some(hash) = meter_hash {
+                pairs.push(("meter_hash", json_string(hash)));
+            }
+            let payload = json_rpc_request("energy.disputes", json_object_from(pairs));
+            dispatch(&client, &url, payload).map(|text| print_disputes_response(&text, json))
+        }
+        EnergyCmd::FlagDispute {
+            meter_hash,
+            reason,
+            reporter,
+            url,
+        } => {
+            let payload = json_rpc_request(
+                "energy.flag_dispute",
+                json_object_from(vec![
+                    ("meter_hash", json_string(meter_hash)),
+                    ("reason", json_string(reason)),
+                    ("reporter", json_string(reporter)),
+                ]),
+            );
+            dispatch(&client, &url, payload).map(|text| print_single_dispute_response(&text, false))
+        }
+        EnergyCmd::ResolveDispute {
+            dispute_id,
+            resolution_note,
+            resolver,
+            url,
+        } => {
+            let mut pairs = vec![
+                ("dispute_id", json_u64(dispute_id)),
+                ("resolver", json_string(resolver)),
+            ];
+            if let Some(note) = resolution_note {
+                pairs.push(("resolution_note", json_string(note)));
+            }
+            let payload = json_rpc_request("energy.resolve_dispute", json_object_from(pairs));
+            dispatch(&client, &url, payload).map(|text| print_single_dispute_response(&text, false))
+        }
+        EnergyCmd::Receipts {
+            provider_id,
+            page,
+            page_size,
+            url,
+            json,
+        } => {
+            let mut pairs = vec![("page", json_u64(page)), ("page_size", json_u64(page_size))];
+            if let Some(provider) = provider_id {
+                pairs.push(("provider_id", json_string(provider)));
+            }
+            let payload = json_rpc_request("energy.receipts", json_object_from(pairs));
+            dispatch(&client, &url, payload).map(|text| print_receipts_response(&text, json))
+        }
+        EnergyCmd::Credits {
+            provider_id,
+            page,
+            page_size,
+            url,
+            json,
+        } => {
+            let mut pairs = vec![("page", json_u64(page)), ("page_size", json_u64(page_size))];
+            if let Some(provider) = provider_id {
+                pairs.push(("provider_id", json_string(provider)));
+            }
+            let payload = json_rpc_request("energy.credits", json_object_from(pairs));
+            dispatch(&client, &url, payload).map(|text| print_credits_response(&text, json))
+        }
     };
     if let Err(err) = result {
         eprintln!("energy command failed: {err}");
@@ -291,4 +624,114 @@ fn dispatch(client: &RpcClient, url: &str, payload: JsonValue) -> Result<String,
     response
         .text()
         .map_err(|err| format!("failed to read response body: {err}"))
+}
+
+fn print_paginated_list<F>(body: &str, json: bool, list_key: &str, heading: &str, fmt: F)
+where
+    F: Fn(&JsonValue) -> String,
+{
+    if json {
+        println!("{body}");
+        return;
+    }
+    match json_from_str::<JsonValue>(body) {
+        Ok(value) => {
+            if value.get("error").is_some() {
+                println!("{body}");
+                return;
+            }
+            let page = value.get("page").and_then(|v| v.as_u64()).unwrap_or(0);
+            let page_size = value.get("page_size").and_then(|v| v.as_u64()).unwrap_or(0);
+            let total = value.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("{heading} page {page} size {page_size} (total {total})");
+            if let Some(items) = value.get(list_key).and_then(|v| v.as_array()) {
+                for item in items {
+                    println!(" - {}", fmt(item));
+                }
+            }
+        }
+        Err(_) => println!("{body}"),
+    }
+}
+
+fn print_disputes_response(body: &str, json: bool) {
+    print_paginated_list(body, json, "disputes", "energy disputes", |dispute| {
+        let id = dispute.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let provider = dispute
+            .get("provider_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let status = dispute
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let reason = dispute
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        format!("#{id} provider={provider} status={status} reason={reason}")
+    });
+}
+
+fn print_single_dispute_response(body: &str, json: bool) {
+    if json {
+        println!("{body}");
+        return;
+    }
+    match json_from_str::<JsonValue>(body) {
+        Ok(value) => {
+            if value.get("error").is_some() {
+                println!("{body}");
+                return;
+            }
+            if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
+                let provider = value
+                    .get("provider_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let status = value.get("status").and_then(|v| v.as_str()).unwrap_or("-");
+                println!("dispute #{id} provider={provider} status={status}");
+            } else {
+                println!("{body}");
+            }
+        }
+        Err(_) => println!("{body}"),
+    }
+}
+
+fn print_receipts_response(body: &str, json: bool) {
+    print_paginated_list(body, json, "receipts", "energy receipts", |receipt| {
+        let buyer = receipt.get("buyer").and_then(|v| v.as_str()).unwrap_or("-");
+        let seller = receipt
+            .get("seller")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let kwh = receipt
+            .get("kwh_delivered")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let price = receipt
+            .get("price_paid")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        format!("{seller} -> {buyer} {kwh}kWh price={price}ct")
+    });
+}
+
+fn print_credits_response(body: &str, json: bool) {
+    print_paginated_list(body, json, "credits", "energy credits", |credit| {
+        let provider = credit
+            .get("provider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let amount = credit
+            .get("amount_kwh")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let timestamp = credit
+            .get("timestamp")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        format!("{provider} pending={amount}kWh recorded_at={timestamp}")
+    });
 }

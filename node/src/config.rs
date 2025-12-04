@@ -37,6 +37,8 @@ pub struct NodeConfig {
     pub rpc: RpcConfig,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub compute_market: ComputeMarketConfig,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub energy: EnergyConfig,
     pub telemetry_summary_interval: u64,
     #[serde(default = "default_max_peer_metrics")]
     pub max_peer_metrics: usize,
@@ -113,6 +115,7 @@ impl Default for NodeConfig {
             price_board_save_interval: 30,
             rpc: RpcConfig::default(),
             compute_market: ComputeMarketConfig::default(),
+            energy: EnergyConfig::default(),
             telemetry_summary_interval: 0,
             max_peer_metrics: default_max_peer_metrics(),
             peer_metrics_export: default_true(),
@@ -596,6 +599,20 @@ impl Default for ComputeMarketConfig {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct EnergyConfig {
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub provider_keys: Vec<crate::energy::ProviderKeyConfig>,
+}
+
+impl Default for EnergyConfig {
+    fn default() -> Self {
+        Self {
+            provider_keys: Vec::new(),
+        }
+    }
+}
+
 fn default_false() -> bool {
     false
 }
@@ -909,6 +926,12 @@ fn apply(cfg: &NodeConfig) {
             })
             .unwrap_or((None, None));
         crate::net::configure_peer_cert_policy(history, max_age);
+    }
+    if let Err(err) = crate::energy::configure_provider_keys(&cfg.energy.provider_keys) {
+        #[cfg(feature = "telemetry")]
+        diagnostics::tracing::warn!(reason = %err, "energy_provider_key_config_failed");
+        #[cfg(not(feature = "telemetry"))]
+        eprintln!("energy_provider_key_config_failed: {err}");
     }
 }
 

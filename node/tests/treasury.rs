@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use sys::tempfile::tempdir;
+use the_block::governance::treasury::{DisbursementDetails, DisbursementPayload};
 use the_block::governance::{
     DisbursementStatus, GovStore, TreasuryBalanceEventKind, NODE_GOV_STORE,
 };
@@ -24,11 +25,11 @@ fn node_treasury_accrual_flow() -> Result<()> {
     store.record_treasury_accrual(64, 16)?;
     assert_eq!(store.treasury_balance()?, 64);
 
-    let queued = store.queue_disbursement("dest", 10, 4, "", 0)?;
+    let queued = store.queue_disbursement(disbursement_payload("dest", 10, 4, "", 0))?;
     assert_eq!(queued.id, 1);
     assert_eq!(store.treasury_balance()?, 64);
 
-    let executed = store.execute_disbursement(queued.id, "0xabc")?;
+    let executed = store.execute_disbursement(queued.id, "0xabc", Vec::new())?;
     assert!(matches!(
         executed.status,
         DisbursementStatus::Executed { .. }
@@ -79,9 +80,9 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
     store.record_treasury_accrual(2_000, 2_000)?;
-    let first = store.queue_disbursement("alpha", 100, 10, "{}", 2)?;
+    let first = store.queue_disbursement(disbursement_payload("alpha", 100, 10, "{}", 2))?;
     let second_memo = "{\"depends_on\":[1]}";
-    let second = store.queue_disbursement("beta", 120, 5, second_memo, 1)?;
+    let second = store.queue_disbursement(disbursement_payload("beta", 120, 5, second_memo, 1))?;
     let blockchain = Arc::new(Mutex::new(Blockchain::default()));
     {
         let mut chain = blockchain.lock().unwrap();
@@ -127,8 +128,8 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
         .find(|d| d.id == second.id)
         .map(|d| d.status.clone())
         .expect("second disbursement present");
-    assert!(matches!(first_status, DisbursementStatus::Scheduled));
-    assert!(matches!(second_status, DisbursementStatus::Scheduled));
+    assert!(matches!(first_status, DisbursementStatus::Draft { .. }));
+    assert!(matches!(second_status, DisbursementStatus::Draft { .. }));
     {
         let mut chain = blockchain.lock().unwrap();
         chain.block_height = 240; // epoch 2
@@ -172,6 +173,26 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
         DisbursementStatus::Executed { .. }
     ));
     Ok(())
+}
+
+fn disbursement_payload(
+    destination: &str,
+    amount_ct: u64,
+    amount_it: u64,
+    memo: &str,
+    scheduled_epoch: u64,
+) -> DisbursementPayload {
+    DisbursementPayload {
+        proposal: Default::default(),
+        disbursement: DisbursementDetails {
+            destination: destination.into(),
+            amount_ct,
+            amount_it,
+            memo: memo.into(),
+            scheduled_epoch,
+            expected_receipts: Vec::new(),
+        },
+    }
 }
 
 #[cfg(feature = "telemetry")]

@@ -668,8 +668,14 @@ async fn treasury_disbursements(
         Some(value) => {
             let normalized = value.to_ascii_lowercase();
             match normalized.as_str() {
-                "scheduled" => Some(TreasuryDisbursementStatusFilter::Scheduled),
+                "draft" => Some(TreasuryDisbursementStatusFilter::Draft),
+                "voting" => Some(TreasuryDisbursementStatusFilter::Voting),
+                "queued" => Some(TreasuryDisbursementStatusFilter::Queued),
+                "timelocked" => Some(TreasuryDisbursementStatusFilter::Timelocked),
                 "executed" => Some(TreasuryDisbursementStatusFilter::Executed),
+                "finalized" => Some(TreasuryDisbursementStatusFilter::Finalized),
+                "rolled_back" => Some(TreasuryDisbursementStatusFilter::RolledBack),
+                "scheduled" => Some(TreasuryDisbursementStatusFilter::Scheduled),
                 "cancelled" => Some(TreasuryDisbursementStatusFilter::Cancelled),
                 _ => {
                     return Err(HttpError::Handler(
@@ -821,7 +827,15 @@ pub fn build_executor_report(store_path: &str) -> Result<ExplorerExecutorReport,
         .map_err(|err| HttpError::Handler(format!("load disbursements: {err}")))?;
     let dependency_blocks: Vec<ExplorerExecutorDependency> = disbursements
         .into_iter()
-        .filter(|d| matches!(d.status, DisbursementStatus::Scheduled))
+        .filter(|d| {
+            matches!(
+                d.status,
+                DisbursementStatus::Draft { .. }
+                    | DisbursementStatus::Voting { .. }
+                    | DisbursementStatus::Queued { .. }
+                    | DisbursementStatus::Timelocked { .. }
+            )
+        })
         .filter_map(|d| {
             let deps = parse_dependency_list(&d.memo);
             if deps.is_empty() {
@@ -1818,6 +1832,35 @@ pub struct TreasuryDisbursementRow {
     pub cancel_reason: Option<String>,
 }
 
+struct StatusInsertFields {
+    label: &'static str,
+    timestamp: u64,
+    tx_hash: Option<String>,
+    reason: Option<String>,
+}
+
+impl StatusInsertFields {
+    fn new(
+        label: &'static str,
+        timestamp: u64,
+        tx_hash: Option<String>,
+        reason: Option<String>,
+    ) -> Self {
+        Self {
+            label,
+            timestamp,
+            tx_hash,
+            reason,
+        }
+    }
+}
+
+fn optional_text_value(value: Option<&str>) -> SqlValue {
+    value
+        .map(|text| SqlValue::from(text))
+        .unwrap_or(SqlValue::Null)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryDisbursementPage {
     pub total: usize,
@@ -1832,31 +1875,7 @@ impl TreasuryDisbursementRow {
     }
 
     fn status_json(status: &DisbursementStatus) -> json::Value {
-        match status {
-            DisbursementStatus::Scheduled => json::Value::String("Scheduled".into()),
-            DisbursementStatus::Executed {
-                tx_hash,
-                executed_at,
-            } => {
-                let mut inner = json::Map::new();
-                inner.insert("tx_hash".into(), json::Value::String(tx_hash.clone()));
-                inner.insert("executed_at".into(), Self::number(*executed_at));
-                let mut outer = json::Map::new();
-                outer.insert("Executed".into(), json::Value::Object(inner));
-                json::Value::Object(outer)
-            }
-            DisbursementStatus::Cancelled {
-                reason,
-                cancelled_at,
-            } => {
-                let mut inner = json::Map::new();
-                inner.insert("reason".into(), json::Value::String(reason.clone()));
-                inner.insert("cancelled_at".into(), Self::number(*cancelled_at));
-                let mut outer = json::Map::new();
-                outer.insert("Cancelled".into(), json::Value::Object(inner));
-                json::Value::Object(outer)
-            }
-        }
+        json::to_value(status).unwrap_or_else(|_| json::Value::String("unknown".into()))
     }
 
     fn to_json_value(&self) -> json::Value {
@@ -1890,6 +1909,85 @@ impl TreasuryDisbursementRow {
     }
 }
 
+fn derive_status_fields(status: &DisbursementStatus) -> StatusInsertFields {
+    match status {
+        DisbursementStatus::Draft { created_at } => {
+            StatusInsertFields::new("draft", *created_at, None, None)
+        }
+        DisbursementStatus::Voting {
+            vote_deadline_epoch,
+        } => StatusInsertFields::new("voting", *vote_deadline_epoch, None, None),
+        DisbursementStatus::Queued { queued_at, .. } => {
+            StatusInsertFields::new("queued", *queued_at, None, None)
+        }
+        DisbursementStatus::Timelocked { ready_epoch } => {
+            StatusInsertFields::new("timelocked", *ready_epoch, None, None)
+        }
+        DisbursementStatus::Executed {
+            tx_hash,
+            executed_at,
+        } => StatusInsertFields::new("executed", *executed_at, Some(tx_hash.clone()), None),
+        DisbursementStatus::Finalized {
+            tx_hash,
+            finalized_at,
+            ..
+        } => StatusInsertFields::new("finalized", *finalized_at, Some(tx_hash.clone()), None),
+        DisbursementStatus::RolledBack {
+            reason,
+            rolled_back_at,
+            prior_tx,
+        } => StatusInsertFields::new(
+            "rolled_back",
+            *rolled_back_at,
+            prior_tx.clone(),
+            Some(reason.clone()),
+        ),
+    }
+}
+
+fn legacy_status_from_label(
+    label: &str,
+    status_ts: u64,
+    tx_hash: &Option<String>,
+    cancel_reason: &Option<String>,
+) -> DisbursementStatus {
+    match label {
+        "draft" => DisbursementStatus::Draft {
+            created_at: status_ts,
+        },
+        "voting" => DisbursementStatus::Voting {
+            vote_deadline_epoch: status_ts,
+        },
+        "queued" => DisbursementStatus::Queued {
+            queued_at: status_ts,
+            activation_epoch: status_ts,
+        },
+        "timelocked" => DisbursementStatus::Timelocked {
+            ready_epoch: status_ts,
+        },
+        "executed" => DisbursementStatus::Executed {
+            tx_hash: tx_hash.clone().unwrap_or_default(),
+            executed_at: status_ts,
+        },
+        "finalized" => DisbursementStatus::Finalized {
+            tx_hash: tx_hash.clone().unwrap_or_default(),
+            executed_at: status_ts,
+            finalized_at: status_ts,
+        },
+        "rolled_back" | "cancelled" => DisbursementStatus::RolledBack {
+            reason: cancel_reason.clone().unwrap_or_default(),
+            rolled_back_at: status_ts,
+            prior_tx: tx_hash.clone(),
+        },
+        "scheduled" => DisbursementStatus::Draft {
+            created_at: status_ts,
+        },
+        other => DisbursementStatus::Draft {
+            created_at: status_ts,
+        },
+    }
+}
+
 impl TreasuryDisbursementPage {
     fn to_json_value(&self) -> json::Value {
         let mut map = json::Map::new();
@@ -1917,8 +2015,14 @@ impl TreasuryDisbursementPage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreasuryDisbursementStatusFilter {
-    Scheduled,
+    Draft,
+    Voting,
+    Queued,
+    Timelocked,
     Executed,
+    Finalized,
+    RolledBack,
+    Scheduled,
     Cancelled,
 }
 
@@ -1942,14 +2046,36 @@ impl TreasuryDisbursementFilter {
     fn matches(&self, row: &TreasuryDisbursementRow) -> bool {
         if let Some(status) = self.status {
             let matches_status = match status {
-                TreasuryDisbursementStatusFilter::Scheduled => {
-                    matches!(row.status, DisbursementStatus::Scheduled)
+                TreasuryDisbursementStatusFilter::Draft => {
+                    matches!(row.status, DisbursementStatus::Draft { .. })
+                }
+                TreasuryDisbursementStatusFilter::Voting => {
+                    matches!(row.status, DisbursementStatus::Voting { .. })
+                }
+                TreasuryDisbursementStatusFilter::Queued => {
+                    matches!(row.status, DisbursementStatus::Queued { .. })
+                }
+                TreasuryDisbursementStatusFilter::Timelocked => {
+                    matches!(row.status, DisbursementStatus::Timelocked { .. })
                 }
                 TreasuryDisbursementStatusFilter::Executed => {
                     matches!(row.status, DisbursementStatus::Executed { .. })
                 }
+                TreasuryDisbursementStatusFilter::Finalized => {
+                    matches!(row.status, DisbursementStatus::Finalized { .. })
+                }
+                TreasuryDisbursementStatusFilter::RolledBack => {
+                    matches!(row.status, DisbursementStatus::RolledBack { .. })
+                }
+                TreasuryDisbursementStatusFilter::Scheduled => matches!(
+                    row.status,
+                    DisbursementStatus::Draft { .. }
+                        | DisbursementStatus::Voting { .. }
+                        | DisbursementStatus::Queued { .. }
+                        | DisbursementStatus::Timelocked { .. }
+                ),
                 TreasuryDisbursementStatusFilter::Cancelled => {
-                    matches!(row.status, DisbursementStatus::Cancelled { .. })
+                    matches!(row.status, DisbursementStatus::RolledBack { .. })
                 }
             };
             if !matches_status {
@@ -2184,7 +2310,7 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount_ct INTEGER NOT NULL, amount_it INTEGER NOT NULL DEFAULT 0, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT)",
+            "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount_ct INTEGER NOT NULL, amount_it INTEGER NOT NULL DEFAULT 0, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT, status_payload TEXT)",
             params![],
         )?;
         if let Err(err) = conn.execute(
@@ -3139,36 +3265,17 @@ impl Explorer {
 
     pub fn index_treasury_disbursements(&self, records: &[TreasuryDisbursement]) -> DbResult<()> {
         let mut conn = self.conn()?;
+        let _ = conn.execute(
+            "ALTER TABLE treasury_disbursements ADD COLUMN status_payload TEXT",
+            params![],
+        );
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM treasury_disbursements", params![])?;
         for record in records {
-            let (status_label, status_ts, tx_hash, cancel_reason) = match &record.status {
-                DisbursementStatus::Scheduled => {
-                    ("scheduled", record.created_at, None::<&str>, None::<&str>)
-                }
-                DisbursementStatus::Executed {
-                    tx_hash,
-                    executed_at,
-                } => (
-                    "executed",
-                    *executed_at,
-                    Some(tx_hash.as_str()),
-                    None::<&str>,
-                ),
-                DisbursementStatus::Cancelled {
-                    reason,
-                    cancelled_at,
-                } => (
-                    "cancelled",
-                    *cancelled_at,
-                    None::<&str>,
-                    Some(reason.as_str()),
-                ),
-            };
-            let tx_hash_value = tx_hash.map(SqlValue::from).unwrap_or(SqlValue::Null);
-            let cancel_reason_value = cancel_reason.map(SqlValue::from).unwrap_or(SqlValue::Null);
+            let fields = derive_status_fields(&record.status);
+            let status_payload = json::to_string(&record.status).unwrap_or_else(|_| "{}".into());
             tx.execute(
-                "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     record.id as i64,
                     &record.destination,
@@ -3177,10 +3284,11 @@ impl Explorer {
                     &record.memo,
                     record.scheduled_epoch as i64,
                     record.created_at as i64,
-                    status_label,
-                    status_ts as i64,
-                    tx_hash_value,
-                    cancel_reason_value,
+                    fields.label,
+                    fields.timestamp as i64,
+                    optional_text_value(fields.tx_hash.as_deref()),
+                    optional_text_value(fields.reason.as_deref()),
+                    status_payload,
                 ],
             )?;
         }
@@ -3195,30 +3303,36 @@ impl Explorer {
         filter: TreasuryDisbursementFilter,
     ) -> DbResult<TreasuryDisbursementPage> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare("SELECT id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason FROM treasury_disbursements ORDER BY scheduled_epoch DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload FROM treasury_disbursements ORDER BY scheduled_epoch DESC, id DESC")?;
         let rows = stmt.query_map(params![], |row| {
             let status_text: String = row.get(7)?;
             let status_ts: i64 = row.get(8)?;
             let tx_hash: Option<String> = row.get(9)?;
             let cancel_reason: Option<String> = row.get(10)?;
-            let status = match status_text.as_str() {
-                "scheduled" => DisbursementStatus::Scheduled,
-                "executed" => DisbursementStatus::Executed {
-                    tx_hash: tx_hash.clone().unwrap_or_default(),
-                    executed_at: status_ts.max(0) as u64,
-                },
-                "cancelled" => DisbursementStatus::Cancelled {
-                    reason: cancel_reason.clone().unwrap_or_default(),
-                    cancelled_at: status_ts.max(0) as u64,
-                },
-                _ => DisbursementStatus::Scheduled,
+            let status_payload: Option<String> = row.get(11)?;
+            let status = if let Some(payload) = status_payload {
+                json::from_str(&payload).unwrap_or_else(|_| {
+                    legacy_status_from_label(
+                        &status_text,
+                        status_ts.max(0) as u64,
+                        &tx_hash,
+                        &cancel_reason,
+                    )
+                })
+            } else {
+                legacy_status_from_label(
+                    &status_text,
+                    status_ts.max(0) as u64,
+                    &tx_hash,
+                    &cancel_reason,
+                )
             };
             let executed_tx_hash = if matches!(status, DisbursementStatus::Executed { .. }) {
                 tx_hash.clone()
             } else {
                 None
             };
-            let cancel_text = if matches!(status, DisbursementStatus::Cancelled { .. }) {
+            let cancel_text = if matches!(status, DisbursementStatus::RolledBack { .. }) {
                 cancel_reason.clone()
             } else {
                 None

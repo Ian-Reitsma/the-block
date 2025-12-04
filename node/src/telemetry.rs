@@ -3765,6 +3765,129 @@ pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static ENERGY_PROVIDER_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new("energy_provider_total", "Total registered energy providers")
+        .unwrap_or_else(|e| panic!("gauge energy_provider_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_provider_total: {e}"));
+    g.handle()
+});
+
+pub static ENERGY_PENDING_CREDITS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "energy_pending_credits_total",
+        "Outstanding energy meter credits awaiting settlement",
+    )
+    .unwrap_or_else(|e| panic!("gauge energy_pending_credits_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_pending_credits_total: {e}"));
+    g.handle()
+});
+
+pub static ENERGY_TOTAL_RECEIPTS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "energy_receipt_total",
+        "Total settled energy receipts retained in the market store",
+    )
+    .unwrap_or_else(|e| panic!("gauge energy_receipt_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_receipt_total: {e}"));
+    g.handle()
+});
+
+pub static ENERGY_ACTIVE_DISPUTES: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "energy_active_disputes_total",
+        "Active energy dispute records",
+    )
+    .unwrap_or_else(|e| panic!("gauge energy_active_disputes_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_active_disputes_total: {e}"));
+    g.handle()
+});
+
+pub static ENERGY_PROVIDER_REGISTER_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "energy_provider_register_total",
+        "Energy providers registered via RPC/CLI flows",
+    )
+    .unwrap_or_else(|e| panic!("counter energy_provider_register_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_provider_register_total: {e}"));
+    c.handle()
+});
+
+pub static ENERGY_METER_READING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "energy_meter_reading_total",
+            "Signed energy meter readings accepted by the market",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("counter energy_meter_reading_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_meter_reading_total: {e}"));
+    c
+});
+
+pub static ENERGY_SETTLEMENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "energy_settlement_total",
+            "Energy settlements finalized per provider",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("counter energy_settlement_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_settlement_total: {e}"));
+    c
+});
+
+pub static ENERGY_TREASURY_FEE_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "energy_treasury_fee_ct_total",
+        "CT accrued into the treasury via energy settlements",
+    )
+    .unwrap_or_else(|e| panic!("counter energy_treasury_fee_ct_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_treasury_fee_ct_total: {e}"));
+    c.handle()
+});
+
+pub static ENERGY_DISPUTE_OPEN_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "energy_dispute_open_total",
+        "Dispute reports filed against meter readings or receipts",
+    )
+    .unwrap_or_else(|e| panic!("counter energy_dispute_open_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_dispute_open_total: {e}"));
+    c.handle()
+});
+
+pub static ENERGY_DISPUTE_RESOLVE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "energy_dispute_resolve_total",
+        "Disputes resolved by operators or tooling",
+    )
+    .unwrap_or_else(|e| panic!("counter energy_dispute_resolve_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_dispute_resolve_total: {e}"));
+    c.handle()
+});
+
 pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_miss_total",

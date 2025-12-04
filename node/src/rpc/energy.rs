@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::energy;
+use crate::energy::{self, DisputeFilter, DisputeStatus};
 use crypto_suite::hex;
 use energy_market::{EnergyCredit, EnergyProvider, EnergyReceipt, MeterReading, ProviderId, H256};
 use foundation_rpc::Params;
@@ -74,6 +74,47 @@ fn credit_value(credit: &EnergyCredit) -> Value {
     Value::Object(map)
 }
 
+fn dispute_value(dispute: &energy::EnergyDispute) -> Value {
+    let mut map = Map::new();
+    map.insert("id".into(), number(dispute.id));
+    map.insert(
+        "provider_id".into(),
+        Value::String(dispute.provider_id.clone()),
+    );
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(dispute.meter_hash)),
+    );
+    map.insert("reporter".into(), Value::String(dispute.reporter.clone()));
+    map.insert("reason".into(), Value::String(dispute.reason.clone()));
+    map.insert(
+        "status".into(),
+        Value::String(dispute_status_label(dispute.status).into()),
+    );
+    map.insert("opened_at".into(), number(dispute.opened_at));
+    map.insert(
+        "resolved_at".into(),
+        dispute.resolved_at.map(number).unwrap_or(Value::Null),
+    );
+    map.insert(
+        "resolution_note".into(),
+        dispute
+            .resolution_note
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "resolver".into(),
+        dispute
+            .resolver
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
 fn params_object(params: &Params) -> Result<&Map, Value> {
     params
         .as_map()
@@ -95,6 +136,13 @@ fn require_u64(params: &Map, key: &str) -> Result<u64, Value> {
         .ok_or_else(|| error_value(format!("missing or invalid '{key}'")))
 }
 
+fn optional_string(params: &Map, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
 fn decode_hash(hex_value: &str) -> Result<H256, Value> {
     let bytes = hex::decode(hex_value)
         .map_err(|_| error_value("meter hash must be hex-encoded 32 bytes"))?;
@@ -108,6 +156,21 @@ fn decode_hash(hex_value: &str) -> Result<H256, Value> {
 
 fn decode_signature(hex_value: &str) -> Result<Vec<u8>, Value> {
     hex::decode(hex_value).map_err(|_| error_value("signature must be hex encoded"))
+}
+
+fn dispute_status_from_str(label: &str) -> Option<DisputeStatus> {
+    match label {
+        "open" => Some(DisputeStatus::Open),
+        "resolved" => Some(DisputeStatus::Resolved),
+        _ => None,
+    }
+}
+
+fn dispute_status_label(status: DisputeStatus) -> &'static str {
+    match status {
+        DisputeStatus::Open => "open",
+        DisputeStatus::Resolved => "resolved",
+    }
 }
 
 pub fn register(params: &Params) -> Value {
@@ -144,8 +207,13 @@ pub fn register(params: &Params) -> Value {
 
 pub fn market_state(filter_provider: Option<&str>) -> Value {
     let snapshot = energy::market_snapshot();
-    let providers: Vec<Value> = snapshot
-        .providers
+    let energy::EnergySnapshot {
+        providers,
+        receipts,
+        credits,
+        disputes,
+    } = snapshot;
+    let providers: Vec<Value> = providers
         .into_iter()
         .filter(|provider| {
             filter_provider
@@ -154,8 +222,7 @@ pub fn market_state(filter_provider: Option<&str>) -> Value {
         })
         .map(|provider| provider_value(&provider))
         .collect();
-    let credits: Vec<Value> = snapshot
-        .credits
+    let credits: Vec<Value> = credits
         .into_iter()
         .filter(|credit| {
             filter_provider
@@ -164,8 +231,7 @@ pub fn market_state(filter_provider: Option<&str>) -> Value {
         })
         .map(|credit| credit_value(&credit))
         .collect();
-    let receipts: Vec<Value> = snapshot
-        .receipts
+    let receipts: Vec<Value> = receipts
         .into_iter()
         .filter(|receipt| {
             filter_provider
@@ -174,12 +240,153 @@ pub fn market_state(filter_provider: Option<&str>) -> Value {
         })
         .map(|receipt| receipt_value(&receipt))
         .collect();
+    let disputes: Vec<Value> = disputes
+        .into_iter()
+        .filter(|dispute| {
+            filter_provider
+                .map(|target| dispute.provider_id == target)
+                .unwrap_or(true)
+        })
+        .map(|dispute| dispute_value(&dispute))
+        .collect();
     let mut map = Map::new();
     map.insert("status".into(), Value::String("ok".into()));
     map.insert("providers".into(), Value::Array(providers));
     map.insert("credits".into(), Value::Array(credits));
     map.insert("receipts".into(), Value::Array(receipts));
+    map.insert("disputes".into(), Value::Array(disputes));
     Value::Object(map)
+}
+
+pub fn disputes(params: &Params) -> Value {
+    let params = match params_object(params) {
+        Ok(map) => map,
+        Err(err) => return err,
+    };
+    let provider_id = params.get("provider_id").and_then(|value| value.as_str());
+    let status = match params.get("status").and_then(|value| value.as_str()) {
+        Some(label) => match dispute_status_from_str(label) {
+            Some(status) => Some(status),
+            None => return error_value("invalid dispute status (expected 'open' or 'resolved')"),
+        },
+        None => None,
+    };
+    let meter_hash = match params.get("meter_hash").and_then(|value| value.as_str()) {
+        Some(hash) => match decode_hash(hash) {
+            Ok(decoded) => Some(decoded),
+            Err(err) => return err,
+        },
+        None => None,
+    };
+    let page = params
+        .get("page")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let page_size = params
+        .get("page_size")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(25) as usize;
+    let filter = DisputeFilter {
+        provider_id,
+        status,
+        meter_hash,
+    };
+    let page = energy::disputes_page(filter, page, page_size);
+    let disputes: Vec<Value> = page.items.iter().map(dispute_value).collect();
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    map.insert("page".into(), number(page.page as u64));
+    map.insert("page_size".into(), number(page.page_size as u64));
+    map.insert("total".into(), number(page.total as u64));
+    map.insert("disputes".into(), Value::Array(disputes));
+    Value::Object(map)
+}
+
+pub fn receipts(params: &Params) -> Value {
+    let params = match params_object(params) {
+        Ok(map) => map,
+        Err(err) => return err,
+    };
+    let provider_id = params.get("provider_id").and_then(|value| value.as_str());
+    let page = params
+        .get("page")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let page_size = params
+        .get("page_size")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(25) as usize;
+    let page = energy::receipts_page(provider_id, page, page_size);
+    let receipts: Vec<Value> = page.items.iter().map(receipt_value).collect();
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    map.insert("page".into(), number(page.page as u64));
+    map.insert("page_size".into(), number(page.page_size as u64));
+    map.insert("total".into(), number(page.total as u64));
+    map.insert("receipts".into(), Value::Array(receipts));
+    Value::Object(map)
+}
+
+pub fn credits(params: &Params) -> Value {
+    let params = match params_object(params) {
+        Ok(map) => map,
+        Err(err) => return err,
+    };
+    let provider_id = params.get("provider_id").and_then(|value| value.as_str());
+    let page = params
+        .get("page")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let page_size = params
+        .get("page_size")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(25) as usize;
+    let page = energy::credits_page(provider_id, page, page_size);
+    let credits: Vec<Value> = page.items.iter().map(credit_value).collect();
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    map.insert("page".into(), number(page.page as u64));
+    map.insert("page_size".into(), number(page.page_size as u64));
+    map.insert("total".into(), number(page.total as u64));
+    map.insert("credits".into(), Value::Array(credits));
+    Value::Object(map)
+}
+
+pub fn flag_dispute(params: &Params, block: u64) -> Value {
+    let params = match params_object(params) {
+        Ok(map) => map,
+        Err(err) => return err,
+    };
+    let meter_hash = match require_string(params, "meter_hash").and_then(|hex| decode_hash(&hex)) {
+        Ok(hash) => hash,
+        Err(err) => return err,
+    };
+    let reason = match require_string(params, "reason") {
+        Ok(reason) => reason,
+        Err(err) => return err,
+    };
+    let reporter = optional_string(params, "reporter").unwrap_or_else(|| "anonymous".into());
+    match energy::flag_dispute(reporter, meter_hash, reason, block) {
+        Ok(dispute) => dispute_value(&dispute),
+        Err(err) => error_value(err.to_string()),
+    }
+}
+
+pub fn resolve_dispute(params: &Params, block: u64) -> Value {
+    let params = match params_object(params) {
+        Ok(map) => map,
+        Err(err) => return err,
+    };
+    let dispute_id = match require_u64(params, "dispute_id") {
+        Ok(value) => value,
+        Err(err) => return err,
+    };
+    let resolver = optional_string(params, "resolver").unwrap_or_else(|| "system".into());
+    let note = optional_string(params, "resolution_note");
+    match energy::resolve_dispute(dispute_id, resolver, note, block) {
+        Ok(dispute) => dispute_value(&dispute),
+        Err(err) => error_value(err.to_string()),
+    }
 }
 
 pub fn settle(params: &Params, block: u64) -> Value {
