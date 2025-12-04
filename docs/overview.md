@@ -67,6 +67,15 @@ All remaining detail sits in six focused guides:
 
 For historical breadcrumbs the removed per-subsystem files now redirect through [`docs/LEGACY_MAPPING.md`](LEGACY_MAPPING.md).
 
+### Owner routing
+Tag the following owners whenever you touch the listed scope. These handles map directly to reviewer groups in GitHub/Gerrit and keep the Document Map actionable:
+
+| Area | Owners to tag | Canonical paths | Critical dependencies |
+| --- | --- | --- | --- |
+| Ad + Targeting Platform | `@ad-market` (primary), `@gov-core`, `@gateway-stack`, `@telemetry-ops` | `crates/ad_market/**`, `node/src/{ad_policy_snapshot.rs,ad_readiness.rs,localnet,range_boost,gateway/dns.rs,rpc/ad_market.rs}`, `node/tests/ad_market_rpc.rs`, `cli/src/{ad_market.rs,gov.rs,explorer.rs}`, `metrics-aggregator/**`, `monitoring/**` | Range Boost + LocalNet presence proofs, `.block` DNS/auction feeds, privacy budget manager, `/wrappers` + Grafana dashboards, governance-configured selector registries |
+- **Spec circulation log** — The ad-market blueprint captured in `docs/architecture.md#ad-marketplace`, `docs/system_reference.md#appendix-a-·-rpc-method-index`, `docs/operations.md#ad-market-operations`, and `docs/security_and_privacy.md#privacy-layers` was circulated to `@ad-market`, `@gov-core`, `@gateway-stack`, and `@telemetry-ops` (Document Map owners above) for ACK on 2024-05-25. Implementation owners should now unblock the code/CLI/RPC backlog in `AGENTS.md §15.K`, referencing this spec and citing doc PRs in every code review.
+- **Docs parity watch** — `@docs-core` + subsystem owners must keep `README.md`, this overview, `docs/developer_handbook.md`, and `docs/apis_and_tooling.md` aligned whenever selectors, presence proofs, or telemetry knobs evolve (see `AGENTS.md §15.L`). Call out any lagging doc delta in PR descriptions until parity is restored.
+
 ## Execution Backlog & Ownership Handoff
 
 Engineering work proceeds against the backlog enumerated in `AGENTS.md §§0.6, 15.A–15.J`. Each subsection is mapped to canonical file paths and telemetry hooks so ownership is explicit:
@@ -79,5 +88,12 @@ Engineering work proceeds against the backlog enumerated in `AGENTS.md §§0.6, 
 - **Bridges + DEX** — `bridges/`, `dex/`, explorer timelines, and `docs/architecture.md#token-bridges`/`#dex-and-trust-lines` must cover signer-set payloads, telemetry pipelines, proofs, and release-verifier workflows documented under `docs/security_and_privacy.md#release-provenance-and-supply-chain`.
 - **Storage + dependency drills** — `node/src/simple_db`, `storage/`, `storage_market/`, `coding/`, and CI harnesses inside `scripts/`/`formal/` run snapshot/restore drills, dependency fault simulations, and ledger parity checks. Procedures live in `docs/operations.md#storage-and-state`.
 - **Energy governance/interfaces** — `governance/`, `node/src/energy.rs`, `cli/src/energy.rs`, `crates/energy-market`, `crates/oracle-adapter`, and `services/mock-energy-oracle` need production-grade oracle verification, governance payloads (batch vs real-time), schema-aligned CLI workflows, telemetry dashboards, CI gates, and runbooks per `docs/architecture.md#energy-governance-and-rpc-next-tasks`, `docs/economics_and_governance.md`, `docs/operations.md#energy-market-operations`, `docs/security_and_privacy.md#energy-oracle-safety`, and `docs/testnet/ENERGY_QUICKSTART.md`.
+- **Docs & onboarding parity** — Track outstanding README/overview/handbook/API diffs inside `AGENTS.md §15.L` and close them in the same PRs that modify code. mdBook (`docs/`) is the spec: run `mdbook build docs` before submitting doc changes and reject reviews that change behaviour without touching the docs listed above.
 
 Every TODO added to the codebase must be mirrored into `AGENTS.md §15` with a pointer back to the files above so the backlog remains synchronized across documentation, telemetry, and implementation.
+
+### Ad + Targeting readiness checklist
+- **When to run** — Any PR that touches `crates/ad_market`, `node/src/rpc/ad_market.rs`, `node/src/{ad_policy_snapshot.rs,ad_readiness.rs,localnet,range_boost,gateway/dns.rs,read_receipt.rs,service_badge.rs}`, `cli/src/{ad_market.rs,gov.rs,explorer.rs}`, `metrics-aggregator/**`, or `monitoring/**`.
+- **Commands (attach transcripts/CI links)** — `just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, and `scripts/fuzz_coverage.sh`. Record the fuzz `.profraw` summary alongside the console logs so reviewers can verify the guardrail cited in `AGENTS.md §0.6`.
+- **Telemetry proof** — When selector, privacy, or readiness metrics change, run `npm ci --prefix monitoring && make monitor`, capture the before/after Grafana JSON diff or screenshot for the `Ad Market Readiness` dashboard, and note the refreshed `/wrappers` payload hash exported by `metrics-aggregator`.
+- **Skipped steps** — If an owner-approved skip is required (for example, `just test-full` unhealthy in CI), document the approver and reason directly in the PR description and mirror it in the worklog so governance reviewers can see the exception trail.

@@ -561,6 +561,7 @@ mod tests {
                 domain: domain.to_string(),
                 provider: Some("wallet".into()),
                 badges: vec!["badge".into()],
+                ..Default::default()
             },
             kappa,
             smoothed_error: error,
