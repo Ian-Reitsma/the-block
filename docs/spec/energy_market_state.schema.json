@@ -1,0 +1,172 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EnergyMarketState",
+  "description": "Response schema for energy.market_state RPC endpoint.",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"],
+      "description": "Request status"
+    },
+    "providers": {
+      "type": "array",
+      "description": "Registered energy providers",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "pattern": "^energy-0x[0-9a-fA-F]+$"
+          },
+          "capacity_kwh": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total registered capacity in kWh"
+          },
+          "available_kwh": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Available (unsettled) capacity"
+          },
+          "price_per_kwh": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Price in CT per kWh"
+          },
+          "stake": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Bonded stake in CT"
+          },
+          "meter_address": {
+            "type": "string"
+          },
+          "jurisdiction": {
+            "type": "string",
+            "description": "Jurisdiction code (e.g., 'US_CA')"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner account address"
+          }
+        },
+        "required": ["provider_id", "capacity_kwh", "price_per_kwh"]
+      }
+    },
+    "credits": {
+      "type": "array",
+      "description": "Outstanding meter credits (pending settlement)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "meter_hash": {
+            "type": "string",
+            "description": "BLAKE3 hash of the meter reading"
+          },
+          "amount_kwh": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Unix timestamp of reading"
+          },
+          "expires_at_block": {
+            "type": "integer",
+            "description": "Block height after which credit expires"
+          }
+        },
+        "required": ["provider", "meter_hash", "amount_kwh", "timestamp"]
+      }
+    },
+    "receipts": {
+      "type": "array",
+      "description": "Settled energy receipts",
+      "items": {
+        "type": "object",
+        "properties": {
+          "buyer": {
+            "type": "string",
+            "description": "Buyer account (optional for provider-initiated)"
+          },
+          "seller": {
+            "type": "string",
+            "description": "Provider ID"
+          },
+          "kwh_delivered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "price_paid": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total CT paid"
+          },
+          "treasury_fee": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Fee sent to treasury"
+          },
+          "slash_applied": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Slashing penalty if any"
+          },
+          "meter_hash": {
+            "type": "string"
+          },
+          "settled_at_block": {
+            "type": "integer"
+          }
+        },
+        "required": ["seller", "kwh_delivered", "price_paid", "meter_hash"]
+      }
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if status is 'error'"
+    }
+  },
+  "required": ["status"],
+  "examples": [
+    {
+      "status": "ok",
+      "providers": [
+        {
+          "provider_id": "energy-0x00",
+          "capacity_kwh": 10000,
+          "available_kwh": 9000,
+          "price_per_kwh": 50,
+          "stake": 1000000,
+          "meter_address": "meter_001",
+          "jurisdiction": "US_CA",
+          "owner": "ct1owner..."
+        }
+      ],
+      "credits": [
+        {
+          "provider": "energy-0x00",
+          "meter_hash": "e3c3a1b2...",
+          "amount_kwh": 120,
+          "timestamp": 1710000000
+        }
+      ],
+      "receipts": [
+        {
+          "buyer": "ct1buyer...",
+          "seller": "energy-0x00",
+          "kwh_delivered": 50,
+          "price_paid": 2500,
+          "treasury_fee": 125,
+          "slash_applied": 0,
+          "meter_hash": "e3c3a1b2..."
+        }
+      ]
+    }
+  ],
+  "$comment": "See node/src/rpc/energy.rs for implementation. Optionally filter by provider_id in request."
+}

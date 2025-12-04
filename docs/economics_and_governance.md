@@ -1,5 +1,22 @@
 # Economics and Governance
 
+> **Plain-Language Overview**
+>
+> **CT is the single token.** Everything in The Block settles in CT — payments, rewards, fees, treasury disbursements. There's no second currency.
+>
+> **What about "IT" in the code?** You'll see variables like `amount_it`, `payout_it`, or `industrial_utilization` in the codebase. These are **legacy names** for "industrial share" — a sub-ledger accounting category that tracks how much of the CT supply is allocated to industrial workloads (compute, storage, energy). **IT is not a separate token you can send or receive.** It's just internal bookkeeping within CT.
+>
+> **How CT moves around:**
+> | Flow | What Happens |
+> |------|--------------|
+> | **Mining** | New CT is minted in each block's "coinbase" (the first transaction) |
+> | **Subsidies** | Part of that coinbase goes to storage/compute/bandwidth providers (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) |
+> | **Fees** | Users pay CT for transactions; fees are split between validators and treasury |
+> | **Rebates** | Users may receive "rebates" — ledger entries that reduce future costs (not separate tokens) |
+> | **Treasury** | Community fund; disbursements require governance votes |
+>
+> **Governance in a nutshell:** CT holders vote on proposals. Proposals can change parameters (like fee floors), allocate treasury funds, or upgrade the network. There's a timelock between approval and activation to allow for rollbacks if something goes wrong.
+
 Everything settles in CT. Consumer workloads, industrial compute/storage, and governance treasury actions all share the same ledger so explorers/CLI/telemetry never disagree.
 
 ## CT Supply and Sub-Ledgers
@@ -16,7 +33,19 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - **Dispute flow** — Until dedicated dispute RPCs land, governance proposals (e.g., temporarily raising `energy_slashing_rate_bps` for a provider, pausing settlement) act as the economic kill switch. Once the dispute endpoints ship they will create ledger anchors referencing disputed meter hashes while preserving CT accounting invariants.
 
 ## Multipliers and Emissions
-- Per-epoch utilisation `U_x` feeds the “one dial” multiplier:
+
+> **Plain English:** The network automatically adjusts how much CT goes to different services based on usage. If storage usage is low, storage rewards increase to attract providers. If usage is high, rewards dampen to avoid overpaying.
+>
+> **Symbol guide:**
+> | Symbol | Meaning |
+> |--------|---------|
+> | `phi_x` | Policy knob for this service (set by governance) |
+> | `I_target` | Target CT issuance per year |
+> | `S` | Share allocated to this service type |
+> | `U_x` | Real usage this epoch |
+> | `epoch_secs` | How long an epoch lasts |
+
+- Per-epoch utilisation `U_x` feeds the "one dial" multiplier:
   \[
   \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
   \]
@@ -29,6 +58,18 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Governance, ledger, CLI, explorer, and metrics aggregator all pull multiplier history through the shared `governance` crate to avoid drift.
 
 ## Fee Lanes and Rebates
+
+> **Plain English:** Fee lanes are like different queues at the post office. Each lane has its own rules and pricing.
+>
+> | Lane | Who Uses It | How Pricing Works |
+> |------|-------------|-------------------|
+> | **Consumer** | Regular wallet users | Base fee + tip; auto-adjusts based on mempool fullness |
+> | **Industrial** | Storage/compute providers | Higher base, but subsidized by block rewards |
+> | **Priority** | Anyone who needs fast inclusion | Pay more, get included sooner |
+> | **Treasury** | Governance disbursements | Fixed rates set by governance |
+>
+> **Rebates** are ledger entries that reduce your future costs. If you overpaid or qualify for a promotion, you get a rebate that auto-applies to your next transactions. Rebates are NOT tokens — you can't send them to someone else.
+
 - `node/src/fee` defines the lane taxonomy (consumer, industrial, priority, treasury). `node/src/fees` implements QoS eviction and rebate books shared with RPC.
 - Lane-aware mempool enforcement sits in `node/src/mempool` (see `docs/architecture.md#fee-lanes-and-rebates`). Each block nudges the base fee toward a fullness target while telemetry exposes `mempool_fee_floor_*` gauges.
 - Rebates are persisted ledger entries exposed via RPC (`node/src/rpc/fees.rs`) and CLI (`cli/src/fee_estimator.rs`).
@@ -38,6 +79,27 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Badges gate governance votes (Operators + Builders houses) and feed range-boost multipliers plus ANN mesh prioritisation.
 
 ## Treasury and Disbursements
+
+> **Plain English:** The treasury is the community fund. Moving CT out of it requires a governance vote. Here's the timeline:
+>
+> ```
+> ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌────────────┐    ┌──────────┐    ┌───────────┐
+> │  DRAFT  │───▶│ VOTING  │───▶│ QUEUED  │───▶│ TIMELOCKED │───▶│ EXECUTED │───▶│ FINALIZED │
+> └─────────┘    └─────────┘    └─────────┘    └────────────┘    └──────────┘    └───────────┘
+>      │                                              │                                │
+>      │                                              │      ┌────────────┐            │
+>      └──────────────────────────────────────────────┴─────▶│ ROLLED BACK│◀───────────┘
+>                                                            └────────────┘
+> ```
+>
+> - **Draft**: Someone writes a JSON payload describing where CT should go
+> - **Voting**: Bicameral vote (Operators + Builders houses)
+> - **Queued**: Passed the vote, waiting for activation
+> - **Timelocked**: Waiting period before execution (allows for emergencies)
+> - **Executed**: CT actually moves
+> - **Finalized**: Done, recorded in ledger
+> - **Rolled Back**: Something went wrong; compensation entry created
+
 - Governance proposals now carry explicit treasury-disbursement payloads in addition to param updates. Each disbursement advances through the canonical state machine: **draft → voting → queued → timelocked → executed → finalized/rolled-back**. Drafts are local JSON payloads (stored under `examples/governance/`) validated with `foundation_serialization` schemas before the proposer signs and submits. Voting/timelock rules piggyback on the bicameral governance machinery (see `governance/src/bicameral.rs`), so disbursements inherit quorum, snapshot, and activation semantics.
 - Once a disbursement proposal passes, `GovStore` persists the queued entry in sled and snapshots the activation epoch + prior rollbacks to `provenance.json` using first-party encoding (Option A from the task brief). The rollback window remains **block-height bounded** via `governance::store::ROLLBACK_WINDOW_EPOCHS`, guaranteeing deterministic replay on both x86_64 and AArch64.
 - Executions emit CT receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.

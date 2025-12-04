@@ -2,6 +2,49 @@
 
 This guide replaces the scattered `docs/operators/**`, `docs/monitoring*.md`, `docs/runbook.md`, and similar files. Use it when running production nodes, gateways, metrics stacks, or chaos drills.
 
+## Just Want to Run a Node on Your Laptop?
+
+Quick local setup for experimentation:
+
+```bash
+# 1. Bootstrap (installs Rust, Python venv, etc.)
+./scripts/bootstrap.sh
+
+# 2. Build
+cargo build -p the_block --release
+cargo build -p cli --bin tb-cli
+
+# 3. Start a single node with default config
+./target/release/tb-cli node start --config config/node.toml
+
+# 4. View basic logs and metrics
+tail -f logs/node.log
+curl http://localhost:26658/metrics | head -20
+```
+
+**What's a "testnet" vs "mainnet"?**
+- **Testnet**: A practice network with fake CT. Safe to experiment, break things, learn.
+- **Mainnet**: The real network with real CT. Production readiness required.
+
+For production deployment, read the rest of this guide.
+
+## SimpleDb: How State is Stored
+
+> **Plain English:** SimpleDb is the key-value store that keeps small databases on disk (like energy market state, governance state, or snapshot indexes). It uses a crash-safe write pattern:
+>
+> 1. Write data to a temporary file
+> 2. `fsync` to ensure it's on disk
+> 3. Atomically rename temp file to final location
+>
+> This "write-ahead + atomic rename" pattern means you never get a corrupted half-written file. If the node crashes mid-write, the old data is still intact.
+
+Key locations:
+- **Energy market**: `TB_ENERGY_MARKET_DIR` (default: `energy_market/`)
+- **Governance**: sled-backed, location configured in node config
+- **Peer overlay**: `node/src/net/overlay_store`
+
+For backup/restore, copy these directories while the node is stopped (or use the snapshot commands).
+
 ## System Requirements
 - Rust 1.86+, `cargo-nextest`, `cargo-fuzz` (nightly), Python 3.12.3 (virtualenv), Node 18+ for dashboards. `scripts/bootstrap.sh`/`.ps1` installs everything plus `patchelf` on Linux.
 - Storage engines via SimpleDb: in-house (default), RocksDB (feature-gated), and memory (for lightweight builds). Sled is used for dedicated subsystems (for example, governance) via the `sled/` crate. Provision SSDs and enable `storage_engine::KeyValue::flush_wal` watchers to keep WAL sizes bounded.
@@ -32,6 +75,68 @@ This guide replaces the scattered `docs/operators/**`, `docs/monitoring*.md`, `d
 - `metrics-aggregator` runs as its own binary; configure via env (`TB_AGGREGATOR_*`). It ingests node metrics, replicates them, archives snapshots (optional S3), and exposes admin endpoints for bridge remediation and TLS warning acknowledgements.
 - Bridge remediation constants (`BRIDGE_REMEDIATION_*`) now reference `docs/operations.md#bridge-liquidity-remediation`; update dashboards accordingly.
 - Set `TB_METRICS_ARCHIVE` to append raw JSON into a log for offline audit.
+
+## Launch Governor Operations
+
+The launch governor automates network readiness transitions by monitoring chain and DNS metrics. See `docs/architecture.md#launch-governor` for the full technical design.
+
+### Enabling the Governor
+
+```bash
+# Required
+export TB_GOVERNOR_ENABLED=1
+
+# Optional overrides
+export TB_GOVERNOR_DB=/path/to/governor_db      # Default: governor_db/ in node dir
+export TB_GOVERNOR_WINDOW_SECS=120              # Default: 2 × epoch duration
+export TB_GOVERNOR_SIGN=1                       # Enable decision signing
+export TB_NODE_KEY_HEX=<32-byte-hex>            # Required if signing enabled
+```
+
+### Monitoring Gate Status
+
+```bash
+# Check current gate states via RPC
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"governor.status","params":[],"id":1}'
+
+# View recent decisions
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"governor.decisions","params":[10],"id":1}'
+
+# Retrieve signed snapshot for specific epoch
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"governor.snapshot","params":[42],"id":1}'
+```
+
+### Understanding Gate Transitions
+
+| Gate | Transition | Meaning |
+|------|------------|---------|
+| operational | `Inactive` → `Active` | Core network stable, normal operations enabled |
+| operational | `Active` → `Inactive` | Metrics degraded, entering safe mode |
+| naming | `Inactive` → `Rehearsal` | DNS metrics healthy, test auctions enabled |
+| naming | `Rehearsal` → `Trade` | Stake coverage met, live auctions enabled |
+| naming | `Trade` → `Rehearsal` | Disputes/failures spiked, reverting to test mode |
+
+### Backup and Recovery
+
+Decision snapshots are stored at `{base_path}/governor/decisions/epoch-{N}.json` with optional `.sig` sidecar files. Include this directory in your backup rotation:
+
+```bash
+# Backup governor state
+cp -r /path/to/node/governor_db /backup/governor_db_$(date +%Y%m%d)
+cp -r /path/to/node/governor/decisions /backup/decisions_$(date +%Y%m%d)
+```
+
+### Alerts to Configure
+
+- **gate_transition** — Alert when any gate changes state (for awareness)
+- **governor_disabled** — Alert if `governor.status` returns `"enabled": false` unexpectedly
+- **intent_backlog** — Alert if pending intents exceed reasonable count (suggests apply failures)
 
 ## Monitoring and Dashboards
 - Grafana/Prometheus configs live under `monitoring/`. Install with `npm ci --prefix monitoring && make monitor` to render dashboards.

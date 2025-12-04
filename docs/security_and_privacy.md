@@ -2,6 +2,20 @@
 
 Security is enforced in code, not promises. This guide consolidates the former threat-model, bridge-security, privacy, and supply-chain docs.
 
+## Who Are the "Bad Guys"?
+
+> **Plain English:** Before diving into technical details, here's who we're protecting against:
+>
+> | Threat | What They Might Try | How We Defend |
+> |--------|---------------------|---------------|
+> | **Token thieves** | Steal CT by forging signatures or exploiting bugs | Ed25519/Dilithium signatures, `#![forbid(unsafe_code)]`, audit gates |
+> | **Censors** | Block certain users or transactions | Decentralized consensus, multiple relayers, gossip protocols |
+> | **Fake readings** | Submit false energy/compute data to earn undeserved rewards | Oracle signature verification, slashing for bad behavior |
+> | **Data snoops** | Spy on what users are reading/storing | Encrypted payloads, privacy-preserving read receipts, no logging of content |
+> | **Compromised nodes** | Rogue operators trying to manipulate state | Macro-block checkpoints, settlement audits, reputation slashing |
+>
+> The rest of this doc explains the technical mechanisms.
+
 ## Threat Model
 - Adversaries include malicious operators, compromised gateways, colluding relayers, and jurisdiction-specific takedown requests.
 - Consensus hardens liveness with hybrid PoW/PoS plus macro-block checkpoints; even if gossip partitions, PoH + VDF tie the timeline together.
@@ -14,6 +28,15 @@ Security is enforced in code, not promises. This guide consolidates the former t
 - Mathematical proofs remain under `docs/maths/` (LaTeX + PDF) and are referenced from CI + auditors.
 
 ## Remote Signers and Key Management
+
+> **Plain English:** A remote signer is a separate, hardened machine that holds your private keys. Instead of keeping keys on the same computer that's connected to the internet, you:
+> 1. Create an unsigned transaction on your regular machine
+> 2. Send it to the air-gapped signer
+> 3. The signer signs it and returns the signed transaction
+> 4. Your regular machine broadcasts the signed transaction
+>
+> This way, even if your regular machine is compromised, your keys stay safe.
+
 - Remote signer workflows live in `node/src/remote_signer_security.rs`, `cli/src/wallet.rs`, and `wallet/` crates. CLI enforces multisig, escrow-hash selection, and remote telemetry.
 - Release provenance (`node/src/provenance.rs`) verifies binary hashes against signed allow lists; attested binaries roll back automatically if hashes drift.
 - Environment variables `TB_RELEASE_SIGNERS`, `TB_RELEASE_SIGNERS_FILE` override defaults for air-gapped deployments.

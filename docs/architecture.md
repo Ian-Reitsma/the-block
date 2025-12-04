@@ -2,7 +2,17 @@
 
 Everything below reflects what ships in `main` today. Paths reference the exact modules so engineers can cross-check behaviour while hacking.
 
+> **For newcomers:** This doc is technical. Each major section starts with a plain-language explainer. If you want a gentler intro, read [`docs/overview.md`](overview.md) first.
+
 ## Ledger and Consensus
+
+> **Plain English:** The ledger is the shared spreadsheet everyone agrees on. It tracks who owns what CT and what services are owed. Blocks are like pages — every ~1 second, a new page is added containing recent transactions. "Consensus" is how all the computers (nodes) agree on which page comes next, preventing anyone from cheating.
+>
+> **Key concepts:**
+> - **Regular blocks**: Added every ~1 second
+> - **Macro-blocks**: Periodic checkpoints (every N blocks) that summarize state and make syncing faster
+> - **State roots**: Cryptographic fingerprints that prove what's in the ledger without showing everything
+
 ### Block Format and State
 - `node/src/blockchain` and `node/src/ledger_binary.rs` define the canonical block/ledger codecs using `codec::profiles`. Ledger snapshots embed service-badge flags, governance params, subsidy buckets, and AI-diagnostics toggles so upgrades round-trip without drift.
 - Macro-block checkpoints (`node/src/macro_block.rs`) record per-shard state roots and finalize batches of 1-second blocks for light clients and replay harnesses.
@@ -32,6 +42,17 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - The DKG helper crate `dkg/` plus `node/src/dkg.rs` coordinates committee key refresh without exposing transcripts.
 
 ## Transaction and Execution Pipeline
+
+> **Plain English:** When you want to send CT or use a service, you create a "transaction" — a signed message saying what you want to do. Here's the journey:
+>
+> 1. **You sign it** — Your wallet creates and signs the transaction
+> 2. **It enters the mempool** — The "waiting room" where transactions sit before being included in a block
+> 3. **The scheduler picks it** — Transactions are batched by priority (higher fees = faster)
+> 4. **It gets executed** — The node runs the transaction, updating balances
+> 5. **A receipt is created** — Proof that it happened, anchored in the ledger
+>
+> **Fee lanes** are like different queues at the post office: regular, priority, special services. Each has rules and pricing.
+
 ### Transaction Lifecycle
 - `node/src/transaction.rs` and `node/src/tx` encode canonical transaction envelopes shared with CLI/explorer via `foundation_serialization`. Account abstraction hooks (`docs/account_abstraction.md` equivalent) now live in `node/src/identity/handle_registry.rs` and `node/src/transaction/fee.rs`.
 - Pipeline: mempool admission → QoS lanes → scheduler → execution → receipts anchored in ledger.
@@ -57,6 +78,15 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Light clients rely on this identity layer for DID revocation proofs and remote signer flows (`node/src/light_client`).
 
 ## Networking and Propagation
+
+> **Plain English:** Nodes need to talk to each other to share blocks and transactions. This section covers how they find each other, establish secure connections, and gossip information across the network.
+>
+> **Key concepts:**
+> - **P2P (Peer-to-Peer)**: Nodes connect directly to each other, no central server
+> - **QUIC**: A fast, modern transport protocol (like TCP but better for unreliable networks)
+> - **Gossip**: How information spreads — each node tells a few others, who tell a few others, etc.
+> - **Handshake**: The initial "hello" where nodes agree on capabilities and verify identities
+
 ### P2P Handshake
 - `node/src/p2p/handshake.rs` negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the `p2p_overlay` crate with in-house and stub adapters.
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
@@ -90,6 +120,15 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - A* routing heuristics, swarm presets, and bootstrap flow are summarized from the former `docs/net_a_star.md`, `docs/swarm.md`, `docs/net_bootstrap.md`, and `docs/network_topologies.md` into this section.
 
 ## Storage and State
+
+> **Plain English:** The Block lets you store files in a decentralized way — like Dropbox, but no single company controls it. Files are:
+> 1. **Chunked** — Split into pieces
+> 2. **Encrypted** — So only you can read them
+> 3. **Erasure coded** — Spread across multiple providers so the file survives even if some go offline
+> 4. **Tracked on-chain** — The ledger knows who stores what and pays them CT
+>
+> **SimpleDb** is our internal key-value store that handles crash-safe writes using atomic file operations.
+
 ### Storage Pipeline
 - `node/src/storage/pipeline.rs` handles chunk sizing, erasure coding, encryption/compression selection, and provider placement. `coding/` supplies the compressor/erasure backends with runtime switches recorded in telemetry.
 - Manifest handling uses `manifest_binary.rs` and `pipeline/binary` for compatibility across CLI/SDK.
@@ -117,6 +156,22 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Examples: bridge header persistence (v8), DEX escrow (v9), and industrial subsidies (v10). Migrations run during startup with telemetry for progress and error handling.
 
 ## Compute Marketplace
+
+> **Plain English:** Think of this as a built-in AWS marketplace where people sell compute time, and the blockchain can audit that the work actually got done.
+>
+> **How it works:**
+> 1. **Provider offers compute** — "I have a GPU, I'll run your jobs for X CT per hour"
+> 2. **Consumer submits a job** — "Run this ML model on my data"
+> 3. **Work gets done** — Provider executes the job
+> 4. **SNARK receipt proves it** — A small cryptographic proof shows the work was done correctly, without re-running it
+> 5. **CT changes hands** — Provider gets paid, consumer gets results
+>
+> **Key terms:**
+> - **Offer**: A provider's listing (price, capacity, bond deposited)
+> - **SNARK receipt**: Proof that computation happened correctly
+> - **SLA (Service Level Agreement)**: Rules about quality/uptime; violations can lead to slashing
+> - **Lane**: Priority tier for different job types
+
 ### Offers and Matching
 - Computation lives under `node/src/compute_market`. Offers, bids, and receipts serialize through `foundation_serialization` and are exposed over RPC (`node/src/rpc/compute_market.rs`).
 - Providers stake bonds (`compute_market::Offer`), schedule workloads, and settle receipts via `compute_market::settlement`.
@@ -139,6 +194,20 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - CBM hooks live in `node/src/compute_market/cbm.rs`. Governance toggles lane payouts, refundable deposits, and SLA slashing (`compute_market::settlement::SlaOutcome`).
 
 ## Energy Market
+
+> **Plain English:** The energy market lets you buy and sell real-world electricity with built-in verification. Smart meters send cryptographically signed readings to the network, which turns them into "credits" that can be settled for CT.
+>
+> **Example flow:**
+> | Step | What Happens |
+> |------|--------------|
+> | 1. Register | Provider signs up with capacity (e.g., 10,000 kWh) and price (e.g., 50 CT/kWh) |
+> | 2. Meter reading | Smart meter sends signed reading: "1,000 kWh delivered" |
+> | 3. Credit created | Network verifies signature, creates an `EnergyCredit` |
+> | 4. Settlement | Customer settles 500 kWh → `EnergyReceipt` created, treasury fee deducted |
+> | 5. Payout | Provider receives CT in their account |
+>
+> **If someone disputes a reading:** A special "dispute" record is created, triggering review.
+
 - Energy credits live in `crates/energy-market` with the node wrapper in `node/src/energy.rs`. Providers, credits, and receipts persist in sled via `SimpleDb::open_named(names::ENERGY_MARKET, …)`; set `TB_ENERGY_MARKET_DIR` to relocate the DB. The store snapshots to bytes (`EnergyMarket::{to_bytes,from_bytes}`) on every mutation and uses the same fsync+rename discipline as other `SimpleDb` consumers so restarts replay identical state.
 - RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, and `energy.settle`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, outstanding credits (meter hashes), and settled receipts, so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `tb-cli energy` calls.
 - Governance owns `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps`. Proposals feed those values through the shared governance crate, latch them in `node/src/governance/params.rs`, then invoke `node::energy::set_governance_params`, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.
@@ -184,6 +253,12 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
   - Add a “fast mainnet gate” workflow that runs: unit tests + targeted integration (governance, RPC, ledger replay, transport handshake).
 
 ## Bridges, DEX, and Settlement
+
+> **Plain English:**
+> - **Bridges** let you move assets between The Block and other blockchains (like Ethereum). A "relayer" watches both chains and proves that a deposit on one side should unlock funds on the other.
+> - **DEX (Decentralized Exchange)** lets you trade tokens without a central exchange. Order books and "trust lines" (credit relationships between parties) are tracked on-chain.
+> - **HTLC (Hash Time-Locked Contracts)** enable atomic swaps: "I'll give you X if you reveal a secret; otherwise we both get refunds after timeout."
+
 ### Token Bridges
 - The `bridges/` crate handles POW header verification, relayer sets, telemetry, and dispute handling. RPC wiring lives in `node/src/rpc/bridge.rs`.
 - Verified headers persist in sled (schema migration v8) and CLI commands under `cli/src/bridge.rs` manage challenge windows.
@@ -195,6 +270,15 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Atomic swap primitives (`docs/htlc_swaps.md` replacement) were folded into `node/src/dex/htlc.rs` with RPC + CLI helpers. Governance tracks lane quotas and telemetry under `DEX_*` metrics.
 
 ## Gateway and Client Access
+
+> **Plain English:** The gateway is the "front door" where wallets and apps talk to nodes. It handles:
+> - **HTTP/API requests** — Apps call JSON-RPC methods to read state or submit transactions
+> - **DNS publishing** — Register `.block` domains that point to your content
+> - **Mobile cache** — Encrypted offline storage so phones work without network
+> - **Light clients** — Lightweight sync for devices that can't store the full chain
+>
+> **User story:** Your wallet app connects to a gateway node. When you check your balance, the app calls an RPC method. When you send CT, it submits a signed transaction. When you go offline, the mobile cache keeps recent data locally.
+
 ### HTTP Gateway
 - `node/src/gateway/http.rs` uses `crates/httpd` for the router, TLS, and WebSocket upgrades. Gateways serve static content, APIs, and compute relays from the embedded storage pipeline.
 - CLI + explorer insight commands surfaced from old `docs/gateway.md` now live in `docs/apis_and_tooling.md#gateway`.
@@ -215,7 +299,99 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 ### Read Receipts
 - `node/src/gateway/read_receipt.rs` records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for `READ_SUB_CT` live in `docs/economics_and_governance.md`.
 
+## Launch Governor
+
+> **Plain English:** The launch governor is an automated system that decides when the network is "ready" for different operational phases. Think of it like a safety system that monitors network health and only enables features when metrics look stable.
+>
+> **Example:** Before enabling live DNS auctions, the governor watches:
+> - Are blocks arriving at regular intervals?
+> - Are peers staying connected?
+> - Are test auctions completing successfully?
+>
+> Once these metrics hit target thresholds consistently (a "streak"), the governor transitions the network to the next phase.
+
+### Gates and Actions
+
+The governor manages two primary gates:
+
+| Gate | Purpose | Actions |
+|------|---------|---------|
+| **operational** | Core network readiness | `Enter` (enable), `Exit` (disable) |
+| **naming** | DNS auction readiness | `Rehearsal` (test mode), `Trade` (live auctions) |
+
+Gate states progress as: `Inactive` → `Active`/`Rehearsal` → `Trade`
+
+### Signal Providers
+
+The governor monitors two signal sources:
+
+**Chain Signals** (`ChainSample`):
+- `block_spacing` — Milliseconds between consecutive blocks (measures stability)
+- `difficulty` — Mining difficulty trend (detects hashrate changes)
+- `replay` — Success ratio of block validation replays
+- `peer_liveness` — Ratio of successful peer requests vs drops
+- `fee_band` — Median and P90 consumer fees
+
+**DNS Signals** (`DnsSample`):
+- `txt_success` — TXT record publish success ratio
+- `dispute_share` — Ratio of auctions ending in disputes
+- `completion` — Auction completion ratio
+- `stake_coverage_ratio` — Locked stake vs P90 settlement amounts
+- `settle_durations_ms` — How long settlements take
+
+### Intent System
+
+When gate conditions are met, the governor creates **intents**—timestamped records of planned state changes:
+
+1. **Intent created** — Captures metrics snapshot, computes BLAKE3 hash
+2. **Optional signing** — Ed25519 signature with node key (if `TB_GOVERNOR_SIGN=1`)
+3. **Persistence** — Saved to `governor_db/` via SimpleDb
+4. **Apply at epoch** — Intents apply one epoch after creation (timelock)
+5. **State update** — Governance runtime receives parameter changes
+
+Intent records include:
+- `id` — Unique identifier (`{gate}-{epoch}-{seq}`)
+- `params_patch` — JSON patch for governance parameters
+- `snapshot_hash_hex` — BLAKE3 hash for auditability
+- `metrics` — Summary and raw metrics that triggered the decision
+
+### Configuration
+
+| Environment Variable | Purpose | Default |
+|---------------------|---------|---------|
+| `TB_GOVERNOR_ENABLED` | Enable governor | `false` |
+| `TB_GOVERNOR_DB` | Database path | `governor_db/` |
+| `TB_GOVERNOR_WINDOW_SECS` | Evaluation window | 2 × epoch duration |
+| `TB_GOVERNOR_SIGN` | Sign decision payloads | `false` |
+| `TB_NODE_KEY_HEX` | Hex-encoded Ed25519 key for signing | (required if signing) |
+
+### RPC Methods
+
+| Method | Description |
+|--------|-------------|
+| `governor.status` | Current gate states, epoch, pending intents |
+| `governor.decisions` | Recent intent history (with `limit` param) |
+| `governor.snapshot` | Load persisted decision for specific epoch |
+
+### Source Files
+
+- `node/src/launch_governor/mod.rs` — Gate controllers, intent planning, signal evaluation
+- `node/src/governor_snapshot.rs` — Snapshot persistence and signing
+- `node/src/rpc/governor.rs` — RPC handlers
+
 ## Telemetry and Instrumentation
+
+> **Plain English:** Telemetry is how operators know what's happening inside the node. The system exports:
+> - **Metrics** — Numbers like "transactions processed per second" or "peer count"
+> - **Logs** — Text records of what happened and when
+> - **Dashboards** — Visual graphs (via Grafana) showing health over time
+>
+> **The basic pattern:**
+> 1. Node collects metrics internally
+> 2. Metrics aggregator pulls them from multiple nodes
+> 3. Grafana displays pretty graphs
+> 4. Alerts fire when something looks wrong
+
 ### Runtime Telemetry
 - `node/src/telemetry.rs` registers every metric (TLS warnings, coding results, gossip fanout, SLA counters). CLI + aggregator share the same registry via `runtime::telemetry`.
 - Wrapper telemetry exports runtime/transport/overlay/storage/coding metadata so governance policy violations are visible.
