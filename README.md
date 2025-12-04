@@ -25,6 +25,25 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
 - **Single Currency (CT - Consumer Token)**: You can send and receive CT just like Bitcoin or cash, but it also pays for services on the network.
 - **Governance**: Instead of a small group deciding how the blockchain works, CT holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
 
+### CT in Everyday Terms
+
+CT is the single currency that powers everything on The Block. Think of it like money that can:
+- **Transfer** like cash — send CT to anyone, anywhere
+- **Pay for services** — storage, compute, energy
+- **Reward work** — earn CT by running infrastructure
+
+**Mini-stories showing how CT moves around:**
+
+| Person | What They Do | CT Flow |
+|--------|--------------|---------|
+| **Alice** | Runs a node that validates transactions | Earns CT from block rewards (mining) |
+| **Bob** | Stores important files on the network | Pays CT for storage; providers earn that CT |
+| **Carol** | Offers spare compute power (like a mini AWS) | Earns CT when people run jobs on her machine |
+| **Dave** | Operates a smart meter that reports energy usage | Earns CT for verified energy readings via the energy market |
+| **Eve** | Wants to run a machine-learning model | Pays CT to Carol's compute; gets results back |
+
+**Note on "IT" in code:** You may see variables like `amount_it` or `payout_it` in the codebase. These are legacy names for "industrial share" — a sub-ledger accounting category, **not** a separate token. All value ultimately settles in CT.
+
 ### Why "Self-Contained" Matters
 
 Most blockchains piece together libraries from dozens of different teams. If one library has a bug or gets abandoned, the whole thing can break. The Block is different:
@@ -79,6 +98,7 @@ Think of this repository like a city with different neighborhoods:
 | **`cli/`** | Command-line tool (`tb-cli`) - like a control panel for interacting with the blockchain | Handles governance, wallet, bridge, compute market, storage, telemetry, diagnostics, and remediation flows. |
 | **`governance/`** | Rules and voting system - how the network makes decisions and manages the treasury | Bicameral voting, treasury disbursements, parameter adjustments, release attestations |
 | **`crates/energy-market/`** | NEW! Energy trading marketplace with oracle-verified meter readings and multi-scheme signature verification (Ed25519 + optional post-quantum) | Providers register, meters submit signed readings, buyers settle against credits, receipts stored in ledger |
+| **`crates/ad_market/`** | Privacy-aware advertising system — groups users into broad "cohorts" (site type, badges, approximate presence), not individual tracking. Advertisers bid on cohorts, not people. | Domain tiers, interest tags, presence buckets, privacy budgets, uplift experiments. See [`node/src/ad_policy_snapshot.rs`](node/src/ad_policy_snapshot.rs), [`node/src/ad_readiness.rs`](node/src/ad_readiness.rs), [`cli/src/ad_market.rs`](cli/src/ad_market.rs), [`docs/architecture.md#ad-market`](docs/architecture.md#ad-market). |
 | **`metrics-aggregator/` + `monitoring/`** | Dashboard and monitoring - shows you what's happening on the network in real-time | Aggregates `/metrics`, exposes `/wrappers`, `/treasury`, `/governance`, `/probe`, `/chaos`, `/remediation/*`, and feeds Grafana dashboards. |
 | **Tooling** (`scripts/`, `tools/`, `examples/`, `sim/`, `fuzz/`, `formal/`) | Scripts and tests to make sure everything works correctly | Bootstrap scripts, dependency policy tooling, settlement/replay harnesses, chaos testing, fuzzing, and formal verification inputs. |
 
@@ -89,6 +109,31 @@ Think of this repository like a city with different neighborhoods:
 - **Comprehensive Testing**: 100+ new unit tests covering signature verification, credit persistence across provider restarts, oracle timeout enforcement, and disbursement validation
 
 See [`docs/overview.md`](docs/overview.md#document-map) for the authoritative document map.
+
+---
+
+## 5-Minute Local Demo (Try It Now)
+
+Want to see The Block running on your machine? Here's the fastest path:
+
+```bash
+# 1. Bootstrap (installs Rust, Python venv, etc.)
+./scripts/bootstrap.sh
+
+# 2. Build the node and CLI
+cargo build -p the_block --release
+cargo build -p cli --bin tb-cli
+
+# 3. Start a local node
+./target/release/tb-cli node start --config config/node.toml
+
+# 4. In another terminal, try some commands:
+./target/release/tb-cli wallet new              # Create a wallet
+./target/release/tb-cli explorer blocks --tail 5   # See recent blocks
+./target/release/tb-cli tx send --help          # Explore sending CT
+```
+
+That's it! You're running a local blockchain. See [`docs/operations.md`](docs/operations.md) for production deployment.
 
 ---
 
@@ -148,3 +193,27 @@ Everything is kept in sync with `mdbook`; CI blocks merges if documentation drif
 - **Licensing:** Apache 2.0 (`LICENSE`) governs the entire repo, including generated artifacts.
 
 When in doubt, update the docs first, then patch the code. Production readiness is assumed at every commit—tests, reproducible builds, and telemetry are not optional.
+
+---
+
+## New to Blockchains? Start Here
+
+If you're completely new to blockchains, here's the recommended reading path:
+
+1. **This README** — You're here! Get the big picture.
+2. **[`docs/overview.md`](docs/overview.md)** — Learn what lives where in the codebase.
+3. **[`docs/architecture.md`](docs/architecture.md)** — Start with "Ledger and Consensus" and "Transaction and Execution Pipeline" sections.
+4. **[`docs/economics_and_governance.md`](docs/economics_and_governance.md)** — Understand how CT flows and how decisions get made.
+5. **[`docs/developer_handbook.md#environment-setup`](docs/developer_handbook.md#environment-setup)** — Set up your dev environment.
+6. **[`AGENTS.md`](AGENTS.md)** — The contributor bible. Read once, work like you wrote it.
+
+**Key concepts you'll encounter:**
+| Term | Plain English |
+|------|---------------|
+| Block | A page in the shared ledger (added every ~1 second) |
+| Consensus | How nodes agree which page is next |
+| CT | The single token (Consumer Token) — like money for the network |
+| Mempool | The waiting room for transactions before they're added to a block |
+| Macro-block | A periodic checkpoint that makes syncing faster |
+| SNARK | A small cryptographic proof that heavy computation was done correctly |
+| Treasury | The community fund; disbursements require governance votes |

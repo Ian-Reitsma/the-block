@@ -1,5 +1,45 @@
 # AGENTS.md — **The‑Block** Developer Handbook
 
+## For New Contributors (Even if You're New to Blockchains)
+
+Welcome! This file is the "bible" for how we build The Block. Before diving into the technical details, here's what you need to know:
+
+### What "Spec-First" Means
+
+In this project, **documentation describes reality**. If code does something different from what the docs say, that's a bug in the docs (or the code needs fixing). This is the opposite of many projects where docs are an afterthought.
+
+**Why it matters:** When you want to change something, you first update the docs to describe the new behavior, get that reviewed, and only then write the code. This prevents "drift" where nobody knows what the code is actually supposed to do.
+
+### Quality Gates in Plain English
+
+| What We Call It | What It Actually Does |
+|-----------------|----------------------|
+| `just lint` | Style checks — catches common mistakes, ensures consistent formatting |
+| `just fmt` | Auto-format — makes your code look like everyone else's |
+| `just test-fast` | Quick tests — catches obvious bugs in a few minutes |
+| `just test-full` | Full tests — runs everything, takes longer, catches subtle issues |
+| Replay test | Re-runs all historical blocks to verify determinism (same input = same output) |
+| Settlement audit | Double-entry accounting check — makes sure CT doesn't appear or disappear |
+| Fuzzing | Throws random inputs at the code to find edge cases |
+
+### Your First PR: 3 Steps
+
+1. **Pick a safe starting task:**
+   - Fix a typo in docs
+   - Add a test for existing functionality
+   - Check the "Beginner documentation backlog" in §15
+
+2. **Run the basic checks locally:**
+   ```bash
+   just lint && just fmt && just test-fast
+   ```
+
+3. **Ask for a sanity check:**
+   - Find the subsystem owner in [`docs/overview.md`](docs/overview.md#document-map)
+   - Tag them in your PR or ask in the relevant channel
+
+---
+
 Quick Index
 - Vision & Strategy: see §16
 - Agent Playbooks: see §17
@@ -76,6 +116,33 @@ Quick Index
 - Consensus, overlay, codec, storage, and governance paths must pass `scripts/fuzz_coverage.sh`; attach the `.profraw` summary (or exported report) to the PR.
 - Dashboard parity is mandatory: whenever `metrics-aggregator/**` or `monitoring/**` changes, run `npm ci --prefix monitoring && make monitor` and update the Grafana docs/screenshots.
 
+#### Concrete Example: Changing CT Fee Floor Behavior
+
+Say you want to change how CT fee floors work (e.g., increase the base fee target from 50% to 60% mempool fullness). Here's the actual order of operations:
+
+1. **Read the existing spec first:**
+   - [`docs/economics_and_governance.md`](docs/economics_and_governance.md) — fee lanes section
+   - Understand what the current behavior is and why
+
+2. **Propose doc changes first:**
+   - Draft the change: "increase base fee target from 50% to 60% mempool fullness"
+   - Update the docs describing the new behavior
+   - Get approval from the owner listed in [`docs/overview.md`](docs/overview.md#document-map)
+
+3. **Only then update code:**
+   - `governance/src/params.rs` — the parameter definition
+   - `node/src/fee` — the fee calculation logic
+   - `cli/src/fee_estimator.rs` — the CLI display
+
+4. **Run the right tests:**
+   ```bash
+   just test-full  # because you touched governance
+   cargo test -p the_block --test replay  # determinism check
+   cargo test -p the_block --test settlement_audit --release  # accounting check
+   ```
+
+5. **Update telemetry and dashboards if affected.**
+
 ### 0.3 Observability, Logging, and Features
 - Guard metrics behind the `telemetry` feature, but keep logic active in all builds—only instrumentation should be `#[cfg]`.
 - Production crates must use first-party stacks (`p2p_overlay`, `crates/httpd`, `foundation_serialization`, `storage_engine`, `coding`). Third-party alternatives need written approval recorded in `docs/developer_handbook.md` and `config/dependency_policies.toml`.
@@ -137,6 +204,16 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 - Automate storage migration drills and dependency fault simulations so wrapper swaps can be rehearsed before production rollouts.
 
 **Energy + Governance Next Tasks (see `docs/architecture.md#energy-governance-and-rpc-next-tasks` for detail)**
+
+*For newcomers — here's what these areas mean in plain terms:*
+
+| Area | Plain English |
+|------|---------------|
+| **Energy/Oracle** | Smart meters send signed readings to the network. An "oracle" is just a trusted data source that bridges real-world info (energy usage) into the blockchain. We verify these readings cryptographically before crediting providers. |
+| **RPC/CLI Hardening** | RPC = Remote Procedure Call, the way apps talk to nodes. "Hardening" means adding authentication (who are you?), rate-limiting (don't spam us), and better error messages. |
+| **Telemetry/Observability** | Graphs and alerts that tell operators when something is wrong. "Telemetry" = metrics the node exports. "Observability" = being able to understand what's happening inside. |
+
+**Current tasks:**
 - Governance/Params: land proposal payloads for batch vs real-time energy settlement, surface explorer/CLI history, expand dependency graphs, and harden param snapshots/rollback audits.
 - Energy/Oracle: production Ed25519 verification now ships in `crates/energy-market` and `crates/oracle-adapter`; provider trust roots load from `config/default.toml` via the `energy.provider_keys` array, which hot-reloads the verifier registry. Remaining work covers quorum/expiry policy + advanced slashing telemetry, persisting receipts in ledger/sled trees, and wiring explorer timelines once the new dispute/receipt RPCs settle.
 - RPC/CLI Hardening: enforce auth + rate-limit parity for `energy.*`, add structured errors for signature/timestamp/meter failures, and publish JSON schema snippets with round-trip CLI tests.
@@ -608,7 +685,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **Onboarding tasks** — Track outstanding doc follow-ups (handbook gaps, README examples, mdBook build regressions) inside this section so reviewers can validate the documentation delta before approving code. When ad/energy/networking work lands without a doc diff, add a TODO here referencing the file + owner until the docs catch up.
 
 ---
-This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.
+This document supersedes earlier "vision" notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.
 
 ---
 
