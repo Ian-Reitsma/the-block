@@ -228,7 +228,11 @@ fn run_executor_tick(
     let mut last_error: Option<String> = None;
 
     for disbursement in disbursements {
-        if !matches!(disbursement.status, DisbursementStatus::Scheduled) {
+        // Check if disbursement is in a state where it's waiting to be executed
+        if !matches!(
+            disbursement.status,
+            DisbursementStatus::Queued { .. } | DisbursementStatus::Timelocked { .. }
+        ) {
             continue;
         }
         if disbursement.scheduled_epoch > current_epoch {

@@ -36,7 +36,9 @@ pub use store::{
     QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use treasury::{
-    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
+    validate_disbursement_payload, DisbursementDetails, DisbursementPayload,
+    DisbursementProposalMetadata, DisbursementStatus, DisbursementValidationError,
+    SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
     TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 

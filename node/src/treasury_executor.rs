@@ -74,7 +74,14 @@ fn dependencies_ready(
                 disbursement.id
             )));
         };
-        if matches!(record.status, DisbursementStatus::Scheduled) {
+        // Check if the dependency disbursement is still pending execution
+        if matches!(
+            record.status,
+            DisbursementStatus::Draft { .. }
+                | DisbursementStatus::Voting { .. }
+                | DisbursementStatus::Queued { .. }
+                | DisbursementStatus::Timelocked { .. }
+        ) {
             return Ok(false);
         }
     }
