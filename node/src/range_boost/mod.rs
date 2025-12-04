@@ -8,6 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
 use std::process::Command;
+use std::ops::{Deref, DerefMut};
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
     Arc, Mutex, Weak,
@@ -33,9 +34,24 @@ pub struct Bundle {
 }
 
 #[derive(Clone, Debug)]
-struct QueueEntry {
+pub struct QueueEntry {
     bundle: Bundle,
+    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     enqueued_at: Instant,
+}
+
+impl Deref for QueueEntry {
+    type Target = Bundle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bundle
+    }
+}
+
+impl DerefMut for QueueEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bundle
+    }
 }
 
 pub struct RangeBoost {
@@ -354,6 +370,7 @@ pub fn discover_peers() -> Vec<MeshPeer> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 fn discover_bt_peers() -> Vec<MeshPeer> {
     let mut out = Vec::new();
     if let Ok(res) = Command::new("hcitool").arg("scan").output() {
@@ -373,11 +390,13 @@ fn discover_bt_peers() -> Vec<MeshPeer> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 fn discover_bt_peers() -> Vec<MeshPeer> {
     Vec::new()
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 fn discover_wifi_peers() -> Vec<MeshPeer> {
     let mut out = Vec::new();
     if let Ok(res) = Command::new("iwlist").arg("scan").output() {
@@ -400,6 +419,7 @@ fn discover_wifi_peers() -> Vec<MeshPeer> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 fn discover_wifi_peers() -> Vec<MeshPeer> {
     Vec::new()
 }

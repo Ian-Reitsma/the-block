@@ -8,6 +8,8 @@
 ))]
 
 use super::{Event, Interest, Token};
+use crate::bsd_kqueue::{ffi, Kevent as KEvent, Timespec};
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -26,29 +28,7 @@ const EVFILT_USER: i16 = -10;
 
 const NOTE_TRIGGER: u32 = 0x0100_0000;
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct KEvent {
-    ident: usize,
-    filter: i16,
-    flags: u16,
-    fflags: u32,
-    data: isize,
-    udata: *mut c_void,
-}
-
 impl KEvent {
-    fn zeroed() -> Self {
-        Self {
-            ident: 0,
-            filter: 0,
-            flags: 0,
-            fflags: 0,
-            data: 0,
-            udata: core::ptr::null_mut(),
-        }
-    }
-
     fn for_fd(fd: RawFd, filter: i16, flags: u16, token: Token) -> Self {
         Self {
             ident: fd as usize,
@@ -57,6 +37,8 @@ impl KEvent {
             fflags: 0,
             data: 0,
             udata: token_to_udata(token),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            ext: [0; 4],
         }
     }
 
@@ -68,6 +50,8 @@ impl KEvent {
             fflags: 0,
             data: 0,
             udata: token_to_udata(token),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            ext: [0; 4],
         }
     }
 
@@ -79,6 +63,8 @@ impl KEvent {
             fflags: 0,
             data: 0,
             udata: token_to_udata(token),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            ext: [0; 4],
         }
     }
 
@@ -90,6 +76,8 @@ impl KEvent {
             fflags: 0,
             data: 0,
             udata: token_to_udata(token),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            ext: [0; 4],
         }
     }
 
@@ -101,30 +89,40 @@ impl KEvent {
             fflags: NOTE_TRIGGER,
             data: 0,
             udata: token_to_udata(token),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            ext: [0; 4],
         }
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn token_to_udata(token: Token) -> *mut c_void {
     token.0 as usize as *mut c_void
 }
 
-#[repr(C)]
-struct Timespec {
-    tv_sec: i64,
-    tv_nsec: i64,
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+fn token_to_udata(token: Token) -> isize {
+    token.0 as isize
 }
 
-extern "C" {
-    fn kqueue() -> i32;
-    fn kevent(
-        kq: i32,
-        changelist: *const KEvent,
-        nchanges: i32,
-        eventlist: *mut KEvent,
-        nevents: i32,
-        timeout: *const Timespec,
-    ) -> i32;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn token_from_udata(value: *mut c_void) -> Token {
+    Token(value as usize)
+}
+
+#[cfg(any(
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+fn token_from_udata(value: isize) -> Token {
+    Token(value as usize)
 }
 
 pub struct Poll {
@@ -137,7 +135,7 @@ struct Inner {
 
 impl Poll {
     pub fn new() -> io::Result<Self> {
-        let fd = unsafe { kqueue() };
+        let fd = unsafe { ffi::kqueue() };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -175,14 +173,14 @@ impl Poll {
 impl Inner {
     fn poll(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         events.events.clear();
-        let mut timespec = timeout.map(duration_to_timespec);
+        let timespec = timeout.map(duration_to_timespec);
         let timeout_ptr = timespec
             .as_ref()
             .map(|ts| ts as *const Timespec)
             .unwrap_or(core::ptr::null());
         loop {
             let res = unsafe {
-                kevent(
+                ffi::kevent(
                     self.kqueue.as_raw_fd(),
                     core::ptr::null(),
                     0,
@@ -266,7 +264,7 @@ impl Inner {
             return Ok(());
         }
         let res = unsafe {
-            kevent(
+            ffi::kevent(
                 self.kqueue.as_raw_fd(),
                 changes.as_ptr(),
                 changes.len() as i32,
@@ -293,7 +291,7 @@ fn duration_to_timespec(duration: Duration) -> Timespec {
 }
 
 fn convert_event(raw: KEvent) -> Event {
-    let token = Token(raw.udata as usize);
+    let token = token_from_udata(raw.udata);
     let readable = raw.filter == EVFILT_READ;
     let writable = raw.filter == EVFILT_WRITE;
     let error = (raw.flags & EV_ERROR_FLAG) != 0 && raw.data != 0;
@@ -312,8 +310,8 @@ fn convert_event(raw: KEvent) -> Event {
 }
 
 pub struct Events {
-    pub(crate) storage: Vec<KEvent>,
-    pub(crate) events: Vec<Event>,
+    storage: Vec<KEvent>,
+    events: Vec<Event>,
 }
 
 impl Events {
@@ -346,7 +344,5 @@ impl Drop for Waker {
         let _ = self.poll.delete_user(self.token);
     }
 }
-
-pub use Waker as PlatformWaker;
 
 const ENOENT: i32 = 2;

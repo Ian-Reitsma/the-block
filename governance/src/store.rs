@@ -943,6 +943,7 @@ impl BinaryCodec for ExecutorLeaseRecord {
     }
 }
 
+#[allow(dead_code)]
 fn executor_lease_to_json(record: &ExecutorLeaseRecord) -> Value {
     let mut map = Map::new();
     map.insert("holder".into(), Value::String(record.holder.clone()));
@@ -963,6 +964,7 @@ fn executor_lease_to_json(record: &ExecutorLeaseRecord) -> Value {
     Value::Object(map)
 }
 
+#[allow(dead_code)]
 fn executor_lease_from_json(value: &Value) -> CodecResult<ExecutorLeaseRecord> {
     let obj = value.as_object().ok_or_else(|| {
         sled::Error::Unsupported("treasury executor lease JSON: expected object".into())
@@ -1474,6 +1476,7 @@ impl GovStore {
         Ok(None)
     }
 
+    #[allow(dead_code)]
     fn persist_executor_lease(
         &self,
         expected: Option<Vec<u8>>,
@@ -1485,6 +1488,7 @@ impl GovStore {
         Ok(result.is_ok())
     }
 
+    #[allow(dead_code)]
     fn remove_executor_lease(&self, expected: Option<Vec<u8>>) -> sled::Result<bool> {
         let tree = self.treasury_executor_state_tree();
         let result = tree.compare_and_swap(b"lease", expected, None)?;

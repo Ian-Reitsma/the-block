@@ -277,6 +277,16 @@ pub mod cpu {
 pub mod device;
 pub mod net;
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly",
+))]
+mod bsd_kqueue;
+
 pub mod reactor;
 
 #[cfg(target_os = "linux")]
@@ -421,6 +431,7 @@ pub mod inotify {
     target_os = "dragonfly"
 ))]
 pub mod kqueue {
+    use crate::bsd_kqueue::{ffi, Kevent as RawKevent, Timespec};
     use std::io::{self, ErrorKind};
     use std::os::fd::{AsRawFd, RawFd};
 
@@ -500,7 +511,7 @@ pub mod kqueue {
             let mut buffer = Vec::with_capacity(capacity.max(1));
             buffer.resize_with(capacity.max(1), RawKevent::zeroed);
             let count = self.poll_raw(&mut buffer)?;
-            Ok(super::kqueue::interpret_events(&buffer[..count]))
+            Ok(interpret_events(&buffer[..count]))
         }
     }
 
@@ -518,7 +529,7 @@ pub mod kqueue {
         }
     }
 
-    pub fn interpret_events(raw: &[RawKevent]) -> Vec<Event> {
+    fn interpret_events(raw: &[RawKevent]) -> Vec<Event> {
         raw.iter()
             .map(|event| Event {
                 fd: event.ident as RawFd,
@@ -540,103 +551,6 @@ pub mod kqueue {
     const EV_ENABLE: u16 = 0x0004;
     const EV_CLEAR: u16 = 0x0020;
 
-    #[repr(C)]
-    struct Timespec {
-        tv_sec: i64,
-        tv_nsec: i64,
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    #[repr(C)]
-    struct RawKevent {
-        ident: usize,
-        filter: i16,
-        flags: u16,
-        fflags: u32,
-        data: isize,
-        udata: *mut std::ffi::c_void,
-        ext: [u64; 4],
-    }
-
-    #[cfg(any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))]
-    #[repr(C)]
-    struct RawKevent {
-        ident: usize,
-        filter: i16,
-        flags: u16,
-        fflags: u32,
-        data: isize,
-        udata: isize,
-    }
-
-    impl RawKevent {
-        fn zeroed() -> Self {
-            Self {
-                ident: 0,
-                filter: 0,
-                flags: 0,
-                fflags: 0,
-                data: 0,
-                udata: Self::udata_zero(),
-                #[cfg(any(target_os = "macos", target_os = "ios"))]
-                ext: [0; 4],
-            }
-        }
-
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        fn udata_zero() -> *mut std::ffi::c_void {
-            std::ptr::null_mut()
-        }
-
-        #[cfg(any(
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "dragonfly"
-        ))]
-        fn udata_zero() -> isize {
-            0
-        }
-
-        fn set_udata_null(&mut self) {
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            {
-                self.udata = std::ptr::null_mut();
-            }
-
-            #[cfg(any(
-                target_os = "freebsd",
-                target_os = "openbsd",
-                target_os = "netbsd",
-                target_os = "dragonfly"
-            ))]
-            {
-                self.udata = 0;
-            }
-        }
-    }
-
-    mod ffi {
-        use super::{RawKevent, Timespec};
-
-        extern "C" {
-            pub fn kqueue() -> i32;
-            pub fn kevent(
-                kq: i32,
-                changelist: *const RawKevent,
-                nchanges: i32,
-                eventlist: *mut RawKevent,
-                nevents: i32,
-                timeout: *const Timespec,
-            ) -> i32;
-            pub fn close(fd: i32) -> i32;
-        }
-    }
 }
 
 pub mod process {

@@ -9,7 +9,7 @@
 //! The verifier registry allows governance to configure which schemes
 //! are accepted for each provider.
 
-use crate::{MeterReading, OracleAddress, ProviderId};
+use crate::{MeterReading, ProviderId};
 use crypto_suite::hashing::blake3::Hasher as Blake3;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -270,6 +270,11 @@ impl VerifierRegistry {
     /// Get a provider's registered key
     pub fn get(&self, provider_id: &str) -> Option<&ProviderKey> {
         self.provider_keys.get(provider_id)
+    }
+
+    /// Remove all registered provider keys
+    pub fn clear(&mut self) {
+        self.provider_keys.clear();
     }
 
     /// Verify a meter reading signature

@@ -224,13 +224,17 @@ fn record_auction_cancelled() {
 
 fn record_stake_lock(amount_ct: u64) {
     if amount_ct > 0 {
-        push_metric(DnsMetricKind::StakeLock { amount_ct });
+        push_metric(DnsMetricKind::StakeLock {
+            _amount_ct: amount_ct,
+        });
     }
 }
 
 fn record_stake_unlock(amount_ct: u64) {
     if amount_ct > 0 {
-        push_metric(DnsMetricKind::StakeUnlock { amount_ct });
+        push_metric(DnsMetricKind::StakeUnlock {
+            _amount_ct: amount_ct,
+        });
     }
 }
 
@@ -299,10 +303,10 @@ enum DnsMetricKind {
     },
     AuctionCancelled,
     StakeLock {
-        amount_ct: u64,
+        _amount_ct: u64,
     },
     StakeUnlock {
-        amount_ct: u64,
+        _amount_ct: u64,
     },
 }
 
