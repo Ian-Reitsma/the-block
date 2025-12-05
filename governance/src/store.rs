@@ -2376,6 +2376,48 @@ impl GovStore {
                                 ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
                                 ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
                                 ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+
+                                // Economic control law parameters - use default 0 for old value
+                                // (proper persistence will be added in future integration)
+                                ParamKey::InflationTargetBps
+                                | ParamKey::InflationControllerGain
+                                | ParamKey::MinAnnualIssuanceCt
+                                | ParamKey::MaxAnnualIssuanceCt
+                                | ParamKey::StorageUtilTargetBps
+                                | ParamKey::StorageMarginTargetBps
+                                | ParamKey::ComputeUtilTargetBps
+                                | ParamKey::ComputeMarginTargetBps
+                                | ParamKey::EnergyUtilTargetBps
+                                | ParamKey::EnergyMarginTargetBps
+                                | ParamKey::AdUtilTargetBps
+                                | ParamKey::AdMarginTargetBps
+                                | ParamKey::SubsidyAllocatorAlpha
+                                | ParamKey::SubsidyAllocatorBeta
+                                | ParamKey::SubsidyAllocatorTemperature
+                                | ParamKey::SubsidyAllocatorDriftRate
+                                | ParamKey::StorageUtilResponsiveness
+                                | ParamKey::StorageCostResponsiveness
+                                | ParamKey::StorageMultiplierFloor
+                                | ParamKey::StorageMultiplierCeiling
+                                | ParamKey::ComputeUtilResponsiveness
+                                | ParamKey::ComputeCostResponsiveness
+                                | ParamKey::ComputeMultiplierFloor
+                                | ParamKey::ComputeMultiplierCeiling
+                                | ParamKey::EnergyUtilResponsiveness
+                                | ParamKey::EnergyCostResponsiveness
+                                | ParamKey::EnergyMultiplierFloor
+                                | ParamKey::EnergyMultiplierCeiling
+                                | ParamKey::AdUtilResponsiveness
+                                | ParamKey::AdCostResponsiveness
+                                | ParamKey::AdMultiplierFloor
+                                | ParamKey::AdMultiplierCeiling
+                                | ParamKey::AdPlatformTakeTargetBps
+                                | ParamKey::AdUserShareTargetBps
+                                | ParamKey::AdDriftRate
+                                | ParamKey::TariffPublicRevenueTargetBps
+                                | ParamKey::TariffDriftRate
+                                | ParamKey::TariffMinBps
+                                | ParamKey::TariffMaxBps => 0,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -2570,6 +2612,47 @@ impl GovStore {
                 ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
                 ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
                 ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+
+                // Economic control law parameters
+                ParamKey::InflationTargetBps
+                | ParamKey::InflationControllerGain
+                | ParamKey::MinAnnualIssuanceCt
+                | ParamKey::MaxAnnualIssuanceCt
+                | ParamKey::StorageUtilTargetBps
+                | ParamKey::StorageMarginTargetBps
+                | ParamKey::ComputeUtilTargetBps
+                | ParamKey::ComputeMarginTargetBps
+                | ParamKey::EnergyUtilTargetBps
+                | ParamKey::EnergyMarginTargetBps
+                | ParamKey::AdUtilTargetBps
+                | ParamKey::AdMarginTargetBps
+                | ParamKey::SubsidyAllocatorAlpha
+                | ParamKey::SubsidyAllocatorBeta
+                | ParamKey::SubsidyAllocatorTemperature
+                | ParamKey::SubsidyAllocatorDriftRate
+                | ParamKey::StorageUtilResponsiveness
+                | ParamKey::StorageCostResponsiveness
+                | ParamKey::StorageMultiplierFloor
+                | ParamKey::StorageMultiplierCeiling
+                | ParamKey::ComputeUtilResponsiveness
+                | ParamKey::ComputeCostResponsiveness
+                | ParamKey::ComputeMultiplierFloor
+                | ParamKey::ComputeMultiplierCeiling
+                | ParamKey::EnergyUtilResponsiveness
+                | ParamKey::EnergyCostResponsiveness
+                | ParamKey::EnergyMultiplierFloor
+                | ParamKey::EnergyMultiplierCeiling
+                | ParamKey::AdUtilResponsiveness
+                | ParamKey::AdCostResponsiveness
+                | ParamKey::AdMultiplierFloor
+                | ParamKey::AdMultiplierCeiling
+                | ParamKey::AdPlatformTakeTargetBps
+                | ParamKey::AdUserShareTargetBps
+                | ParamKey::AdDriftRate
+                | ParamKey::TariffPublicRevenueTargetBps
+                | ParamKey::TariffDriftRate
+                | ParamKey::TariffMinBps
+                | ParamKey::TariffMaxBps => 0,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -2641,6 +2724,47 @@ impl GovStore {
             ParamKey::BridgeFailureSlash => params.bridge_failure_slash,
             ParamKey::BridgeChallengeSlash => params.bridge_challenge_slash,
             ParamKey::BridgeDutyWindowSecs => params.bridge_duty_window_secs,
+
+            // Economic control law parameters
+            ParamKey::InflationTargetBps
+            | ParamKey::InflationControllerGain
+            | ParamKey::MinAnnualIssuanceCt
+            | ParamKey::MaxAnnualIssuanceCt
+            | ParamKey::StorageUtilTargetBps
+            | ParamKey::StorageMarginTargetBps
+            | ParamKey::ComputeUtilTargetBps
+            | ParamKey::ComputeMarginTargetBps
+            | ParamKey::EnergyUtilTargetBps
+            | ParamKey::EnergyMarginTargetBps
+            | ParamKey::AdUtilTargetBps
+            | ParamKey::AdMarginTargetBps
+            | ParamKey::SubsidyAllocatorAlpha
+            | ParamKey::SubsidyAllocatorBeta
+            | ParamKey::SubsidyAllocatorTemperature
+            | ParamKey::SubsidyAllocatorDriftRate
+            | ParamKey::StorageUtilResponsiveness
+            | ParamKey::StorageCostResponsiveness
+            | ParamKey::StorageMultiplierFloor
+            | ParamKey::StorageMultiplierCeiling
+            | ParamKey::ComputeUtilResponsiveness
+            | ParamKey::ComputeCostResponsiveness
+            | ParamKey::ComputeMultiplierFloor
+            | ParamKey::ComputeMultiplierCeiling
+            | ParamKey::EnergyUtilResponsiveness
+            | ParamKey::EnergyCostResponsiveness
+            | ParamKey::EnergyMultiplierFloor
+            | ParamKey::EnergyMultiplierCeiling
+            | ParamKey::AdUtilResponsiveness
+            | ParamKey::AdCostResponsiveness
+            | ParamKey::AdMultiplierFloor
+            | ParamKey::AdMultiplierCeiling
+            | ParamKey::AdPlatformTakeTargetBps
+            | ParamKey::AdUserShareTargetBps
+            | ParamKey::AdDriftRate
+            | ParamKey::TariffPublicRevenueTargetBps
+            | ParamKey::TariffDriftRate
+            | ParamKey::TariffMinBps
+            | ParamKey::TariffMaxBps => 0,
         };
         self.persist_param_change(
             &hist_dir,

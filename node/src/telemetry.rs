@@ -2926,6 +2926,38 @@ pub static AD_PRIVACY_BUDGET_UTILIZATION_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
     g
 });
 
+#[cfg(feature = "telemetry")]
+pub static AD_PRIVACY_BUDGET_REMAINING_PPM: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_privacy_budget_remaining_ppm",
+            "Remaining privacy budget per campaign in parts-per-million",
+        ),
+        &["campaign_id"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad privacy budget remaining: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad privacy budget remaining: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_BIDDING_LATENCY_MICROS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_bidding_latency_micros",
+            "Bidding auction latency in microseconds per auction type",
+        ),
+        &["auction_type"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad bidding latency: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad bidding latency: {e}"));
+    g
+});
+
 pub static AD_CONVERSION_VALUE_CT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -5280,6 +5312,143 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     c.handle()
 });
 
+// ===== Economic Control Laws Telemetry =====
+
+pub static ECONOMICS_ANNUAL_ISSUANCE_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_annual_issuance_ct",
+        "Annual CT issuance (Layer 1: Inflation Controller)",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_REALIZED_INFLATION_BPS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_realized_inflation_bps",
+        "Realized annual inflation in basis points",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_SUBSIDY_SHARE_BPS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "economics_subsidy_share_bps",
+            "Subsidy allocation share per market in basis points (Layer 2)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_MULTIPLIER: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "economics_multiplier",
+            "Market multiplier (Layer 3: Dual control)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_UTILIZATION: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "economics_utilization",
+            "Market utilization ratio (0.0 to 1.0)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_PROVIDER_MARGIN: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "economics_provider_margin",
+            "Provider margin ratio (can be negative)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_AD_SPLIT_BPS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "economics_ad_split_bps",
+            "Ad revenue split in basis points (Layer 4)",
+        ),
+        &["recipient"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_TARIFF_BPS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_tariff_bps",
+        "Non-KYC tariff rate in basis points (Layer 4)",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_TARIFF_TREASURY_CONTRIBUTION_BPS: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_tariff_treasury_contribution_bps",
+        "Tariff contribution to treasury as percentage of total inflow (bps)",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_CONTROL_LAW_UPDATE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "economics_control_law_update_total",
+        "Total number of economic control law updates",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c.handle()
+});
+
 pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("peer_error_total", "Total peer errors grouped by code"),
@@ -5960,6 +6129,22 @@ pub static DNS_AUCTION_OUTCOME_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry dns auction outcome total: {e}"));
+    c
+});
+
+#[cfg(feature = "telemetry")]
+pub static DNS_AUCTION_BIDS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "dns_auction_bids_total",
+            "Total DNS auction bids partitioned by domain tier",
+        ),
+        &["domain_tier"],
+    )
+    .unwrap_or_else(|e| panic!("counter dns auction bids total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry dns auction bids total: {e}"));
     c
 });
 
@@ -7120,3 +7305,93 @@ pub fn verbose() -> bool {
 pub fn verbose() -> bool {
     false
 }
+
+/// Update economics telemetry from economic snapshot
+#[cfg(feature = "telemetry")]
+pub fn update_economics_telemetry(snapshot: &crate::economics::EconomicSnapshot) {
+    // Layer 1: Inflation
+    ECONOMICS_ANNUAL_ISSUANCE_CT.set(snapshot.inflation.annual_issuance_ct as i64);
+    ECONOMICS_REALIZED_INFLATION_BPS.set(snapshot.inflation.realized_inflation_bps as i64);
+
+    // Layer 2: Subsidy allocation
+    ECONOMICS_SUBSIDY_SHARE_BPS
+        .with_label_values(&["storage"])
+        .set(snapshot.subsidies.storage_share_bps as i64);
+    ECONOMICS_SUBSIDY_SHARE_BPS
+        .with_label_values(&["compute"])
+        .set(snapshot.subsidies.compute_share_bps as i64);
+    ECONOMICS_SUBSIDY_SHARE_BPS
+        .with_label_values(&["energy"])
+        .set(snapshot.subsidies.energy_share_bps as i64);
+    ECONOMICS_SUBSIDY_SHARE_BPS
+        .with_label_values(&["ad"])
+        .set(snapshot.subsidies.ad_share_bps as i64);
+
+    // Layer 3: Multipliers
+    ECONOMICS_MULTIPLIER
+        .with_label_values(&["storage"])
+        .set(snapshot.multipliers.storage_multiplier);
+    ECONOMICS_MULTIPLIER
+        .with_label_values(&["compute"])
+        .set(snapshot.multipliers.compute_multiplier);
+    ECONOMICS_MULTIPLIER
+        .with_label_values(&["energy"])
+        .set(snapshot.multipliers.energy_multiplier);
+    ECONOMICS_MULTIPLIER
+        .with_label_values(&["ad"])
+        .set(snapshot.multipliers.ad_multiplier);
+
+    // Layer 4: Ad splits
+    ECONOMICS_AD_SPLIT_BPS
+        .with_label_values(&["platform"])
+        .set(snapshot.ad_market.platform_take_bps as i64);
+    ECONOMICS_AD_SPLIT_BPS
+        .with_label_values(&["user"])
+        .set(snapshot.ad_market.user_share_bps as i64);
+    ECONOMICS_AD_SPLIT_BPS
+        .with_label_values(&["publisher"])
+        .set(snapshot.ad_market.publisher_share_bps as i64);
+
+    // Layer 4: Tariff
+    ECONOMICS_TARIFF_BPS.set(snapshot.tariff.tariff_bps as i64);
+    ECONOMICS_TARIFF_TREASURY_CONTRIBUTION_BPS.set(snapshot.tariff.treasury_contribution_bps as i64);
+
+    // Increment update counter
+    ECONOMICS_CONTROL_LAW_UPDATE_TOTAL.inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn update_economics_telemetry(_snapshot: &crate::economics::EconomicSnapshot) {}
+
+/// Update economics market metrics telemetry
+#[cfg(feature = "telemetry")]
+pub fn update_economics_market_metrics(metrics: &crate::economics::MarketMetrics) {
+    ECONOMICS_UTILIZATION
+        .with_label_values(&["storage"])
+        .set(metrics.storage.utilization);
+    ECONOMICS_UTILIZATION
+        .with_label_values(&["compute"])
+        .set(metrics.compute.utilization);
+    ECONOMICS_UTILIZATION
+        .with_label_values(&["energy"])
+        .set(metrics.energy.utilization);
+    ECONOMICS_UTILIZATION
+        .with_label_values(&["ad"])
+        .set(metrics.ad.utilization);
+
+    ECONOMICS_PROVIDER_MARGIN
+        .with_label_values(&["storage"])
+        .set(metrics.storage.provider_margin);
+    ECONOMICS_PROVIDER_MARGIN
+        .with_label_values(&["compute"])
+        .set(metrics.compute.provider_margin);
+    ECONOMICS_PROVIDER_MARGIN
+        .with_label_values(&["energy"])
+        .set(metrics.energy.provider_margin);
+    ECONOMICS_PROVIDER_MARGIN
+        .with_label_values(&["ad"])
+        .set(metrics.ad.provider_margin);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn update_economics_market_metrics(_metrics: &crate::economics::MarketMetrics) {}

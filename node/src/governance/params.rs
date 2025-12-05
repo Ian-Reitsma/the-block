@@ -388,6 +388,93 @@ pub struct Params {
     pub bridge_failure_slash: i64,
     pub bridge_challenge_slash: i64,
     pub bridge_duty_window_secs: i64,
+    // ===== Economic Control Laws =====
+    // Layer 1: Inflation Controller
+    #[serde(default = "default_inflation_target_bps")]
+    pub inflation_target_bps: i64,
+    #[serde(default = "default_inflation_controller_gain")]
+    pub inflation_controller_gain: i64,
+    #[serde(default = "default_min_annual_issuance_ct")]
+    pub min_annual_issuance_ct: i64,
+    #[serde(default = "default_max_annual_issuance_ct")]
+    pub max_annual_issuance_ct: i64,
+    // Layer 2: Subsidy Allocator
+    #[serde(default = "default_storage_util_target_bps")]
+    pub storage_util_target_bps: i64,
+    #[serde(default = "default_storage_margin_target_bps")]
+    pub storage_margin_target_bps: i64,
+    #[serde(default = "default_compute_util_target_bps")]
+    pub compute_util_target_bps: i64,
+    #[serde(default = "default_compute_margin_target_bps")]
+    pub compute_margin_target_bps: i64,
+    #[serde(default = "default_energy_util_target_bps")]
+    pub energy_util_target_bps: i64,
+    #[serde(default = "default_energy_margin_target_bps")]
+    pub energy_margin_target_bps: i64,
+    #[serde(default = "default_ad_util_target_bps")]
+    pub ad_util_target_bps: i64,
+    #[serde(default = "default_ad_margin_target_bps")]
+    pub ad_margin_target_bps: i64,
+    #[serde(default = "default_subsidy_allocator_alpha")]
+    pub subsidy_allocator_alpha: i64,
+    #[serde(default = "default_subsidy_allocator_beta")]
+    pub subsidy_allocator_beta: i64,
+    #[serde(default = "default_subsidy_allocator_temperature")]
+    pub subsidy_allocator_temperature: i64,
+    #[serde(default = "default_subsidy_allocator_drift_rate")]
+    pub subsidy_allocator_drift_rate: i64,
+    // Layer 3: Market Multipliers - Storage
+    #[serde(default = "default_storage_util_responsiveness")]
+    pub storage_util_responsiveness: i64,
+    #[serde(default = "default_storage_cost_responsiveness")]
+    pub storage_cost_responsiveness: i64,
+    #[serde(default = "default_storage_multiplier_floor")]
+    pub storage_multiplier_floor: i64,
+    #[serde(default = "default_storage_multiplier_ceiling")]
+    pub storage_multiplier_ceiling: i64,
+    // Layer 3: Market Multipliers - Compute
+    #[serde(default = "default_compute_util_responsiveness")]
+    pub compute_util_responsiveness: i64,
+    #[serde(default = "default_compute_cost_responsiveness")]
+    pub compute_cost_responsiveness: i64,
+    #[serde(default = "default_compute_multiplier_floor")]
+    pub compute_multiplier_floor: i64,
+    #[serde(default = "default_compute_multiplier_ceiling")]
+    pub compute_multiplier_ceiling: i64,
+    // Layer 3: Market Multipliers - Energy
+    #[serde(default = "default_energy_util_responsiveness")]
+    pub energy_util_responsiveness: i64,
+    #[serde(default = "default_energy_cost_responsiveness")]
+    pub energy_cost_responsiveness: i64,
+    #[serde(default = "default_energy_multiplier_floor")]
+    pub energy_multiplier_floor: i64,
+    #[serde(default = "default_energy_multiplier_ceiling")]
+    pub energy_multiplier_ceiling: i64,
+    // Layer 3: Market Multipliers - Ad
+    #[serde(default = "default_ad_util_responsiveness")]
+    pub ad_util_responsiveness: i64,
+    #[serde(default = "default_ad_cost_responsiveness")]
+    pub ad_cost_responsiveness: i64,
+    #[serde(default = "default_ad_multiplier_floor")]
+    pub ad_multiplier_floor: i64,
+    #[serde(default = "default_ad_multiplier_ceiling")]
+    pub ad_multiplier_ceiling: i64,
+    // Layer 4: Ad Market Drift
+    #[serde(default = "default_ad_platform_take_target_bps")]
+    pub ad_platform_take_target_bps: i64,
+    #[serde(default = "default_ad_user_share_target_bps")]
+    pub ad_user_share_target_bps: i64,
+    #[serde(default = "default_ad_drift_rate")]
+    pub ad_drift_rate: i64,
+    // Layer 4: Tariff Controller
+    #[serde(default = "default_tariff_public_revenue_target_bps")]
+    pub tariff_public_revenue_target_bps: i64,
+    #[serde(default = "default_tariff_drift_rate")]
+    pub tariff_drift_rate: i64,
+    #[serde(default = "default_tariff_min_bps")]
+    pub tariff_min_bps: i64,
+    #[serde(default = "default_tariff_max_bps")]
+    pub tariff_max_bps: i64,
 }
 
 impl Default for Params {
@@ -471,6 +558,46 @@ impl Default for Params {
             bridge_failure_slash: BridgeIncentiveParameters::DEFAULT_FAILURE_SLASH as i64,
             bridge_challenge_slash: BridgeIncentiveParameters::DEFAULT_CHALLENGE_SLASH as i64,
             bridge_duty_window_secs: BridgeIncentiveParameters::DEFAULT_DUTY_WINDOW_SECS as i64,
+            // Economic Control Laws
+            inflation_target_bps: default_inflation_target_bps(),
+            inflation_controller_gain: default_inflation_controller_gain(),
+            min_annual_issuance_ct: default_min_annual_issuance_ct(),
+            max_annual_issuance_ct: default_max_annual_issuance_ct(),
+            storage_util_target_bps: default_storage_util_target_bps(),
+            storage_margin_target_bps: default_storage_margin_target_bps(),
+            compute_util_target_bps: default_compute_util_target_bps(),
+            compute_margin_target_bps: default_compute_margin_target_bps(),
+            energy_util_target_bps: default_energy_util_target_bps(),
+            energy_margin_target_bps: default_energy_margin_target_bps(),
+            ad_util_target_bps: default_ad_util_target_bps(),
+            ad_margin_target_bps: default_ad_margin_target_bps(),
+            subsidy_allocator_alpha: default_subsidy_allocator_alpha(),
+            subsidy_allocator_beta: default_subsidy_allocator_beta(),
+            subsidy_allocator_temperature: default_subsidy_allocator_temperature(),
+            subsidy_allocator_drift_rate: default_subsidy_allocator_drift_rate(),
+            storage_util_responsiveness: default_storage_util_responsiveness(),
+            storage_cost_responsiveness: default_storage_cost_responsiveness(),
+            storage_multiplier_floor: default_storage_multiplier_floor(),
+            storage_multiplier_ceiling: default_storage_multiplier_ceiling(),
+            compute_util_responsiveness: default_compute_util_responsiveness(),
+            compute_cost_responsiveness: default_compute_cost_responsiveness(),
+            compute_multiplier_floor: default_compute_multiplier_floor(),
+            compute_multiplier_ceiling: default_compute_multiplier_ceiling(),
+            energy_util_responsiveness: default_energy_util_responsiveness(),
+            energy_cost_responsiveness: default_energy_cost_responsiveness(),
+            energy_multiplier_floor: default_energy_multiplier_floor(),
+            energy_multiplier_ceiling: default_energy_multiplier_ceiling(),
+            ad_util_responsiveness: default_ad_util_responsiveness(),
+            ad_cost_responsiveness: default_ad_cost_responsiveness(),
+            ad_multiplier_floor: default_ad_multiplier_floor(),
+            ad_multiplier_ceiling: default_ad_multiplier_ceiling(),
+            ad_platform_take_target_bps: default_ad_platform_take_target_bps(),
+            ad_user_share_target_bps: default_ad_user_share_target_bps(),
+            ad_drift_rate: default_ad_drift_rate(),
+            tariff_public_revenue_target_bps: default_tariff_public_revenue_target_bps(),
+            tariff_drift_rate: default_tariff_drift_rate(),
+            tariff_min_bps: default_tariff_min_bps(),
+            tariff_max_bps: default_tariff_max_bps(),
         }
     }
 }
@@ -967,6 +1094,46 @@ impl Params {
             bridge_failure_slash: take_i64("bridge_failure_slash")?,
             bridge_challenge_slash: take_i64("bridge_challenge_slash")?,
             bridge_duty_window_secs: take_i64("bridge_duty_window_secs")?,
+            // Economic Control Laws - use defaults if not present for backward compatibility
+            inflation_target_bps: obj.get("inflation_target_bps").and_then(Value::as_i64).unwrap_or_else(default_inflation_target_bps),
+            inflation_controller_gain: obj.get("inflation_controller_gain").and_then(Value::as_i64).unwrap_or_else(default_inflation_controller_gain),
+            min_annual_issuance_ct: obj.get("min_annual_issuance_ct").and_then(Value::as_i64).unwrap_or_else(default_min_annual_issuance_ct),
+            max_annual_issuance_ct: obj.get("max_annual_issuance_ct").and_then(Value::as_i64).unwrap_or_else(default_max_annual_issuance_ct),
+            storage_util_target_bps: obj.get("storage_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_util_target_bps),
+            storage_margin_target_bps: obj.get("storage_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_margin_target_bps),
+            compute_util_target_bps: obj.get("compute_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_compute_util_target_bps),
+            compute_margin_target_bps: obj.get("compute_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_compute_margin_target_bps),
+            energy_util_target_bps: obj.get("energy_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_energy_util_target_bps),
+            energy_margin_target_bps: obj.get("energy_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_energy_margin_target_bps),
+            ad_util_target_bps: obj.get("ad_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_util_target_bps),
+            ad_margin_target_bps: obj.get("ad_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_margin_target_bps),
+            subsidy_allocator_alpha: obj.get("subsidy_allocator_alpha").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_alpha),
+            subsidy_allocator_beta: obj.get("subsidy_allocator_beta").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_beta),
+            subsidy_allocator_temperature: obj.get("subsidy_allocator_temperature").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_temperature),
+            subsidy_allocator_drift_rate: obj.get("subsidy_allocator_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_drift_rate),
+            storage_util_responsiveness: obj.get("storage_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_storage_util_responsiveness),
+            storage_cost_responsiveness: obj.get("storage_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_storage_cost_responsiveness),
+            storage_multiplier_floor: obj.get("storage_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_storage_multiplier_floor),
+            storage_multiplier_ceiling: obj.get("storage_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_storage_multiplier_ceiling),
+            compute_util_responsiveness: obj.get("compute_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_compute_util_responsiveness),
+            compute_cost_responsiveness: obj.get("compute_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_compute_cost_responsiveness),
+            compute_multiplier_floor: obj.get("compute_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_compute_multiplier_floor),
+            compute_multiplier_ceiling: obj.get("compute_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_compute_multiplier_ceiling),
+            energy_util_responsiveness: obj.get("energy_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_energy_util_responsiveness),
+            energy_cost_responsiveness: obj.get("energy_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_energy_cost_responsiveness),
+            energy_multiplier_floor: obj.get("energy_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_energy_multiplier_floor),
+            energy_multiplier_ceiling: obj.get("energy_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_energy_multiplier_ceiling),
+            ad_util_responsiveness: obj.get("ad_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_ad_util_responsiveness),
+            ad_cost_responsiveness: obj.get("ad_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_ad_cost_responsiveness),
+            ad_multiplier_floor: obj.get("ad_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_ad_multiplier_floor),
+            ad_multiplier_ceiling: obj.get("ad_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_ad_multiplier_ceiling),
+            ad_platform_take_target_bps: obj.get("ad_platform_take_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_platform_take_target_bps),
+            ad_user_share_target_bps: obj.get("ad_user_share_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_user_share_target_bps),
+            ad_drift_rate: obj.get("ad_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_ad_drift_rate),
+            tariff_public_revenue_target_bps: obj.get("tariff_public_revenue_target_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_public_revenue_target_bps),
+            tariff_drift_rate: obj.get("tariff_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_tariff_drift_rate),
+            tariff_min_bps: obj.get("tariff_min_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_min_bps),
+            tariff_max_bps: obj.get("tariff_max_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_max_bps),
         };
         Ok(params)
     }
@@ -1082,6 +1249,125 @@ const fn default_transport_provider_policy() -> i64 {
 
 const fn default_storage_engine_policy() -> i64 {
     DEFAULT_STORAGE_ENGINE_POLICY
+}
+
+// ===== Economic Control Law Defaults =====
+const fn default_inflation_target_bps() -> i64 {
+    500 // 5%
+}
+const fn default_inflation_controller_gain() -> i64 {
+    100 // 0.10 in millis
+}
+const fn default_min_annual_issuance_ct() -> i64 {
+    50_000_000
+}
+const fn default_max_annual_issuance_ct() -> i64 {
+    300_000_000
+}
+const fn default_storage_util_target_bps() -> i64 {
+    4000 // 40%
+}
+const fn default_storage_margin_target_bps() -> i64 {
+    5000 // 50%
+}
+const fn default_compute_util_target_bps() -> i64 {
+    6000 // 60%
+}
+const fn default_compute_margin_target_bps() -> i64 {
+    5000 // 50%
+}
+const fn default_energy_util_target_bps() -> i64 {
+    5000 // 50%
+}
+const fn default_energy_margin_target_bps() -> i64 {
+    2500 // 25%
+}
+const fn default_ad_util_target_bps() -> i64 {
+    5000 // 50%
+}
+const fn default_ad_margin_target_bps() -> i64 {
+    3000 // 30%
+}
+const fn default_subsidy_allocator_alpha() -> i64 {
+    600 // 0.60 in millis
+}
+const fn default_subsidy_allocator_beta() -> i64 {
+    400 // 0.40 in millis
+}
+const fn default_subsidy_allocator_temperature() -> i64 {
+    1000 // 1.0 in millis
+}
+const fn default_subsidy_allocator_drift_rate() -> i64 {
+    50 // 0.05 in millis
+}
+const fn default_storage_util_responsiveness() -> i64 {
+    200 // 0.20 in millis
+}
+const fn default_storage_cost_responsiveness() -> i64 {
+    150 // 0.15 in millis
+}
+const fn default_storage_multiplier_floor() -> i64 {
+    200 // 0.20 in millis
+}
+const fn default_storage_multiplier_ceiling() -> i64 {
+    5000 // 5.0 in millis
+}
+const fn default_compute_util_responsiveness() -> i64 {
+    300 // 0.30 in millis
+}
+const fn default_compute_cost_responsiveness() -> i64 {
+    200 // 0.20 in millis
+}
+const fn default_compute_multiplier_floor() -> i64 {
+    200 // 0.20 in millis
+}
+const fn default_compute_multiplier_ceiling() -> i64 {
+    8000 // 8.0 in millis
+}
+const fn default_energy_util_responsiveness() -> i64 {
+    250 // 0.25 in millis
+}
+const fn default_energy_cost_responsiveness() -> i64 {
+    300 // 0.30 in millis
+}
+const fn default_energy_multiplier_floor() -> i64 {
+    100 // 0.10 in millis
+}
+const fn default_energy_multiplier_ceiling() -> i64 {
+    10000 // 10.0 in millis
+}
+const fn default_ad_util_responsiveness() -> i64 {
+    150 // 0.15 in millis
+}
+const fn default_ad_cost_responsiveness() -> i64 {
+    100 // 0.10 in millis
+}
+const fn default_ad_multiplier_floor() -> i64 {
+    500 // 0.50 in millis
+}
+const fn default_ad_multiplier_ceiling() -> i64 {
+    3000 // 3.0 in millis
+}
+const fn default_ad_platform_take_target_bps() -> i64 {
+    2800 // 28%
+}
+const fn default_ad_user_share_target_bps() -> i64 {
+    2200 // 22%
+}
+const fn default_ad_drift_rate() -> i64 {
+    10 // 0.01 in millis
+}
+const fn default_tariff_public_revenue_target_bps() -> i64 {
+    1000 // 10%
+}
+const fn default_tariff_drift_rate() -> i64 {
+    50 // 0.05 in millis
+}
+const fn default_tariff_min_bps() -> i64 {
+    0 // 0%
+}
+const fn default_tariff_max_bps() -> i64 {
+    200 // 2%
 }
 
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {

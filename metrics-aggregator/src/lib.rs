@@ -8477,7 +8477,7 @@ fn parse_event_field(value: Option<&Value>) -> io::Result<TreasuryBalanceEventKi
     }
 }
 
-#[derive(Default, Default)]
+#[derive(Default)]
 struct StatusBucket {
     count: u64,
     amount_ct: u64,

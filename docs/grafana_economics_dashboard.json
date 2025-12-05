@@ -1,0 +1,291 @@
+{
+  "dashboard": {
+    "title": "Economic Control Laws - The Block",
+    "tags": ["economics", "control-laws", "inflation", "subsidies"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Layer 1: Inflation Control",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_annual_issuance_ct",
+            "legendFormat": "Annual Issuance (CT)",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_realized_inflation_bps / 100",
+            "legendFormat": "Realized Inflation (%)",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_inflation_error_bps / 100",
+            "legendFormat": "Inflation Error (%)",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"label": "CT / Percent", "format": "short"},
+          {"show": false}
+        ],
+        "alert": {
+          "name": "Inflation Divergence Alert",
+          "conditions": [
+            {
+              "evaluator": {"params": [100], "type": "gt"},
+              "query": {"params": ["C", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "message": "Inflation error exceeds 1% - control law may need tuning"
+        }
+      },
+      {
+        "title": "Layer 2: Subsidy Allocation Shares",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_subsidy_share_bps{market=\"storage\"} / 100",
+            "legendFormat": "Storage (%)",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_subsidy_share_bps{market=\"compute\"} / 100",
+            "legendFormat": "Compute (%)",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_subsidy_share_bps{market=\"energy\"} / 100",
+            "legendFormat": "Energy (%)",
+            "refId": "C"
+          },
+          {
+            "expr": "economics_subsidy_share_bps{market=\"ad\"} / 100",
+            "legendFormat": "Ad (%)",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"label": "Percent of Total Subsidy", "format": "percent", "min": 0, "max": 100},
+          {"show": false}
+        ],
+        "stack": true
+      },
+      {
+        "title": "Layer 3: Market Multipliers",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_market_multiplier{market=\"storage\"}",
+            "legendFormat": "Storage Multiplier",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_market_multiplier{market=\"compute\"}",
+            "legendFormat": "Compute Multiplier",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_market_multiplier{market=\"energy\"}",
+            "legendFormat": "Energy Multiplier",
+            "refId": "C"
+          },
+          {
+            "expr": "economics_market_multiplier{market=\"ad\"}",
+            "legendFormat": "Ad Multiplier",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"label": "Multiplier", "format": "short", "min": 0},
+          {"show": false}
+        ],
+        "alert": {
+          "name": "Multiplier Ceiling Hit",
+          "conditions": [
+            {
+              "evaluator": {"params": [9.5], "type": "gt"},
+              "query": {"params": ["C", "5m", "now"]},
+              "reducer": {"params": [], "type": "max"},
+              "type": "query"
+            }
+          ],
+          "message": "Energy multiplier approaching ceiling - may indicate severe market distress"
+        }
+      },
+      {
+        "title": "Layer 4: Ad Market Splits",
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 8},
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "economics_ad_market_split_bps{role=\"platform\"} / 100",
+            "legendFormat": "Platform Take",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_ad_market_split_bps{role=\"user\"} / 100",
+            "legendFormat": "User Share",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_ad_market_split_bps{role=\"publisher\"} / 100",
+            "legendFormat": "Publisher Share",
+            "refId": "C"
+          }
+        ],
+        "pieType": "donut"
+      },
+      {
+        "title": "Layer 4: Tariff & Treasury Contribution",
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_tariff_bps / 100",
+            "legendFormat": "Tariff Rate (%)",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_treasury_contribution_bps / 100",
+            "legendFormat": "Treasury Contribution (%)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "Percent", "format": "percent", "min": 0},
+          {"show": false}
+        ]
+      },
+      {
+        "title": "Market Utilization Rates",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_market_utilization{market=\"storage\"}",
+            "legendFormat": "Storage Utilization",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_market_utilization{market=\"compute\"}",
+            "legendFormat": "Compute Utilization",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_market_utilization{market=\"energy\"}",
+            "legendFormat": "Energy Utilization",
+            "refId": "C"
+          },
+          {
+            "expr": "economics_market_utilization{market=\"ad\"}",
+            "legendFormat": "Ad Utilization",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"label": "Utilization Ratio", "format": "percentunit", "min": 0, "max": 1},
+          {"show": false}
+        ]
+      },
+      {
+        "title": "Provider Margins",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "economics_provider_margin{market=\"storage\"}",
+            "legendFormat": "Storage Margin",
+            "refId": "A"
+          },
+          {
+            "expr": "economics_provider_margin{market=\"compute\"}",
+            "legendFormat": "Compute Margin",
+            "refId": "B"
+          },
+          {
+            "expr": "economics_provider_margin{market=\"energy\"}",
+            "legendFormat": "Energy Margin",
+            "refId": "C"
+          },
+          {
+            "expr": "economics_provider_margin{market=\"ad\"}",
+            "legendFormat": "Ad Margin",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"label": "Margin Ratio", "format": "percentunit"},
+          {"show": false}
+        ],
+        "alert": {
+          "name": "Negative Provider Margin",
+          "conditions": [
+            {
+              "evaluator": {"params": [0], "type": "lt"},
+              "query": {"params": ["C", "5m", "now"]},
+              "reducer": {"params": [], "type": "min"},
+              "type": "query"
+            }
+          ],
+          "message": "Provider margin is negative - market distress detected"
+        }
+      },
+      {
+        "title": "Economic Health Score",
+        "gridPos": {"x": 0, "y": 24, "w": 24, "h": 4},
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "100 - abs(economics_inflation_error_bps) / 10",
+            "legendFormat": "Inflation Score",
+            "refId": "A"
+          },
+          {
+            "expr": "100 * (1 - stddev_over_time(economics_subsidy_share_bps[1h]) / 2500)",
+            "legendFormat": "Subsidy Stability",
+            "refId": "B"
+          },
+          {
+            "expr": "100 - abs(economics_treasury_contribution_bps - 1000) / 20",
+            "legendFormat": "Treasury Target Score",
+            "refId": "C"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value",
+          "justifyMode": "auto",
+          "orientation": "horizontal"
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"value": 0, "color": "red"},
+            {"value": 80, "color": "yellow"},
+            {"value": 95, "color": "green"}
+          ]
+        }
+      }
+    ],
+    "refresh": "10s",
+    "time": {"from": "now-6h", "to": "now"},
+    "timepicker": {
+      "refresh_intervals": ["10s", "30s", "1m", "5m"]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Epoch Boundaries",
+          "datasource": "Prometheus",
+          "expr": "changes(economics_annual_issuance_ct[5m]) > 0",
+          "iconColor": "blue"
+        }
+      ]
+    }
+  }
+}

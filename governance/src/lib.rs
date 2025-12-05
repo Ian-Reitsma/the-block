@@ -119,4 +119,61 @@ pub enum ParamKey {
     EnergyMinStake,
     EnergyOracleTimeoutBlocks,
     EnergySlashingRateBps,
+
+    // ===== Economic Control Laws =====
+
+    // Layer 1: Inflation Controller
+    InflationTargetBps,
+    InflationControllerGain,
+    MinAnnualIssuanceCt,
+    MaxAnnualIssuanceCt,
+
+    // Layer 2: Subsidy Allocator
+    StorageUtilTargetBps,
+    StorageMarginTargetBps,
+    ComputeUtilTargetBps,
+    ComputeMarginTargetBps,
+    EnergyUtilTargetBps,
+    EnergyMarginTargetBps,
+    AdUtilTargetBps,
+    AdMarginTargetBps,
+    SubsidyAllocatorAlpha,
+    SubsidyAllocatorBeta,
+    SubsidyAllocatorTemperature,
+    SubsidyAllocatorDriftRate,
+
+    // Layer 3: Market Multipliers - Storage
+    StorageUtilResponsiveness,
+    StorageCostResponsiveness,
+    StorageMultiplierFloor,
+    StorageMultiplierCeiling,
+
+    // Layer 3: Market Multipliers - Compute
+    ComputeUtilResponsiveness,
+    ComputeCostResponsiveness,
+    ComputeMultiplierFloor,
+    ComputeMultiplierCeiling,
+
+    // Layer 3: Market Multipliers - Energy
+    EnergyUtilResponsiveness,
+    EnergyCostResponsiveness,
+    EnergyMultiplierFloor,
+    EnergyMultiplierCeiling,
+
+    // Layer 3: Market Multipliers - Ad
+    AdUtilResponsiveness,
+    AdCostResponsiveness,
+    AdMultiplierFloor,
+    AdMultiplierCeiling,
+
+    // Layer 4: Ad Market Drift
+    AdPlatformTakeTargetBps,
+    AdUserShareTargetBps,
+    AdDriftRate,
+
+    // Layer 4: Tariff Controller
+    TariffPublicRevenueTargetBps,
+    TariffDriftRate,
+    TariffMinBps,
+    TariffMaxBps,
 }
