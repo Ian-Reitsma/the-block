@@ -105,7 +105,7 @@ impl FromStr for DomainTier {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
 pub enum PresenceKind {
     LocalNet,
     RangeBoost,
@@ -142,6 +142,7 @@ impl FromStr for PresenceKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PresenceBucketRef {
     pub bucket_id: String,
     #[serde(default)]

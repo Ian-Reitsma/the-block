@@ -310,6 +310,61 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::EnergyMinStake => 62,
         ParamKey::EnergyOracleTimeoutBlocks => 63,
         ParamKey::EnergySlashingRateBps => 64,
+
+        // Economic Control Laws (Layer 1: Inflation)
+        ParamKey::InflationTargetBps => 65,
+        ParamKey::InflationControllerGain => 66,
+        ParamKey::MinAnnualIssuanceCt => 67,
+        ParamKey::MaxAnnualIssuanceCt => 68,
+
+        // Economic Control Laws (Layer 2: Subsidy Allocator)
+        ParamKey::StorageUtilTargetBps => 69,
+        ParamKey::StorageMarginTargetBps => 70,
+        ParamKey::ComputeUtilTargetBps => 71,
+        ParamKey::ComputeMarginTargetBps => 72,
+        ParamKey::EnergyUtilTargetBps => 73,
+        ParamKey::EnergyMarginTargetBps => 74,
+        ParamKey::AdUtilTargetBps => 75,
+        ParamKey::AdMarginTargetBps => 76,
+        ParamKey::SubsidyAllocatorAlpha => 77,
+        ParamKey::SubsidyAllocatorBeta => 78,
+        ParamKey::SubsidyAllocatorTemperature => 79,
+        ParamKey::SubsidyAllocatorDriftRate => 80,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Storage)
+        ParamKey::StorageUtilResponsiveness => 81,
+        ParamKey::StorageCostResponsiveness => 82,
+        ParamKey::StorageMultiplierFloor => 83,
+        ParamKey::StorageMultiplierCeiling => 84,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Compute)
+        ParamKey::ComputeUtilResponsiveness => 85,
+        ParamKey::ComputeCostResponsiveness => 86,
+        ParamKey::ComputeMultiplierFloor => 87,
+        ParamKey::ComputeMultiplierCeiling => 88,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Energy)
+        ParamKey::EnergyUtilResponsiveness => 89,
+        ParamKey::EnergyCostResponsiveness => 90,
+        ParamKey::EnergyMultiplierFloor => 91,
+        ParamKey::EnergyMultiplierCeiling => 92,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Ad)
+        ParamKey::AdUtilResponsiveness => 93,
+        ParamKey::AdCostResponsiveness => 94,
+        ParamKey::AdMultiplierFloor => 95,
+        ParamKey::AdMultiplierCeiling => 96,
+
+        // Economic Control Laws (Layer 4: Ad Market Drift)
+        ParamKey::AdPlatformTakeTargetBps => 97,
+        ParamKey::AdUserShareTargetBps => 98,
+        ParamKey::AdDriftRate => 99,
+
+        // Economic Control Laws (Layer 4: Tariff Controller)
+        ParamKey::TariffPublicRevenueTargetBps => 100,
+        ParamKey::TariffDriftRate => 101,
+        ParamKey::TariffMinBps => 102,
+        ParamKey::TariffMaxBps => 103,
     }
 }
 
@@ -380,6 +435,62 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         62 => ParamKey::EnergyMinStake,
         63 => ParamKey::EnergyOracleTimeoutBlocks,
         64 => ParamKey::EnergySlashingRateBps,
+
+        // Economic Control Laws (Layer 1: Inflation)
+        65 => ParamKey::InflationTargetBps,
+        66 => ParamKey::InflationControllerGain,
+        67 => ParamKey::MinAnnualIssuanceCt,
+        68 => ParamKey::MaxAnnualIssuanceCt,
+
+        // Economic Control Laws (Layer 2: Subsidy Allocator)
+        69 => ParamKey::StorageUtilTargetBps,
+        70 => ParamKey::StorageMarginTargetBps,
+        71 => ParamKey::ComputeUtilTargetBps,
+        72 => ParamKey::ComputeMarginTargetBps,
+        73 => ParamKey::EnergyUtilTargetBps,
+        74 => ParamKey::EnergyMarginTargetBps,
+        75 => ParamKey::AdUtilTargetBps,
+        76 => ParamKey::AdMarginTargetBps,
+        77 => ParamKey::SubsidyAllocatorAlpha,
+        78 => ParamKey::SubsidyAllocatorBeta,
+        79 => ParamKey::SubsidyAllocatorTemperature,
+        80 => ParamKey::SubsidyAllocatorDriftRate,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Storage)
+        81 => ParamKey::StorageUtilResponsiveness,
+        82 => ParamKey::StorageCostResponsiveness,
+        83 => ParamKey::StorageMultiplierFloor,
+        84 => ParamKey::StorageMultiplierCeiling,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Compute)
+        85 => ParamKey::ComputeUtilResponsiveness,
+        86 => ParamKey::ComputeCostResponsiveness,
+        87 => ParamKey::ComputeMultiplierFloor,
+        88 => ParamKey::ComputeMultiplierCeiling,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Energy)
+        89 => ParamKey::EnergyUtilResponsiveness,
+        90 => ParamKey::EnergyCostResponsiveness,
+        91 => ParamKey::EnergyMultiplierFloor,
+        92 => ParamKey::EnergyMultiplierCeiling,
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Ad)
+        93 => ParamKey::AdUtilResponsiveness,
+        94 => ParamKey::AdCostResponsiveness,
+        95 => ParamKey::AdMultiplierFloor,
+        96 => ParamKey::AdMultiplierCeiling,
+
+        // Economic Control Laws (Layer 4: Ad Market Drift)
+        97 => ParamKey::AdPlatformTakeTargetBps,
+        98 => ParamKey::AdUserShareTargetBps,
+        99 => ParamKey::AdDriftRate,
+
+        // Economic Control Laws (Layer 4: Tariff Controller)
+        100 => ParamKey::TariffPublicRevenueTargetBps,
+        101 => ParamKey::TariffDriftRate,
+        102 => ParamKey::TariffMinBps,
+        103 => ParamKey::TariffMaxBps,
+
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -1386,6 +1497,61 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::BridgeFailureSlash => "BridgeFailureSlash",
         ParamKey::BridgeChallengeSlash => "BridgeChallengeSlash",
         ParamKey::BridgeDutyWindowSecs => "BridgeDutyWindowSecs",
+
+        // Economic Control Laws (Layer 1: Inflation)
+        ParamKey::InflationTargetBps => "InflationTargetBps",
+        ParamKey::InflationControllerGain => "InflationControllerGain",
+        ParamKey::MinAnnualIssuanceCt => "MinAnnualIssuanceCt",
+        ParamKey::MaxAnnualIssuanceCt => "MaxAnnualIssuanceCt",
+
+        // Economic Control Laws (Layer 2: Subsidy Allocator)
+        ParamKey::StorageUtilTargetBps => "StorageUtilTargetBps",
+        ParamKey::StorageMarginTargetBps => "StorageMarginTargetBps",
+        ParamKey::ComputeUtilTargetBps => "ComputeUtilTargetBps",
+        ParamKey::ComputeMarginTargetBps => "ComputeMarginTargetBps",
+        ParamKey::EnergyUtilTargetBps => "EnergyUtilTargetBps",
+        ParamKey::EnergyMarginTargetBps => "EnergyMarginTargetBps",
+        ParamKey::AdUtilTargetBps => "AdUtilTargetBps",
+        ParamKey::AdMarginTargetBps => "AdMarginTargetBps",
+        ParamKey::SubsidyAllocatorAlpha => "SubsidyAllocatorAlpha",
+        ParamKey::SubsidyAllocatorBeta => "SubsidyAllocatorBeta",
+        ParamKey::SubsidyAllocatorTemperature => "SubsidyAllocatorTemperature",
+        ParamKey::SubsidyAllocatorDriftRate => "SubsidyAllocatorDriftRate",
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Storage)
+        ParamKey::StorageUtilResponsiveness => "StorageUtilResponsiveness",
+        ParamKey::StorageCostResponsiveness => "StorageCostResponsiveness",
+        ParamKey::StorageMultiplierFloor => "StorageMultiplierFloor",
+        ParamKey::StorageMultiplierCeiling => "StorageMultiplierCeiling",
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Compute)
+        ParamKey::ComputeUtilResponsiveness => "ComputeUtilResponsiveness",
+        ParamKey::ComputeCostResponsiveness => "ComputeCostResponsiveness",
+        ParamKey::ComputeMultiplierFloor => "ComputeMultiplierFloor",
+        ParamKey::ComputeMultiplierCeiling => "ComputeMultiplierCeiling",
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Energy)
+        ParamKey::EnergyUtilResponsiveness => "EnergyUtilResponsiveness",
+        ParamKey::EnergyCostResponsiveness => "EnergyCostResponsiveness",
+        ParamKey::EnergyMultiplierFloor => "EnergyMultiplierFloor",
+        ParamKey::EnergyMultiplierCeiling => "EnergyMultiplierCeiling",
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Ad)
+        ParamKey::AdUtilResponsiveness => "AdUtilResponsiveness",
+        ParamKey::AdCostResponsiveness => "AdCostResponsiveness",
+        ParamKey::AdMultiplierFloor => "AdMultiplierFloor",
+        ParamKey::AdMultiplierCeiling => "AdMultiplierCeiling",
+
+        // Economic Control Laws (Layer 4: Ad Market Drift)
+        ParamKey::AdPlatformTakeTargetBps => "AdPlatformTakeTargetBps",
+        ParamKey::AdUserShareTargetBps => "AdUserShareTargetBps",
+        ParamKey::AdDriftRate => "AdDriftRate",
+
+        // Economic Control Laws (Layer 4: Tariff Controller)
+        ParamKey::TariffPublicRevenueTargetBps => "TariffPublicRevenueTargetBps",
+        ParamKey::TariffDriftRate => "TariffDriftRate",
+        ParamKey::TariffMinBps => "TariffMinBps",
+        ParamKey::TariffMaxBps => "TariffMaxBps",
     }
 }
 
@@ -1456,6 +1622,62 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "BridgeFailureSlash" => Ok(ParamKey::BridgeFailureSlash),
         "BridgeChallengeSlash" => Ok(ParamKey::BridgeChallengeSlash),
         "BridgeDutyWindowSecs" => Ok(ParamKey::BridgeDutyWindowSecs),
+
+        // Economic Control Laws (Layer 1: Inflation)
+        "InflationTargetBps" => Ok(ParamKey::InflationTargetBps),
+        "InflationControllerGain" => Ok(ParamKey::InflationControllerGain),
+        "MinAnnualIssuanceCt" => Ok(ParamKey::MinAnnualIssuanceCt),
+        "MaxAnnualIssuanceCt" => Ok(ParamKey::MaxAnnualIssuanceCt),
+
+        // Economic Control Laws (Layer 2: Subsidy Allocator)
+        "StorageUtilTargetBps" => Ok(ParamKey::StorageUtilTargetBps),
+        "StorageMarginTargetBps" => Ok(ParamKey::StorageMarginTargetBps),
+        "ComputeUtilTargetBps" => Ok(ParamKey::ComputeUtilTargetBps),
+        "ComputeMarginTargetBps" => Ok(ParamKey::ComputeMarginTargetBps),
+        "EnergyUtilTargetBps" => Ok(ParamKey::EnergyUtilTargetBps),
+        "EnergyMarginTargetBps" => Ok(ParamKey::EnergyMarginTargetBps),
+        "AdUtilTargetBps" => Ok(ParamKey::AdUtilTargetBps),
+        "AdMarginTargetBps" => Ok(ParamKey::AdMarginTargetBps),
+        "SubsidyAllocatorAlpha" => Ok(ParamKey::SubsidyAllocatorAlpha),
+        "SubsidyAllocatorBeta" => Ok(ParamKey::SubsidyAllocatorBeta),
+        "SubsidyAllocatorTemperature" => Ok(ParamKey::SubsidyAllocatorTemperature),
+        "SubsidyAllocatorDriftRate" => Ok(ParamKey::SubsidyAllocatorDriftRate),
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Storage)
+        "StorageUtilResponsiveness" => Ok(ParamKey::StorageUtilResponsiveness),
+        "StorageCostResponsiveness" => Ok(ParamKey::StorageCostResponsiveness),
+        "StorageMultiplierFloor" => Ok(ParamKey::StorageMultiplierFloor),
+        "StorageMultiplierCeiling" => Ok(ParamKey::StorageMultiplierCeiling),
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Compute)
+        "ComputeUtilResponsiveness" => Ok(ParamKey::ComputeUtilResponsiveness),
+        "ComputeCostResponsiveness" => Ok(ParamKey::ComputeCostResponsiveness),
+        "ComputeMultiplierFloor" => Ok(ParamKey::ComputeMultiplierFloor),
+        "ComputeMultiplierCeiling" => Ok(ParamKey::ComputeMultiplierCeiling),
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Energy)
+        "EnergyUtilResponsiveness" => Ok(ParamKey::EnergyUtilResponsiveness),
+        "EnergyCostResponsiveness" => Ok(ParamKey::EnergyCostResponsiveness),
+        "EnergyMultiplierFloor" => Ok(ParamKey::EnergyMultiplierFloor),
+        "EnergyMultiplierCeiling" => Ok(ParamKey::EnergyMultiplierCeiling),
+
+        // Economic Control Laws (Layer 3: Market Multipliers - Ad)
+        "AdUtilResponsiveness" => Ok(ParamKey::AdUtilResponsiveness),
+        "AdCostResponsiveness" => Ok(ParamKey::AdCostResponsiveness),
+        "AdMultiplierFloor" => Ok(ParamKey::AdMultiplierFloor),
+        "AdMultiplierCeiling" => Ok(ParamKey::AdMultiplierCeiling),
+
+        // Economic Control Laws (Layer 4: Ad Market Drift)
+        "AdPlatformTakeTargetBps" => Ok(ParamKey::AdPlatformTakeTargetBps),
+        "AdUserShareTargetBps" => Ok(ParamKey::AdUserShareTargetBps),
+        "AdDriftRate" => Ok(ParamKey::AdDriftRate),
+
+        // Economic Control Laws (Layer 4: Tariff Controller)
+        "TariffPublicRevenueTargetBps" => Ok(ParamKey::TariffPublicRevenueTargetBps),
+        "TariffDriftRate" => Ok(ParamKey::TariffDriftRate),
+        "TariffMinBps" => Ok(ParamKey::TariffMinBps),
+        "TariffMaxBps" => Ok(ParamKey::TariffMaxBps),
+
         other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
     }
 }

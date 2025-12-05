@@ -14,7 +14,7 @@ use foundation_serialization::binary_cursor::{Reader as BinaryReader, Writer as 
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
@@ -22,12 +22,11 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "telemetry")]
 use crate::telemetry::{
     adjust_dns_stake_locked, record_dns_auction_cancelled, record_dns_auction_completed,
-    update_dns_auction_status_metrics,
+    update_dns_auction_status_metrics, DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL,
 };
-#[cfg(feature = "telemetry")]
-use crate::telemetry::{DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL};
 use runtime::net::lookup_txt;
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
@@ -58,7 +57,7 @@ const DNS_METRIC_CAPACITY: usize = 4096;
 static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
     Lazy::new(|| Mutex::new(VecDeque::with_capacity(DNS_METRIC_CAPACITY)));
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
 enum AuctionStatus {
     Active,
@@ -220,11 +219,13 @@ fn record_auction_completed(duration_secs: u64, settlement_ct: u64) {
         duration_secs,
         settlement_ct,
     });
+    #[cfg(feature = "telemetry")]
     record_dns_auction_completed(duration_secs, settlement_ct);
 }
 
 fn record_auction_cancelled() {
     push_metric(DnsMetricKind::AuctionCancelled);
+    #[cfg(feature = "telemetry")]
     record_dns_auction_cancelled();
 }
 
@@ -233,6 +234,7 @@ fn record_stake_lock(amount_ct: u64) {
         push_metric(DnsMetricKind::StakeLock {
             _amount_ct: amount_ct,
         });
+        #[cfg(feature = "telemetry")]
         adjust_dns_stake_locked(i64::try_from(amount_ct).unwrap_or(i64::MAX));
     }
 }
@@ -242,6 +244,7 @@ fn record_stake_unlock(amount_ct: u64) {
         push_metric(DnsMetricKind::StakeUnlock {
             _amount_ct: amount_ct,
         });
+        #[cfg(feature = "telemetry")]
         adjust_dns_stake_locked(-i64::try_from(amount_ct).unwrap_or(i64::MAX));
     }
 }
@@ -2323,6 +2326,7 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
     let cancelled = *status_counts
         .get(&AuctionStatus::Cancelled)
         .unwrap_or(&0);
+    #[cfg(feature = "telemetry")]
     update_dns_auction_status_metrics(active, settled, cancelled);
 
     let mut counts_map = Map::new();

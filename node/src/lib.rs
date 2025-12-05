@@ -161,6 +161,13 @@ pub use service_badge::ServiceBadgeTracker;
 
 pub mod blob_chain;
 
+pub mod economics;
+pub use economics::{
+    execute_epoch_economics, AdMarketDriftController, ControlLawUpdateEvent, EconomicSnapshot,
+    GovernanceEconomicParams, InflationController, MarketMetric, MarketMetrics,
+    MarketMultiplierController, SubsidyAllocator, TariffController,
+};
+
 pub mod governance;
 pub mod treasury_executor;
 pub use governance::{
@@ -959,6 +966,15 @@ pub struct Blockchain {
     logistic_last_n: f64,
     logistic_lock_end: u64,
     logistic_factor: f64,
+    // Economic Control Law State
+    /// Previous epoch's annual CT issuance (for inflation controller continuity)
+    pub economics_prev_annual_issuance_ct: u64,
+    /// Previous epoch's subsidy allocation shares
+    pub economics_prev_subsidy: economics::SubsidySnapshot,
+    /// Previous epoch's tariff state
+    pub economics_prev_tariff: economics::TariffSnapshot,
+    /// Current epoch transaction volume (for tariff controller)
+    pub economics_epoch_tx_volume_ct: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1104,6 +1120,19 @@ impl Default for Blockchain {
             logistic_last_n: 0.0,
             logistic_lock_end: 0,
             logistic_factor: 1.0,
+            economics_prev_annual_issuance_ct: 200_000_000, // Bootstrap value
+            economics_prev_subsidy: economics::SubsidySnapshot {
+                storage_share_bps: 1500,
+                compute_share_bps: 3000,
+                energy_share_bps: 2000,
+                ad_share_bps: 3500,
+            },
+            economics_prev_tariff: economics::TariffSnapshot {
+                tariff_bps: 0,
+                non_kyc_volume_ct: 0,
+                treasury_contribution_bps: 0,
+            },
+            economics_epoch_tx_volume_ct: 0,
         }
     }
 }
@@ -4692,6 +4721,62 @@ impl Blockchain {
                     self.params.industrial_multiplier = ind;
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::INDUSTRIAL_MULTIPLIER.set(ind);
+
+                    // Execute economic control laws
+                    let econ_params = economics::GovernanceEconomicParams::from_governance_params(
+                        &self.params,
+                        self.economics_prev_annual_issuance_ct,
+                        self.economics_prev_subsidy.clone(),
+                        self.economics_prev_tariff.clone(),
+                    );
+
+                    // Build metrics from epoch data
+                    let metrics = economics::MarketMetrics {
+                        storage: economics::MarketMetric {
+                            utilization: (self.epoch_storage_bytes as f64) / (stats.epoch_secs * 1_000_000.0),
+                            provider_margin: 0.0, // TODO: compute from settlement data
+                            ..Default::default()
+                        },
+                        compute: economics::MarketMetric {
+                            utilization: (self.epoch_cpu_ms as f64) / (stats.epoch_secs * 1000.0),
+                            provider_margin: 0.0,
+                            ..Default::default()
+                        },
+                        energy: economics::MarketMetric::default(), // TODO: wire when energy market launches
+                        ad: economics::MarketMetric::default(), // TODO: compute from ad settlements
+                    };
+
+                    // Compute total ad spend from settlements
+                    let total_ad_spend = self.pending_ad_settlements.iter()
+                        .map(|s| s.total_usd_micros)
+                        .sum::<u64>();
+
+                    // Execute control laws
+                    let econ_snapshot = economics::execute_epoch_economics(
+                        epoch,
+                        &metrics,
+                        self.emission_consumer,
+                        self.economics_epoch_tx_volume_ct, // non-KYC volume
+                        total_ad_spend,
+                        0, // TODO: track treasury inflow
+                        &econ_params,
+                    );
+
+                    // Update blockchain state with results
+                    self.economics_prev_annual_issuance_ct = econ_snapshot.inflation.annual_issuance_ct;
+                    self.economics_prev_subsidy = econ_snapshot.subsidies.clone();
+                    self.economics_prev_tariff = econ_snapshot.tariff.clone();
+
+                    // Update telemetry
+                    #[cfg(feature = "telemetry")]
+                    {
+                        crate::telemetry::update_economics_telemetry(&econ_snapshot);
+                        crate::telemetry::update_economics_market_metrics(&metrics);
+                    }
+
+                    // Reset epoch tx volume counter
+                    self.economics_epoch_tx_volume_ct = 0;
+
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
                     self.epoch_viewer_bytes.clear();
@@ -5877,8 +5962,8 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 mod tests {
     use super::*;
     use ad_market::{
-        DeliveryChannel, ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace,
-        SelectionReceipt,
+        DeliveryChannel, DomainTier, ResourceFloorBreakdown, SelectionCandidateTrace,
+        SelectionCohortTrace, SelectionReceipt,
     };
     use crypto_suite::hashing::blake3::Hasher;
     use crypto_suite::signatures::ed25519::SigningKey;
@@ -6018,8 +6103,13 @@ mod tests {
         ack.selection_receipt = Some(SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "viewer.test".into(),
+                domain_tier: DomainTier::Unverified,
+                domain_owner: None,
                 provider: Some("provider-1".into()),
                 badges: Vec::new(),
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: 2,
                 bytes: 1_024,
                 price_per_mib_usd_micros: 80,
                 delivery_channel: DeliveryChannel::Http,
