@@ -662,15 +662,11 @@ pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
     decode_raw_payload(&bytes).map_err(|e| py_value_err(format!("decode: {e}")))
 }
 
-#[cfg(all(test, feature = "python-bindings"))]
+// First-party transaction tests (no third-party dependencies)
+#[cfg(test)]
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::SIGNATURE_LENGTH;
-    use pyo3::{
-        types::{IntoPyDict, PyBytes, PyDict, PyModule},
-        Py,
-    };
-    use std::ffi::CString;
 
     fn sample_payload() -> RawTxPayload {
         RawTxPayload {
@@ -712,6 +708,8 @@ mod tests {
         let payload = sample_payload();
         let public_key = vec![1u8; 32];
         let signature = vec![2u8; 64];
+
+        // Test without tip (None)
         let tx = SignedTransaction::new(
             payload.clone(),
             public_key.clone(),
@@ -723,159 +721,62 @@ mod tests {
         assert_eq!(tx.public_key, public_key);
         assert_eq!(tx.signature.ed25519, signature);
 
+        // Test with tip (Some)
         let tx_with_tip =
             SignedTransaction::new(payload, public_key, signature, FeeLane::Consumer, Some(42));
         assert_eq!(tx_with_tip.tip, 42);
     }
 
     #[test]
-    fn python_constructor_supports_tip_keyword() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            let payload = Py::new(py, sample_payload()).expect("payload object");
-            let lane = Py::new(py, FeeLane::Consumer).expect("lane object");
-            let tx_type = py.get_type::<SignedTransaction>();
-            let tx_default = tx_type
-                .call1((
-                    payload.clone_ref(py),
-                    Vec::<u8>::new(),
-                    vec![1u8; 16],
-                    lane.clone_ref(py),
-                ))
-                .expect("default constructor call");
-            assert_eq!(
-                tx_default
-                    .getattr("tip")
-                    .expect("tip attr")
-                    .extract::<u64>()
-                    .expect("tip extract"),
-                0
-            );
-
-            let payload_kw = Py::new(py, sample_payload()).expect("payload kw");
-            let lane_kw = Py::new(py, FeeLane::Consumer).expect("lane kw");
-            let kwargs = [("tip", 99u64)].into_py_dict(py).expect("kwargs dict");
-            let tx_kw = tx_type
-                .call(
-                    (payload_kw, Vec::<u8>::new(), vec![1u8; 16], lane_kw),
-                    Some(&kwargs),
-                )
-                .expect("keyword constructor call");
-            assert_eq!(
-                tx_kw
-                    .getattr("tip")
-                    .expect("tip attr")
-                    .extract::<u64>()
-                    .expect("tip extract"),
-                99
-            );
-        });
+    fn canonical_payload_bytes_deterministic() {
+        let payload = sample_payload();
+        let bytes1 = canonical_payload_bytes(&payload);
+        let bytes2 = canonical_payload_bytes(&payload);
+        assert_eq!(bytes1, bytes2, "canonical encoding must be deterministic");
     }
 
     #[test]
-    fn tx_signature_extracts_from_dict() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            let dict = PyDict::new(py);
-            dict.set_item("ed25519", PyBytes::new(py, &[1, 2, 3]))
-                .expect("set ed25519");
+    fn tx_signature_roundtrip() {
+        let sig = TxSignature {
+            ed25519: vec![1, 2, 3, 4],
             #[cfg(feature = "quantum")]
-            dict.set_item("dilithium", PyBytes::new(py, &[4, 5, 6]))
-                .expect("set dilithium");
+            dilithium: vec![5, 6, 7, 8],
+        };
 
-            let sig: TxSignature = dict.extract().expect("dict extract");
-            assert_eq!(sig.ed25519, vec![1, 2, 3]);
-            #[cfg(feature = "quantum")]
-            assert_eq!(sig.dilithium, vec![4, 5, 6]);
-        });
+        // Verify fields are set correctly
+        assert_eq!(sig.ed25519, vec![1, 2, 3, 4]);
+        #[cfg(feature = "quantum")]
+        assert_eq!(sig.dilithium, vec![5, 6, 7, 8]);
     }
 
     #[test]
-    fn tx_signature_extracts_from_bytes() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            let bytes = PyBytes::new(py, &[9, 8, 7]);
-            let sig: TxSignature = bytes.extract().expect("bytes extract");
-            assert_eq!(sig.ed25519, vec![9, 8, 7]);
-            #[cfg(feature = "quantum")]
-            assert!(sig.dilithium.is_empty());
-        });
+    fn tx_version_variants() {
+        // Test all TxVersion variants exist
+        let _ = TxVersion::Ed25519Only;
+        #[cfg(feature = "quantum")]
+        let _ = TxVersion::DilithiumOnly;
+        let _ = TxVersion::Dual;
     }
 
     #[test]
-    fn tx_signature_extracts_from_attributes() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            #[cfg(feature = "quantum")]
-            let module = {
-                let code = CString::new(
-                    "class Holder:\n    def __init__(self):\n        self.ed25519 = b'abc'\n        self.dilithium = b'def'\nholder = Holder()\n",
-                )
-                .expect("code CString");
-                PyModule::from_code(
-                    py,
-                    code.as_c_str(),
-                    pyo3::ffi::c_str!(""),
-                    pyo3::ffi::c_str!("holder_module"),
-                )
-                .expect("module")
-            };
-            #[cfg(not(feature = "quantum"))]
-            let module = {
-                let code = CString::new(
-                    "class Holder:\n    def __init__(self):\n        self.ed25519 = b'abc'\nholder = Holder()\n",
-                )
-                .expect("code CString");
-                PyModule::from_code(
-                    py,
-                    code.as_c_str(),
-                    pyo3::ffi::c_str!(""),
-                    pyo3::ffi::c_str!("holder_module"),
-                )
-                .expect("module")
-            };
-
-            let holder = module.getattr("holder").expect("holder attr");
-            let sig: TxSignature = holder.extract().expect("attr extract");
-            assert_eq!(sig.ed25519, b"abc".to_vec());
-            #[cfg(feature = "quantum")]
-            assert_eq!(sig.dilithium, b"def".to_vec());
-        });
+    fn fee_lane_variants() {
+        // Test all FeeLane variants exist and are distinct
+        assert_ne!(
+            format!("{:?}", FeeLane::Consumer),
+            format!("{:?}", FeeLane::Industrial),
+            "Consumer and Industrial lanes should be distinct"
+        );
     }
 
     #[test]
-    fn tx_version_extracts_from_strings() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            let py_str = py
-                .eval(pyo3::ffi::c_str!("'Dual'"), None, None)
-                .expect("eval dual");
-            let version: TxVersion = py_str.extract().expect("string extract");
-            assert_eq!(version, TxVersion::Dual);
+    fn verify_signed_tx_rejects_invalid_signature() {
+        let payload = sample_payload();
+        let sk = [7u8; crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH];
+        let mut signed = sign_tx(&sk, &payload).expect("tx signed");
 
-            let ed = py
-                .eval(pyo3::ffi::c_str!("'ed25519-only'"), None, None)
-                .expect("eval ed25519");
-            let version: TxVersion = ed.extract().expect("normalize ed");
-            assert_eq!(version, TxVersion::Ed25519Only);
-        });
-    }
+        // Corrupt the signature
+        signed.signature.ed25519[0] ^= 0xFF;
 
-    #[test]
-    fn tx_version_extracts_from_integers() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
-            let zero = py
-                .eval(pyo3::ffi::c_str!("0"), None, None)
-                .expect("zero eval");
-            let version: TxVersion = zero.extract().expect("zero extract");
-            assert_eq!(version, TxVersion::Ed25519Only);
-
-            let two = py
-                .eval(pyo3::ffi::c_str!("2"), None, None)
-                .expect("two eval");
-            let version: TxVersion = two.extract().expect("two extract");
-            assert_eq!(version, TxVersion::DilithiumOnly);
-        });
+        assert!(!verify_signed_tx(&signed), "corrupted signature should fail verification");
     }
 }

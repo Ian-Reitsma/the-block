@@ -18,8 +18,8 @@ use transport::S2N_PROVIDER_ID;
 
 #[cfg(feature = "inhouse")]
 use transport::{
-    inhouse::{self, Certificate as InhouseCertificate},
-    inhouse_certificate_store, InhouseAdvertisement, InhouseCertificateStore, INHOUSE_PROVIDER_ID,
+    inhouse::{self, Certificate as InhouseCertificate, InhouseCertificateStore},
+    inhouse_certificate_store, InhouseAdvertisement, INHOUSE_PROVIDER_ID,
 };
 
 #[cfg(feature = "inhouse")]
@@ -171,20 +171,18 @@ fn cert_store_path() -> PathBuf {
 
 #[cfg(feature = "inhouse")]
 fn certificate_from_store(store: &InhouseCertificateStore) -> Result<InhouseCertificate> {
+    // Try to load existing certificate
     if let Some(cert) = store.load_certificate() {
         return Ok(cert);
     }
-    if let Some(advert) = store.current() {
-        return Ok(inhouse::Certificate::from_der_lossy(
-            advert.certificate.clone(),
-        ));
-    }
-    let advert = store
-        .initialize()
-        .map_err(|err| anyhow!("initialize inhouse certificate store: {err}"))?;
-    Ok(inhouse::Certificate::from_der_lossy(
-        advert.certificate.clone(),
-    ))
+
+    // If no certificate exists, generate a new one and install it
+    let cert = inhouse::Certificate::generate()
+        .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
+    store
+        .install_certificate(&cert)
+        .map_err(|err| anyhow!("install inhouse certificate: {err}"))?;
+    Ok(cert)
 }
 
 pub fn initialize(signing_key: &SigningKey) -> Result<CertAdvertisement> {
@@ -195,10 +193,14 @@ pub fn initialize(signing_key: &SigningKey) -> Result<CertAdvertisement> {
             .map(from_s2n_advert)
             .map_err(Into::into),
         #[cfg(feature = "inhouse")]
-        ActiveProvider::Inhouse { store, .. } => store
-            .initialize()
-            .map(from_inhouse_advert)
-            .map_err(|err| anyhow!("initialize inhouse certificate store: {err}")),
+        ActiveProvider::Inhouse { store, .. } => {
+            let cert = inhouse::Certificate::generate()
+                .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
+            let advert = store
+                .install_certificate(&cert)
+                .map_err(|err| anyhow!("install inhouse certificate: {err}"))?;
+            Ok(from_inhouse_advert(advert))
+        }
     }
 }
 
@@ -210,10 +212,14 @@ pub fn rotate(signing_key: &SigningKey) -> Result<CertAdvertisement> {
             .map(from_s2n_advert)
             .map_err(Into::into),
         #[cfg(feature = "inhouse")]
-        ActiveProvider::Inhouse { store, .. } => store
-            .rotate()
-            .map(from_inhouse_advert)
-            .map_err(|err| anyhow!("rotate inhouse certificate: {err}")),
+        ActiveProvider::Inhouse { store, .. } => {
+            let cert = inhouse::Certificate::generate()
+                .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
+            let advert = store
+                .install_certificate(&cert)
+                .map_err(|err| anyhow!("rotate inhouse certificate: {err}"))?;
+            Ok(from_inhouse_advert(advert))
+        }
     }
 }
 
@@ -230,7 +236,12 @@ pub fn current_advertisement() -> Option<CertAdvertisement> {
         #[cfg(feature = "s2n-quic")]
         Ok(ActiveProvider::S2n(adapter)) => adapter.current_advertisement().map(from_s2n_advert),
         #[cfg(feature = "inhouse")]
-        Ok(ActiveProvider::Inhouse { store, .. }) => store.current().map(from_inhouse_advert),
+        Ok(ActiveProvider::Inhouse { store, .. }) => {
+            store.load_certificate().map(|cert| {
+                let advert = transport::InhouseAdvertisement::from(&cert);
+                from_inhouse_advert(advert)
+            })
+        }
         Err(_) => None,
     }
 }
@@ -276,12 +287,15 @@ pub async fn start_server(addr: SocketAddr) -> Result<ListenerHandle> {
         }
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { adapter, store } => {
-            let certificate = certificate_from_store(store)?;
-            let (endpoint, cert) = adapter.listen_with_certificate(addr, certificate).await?;
-            store
-                .install_certificate(&cert)
-                .map_err(|err| anyhow!("persist inhouse certificate: {err}"))?;
-            Ok(ListenerHandle::Inhouse(endpoint))
+            let (endpoint, cert_handle) = adapter.listen(addr).await?;
+            // Extract the certificate from the handle and store it
+            if let transport::CertificateHandle::Inhouse(cert) = &cert_handle {
+                // Store the certificate DER bytes
+                store
+                    .install_certificate(cert)
+                    .map_err(|err| anyhow!("persist inhouse certificate: {err}"))?;
+            }
+            Ok(endpoint)
         }
     }
 }
@@ -293,7 +307,8 @@ pub async fn connect(addr: SocketAddr) -> Result<()> {
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { adapter, store } => {
             let certificate = certificate_from_store(store)?;
-            adapter.connect(addr, &certificate).await.map(|_| ())
+            let cert_handle = transport::CertificateHandle::Inhouse(certificate);
+            adapter.connect(addr, &cert_handle).await.map(|_| ())
         }
     }
 }

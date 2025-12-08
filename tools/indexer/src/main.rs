@@ -5,7 +5,8 @@ use cli_core::{
     parse::{Matches, ParseError, Parser},
 };
 use foundation_serialization::json::{self, Value};
-use httpd::{serve, serve_tls, ServerConfig, ServerTlsConfig};
+use http_env::server_tls_from_env;
+use httpd::{serve, serve_tls, ServerConfig};
 use indexer::{router, BlockRecord, Indexer};
 use runtime::net::TcpListener;
 use std::{env, fs::File, io::Read, net::SocketAddr, path::Path, process};

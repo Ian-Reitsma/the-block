@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 authors = ["The Block Developers"]
 license = "MIT OR Apache-2.0"
-description = "First-party serde compatibility facade"
+description = "First-party serialization traits - no external dependencies"
 
 [dependencies]
+# No dependencies - fully first-party implementation
+
+[dev-dependencies]
 foundation_serde_derive = { path = "../foundation_serde_derive" }

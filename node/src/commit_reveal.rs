@@ -1,5 +1,6 @@
 #[cfg(feature = "pq-crypto")]
 use concurrency::Lazy;
+#[cfg(not(feature = "pq-crypto"))]
 use crypto_suite::hashing::blake3;
 #[cfg(feature = "pq-crypto")]
 use pqcrypto_dilithium::dilithium3::{
@@ -16,8 +17,7 @@ pub fn commit(salt: &[u8], state: &[u8], nonce: u64) -> (Vec<u8>, u64) {
     msg.extend_from_slice(&nonce.to_le_bytes());
     msg.extend_from_slice(state);
     let sig = detached_sign(&msg, &KEYPAIR.1).as_bytes().to_vec();
-    // simulate FO compression by truncating to 170 bytes
-    (sig[..170.min(sig.len())].to_vec(), nonce)
+    (sig, nonce)
 }
 
 #[cfg(feature = "pq-crypto")]
@@ -56,7 +56,10 @@ mod tests {
         let salt = b"s";
         let state = b"payload";
         let (sig, nonce) = commit(salt, state, 1);
-        assert!(sig.len() <= 170);
+        #[cfg(feature = "pq-crypto")]
+        assert!(sig.len() > 0);
+        #[cfg(not(feature = "pq-crypto"))]
+        assert_eq!(sig.len(), 32);
         assert!(verify(salt, state, &sig, nonce));
     }
 }

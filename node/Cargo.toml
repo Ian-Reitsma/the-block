@@ -38,6 +38,7 @@ foundation_profiler = { path = "../crates/foundation_profiler" }
 foundation_archive = { path = "../crates/foundation_archive" }
 foundation_unicode = { path = "../crates/foundation_unicode" }
 foundation_tui = { path = "../crates/foundation_tui" }
+foundation_tls = { path = "../crates/foundation_tls", optional = true }
 foundation_bigint = { path = "../crates/foundation_bigint" }
 base64_fp = { path = "../crates/base64_fp" }
 sled = { path = "../sled" }
@@ -103,7 +104,7 @@ pq-crypto = ["pqcrypto-dilithium"]
 bluetooth = []
 gpu = ["crypto_suite/gpu"]
 gateway = []
-quic = ["transport"]
+quic = ["transport", "dep:foundation_tls"]
 quinn = ["quic", "transport/quinn"]
 inhouse = []
 privacy = ["dep:privacy"]
@@ -113,9 +114,8 @@ python-bindings = ["dep:python_bridge", "python_bridge/python-bindings"]
 
 [dev-dependencies]
 jurisdiction = { path = "../crates/jurisdiction" }
-sim = { package = "tb-sim", path = "../sim" }
+# sim = { package = "tb-sim", path = "../sim" }  # Excluded: dependency_fault feature configuration issues
 testkit = { path = "../crates/testkit" }
-foundation_tls = { path = "../crates/foundation_tls" }
 verifier_selection = { path = "../crates/verifier_selection" }
 
 [build-dependencies]

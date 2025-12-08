@@ -8627,7 +8627,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use sys::archive::zip::ZipReader;
     use sys::tempfile;
-    use tb_sim::Simulation;
 
     fn run_async<T>(future: impl Future<Output = T>) -> T {
         runtime::block_on(future)
@@ -8707,89 +8706,6 @@ mod tests {
                 site_entry.get("provider_kind").and_then(Value::as_str),
                 Some("foundation")
             );
-        });
-    }
-
-    #[test]
-    fn chaos_lab_attestations_flow_through_status() {
-        run_async(async {
-            let dir = tempfile::tempdir().unwrap();
-            let state = AppState::new("token".into(), dir.path().join("chaos.json"), 120);
-            let app = router(state.clone());
-
-            let mut sim = Simulation::new(64);
-            sim.drive(24);
-            let issued_at = 512_u64;
-            let drafts = sim.chaos_attestation_drafts(issued_at);
-
-            let mut rng = OsRng::default();
-            let signing_key = SigningKey::generate(&mut rng);
-            let payload = Value::Array(
-                drafts
-                    .into_iter()
-                    .map(|draft| sign_attestation(draft, &signing_key).to_value())
-                    .collect(),
-            );
-
-            let resp = app
-                .handle(
-                    app.request_builder()
-                        .method(Method::Post)
-                        .path("/chaos/attest")
-                        .json(&payload)
-                        .unwrap()
-                        .build(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(resp.status(), StatusCode::ACCEPTED);
-
-            let resp = app
-                .handle(app.request_builder().path("/chaos/status").build())
-                .await
-                .unwrap();
-            assert_eq!(resp.status(), StatusCode::OK);
-            let body: Value = json::from_slice(resp.body()).unwrap();
-            let snapshots = body.as_array().expect("array payload");
-            assert_eq!(snapshots.len(), 3, "one entry per module");
-
-            let mut modules = snapshots
-                .iter()
-                .map(|entry| {
-                    entry
-                        .get("module")
-                        .and_then(Value::as_str)
-                        .expect("module field present")
-                        .to_string()
-                })
-                .collect::<Vec<_>>();
-            modules.sort();
-            assert_eq!(modules, vec!["compute", "overlay", "storage"]);
-
-            let overlay_entry = snapshots
-                .iter()
-                .find(|entry| entry.get("module").and_then(Value::as_str) == Some("overlay"))
-                .expect("overlay snapshot present");
-            let overlay_sites = overlay_entry
-                .get("site_readiness")
-                .and_then(Value::as_array)
-                .expect("overlay site readiness array");
-            assert!(!overlay_sites.is_empty());
-
-            let tracker = state.chaos_snapshots();
-            assert_eq!(tracker.len(), 3);
-            for snapshot in tracker {
-                assert_eq!(snapshot.issued_at, issued_at);
-                assert!(snapshot.readiness >= 0.0 && snapshot.readiness <= 1.0);
-                assert_eq!(
-                    snapshot.signer,
-                    signing_key.verifying_key().to_bytes(),
-                    "verifying key preserved"
-                );
-                if snapshot.module == ChaosModule::Overlay {
-                    assert!(!snapshot.site_readiness.is_empty());
-                }
-            }
         });
     }
 

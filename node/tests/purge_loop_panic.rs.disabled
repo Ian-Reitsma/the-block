@@ -16,7 +16,6 @@ use the_block::{maybe_spawn_purge_loop_py, Blockchain, ShutdownFlag};
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
 }
 
 fn run_purge_panic(backtrace: bool) -> String {

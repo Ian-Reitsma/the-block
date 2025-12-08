@@ -57,6 +57,97 @@ const DNS_METRIC_CAPACITY: usize = 4096;
 static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
     Lazy::new(|| Mutex::new(VecDeque::with_capacity(DNS_METRIC_CAPACITY)));
 
+/// Dynamic reserve pricing configuration
+#[derive(Debug, Clone)]
+struct DynamicReservePricingConfig {
+    /// Enable dynamic reserve pricing
+    enabled: bool,
+    /// Base reserve price in CT (default 1000)
+    base_reserve_ct: u64,
+    /// Length sensitivity factor (default 0.1 = 10% per character)
+    length_sensitivity: f64,
+    /// Historical performance weight (default 0.5)
+    history_weight: f64,
+}
+
+impl Default for DynamicReservePricingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            base_reserve_ct: 1000,
+            length_sensitivity: 0.1,
+            history_weight: 0.5,
+        }
+    }
+}
+
+static DYNAMIC_RESERVE_CONFIG: Lazy<Mutex<DynamicReservePricingConfig>> =
+    Lazy::new(|| Mutex::new(DynamicReservePricingConfig::default()));
+
+/// Compute dynamic reserve price based on domain quality metrics
+///
+/// Formula:
+/// ```
+/// reserve_price = base_reserve × length_multiplier × history_multiplier
+///
+/// where:
+///   length_multiplier = max(0.2, 1.0 - sensitivity × max(0, length - 3))
+///   history_multiplier = if prior auction exists:
+///                          1.0 + history_weight × ((historical_price / base_reserve) - 1.0).clamp(0.0, 2.0)
+///                        else:
+///                          1.0
+/// ```
+///
+/// **Domain Quality Factors:**
+/// - **Length**: Shorter domains (3-4 chars) get premium pricing
+/// - **Historical performance**: Domains with successful prior auctions get premium
+/// - **Floor protection**: Minimum 20% of base reserve prevents devaluation
+///
+fn compute_dynamic_reserve_price(domain: &str, prior_auction: Option<&DomainAuctionRecord>) -> u64 {
+    let config = DYNAMIC_RESERVE_CONFIG
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+
+    if !config.enabled {
+        return config.base_reserve_ct;
+    }
+
+    let base = config.base_reserve_ct as f64;
+
+    // 1. Length multiplier (shorter = more valuable)
+    // 3-char domains: 1.0x, 4-char: 0.9x, 5-char: 0.8x, etc.
+    // Floor at 0.2x (20% of base) for very long domains
+    let length = domain.chars().count() as f64;
+    let length_multiplier = (1.0 - config.length_sensitivity * (length - 3.0).max(0.0)).max(0.2);
+
+    // 2. Historical performance multiplier
+    let history_multiplier = if let Some(prior) = prior_auction {
+        if prior.status == AuctionStatus::Settled {
+            if let Some(winning_bid) = &prior.highest_bid {
+                // Compute historical price premium
+                let historical_price = winning_bid.amount_ct as f64;
+                let price_ratio = historical_price / base;
+                // Apply history weight to the price premium (clamped to [0.0, 2.0])
+                let premium = (price_ratio - 1.0).clamp(0.0, 2.0);
+                1.0 + config.history_weight * premium
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        }
+    } else {
+        1.0
+    };
+
+    // Combine all factors
+    let final_price = base * length_multiplier * history_multiplier;
+
+    // Round and ensure minimum of 1 CT
+    final_price.round().max(1.0) as u64
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
 enum AuctionStatus {
@@ -1810,10 +1901,29 @@ pub fn list_for_sale(params: &Value) -> Result<Value, AuctionError> {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim();
+
+    // Load database and prior auction record (needed for dynamic pricing)
+    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+    ensure_domain_allowed(domain, &db)?;
+
+    let mut prior_record = None;
+    if let Some(bytes) = db.get(&auction_key(domain)) {
+        let existing = decode_auction(&bytes)?;
+        if existing.status == AuctionStatus::Active {
+            return Err(AuctionError::ListingActive);
+        }
+        prior_record = Some(existing);
+    }
+
+    // Compute dynamic reserve price based on domain quality
+    let computed_reserve = compute_dynamic_reserve_price(domain, prior_record.as_ref());
+
+    // Use user-provided min_bid if specified, otherwise use computed reserve
     let min_bid = params
         .get("min_bid_ct")
         .and_then(|v| v.as_u64())
-        .ok_or(AuctionError::BidTooLow)?;
+        .unwrap_or(computed_reserve);
+
     if min_bid == 0 {
         return Err(AuctionError::BidTooLow);
     }
@@ -1844,17 +1954,7 @@ pub fn list_for_sale(params: &Value) -> Result<Value, AuctionError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    ensure_domain_allowed(domain, &db)?;
-
-    let mut prior_record = None;
-    if let Some(bytes) = db.get(&auction_key(domain)) {
-        let existing = decode_auction(&bytes)?;
-        if existing.status == AuctionStatus::Active {
-            return Err(AuctionError::ListingActive);
-        }
-        prior_record = Some(existing);
-    }
+    // Database and prior_record already loaded above for dynamic pricing
 
     let mut protocol_fee_bps = params
         .get("protocol_fee_bps")
@@ -2998,5 +3098,116 @@ mod tests {
         assert_eq!(snap.auction_cancels, 1);
         assert_eq!(snap.stake_unlock_events, 1);
         assert_eq!(snap.settlement_amounts_ct, vec![42]);
+    }
+
+    #[test]
+    fn dynamic_reserve_pricing_short_domains() {
+        // Test that shorter domains get premium pricing
+        let base = 1000u64;
+
+        // 3-char domain: 1.0x multiplier
+        let price_3char = compute_dynamic_reserve_price("abc", None);
+        assert_eq!(price_3char, base, "3-char domain should get 1.0x base price");
+
+        // 4-char domain: 0.9x multiplier (1.0 - 0.1 × 1)
+        let price_4char = compute_dynamic_reserve_price("abcd", None);
+        assert_eq!(price_4char, 900, "4-char domain should get 0.9x base price");
+
+        // 5-char domain: 0.8x multiplier
+        let price_5char = compute_dynamic_reserve_price("abcde", None);
+        assert_eq!(price_5char, 800, "5-char domain should get 0.8x base price");
+
+        // Very long domain: should floor at 0.2x
+        let price_long = compute_dynamic_reserve_price("verylongdomainname", None);
+        assert_eq!(price_long, 200, "Long domains should floor at 0.2x base price");
+    }
+
+    #[test]
+    fn dynamic_reserve_pricing_historical_performance() {
+        // Test that domains with successful prior auctions get premium
+        let base = 1000u64;
+
+        // Create a prior auction record with high selling price
+        let mut prior = DomainAuctionRecord {
+            domain: "test.block".to_string(),
+            seller_account: Some("seller".to_string()),
+            seller_stake: None,
+            protocol_fee_bps: 500,
+            royalty_bps: 0,
+            min_bid_ct: base,
+            stake_requirement_ct: base,
+            start_ts: 0,
+            end_ts: 1000,
+            status: AuctionStatus::Settled,
+            highest_bid: Some(DomainBidRecord {
+                bidder: "winner".to_string(),
+                amount_ct: 2000, // 2x base price
+                stake_reference: None,
+                placed_at: 500,
+                stake_locked_ct: 0,
+            }),
+            bids: vec![],
+        };
+
+        // With history_weight = 0.5 and 2x historical price:
+        // history_multiplier = 1.0 + 0.5 × (2.0 - 1.0) = 1.5
+        // For 4-char domain "test": price = 1000 × 0.9 (length) × 1.5 (history) = 1350
+        let price_with_history = compute_dynamic_reserve_price("test", Some(&prior));
+        assert_eq!(price_with_history, 1350, "Should apply historical premium (4-char: 0.9 × 1.5 = 1.35x)");
+
+        // Test with cancelled auction (no history bonus)
+        prior.status = AuctionStatus::Cancelled;
+        let price_cancelled = compute_dynamic_reserve_price("test", Some(&prior));
+        assert_eq!(price_cancelled, 900, "Cancelled auction should not get history bonus (4-char only)");
+    }
+
+    #[test]
+    fn dynamic_reserve_pricing_disabled_uses_base() {
+        // Test that when disabled, base price is always returned
+        {
+            let mut config = DYNAMIC_RESERVE_CONFIG
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            config.enabled = false;
+            config.base_reserve_ct = 5000;
+        }
+
+        let price = compute_dynamic_reserve_price("xyz", None);
+        assert_eq!(price, 5000, "When disabled, should return base price regardless of domain");
+
+        // Re-enable for other tests
+        {
+            let mut config = DYNAMIC_RESERVE_CONFIG
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            config.enabled = true;
+            config.base_reserve_ct = 1000;
+        }
+    }
+
+    #[testkit::tb_serial]
+    fn list_for_sale_uses_dynamic_reserve_when_not_specified() {
+        let domain = "xyz.block";
+        clear_domain_state(domain);
+
+        let _chain = install_test_chain(&[]);
+
+        // List without specifying min_bid - should use computed reserve
+        // "xyz.block" = 9 chars -> length_multiplier = 1.0 - 0.1 × (9-3) = 0.4
+        // Expected: 1000 × 0.4 = 400 CT
+        let listing = list_for_sale(&json_map(vec![
+            ("domain", Value::String(domain.to_string())),
+            // min_bid_ct NOT specified - should default to dynamic reserve
+        ]))
+        .expect("listing ok");
+
+        assert_eq!(listing["status"].as_str(), Some("ok"));
+
+        // Verify the min_bid was set to dynamic reserve price
+        let auction = &listing["auction"];
+        assert_eq!(auction["min_bid_ct"].as_u64(), Some(400),
+                   "Should use dynamic reserve (9-char domain \"xyz.block\": 400 CT)");
+
+        clear_domain_state(domain);
     }
 }

@@ -6,6 +6,7 @@ mod message;
 pub mod peer;
 mod peer_metrics_binary;
 pub mod peer_metrics_store;
+pub mod health; // Network Health Index
 #[cfg(all(feature = "quic", feature = "quinn"))]
 pub mod quic;
 #[cfg(all(feature = "quic", feature = "quinn"))]

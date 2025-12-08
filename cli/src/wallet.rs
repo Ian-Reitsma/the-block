@@ -283,6 +283,7 @@ pub enum BuildTxStatus {
 pub enum SignerSource {
     Local,
     Ephemeral,
+    #[allow(dead_code)] // Reserved for future session-based signing
     Session,
 }
 
@@ -339,6 +340,7 @@ pub struct FeeFloorEvaluation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeeFloorPreviewError {
+    #[allow(dead_code)] // Reserved for future interactive fee prompts
     PromptRequired,
 }
 
@@ -363,7 +365,7 @@ pub fn handle(cmd: WalletCmd) {
             {
                 use std::thread;
                 use wallet::pq::generate as pq_generate;
-                use wallet::Wallet;
+                use wallet::{Wallet, WalletSigner};
                 let ed_handle = thread::spawn(|| Wallet::generate());
                 let pq_handle = thread::spawn(|| pq_generate());
                 let ed = ed_handle.join().expect("ed25519");
@@ -604,6 +606,7 @@ fn compute_signer_metadata(signer: &str, source: SignerSource) -> Option<Vec<Sig
     }
 }
 
+#[allow(dead_code)] // Reserved for future locale-specific transaction building
 pub fn build_tx_default_locale(
     client: &RpcClient,
     rpc: &str,
@@ -836,6 +839,7 @@ pub fn evaluate_fee_floor(
     }
 }
 
+#[allow(dead_code)] // Reserved for future preview/reporting features
 pub fn preview_build_tx_report(
     lane: FeeLane,
     from: &str,

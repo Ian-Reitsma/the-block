@@ -1998,6 +1998,10 @@ fn dispatch(
                     .and_then(|v| v.as_u64())
                     .unwrap_or(1),
                 timestamp_millis: timestamp,
+                #[cfg(feature = "quantum")]
+                dilithium_pubkey: Vec::new(),
+                #[cfg(feature = "quantum")]
+                dilithium_sig: Vec::new(),
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
                 vdf_commit: [0u8; 32],

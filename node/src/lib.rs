@@ -46,7 +46,7 @@ pub use py::prepare_freethreaded_python;
 use crate::py::{getter, new, setter, staticmethod};
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry-json")]
-use foundation_serialization::json::{self, Map as JsonMap, Number, Value as JsonValue};
+use foundation_serialization::json::{Map as JsonMap, Number, Value as JsonValue};
 use foundation_serialization::{Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -370,10 +370,8 @@ const DB_ACCOUNTS: &str = "accounts";
 const DB_EMISSION: &str = "emission";
 
 // === Monetary constants ===
-const MAX_SUPPLY_CONSUMER: u64 = 20_000_000_000_000;
-const MAX_SUPPLY_INDUSTRIAL: u64 = 20_000_000_000_000;
-const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
-const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
+const MAX_SUPPLY_BLOCK: u64 = 40_000_000; // 40M BLOCK total supply cap (like Bitcoin's 21M)
+const INITIAL_BLOCK_REWARD: u64 = 50_000; // Bootstrap reward, adjusted by formula per block
 const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100_000;
 
@@ -888,20 +886,17 @@ pub struct Blockchain {
     admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
     pub path: String,
-    pub emission_consumer: u64,
-    pub emission_industrial: u64,
-    /// Total consumer emissions from one year ago used for rolling inflation.
-    pub emission_consumer_year_ago: u64,
+    pub emission: u64,
+    /// Total emissions from one year ago used for rolling inflation.
+    pub emission_year_ago: u64,
     /// Block height when the rolling inflation window started.
     pub inflation_epoch_marker: u64,
-    pub block_reward_consumer: TokenAmount,
-    pub block_reward_industrial: TokenAmount,
+    pub block_reward: TokenAmount,
     pub block_height: u64,
     /// Pending messages across shards.
     pub inter_shard: MessageQueue,
     /// Accumulated rewards since last macro block.
-    macro_acc_consumer: u64,
-    macro_acc_industrial: u64,
+    macro_acc: u64,
     /// Stored macro blocks.
     pub macro_blocks: Vec<MacroBlock>,
     /// Interval in blocks between macro block emissions.
@@ -967,14 +962,14 @@ pub struct Blockchain {
     logistic_lock_end: u64,
     logistic_factor: f64,
     // Economic Control Law State
-    /// Previous epoch's annual CT issuance (for inflation controller continuity)
-    pub economics_prev_annual_issuance_ct: u64,
+    /// Previous epoch's annual BLOCK issuance (for inflation controller continuity)
+    pub economics_prev_annual_issuance_block: u64,
     /// Previous epoch's subsidy allocation shares
     pub economics_prev_subsidy: economics::SubsidySnapshot,
     /// Previous epoch's tariff state
     pub economics_prev_tariff: economics::TariffSnapshot,
     /// Current epoch transaction volume (for tariff controller)
-    pub economics_epoch_tx_volume_ct: u64,
+    pub economics_epoch_tx_volume_block: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -986,17 +981,13 @@ pub struct ChainDisk {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub accounts: HashMap<String, Account>,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub emission_consumer: u64,
+    pub emission: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub emission_industrial: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub emission_consumer_year_ago: u64,
+    pub emission_year_ago: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub inflation_epoch_marker: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub block_reward_consumer: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub block_reward_industrial: TokenAmount,
+    pub block_reward: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub block_height: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -1072,16 +1063,13 @@ impl Default for Blockchain {
             admission_locks: DashMap::new(),
             db: Db::default(),
             path: String::new(),
-            emission_consumer: 0,
-            emission_industrial: 0,
-            emission_consumer_year_ago: 0,
+            emission: 0,
+            emission_year_ago: 0,
             inflation_epoch_marker: 0,
-            block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
-            block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+            block_reward: TokenAmount::new(INITIAL_BLOCK_REWARD),
             block_height: 0,
             inter_shard: MessageQueue::new(1024),
-            macro_acc_consumer: 0,
-            macro_acc_industrial: 0,
+            macro_acc: 0,
             macro_blocks: Vec::new(),
             macro_interval: 100,
             snapshot: SnapshotManager::new(String::new(), snapshot_interval_from_env()),
@@ -1120,7 +1108,7 @@ impl Default for Blockchain {
             logistic_last_n: 0.0,
             logistic_lock_end: 0,
             logistic_factor: 1.0,
-            economics_prev_annual_issuance_ct: 200_000_000, // Bootstrap value
+            economics_prev_annual_issuance_block: 40_000_000,  // Bootstrap: 40M BLOCK/year
             economics_prev_subsidy: economics::SubsidySnapshot {
                 storage_share_bps: 1500,
                 compute_share_bps: 3000,
@@ -1129,10 +1117,10 @@ impl Default for Blockchain {
             },
             economics_prev_tariff: economics::TariffSnapshot {
                 tariff_bps: 0,
-                non_kyc_volume_ct: 0,
+                non_kyc_volume_block: 0,
                 treasury_contribution_bps: 0,
             },
-            economics_epoch_tx_volume_ct: 0,
+            economics_epoch_tx_volume_block: 0,
         }
     }
 }
@@ -1406,7 +1394,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "service",
-                diagnostics::log::Level::Info,
+                diagnostics::log::Level::INFO,
                 "badge",
                 "-",
                 0,
@@ -1744,10 +1732,8 @@ impl Blockchain {
         let (
             mut chain,
             mut accounts,
-            em_c,
-            em_i,
-            br_c,
-            br_i,
+            em,
+            br,
             bh,
             mempool_disk,
             base_fee,
@@ -1841,17 +1827,11 @@ impl Blockchain {
                             schema_version: 3,
                             chain: migrated_chain,
                             accounts: disk.accounts,
-                            emission_consumer: em_c,
-                            emission_industrial: em_i,
-                            block_reward_consumer: if disk.block_reward_consumer.get() == 0 {
-                                TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER)
+                            emission: em_c.saturating_add(em_i),
+                            block_reward: if disk.block_reward.get() == 0 {
+                                TokenAmount::new(INITIAL_BLOCK_REWARD)
                             } else {
-                                disk.block_reward_consumer
-                            },
-                            block_reward_industrial: if disk.block_reward_industrial.get() == 0 {
-                                TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL)
-                            } else {
-                                disk.block_reward_industrial
+                                disk.block_reward
                             },
                             block_height: bh,
                             mempool: Vec::new(),
@@ -1861,7 +1841,7 @@ impl Blockchain {
                             epoch_read_bytes: 0,
                             epoch_cpu_ms: 0,
                             epoch_bytes_out: 0,
-                            emission_consumer_year_ago: disk.emission_consumer_year_ago,
+                            emission_year_ago: disk.emission_year_ago,
                             inflation_epoch_marker: disk.inflation_epoch_marker,
                             recent_timestamps: Vec::new(),
                         };
@@ -1875,28 +1855,22 @@ impl Blockchain {
                         (
                             migrated.chain,
                             migrated.accounts,
-                            migrated.emission_consumer,
-                            migrated.emission_industrial,
-                            migrated.block_reward_consumer,
-                            migrated.block_reward_industrial,
+                            migrated.emission,
+                            migrated.block_reward,
                             migrated.block_height,
                             migrated.mempool,
                             migrated.base_fee,
                             migrated.recent_timestamps,
                         )
                     } else {
-                        if disk.emission_consumer == 0
-                            && disk.emission_industrial == 0
-                            && !disk.chain.is_empty()
-                        {
+                        if disk.emission == 0 && !disk.chain.is_empty() {
                             let mut em_c = 0u64;
                             let mut em_i = 0u64;
                             for b in &disk.chain {
                                 em_c = em_c.saturating_add(b.coinbase_consumer.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
-                            disk.emission_consumer = em_c;
-                            disk.emission_industrial = em_i;
+                            disk.emission = em_c.saturating_add(em_i);
                             disk.block_height = disk.chain.len() as u64;
                             db.insert(
                                 DB_CHAIN,
@@ -1980,8 +1954,7 @@ impl Blockchain {
                                 em_c = em_c.saturating_add(b.coinbase_consumer.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
-                            disk.emission_consumer = em_c;
-                            disk.emission_industrial = em_i;
+                            disk.emission = em_c.saturating_add(em_i);
                             disk.block_height = disk.chain.len() as u64;
                             for e in &mut disk.mempool {
                                 e.timestamp_ticks = e.timestamp_millis;
@@ -2050,10 +2023,8 @@ impl Blockchain {
                         (
                             disk.chain,
                             disk.accounts,
-                            disk.emission_consumer,
-                            disk.emission_industrial,
-                            disk.block_reward_consumer,
-                            disk.block_reward_industrial,
+                            disk.emission,
+                            disk.block_reward,
                             disk.block_height,
                             disk.mempool,
                             disk.base_fee,
@@ -2067,16 +2038,13 @@ impl Blockchain {
                         .get(DB_ACCOUNTS)
                         .and_then(|iv| ledger_binary::decode_account_map_bytes(&iv).ok())
                         .unwrap_or_default();
-                    let (_em_c, _em_i, br_c, br_i, _bh) = db
+                    let (_em, br, _bh) = db
                         .get(DB_EMISSION)
                         .and_then(|iv| ledger_binary::decode_emission_tuple(&iv).ok())
-                        .unwrap_or((
-                            0,
-                            0,
-                            INITIAL_BLOCK_REWARD_CONSUMER,
-                            INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                            0,
-                        ));
+                        .map(|(em_c, em_i, br_c, br_i, bh)| {
+                            (em_c + em_i, br_c + br_i, bh)
+                        })
+                        .unwrap_or((0, INITIAL_BLOCK_REWARD, 0));
                     let mut migrated_chain = chain.clone();
                     for b in &mut migrated_chain {
                         if let Some(cb) = b.transactions.first() {
@@ -2158,12 +2126,10 @@ impl Blockchain {
                         schema_version: 3,
                         chain: migrated_chain,
                         accounts: accounts.clone(),
-                        emission_consumer: em_c,
-                        emission_industrial: em_i,
-                        emission_consumer_year_ago: 0,
+                        emission: em_c.saturating_add(em_i),
+                        emission_year_ago: 0,
                         inflation_epoch_marker: 0,
-                        block_reward_consumer: TokenAmount::new(br_c),
-                        block_reward_industrial: TokenAmount::new(br_i),
+                        block_reward: TokenAmount::new(br),
                         block_height: bh,
                         mempool: Vec::new(),
                         base_fee: 1,
@@ -2184,10 +2150,8 @@ impl Blockchain {
                     (
                         disk_new.chain,
                         disk_new.accounts,
-                        disk_new.emission_consumer,
-                        disk_new.emission_industrial,
-                        disk_new.block_reward_consumer,
-                        disk_new.block_reward_industrial,
+                        disk_new.emission,
+                        disk_new.block_reward,
                         disk_new.block_height,
                         disk_new.mempool,
                         disk_new.base_fee,
@@ -2200,9 +2164,7 @@ impl Blockchain {
                 Vec::new(),
                 HashMap::new(),
                 0,
-                0,
-                TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
-                TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+                TokenAmount::new(INITIAL_BLOCK_REWARD),
                 0,
                 Vec::new(),
                 1,
@@ -2252,10 +2214,8 @@ impl Blockchain {
         bc.accounts = accounts;
         bc.shard_roots = shard_roots;
         bc.db = db;
-        bc.emission_consumer = em_c;
-        bc.emission_industrial = em_i;
-        bc.block_reward_consumer = br_c;
-        bc.block_reward_industrial = br_i;
+        bc.emission = em;
+        bc.block_reward = br;
         bc.block_height = bh;
         bc.recent_miners = VecDeque::new();
         bc.recent_timestamps = VecDeque::from(recent_ts);
@@ -2334,15 +2294,10 @@ impl Blockchain {
                                     .saturating_add(tx.payload.amount_industrial);
                             }
                         }
-                        bc.emission_consumer = bc
+                        bc.emission = bc
                             .accounts
                             .values()
-                            .map(|a| a.balance.consumer)
-                            .sum::<u64>();
-                        bc.emission_industrial = bc
-                            .accounts
-                            .values()
-                            .map(|a| a.balance.industrial)
+                            .map(|a| a.balance.consumer + a.balance.industrial)
                             .sum::<u64>();
                     }
                 }
@@ -2584,7 +2539,7 @@ impl Blockchain {
         #[cfg(feature = "telemetry-json")]
         log_event(
             "storage",
-            diagnostics::log::Level::Info,
+            diagnostics::log::Level::INFO,
             "startup_purge",
             "",
             0,
@@ -2667,12 +2622,10 @@ impl Blockchain {
             schema_version: self.schema_version(),
             chain: self.chain.clone(),
             accounts: self.accounts.clone(),
-            emission_consumer: self.emission_consumer,
-            emission_industrial: self.emission_industrial,
-            emission_consumer_year_ago: self.emission_consumer_year_ago,
+            emission: self.emission,
+            emission_year_ago: self.emission_year_ago,
             inflation_epoch_marker: self.inflation_epoch_marker,
-            block_reward_consumer: self.block_reward_consumer,
-            block_reward_industrial: self.block_reward_industrial,
+            block_reward: self.block_reward,
             block_height: self.block_height,
             mempool,
             base_fee: self.base_fee,
@@ -2693,8 +2646,8 @@ impl Blockchain {
         Ok(())
     }
 
-    pub fn circulating_supply(&self) -> (u64, u64) {
-        (self.emission_consumer, self.emission_industrial)
+    pub fn circulating_supply(&self) -> u64 {
+        self.emission
     }
 
     /// Construct and persist the genesis block.
@@ -2893,7 +2846,7 @@ impl Blockchain {
                 #[cfg(feature = "telemetry-json")]
                 log_event(
                     "mempool",
-                    diagnostics::log::Level::Warn,
+                    diagnostics::log::Level::WARN,
                     "reject",
                     &sender_addr,
                     nonce,
@@ -2955,7 +2908,7 @@ impl Blockchain {
                 let tx_hash = tx.id();
                 log_event(
                     "mempool",
-                    diagnostics::log::Level::Warn,
+                    diagnostics::log::Level::WARN,
                     "reject",
                     &sender_addr,
                     nonce,
@@ -3121,7 +3074,7 @@ impl Blockchain {
                     let ev_hash = ev_entry.tx.id();
                     log_event(
                         "mempool",
-                        diagnostics::log::Level::Info,
+                        diagnostics::log::Level::INFO,
                         "evict",
                         &ev_sender,
                         ev_nonce,
@@ -3147,7 +3100,7 @@ impl Blockchain {
                     let tx_hash = tx.id();
                     log_event(
                         "mempool",
-                        diagnostics::log::Level::Warn,
+                        diagnostics::log::Level::WARN,
                         "reject",
                         &sender_addr,
                         nonce,
@@ -3174,7 +3127,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry-json")]
                     log_event(
                         "mempool",
-                        diagnostics::log::Level::Warn,
+                        diagnostics::log::Level::WARN,
                         "reject",
                         &sender_addr,
                         nonce,
@@ -3207,7 +3160,7 @@ impl Blockchain {
                             let tx_hash = tx.id();
                             log_event(
                                 "mempool",
-                                diagnostics::log::Level::Warn,
+                                diagnostics::log::Level::WARN,
                                 "reject",
                                 &sender_addr,
                                 nonce,
@@ -3248,7 +3201,7 @@ impl Blockchain {
                             #[cfg(feature = "telemetry-json")]
                             log_event(
                                 "mempool",
-                                diagnostics::log::Level::Warn,
+                                diagnostics::log::Level::WARN,
                                 "reject",
                                 &sender_addr,
                                 nonce,
@@ -3304,7 +3257,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            diagnostics::log::Level::Warn,
+                            diagnostics::log::Level::WARN,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -3330,7 +3283,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            diagnostics::log::Level::Warn,
+                            diagnostics::log::Level::WARN,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -3356,7 +3309,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            diagnostics::log::Level::Warn,
+                            diagnostics::log::Level::WARN,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -3417,7 +3370,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            diagnostics::log::Level::Warn,
+                            diagnostics::log::Level::WARN,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -3442,7 +3395,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            diagnostics::log::Level::Warn,
+                            diagnostics::log::Level::WARN,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -3497,7 +3450,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry-json")]
                     log_event(
                         "mempool",
-                        diagnostics::log::Level::Info,
+                        diagnostics::log::Level::INFO,
                         "admit",
                         &sender_addr,
                         nonce,
@@ -3615,7 +3568,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                diagnostics::log::Level::Info,
+                diagnostics::log::Level::INFO,
                 "drop",
                 sender,
                 nonce,
@@ -3669,7 +3622,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                diagnostics::log::Level::Info,
+                diagnostics::log::Level::INFO,
                 "drop",
                 sender,
                 nonce,
@@ -3693,7 +3646,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                diagnostics::log::Level::Warn,
+                diagnostics::log::Level::WARN,
                 "drop",
                 sender,
                 nonce,
@@ -3909,16 +3862,9 @@ impl Blockchain {
         };
 
         // apply decay first so reward reflects current height
-        self.block_reward_consumer = TokenAmount::new(
+        self.block_reward = TokenAmount::new(
             u64::try_from(
-                (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
-                    / u128::from(DECAY_DENOMINATOR),
-            )
-            .map_err(|_| py_value_err("reward overflow"))?,
-        );
-        self.block_reward_industrial = TokenAmount::new(
-            u64::try_from(
-                (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
+                (u128::from(self.block_reward.0) * u128::from(DECAY_NUMERATOR))
                     / u128::from(DECAY_DENOMINATOR),
             )
             .map_err(|_| py_value_err("reward overflow"))?,
@@ -3980,20 +3926,15 @@ impl Blockchain {
             }
         }
         let logistic = self.logistic_factor;
-        let mut reward_consumer =
-            TokenAmount::new((self.block_reward_consumer.0 as f64 * logistic).round() as u64);
-        let mut reward_industrial =
-            TokenAmount::new((self.block_reward_industrial.0 as f64 * logistic).round() as u64);
+        let mut reward =
+            TokenAmount::new((self.block_reward.0 as f64 * logistic).round() as u64);
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::ACTIVE_MINERS.set(active_eff.round() as i64);
-            crate::telemetry::BASE_REWARD_CT.set(reward_consumer.0 as i64);
+            crate::telemetry::BASE_REWARD_CT.set(reward.0 as i64);
         }
-        if self.emission_consumer + reward_consumer.0 > MAX_SUPPLY_CONSUMER {
-            reward_consumer = TokenAmount::new(MAX_SUPPLY_CONSUMER - self.emission_consumer);
-        }
-        if self.emission_industrial + reward_industrial.0 > MAX_SUPPLY_INDUSTRIAL {
-            reward_industrial = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
+        if self.emission + reward.0 > MAX_SUPPLY_BLOCK {
+            reward = TokenAmount::new(MAX_SUPPLY_BLOCK - self.emission);
         }
 
         self.skipped.clear();
@@ -4067,7 +4008,7 @@ impl Blockchain {
             .saturating_add(
                 (self.lambda_bytes_out_sub_ct_raw as u64).saturating_mul(self.epoch_bytes_out),
             );
-        let mut base_coinbase_consumer = reward_consumer
+        let mut base_coinbase_consumer = reward
             .0
             .checked_add(storage_sub_ct)
             .and_then(|v| v.checked_add(compute_sub_ct))
@@ -4304,21 +4245,13 @@ impl Blockchain {
                 base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
             }
         }
-        let mut coinbase_industrial_total = reward_industrial
-            .0
-            .checked_add(fee_industrial_u64)
-            .ok_or_else(|| py_value_err("Fee overflow"))?;
-
-        if dual_token_enabled && ad_miner_it_total > 0 {
-            coinbase_industrial_total = coinbase_industrial_total
-                .checked_add(ad_miner_it_total)
-                .ok_or_else(|| py_value_err("Fee overflow"))?;
-        }
-
         let rebate_ct = self.proof_tracker.claim_all(index);
         let coinbase_consumer_total = base_coinbase_consumer
             .checked_add(rebate_ct)
+            .and_then(|v| v.checked_add(fee_industrial_u64))
+            .and_then(|v| if dual_token_enabled { v.checked_add(ad_miner_it_total) } else { Some(v) })
             .ok_or_else(|| py_value_err("Fee overflow"))?;
+        let coinbase_industrial_total = 0;
 
         let mut fee_hasher = blake3::Hasher::new();
         fee_hasher.update(&fee_consumer_u64.to_le_bytes());
@@ -4590,6 +4523,10 @@ impl Blockchain {
             vdf_commit: [0u8; 32],
             vdf_output: [0u8; 32],
             vdf_proof: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium_pubkey: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium_sig: Vec::new(),
         };
 
         crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_ct);
@@ -4681,26 +4618,26 @@ impl Blockchain {
                     };
                     let epoch = index / EPOCH_BLOCKS;
                     if epoch - self.inflation_epoch_marker >= EPOCHS_PER_YEAR {
-                        self.emission_consumer_year_ago = self.emission_consumer;
+                        self.emission_year_ago = self.emission;
                         self.inflation_epoch_marker = epoch;
                     }
-                    let prev = if self.emission_consumer_year_ago == 0 {
-                        self.emission_consumer
+                    let prev = if self.emission_year_ago == 0 {
+                        self.emission
                     } else {
-                        self.emission_consumer_year_ago
+                        self.emission_year_ago
                     };
                     let rolling = if prev == 0 {
                         0.0
                     } else {
                         let delta = self
-                            .emission_consumer
+                            .emission
                             .checked_sub(prev)
                             .ok_or(BalanceUnderflow)?;
                         delta as f64 / prev as f64
                     };
                     let raw = retune_multipliers(
                         &mut self.params,
-                        self.emission_consumer as f64,
+                        self.emission as f64,
                         &stats,
                         epoch,
                         std::path::Path::new(&self.path),
@@ -4725,7 +4662,7 @@ impl Blockchain {
                     // Execute economic control laws
                     let econ_params = economics::GovernanceEconomicParams::from_governance_params(
                         &self.params,
-                        self.economics_prev_annual_issuance_ct,
+                        self.economics_prev_annual_issuance_block,
                         self.economics_prev_subsidy.clone(),
                         self.economics_prev_tariff.clone(),
                     );
@@ -4751,19 +4688,29 @@ impl Blockchain {
                         .map(|s| s.total_usd_micros)
                         .sum::<u64>();
 
+                    // Collect network activity metrics for formula-based issuance
+                    let network_activity = economics::NetworkActivity {
+                        tx_count: 0, // TODO: track tx count per epoch
+                        tx_volume_block: self.economics_epoch_tx_volume_block,
+                        unique_miners: self.recent_miners.len() as u64,
+                        block_height: self.block_height,
+                    };
+
                     // Execute control laws
                     let econ_snapshot = economics::execute_epoch_economics(
                         epoch,
                         &metrics,
-                        self.emission_consumer,
-                        self.economics_epoch_tx_volume_ct, // non-KYC volume
+                        &network_activity,
+                        self.emission, // circulating_block
+                        self.emission, // total_emission (same as circulating for now)
+                        self.economics_epoch_tx_volume_block, // non-KYC volume
                         total_ad_spend,
                         0, // TODO: track treasury inflow
                         &econ_params,
                     );
 
                     // Update blockchain state with results
-                    self.economics_prev_annual_issuance_ct = econ_snapshot.inflation.annual_issuance_ct;
+                    self.economics_prev_annual_issuance_block = econ_snapshot.inflation.annual_issuance_block;
                     self.economics_prev_subsidy = econ_snapshot.subsidies.clone();
                     self.economics_prev_tariff = econ_snapshot.tariff.clone();
 
@@ -4775,7 +4722,7 @@ impl Blockchain {
                     }
 
                     // Reset epoch tx volume counter
-                    self.economics_epoch_tx_volume_ct = 0;
+                    self.economics_epoch_tx_volume_block = 0;
 
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
@@ -5036,27 +4983,24 @@ impl Blockchain {
                         .map_err(|e| py_value_err(format!("shard state write: {e}")))?;
                 }
 
-                let minted_consumer = reward_consumer.0.saturating_add(rebate_ct);
-                self.emission_consumer = self.emission_consumer.saturating_add(minted_consumer);
-                self.emission_industrial += reward_industrial.0;
-                self.macro_acc_consumer = self.macro_acc_consumer.saturating_add(minted_consumer);
-                self.macro_acc_industrial += reward_industrial.0;
+                let minted = reward.0.saturating_add(rebate_ct);
+                self.emission = self.emission.saturating_add(minted);
+                self.macro_acc = self.macro_acc.saturating_add(minted);
                 self.block_height += 1;
                 if self.block_height % self.macro_interval == 0 {
                     let mb = MacroBlock {
                         height: self.block_height,
                         shard_heights: self.shard_heights.clone(),
                         shard_roots: self.shard_roots.clone(),
-                        reward_consumer: self.macro_acc_consumer,
-                        reward_industrial: self.macro_acc_industrial,
+                        reward_consumer: self.macro_acc,
+                        reward_industrial: 0,
                         queue_root: self.inter_shard.root(),
                     };
                     let _ = self
                         .db
                         .insert(&MacroBlock::db_key(self.block_height), mb.to_bytes());
                     self.macro_blocks.push(mb);
-                    self.macro_acc_consumer = 0;
-                    self.macro_acc_industrial = 0;
+                    self.macro_acc = 0;
                 }
                 #[cfg(feature = "telemetry")]
                 self.record_block_mined();
@@ -5247,13 +5191,14 @@ impl Blockchain {
             return Ok(false);
         }
         let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
-        let expected_consumer = self.block_reward_consumer.0 as u128
+        let expected_consumer = self.block_reward.0 as u128
             + block.storage_sub_ct.0 as u128
             + read_miner_share
             + block.compute_sub_ct.0 as u128
             + block.proof_rebate_ct.0 as u128
-            + fee_tot_consumer;
-        let expected_industrial = self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+            + fee_tot_consumer
+            + fee_tot_industrial;
+        let expected_industrial = 0u128;
         if coinbase_consumer_total != expected_consumer
             || coinbase_industrial_total != expected_industrial
         {
@@ -5295,10 +5240,8 @@ impl Blockchain {
         }
         self.chain.clear();
         self.accounts.clear();
-        self.emission_consumer = 0;
-        self.emission_industrial = 0;
-        self.block_reward_consumer = TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER);
-        self.block_reward_industrial = TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL);
+        self.emission = 0;
+        self.block_reward = TokenAmount::new(INITIAL_BLOCK_REWARD);
         self.block_height = 0;
 
         for block in &new_chain {
@@ -5375,13 +5318,14 @@ impl Blockchain {
             {
                 return Err(py_value_err("Fee mismatch"));
             }
-            let expected_consumer = self.block_reward_consumer.0 as u128
+            let expected_consumer = self.block_reward.0 as u128
                 + block.storage_sub_ct.0 as u128
                 + block.read_sub_ct.0 as u128
                 + block.compute_sub_ct.0 as u128
                 + block.proof_rebate_ct.0 as u128
-                + fee_tot_consumer;
-            let expected_industrial = self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+                + fee_tot_consumer
+                + fee_tot_industrial;
+            let expected_industrial = 0u128;
             if coinbase_consumer_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
@@ -5418,22 +5362,14 @@ impl Blockchain {
                     return Err(py_value_err("Coinbase mismatch"));
                 }
             }
-            self.block_reward_consumer = TokenAmount::new(
+            self.block_reward = TokenAmount::new(
                 u64::try_from(
-                    (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
+                    (u128::from(self.block_reward.0) * u128::from(DECAY_NUMERATOR))
                         / u128::from(DECAY_DENOMINATOR),
                 )
                 .map_err(|_| py_value_err("reward overflow"))?,
             );
-            self.block_reward_industrial = TokenAmount::new(
-                u64::try_from(
-                    (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
-                        / u128::from(DECAY_DENOMINATOR),
-                )
-                .map_err(|_| py_value_err("reward overflow"))?,
-            );
-            self.emission_consumer += block.coinbase_consumer.0;
-            self.emission_industrial += block.coinbase_industrial.0;
+            self.emission += block.coinbase_consumer.0 + block.coinbase_industrial.0;
             self.chain.push(block.clone());
             state::append_difficulty(
                 &std::path::Path::new(&self.path).join("diff_history"),
@@ -5634,12 +5570,13 @@ impl Blockchain {
             {
                 return false;
             }
-            let expected_consumer = self.block_reward_consumer.0 as u128
+            let expected_consumer = self.block_reward.0 as u128
                 + b.storage_sub_ct.0 as u128
                 + b.read_sub_ct.0 as u128
                 + b.compute_sub_ct.0 as u128
-                + fee_tot_consumer;
-            let expected_industrial = self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+                + fee_tot_consumer
+                + fee_tot_industrial;
+            let expected_industrial = 0u128;
             if coinbase_consumer_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
@@ -5688,7 +5625,7 @@ pub fn spawn_purge_loop_thread(
                         if ttl_delta > 0 {
                             log_event(
                                 "mempool",
-                                diagnostics::log::Level::Info,
+                                diagnostics::log::Level::INFO,
                                 "purge_loop",
                                 "",
                                 0,
@@ -5701,7 +5638,7 @@ pub fn spawn_purge_loop_thread(
                         if orphan_delta > 0 {
                             log_event(
                                 "mempool",
-                                diagnostics::log::Level::Info,
+                                diagnostics::log::Level::INFO,
                                 "purge_loop",
                                 "",
                                 0,
@@ -6010,8 +5947,7 @@ mod tests {
     #[test]
     fn read_subsidy_split_distribution() {
         let mut bc = Blockchain::default();
-        bc.block_reward_consumer = TokenAmount::new(0);
-        bc.block_reward_industrial = TokenAmount::new(0);
+        bc.block_reward = TokenAmount::new(0);
         bc.beta_storage_sub_ct_raw = 0;
         bc.kappa_cpu_sub_ct_raw = 0;
         bc.lambda_bytes_out_sub_ct_raw = 0;
@@ -6096,8 +6032,7 @@ mod tests {
     #[test]
     fn reject_ack_with_invalid_selection_receipt() {
         let mut bc = Blockchain::default();
-        bc.block_reward_consumer = TokenAmount::new(0);
-        bc.block_reward_industrial = TokenAmount::new(0);
+        bc.block_reward = TokenAmount::new(0);
         let signing = SigningKey::from_bytes(&[11u8; 32]);
         let mut ack = signed_ack(&signing, 100, "viewer.test", "provider-1");
         ack.selection_receipt = Some(SelectionReceipt {

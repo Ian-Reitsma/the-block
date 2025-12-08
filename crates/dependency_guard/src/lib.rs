@@ -7,6 +7,10 @@ use std::process::Command;
 
 mod json;
 
+/// Proc-macro infrastructure crates that are allowed even with FIRST_PARTY_ONLY=1
+/// These are necessary for derive macros to function.
+const PROC_MACRO_ALLOWLIST: &[&str] = &["proc-macro2", "quote", "syn", "unicode-ident"];
+
 /// Error returned when the dependency guard fails.
 #[derive(Debug)]
 pub struct GuardError {
@@ -221,7 +225,10 @@ fn detect_third_party_precise(metadata: &str) -> Option<BTreeSet<String>> {
         }
         if let Some((name, Some(source))) = package_sources.get(&pkg_id) {
             if source.starts_with("registry+") || source.starts_with("git+") {
-                offenders.insert(name.clone());
+                // Skip proc-macro infrastructure crates
+                if !PROC_MACRO_ALLOWLIST.contains(&name.as_str()) {
+                    offenders.insert(name.clone());
+                }
             }
         }
     }
@@ -251,7 +258,11 @@ fn detect_third_party_naive(metadata: &str) -> BTreeSet<String> {
             if let Some(rest) = metadata[name_start..].find('"') {
                 let name = &metadata[name_start..name_start + rest];
                 if !name.trim().is_empty() {
-                    offenders.insert(name.trim().to_string());
+                    let name_str = name.trim();
+                    // Skip proc-macro infrastructure crates
+                    if !PROC_MACRO_ALLOWLIST.contains(&name_str) {
+                        offenders.insert(name_str.to_string());
+                    }
                 }
             }
         }

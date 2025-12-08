@@ -29,7 +29,7 @@ fn register_persists() {
     let (pk, sig) = sign_msg("alice", &sk, 1);
     {
         let mut reg = HandleRegistry::open(path);
-        let outcome = reg.register_handle("alice", &pk, &sig, 1).unwrap();
+        let outcome = reg.register_handle("alice", &pk, None, &sig, 1).unwrap();
         assert_eq!(outcome.normalized_handle, "alice");
         assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
     }
@@ -53,9 +53,9 @@ fn duplicate_rejected() {
     let (pk1, sig1) = sign_msg("bob", &sk1, 1);
     let (pk2, sig2) = sign_msg("bob", &sk2, 1);
     let mut reg = HandleRegistry::open(path);
-    reg.register_handle("bob", &pk1, &sig1, 1).unwrap();
+    reg.register_handle("bob", &pk1, None, &sig1, 1).unwrap();
     let err = reg
-        .register_handle("bob", &pk2, &sig2, 1)
+        .register_handle("bob", &pk2, None, &sig2, 1)
         .err()
         .expect("duplicate registration should fail");
     assert!(matches!(err, HandleError::Duplicate));
@@ -69,14 +69,14 @@ fn replay_and_higher_nonce() {
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
     let (pk, sig1) = sign_msg("carol", &sk, 1);
     let mut reg = HandleRegistry::open(path);
-    reg.register_handle("carol", &pk, &sig1, 1).unwrap();
+    reg.register_handle("carol", &pk, None, &sig1, 1).unwrap();
     let (_, sig1r) = sign_msg("carol", &sk, 1);
     assert!(matches!(
-        reg.register_handle("carol", &pk, &sig1r, 1),
+        reg.register_handle("carol", &pk, None, &sig1r, 1),
         Err(HandleError::LowNonce)
     ));
     let (_, sig2) = sign_msg("carol", &sk, 2);
-    let outcome = reg.register_handle("carol", &pk, &sig2, 2).unwrap();
+    let outcome = reg.register_handle("carol", &pk, None, &sig2, 2).unwrap();
     assert_eq!(outcome.normalized_handle, "carol");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
 }
@@ -90,11 +90,11 @@ fn reserved_and_case_conflict() {
     let (pk, sig) = sign_msg("Sys/Admin", &sk, 1);
     let mut reg = HandleRegistry::open(path);
     assert!(matches!(
-        reg.register_handle("sys/root", &pk, &sig, 1),
+        reg.register_handle("sys/root", &pk, None, &sig, 1),
         Err(HandleError::Reserved)
     ));
     let (pk2, sig2) = sign_msg("Alice", &sk, 2);
-    let outcome = reg.register_handle("Alice", &pk2, &sig2, 2).unwrap();
+    let outcome = reg.register_handle("Alice", &pk2, None, &sig2, 2).unwrap();
     assert_eq!(outcome.normalized_handle, "alice");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
     assert!(reg.resolve_handle("alice").is_some());
@@ -108,7 +108,7 @@ fn approximate_handles_report_accuracy() {
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
     let (pk, sig) = sign_msg("École", &sk, 1);
     let mut reg = HandleRegistry::open(path);
-    let outcome = reg.register_handle("École", &pk, &sig, 1).unwrap();
+    let outcome = reg.register_handle("École", &pk, None, &sig, 1).unwrap();
     assert_eq!(outcome.normalized_handle, "ecole");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Approximate);
 }

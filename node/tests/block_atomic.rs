@@ -2,7 +2,7 @@
 use the_block::{
     blockchain::process::{commit, validate_and_apply},
     transaction::{sign_tx, RawTxPayload},
-    Account, Blockchain, TokenAmount, TokenBalance,
+    Account, Blockchain, TokenBalance,
 };
 
 #[test]

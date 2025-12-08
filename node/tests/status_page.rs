@@ -1,12 +1,11 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "gateway")]
 
-use httpd::{HttpClient, Method};
-use node::http_client;
+use httpd::Method;
 use runtime::net::TcpListener;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use sys::tempfile;
+use the_block::http_client;
 use the_block::web::status;
 use the_block::Blockchain;
 

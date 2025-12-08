@@ -124,6 +124,7 @@ fn build_in_memory_harness(
         min_unique_viewers: 1,
         min_host_count: 1,
         min_provider_count: 1,
+        ..Default::default()
     });
 
     let harness = Arc::new(RpcHarness {
@@ -352,6 +353,7 @@ fn ad_market_rpc_endpoints_round_trip() {
         min_unique_viewers: 1,
         min_host_count: 1,
         min_provider_count: 1,
+        ..Default::default()
     });
 
     let harness = Arc::new(RpcHarness {
@@ -657,6 +659,7 @@ fn governance_updates_distribution_policy() {
         dids,
         runtime_cfg,
         market: market.clone(),
+        in_memory_market: None,
         admin_token,
         readiness: None,
     };
@@ -1205,10 +1208,16 @@ fn ad_market_committee_blocks_invalid_when_attestation_required() {
             badges: Vec::new(),
             domains: vec!["example.test".into()],
             metadata: HashMap::new(),
+            mesh_payload: None,
+            placement: Default::default(),
         }],
         targeting: CampaignTargeting {
             domains: vec!["example.test".into()],
             badges: Vec::new(),
+            geo: Default::default(),
+            device: Default::default(),
+            crm_lists: Default::default(),
+            delivery: Default::default(),
         },
         metadata: HashMap::new(),
     };
@@ -1624,14 +1633,14 @@ fn rpc_record_conversion_rejects_unknown_creative() {
         params,
         Some("Advertiser missing-adv:token".into()),
     ));
-    assert_eq!(error.code(), -32001);
+    assert_eq!(error.code, -32001);
 }
 
 #[testkit::tb_serial]
 fn mesh_holdout_treatment_settlement_has_mesh_fields() {
     let mut config = MarketplaceConfig::default();
-    config.oracles.prices.ct_price_usd_micros = 1_000_000;
-    config.oracles.prices.it_price_usd_micros = 1_000_000;
+    config.default_oracle.ct_price_usd_micros = 1_000_000;
+    config.default_oracle.it_price_usd_micros = 1_000_000;
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_mesh_holdout_treatment", config);
     let market = harness
@@ -1794,7 +1803,7 @@ fn rpc_record_conversion_requires_authorization_header() {
         }
     });
     let error = expect_error(harness.call("ad_market.record_conversion", params));
-    assert_eq!(error.code(), -32030);
+    assert_eq!(error.code, -32030);
     let budget_after = expect_ok(harness.call("ad_market.budget", Value::Null));
     let after_errors = budget_after
         .get("conversion_summary")
@@ -1861,7 +1870,7 @@ fn rpc_record_conversion_rejects_invalid_token() {
         params,
         Some("Advertiser adv-bad:wrong-token".into()),
     ));
-    assert_eq!(error.code(), -32033);
+    assert_eq!(error.code, -32033);
 }
 
 #[testkit::tb_serial]
@@ -1912,7 +1921,7 @@ fn rpc_record_conversion_rejects_account_mismatch() {
         params,
         Some("Advertiser adv-other:mismatch-token".into()),
     ));
-    assert_eq!(error.code(), -32031);
+    assert_eq!(error.code, -32031);
 }
 
 #[testkit::tb_serial]
@@ -1960,7 +1969,7 @@ fn rpc_record_conversion_rejects_missing_token_metadata() {
         params,
         Some("Advertiser adv-missing:any".into()),
     ));
-    assert_eq!(error.code(), -32032);
+    assert_eq!(error.code, -32032);
 }
 
 #[testkit::tb_serial]
@@ -1968,7 +1977,7 @@ fn rpc_record_conversion_rejects_malformed_payload() {
     let config = MarketplaceConfig::default();
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_record_conversion_malformed", config);
-    let params = json_mod::json!({
+    let params = foundation_serialization::json!({
         "campaign_id": "cmp-malformed",
         "creative_id": "creative-malformed",
         "advertiser_account": "adv-malformed"
@@ -1978,7 +1987,7 @@ fn rpc_record_conversion_rejects_malformed_payload() {
         params,
         Some("Advertiser adv-malformed:token".into()),
     ));
-    assert_eq!(error.code(), -32602);
+    assert_eq!(error.code, -32602);
 }
 
 #[testkit::tb_serial]
@@ -2034,7 +2043,7 @@ fn presence_listing_and_reservation_flow() {
         "{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"missing\",\"slot_count\":5}",
     );
     let err = expect_error(harness.call("ad_market.reserve_presence", missing_bucket));
-    assert_eq!(err.code(), -32034);
+    assert_eq!(err.code, -32034);
 
     let ok_params = parse_json(&format!(
         "{{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"{}\",\"slot_count\":12}}",

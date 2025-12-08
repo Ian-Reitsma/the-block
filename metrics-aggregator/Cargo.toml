@@ -26,7 +26,7 @@ foundation_object_store = { path = "../crates/foundation_object_store", optional
 [dev-dependencies]
 rand = { path = "../crates/rand" }
 the_block = { path = "../node" }
-tb-sim = { path = "../sim" }
+# tb-sim = { path = "../sim" }  # Excluded: dependency_fault feature configuration issues
 
 [build-dependencies]
 dependency_guard = { path = "../crates/dependency_guard" }

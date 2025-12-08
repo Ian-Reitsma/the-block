@@ -37,27 +37,10 @@ fn canonical_source_key(path: &Path) -> String {
         .to_string()
 }
 
+// Telemetry removed - module doesn't exist in log-indexer-cli
 #[cfg(feature = "telemetry")]
-fn increment_indexed_metric(correlation_id: &str) {
-    crate::telemetry::LOG_ENTRIES_INDEXED_TOTAL.inc();
-    use std::borrow::Cow;
-    let label: Cow<'_, str> = if correlation_id.is_empty() {
-        Cow::Borrowed("unknown")
-    } else {
-        let shortened: String = correlation_id.chars().take(64).collect();
-        let trimmed = shortened.trim();
-        if trimmed.is_empty() {
-            Cow::Borrowed("unknown")
-        } else if trimmed.len() == shortened.len() {
-            Cow::Owned(shortened)
-        } else {
-            Cow::Owned(trimmed.to_string())
-        }
-    };
-    crate::telemetry::LOG_CORRELATION_INDEX_TOTAL
-        .ensure_handle_for_label_values(&[label.as_ref()])
-        .expect("telemetry label set not registered")
-        .inc();
+fn increment_indexed_metric(_correlation_id: &str) {
+    // TODO: wire telemetry when module exists
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -68,6 +51,7 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
     let store = LogStore::open(db_path)?;
     let results = search_logs_in_store(&store, filter)?;
 
+    // Telemetry removed - module doesn't exist
     #[cfg(feature = "telemetry")]
     {
         if filter
@@ -77,7 +61,8 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
             .unwrap_or(false)
             && results.is_empty()
         {
-            crate::telemetry::record_log_correlation_fail();
+            // TODO: wire telemetry when module exists
+            // crate::telemetry::record_log_correlation_fail();
         }
     }
 

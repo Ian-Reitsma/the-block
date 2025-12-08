@@ -2,18 +2,22 @@
 
 extern crate foundation_serde as serde;
 
-use foundation_serde::{Deserialize, Serialize};
+// Import derive macros (which will also bring in the traits for derive usage)
+use foundation_serde_derive::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serde")]
 struct Named {
     alpha: u32,
     beta: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serde")]
 struct Tuple(u32, u64);
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serde")]
 enum Sample {
     Unit,
     Named { x: u8, y: u8 },

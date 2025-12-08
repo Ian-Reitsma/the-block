@@ -292,8 +292,8 @@ mod tests {
                 reason: DutyFailureReason::ChallengeAccepted,
             },
         };
-        let value = foundation_serialization::json::to_value(&record);
-        let decoded = DutyRecord::deserialize(&value).expect("decode duty record");
+        let value = foundation_serialization::json::to_value(&record).expect("serialize duty record");
+        let decoded: DutyRecord = foundation_serialization::json::from_value(value).expect("decode duty record");
         assert_eq!(decoded.penalty(), 5);
         assert!(!decoded.is_pending());
     }
@@ -319,8 +319,8 @@ mod tests {
                 completed_at: 444,
             },
         };
-        let value = foundation_serialization::json::to_value(&record);
-        let decoded = DutyRecord::deserialize(&value).expect("decode settlement duty");
+        let value = foundation_serialization::json::to_value(&record).expect("serialize settlement duty");
+        let decoded: DutyRecord = foundation_serialization::json::from_value(value).expect("decode settlement duty");
         assert_eq!(decoded.commitment(), Some([9u8; 32]));
         assert_eq!(decoded.completed_reward(), 12);
     }

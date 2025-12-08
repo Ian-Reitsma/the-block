@@ -14,5 +14,7 @@ crypto_suite = { path = "../crates/crypto_suite" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 
 [dev-dependencies]
+coding = { path = "../crates/coding" }
+storage_market = { path = "../storage_market" }
 sys = { path = "../crates/sys" }
 the_block = { path = "../node", features = ["telemetry"] }

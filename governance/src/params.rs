@@ -400,11 +400,11 @@ const fn default_inflation_controller_gain() -> i64 {
     100 // 0.10 in millis
 }
 
-const fn default_min_annual_issuance_ct() -> i64 {
+const fn default_min_annual_issuance_block() -> i64 {
     50_000_000
 }
 
-const fn default_max_annual_issuance_ct() -> i64 {
+const fn default_max_annual_issuance_block() -> i64 {
     300_000_000
 }
 
@@ -668,10 +668,10 @@ pub struct Params {
     pub inflation_target_bps: i64,
     #[serde(default = "default_inflation_controller_gain")]
     pub inflation_controller_gain: i64,
-    #[serde(default = "default_min_annual_issuance_ct")]
-    pub min_annual_issuance_ct: i64,
-    #[serde(default = "default_max_annual_issuance_ct")]
-    pub max_annual_issuance_ct: i64,
+    #[serde(default = "default_min_annual_issuance_block")]
+    pub min_annual_issuance_block: i64,
+    #[serde(default = "default_max_annual_issuance_block")]
+    pub max_annual_issuance_block: i64,
     // Layer 2: Subsidy Allocator
     #[serde(default = "default_storage_util_target_bps")]
     pub storage_util_target_bps: i64,
@@ -828,8 +828,8 @@ impl Default for Params {
             // Economic Control Laws
             inflation_target_bps: default_inflation_target_bps(),
             inflation_controller_gain: default_inflation_controller_gain(),
-            min_annual_issuance_ct: default_min_annual_issuance_ct(),
-            max_annual_issuance_ct: default_max_annual_issuance_ct(),
+            min_annual_issuance_block: default_min_annual_issuance_block(),
+            max_annual_issuance_block: default_max_annual_issuance_block(),
             storage_util_target_bps: default_storage_util_target_bps(),
             storage_margin_target_bps: default_storage_margin_target_bps(),
             compute_util_target_bps: default_compute_util_target_bps(),
@@ -1293,8 +1293,8 @@ impl Params {
             // Economic Control Laws - use defaults if not present for backward compatibility
             inflation_target_bps: obj.get("inflation_target_bps").and_then(Value::as_i64).unwrap_or_else(default_inflation_target_bps),
             inflation_controller_gain: obj.get("inflation_controller_gain").and_then(Value::as_i64).unwrap_or_else(default_inflation_controller_gain),
-            min_annual_issuance_ct: obj.get("min_annual_issuance_ct").and_then(Value::as_i64).unwrap_or_else(default_min_annual_issuance_ct),
-            max_annual_issuance_ct: obj.get("max_annual_issuance_ct").and_then(Value::as_i64).unwrap_or_else(default_max_annual_issuance_ct),
+            min_annual_issuance_block: obj.get("min_annual_issuance_block").and_then(Value::as_i64).unwrap_or_else(default_min_annual_issuance_block),
+            max_annual_issuance_block: obj.get("max_annual_issuance_block").and_then(Value::as_i64).unwrap_or_else(default_max_annual_issuance_block),
             storage_util_target_bps: obj.get("storage_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_util_target_bps),
             storage_margin_target_bps: obj.get("storage_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_margin_target_bps),
             compute_util_target_bps: obj.get("compute_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_compute_util_target_bps),

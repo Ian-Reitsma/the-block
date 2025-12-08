@@ -21,12 +21,12 @@ pub const VERSION: &str = "2.0";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RpcError {
     pub code: i32,
-    pub message: Cow<'static, str>,
+    pub message: String,
 }
 
 impl RpcError {
     /// Construct a new error with the supplied code and message.
-    pub fn new(code: i32, message: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),

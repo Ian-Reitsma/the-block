@@ -26,9 +26,9 @@ pub struct ControlLawUpdateEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct InflationUpdateEvent {
-    pub previous_annual_issuance_ct: u64,
-    pub new_annual_issuance_ct: u64,
-    pub circulating_ct: u64,
+    pub previous_annual_issuance_block: u64,
+    pub new_annual_issuance_block: u64,
+    pub circulating_block: u64,
     pub realized_inflation_bps: u16,
     pub target_inflation_bps: u16,
     pub error_bps: i32, // π* - π_t (can be negative)
@@ -70,14 +70,14 @@ pub struct AdMarketUpdateEvent {
     pub platform_take_bps: u16,
     pub user_share_bps: u16,
     pub publisher_share_bps: u16,
-    pub total_ad_spend_ct: u64,
+    pub total_ad_spend_block: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TariffUpdateEvent {
     pub tariff_bps: u16,
-    pub non_kyc_volume_ct: u64,
+    pub non_kyc_volume_block: u64,
     pub treasury_contribution_bps: u16,
     pub target_contribution_bps: u16,
 }
@@ -98,9 +98,9 @@ impl ControlLawUpdateEvent {
                 .unwrap_or_default()
                 .as_secs(),
             inflation: InflationUpdateEvent {
-                previous_annual_issuance_ct: previous_issuance,
-                new_annual_issuance_ct: snapshot.inflation.annual_issuance_ct,
-                circulating_ct: snapshot.inflation.circulating_ct,
+                previous_annual_issuance_block: previous_issuance,
+                new_annual_issuance_block: snapshot.inflation.annual_issuance_block,
+                circulating_block: snapshot.inflation.circulating_block,
                 realized_inflation_bps: snapshot.inflation.realized_inflation_bps,
                 target_inflation_bps: snapshot.inflation.target_inflation_bps,
                 error_bps: (snapshot.inflation.target_inflation_bps as i32)
@@ -135,11 +135,11 @@ impl ControlLawUpdateEvent {
                 platform_take_bps: snapshot.ad_market.platform_take_bps,
                 user_share_bps: snapshot.ad_market.user_share_bps,
                 publisher_share_bps: snapshot.ad_market.publisher_share_bps,
-                total_ad_spend_ct: total_ad_spend,
+                total_ad_spend_block: total_ad_spend,
             },
             tariff: TariffUpdateEvent {
                 tariff_bps: snapshot.tariff.tariff_bps,
-                non_kyc_volume_ct: snapshot.tariff.non_kyc_volume_ct,
+                non_kyc_volume_block: snapshot.tariff.non_kyc_volume_block,
                 treasury_contribution_bps: snapshot.tariff.treasury_contribution_bps,
                 target_contribution_bps,
             },

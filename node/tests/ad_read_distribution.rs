@@ -1,8 +1,8 @@
 #![cfg(feature = "integration-tests")]
 
 use ad_market::{
-    DeliveryChannel, ResourceFloorBreakdown, SelectionCandidateTrace, SelectionCohortTrace,
-    SelectionReceipt, SettlementBreakdown, UpliftEstimate,
+    DeliveryChannel, DomainTier, ResourceFloorBreakdown, SelectionCandidateTrace,
+    SelectionCohortTrace, SelectionReceipt, SettlementBreakdown, UpliftEstimate,
 };
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex;
@@ -68,8 +68,13 @@ fn dummy_receipt(
     SelectionReceipt {
         cohort: SelectionCohortTrace {
             domain: "example.com".into(),
+            domain_tier: DomainTier::default(),
+            domain_owner: None,
             provider: Some("provider".into()),
             badges: Vec::new(),
+            interest_tags: Vec::new(),
+            presence_bucket: None,
+            selectors_version: 0,
             bytes: 0,
             price_per_mib_usd_micros: 0,
             delivery_channel: DeliveryChannel::Http,

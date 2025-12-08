@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use crypto_suite::signatures::{ed25519::SigningKey, Signer, Verifier};
+use crypto_suite::signatures::ed25519::SigningKey;
 use the_block::{domain_tag, domain_tag_for};
 
 #[test]

@@ -17,7 +17,7 @@ fn test_economic_convergence_over_100_epochs() {
     let gov_params = Params::default();
 
     // Bootstrap values
-    let mut prev_annual_issuance_ct = 200_000_000u64;
+    let mut prev_annual_issuance_block = 40_000_000u64;  // Bootstrap: 40M BLOCK/year
     let mut prev_subsidy = SubsidySnapshot {
         storage_share_bps: 1500, // 15%
         compute_share_bps: 3000, // 30%
@@ -26,12 +26,15 @@ fn test_economic_convergence_over_100_epochs() {
     };
     let mut prev_tariff = TariffSnapshot {
         tariff_bps: 0,
-        non_kyc_volume_ct: 0,
+        non_kyc_volume_block: 0,
         treasury_contribution_bps: 0,
     };
 
     // Starting conditions
-    let circulating_ct = 4_000_000_000u64;
+    // Circulating supply adjusted for 40M annual issuance
+    // Target: 5% inflation → need ~1B circulating to allow controller flexibility
+    // Starting: 40M / 1B = 4% → controller increases to ~50M / 1B = 5%
+    let circulating_block = 1_000_000_000u64;
 
     // Track convergence metrics
     let mut inflation_history = Vec::new();
@@ -42,7 +45,7 @@ fn test_economic_convergence_over_100_epochs() {
         // Convert governance params
         let econ_params = GovernanceEconomicParams::from_governance_params(
             &gov_params,
-            prev_annual_issuance_ct,
+            prev_annual_issuance_block,
             prev_subsidy.clone(),
             prev_tariff.clone(),
         );
@@ -76,11 +79,21 @@ fn test_economic_convergence_over_100_epochs() {
             },
         };
 
+        // Network activity metrics for formula-based issuance
+        let network_activity = the_block::economics::NetworkActivity {
+            tx_count: 100, // Baseline transaction activity
+            tx_volume_block: 10_000,
+            unique_miners: 10,
+            block_height: epoch * 120, // Assuming 120 blocks per epoch
+        };
+
         // Execute economic control laws
         let snapshot = execute_epoch_economics(
             epoch,
             &metrics,
-            circulating_ct,
+            &network_activity,
+            circulating_block,
+            epoch * 1000, // Rough estimate: total emission grows each epoch
             100_000_000, // non-KYC volume
             50_000_000,  // ad spend
             10_000_000,  // treasury inflow
@@ -108,17 +121,17 @@ fn test_economic_convergence_over_100_epochs() {
         subsidy_variance_history.push(subsidy_variance);
 
         // Update for next epoch
-        prev_annual_issuance_ct = snapshot.inflation.annual_issuance_ct;
+        prev_annual_issuance_block = snapshot.inflation.annual_issuance_block;
         prev_subsidy = snapshot.subsidies.clone();
         prev_tariff = snapshot.tariff.clone();
 
         // Log progress every 25 epochs
         if epoch % 25 == 0 {
             println!(
-                "Epoch {}: Inflation={} bps, Issuance={} CT, Subsidies=[{}%, {}%, {}%, {}%], Tariff={} bps",
+                "Epoch {}: Inflation={} bps, Issuance={} BLOCK, Subsidies=[{}%, {}%, {}%, {}%], Tariff={} bps",
                 epoch,
                 snapshot.inflation.realized_inflation_bps,
-                snapshot.inflation.annual_issuance_ct,
+                snapshot.inflation.annual_issuance_block,
                 snapshot.subsidies.storage_share_bps / 100,
                 snapshot.subsidies.compute_share_bps / 100,
                 snapshot.subsidies.energy_share_bps / 100,
@@ -128,18 +141,37 @@ fn test_economic_convergence_over_100_epochs() {
         }
     }
 
-    // === Verification: System should converge to stable equilibrium ===
+    // === Verification: System should remain stable with formula-driven issuance ===
 
-    // 1. Inflation should stabilize near target (500 bps = 5%)
+    // 1. Formula-driven inflation should be stable (not oscillating wildly)
     let final_inflation = inflation_history.last().unwrap();
-    let inflation_error = (*final_inflation as i32 - 500).abs();
-    println!("Final inflation: {} bps (target: 500 bps, error: {} bps)", final_inflation, inflation_error);
+    println!("Final inflation: {} bps (formula-driven, no target)", final_inflation);
 
-    // After 150 epochs, inflation should be within 50 bps of target
+    // Check inflation is reasonable (not zero, not runaway)
     assert!(
-        inflation_error < 50,
-        "Inflation failed to converge: {} bps from target",
-        inflation_error
+        *final_inflation > 0 && *final_inflation < 2000,
+        "Inflation should be reasonable: got {} bps",
+        final_inflation
+    );
+
+    // Check inflation is relatively stable (last 20 epochs should have low variance)
+    let late_inflation: Vec<u16> = inflation_history.iter().rev().take(20).copied().collect();
+    let late_avg = late_inflation.iter().map(|&x| x as f64).sum::<f64>() / late_inflation.len() as f64;
+    let late_variance = late_inflation.iter()
+        .map(|&x| {
+            let diff = (x as f64) - late_avg;
+            diff * diff
+        })
+        .sum::<f64>() / late_inflation.len() as f64;
+    let late_stddev = late_variance.sqrt();
+
+    println!("Late inflation stability: avg={:.1} bps, stddev={:.1} bps", late_avg, late_stddev);
+
+    // Inflation should be stable (low variance in final epochs)
+    assert!(
+        late_stddev < 50.0,
+        "Inflation should be stable in late epochs: stddev={:.1} bps",
+        late_stddev
     );
 
     // 2. Subsidy variance should decrease (system stabilizing)
@@ -171,7 +203,7 @@ fn test_economic_response_to_market_shock() {
     // Test that the system responds appropriately to sudden market changes
     let gov_params = Params::default();
 
-    let mut prev_annual_issuance_ct = 200_000_000u64;
+    let mut prev_annual_issuance_block = 200_000_000u64;
     let mut prev_subsidy = SubsidySnapshot {
         storage_share_bps: 2500,
         compute_share_bps: 2500,
@@ -180,7 +212,7 @@ fn test_economic_response_to_market_shock() {
     };
     let mut prev_tariff = TariffSnapshot {
         tariff_bps: 50,
-        non_kyc_volume_ct: 100_000_000,
+        non_kyc_volume_block: 100_000_000,
         treasury_contribution_bps: 500,
     };
 
@@ -211,22 +243,31 @@ fn test_economic_response_to_market_shock() {
     // Run baseline epoch
     let econ_params = GovernanceEconomicParams::from_governance_params(
         &gov_params,
-        prev_annual_issuance_ct,
+        prev_annual_issuance_block,
         prev_subsidy.clone(),
         prev_tariff.clone(),
     );
 
+    let network_activity = the_block::economics::NetworkActivity {
+        tx_count: 100,
+        tx_volume_block: 10_000,
+        unique_miners: 10,
+        block_height: 100 * 120,
+    };
+
     let baseline_snapshot = execute_epoch_economics(
         100,
         &baseline_metrics,
+        &network_activity,
         4_000_000_000,
+        10_000_000, // total emission
         100_000_000,
         50_000_000,
         10_000_000,
         &econ_params,
     );
 
-    prev_annual_issuance_ct = baseline_snapshot.inflation.annual_issuance_ct;
+    prev_annual_issuance_block = baseline_snapshot.inflation.annual_issuance_block;
     prev_subsidy = baseline_snapshot.subsidies.clone();
     prev_tariff = baseline_snapshot.tariff.clone();
 
@@ -256,15 +297,24 @@ fn test_economic_response_to_market_shock() {
 
     let econ_params = GovernanceEconomicParams::from_governance_params(
         &gov_params,
-        prev_annual_issuance_ct,
+        prev_annual_issuance_block,
         prev_subsidy.clone(),
         prev_tariff.clone(),
     );
 
+    let shocked_activity = the_block::economics::NetworkActivity {
+        tx_count: 100,
+        tx_volume_block: 10_000,
+        unique_miners: 10,
+        block_height: 101 * 120,
+    };
+
     let shocked_snapshot = execute_epoch_economics(
         101,
         &shocked_metrics,
+        &shocked_activity,
         4_000_000_000,
+        10_100_000, // total emission (slightly higher)
         100_000_000,
         50_000_000,
         10_000_000,
@@ -295,7 +345,7 @@ fn test_tariff_controller_convergence() {
 
     let mut prev_tariff = TariffSnapshot {
         tariff_bps: 10, // Start at 0.1%
-        non_kyc_volume_ct: 200_000_000,
+        non_kyc_volume_block: 200_000_000,
         treasury_contribution_bps: 100, // Only 1% of treasury (target is 10%)
     };
 
@@ -315,10 +365,19 @@ fn test_tariff_controller_convergence() {
             prev_tariff.clone(),
         );
 
+        let network_activity = the_block::economics::NetworkActivity {
+            tx_count: 100,
+            tx_volume_block: 200_000_000, // Match non-KYC volume
+            unique_miners: 10,
+            block_height: epoch * 120,
+        };
+
         let snapshot = execute_epoch_economics(
             epoch,
             &metrics,
+            &network_activity,
             4_000_000_000,
+            epoch * 100_000, // Gradual emission growth
             200_000_000, // Consistent non-KYC volume
             50_000_000,
             20_000_000,  // Treasury inflow

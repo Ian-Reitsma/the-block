@@ -2,7 +2,7 @@
 #![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::Once;
-use the_block::dex::{escrow::Escrow, DexStore, Order, OrderBook, Side, TrustLedger};
+use the_block::dex::{storage::EscrowState, DexStore, Order, OrderBook, Side, TrustLedger};
 
 mod util;
 use util::temp::temp_dir;
@@ -11,7 +11,6 @@ static PY_INIT: Once = Once::new();
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     PY_INIT.call_once(|| {
-        pyo3::prepare_freethreaded_python();
     });
 }
 
@@ -41,10 +40,10 @@ fn order_book_persists() {
         price: 5,
         max_slippage_bps: 0,
     };
-    let mut escrow = Escrow::default();
-    book.place_settle_persist(buy, &mut ledger, Some(&mut store), &mut escrow)
+    let mut esc_state = EscrowState::default();
+    book.place_settle_persist(buy, &mut ledger, Some(&mut store), &mut esc_state)
         .unwrap();
-    book.place_settle_persist(sell, &mut ledger, Some(&mut store), &mut escrow)
+    book.place_settle_persist(sell, &mut ledger, Some(&mut store), &mut esc_state)
         .unwrap();
     assert_eq!(store.trades().len(), 1);
     drop(book);

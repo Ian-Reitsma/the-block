@@ -2,6 +2,7 @@
 #![cfg(feature = "telemetry")]
 
 use the_block::net::{record_request, reset_peer_metrics, set_peer_metrics_sample_rate};
+use the_block::telemetry;
 use the_block::telemetry::PEER_REQUEST_TOTAL;
 
 #[test]

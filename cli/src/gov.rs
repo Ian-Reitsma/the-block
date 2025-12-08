@@ -13,12 +13,12 @@ use foundation_serialization::json::Value;
 use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
-    encode_transport_provider_policy, registry, validate_disbursement_payload, DisbursementDetails,
-    DisbursementPayload, DisbursementProposalMetadata, DisbursementQuorum, DisbursementReceipt,
+    encode_transport_provider_policy, registry,
     DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
     Vote, VoteChoice,
+    treasury::{ExpectedReceipt, QuorumSpec},
 };
 use httpd::ClientError;
 use std::io::{self, Write};
@@ -1927,7 +1927,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                     summary: "Brief description of the disbursement purpose".to_string(),
                     deps: vec![],
                     attachments: vec![],
-                    quorum: governance::DisbursementQuorum {
+                    quorum: QuorumSpec {
                         operators_ppm: 670000,
                         builders_ppm: 670000,
                     },
@@ -1941,7 +1941,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                     amount_it: 0,
                     memo: "Example disbursement memo".to_string(),
                     scheduled_epoch: 180000,
-                    expected_receipts: vec![governance::DisbursementReceipt {
+                    expected_receipts: vec![ExpectedReceipt {
                         account: "example-account".to_string(),
                         amount_ct: 100000000,
                         amount_it: 0,
@@ -2059,7 +2059,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             receipts_json,
             rpc,
         } => {
-            #[derive(Serialize)]
+            #[derive(Serialize, Deserialize)]
             #[serde(crate = "foundation_serialization::serde")]
             struct ReceiptInput {
                 account: String,

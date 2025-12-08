@@ -254,6 +254,9 @@ fn treasury_fetch_remote_combines_responses() {
             status: DisbursementStatus::Draft {
                 created_at: 1_700_000_000,
             },
+            proposal: None,
+            expected_receipts: Vec::new(),
+            receipts: Vec::new(),
         }],
         next_cursor: Some(12),
     };

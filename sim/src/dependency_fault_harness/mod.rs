@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,7 +22,7 @@ use p2p_overlay::{
     Discovery, OverlayDiagnostics, OverlayResult, OverlayService, PeerId as OverlayPeerId,
     UptimeHandle, UptimeInfo, UptimeMetrics, UptimeStore,
 };
-use runtime::{self, JoinError};
+use runtime::{self};
 use storage_engine::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,
 };
@@ -397,7 +396,7 @@ fn execute_scenario(
         None
     };
 
-    let json = json::to_vec_pretty(metrics).map_err(|err| anyhow!(err.to_string()))?;
+    let json = json::to_vec_pretty(metrics).map_err(|err| anyhow!(err))?;
     fs::write(&metrics_path, json)?;
     let mut summary = File::create(&summary_path)?;
     write_summary(&mut summary, metrics)?;
@@ -497,10 +496,11 @@ fn run_match_loop(
             lane.metadata.fairness_window = Duration::from_millis(5);
         }
     }
-    matcher::seed_orders(lanes)?;
+    matcher::seed_orders(lanes).map_err(|e| anyhow!("{e}"))?;
     let tempdir = tempfile::Builder::new()
         .prefix("dependency-fault-receipts")
-        .tempdir()?;
+        .tempdir()
+        .map_err(|e| anyhow!("{e}"))?;
     let store = ReceiptStore::open(tempdir.path().to_str().unwrap());
     let stop = CancellationToken::new();
     let fault = injector.get(FaultTarget::Runtime);
@@ -531,7 +531,7 @@ fn run_match_loop(
     });
     match runtime::block_on(async { handle.await }) {
         Ok(_) => {}
-        Err(JoinError(err)) => {
+        Err(err) => {
             metrics.match_loop_errors += 1;
             logs.push(format!("match loop join error: {err}"));
         }
@@ -639,7 +639,7 @@ fn run_storage_probe(
 ) -> Result<()> {
     let fault = injector.get(FaultTarget::Storage);
     let storage = SimulatedStorage::new(selections.storage, fault);
-    storage.ensure_cf("receipts")?;
+    storage.ensure_cf("receipts").map_err(|e| anyhow!("{e}"))?;
     for idx in 0..4 {
         let key = format!("key-{idx}");
         let value = format!("value-{idx}");
@@ -718,7 +718,7 @@ fn run_coding_probe(
 }
 
 fn run_crypto_probe(
-    selections: &BackendSelections,
+    _selections: &BackendSelections,
     injector: &FaultInjector,
     metrics: &mut ScenarioMetrics,
     logs: &mut Vec<String>,
@@ -826,10 +826,7 @@ fn run_rpc_probe(
     let start = Instant::now();
     let response = consensus::difficulty(&blockchain);
     metrics.rpc_latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-    metrics.consensus_difficulty = response
-        .get("difficulty")
-        .and_then(|v| v.as_u64())
-        .unwrap_or_default();
+    metrics.consensus_difficulty = response.difficulty;
     Ok(())
 }
 
@@ -900,7 +897,7 @@ impl SimulatedOverlay {
             self.logs.push("overlay panic injected".into());
             return Ok(());
         }
-        let service = MockOverlayService::new(self.backend, self.fault, &mut self.logs);
+        let service = MockOverlayService::new(self.backend, self.fault);
         let local = MockPeerId("local".into());
         let mut discovery = service.discovery(local.clone());
         for idx in 0..5 {
@@ -945,23 +942,18 @@ impl SimulatedOverlay {
     }
 }
 
-struct MockOverlayService<'a> {
+struct MockOverlayService {
     backend: OverlayBackendChoice,
+    #[allow(dead_code)] // Used for fault injection in future tests
     fault: Option<FaultKind>,
-    logs: &'a mut Vec<String>,
     store: Arc<MockUptimeStore>,
 }
 
-impl<'a> MockOverlayService<'a> {
-    fn new(
-        backend: OverlayBackendChoice,
-        fault: Option<FaultKind>,
-        logs: &'a mut Vec<String>,
-    ) -> Self {
+impl MockOverlayService {
+    fn new(backend: OverlayBackendChoice, fault: Option<FaultKind>) -> Self {
         Self {
             backend,
             fault,
-            logs,
             store: Arc::new(MockUptimeStore::default()),
         }
     }
@@ -1027,6 +1019,7 @@ impl UptimeHandle for MockUptimeHandle {
 }
 
 impl MockUptimeHandle {
+    #[allow(dead_code)] // Helper for future test assertions
     fn claims(&self) -> u64 {
         self.store.claims()
     }
@@ -1034,7 +1027,7 @@ impl MockUptimeHandle {
 
 impl UptimeMetrics for MockUptimeStore {}
 
-impl OverlayService for MockOverlayService<'_> {
+impl OverlayService for MockOverlayService {
     type Peer = MockPeerId;
     type Address = String;
 
@@ -1257,7 +1250,7 @@ impl InMemoryStore {
     fn list_cfs(&self) -> StorageResult<Vec<String>> {
         let guard = self.data.lock().unwrap();
         let mut seen = HashSet::new();
-        for (key, _) in guard.keys() {
+        for key in guard.keys() {
             if !key.0.is_empty() {
                 seen.insert(key.0.clone());
             }

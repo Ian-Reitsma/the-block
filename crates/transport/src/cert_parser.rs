@@ -336,12 +336,10 @@ fn oid_to_string(data: &[u8]) -> Result<String, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_suite::signatures::ed25519::SigningKey;
     use foundation_tls::{generate_self_signed_ed25519, SelfSignedCertParams};
 
     #[test]
     fn parses_basic_certificate_metadata() {
-        let signing_key = SigningKey::generate();
         let params = SelfSignedCertParams::builder()
             .subject_cn("test")
             .validity(
@@ -351,8 +349,8 @@ mod tests {
             .serial([0u8; 16])
             .build()
             .unwrap();
-        let cert = generate_self_signed_ed25519(&signing_key, &params).unwrap();
-        let metadata = parse_certificate_metadata(&cert).unwrap();
+        let cert_result = generate_self_signed_ed25519(&params).unwrap();
+        let metadata = parse_certificate_metadata(&cert_result.certificate).unwrap();
         assert_eq!(metadata.algorithm_oid, "1.3.101.112");
         assert_eq!(metadata.public_key.len(), 32);
         assert!(metadata.not_before < metadata.not_after);

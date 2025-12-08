@@ -964,17 +964,18 @@ impl OperationalController {
         {
             return None;
         }
-        let smooth_prev = *self.smooth_history.back().unwrap();
+        // Get previous values from second-to-last position (before current push)
+        let smooth_prev = *self.smooth_history.get(self.smooth_history.len() - 2).unwrap();
         let smooth_std = std_dev(&self.smooth_history);
         let smooth_enter_band = smooth_prev + smooth_std;
         let smooth_exit_band = smooth_prev + smooth_std * 2.0;
 
-        let slope_prev = self.slope_history.back().unwrap().abs();
+        let slope_prev = self.slope_history.get(self.slope_history.len() - 2).unwrap().abs();
         let slope_std = std_dev(&self.slope_history);
         let slope_enter_band = slope_prev.max(slope_std);
         let slope_exit_band = slope_prev + slope_std.max(0.0) * 2.0;
 
-        let replay_prev = *self.replay_history.back().unwrap();
+        let replay_prev = *self.replay_history.get(self.replay_history.len() - 2).unwrap();
         let replay_delta = diff_percentile(&self.replay_history, 0.75);
 
         let peer_median = median_f64(&self.peer_history).unwrap_or(peer);
@@ -1204,11 +1205,12 @@ impl NamingController {
             return None;
         }
 
-        let txt_prev = *self.txt_history.back().unwrap();
-        let dispute_prev = *self.dispute_history.back().unwrap();
-        let completion_prev = *self.completion_history.back().unwrap();
-        let settlement_prev = *self.settlement_history.back().unwrap();
-        let duration_prev = *self.duration_history.back().unwrap();
+        // Get previous values from second-to-last position (before current push)
+        let txt_prev = *self.txt_history.get(self.txt_history.len() - 2).unwrap();
+        let dispute_prev = *self.dispute_history.get(self.dispute_history.len() - 2).unwrap();
+        let completion_prev = *self.completion_history.get(self.completion_history.len() - 2).unwrap();
+        let settlement_prev = *self.settlement_history.get(self.settlement_history.len() - 2).unwrap();
+        let duration_prev = *self.duration_history.get(self.duration_history.len() - 2).unwrap();
 
         let txt_delta = diff_percentile(&self.txt_history, 0.75);
         let dispute_delta = diff_percentile(&self.dispute_history, 0.75);
@@ -1353,11 +1355,13 @@ impl NamingController {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)] // Test utility struct for future test expansion
     struct MockProvider {
         chain_samples: VecDeque<ChainSample>,
         dns_samples: VecDeque<DnsSample>,
     }
 
+    #[allow(dead_code)] // Test utility methods for future test expansion
     impl MockProvider {
         fn new() -> Self {
             Self {

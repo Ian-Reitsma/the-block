@@ -1,11 +1,10 @@
 #![deny(warnings)]
 
 use crypto_suite::hex::{decode, encode};
-use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
 use foundation_serialization::json::{self, Map as JsonMap, Number, Value};
-use httpd::{BlockingClient, Method};
-use node::http_client;
+use httpd::Method;
+use the_block::http_client;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -451,7 +450,7 @@ fn main() {
     match cli.command {
         Commands::Generate => {
             let wallet = Wallet::generate();
-            println!("{}", encode(wallet.public_key()));
+            println!("{}", encode(wallet.public_key().to_bytes()));
         }
         Commands::Sign {
             seed,
@@ -610,7 +609,7 @@ fn main() {
         }
         Commands::EscrowRelease { id, amount, url } => {
             let mut params = JsonMap::new();
-            params.insert("id".into(), Value::String(id));
+            params.insert("id".into(), Value::String(id.to_string()));
             params.insert("amount".into(), Value::Number(Number::from(amount)));
             let payload = json_rpc_envelope("dex.escrow_release", Value::Object(params));
             let client = http_client::blocking_client();

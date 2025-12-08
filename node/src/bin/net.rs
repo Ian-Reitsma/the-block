@@ -1,8 +1,6 @@
-use crypto_suite::signatures::Signer;
 use foundation_regex::Regex;
 use foundation_serialization::json::{self, Map as JsonMap, Value};
-use foundation_tui::color::Colorize;
-use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
+use httpd::{ClientError as HttpClientError, Method, Uri};
 use runtime::net::TcpStream;
 use runtime::{
     self,
@@ -26,7 +24,7 @@ use cli_core::{
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
-use node::http_client;
+use the_block::http_client;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OutputFormat {
@@ -99,6 +97,7 @@ fn json_string(value: impl Into<String>) -> Value {
     Value::String(value.into())
 }
 
+#[allow(dead_code)]
 fn json_array(items: Vec<Value>) -> Value {
     Value::Array(items)
 }
@@ -211,8 +210,10 @@ enum StatsCmd {
         /// RPC server address
         rpc: String,
         /// Minimum reputation to include
+        #[allow(dead_code)]
         min_reputation: Option<f64>,
         /// Only include peers active within this many seconds
+        #[allow(dead_code)]
         active_within: Option<u64>,
         /// Encrypt archive with the in-house envelope recipient
         recipient: Option<String>,
@@ -1098,8 +1099,8 @@ fn main() {
                                 (
                                     "params".to_owned(),
                                     json_object_from(vec![
-                                        ("offset".to_owned(), Value::from(off)),
-                                        ("limit".to_owned(), Value::from(limit)),
+                                        ("offset".to_owned(), Value::from(off as u64)),
+                                        ("limit".to_owned(), Value::from(limit as u64)),
                                     ]),
                                 ),
                             ]);
@@ -1243,7 +1244,7 @@ fn main() {
                                             &line
                                         };
                                         if drop_ratio > DROP_ALERT {
-                                            println!("{}", line.red());
+                                            println!("{line}");
                                         } else {
                                             println!("{line}");
                                         }
@@ -1327,7 +1328,7 @@ fn main() {
                                         rep, thr, until
                                     );
                                         if drop_ratio > DROP_ALERT {
-                                            println!("{}", line.red());
+                                            println!("{line}");
                                         } else {
                                             println!("{line}");
                                         }

@@ -283,25 +283,21 @@ fn read_session(reader: &mut Reader<'_>) -> binary_struct::Result<SessionPolicy>
 }
 
 fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
-    writer.write_u64(18);
+    writer.write_u64(16); // Updated from 18 after emission/block_reward consolidation
     writer.write_string("schema_version");
     writer.write_u64(disk.schema_version as u64);
     writer.write_string("chain");
     write_vec(writer, &disk.chain, "chain", block_binary::write_block)?;
     writer.write_string("accounts");
     write_account_map(writer, &disk.accounts)?;
-    writer.write_string("emission_consumer");
-    writer.write_u64(disk.emission_consumer);
-    writer.write_string("emission_industrial");
-    writer.write_u64(disk.emission_industrial);
-    writer.write_string("emission_consumer_year_ago");
-    writer.write_u64(disk.emission_consumer_year_ago);
+    writer.write_string("emission");
+    writer.write_u64(disk.emission);
+    writer.write_string("emission_year_ago");
+    writer.write_u64(disk.emission_year_ago);
     writer.write_string("inflation_epoch_marker");
     writer.write_u64(disk.inflation_epoch_marker);
-    writer.write_string("block_reward_consumer");
-    writer.write_u64(disk.block_reward_consumer.get());
-    writer.write_string("block_reward_industrial");
-    writer.write_u64(disk.block_reward_industrial.get());
+    writer.write_string("block_reward");
+    writer.write_u64(disk.block_reward.get());
     writer.write_string("block_height");
     writer.write_u64(disk.block_height);
     writer.write_string("mempool");
@@ -327,10 +323,13 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut schema_version = None;
     let mut chain = None;
     let mut accounts = None;
+    let mut emission = None;
     let mut emission_consumer = None;
     let mut emission_industrial = None;
+    let mut emission_year_ago = None;
     let mut emission_consumer_year_ago = None;
     let mut inflation_epoch_marker = None;
+    let mut block_reward = None;
     let mut block_reward_consumer = None;
     let mut block_reward_industrial = None;
     let mut block_height = None;
@@ -343,7 +342,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut epoch_bytes_out = None;
     let mut recent_timestamps = None;
 
-    decode_struct(reader, Some(18), |key, reader| match key {
+    decode_struct(reader, None, |key, reader| match key { // Changed from Some(18) to support both old (18) and new (16) field formats
         "schema_version" => assign_once(
             &mut schema_version,
             reader.read_u64().map(|v| v as usize)?,
@@ -355,6 +354,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             "chain",
         ),
         "accounts" => assign_once(&mut accounts, read_account_map(reader)?, "accounts"),
+        "emission" => assign_once(&mut emission, reader.read_u64()?, "emission"),
         "emission_consumer" => assign_once(
             &mut emission_consumer,
             reader.read_u64()?,
@@ -365,6 +365,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             reader.read_u64()?,
             "emission_industrial",
         ),
+        "emission_year_ago" => assign_once(&mut emission_year_ago, reader.read_u64()?, "emission_year_ago"),
         "emission_consumer_year_ago" => assign_once(
             &mut emission_consumer_year_ago,
             reader.read_u64()?,
@@ -375,6 +376,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             reader.read_u64()?,
             "inflation_epoch_marker",
         ),
+        "block_reward" => assign_once(&mut block_reward, reader.read_u64()?, "block_reward"),
         "block_reward_consumer" => assign_once(
             &mut block_reward_consumer,
             reader.read_u64()?,
@@ -419,12 +421,14 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
         schema_version: schema_version.unwrap_or_default(),
         chain: chain.unwrap_or_default(),
         accounts: accounts.unwrap_or_default(),
-        emission_consumer: emission_consumer.unwrap_or_default(),
-        emission_industrial: emission_industrial.unwrap_or_default(),
-        emission_consumer_year_ago: emission_consumer_year_ago.unwrap_or_default(),
+        emission: emission.unwrap_or_else(|| {
+            emission_consumer.unwrap_or_default() + emission_industrial.unwrap_or_default()
+        }),
+        emission_year_ago: emission_year_ago.unwrap_or_else(|| emission_consumer_year_ago.unwrap_or_default()),
         inflation_epoch_marker: inflation_epoch_marker.unwrap_or_default(),
-        block_reward_consumer: TokenAmount::new(block_reward_consumer.unwrap_or_default()),
-        block_reward_industrial: TokenAmount::new(block_reward_industrial.unwrap_or_default()),
+        block_reward: TokenAmount::new(block_reward.unwrap_or_else(|| {
+            block_reward_consumer.unwrap_or_default() + block_reward_industrial.unwrap_or_default()
+        })),
         block_height: block_height.unwrap_or_default(),
         mempool: mempool.unwrap_or_default(),
         base_fee: base_fee.unwrap_or_default(),
@@ -1194,12 +1198,10 @@ mod tests {
             schema_version: 9,
             chain: vec![block],
             accounts: HashMap::from([(String::from("alice"), account.clone())]),
-            emission_consumer: 7,
-            emission_industrial: 8,
-            emission_consumer_year_ago: 9,
+            emission: 15, // Was: emission_consumer: 7 + emission_industrial: 8
+            emission_year_ago: 9,
             inflation_epoch_marker: 10,
-            block_reward_consumer: TokenAmount::new(11),
-            block_reward_industrial: TokenAmount::new(12),
+            block_reward: TokenAmount::new(23), // Was: block_reward_consumer: 11 + block_reward_industrial: 12
             block_height: 13,
             mempool: vec![MempoolEntryDisk {
                 sender: "alice".into(),
@@ -1221,7 +1223,7 @@ mod tests {
         let decoded = decode_chain_disk(&bytes).expect("decode");
         assert_eq!(decoded.schema_version, disk.schema_version);
         assert_eq!(decoded.accounts.get("alice"), Some(&account));
-        assert_eq!(decoded.emission_consumer, disk.emission_consumer);
+        assert_eq!(decoded.emission, disk.emission);
         assert_eq!(decoded.base_fee, disk.base_fee);
         assert_eq!(decoded.recent_timestamps, disk.recent_timestamps);
         assert_eq!(

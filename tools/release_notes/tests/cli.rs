@@ -6,6 +6,7 @@ use std::{
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
+use foundation_serialization::json;
 
 fn fixture_dir() -> PathBuf {
     let base = env::temp_dir();

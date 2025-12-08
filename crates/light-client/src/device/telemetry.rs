@@ -25,12 +25,10 @@ pub fn record(snapshot: &DeviceStatusSnapshot) {
     LIGHT_CLIENT_DEVICE_STATUS
         .ensure_handle_for_label_values(&["wifi", freshness])
         .expect(runtime::telemetry::LABEL_REGISTRATION_ERR)
-        .expect("device status wifi gauge")
         .set(if snapshot.status.on_wifi { 1.0 } else { 0.0 });
     LIGHT_CLIENT_DEVICE_STATUS
         .ensure_handle_for_label_values(&["charging", freshness])
         .expect(runtime::telemetry::LABEL_REGISTRATION_ERR)
-        .expect("device status charging gauge")
         .set(if snapshot.status.is_charging {
             1.0
         } else {
@@ -39,6 +37,5 @@ pub fn record(snapshot: &DeviceStatusSnapshot) {
     LIGHT_CLIENT_DEVICE_STATUS
         .ensure_handle_for_label_values(&["battery", freshness])
         .expect(runtime::telemetry::LABEL_REGISTRATION_ERR)
-        .expect("device status battery gauge")
         .set(snapshot.status.battery_level as f64);
 }

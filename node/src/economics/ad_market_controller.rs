@@ -78,12 +78,12 @@ impl AdMarketDriftController {
     ///          P_{t+1} = 1 - T_{t+1} - U_{t+1}
     ///
     /// # Arguments
-    /// * `total_ad_spend_ct` - Total ad spend this epoch (for measuring actual splits)
+    /// * `total_ad_spend_block` - Total ad spend this epoch (for measuring actual splits)
     ///
     /// # Note
     /// In practice, you'd measure actual T and U from ad settlement records.
     /// For this initial implementation, we drift toward targets from governance.
-    pub fn compute_next_splits(&self, _total_ad_spend_ct: u64) -> AdMarketSnapshot {
+    pub fn compute_next_splits(&self, _total_ad_spend_block: u64) -> AdMarketSnapshot {
         // For now, just return governance targets
         // In full implementation, measure actual splits from ad settlement
         // and apply drift: T_next = T_current + k × (T_target - T_current)
@@ -152,33 +152,33 @@ impl TariffController {
     ///          τ_{t+1} = clamp(τ_{t+1}, τ_min, τ_max)
     ///
     /// # Arguments
-    /// * `non_kyc_volume_ct` - Total non-KYC transaction volume this epoch
-    /// * `treasury_inflow_ct` - Total treasury inflow this epoch
+    /// * `non_kyc_volume_block` - Total non-KYC transaction volume this epoch
+    /// * `treasury_inflow_block` - Total treasury inflow this epoch
     /// * `current_tariff_bps` - Current tariff rate
     ///
     /// # Returns
     /// Updated tariff snapshot
     pub fn compute_next_tariff(
         &self,
-        non_kyc_volume_ct: u64,
-        treasury_inflow_ct: u64,
+        non_kyc_volume_block: u64,
+        treasury_inflow_block: u64,
         current_tariff_bps: u16,
     ) -> TariffSnapshot {
         // Avoid division by zero
-        if non_kyc_volume_ct == 0 || treasury_inflow_ct == 0 {
+        if non_kyc_volume_block == 0 || treasury_inflow_block == 0 {
             return TariffSnapshot {
                 tariff_bps: current_tariff_bps,
-                non_kyc_volume_ct,
+                non_kyc_volume_block,
                 treasury_contribution_bps: 0,
             };
         }
 
         // Target revenue from tariffs: R_target × I_treasury
         let r_target_ratio = (self.params.public_revenue_target_bps as f64) / 10_000.0;
-        let r_needed = (treasury_inflow_ct as f64) * r_target_ratio;
+        let r_needed = (treasury_inflow_block as f64) * r_target_ratio;
 
         // Implied tariff: τ = R_needed / F_tariff
-        let tau_implied = r_needed / (non_kyc_volume_ct as f64);
+        let tau_implied = r_needed / (non_kyc_volume_block as f64);
         let tau_implied_bps = (tau_implied * 10_000.0).round() as u16;
 
         // Drift toward implied tariff
@@ -191,9 +191,9 @@ impl TariffController {
             .clamp(self.params.tariff_min_bps, self.params.tariff_max_bps);
 
         // Compute actual treasury contribution
-        let actual_revenue = (non_kyc_volume_ct as f64) * (tau_next_bps as f64) / 10_000.0;
-        let contribution_ratio = if treasury_inflow_ct > 0 {
-            actual_revenue / (treasury_inflow_ct as f64)
+        let actual_revenue = (non_kyc_volume_block as f64) * (tau_next_bps as f64) / 10_000.0;
+        let contribution_ratio = if treasury_inflow_block > 0 {
+            actual_revenue / (treasury_inflow_block as f64)
         } else {
             0.0
         };
@@ -201,7 +201,7 @@ impl TariffController {
 
         TariffSnapshot {
             tariff_bps: tau_next_bps,
-            non_kyc_volume_ct,
+            non_kyc_volume_block,
             treasury_contribution_bps: contribution_bps,
         }
     }
@@ -265,11 +265,11 @@ mod tests {
         };
         let controller = TariffController::new(params);
 
-        // Treasury inflow = 1M CT
-        // Want 10% from tariffs = 100k CT
-        // Non-KYC volume = 2M CT
+        // Treasury inflow = 1M BLOCK
+        // Want 10% from tariffs = 100k BLOCK
+        // Non-KYC volume = 2M BLOCK
         // Current tariff = 50 bps = 0.5%
-        // Actual revenue = 2M × 0.005 = 10k CT (only 1% of treasury, not 10%)
+        // Actual revenue = 2M × 0.005 = 10k BLOCK (only 1% of treasury, not 10%)
 
         let treasury_inflow = 1_000_000u64;
         let non_kyc_volume = 2_000_000u64;
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_tariff_above_target() {
-        // Tariff is producing too much revenue → should decrease
+        // Tariff too low → should increase toward target
         let params = TariffParams {
             public_revenue_target_bps: 1000, // Want 10% of treasury
             drift_rate: 0.05,
@@ -298,11 +298,12 @@ mod tests {
         };
         let controller = TariffController::new(params);
 
-        // Treasury inflow = 1M CT
-        // Want 10% from tariffs = 100k CT
-        // Non-KYC volume = 500k CT
+        // Treasury inflow = 1M BLOCK
+        // Want 10% from tariffs = 100k BLOCK
+        // Non-KYC volume = 500k BLOCK
         // Current tariff = 50 bps = 0.5%
-        // Actual revenue = 500k × 0.005 = 2.5k CT (0.25% of treasury, below target)
+        // Implied tariff: 100k / 500k = 20% = 2000 bps (way above max)
+        // With drift 0.05: 50 + 0.05 * (2000 - 50) = 50 + 97.5 = 147.5 ≈ 148 bps
 
         let treasury_inflow = 1_000_000u64;
         let non_kyc_volume = 500_000u64;
@@ -314,9 +315,10 @@ mod tests {
             current_tariff,
         );
 
-        // Need 100k from 500k volume → 20% tariff (2000 bps)
-        // But max is 200 bps, so should clamp
-        assert_eq!(snapshot.tariff_bps, 200); // Clamped at max
+        // Should drift up but not hit max yet (5% drift)
+        assert!(snapshot.tariff_bps > current_tariff);
+        assert!(snapshot.tariff_bps < 200); // Not at max yet
+        assert_eq!(snapshot.tariff_bps, 148); // Calculated drift
     }
 
     #[test]
@@ -328,6 +330,7 @@ mod tests {
             tariff_min_bps: 10,
             tariff_max_bps: 200,
         };
+        let tariff_min = params.tariff_min_bps;
         let controller = TariffController::new(params);
 
         // Very high volume → would want near-zero tariff
@@ -342,7 +345,7 @@ mod tests {
         );
 
         // Should clamp at min
-        assert!(snapshot.tariff_bps >= params.tariff_min_bps);
+        assert!(snapshot.tariff_bps >= tariff_min);
     }
 
     #[test]
@@ -354,6 +357,6 @@ mod tests {
         let snapshot = controller.compute_next_tariff(0, 1_000_000, 50);
 
         assert_eq!(snapshot.tariff_bps, 50);
-        assert_eq!(snapshot.non_kyc_volume_ct, 0);
+        assert_eq!(snapshot.non_kyc_volume_block, 0);
     }
 }

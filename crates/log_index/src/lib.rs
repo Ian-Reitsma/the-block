@@ -429,7 +429,7 @@ fn migrate_sqlite(store: &LogStore, legacy_path: &Path) -> Result<()> {
 }
 
 #[cfg(feature = "sqlite-migration")]
-fn row_to_stored_entry(row: &Row<'_>) -> foundation_sqlite::Result<StoredEntry> {
+fn row_to_stored_entry(row: &Row) -> foundation_sqlite::Result<StoredEntry> {
     Ok(StoredEntry {
         id: row.get::<_, i64>("id")?.max(0) as u64,
         timestamp: row.get("timestamp")?,

@@ -487,9 +487,13 @@ mod tests {
     fn infers_quinn_provider_when_metadata_missing() {
         let mut hello = base_hello();
         hello.transport = Transport::Quic;
+        #[cfg(feature = "inhouse")]
+        let expected = Some(transport::ProviderKind::Inhouse);
+        #[cfg(not(feature = "inhouse"))]
+        let expected = Some(transport::ProviderKind::Quinn);
         assert_eq!(
             super::infer_quic_provider_kind(&hello),
-            Some(transport::ProviderKind::Quinn)
+            expected
         );
     }
 

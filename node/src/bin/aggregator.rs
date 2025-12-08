@@ -7,8 +7,8 @@ use cli_core::{
 };
 use foundation_serialization::json::{self, Value};
 use foundation_telemetry::TelemetrySummary;
-use httpd::{BlockingClient, Method};
-use node::http_client;
+use httpd::Method;
+use the_block::http_client;
 use std::collections::VecDeque;
 
 mod cli_support;

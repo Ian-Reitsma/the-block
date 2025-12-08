@@ -393,7 +393,7 @@ impl<T> JoinHandle<T> {
 
 impl<T> Future for JoinHandle<T>
 where
-    T: Send + 'static,
+    T: Send + 'static + Unpin,
 {
     type Output = Result<T, JoinError>;
 

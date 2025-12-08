@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use rand::{rngs::StdRng, seq::SliceRandom};
 use sys::tempfile::tempdir;
 use the_block::SimpleDb;
 

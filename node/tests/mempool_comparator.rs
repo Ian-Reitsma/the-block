@@ -14,7 +14,6 @@ use util::temp::temp_dir;
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
 }
@@ -128,11 +127,9 @@ fn ordering_stable_after_heap_rebuild() {
     bc.accounts.remove("d");
     bc.purge_expired();
 
-    let mut after: Vec<MempoolEntry> = bc
-        .mempool_consumer
-        .iter()
-        .map(|e| e.value().clone())
-        .collect();
+    let mut after: Vec<MempoolEntry> = Vec::new();
+    bc.mempool_consumer
+        .for_each(|_key, value| after.push(value.clone()));
     after.sort_by(|a, b| mempool_cmp(a, b, bc.tx_ttl));
     let actual: Vec<[u8; 32]> = after.iter().map(|e| e.tx.id()).collect();
 

@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use rand::SeedableRng as _;
 use rand::{rngs::StdRng, Rng};
 use std::fs;
 use std::io::Write;

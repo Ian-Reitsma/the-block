@@ -331,10 +331,10 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
     let mut payload = vec![0u8; bytes];
     rng.fill_bytes(&mut payload);
 
-    let rs = erasure_coder_for("reed-solomon", data, parity)?;
-    let xor = erasure_coder_for("xor", data, parity)?;
-    let hybrid = compressor_for("lz77-rle", 4)?;
-    let rle = compressor_for("rle", 0)?;
+    let rs = erasure_coder_for("reed-solomon", data, parity).context("failed to create reed-solomon coder")?;
+    let xor = erasure_coder_for("xor", data, parity).context("failed to create xor coder")?;
+    let hybrid = compressor_for("lz77-rle", 4).context("failed to create lz77-rle compressor")?;
+    let rle = compressor_for("rle", 0).context("failed to create rle compressor")?;
 
     let mut rs_encode = Duration::ZERO;
     let mut rs_decode = Duration::ZERO;
@@ -349,7 +349,7 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
 
     for _ in 0..iterations {
         let start = Instant::now();
-        let rs_batch = rs.encode(&payload)?;
+        let rs_batch = rs.encode(&payload).context("reed-solomon encode failed")?;
         rs_encode += start.elapsed();
         let mut rs_slots = vec![None; rs_batch.shards.len()];
         for shard in rs_batch.shards.iter() {
@@ -359,12 +359,12 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
             rs_slots[0] = None;
         }
         let start = Instant::now();
-        let recovered = rs.reconstruct(&rs_batch.metadata, &rs_slots)?;
+        let recovered = rs.reconstruct(&rs_batch.metadata, &rs_slots).context("reed-solomon reconstruct failed")?;
         rs_decode += start.elapsed();
         assert_eq!(recovered, payload);
 
         let start = Instant::now();
-        let xor_batch = xor.encode(&payload)?;
+        let xor_batch = xor.encode(&payload).context("xor encode failed")?;
         xor_encode += start.elapsed();
         let mut xor_slots = vec![None; xor_batch.shards.len()];
         for shard in xor_batch.shards.iter() {
@@ -374,25 +374,25 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
             xor_slots[0] = None;
         }
         let start = Instant::now();
-        let xor_recovered = xor.reconstruct(&xor_batch.metadata, &xor_slots)?;
+        let xor_recovered = xor.reconstruct(&xor_batch.metadata, &xor_slots).context("xor reconstruct failed")?;
         xor_decode += start.elapsed();
         assert_eq!(xor_recovered, payload);
 
         let start = Instant::now();
-        let hybrid_buf = hybrid.compress(&payload)?;
+        let hybrid_buf = hybrid.compress(&payload).context("lz77-rle compress failed")?;
         hybrid_compress += start.elapsed();
         hybrid_bytes += hybrid_buf.len();
         let start = Instant::now();
-        let hybrid_plain = hybrid.decompress(&hybrid_buf)?;
+        let hybrid_plain = hybrid.decompress(&hybrid_buf).context("lz77-rle decompress failed")?;
         hybrid_decompress += start.elapsed();
         assert_eq!(hybrid_plain, payload);
 
         let start = Instant::now();
-        let rle_buf = rle.compress(&payload)?;
+        let rle_buf = rle.compress(&payload).context("rle compress failed")?;
         rle_compress += start.elapsed();
         rle_bytes += rle_buf.len();
         let start = Instant::now();
-        let rle_plain = rle.decompress(&rle_buf)?;
+        let rle_plain = rle.decompress(&rle_buf).context("rle decompress failed")?;
         rle_decompress += start.elapsed();
         assert_eq!(rle_plain, payload);
     }

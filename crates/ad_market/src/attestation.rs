@@ -575,7 +575,8 @@ mod tests {
     use super::*;
     use crate::test_support::TestMetricsRecorder;
     use crate::{
-        DeliveryChannel, SelectionCandidateTrace, SelectionCohortTrace, UpliftHoldoutAssignment,
+        DeliveryChannel, DomainTier, SelectionCandidateTrace, SelectionCohortTrace,
+        UpliftHoldoutAssignment,
     };
     use std::collections::HashSet;
     use verifier_selection::{self, CommitteeConfig as CommitteePolicy};
@@ -606,8 +607,13 @@ mod tests {
         let mut receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "example.com".into(),
+                domain_tier: DomainTier::default(),
+                domain_owner: None,
                 provider: Some("wallet".into()),
                 badges: vec!["badge-a".into(), "badge-b".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: 0,
                 bytes: 512,
                 price_per_mib_usd_micros: 1_500_000,
                 delivery_channel: DeliveryChannel::Http,

@@ -4,7 +4,7 @@ use std::fs::File;
 use std::time::Instant;
 
 fn main() {
-    let guard = ProfilerGuard::new(100).ok();
+    let guard = ProfilerGuard::new(100);
     let start = Instant::now();
     let mut digest = [0u8; 32];
     for _ in 0..100_000 {

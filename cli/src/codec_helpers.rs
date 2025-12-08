@@ -9,6 +9,7 @@ where
 }
 
 #[cfg(feature = "wasm-metadata")]
+#[allow(dead_code)] // Used conditionally with feature flag
 pub fn json_to_vec<T>(value: &T) -> codec::Result<Vec<u8>>
 where
     T: Serialize,
