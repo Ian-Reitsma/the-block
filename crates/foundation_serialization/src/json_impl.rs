@@ -14,6 +14,9 @@ use serde::ser::{
 };
 use serde::{Deserialize, Deserializer, Serialize};
 
+// Note: "serde" is aliased to foundation_serde in Cargo.toml - all imports above
+// now refer to our first-party traits!
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error returned when JSON encoding or decoding fails.
@@ -978,6 +981,11 @@ impl ser::Serializer for ValueSerializer {
         Ok(Value::from(v))
     }
 
+    fn serialize_i128(self, v: i128) -> Result<Value> {
+        // JSON doesn't natively support i128, so serialize as string
+        Ok(Value::String(v.to_string()))
+    }
+
     fn serialize_u8(self, v: u8) -> Result<Value> {
         Ok(Value::from(v))
     }
@@ -992,6 +1000,21 @@ impl ser::Serializer for ValueSerializer {
 
     fn serialize_u64(self, v: u64) -> Result<Value> {
         Ok(Value::from(v))
+    }
+
+    fn serialize_u128(self, v: u128) -> Result<Value> {
+        // JSON doesn't natively support u128, so serialize as string
+        Ok(Value::String(v.to_string()))
+    }
+
+    fn serialize_usize(self, v: usize) -> Result<Value> {
+        // Serialize as u64 for platform independence
+        Ok(Value::from(v as u64))
+    }
+
+    fn serialize_isize(self, v: isize) -> Result<Value> {
+        // Serialize as i64 for platform independence
+        Ok(Value::from(v as i64))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Value> {
@@ -1353,21 +1376,51 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     where
         V: Visitor<'de>,
     {
-        self.deserialize_i64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_i64()
+                    .ok_or_else(|| Error::message("expected signed integer"))?;
+                if value > i8::MAX as i64 || value < i8::MIN as i64 {
+                    return Err(Error::message("value out of range for i8"));
+                }
+                visitor.visit_i8(value as i8)
+            }
+            other => Err(unexpected_type("i8", other)),
+        }
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        self.deserialize_i64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_i64()
+                    .ok_or_else(|| Error::message("expected signed integer"))?;
+                if value > i16::MAX as i64 || value < i16::MIN as i64 {
+                    return Err(Error::message("value out of range for i16"));
+                }
+                visitor.visit_i16(value as i16)
+            }
+            other => Err(unexpected_type("i16", other)),
+        }
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        self.deserialize_i64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_i64()
+                    .ok_or_else(|| Error::message("expected signed integer"))?;
+                if value > i32::MAX as i64 || value < i32::MIN as i64 {
+                    return Err(Error::message("value out of range for i32"));
+                }
+                visitor.visit_i32(value as i32)
+            }
+            other => Err(unexpected_type("i32", other)),
+        }
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
@@ -1383,25 +1436,69 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
         }
     }
 
+    fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            Value::String(s) => {
+                let v = s.parse::<i128>()
+                    .map_err(|_| Error::message("invalid i128 string"))?;
+                visitor.visit_i128(v)
+            }
+            other => Err(unexpected_type("i128", other)),
+        }
+    }
+
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        self.deserialize_u64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_u64()
+                    .ok_or_else(|| Error::message("expected unsigned integer"))?;
+                if value > u8::MAX as u64 {
+                    return Err(Error::message("value out of range for u8"));
+                }
+                visitor.visit_u8(value as u8)
+            }
+            other => Err(unexpected_type("u8", other)),
+        }
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        self.deserialize_u64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_u64()
+                    .ok_or_else(|| Error::message("expected unsigned integer"))?;
+                if value > u16::MAX as u64 {
+                    return Err(Error::message("value out of range for u16"));
+                }
+                visitor.visit_u16(value as u16)
+            }
+            other => Err(unexpected_type("u16", other)),
+        }
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        self.deserialize_u64(visitor)
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_u64()
+                    .ok_or_else(|| Error::message("expected unsigned integer"))?;
+                if value > u32::MAX as u64 {
+                    return Err(Error::message("value out of range for u32"));
+                }
+                visitor.visit_u32(value as u32)
+            }
+            other => Err(unexpected_type("u32", other)),
+        }
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
@@ -1414,6 +1511,54 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
                 .ok_or_else(Error::invalid_number)
                 .and_then(|v| visitor.visit_u64(v)),
             other => Err(unexpected_type("unsigned integer", other)),
+        }
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            Value::String(s) => {
+                let v = s.parse::<u128>()
+                    .map_err(|_| Error::message("invalid u128 string"))?;
+                visitor.visit_u128(v)
+            }
+            other => Err(unexpected_type("u128", other)),
+        }
+    }
+
+    fn deserialize_usize<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_u64()
+                    .ok_or_else(|| Error::message("expected unsigned integer"))?;
+                if value > usize::MAX as u64 {
+                    return Err(Error::message("u64 value too large for usize on this platform"));
+                }
+                visitor.visit_usize(value as usize)
+            }
+            other => Err(unexpected_type("usize", other)),
+        }
+    }
+
+    fn deserialize_isize<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        match self.value {
+            Value::Number(n) => {
+                let value = n.as_i64()
+                    .ok_or_else(|| Error::message("expected signed integer"))?;
+                if value > isize::MAX as i64 || value < isize::MIN as i64 {
+                    return Err(Error::message("i64 value out of range for isize on this platform"));
+                }
+                visitor.visit_isize(value as isize)
+            }
+            other => Err(unexpected_type("isize", other)),
         }
     }
 
@@ -1734,9 +1879,9 @@ impl<'de> VariantAccess<'de> for UnitVariant {
         Ok(())
     }
 
-    fn newtype_variant_seed<T>(self, _seed: T) -> Result<T::Value>
+    fn newtype_variant<T>(self) -> Result<T>
     where
-        T: DeserializeSeed<'de>,
+        T: de::Deserialize<'de>,
     {
         Err(Error::message("expected unit variant"))
     }
@@ -1794,11 +1939,11 @@ impl<'de> VariantAccess<'de> for ComplexVariant {
         }
     }
 
-    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    fn newtype_variant<T>(self) -> Result<T>
     where
-        T: DeserializeSeed<'de>,
+        T: de::Deserialize<'de>,
     {
-        seed.deserialize(ValueDeserializer { value: self.value })
+        T::deserialize(ValueDeserializer { value: self.value })
     }
 
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>

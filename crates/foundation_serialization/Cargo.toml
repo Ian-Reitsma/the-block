@@ -11,3 +11,4 @@ default = []
 
 [dependencies]
 serde = { package = "foundation_serde", path = "../foundation_serde", default-features = false }
+foundation_serde_derive = { path = "../foundation_serde_derive" }
