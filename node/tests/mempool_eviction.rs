@@ -13,7 +13,6 @@ static INIT: Once = Once::new();
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     INIT.call_once(|| {
-        pyo3::prepare_freethreaded_python();
     });
 }
 

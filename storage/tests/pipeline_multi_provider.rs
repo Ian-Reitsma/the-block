@@ -9,7 +9,7 @@ static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 struct SettlementGuard {
     _lock: MutexGuard<'static, ()>,
-    _dir: tempfile::TempDir,
+    _dir: sys::tempfile::TempDir,
 }
 
 impl SettlementGuard {

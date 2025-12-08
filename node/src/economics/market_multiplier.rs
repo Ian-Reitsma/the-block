@@ -138,10 +138,10 @@ impl MarketMultiplierController {
         let m_u = 1.0 + params.util_responsiveness * util_gap;
 
         // Cost-coverage multiplier: m^(c) = 1 + k_c × ((c × (1 + m_target)) / p - 1)
-        let m_c = if metric.effective_payout_ct > 0.0 && metric.average_cost_ct > 0.0 {
+        let m_c = if metric.effective_payout_block > 0.0 && metric.average_cost_block > 0.0 {
             let m_target = (params.margin_target_bps as f64) / 10_000.0;
-            let cost_with_margin = metric.average_cost_ct * (1.0 + m_target);
-            let coverage_ratio = cost_with_margin / metric.effective_payout_ct;
+            let cost_with_margin = metric.average_cost_block * (1.0 + m_target);
+            let coverage_ratio = cost_with_margin / metric.effective_payout_block;
             let coverage_gap = coverage_ratio - 1.0;
             1.0 + params.cost_responsiveness * coverage_gap
         } else {
@@ -171,8 +171,8 @@ mod tests {
         let metrics = MarketMetrics {
             storage: MarketMetric {
                 utilization: 0.40, // At target (40%)
-                average_cost_ct: 100.0,
-                effective_payout_ct: 150.0, // 50% margin (at target)
+                average_cost_block: 100.0,
+                effective_payout_block: 150.0, // 50% margin (at target)
                 provider_margin: 0.50,
             },
             ..Default::default()
@@ -194,8 +194,8 @@ mod tests {
         let metrics = MarketMetrics {
             storage: MarketMetric {
                 utilization: 0.10, // Very low (target 40%)
-                average_cost_ct: 100.0,
-                effective_payout_ct: 150.0,
+                average_cost_block: 100.0,
+                effective_payout_block: 150.0,
                 provider_margin: 0.50,
             },
             ..Default::default()
@@ -216,8 +216,8 @@ mod tests {
         let metrics = MarketMetrics {
             energy: MarketMetric {
                 utilization: 0.50, // At target
-                average_cost_ct: 200.0, // High cost
-                effective_payout_ct: 150.0, // Below needed payout
+                average_cost_block: 200.0, // High cost
+                effective_payout_block: 150.0, // Below needed payout
                 provider_margin: -0.15, // Unprofitable
             },
             ..Default::default()
@@ -238,8 +238,8 @@ mod tests {
         let metrics = MarketMetrics {
             compute: MarketMetric {
                 utilization: 0.90, // Very high (target 60%)
-                average_cost_ct: 100.0,
-                effective_payout_ct: 300.0, // Very profitable
+                average_cost_block: 100.0,
+                effective_payout_block: 300.0, // Very profitable
                 provider_margin: 2.0, // 200% margin
             },
             ..Default::default()
@@ -260,8 +260,8 @@ mod tests {
         let metrics = MarketMetrics {
             energy: MarketMetric {
                 utilization: 0.0, // Zero utilization
-                average_cost_ct: 1000.0, // Very high cost
-                effective_payout_ct: 10.0, // Very low payout
+                average_cost_block: 1000.0, // Very high cost
+                effective_payout_block: 10.0, // Very low payout
                 provider_margin: -10.0, // Massively unprofitable
             },
             ..Default::default()
@@ -282,8 +282,8 @@ mod tests {
         let metrics = MarketMetrics {
             ad: MarketMetric {
                 utilization: 0.20, // Below target
-                average_cost_ct: 0.0, // No cost data
-                effective_payout_ct: 0.0, // No payout data
+                average_cost_block: 0.0, // No cost data
+                effective_payout_block: 0.0, // No payout data
                 provider_margin: 0.0,
             },
             ..Default::default()
@@ -314,8 +314,8 @@ mod tests {
         let metrics = MarketMetrics {
             energy: MarketMetric {
                 utilization: 0.20, // Low (target 50%)
-                average_cost_ct: 200.0,
-                effective_payout_ct: 150.0, // Below needed
+                average_cost_block: 200.0,
+                effective_payout_block: 150.0, // Below needed
                 provider_margin: -0.15,
             },
             ..Default::default()

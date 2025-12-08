@@ -21,28 +21,30 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
   - **Storage** (keeping files safe)
   - **Computation** (running programs)
   - **Bandwidth** (helping data move around)
-- **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving “cohorts” defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
-- **Single Currency (CT - Consumer Token)**: You can send and receive CT just like Bitcoin or cash, but it also pays for services on the network.
-- **Governance**: Instead of a small group deciding how the blockchain works, CT holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
+- **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving "cohorts" defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
+- **Single Currency (BLOCK)**: Fixed supply of 40 million BLOCK tokens (similar to Bitcoin's 21M cap). You can send and receive BLOCK like Bitcoin or cash, and it pays for all services on the network. Formula-driven issuance based on network activity - no arbitrary constants.
+- **Governance**: Instead of a small group deciding how the blockchain works, BLOCK holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
 
-### CT in Everyday Terms
+### BLOCK in Everyday Terms
 
-CT is the single currency that powers everything on The Block. Think of it like money that can:
-- **Transfer** like cash — send CT to anyone, anywhere
+BLOCK is the single currency that powers everything on The Block. Think of it like money that can:
+- **Transfer** like cash — send BLOCK to anyone, anywhere
 - **Pay for services** — storage, compute, energy
-- **Reward work** — earn CT by running infrastructure
+- **Reward work** — earn BLOCK by running infrastructure
 
-**Mini-stories showing how CT moves around:**
+**Supply Cap:** 40 million BLOCK maximum (like Bitcoin's 21M cap), with formula-driven issuance that responds to network activity.
 
-| Person | What They Do | CT Flow |
+**Mini-stories showing how BLOCK moves around:**
+
+| Person | What They Do | BLOCK Flow |
 |--------|--------------|---------|
-| **Alice** | Runs a node that validates transactions | Earns CT from block rewards (mining) |
-| **Bob** | Stores important files on the network | Pays CT for storage; providers earn that CT |
-| **Carol** | Offers spare compute power (like a mini AWS) | Earns CT when people run jobs on her machine |
-| **Dave** | Operates a smart meter that reports energy usage | Earns CT for verified energy readings via the energy market |
-| **Eve** | Wants to run a machine-learning model | Pays CT to Carol's compute; gets results back |
+| **Alice** | Runs a node that validates transactions | Earns BLOCK from block rewards (mining) |
+| **Bob** | Stores important files on the network | Pays BLOCK for storage; providers earn that BLOCK |
+| **Carol** | Offers spare compute power (like a mini AWS) | Earns BLOCK when people run jobs on her machine |
+| **Dave** | Operates a smart meter that reports energy usage | Earns BLOCK for verified energy readings via the energy market |
+| **Eve** | Wants to run a machine-learning model | Pays BLOCK to Carol's compute; gets results back |
 
-**Note on "IT" in code:** You may see variables like `amount_it` or `payout_it` in the codebase. These are legacy names for "industrial share" — a sub-ledger accounting category, **not** a separate token. All value ultimately settles in CT.
+**Note on Legacy Code:** You may see references to "CT" or "Consumer Token" in older code/docs - these now refer to BLOCK. The dual-token system (CT/IT) has been consolidated into a single BLOCK token.
 
 ### Why "Self-Contained" Matters
 
@@ -212,7 +214,7 @@ If you're completely new to blockchains, here's the recommended reading path:
 |------|---------------|
 | Block | A page in the shared ledger (added every ~1 second) |
 | Consensus | How nodes agree which page is next |
-| CT | The single token (Consumer Token) — like money for the network |
+| BLOCK | The single token (40M max supply) — like money for the network |
 | Mempool | The waiting room for transactions before they're added to a block |
 | Macro-block | A periodic checkpoint that makes syncing faster |
 | SNARK | A small cryptographic proof that heavy computation was done correctly |

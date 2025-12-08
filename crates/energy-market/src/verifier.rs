@@ -36,6 +36,18 @@ pub enum VerificationError {
     MalformedPublicKey(String),
 }
 
+impl VerificationError {
+    pub fn label(&self) -> &'static str {
+        match self {
+            VerificationError::UnsupportedScheme(_) => "unsupported_scheme",
+            VerificationError::InvalidSignature { .. } => "invalid_signature",
+            VerificationError::ProviderNotRegistered(_) => "provider_not_registered",
+            VerificationError::MalformedSignature(_) => "malformed_signature",
+            VerificationError::MalformedPublicKey(_) => "malformed_public_key",
+        }
+    }
+}
+
 /// Signature scheme identifier
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -181,17 +193,18 @@ impl SignatureVerifier for DilithiumVerifier {
                 })
             }
             5 => {
-                use pqcrypto_dilithium::dilithium5::*;
+                // TEMPORARY: dilithium5 not yet available in pqcrypto_dilithium, using dilithium3 as fallback
+                use pqcrypto_dilithium::dilithium3::*;
                 let pk = PublicKey::from_bytes(public_key).map_err(|e| {
-                    VerificationError::MalformedPublicKey(format!("dilithium5: {}", e))
+                    VerificationError::MalformedPublicKey(format!("dilithium3 (level5 fallback): {}", e))
                 })?;
                 let sig = DetachedSignature::from_bytes(&reading.signature).map_err(|e| {
-                    VerificationError::MalformedSignature(format!("dilithium5: {}", e))
+                    VerificationError::MalformedSignature(format!("dilithium3 (level5 fallback): {}", e))
                 })?;
                 verify_detached_signature(&sig, message.as_bytes(), &pk).map_err(|e| {
                     VerificationError::InvalidSignature {
                         provider_id: reading.provider_id.clone(),
-                        reason: format!("dilithium5 verification failed: {}", e),
+                        reason: format!("dilithium3 (level5 fallback) verification failed: {}", e),
                     }
                 })
             }
@@ -232,6 +245,20 @@ impl VerifierRegistry {
         Self::default()
     }
 
+    pub fn clear(&mut self) {
+        self.provider_keys.clear();
+    }
+
+    pub fn replace_all<I>(&mut self, entries: I)
+    where
+        I: IntoIterator<Item = ProviderKey>,
+    {
+        self.provider_keys.clear();
+        for entry in entries {
+            self.provider_keys.insert(entry.provider_id.clone(), entry);
+        }
+    }
+
     /// Register a provider's public key
     pub fn register(
         &mut self,
@@ -257,11 +284,6 @@ impl VerifierRegistry {
     /// Get a provider's registered key
     pub fn get(&self, provider_id: &str) -> Option<&ProviderKey> {
         self.provider_keys.get(provider_id)
-    }
-
-    /// Remove all registered provider keys
-    pub fn clear(&mut self) {
-        self.provider_keys.clear();
     }
 
     /// Verify a meter reading signature
@@ -315,5 +337,23 @@ mod tests {
         let removed = registry.unregister("provider-1");
         assert!(removed.is_some());
         assert!(registry.get("provider-1").is_none());
+    }
+
+    #[test]
+    fn registry_replace_all_swaps_entries() {
+        let mut registry = VerifierRegistry::new();
+        registry.register(
+            "provider-1".to_string(),
+            vec![0u8; 32],
+            SignatureScheme::Ed25519,
+        );
+        assert_eq!(registry.providers().len(), 1);
+        registry.replace_all(vec![ProviderKey {
+            provider_id: "provider-2".into(),
+            public_key: vec![1u8; 32],
+            scheme: SignatureScheme::Ed25519,
+        }]);
+        assert!(registry.get("provider-1").is_none());
+        assert!(registry.get("provider-2").is_some());
     }
 }

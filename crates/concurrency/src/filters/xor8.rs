@@ -204,7 +204,7 @@ mod tests {
             assert!(filter.contains(key));
         }
         let misses = (0..128)
-            .map(|v| mix64(v.wrapping_add(1_000)))
+            .map(|v: u64| mix64(v.wrapping_add(1_000)))
             .filter(|k| filter.contains(k))
             .count();
         assert!(

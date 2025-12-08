@@ -38,7 +38,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
 
 struct TestNode {
     addr: SocketAddr,
-    dir: sys::tempfile::TempDir,
+    _dir: sys::tempfile::TempDir,
     node: Node,
     flag: ShutdownFlag,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -55,7 +55,7 @@ impl TestNode {
         node.discover_peers();
         Self {
             addr,
-            dir,
+            _dir: dir,
             node,
             flag,
             handle: Some(handle),
@@ -78,7 +78,7 @@ fn partitions_merge_consistent_fork_choice() {
         for _ in 0..5 {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
-            let mut tn = TestNode::new(addr, &peers);
+            let tn = TestNode::new(addr, &peers);
             for p in &peers {
                 tn.node.add_peer(*p);
             }

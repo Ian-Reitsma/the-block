@@ -11,7 +11,6 @@ use util::temp::temp_dir;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
 }
 
 fn build_signed_tx(

@@ -18,7 +18,6 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream as StdTcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use sys::tempfile;
 
 const HANDSHAKE_MAGIC: &[u8; 4] = b"TBHS";
 const HANDSHAKE_VERSION: u8 = 1;

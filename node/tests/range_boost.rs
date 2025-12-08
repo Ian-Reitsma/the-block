@@ -25,9 +25,8 @@ fn bundle_queue_works() {
         },
     );
     let entry = rb.dequeue().unwrap();
-    assert_eq!(entry.bundle.payload.len(), 4);
-    assert_eq!(entry.bundle.proofs[0].relay, "loopback");
-    assert!(entry.enqueued_at.elapsed().as_secs() >= 0);
+    assert_eq!(entry.payload.len(), 4);
+    assert_eq!(entry.proofs[0].relay, "loopback");
 }
 
 #[test]

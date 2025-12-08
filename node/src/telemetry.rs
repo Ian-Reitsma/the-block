@@ -2856,8 +2856,7 @@ pub static AD_AUCTION_TOP_BID_USD: Lazy<GaugeVec> = Lazy::new(|| {
             "Top clearing bid per selector in USD micros",
         ),
         &["selector"],
-    )
-    .unwrap_or_else(|e| panic!("gauge ad auction top bid: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad auction top bid: {e}"));
@@ -2872,8 +2871,7 @@ pub static AD_AUCTION_WIN_RATE: Lazy<GaugeVec> = Lazy::new(|| {
             "Auction win rate per selector (parts-per-million)",
         ),
         &["selector"],
-    )
-    .unwrap_or_else(|e| panic!("gauge ad auction win rate: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad auction win rate: {e}"));
@@ -2888,8 +2886,7 @@ pub static AD_BID_SHADING_FACTOR_BPS: Lazy<GaugeVec> = Lazy::new(|| {
             "Bid shading factor per selector in basis points",
         ),
         &["selector"],
-    )
-    .unwrap_or_else(|e| panic!("gauge ad bid shading factor: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad bid shading factor: {e}"));
@@ -2918,8 +2915,7 @@ pub static AD_PRIVACY_BUDGET_UTILIZATION_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
             "Privacy budget utilization ratio per selector",
         ),
         &["selector"],
-    )
-    .unwrap_or_else(|e| panic!("gauge ad privacy utilization: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry ad privacy utilization: {e}"));
@@ -4480,7 +4476,7 @@ pub fn update_ad_budget_metrics(snapshot: &ad_market::BudgetBrokerSnapshot) {
 }
 
 #[cfg(all(test, feature = "telemetry"))]
-mod tests {
+mod ad_budget_tests {
     use super::*;
 
     #[test]
@@ -4527,59 +4523,59 @@ mod tests {
         update_ad_budget_metrics(&snapshot);
 
         let campaign_count = AD_BUDGET_SUMMARY_VALUES
-            .get_metric_with_label_values(&["campaign_count"])
-            .expect("campaign_count gauge");
+            .with_label_values(&["campaign_count"]);
+            
         assert_eq!(campaign_count.get(), 1.0);
 
         let cohort_count = AD_BUDGET_SUMMARY_VALUES
-            .get_metric_with_label_values(&["cohort_count"])
-            .expect("cohort_count gauge");
+            .with_label_values(&["cohort_count"]);
+            
         assert_eq!(cohort_count.get(), 1.0);
 
         let mean_kappa = AD_BUDGET_SUMMARY_VALUES
-            .get_metric_with_label_values(&["mean_kappa"])
-            .expect("mean kappa gauge");
+            .with_label_values(&["mean_kappa"]);
+            
         assert!((mean_kappa.get() - 0.85).abs() < f64::EPSILON);
 
         let realized_total = AD_BUDGET_SUMMARY_VALUES
-            .get_metric_with_label_values(&["realized_spend_total_usd"])
-            .expect("realized spend total gauge");
+            .with_label_values(&["realized_spend_total_usd"]);
+            
         assert!((realized_total.get() - 220_000.0).abs() < f64::EPSILON);
 
         let dual_step = AD_BUDGET_CONFIG_VALUES
-            .get_metric_with_label_values(&["dual_step"])
-            .expect("dual_step gauge");
+            .with_label_values(&["dual_step"]);
+            
         assert!((dual_step.get() - config.dual_step).abs() < f64::EPSILON);
 
         let min_kappa = AD_BUDGET_CONFIG_VALUES
-            .get_metric_with_label_values(&["min_kappa"])
-            .expect("min_kappa gauge");
+            .with_label_values(&["min_kappa"]);
+            
         assert!((min_kappa.get() - config.min_kappa).abs() < f64::EPSILON);
 
         let cohort_labels = ["cmp-test", "example.com", "wallet", "badge-a"];
         let cohort_kappa = AD_BUDGET_COHORT_KAPPA
-            .get_metric_with_label_values(&cohort_labels)
-            .expect("cohort kappa gauge");
+            .with_label_values(&cohort_labels);
+            
         assert!((cohort_kappa.get() - 0.85).abs() < f64::EPSILON);
 
         let cohort_realized = AD_BUDGET_COHORT_REALIZED_USD
-            .get_metric_with_label_values(&cohort_labels)
-            .expect("cohort realized spend gauge");
+            .with_label_values(&cohort_labels);
+            
         assert!((cohort_realized.get() - 220_000.0).abs() < f64::EPSILON);
 
         let cohort_error = AD_BUDGET_COHORT_ERROR
-            .get_metric_with_label_values(&cohort_labels)
-            .expect("cohort error gauge");
+            .with_label_values(&cohort_labels);
+            
         assert!((cohort_error.get() - 0.12).abs() < f64::EPSILON);
 
         let remaining_budget = AD_BUDGET_CAMPAIGN_REMAINING_USD
-            .get_metric_with_label_values(&["cmp-test"])
-            .expect("campaign remaining gauge");
+            .with_label_values(&["cmp-test"]);
+            
         assert!((remaining_budget.get() - 1_000_000.0).abs() < f64::EPSILON);
 
         let dual_price = AD_BUDGET_CAMPAIGN_DUAL_PRICE
-            .get_metric_with_label_values(&["cmp-test"])
-            .expect("campaign dual price gauge");
+            .with_label_values(&["cmp-test"]);
+            
         assert!((dual_price.get() - 0.75).abs() < f64::EPSILON);
     }
 }
@@ -4700,8 +4696,7 @@ pub fn update_ad_privacy_budget_ratio(selector: &str, ratio: f64) {
     {
         let clamped = ratio.clamp(0.0, 1.0);
         AD_PRIVACY_BUDGET_UTILIZATION_RATIO
-            .get_metric_with_label_values(&[selector])
-            .unwrap_or_else(|e| panic!("ad privacy utilization labels: {e}"))
+            .with_label_values(&[selector])
             .set(clamped);
     }
     #[cfg(not(feature = "telemetry"))]
@@ -4714,8 +4709,7 @@ pub fn update_ad_auction_top_bid(selector: &str, bid_usd_micros: u64) {
     #[cfg(feature = "telemetry")]
     {
         AD_AUCTION_TOP_BID_USD
-            .get_metric_with_label_values(&[selector])
-            .unwrap_or_else(|e| panic!("ad auction top bid labels: {e}"))
+            .with_label_values(&[selector])
             .set(bid_usd_micros as f64);
     }
     #[cfg(not(feature = "telemetry"))]
@@ -4728,8 +4722,7 @@ pub fn update_ad_bid_shading(selector: &str, shading_factor_bps: u32) {
     #[cfg(feature = "telemetry")]
     {
         AD_BID_SHADING_FACTOR_BPS
-            .get_metric_with_label_values(&[selector])
-            .unwrap_or_else(|e| panic!("ad bid shading labels: {e}"))
+            .with_label_values(&[selector])
             .set(shading_factor_bps as f64);
     }
     #[cfg(not(feature = "telemetry"))]
@@ -4742,8 +4735,7 @@ pub fn update_ad_auction_win_rate(selector: &str, win_rate_ppm: u32) {
     #[cfg(feature = "telemetry")]
     {
         AD_AUCTION_WIN_RATE
-            .get_metric_with_label_values(&[selector])
-            .unwrap_or_else(|e| panic!("ad auction win rate labels: {e}"))
+            .with_label_values(&[selector])
             .set(win_rate_ppm as f64);
     }
     #[cfg(not(feature = "telemetry"))]
@@ -4757,7 +4749,6 @@ pub fn add_ad_conversion_ct_value(selector: &str, value_ct_micros: u64) {
     {
         AD_CONVERSION_VALUE_CT_TOTAL
             .with_label_values(&[selector])
-            .unwrap_or_else(|e| panic!("ad conversion value labels: {e}"))
             .inc_by(value_ct_micros);
     }
     #[cfg(not(feature = "telemetry"))]
@@ -4771,7 +4762,6 @@ pub fn record_dns_auction_completed(duration_secs: u64, settlement_ct: u64) {
     {
         DNS_AUCTION_OUTCOME_TOTAL
             .with_label_values(&["settled"])
-            .unwrap_or_else(|e| panic!("dns auction outcome labels: {e}"))
             .inc();
         DNS_AUCTION_DURATION_SECONDS.observe(duration_secs as f64);
         DNS_AUCTION_SETTLEMENT_CT.observe(settlement_ct as f64);
@@ -4787,7 +4777,6 @@ pub fn record_dns_auction_cancelled() {
     {
         DNS_AUCTION_OUTCOME_TOTAL
             .with_label_values(&["cancelled"])
-            .unwrap_or_else(|e| panic!("dns auction outcome labels: {e}"))
             .inc();
     }
 }
@@ -5314,10 +5303,10 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
 
 // ===== Economic Control Laws Telemetry =====
 
-pub static ECONOMICS_ANNUAL_ISSUANCE_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+pub static ECONOMICS_ANNUAL_ISSUANCE_BLOCK: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
-        "economics_annual_issuance_ct",
-        "Annual CT issuance (Layer 1: Inflation Controller)",
+        "economics_annual_issuance_block",
+        "Annual BLOCK issuance (Layer 1: Inflation Controller)",
     )
     .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
@@ -5360,8 +5349,7 @@ pub static ECONOMICS_MULTIPLIER: Lazy<GaugeVec> = Lazy::new(|| {
             "Market multiplier (Layer 3: Dual control)",
         ),
         &["market"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -5375,8 +5363,7 @@ pub static ECONOMICS_UTILIZATION: Lazy<GaugeVec> = Lazy::new(|| {
             "Market utilization ratio (0.0 to 1.0)",
         ),
         &["market"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -5390,8 +5377,7 @@ pub static ECONOMICS_PROVIDER_MARGIN: Lazy<GaugeVec> = Lazy::new(|| {
             "Provider margin ratio (can be negative)",
         ),
         &["market"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -7310,7 +7296,7 @@ pub fn verbose() -> bool {
 #[cfg(feature = "telemetry")]
 pub fn update_economics_telemetry(snapshot: &crate::economics::EconomicSnapshot) {
     // Layer 1: Inflation
-    ECONOMICS_ANNUAL_ISSUANCE_CT.set(snapshot.inflation.annual_issuance_ct as i64);
+    ECONOMICS_ANNUAL_ISSUANCE_BLOCK.set(snapshot.inflation.annual_issuance_block as i64);
     ECONOMICS_REALIZED_INFLATION_BPS.set(snapshot.inflation.realized_inflation_bps as i64);
 
     // Layer 2: Subsidy allocation

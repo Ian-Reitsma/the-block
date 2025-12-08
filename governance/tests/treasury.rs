@@ -1,4 +1,4 @@
-use governance::{DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryDisbursement};
+use governance::{DisbursementDetails, DisbursementPayload, DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryDisbursement};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use std::{
@@ -38,7 +38,17 @@ fn treasury_disbursements_roundtrip() {
     );
 
     let scheduled = store
-        .queue_disbursement("dest-1", 42, 12, "initial memo", 100)
+        .queue_disbursement(DisbursementPayload {
+            proposal: Default::default(),
+            disbursement: DisbursementDetails {
+                destination: "dest-1".into(),
+                amount_ct: 42,
+                amount_it: 12,
+                memo: "initial memo".into(),
+                scheduled_epoch: 100,
+                expected_receipts: Vec::new(),
+            },
+        })
         .expect("queue disbursement");
     assert_eq!(scheduled.id, 1);
     assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
@@ -56,7 +66,7 @@ fn treasury_disbursements_roundtrip() {
     assert_eq!(list[0].destination, "dest-1");
 
     let executed = store
-        .execute_disbursement(scheduled.id, "0xfeed")
+        .execute_disbursement(scheduled.id, "0xfeed", Vec::new())
         .expect("execute disbursement");
     match executed.status {
         DisbursementStatus::Executed { ref tx_hash, .. } => {
@@ -92,7 +102,17 @@ fn treasury_disbursements_roundtrip() {
     );
 
     let scheduled_two = store
-        .queue_disbursement("dest-2", 7, 0, "", 200)
+        .queue_disbursement(DisbursementPayload {
+            proposal: Default::default(),
+            disbursement: DisbursementDetails {
+                destination: "dest-2".into(),
+                amount_ct: 7,
+                amount_it: 0,
+                memo: "".into(),
+                scheduled_epoch: 200,
+                expected_receipts: Vec::new(),
+            },
+        })
         .expect("queue second");
     assert_eq!(scheduled_two.id, 2);
     assert_eq!(store.treasury_balance().expect("after second queue"), 58);
@@ -129,9 +149,19 @@ fn execute_requires_balance() {
     let store = GovStore::open(&db_path);
 
     let scheduled = store
-        .queue_disbursement("dest-1", 5, 0, "", 0)
+        .queue_disbursement(DisbursementPayload {
+            proposal: Default::default(),
+            disbursement: DisbursementDetails {
+                destination: "dest-1".into(),
+                amount_ct: 5,
+                amount_it: 0,
+                memo: "".into(),
+                scheduled_epoch: 0,
+                expected_receipts: Vec::new(),
+            },
+        })
         .expect("queue");
-    let result = store.execute_disbursement(scheduled.id, "0xbeef");
+    let result = store.execute_disbursement(scheduled.id, "0xbeef", Vec::new());
     assert!(result.is_err(), "expected insufficient balance error");
 }
 
@@ -144,7 +174,17 @@ fn treasury_executor_stages_and_executes() {
         .record_treasury_accrual(10_000, 0)
         .expect("fund treasury");
     let scheduled = store
-        .queue_disbursement("dest-exec", 1_000, 0, "intent", 5)
+        .queue_disbursement(DisbursementPayload {
+            proposal: Default::default(),
+            disbursement: DisbursementDetails {
+                destination: "dest-exec".into(),
+                amount_ct: 1_000,
+                amount_it: 0,
+                memo: "intent".into(),
+                scheduled_epoch: 5,
+                expected_receipts: Vec::new(),
+            },
+        })
         .expect("queue disbursement");
     let sign_calls = Arc::new(AtomicUsize::new(0));
     let submit_calls = Arc::new(AtomicUsize::new(0));
@@ -224,7 +264,17 @@ fn treasury_executor_reuses_staged_intents() {
         .record_treasury_accrual(5_000, 0)
         .expect("fund treasury");
     let disbursement = store
-        .queue_disbursement("reuse", 500, 0, "memo", 1)
+        .queue_disbursement(DisbursementPayload {
+            proposal: Default::default(),
+            disbursement: DisbursementDetails {
+                destination: "reuse".into(),
+                amount_ct: 500,
+                amount_it: 0,
+                memo: "memo".into(),
+                scheduled_epoch: 1,
+                expected_receipts: Vec::new(),
+            },
+        })
         .expect("queue disbursement");
     store
         .record_execution_intent(governance::SignedExecutionIntent::new(
@@ -314,7 +364,17 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
     store.record_treasury_accrual(2_000, 0)?;
-    let disbursement = store.queue_disbursement("omega", 250, 0, "{}", 0)?;
+    let disbursement = store.queue_disbursement(DisbursementPayload {
+        proposal: Default::default(),
+        disbursement: DisbursementDetails {
+            destination: "omega".into(),
+            amount_ct: 250,
+            amount_it: 0,
+            memo: "{}".into(),
+            scheduled_epoch: 0,
+            expected_receipts: Vec::new(),
+        },
+    })?;
     let error_count = Arc::new(AtomicUsize::new(0));
     let config = governance::TreasuryExecutorConfig {
         identity: "error-exec".into(),
@@ -373,8 +433,28 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
     let store = GovStore::open(&db_path);
     store.record_treasury_accrual(5_000, 0)?;
 
-    let first = store.queue_disbursement("failover-a", 250, 0, "", 0)?;
-    let second = store.queue_disbursement("failover-b", 250, 0, "", 0)?;
+    let first = store.queue_disbursement(DisbursementPayload {
+        proposal: Default::default(),
+        disbursement: DisbursementDetails {
+            destination: "failover-a".into(),
+            amount_ct: 250,
+            amount_it: 0,
+            memo: "".into(),
+            scheduled_epoch: 0,
+            expected_receipts: Vec::new(),
+        },
+    })?;
+    let second = store.queue_disbursement(DisbursementPayload {
+        proposal: Default::default(),
+        disbursement: DisbursementDetails {
+            destination: "failover-b".into(),
+            amount_ct: 250,
+            amount_it: 0,
+            memo: "".into(),
+            scheduled_epoch: 0,
+            expected_receipts: Vec::new(),
+        },
+    })?;
 
     let make_config = |identity: &str,
                        gate: Arc<AtomicU64>,

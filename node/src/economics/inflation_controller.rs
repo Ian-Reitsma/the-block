@@ -1,9 +1,9 @@
-//! Layer 1: Adaptive Global CT Issuance Controller
+//! Layer 1: Adaptive Global BLOCK Issuance Controller
 //!
 //! Maintains inflation at target rate via proportional feedback control.
 //! Formula: I_{t+1} = I_t × (1 + k_π × (π* - π_t))
 //!
-//! Instead of fixed 200M CT/year, issuance adapts to keep inflation stable
+//! Instead of fixed 200M BLOCK/year, issuance adapts to keep inflation stable
 //! even if token price or adoption changes dramatically.
 
 use super::{InflationSnapshot};
@@ -19,14 +19,14 @@ pub struct InflationParams {
     /// Proportional gain k_π (e.g., 0.10 = 10% of error per epoch)
     pub controller_gain: f64,
 
-    /// Minimum annual issuance in CT (safety floor)
-    pub min_annual_issuance_ct: u64,
+    /// Minimum annual issuance in BLOCK (safety floor)
+    pub min_annual_issuance_block: u64,
 
-    /// Maximum annual issuance in CT (safety ceiling)
-    pub max_annual_issuance_ct: u64,
+    /// Maximum annual issuance in BLOCK (safety ceiling)
+    pub max_annual_issuance_block: u64,
 
     /// Previous epoch's annual issuance (for continuity)
-    pub previous_annual_issuance_ct: u64,
+    pub previous_annual_issuance_block: u64,
 }
 
 impl Default for InflationParams {
@@ -34,9 +34,9 @@ impl Default for InflationParams {
         Self {
             target_inflation_bps: 500, // 5%
             controller_gain: 0.10,
-            min_annual_issuance_ct: 50_000_000,
-            max_annual_issuance_ct: 300_000_000,
-            previous_annual_issuance_ct: 200_000_000,
+            min_annual_issuance_block: 50_000_000,
+            max_annual_issuance_block: 300_000_000,
+            previous_annual_issuance_block: 40_000_000,  // Bootstrap: 40M BLOCK/year
         }
     }
 }
@@ -53,24 +53,24 @@ impl InflationController {
     /// Compute next epoch's issuance using proportional controller
     ///
     /// # Arguments
-    /// * `circulating_ct` - Total CT in circulation at epoch start
+    /// * `circulating_block` - Total BLOCK in circulation at epoch start
     ///
     /// # Returns
     /// Updated inflation snapshot with new annual issuance
-    pub fn compute_epoch_issuance(&self, circulating_ct: u64) -> InflationSnapshot {
+    pub fn compute_epoch_issuance(&self, circulating_block: u64) -> InflationSnapshot {
         // Avoid division by zero
-        if circulating_ct == 0 {
+        if circulating_block == 0 {
             return InflationSnapshot {
-                circulating_ct: 0,
-                annual_issuance_ct: self.params.min_annual_issuance_ct,
+                circulating_block: 0,
+                annual_issuance_block: self.params.min_annual_issuance_block,
                 realized_inflation_bps: 0,
                 target_inflation_bps: self.params.target_inflation_bps,
             };
         }
 
         // Compute realized inflation: π_t = I_t / M_t
-        let i_t = self.params.previous_annual_issuance_ct;
-        let m_t = circulating_ct;
+        let i_t = self.params.previous_annual_issuance_block;
+        let m_t = circulating_block;
 
         let realized_inflation = (i_t as f64) / (m_t as f64);
         let realized_inflation_bps = (realized_inflation * 10_000.0).round() as u16;
@@ -87,13 +87,13 @@ impl InflationController {
 
         // Clamp to safety bounds
         let i_next = i_next_raw
-            .max(self.params.min_annual_issuance_ct as f64)
-            .min(self.params.max_annual_issuance_ct as f64)
+            .max(self.params.min_annual_issuance_block as f64)
+            .min(self.params.max_annual_issuance_block as f64)
             .round() as u64;
 
         InflationSnapshot {
-            circulating_ct,
-            annual_issuance_ct: i_next,
+            circulating_block,
+            annual_issuance_block: i_next,
             realized_inflation_bps,
             target_inflation_bps: self.params.target_inflation_bps,
         }
@@ -110,9 +110,9 @@ mod tests {
         let params = InflationParams {
             target_inflation_bps: 500, // 5%
             controller_gain: 0.10,
-            min_annual_issuance_ct: 50_000_000,
-            max_annual_issuance_ct: 300_000_000,
-            previous_annual_issuance_ct: 200_000_000,
+            min_annual_issuance_block: 50_000_000,
+            max_annual_issuance_block: 300_000_000,
+            previous_annual_issuance_block: 200_000_000,
         };
 
         let controller = InflationController::new(params);
@@ -122,8 +122,8 @@ mod tests {
         let snapshot = controller.compute_epoch_issuance(circulating);
 
         // Should stay near 200M (minimal adjustment)
-        assert!(snapshot.annual_issuance_ct >= 199_000_000);
-        assert!(snapshot.annual_issuance_ct <= 201_000_000);
+        assert!(snapshot.annual_issuance_block >= 199_000_000);
+        assert!(snapshot.annual_issuance_block <= 201_000_000);
         assert_eq!(snapshot.realized_inflation_bps, 500);
     }
 
@@ -133,9 +133,9 @@ mod tests {
         let params = InflationParams {
             target_inflation_bps: 500, // 5%
             controller_gain: 0.10,
-            min_annual_issuance_ct: 50_000_000,
-            max_annual_issuance_ct: 300_000_000,
-            previous_annual_issuance_ct: 200_000_000,
+            min_annual_issuance_block: 50_000_000,
+            max_annual_issuance_block: 300_000_000,
+            previous_annual_issuance_block: 200_000_000,
         };
 
         let controller = InflationController::new(params);
@@ -145,8 +145,8 @@ mod tests {
         let snapshot = controller.compute_epoch_issuance(circulating);
 
         // Should increase issuance to push inflation up
-        assert!(snapshot.annual_issuance_ct > 200_000_000);
-        assert_eq!(snapshot.realized_inflation_bps, 299); // ~3%
+        assert!(snapshot.annual_issuance_block > 200_000_000);
+        assert_eq!(snapshot.realized_inflation_bps, 300); // 3%
     }
 
     #[test]
@@ -155,9 +155,9 @@ mod tests {
         let params = InflationParams {
             target_inflation_bps: 500, // 5%
             controller_gain: 0.10,
-            min_annual_issuance_ct: 50_000_000,
-            max_annual_issuance_ct: 300_000_000,
-            previous_annual_issuance_ct: 200_000_000,
+            min_annual_issuance_block: 50_000_000,
+            max_annual_issuance_block: 300_000_000,
+            previous_annual_issuance_block: 200_000_000,
         };
 
         let controller = InflationController::new(params);
@@ -167,40 +167,42 @@ mod tests {
         let snapshot = controller.compute_epoch_issuance(circulating);
 
         // Should decrease issuance to push inflation down
-        assert!(snapshot.annual_issuance_ct < 200_000_000);
+        assert!(snapshot.annual_issuance_block < 200_000_000);
         assert_eq!(snapshot.realized_inflation_bps, 1000); // 10%
     }
 
     #[test]
     fn test_inflation_controller_bounds() {
-        // Test ceiling
+        // Test floor: Low circulation causes high inflation, need to cut issuance
         let params = InflationParams {
             target_inflation_bps: 500,
             controller_gain: 1.0, // Very aggressive
-            min_annual_issuance_ct: 50_000_000,
-            max_annual_issuance_ct: 300_000_000,
-            previous_annual_issuance_ct: 200_000_000,
+            min_annual_issuance_block: 50_000_000,
+            max_annual_issuance_block: 300_000_000,
+            previous_annual_issuance_block: 200_000_000,
         };
 
         let controller = InflationController::new(params);
 
-        // Very low circulation → would want massive issuance
+        // Very low circulation → realized inflation is 200% (way too high)
+        // Controller will aggressively cut issuance
         let circulating = 100_000_000u64;
         let snapshot = controller.compute_epoch_issuance(circulating);
 
-        // Should clamp at ceiling
-        assert_eq!(snapshot.annual_issuance_ct, 300_000_000);
+        // Should clamp at floor
+        assert_eq!(snapshot.annual_issuance_block, 50_000_000);
     }
 
     #[test]
     fn test_inflation_controller_zero_circulation() {
         let params = InflationParams::default();
+        let min_issuance = params.min_annual_issuance_block;
         let controller = InflationController::new(params);
 
         let snapshot = controller.compute_epoch_issuance(0);
 
         // Should return floor without division by zero
-        assert_eq!(snapshot.annual_issuance_ct, params.min_annual_issuance_ct);
+        assert_eq!(snapshot.annual_issuance_block, min_issuance);
         assert_eq!(snapshot.realized_inflation_bps, 0);
     }
 }

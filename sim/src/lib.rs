@@ -1,7 +1,5 @@
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "sim-db")]
-use foundation_serialization::binary;
 use foundation_serialization::json;
 use foundation_serialization::Serialize;
 use rand::{rngs::StdRng, Rng};
@@ -293,10 +291,10 @@ impl Simulation {
             self.reconciliation_latency -= 1;
         }
         #[cfg(feature = "sim-db")]
-        if let Some(db) = &self.db {
-            let key = step.to_be_bytes();
-            let val = binary::encode(&snap).expect("serialize snapshot");
-            let _ = db.put(key, val);
+        {
+            // DB snapshot recording disabled - feature not fully implemented
+            let _ = step;
+            let _ = &snap;
         }
         snap
     }

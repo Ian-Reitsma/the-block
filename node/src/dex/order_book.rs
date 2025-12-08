@@ -4,7 +4,7 @@ use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
 use super::{storage::EscrowState, DexStore};
-use dex::escrow::EscrowId;
+use dex::escrow::{EscrowId, HashAlgo, PaymentProof};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -172,6 +172,39 @@ impl OrderBook {
             }
             if let Some(st) = store.as_deref_mut() {
                 st.save_escrow_state(esc_state);
+            }
+        }
+        if let Some(st) = store.as_deref_mut() {
+            st.save_book(self);
+        }
+        Ok(trades)
+    }
+
+    pub fn place_settle_persist(
+        &mut self,
+        order: Order,
+        ledger: &mut super::TrustLedger,
+        mut store: Option<&mut DexStore>,
+        _esc_state: &mut EscrowState,
+    ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
+        let trades = self.place(order)?;
+        for (buy, sell, qty) in &trades {
+            let value = sell.price * *qty;
+            let value_i64 = i64::try_from(value).map_err(|_| "value overflow")?;
+            if !ledger.adjust(&buy.account, &sell.account, value_i64) {
+                return Err("trust ledger adjustment failed");
+            }
+            if !ledger.adjust(&sell.account, &buy.account, -value_i64) {
+                ledger.adjust(&buy.account, &sell.account, -value_i64);
+                return Err("trust ledger reverse adjustment failed");
+            }
+            if let Some(st) = store.as_deref_mut() {
+                let proof = PaymentProof {
+                    leaf: [0u8; 32],
+                    path: Vec::new(),
+                    algo: HashAlgo::Blake3,
+                };
+                st.log_trade(&(buy.clone(), sell.clone(), *qty), &proof);
             }
         }
         if let Some(st) = store.as_deref_mut() {

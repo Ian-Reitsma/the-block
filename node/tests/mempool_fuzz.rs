@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use foundation_serialization::binary;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 use the_block::{
     generate_keypair, mempool_cmp, sign_tx, Blockchain, RawTxPayload, SignedTransaction,
 };
@@ -15,7 +15,6 @@ use util::temp::temp_dir;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
 }
 
 fn build_signed_tx(
@@ -76,7 +75,7 @@ fn fuzz_mempool_random_fees_nonces() {
             let nonce_cl = Arc::clone(&nonces);
             let rec_cl = Arc::clone(&records);
             std::thread::spawn(move || {
-                let mut rng = StdRng::from_entropy();
+                let mut rng = StdRng::seed_from_u64(t as u64);
                 let local_iters = per_thread + if t < remainder { 1 } else { 0 };
                 for _ in 0..local_iters {
                     let idx = rng.gen_range(0..THREADS);
@@ -106,22 +105,20 @@ fn fuzz_mempool_random_fees_nonces() {
     assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 
     let mut seen = std::collections::HashSet::new();
-    for entry in guard.mempool_consumer.iter() {
-        assert!(seen.insert((entry.key().0.clone(), entry.key().1)));
-    }
+    guard.mempool_consumer.for_each(|key, _value| {
+        assert!(seen.insert((key.0.clone(), key.1)));
+    });
 
     let rec = records.lock().unwrap().clone();
-    let mem_keys: std::collections::HashSet<_> = guard
-        .mempool_consumer
-        .iter()
-        .map(|e| (e.key().0.clone(), e.key().1))
-        .collect();
+    let mut mem_keys = std::collections::HashSet::new();
+    guard.mempool_consumer.for_each(|key, _value| {
+        mem_keys.insert((key.0.clone(), key.1));
+    });
     let ttl = guard.tx_ttl;
-    let mut entries: Vec<_> = guard
-        .mempool_consumer
-        .iter()
-        .map(|e| e.value().clone())
-        .collect();
+    let mut entries = Vec::new();
+    guard.mempool_consumer.for_each(|_key, value| {
+        entries.push(value.clone());
+    });
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
     for w in entries.windows(2) {
         assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);

@@ -140,7 +140,9 @@ pub struct AdReadinessStatusView {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 struct ParamChangeRecordView {
+    #[allow(dead_code)] // Deserialized from DB but not currently used
     key: the_block::governance::ParamKey,
+    #[allow(dead_code)] // Deserialized from DB but not currently used
     new_value: i64,
     #[serde(rename = "epoch")]
     _epoch: u64,

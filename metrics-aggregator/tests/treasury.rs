@@ -1,5 +1,6 @@
 use foundation_serialization::json;
 use governance::codec::{balance_history_to_json, disbursements_to_json_array};
+use governance::treasury::{DisbursementDetails, DisbursementPayload};
 use metrics_aggregator::{router, AppState};
 use std::env;
 use std::fs;
@@ -87,10 +88,20 @@ fn treasury_metrics_from_store_source() {
     let store = GovStore::open(&gov_path);
     store.record_treasury_accrual(600, 120).expect("accrual");
     let queued = store
-        .queue_disbursement("dest-4", 120, 25, "", 400)
+        .queue_disbursement(DisbursementPayload {
+            disbursement: DisbursementDetails {
+                destination: "dest-4".into(),
+                amount_ct: 120,
+                amount_it: 25,
+                memo: "".into(),
+                scheduled_epoch: 400,
+                expected_receipts: Vec::new(),
+            },
+            ..Default::default()
+        })
         .expect("queue");
     store
-        .execute_disbursement(queued.id, "0xbeef")
+        .execute_disbursement(queued.id, "0xbeef", Vec::new())
         .expect("execute");
     store
         .refresh_executor_lease("lease-holder", Duration::from_secs(120))

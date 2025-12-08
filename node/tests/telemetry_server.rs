@@ -8,7 +8,6 @@ use std::net::TcpStream;
 use the_block::{serve_metrics_with_shutdown, telemetry};
 
 fn init() {
-    pyo3::prepare_freethreaded_python();
 }
 
 #[test]

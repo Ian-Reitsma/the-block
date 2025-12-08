@@ -9,7 +9,6 @@ use util::temp::temp_dir;
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        pyo3::prepare_freethreaded_python();
     });
 }
 
@@ -72,14 +71,13 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
                 expected_nonce += 1;
                 assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);
                 let mut total_c = 0u64;
-                let mut total_i = 0u64;
+                let mut _total_i = 0u64;
                 for acc in bc.accounts.values() {
                     total_c += acc.balance.consumer;
-                    total_i += acc.balance.industrial;
+                    _total_i += acc.balance.industrial;
                 }
-                let (em_c, em_i) = bc.circulating_supply();
+                let em_c = bc.circulating_supply();
                 assert_eq!(total_c, em_c);
-                assert_eq!(total_i, em_i);
             }
         })
         .expect("register random case");

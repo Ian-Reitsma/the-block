@@ -11,7 +11,6 @@ use util::temp::temp_dir;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
 }
 
 fn build_signed_tx(
@@ -60,8 +59,14 @@ tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
                 let tx = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
                 bc.submit_transaction(tx).unwrap();
             }
-            for mut entry in bc.mempool_consumer.iter_mut() {
-                entry.value_mut().timestamp_millis = 0;
+            let mut keys = Vec::new();
+            bc.mempool_consumer.for_each(|key, _value| {
+                keys.push(key.clone());
+            });
+            for key in keys {
+                if let Some(mut entry) = bc.mempool_consumer.get_mut(&key) {
+                    entry.timestamp_millis = 0;
+                }
             }
             let bc = Arc::new(RwLock::new(bc));
             let op_count = rng.range_usize(1..=64);

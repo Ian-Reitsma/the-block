@@ -202,7 +202,7 @@ impl BudgetBroker {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct CampaignBudgetState {
     campaign_id: String,
     total_budget: u64,
@@ -389,7 +389,7 @@ impl CampaignBudgetState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct CohortBudgetState {
     kappa: f64,
     smoothed_error: f64,

@@ -18,7 +18,6 @@ use the_block::{generate_keypair, sign_tx, spawn_purge_loop_thread, Blockchain, 
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
 }
 
 static TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -113,10 +112,10 @@ fn counters_saturate_at_u64_max() {
     };
     let tx = sign_tx(sk.clone(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
-    for mut entry in bc.mempool_consumer.iter_mut() {
+    bc.mempool_consumer.for_each_mut(|_key, entry| {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
-    }
+    });
     telemetry::TTL_DROP_TOTAL.reset();
     telemetry::TTL_DROP_TOTAL.inc_by(u64::MAX - 1);
     bc.purge_expired();

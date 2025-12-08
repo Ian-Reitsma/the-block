@@ -2,15 +2,18 @@ use core::fmt;
 use std::string::FromUtf8Error;
 
 use crate::Serialize;
-use serde::de::value::StringDeserializer;
+use serde::de::value::{IntoDeserializer, StringDeserializer};
 use serde::de::{
-    self, DeserializeOwned, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+    self, DeserializeOwned, DeserializeSeed, EnumAccess, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
 use serde::ser::{
     self, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant,
 };
+
+// Note: "serde" is aliased to foundation_serde in Cargo.toml - all imports above
+// now refer to our first-party traits!
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -267,6 +270,16 @@ impl<'a, 'b> ser::Serializer for &'a mut Serializer<'b> {
     fn serialize_u128(self, v: u128) -> Result<()> {
         self.write_u128(v);
         Ok(())
+    }
+
+    fn serialize_usize(self, v: usize) -> Result<()> {
+        // Serialize as u64 for platform independence
+        self.serialize_u64(v as u64)
+    }
+
+    fn serialize_isize(self, v: isize) -> Result<()> {
+        // Serialize as i64 for platform independence
+        self.serialize_i64(v as i64)
     }
 
     fn serialize_f32(self, v: f32) -> Result<()> {
@@ -861,6 +874,30 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         visitor.visit_u128(self.read_u128()?)
     }
 
+    fn deserialize_usize<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let value = self.read_u64()?;
+        // Validate the value fits in usize on this platform
+        if value > usize::MAX as u64 {
+            return Err(Error::message("u64 value too large for usize on this platform"));
+        }
+        visitor.visit_usize(value as usize)
+    }
+
+    fn deserialize_isize<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        let value = self.read_i64()?;
+        // Validate the value fits in isize on this platform
+        if value > isize::MAX as i64 || value < isize::MIN as i64 {
+            return Err(Error::message("i64 value out of range for isize on this platform"));
+        }
+        visitor.visit_isize(value as isize)
+    }
+
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
@@ -1159,11 +1196,11 @@ impl<'de> VariantAccess<'de> for VariantDeserializer<'_, 'de> {
         Ok(())
     }
 
-    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    fn newtype_variant<T>(self) -> Result<T>
     where
-        T: DeserializeSeed<'de>,
+        T: de::Deserialize<'de>,
     {
-        seed.deserialize(self.de)
+        T::deserialize(self.de)
     }
 
     fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>

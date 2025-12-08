@@ -305,7 +305,7 @@ where
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct AnnotatedLogBundle {
-    pub compression: &'static str,
+    pub compression: String,
     pub payload: Vec<u8>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub device_status: Option<DeviceStatusEnvelope>,
@@ -351,7 +351,7 @@ pub fn upload_compressed_logs(
         }
     });
     AnnotatedLogBundle {
-        compression: "gzip",
+        compression: "gzip".to_string(),
         payload,
         device_status,
     }

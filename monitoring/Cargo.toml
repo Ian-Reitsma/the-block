@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[[bin]]
+name = "monitoring_snapshot"
+path = "src/bin/snapshot.rs"
+
 [dependencies]
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_metrics = { path = "../crates/foundation_metrics" }

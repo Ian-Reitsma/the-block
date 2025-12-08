@@ -20,7 +20,6 @@ static PY_INIT: Once = Once::new();
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     PY_INIT.call_once(|| {
-        pyo3::prepare_freethreaded_python();
     });
 }
 
@@ -183,11 +182,9 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
     #[cfg(feature = "telemetry")]
     assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.value());
     let ttl = bc.tx_ttl;
-    let mut entries: Vec<_> = bc
-        .mempool_consumer
-        .iter()
-        .map(|e| e.value().clone())
-        .collect();
+    let mut entries = Vec::new();
+    bc.mempool_consumer
+        .for_each(|_key, value| entries.push(value.clone()));
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
     for w in entries.windows(2) {
         assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);

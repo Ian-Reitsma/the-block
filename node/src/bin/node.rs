@@ -29,7 +29,7 @@ use sys::process;
 use ad_market::{
     DistributionPolicy, MarketplaceConfig, MarketplaceHandle, ReservationKey, SledMarketplace,
 };
-use the_block::config::OverlayBackend;
+use the_block::config::{OverlayBackend, ReadAckPrivacyMode};
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::treasury_executor::{
@@ -645,12 +645,10 @@ enum Commands {
     SignTx { key_id: String, tx_json: String },
     /// Compute-related utilities
     Compute {
-        #[command(subcommand)]
         cmd: ComputeCmd,
     },
     /// Service badge utilities
     Badge {
-        #[command(subcommand)]
         cmd: BadgeCmd,
     },
 }
@@ -1202,7 +1200,7 @@ fn spawn_read_ack_worker(
     use concurrency::Lazy;
     use std::sync::Mutex as StdMutex;
     static REHEARSAL_STATE: Lazy<StdMutex<(u64, u64)>> = Lazy::new(|| StdMutex::new((0, 0)));
-    let (tx, mut rx) = mpsc::channel(1024);
+    let (tx, mut rx) = mpsc::channel::<ReadAck>(1024);
     runtime::spawn(async move {
         let market = market.clone();
         let readiness = readiness.clone();
@@ -1274,8 +1272,8 @@ fn spawn_read_ack_worker(
                         if ack.campaign_id.is_some() {
                             // Optional presence badge enforcement for venue-grade impressions.
                             let mut presence_ok = true;
-                            if let Some(ref token) = ack.presence_badge {
-                                if let Some(ref venue) = ack.venue_id {
+                            if let Some(token) = &ack.presence_badge {
+                                if let Some(venue) = &ack.venue_id {
                                     if !the_block::service_badge::verify_venue_token(venue, token) {
                                         presence_ok = false;
                                     }
@@ -1284,7 +1282,7 @@ fn spawn_read_ack_worker(
                                 }
                             }
                             // Record venue crowd hints if provided and enforce minimum crowd size.
-                            if let Some(ref venue) = ack.venue_id {
+                            if let Some(venue) = &ack.venue_id {
                                 if let Some(count) = ack.crowd_size_hint.map(|v| v as u64) {
                                     the_block::service_badge::record_venue_crowd(venue, count);
                                 }
@@ -1782,6 +1780,7 @@ async fn async_main() -> std::process::ExitCode {
                             cert_path: cert_path.clone(),
                             key_path: key_path.clone(),
                             cert_ttl_days: ttl_days,
+                            transport: Default::default(),
                         });
                         guard.save_config();
                     }
@@ -1846,7 +1845,7 @@ async fn async_main() -> std::process::ExitCode {
             let sk = load_key(&key_id);
             let payload: RawTxPayload = json::from_str(&tx_json).expect("parse tx payload");
             let signed = sign_tx(sk.to_bytes().to_vec(), payload).expect("sign tx");
-            let bytes = crate::transaction::binary::encode_signed_transaction(&signed)
+            let bytes = the_block::transaction::binary::encode_signed_transaction(&signed)
                 .expect("serialize tx");
             println!("{}", crypto_suite::hex::encode(bytes));
             std::process::ExitCode::SUCCESS

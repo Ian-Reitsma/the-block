@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used)]
 use the_block::governance::{BicameralGovernance as Governance, House};
+use the_block::telemetry;
 
 #[test]
 fn submit_vote_exec_cycle() {
@@ -56,6 +57,7 @@ fn rollback_resets_metrics() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid = store.submit(prop).unwrap();
     store

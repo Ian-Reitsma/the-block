@@ -25,6 +25,7 @@ enum Command {
     },
     Apply {
         data_dir: String,
+        #[allow(dead_code)]
         db_path: Option<String>,
     },
     List {

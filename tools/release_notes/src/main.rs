@@ -7,6 +7,7 @@ use cli_core::{
     parse::{Matches, ParseError, Parser},
 };
 use diagnostics::anyhow::{anyhow, Result};
+use foundation_serialization::json;
 
 use release_notes::{
     format_allowed, format_change_summary, kind_label, load_history, summarise, summary_to_value,

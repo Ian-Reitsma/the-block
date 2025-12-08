@@ -12,7 +12,6 @@ use foundation_sqlite::{
     params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
 };
 use httpd::{HttpError, Request, Response, Router, StatusCode};
-use std::convert::TryInto;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -791,6 +790,7 @@ pub struct ExplorerExecutorReport {
     dependency_blocks: Vec<ExplorerExecutorDependency>,
 }
 
+#[allow(dead_code)] // Reserved for future API endpoint
 #[derive(Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 struct AdPolicySnapshotListResponse {
@@ -1982,7 +1982,7 @@ fn legacy_status_from_label(
         "scheduled" => DisbursementStatus::Draft {
             created_at: status_ts,
         },
-        other => DisbursementStatus::Draft {
+        _ => DisbursementStatus::Draft {
             created_at: status_ts,
         },
     }

@@ -105,7 +105,6 @@ mod tests {
     use super::*;
     use crate::launch_governor::{GateAction, IntentMetrics};
     use foundation_serialization::json::Value;
-    use std::collections::VecDeque;
     use sys::tempfile::TempDir;
 
     fn sample_payload() -> DecisionPayload {

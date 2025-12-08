@@ -33,7 +33,6 @@ use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
 };
-use runtime::net::TcpListener;
 use runtime::sync::mpsc;
 use runtime::ws::Message as WsMessage;
 
@@ -97,6 +96,7 @@ fn provider_crm_lists(provider: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn set_crm_lists(provider: &str, lists: &[&str]) {
     CRM_MEMBERSHIPS
         .write()
@@ -655,7 +655,7 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         if !decision.ready() {
             #[cfg(feature = "telemetry")]
             {
-                if let Ok(counter) = the_block::telemetry::AD_READINESS_SKIPPED
+                if let Ok(counter) = crate::telemetry::AD_READINESS_SKIPPED
                     .ensure_handle_for_label_values(&[match decision.blockers().first() {
                         Some(reason) => reason.as_str(),
                         None => "unknown",
@@ -991,6 +991,7 @@ mod tests {
     use super::*;
     use crate::ad_readiness::{AdReadinessConfig, AdReadinessHandle};
     use crate::storage::pipeline;
+    use crate::telemetry;
     use ad_market::{
         badge::ann::{SoftIntentReceipt, WalletAnnIndexSnapshot},
         badge::BadgeSoftIntentContext,
@@ -1131,6 +1132,15 @@ mod tests {
             _event: ad_market::ConversionEvent,
         ) -> Result<(), ad_market::MarketplaceError> {
             Ok(())
+        }
+
+        fn recompute_distribution_from_utilization(&self) {
+            // Stub implementation - no-op for tests
+        }
+
+        fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
+            // Stub implementation - return default values for tests
+            (0, 0, 0)
         }
     }
 
@@ -1289,10 +1299,16 @@ mod tests {
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: Default::default(),
                 }],
                 targeting: CampaignTargeting {
                     domains: vec!["signed.test".to_string()],
                     badges: Vec::new(),
+                    geo: Default::default(),
+                    device: Default::default(),
+                    crm_lists: Default::default(),
+                    delivery: Default::default(),
                 },
                 metadata: HashMap::new(),
             })
@@ -1375,10 +1391,16 @@ mod tests {
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: Default::default(),
                 }],
                 targeting: CampaignTargeting {
                     domains: vec!["signed.test".to_string()],
                     badges: Vec::new(),
+                    geo: Default::default(),
+                    device: Default::default(),
+                    crm_lists: Default::default(),
+                    delivery: Default::default(),
                 },
                 metadata: HashMap::new(),
             })
@@ -1389,11 +1411,23 @@ mod tests {
             min_unique_viewers: 2,
             min_host_count: 1,
             min_provider_count: 1,
+            use_percentile_thresholds: false,
+            viewer_percentile: 90,
+            host_percentile: 75,
+            provider_percentile: 50,
+            ema_smoothing_ppm: 200_000,
+            floor_unique_viewers: 0,
+            floor_host_count: 0,
+            floor_provider_count: 0,
+            cap_unique_viewers: 0,
+            cap_host_count: 0,
+            cap_provider_count: 0,
+            percentile_buckets: 12,
         });
 
         #[cfg(feature = "telemetry")]
         {
-            the_block::telemetry::AD_READINESS_SKIPPED.reset();
+            telemetry::AD_READINESS_SKIPPED.reset();
         }
 
         let (state, mut rx) = state_with_market(
@@ -1446,7 +1480,7 @@ mod tests {
         assert!(ack.creative_id.is_none());
         #[cfg(feature = "telemetry")]
         {
-            let counter = the_block::telemetry::AD_READINESS_SKIPPED
+            let counter = telemetry::AD_READINESS_SKIPPED
                 .with_label_values(&["insufficient_unique_viewers"]);
             assert_eq!(counter.get(), 1);
         }
@@ -1508,10 +1542,16 @@ mod tests {
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: Default::default(),
                 }],
                 targeting: CampaignTargeting {
                     domains: vec!["signed.test".to_string()],
                     badges: vec!["physical_presence".to_string()],
+                    geo: Default::default(),
+                    device: Default::default(),
+                    crm_lists: Default::default(),
+                    delivery: Default::default(),
                 },
                 metadata: HashMap::new(),
             })
@@ -1591,10 +1631,16 @@ mod tests {
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
                     metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: Default::default(),
                 }],
                 targeting: CampaignTargeting {
                     domains: vec!["signed.test".to_string()],
                     badges: vec!["physical_presence".to_string()],
+                    geo: Default::default(),
+                    device: Default::default(),
+                    crm_lists: Default::default(),
+                    delivery: Default::default(),
                 },
                 metadata: HashMap::new(),
             })
@@ -1617,8 +1663,8 @@ mod tests {
         let query = ann::hash_badges(&badge_list);
         let snapshot = ann::WalletAnnIndexSnapshot::new([0xAA; 32], vec![query, [0x33; 32]], 16);
         let proof = ann::build_proof(&snapshot, &badge_list).expect("soft intent proof");
-        let snapshot_hex = hex::encode(binary::encode(&snapshot));
-        let proof_hex = hex::encode(binary::encode(&proof));
+        let snapshot_hex = hex::encode(binary::encode(&snapshot).expect("encode snapshot"));
+        let proof_hex = hex::encode(binary::encode(&proof).expect("encode proof"));
 
         let mut rng = OsRng::default();
         let signing = SigningKey::generate(&mut rng);
@@ -1702,8 +1748,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "selection.test".into(),
+                domain_tier: Default::default(),
+                domain_owner: None,
                 provider: Some("provider".into()),
                 badges: vec!["vip".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: 1,
                 bytes: 512,
                 price_per_mib_usd_micros: 100,
                 delivery_channel: DeliveryChannel::Http,
@@ -1784,6 +1835,9 @@ mod tests {
             }),
             readiness: None,
             zk_proof: None,
+            presence_badge: None,
+            venue_id: None,
+            crowd_size_hint: None,
         };
 
         attach_campaign_metadata(&state, &mut ack);
@@ -1797,10 +1851,16 @@ mod tests {
         assert!((candidate.requested_kappa - 0.66).abs() < f64::EPSILON);
         assert!((candidate.shadow_price - 0.33).abs() < f64::EPSILON);
         assert_eq!(receipt.badge_soft_intent.as_ref(), Some(&ann_receipt));
-        assert_eq!(receipt.badge_soft_intent_snapshot.as_ref(), Some(&snapshot));
+        let receipt_snapshot = receipt.badge_soft_intent_snapshot.as_ref().expect("snapshot");
+        assert_eq!(receipt_snapshot.fingerprint, snapshot.fingerprint);
+        assert_eq!(receipt_snapshot.bucket_hashes, snapshot.bucket_hashes);
+        assert_eq!(receipt_snapshot.dimensions, snapshot.dimensions);
         let context = ack.badge_soft_intent.as_ref().expect("context preserved");
         assert_eq!(context.proof.as_ref(), Some(&ann_receipt));
-        assert_eq!(context.wallet_index.as_ref(), Some(&snapshot));
+        let context_snapshot = context.wallet_index.as_ref().expect("wallet index");
+        assert_eq!(context_snapshot.fingerprint, snapshot.fingerprint);
+        assert_eq!(context_snapshot.bucket_hashes, snapshot.bucket_hashes);
+        assert_eq!(context_snapshot.dimensions, snapshot.dimensions);
     }
 
     #[test]
@@ -1840,8 +1900,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "multi.test".into(),
+                domain_tier: Default::default(),
+                domain_owner: None,
                 provider: Some("wallet".into()),
                 badges: vec!["tier.one".into(), "tier.two".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: 1,
                 bytes: 1_024,
                 price_per_mib_usd_micros: 220,
                 delivery_channel: DeliveryChannel::Http,
@@ -1874,6 +1939,7 @@ mod tests {
             creative_id: winner.creative_id.clone(),
             price_per_mib_usd_micros: 220,
             total_usd_micros: 2_048,
+            clearing_price_usd_micros: 1_520_000,
             resource_floor_usd_micros: 180,
             resource_floor_breakdown: receipt.resource_floor_breakdown.clone(),
             runner_up_quality_bid_usd_micros: runner_up.quality_adjusted_bid_usd_micros,
@@ -1918,6 +1984,9 @@ mod tests {
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
+            presence_badge: None,
+            venue_id: None,
+            crowd_size_hint: None,
         };
 
         attach_campaign_metadata(&state, &mut ack);
@@ -1953,8 +2022,13 @@ mod tests {
         let receipt = SelectionReceipt {
             cohort: SelectionCohortTrace {
                 domain: "mesh.test".into(),
+                domain_tier: Default::default(),
+                domain_owner: None,
                 provider: Some("mesh-provider".into()),
                 badges: vec!["mesh.badge".into()],
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: 1,
                 bytes: 2_048,
                 price_per_mib_usd_micros: 180,
                 delivery_channel: DeliveryChannel::Mesh,
@@ -2043,6 +2117,9 @@ mod tests {
             badge_soft_intent: None,
             readiness: None,
             zk_proof: None,
+            presence_badge: None,
+            venue_id: None,
+            crowd_size_hint: None,
         };
 
         attach_campaign_metadata(&state, &mut ack);
@@ -2056,7 +2133,7 @@ mod tests {
         assert_eq!(guard.pending(), 1);
         let bundle = guard.dequeue().expect("bundle enqueued");
         assert_eq!(bundle.payload, mesh_payload);
-        let relays: Vec<String> = bundle.proofs.into_iter().map(|proof| proof.relay).collect();
+        let relays: Vec<String> = bundle.proofs.iter().map(|proof| proof.relay.clone()).collect();
         assert_eq!(relays, vec!["relay-1".to_string(), "relay-2".to_string()]);
     }
 

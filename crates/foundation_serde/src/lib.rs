@@ -1,7 +1,22 @@
 #![forbid(unsafe_code)]
 
-//! Foundation serde facade backed entirely by the in-house stub implementation.
+//! First-party serialization traits.
+//!
+//! This crate provides the foundational traits for serialization and deserialization,
+//! implementing the same API surface as serde but with a fully first-party implementation.
+//!
+//! No third-party dependencies - built entirely in-house for complete auditability.
 
-mod stub;
+pub mod de;
+pub mod ser;
 
-pub use crate::stub::*;
+#[doc(inline)]
+pub use de::{Deserialize, DeserializeOwned, DeserializeSeed, Deserializer};
+
+#[doc(inline)]
+pub use ser::{Serialize, Serializer};
+
+// Re-export for compatibility
+pub use de as deserialize;
+pub use de::value::IntoDeserializer;
+pub use ser as serialize;

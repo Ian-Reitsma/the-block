@@ -83,8 +83,8 @@ fn deposit_valid_proof() {
     assert_eq!(bridge.locked("alice"), 50);
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(PROOF_VERIFY_SUCCESS_TOTAL.get(), 1);
-        assert_eq!(PROOF_VERIFY_FAILURE_TOTAL.get(), 0);
+        assert_eq!((*PROOF_VERIFY_SUCCESS_TOTAL).get(), 1);
+        assert_eq!((*PROOF_VERIFY_FAILURE_TOTAL).get(), 0);
     }
 }
 
@@ -115,8 +115,8 @@ fn deposit_invalid_proof() {
     assert_eq!(bridge.locked("alice"), 0);
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(PROOF_VERIFY_SUCCESS_TOTAL.get(), 0);
-        assert_eq!(PROOF_VERIFY_FAILURE_TOTAL.get(), 1);
+        assert_eq!((*PROOF_VERIFY_SUCCESS_TOTAL).get(), 0);
+        assert_eq!((*PROOF_VERIFY_FAILURE_TOTAL).get(), 1);
     }
 }
 
@@ -163,7 +163,7 @@ fn deposit_replay_fails() {
     assert_eq!(bridge.locked("alice"), 50);
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(PROOF_VERIFY_SUCCESS_TOTAL.get(), 1);
-        assert_eq!(PROOF_VERIFY_FAILURE_TOTAL.get(), 1);
+        assert_eq!((*PROOF_VERIFY_SUCCESS_TOTAL).get(), 1);
+        assert_eq!((*PROOF_VERIFY_FAILURE_TOTAL).get(), 1);
     }
 }

@@ -102,10 +102,6 @@ pub fn is_charging() -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tempfile::TempDir;
-    use std::fs::File;
-    use std::io::Write;
 
     #[test]
     #[cfg(any(target_os = "android", target_os = "linux"))]

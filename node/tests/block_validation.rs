@@ -5,7 +5,7 @@ use std::panic;
 use the_block::{
     blockchain::process::{validate_and_apply, ExecutionContext},
     transaction::{sign_tx, RawTxPayload},
-    Account, Blockchain, TokenAmount, TokenBalance, TxAdmissionError,
+    Account, Blockchain, TokenBalance, TxAdmissionError,
 };
 
 #[test]

@@ -227,7 +227,6 @@ impl crate::telemetry::Recordable for PublicKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
 
     #[test]
     fn vrf_round_trip() {

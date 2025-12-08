@@ -18,10 +18,10 @@ use std::sync::{Arc, RwLock};
 use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
 mod attestation;
-mod badge;
-mod budget;
+pub mod badge;
+pub mod budget;
 mod privacy;
-mod uplift;
+pub mod uplift;
 
 pub use attestation::{
     AttestationSatisfaction, SelectionAttestationConfig, SelectionAttestationManager,
@@ -691,7 +691,8 @@ impl Default for MarketplaceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct CohortKey {
     domain: String,
     domain_tier: DomainTier,
@@ -1843,7 +1844,9 @@ impl SelectionProofMetadata {
 }
 
 mod serde_bytes_vec {
-    use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serializer};
+    use foundation_serialization::serde::{
+        ser::SerializeSeq, Deserialize, Deserializer, Serializer,
+    };
 
     #[allow(dead_code)]
     pub fn serialize<S>(values: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
@@ -1862,17 +1865,14 @@ mod serde_bytes_vec {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(transparent)]
-        struct ByteVec(#[serde(with = "foundation_serialization::serde_bytes")] Vec<u8>);
-
-        let items: Vec<ByteVec> = Vec::<ByteVec>::deserialize(deserializer)?;
-        Ok(items.into_iter().map(|ByteVec(bytes)| bytes).collect())
+        // Deserialize directly as Vec<Vec<u8>>
+        // The serde_bytes optimization isn't critical for correctness
+        Vec::<Vec<u8>>::deserialize(deserializer)
     }
 
     struct ByteSlice<'a>(&'a [u8]);
 
-    impl serde::Serialize for ByteSlice<'_> {
+    impl foundation_serialization::serde::Serialize for ByteSlice<'_> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,

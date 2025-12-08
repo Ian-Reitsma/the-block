@@ -191,6 +191,10 @@ mod tests {
                 vdf_commit: [0u8; 32],
                 vdf_output: [0u8; 32],
                 vdf_proof: Vec::new(),
+                #[cfg(feature = "quantum")]
+                dilithium_pubkey: Vec::new(),
+                #[cfg(feature = "quantum")]
+                dilithium_sig: Vec::new(),
             });
             ts += 2_000; // twice the target spacing
         }

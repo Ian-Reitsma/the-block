@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use coding::{CompressionConfig, Config, ErasureConfig};
-use sys::tempfile::tempdir;
+use sys::tempfile::{tempdir, TempDir};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::simple_db::{names, SimpleDb};
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -30,7 +30,7 @@ impl Drop for ConfigGuard {
 
 struct SettlementGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
-    _dir: tempfile::TempDir,
+    _dir: TempDir,
 }
 
 impl SettlementGuard {

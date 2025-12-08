@@ -13,7 +13,7 @@ use the_block::{
     generate_keypair,
     net::{self, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
     p2p::handshake::{Hello, Transport},
-    sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag, TokenAmount,
+    sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag,
 };
 use util::fork::inject_fork;
 
