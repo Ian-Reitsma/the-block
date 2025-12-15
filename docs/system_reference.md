@@ -56,8 +56,8 @@ Never reorder or remove fields; instead add new suffix fields and bump the hash 
 | Version | Scope | Pre‑migration state | Post‑migration state | Operator expectations |
 | --- | --- | --- | --- | --- |
 | v7 | Recent timestamp journaling (`docs/schema_migrations/v7_recent_timestamps.md` ➜ `Blockchain::recent_timestamps`) | Mempool entries only tracked `timestamp_millis`; restarts lost ordering guarantees. | `timestamp_ticks` persisted alongside millis so QoS lanes continue after restarts (`node/tests/reopen.rs`). | Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring `telemetry::STARTUP_TTL_DROP_TOTAL`. |
-| v8 | Bridge header persistence (`docs/schema_migrations/v8_bridge_headers.md`) | Bridge proofs not materialised in sled; challenge windows could not replay after crash. | `simple_db::names::BRIDGE` stores verified headers and pending withdrawals; CLI exposes `tb-cli bridge pending | disputes`. | Run the node once per bridge shard after upgrading; watch `bridge_head_commit_total`. |
-| v9 | DEX escrow snapshots | Escrow state stored only in memory; C/R flows risked desync. | `simple_db::names::DEX_STORAGE` now stores `EscrowState` (orders, locks, HTLC proofs). | Before upgrading, pause matching, run `tb-cli dex escrow export`; after upgrade confirm `dex.order_book` RPC matches expectations. |
+| v8 | Bridge header persistence (`docs/schema_migrations/v8_bridge_headers.md`) | Bridge proofs not materialised in sled; challenge windows could not replay after crash. | `simple_db::names::BRIDGE` stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending | disputes`. | Run the node once per bridge shard after upgrading; watch `bridge_head_commit_total`. |
+| v9 | DEX escrow snapshots | Escrow state stored only in memory; C/R flows risked desync. | `simple_db::names::DEX_STORAGE` now stores `EscrowState` (orders, locks, HTLC proofs). | Before upgrading, pause matching, run `contract-cli dex escrow export`; after upgrade confirm `dex.order_book` RPC matches expectations. |
 | v10 | Industrial subsidy buckets | Subsidy accounting was aggregated; per‑lane reporting missing. | `Block::industrial_subsidies()` writes `storage_sub_it`, `read_sub_it`, `compute_sub_it`; governance surfaces via explorer and CLI. | Update dashboards to use the new metrics (`INDUSTRIAL_SUBSIDY_*`); re-run treasury audits to ensure ledgers reconcile. |
 
 ---
@@ -88,7 +88,7 @@ next = max(prev + Δ, 1)
 ### 2.3 QoS accounting, TTL math, and RPC surfaces
 
 - Admission + per‑sender limits (`node/src/mempool/admission.rs`): `AdmissionState::reserve_sender` tracks outstanding slots keyed by `(sender, lane)`. Defaults:
-  - `max_pending_per_account = 16` (overrideable via `tb-cli node mempool set-cap` or `TB_MEMPOOL_ACCOUNT_CAP`).
+  - `max_pending_per_account = 16` (overrideable via `contract-cli node mempool set-cap` or `TB_MEMPOOL_ACCOUNT_CAP`).
   - `max_mempool_size_{consumer,industrial} = 1_024` entries each.
   - `min_fee_per_byte_{consumer,industrial}` defaults to 1 µCT/byte but is immediately clamped to the rolling floor.
 - Rolling floor: every admitted transaction records its `fee_per_byte`. The percentile window is configured by governance (`fee_floor_window`, `fee_floor_percentile`) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post `mempool.qos_event` we log overrides (`FEE_FLOOR_WARNING_TOTAL` / `FEE_FLOOR_OVERRIDE_TOTAL`).
@@ -144,7 +144,7 @@ When consumer latency jumps above `comfort_threshold_p90` (governance parameter)
 - Pick logic: in re‑entrant builds we maintain `(current_class, budget, last_idx)`. Each dequeue consumes one unit of the class budget; once the budget hits zero or the queue empties we rotate to the next non‑empty class. In non‑re‑entrant builds we rotate a ring buffer of `(class, queue_len)` pairs so large bursts cannot starve lower-weight lanes.
 - Batch size: callers (e.g., the gossip reactor or execution pipeline) pass `limit` into `drain(limit)` or `execute_ready(limit)`. A typical block assembly requests `limit = dynamic_block_limit()`; gossip workers usually ask for 64 messages. Because the scheduler enforces per-class weights the effective fairness window equals `weight` dequeues before the class yields to its peers.
 - Starvation guards: `ServiceSchedulerStats` exposes `queue_depths` + `weights` via diagnostics so operators can confirm configuration. If a class enters `reentrant_enabled` mode with weight zero its queues will still be scanned periodically to avoid livelock. For transaction execution, `TxScheduler` builds read/write sets (`TxRwSet`) and refuses to schedule transactions whose inputs or outputs overlap an active run (“RW conflict”). Conflicts are surfaced as `ScheduleError::Conflict(txid)` so block builders can defer the losing transaction without discarding it.
-- Governance knobs: to bias toward consumer traffic during incidents set `scheduler_weight_gossip=4`, `scheduler_weight_compute=1`, `scheduler_weight_storage=1`, then monitor `scheduler.stats` RPC to ensure queue depths drop as expected. `tb-cli diagnostics scheduler` prints the same struct locally.
+- Governance knobs: to bias toward consumer traffic during incidents set `scheduler_weight_gossip=4`, `scheduler_weight_compute=1`, `scheduler_weight_storage=1`, then monitor `scheduler.stats` RPC to ensure queue depths drop as expected. `contract-cli diagnostics scheduler` prints the same struct locally.
 
 ---
 
@@ -187,14 +187,14 @@ When consumer latency jumps above `comfort_threshold_p90` (governance parameter)
 
 - `PartitionWatch` (`node/src/net/partition_watch.rs`) tracks unreachable peers; default threshold = 8.
 - When `mark_unreachable` pushes the count past the threshold, `PARTITION_EVENTS_TOTAL` increments and `active=true`. Operators should:
-  1. Query `tb-cli net partition` (via diagnostics) to list isolated peer IDs.
+  1. Query `contract-cli net partition` (via diagnostics) to list isolated peer IDs.
   2. Inspect `partition_watch.current_marker()` to correlate with dashboards/incident logs.
   3. Run the recovery recipe: flush peer bans, reseed overlay via CLI, confirm `is_partitioned()` flips back to false.
 
 ### 3.5 Overlay store and peer persistence
 
 - Backends: `node/src/config.rs` exposes `overlay.backend = inhouse | stub`. The in-house backend (`crates/p2p_overlay::InhouseOverlay`) persists peers under `TB_OVERLAY_DB_PATH` (defaults to `~/.the_block/overlay`). Records are pretty‑printed JSON containing the base58 peer ID, socket address, and `last_seen` epoch seconds. The stub backend (memory only) is useful for deterministic tests.
-- Discovery + RPC selection: `node/src/net/discovery.rs` re‑exports the trait so CLI/RPC consumers can issue `net.overlay_status` and `tb-cli net overlay-status --format json`. Switching backend at runtime is safe; `net::overlay_service()` holds the chosen implementation in a read/write lock, and `governance::registry` wires up policy changes.
+- Discovery + RPC selection: `node/src/net/discovery.rs` re‑exports the trait so CLI/RPC consumers can issue `net.overlay_status` and `contract-cli net overlay-status --format json`. Switching backend at runtime is safe; `net::overlay_service()` holds the chosen implementation in a read/write lock, and `governance::registry` wires up policy changes.
 - Migration: `scripts/migrate_overlay_store.rs` converts legacy bincode sled trees into the new JSON format. Invoke it before flipping `overlay.backend` on existing nodes so peer histories are retained.
 - Peer metrics store: `node/src/net/peer_metrics_store.rs` writes compressed records into `sled` (`peer_metrics` tree). Values are encoded via `peer_metrics_binary::{encode, decode}` (compact bincode) and keyed by `<peer-pk><timestamp>` which enables retention pruning. `peer.metrics_export` CLI/RPC commands also read from this tree.
 - Ban store: `node/src/net/ban_store.rs` keeps bans in `SimpleDb::open_named(names::NET_BANS, TB_BAN_DB)`. Entries are hex peer IDs with an 8‑byte timestamp payload; `ban_store::purge_expired()` enforces TTL and updates `BANNED_PEERS_TOTAL`.
@@ -228,7 +228,7 @@ When consumer latency jumps above `comfort_threshold_p90` (governance parameter)
 ### 4.3 Headless and AI diagnostics
 
 - CLI (`cli/src/ai.rs`):
-  - `tb-cli ai diagnose --snapshot metrics.json` loads a JSON blob, evaluates heuristics (currently latency thresholds), and prints remediation tips.
+  - `contract-cli ai diagnose --snapshot metrics.json` loads a JSON blob, evaluates heuristics (currently latency thresholds), and prints remediation tips.
   - `Metrics` struct contains `avg_latency_ms`; extend it as headless tooling matures.
 - Governance parameter `ai_diagnostics_enabled` (see §10) gates ANN‑based alerts in node + aggregator.
 - Headless flows share the same JSON codec helpers as RPC so suggestions are deterministic and auditable.
@@ -304,9 +304,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 ### 5.9 Storage importer and audit CLI
 
 - Legacy manifests still exist under `storage_market/legacy/`. `storage_market/src/importer.rs` provides an ergonomic wrapper around that filesystem for audits and replay:
-  - `tb-cli storage importer audit --dir <market>` scans the pending/migrated manifest directories, samples up to 32 entries (`AUDIT_SAMPLE_LIMIT`), and reports duplicates/missing keys.
-  - `tb-cli storage importer rerun --overwrite` replays a manifest into the sled `market/contracts` tree. Modes: `InsertMissing` (default) or `OverwriteExisting`. Use `--dry-run` to see the counts first.
-  - `tb-cli storage importer verify --scope {contracts,all}` compares manifest checksums (deterministic hash over `(<cf>, key, value)` pairs) with the live database.
+  - `contract-cli storage importer audit --dir <market>` scans the pending/migrated manifest directories, samples up to 32 entries (`AUDIT_SAMPLE_LIMIT`), and reports duplicates/missing keys.
+  - `contract-cli storage importer rerun --overwrite` replays a manifest into the sled `market/contracts` tree. Modes: `InsertMissing` (default) or `OverwriteExisting`. Use `--dry-run` to see the counts first.
+  - `contract-cli storage importer verify --scope {contracts,all}` compares manifest checksums (deterministic hash over `(<cf>, key, value)` pairs) with the live database.
 - All importer commands honor `--allow-absent` so CI can skip legacy steps when the manifests were already migrated. Reports can be written to disk (`--out report.json`) and are encoded with `foundation_serialization::json` for reproducibility.
 
 ---
@@ -325,8 +325,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - `idempotency_key` is BLAKE3(`job_id | buyer | provider | price | units | version | lane`), guaranteeing deduplicated settlement entries even if retries occur.
 - SNARK receipts now embed a `ProofBundle` produced by `node/src/compute_market/snark.rs`. The helper wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled circuits per digest, selects CPU or GPU provers automatically, records telemetry (`snark_prover_latency_seconds{backend}`, `snark_prover_failure_total{backend}`), and emits bundles containing the circuit/output/witness commitments plus serialized proof bytes.
 - Each proof bundle includes a `CircuitArtifact { circuit_hash, wasm_hash, generated_at }`, allowing offline re-verification and matching against CLI/explorer exports without re-running compilation.
-- CLI support lives under `cli/src/snark.rs`. `snark compile` now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and `tb-cli compute proofs --limit N` streams the latest `compute_market.sla_history` proofs (fingerprint, backend, commitments, artifact metadata) for audits.
-- Settlement persists every accepted proof via `Settlement::record_proof`, retaining the full vector of bundles per SLA and exposing them through `compute_market.sla_history`. `tb-cli explorer sync-proofs` writes the same `Vec<ProofBundle>` blobs into the explorer tables (`compute_sla_history`, `compute_sla_proofs`), and the explorer HTTP route `/compute/sla/history?limit=N` re-exports the decoded fingerprints/artifacts for dashboards and auditors.
+- CLI support lives under `cli/src/snark.rs`. `snark compile` now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and `contract-cli compute proofs --limit N` streams the latest `compute_market.sla_history` proofs (fingerprint, backend, commitments, artifact metadata) for audits.
+- Settlement persists every accepted proof via `Settlement::record_proof`, retaining the full vector of bundles per SLA and exposing them through `compute_market.sla_history`. `contract-cli explorer sync-proofs` writes the same `Vec<ProofBundle>` blobs into the explorer tables (`compute_sla_history`, `compute_sla_proofs`), and the explorer HTTP route `/compute/sla/history?limit=N` re-exports the decoded fingerprints/artifacts for dashboards and auditors.
 
 ### 6.3 SLA slashing and dashboards
 
@@ -339,7 +339,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Dashboards plot `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL`, and `COMPUTE_SLA_NEXT_DEADLINE_TS`.
 - Operator workflow:
   1. Arm settlement via `compute_arm_real` RPC, wait for the `activate_at` block height, then advance to `SettleMode::Real`.
-  2. Watch aggregator dashboards for SLA thresholds; use `tb-cli compute settlement` to inspect queued records.
+  2. Watch aggregator dashboards for SLA thresholds; use `contract-cli compute settlement` to inspect queued records.
   3. Use the courier appendix (below) when diagnosing stuck carry-to-earn flows and pull `compute_market.sla_history` when auditing proof material alongside SLA outcomes.
 
 ### 6.4 Lane-aware matcher semantics
@@ -361,7 +361,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 ### 6.6 Scheduler metrics RPC
 
-- `scheduler.metrics` (`node/src/rpc/compute_market.rs`) simply forwards the JSON from `scheduler::metrics()` which contains `reputation` (provider score map) and `utilization` (capability → units consumed). Use `tb-cli compute scheduler metrics --json` for scripting.
+- `scheduler.metrics` (`node/src/rpc/compute_market.rs`) simply forwards the JSON from `scheduler::metrics()` which contains `reputation` (provider score map) and `utilization` (capability → units consumed). Use `contract-cli compute scheduler metrics --json` for scripting.
 - `scheduler.stats` returns a richer struct (`SchedulerStats`): outcome counters (`success`, `capability_mismatch`, `reputation_failure`), queue depths per priority (`queued_high/normal/low`), pending jobs with effective priority, and preemption counters.
 - Together with `compute_market.stats` these RPCs explain why a job failed to match (e.g., reputation failure vs lack of capability) without scraping node logs.
 
@@ -380,7 +380,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - `config/default.toml` exposes `energy.provider_keys = [{ provider_id = "...", public_key_hex = "..." }, …]`. Reloads invoke `node::energy::configure_provider_keys`, clearing and repopulating the sled-backed verifier registry so ops can rotate or revoke keys without restarts. Entries are authoritative—omitting a provider removes it from the registry and puts it back into shadow mode.
 - **RPC + CLI** (`node/src/rpc/energy.rs`, `cli/src/energy.rs`):
   - RPC methods: `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`. Helpers enforce payload shape (`require_string`, `require_u64`, `decode_hash`, `decode_signature`) and emit canonical JSON for providers/credits/receipts.
-  - CLI mirrors the RPC schema: `tb-cli energy register <capacity> <price> --meter-address … --jurisdiction … --stake … --owner …`, `tb-cli energy market [--provider-id … --verbose]`, `tb-cli energy submit-reading --reading-json '…'`, `tb-cli energy settle <provider> <kwh> --meter-hash … --buyer …`.
+  - CLI mirrors the RPC schema: `contract-cli energy register <capacity> <price> --meter-address … --jurisdiction … --stake … --owner …`, `contract-cli energy market [--provider-id … --verbose]`, `contract-cli energy submit-reading --reading-json '…'`, `contract-cli energy settle <provider> <kwh> --meter-hash … --buyer …`.
   - All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts` so meter hashes/receipts stay byte-identical everywhere.
 - **Oracle adapter + mock service** (`crates/oracle-adapter`, `services/mock-energy-oracle`):
 - Adapter defines `SignatureVerifier`; the default (`Ed25519SignatureVerifier`) enforces signatures for every provider with a registered key. `MeterReadingPayload` implements `MeterReading` and exposes the canonical `signing_bytes()` digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.
@@ -431,7 +431,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - When `released == total` the entry is deleted and `total_locked` drops accordingly (`dex_escrow_locked` gauge).
 - Persistence and RPC:
   - Escrow tables live in sled (`dex::storage::DexStore`) and are exported via `node/src/dex/storage_binary.rs` (bincode helpers for order books, escrow snapshots, proofs).
-  - RPC `dex_escrow_status`/`dex_escrow_release`/`dex_escrow_proof` expose the state machine; CLI mirrors them via `tb-cli dex escrow status|release|proof`.
+  - RPC `dex_escrow_status`/`dex_escrow_release`/`dex_escrow_proof` expose the state machine; CLI mirrors them via `contract-cli dex escrow status|release|proof`.
 - Explorer + metrics:
   - `GET /dex/order_book` and `GET /dex/trust_lines` return the indexed order book and trust-line graph, respectively.
   - Metrics `dex_escrow_locked` and `dex_escrow_pending` (see `node/src/telemetry.rs`) feed the default dashboards so operators can spot runaway collateral.
@@ -476,7 +476,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Governance: treasury drains, badge forgery attempts.
 - Audit tooling:
   - Aggregator `/audit` endpoint stores incident logs.
-  - `scripts/settlement_audit.rs`, `tools/settlement_audit`, and `tb-cli gov treasury audit` compare ledger projections vs settlement state.
+  - `scripts/settlement_audit.rs`, `tools/settlement_audit`, and `contract-cli gov treasury audit` compare ledger projections vs settlement state.
   - Risk reviews must cite relevant sections here before patching code.
 
 ---
@@ -487,9 +487,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 - `node/src/gateway/dns.rs` maintains auctions (`DomainAuctionRecord`) and stakes (`StakeEscrowRecord`) under `SimpleDb::open_named(names::GATEWAY_DNS, path)`.
 - Auction lifecycle:
-  1. Seller lists via `tb-cli gateway domain list <domain> <min_bid> --seller <acct> ...`.
-  2. Bidders lock stake references (`register_stake`) and submit bids (`tb-cli gateway domain bid ... --stake-ref ref1`). Bids must exceed both `min_bid_ct` and previous `highest_bid`.
-  3. Seller (or governance) completes the sale (`tb-cli gateway domain complete`) once `end_ts` passes; ledger events (`LedgerEventRecord`) debit bidders, credit seller/royalty/treasury, and refund unused stake.
+  1. Seller lists via `contract-cli gateway domain list <domain> <min_bid> --seller <acct> ...`.
+  2. Bidders lock stake references (`register_stake`) and submit bids (`contract-cli gateway domain bid ... --stake-ref ref1`). Bids must exceed both `min_bid_ct` and previous `highest_bid`.
+  3. Seller (or governance) completes the sale (`contract-cli gateway domain complete`) once `end_ts` passes; ledger events (`LedgerEventRecord`) debit bidders, credit seller/royalty/treasury, and refund unused stake.
   4. If no bids, `cancel` reopens the domain.
 - Escrow bookkeeping handles stake reuse, lock/unlock flows, and ledger references for audit reports.
 - DNS TXT schema: publications must conform to `docs/spec/dns_record.schema.json` (`{domain, txt, pubkey, sig}`). Example TXT record for `club.block`:
@@ -502,7 +502,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - Verification and auditing:
   - RPC `gateway.policy` returns the active TXT policy parsed via `gateway::dns::gateway_policy`.
   - `gateway.dns_lookup` exposes the cached verdict (`verified`, `pending`, `failed`) so explorers can show trust badges.
-  - CLI `tb-cli net dns verify <domain>` exercises the same path and prints cache hits/misses.
+  - CLI `contract-cli net dns verify <domain>` exercises the same path and prints cache hits/misses.
 
 ### 9.2 Read receipts, batching, and audit workflow
 
@@ -512,8 +512,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - `batch(epoch)` loads all receipts, computes a BLAKE3 Merkle root, writes `<epoch>.root`, combines with execution receipts (`exec::batch`), and submits the final anchor to the settlement engine.
   - `reads_since(epoch, domain)` returns `(count, last_ts)` for CLI/RPC reporting.
 - CLI runbook:
-  1. `tb-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600` (custom script) polls the RPC `gateway.reads_since`.
-  2. `tb-cli gateway mobile-cache flush` before maintenance to force anchors.
+  1. `contract-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600` (custom script) polls the RPC `gateway.reads_since`.
+  2. `contract-cli gateway mobile-cache flush` before maintenance to force anchors.
   3. Inspect anchors via `compute_market.recent_roots` to ensure READ_SUB_CT credits landed.
 
 ### 9.3 Mobile gateway cache
@@ -526,8 +526,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Encryption key: `TB_MOBILE_CACHE_KEY_HEX` (falls back to `TB_NODE_KEY_HEX`).
 - The cache uses ChaCha20‑Poly1305; entries persist `stored_at`, `expires_at`, and ciphertext bytes. TTL enforcement sweeps expired records, increments `MOBILE_CACHE_STALE_TOTAL`, and updates `MOBILE_CACHE_QUEUE_BYTES`.
 - CLI:
-  - `tb-cli gateway mobile-cache status --url http://node:26658 --pretty`.
-  - `tb-cli gateway mobile-cache flush` to drop encrypted responses and offline queue state.
+  - `contract-cli gateway mobile-cache status --url http://node:26658 --pretty`.
+  - `contract-cli gateway mobile-cache flush` to drop encrypted responses and offline queue state.
 
 ### 9.4 Light clients, state streams, and explorer payloads
 
@@ -536,7 +536,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Accounts are serialized as sorted sequences (`AccountChunk { address, balance, account_seq, proof }`); proofs are the Merkle siblings from `state::MerkleTrie::prove`.
   - Default cadence: 1 chunk per second; set by the loop delay inside `run_stream`. Errors close the socket; clients should reconnect and resume from the latest `seq`.
 - Light-client crate (`crates/light-client`):
-  - `SyncOptions` gate by Wi-Fi/charging/battery and compute `GatingReason`. Device probes feed `DeviceStatusSnapshot` which feeds CLI via `tb-cli light-client device status --json`.
+  - `SyncOptions` gate by Wi-Fi/charging/battery and compute `GatingReason`. Device probes feed `DeviceStatusSnapshot` which feeds CLI via `contract-cli light-client device status --json`.
   - Headers (`light_client::Header`) mirror the canonical layout (height, prev hash, Merkle roots, VDF data, optional validator key/sig). `verify_and_append` enforces PoW and checkpoint rules.
   - `state_stream` consumers persist deltas under `~/.the_block/light_client.toml` and reuse `fetch_signed` to load jurisdiction-specific overrides.
 - Rebate + explorer endpoints:
@@ -555,9 +555,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
     ```
 
 - CLI quick start:
-  1. `tb-cli light-client rebate-status --url http://node:26658` prints local balances.
-  2. `tb-cli light-client rebate-history --limit 5 --json` paginates receipts (set `--relayer <hex>` to filter).
-  3. `tb-cli light-client device status --json` confirms gating vs overrides before enabling background sync.
+  1. `contract-cli light-client rebate-status --url http://node:26658` prints local balances.
+  2. `contract-cli light-client rebate-history --limit 5 --json` paginates receipts (set `--relayer <hex>` to filter).
+  3. `contract-cli light-client device status --json` confirms gating vs overrides before enabling background sync.
 
 - Failure modes:
   - Missing proofs ➜ `state_stream` closes the socket and logs `StateStreamError::InvalidProof`.
@@ -576,7 +576,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 ### 10.2 Fee rebates
 
 - Rebates are ledger entries keyed to sender accounts. `node/src/fees/mod.rs` charges consumer traffic by applying rebates first; `FeeLane::Industrial` bypasses rebates and bills direct CT.
-- RPC: `peer.rebate_status`, `peer.rebate_claim`. CLI: `tb-cli fees status`, `tb-cli fees claim`.
+- RPC: `peer.rebate_status`, `peer.rebate_claim`. CLI: `contract-cli fees status`, `contract-cli fees claim`.
 - Ordering: when submitting a transaction `submit_tx` calculates `total_consumer = amount_consumer + fee`, subtracts available rebate credits, and only then debits CT.
 
 ### 10.3 Governance parameters
@@ -587,12 +587,12 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 ### 10.4 Release, rollback, and UI flows
 
 - CLI:
-  - `tb-cli gov release propose --hash <build_hash> --artifact <url>` registers new releases; provenance signatures must match `config/release_signers.txt` or env overrides.
-  - `tb-cli gov release approve --proposal <id>` collects signatures/quorum.
-  - `tb-cli gov release rollback --proposal <id>` triggers rollback windows; explorer `GET /releases` surfaces history.
+  - `contract-cli gov release propose --hash <build_hash> --artifact <url>` registers new releases; provenance signatures must match `config/release_signers.txt` or env overrides.
+  - `contract-cli gov release approve --proposal <id>` collects signatures/quorum.
+  - `contract-cli gov release rollback --proposal <id>` triggers rollback windows; explorer `GET /releases` surfaces history.
 - UI flows mirror CLI commands via explorer endpoints; log indexer ensures wallet + explorer display identical release states.
 - Provenance controls (`node/src/provenance.rs`):
-  - Signer list: load from `TB_RELEASE_SIGNERS`, `TB_RELEASE_SIGNERS_FILE`, or `config/release_signers.txt`. `tb-cli gov release signers` prints the active keys.
+  - Signer list: load from `TB_RELEASE_SIGNERS`, `TB_RELEASE_SIGNERS_FILE`, or `config/release_signers.txt`. `contract-cli gov release signers` prints the active keys.
   - Attestation payloads look like:
 
     ```json
@@ -615,7 +615,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Non‑negative balances (`ct`, `industrial`) tracked in sled.
   - Streaming caps and kill switches (`kill_switch_subsidy_reduction`, `treasury_percent_ct`).
   - Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.
-- Executor snapshots (CLI `tb-cli gov treasury executor`) must show monotonic `last_tick_at`. Settlement anchors are hashed and appended to the audit log for replayability.
+- Executor snapshots (CLI `contract-cli gov treasury executor`) must show monotonic `last_tick_at`. Settlement anchors are hashed and appended to the audit log for replayability.
 
 ### 10.6 Service badge lifecycle
 
@@ -623,9 +623,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Maintains uptime counters, latency samples, and expiry metadata. Badges mint once `total_epochs >= BADGE_MIN_EPOCHS` (default 90) and uptime ≥ `BADGE_ISSUE_UPTIME` (99 %). Revocation triggers when uptime falls below `BADGE_REVOKE_UPTIME` (95 %) or `expiry` passes (`BADGE_TTL_SECS`, default 30 days).
   - Minting calls `register_physical_presence(provider)`, stores a `token`, increments `BADGE_ISSUED_TOTAL`, and records timestamps (`BADGE_LAST_CHANGE_SECONDS`). Burning calls `revoke_provider_badge` and updates `BADGE_ACTIVE`.
 - CLI (`cli/src/service_badge.rs`):
-  - `tb-cli service-badge issue|revoke` wrap the RPC methods for automation.
-  - `tb-cli service-badge verify <token>` confirms authenticity (good for explorer tooltips).
-  - `tb-cli service-badge venue register|rotate|status <name>` manages venue presence tokens tracked in `VENUE_TOKENS`.
+  - `contract-cli service-badge issue|revoke` wrap the RPC methods for automation.
+  - `contract-cli service-badge verify <token>` confirms authenticity (good for explorer tooltips).
+  - `contract-cli service-badge venue register|rotate|status <name>` manages venue presence tokens tracked in `VENUE_TOKENS`.
 - Explorer + telemetry:
   - Explorer surfaces badges under `/auxiliary/services` alongside venue crowd snapshots (`VENUE_COUNTS`).
   - Metrics `BADGE_ACTIVE`, `BADGE_LAST_CHANGE_SECONDS`, and `service_badge_token_age_seconds` back the default dashboards so operators can verify SLA compliance before badges expire.
@@ -639,7 +639,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - PQ upgrades compile by enabling the `pq-crypto` feature; `node/src/commit_reveal.rs` switches commits to Dilithium, while `dkg/` and `wallet/remote_signer` can operate in both classic and PQ modes.
 - Migration playbook:
   1. Build both PQ and classic binaries; verify `crypto_suite` self‑tests.
-  2. Rotate commit‑reveal keys using CLI (`tb-cli gov commit-reveal rotate` when available) while telemetry `CRYPTO_MIGRATION_*` metrics stay zero.
+  2. Rotate commit‑reveal keys using CLI (`contract-cli gov commit-reveal rotate` when available) while telemetry `CRYPTO_MIGRATION_*` metrics stay zero.
   3. Roll out PQ wallets by updating `TB_WALLET_SCHEME=dalek|dilithium`; the wallet crate auto‑detects remote signer capability.
 
 ### 11.2 Remote signer security
@@ -759,10 +759,10 @@ Pair probes with dashboards (see `monitoring/README.md`) and aggregator targets 
 ## 14. Developer Handbook Highlights
 
 - **Concurrency & Logging**: Use `concurrency::{MutexExt, DashMap}` to avoid poisoned locks; log via `diagnostics::tracing` with structured fields (`component`, `peer`, `lane`, etc.). Never log PII; privacy filters exist for the LE portal only.
-- **Debugging**: `tb-cli diagnostics {mempool,gossip,mesh,tls}` surfaces cached stats. Enable `RUST_LOG=trace` plus diagnostics subscriber when reproducing issues. Probe CLI (above) complements runtime diagnostics.
+- **Debugging**: `contract-cli diagnostics {mempool,gossip,mesh,tls}` surfaces cached stats. Enable `RUST_LOG=trace` plus diagnostics subscriber when reproducing issues. Probe CLI (above) complements runtime diagnostics.
 - **Performance & Benchmarks**: Bench harnesses under `benches/` and Grafana dashboards compare results against thresholds in `config/benchmarks/*.thresholds`. Export histograms via `TB_BENCH_PROM_PATH`.
 - **Formal Methods & Simulation**: `formal/` crate plus `docs/formal.md` house model checks. `sim/` contains scenario harnesses (dependency faults, DKG latency, bridge threats); run them before altering consensus or governance logic.
-- **WASM/VM Debug**: `cli/src/wasm.rs`, `node/src/vm`, `node/src/vm/debugger.rs` provide contract deployment, tracing, and debugging. Workflow: `tb-cli wasm build` → `tb-cli contract deploy` → `tb-cli contract call` → `tb-cli vm trace --tx <hash>`.
+- **WASM/VM Debug**: `cli/src/wasm.rs`, `node/src/vm`, `node/src/vm/debugger.rs` provide contract deployment, tracing, and debugging. Workflow: `contract-cli wasm build` → `contract-cli contract deploy` → `contract-cli contract call` → `contract-cli vm trace --tx <hash>`.
 
 ---
 
@@ -1365,9 +1365,9 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 
 ### Appendix F · DNS & Read-Receipt Flowchart
 
-1. `tb-cli gateway domain list` → RPC `dns.list_for_sale` → SimpleDb `auction:<domain>` record.
-2. `tb-cli gateway domain bid` (optionally register stake first) → RPC `dns.place_bid`.
-3. `tb-cli gateway domain complete` → RPC `dns.complete_sale` → ledger events (seller, royalties, treasury) + CLI confirmation.
+1. `contract-cli gateway domain list` → RPC `dns.list_for_sale` → SimpleDb `auction:<domain>` record.
+2. `contract-cli gateway domain bid` (optionally register stake first) → RPC `dns.place_bid`.
+3. `contract-cli gateway domain complete` → RPC `dns.complete_sale` → ledger events (seller, royalties, treasury) + CLI confirmation.
 4. Gateway serves content; clients issue reads with `ReadAck` headers (`X-TB-Read-Ack`).
 5. Gateway writes receipts (`read/<epoch>/<seq>.bin`), batches hourly via RPC `gateway.reads_since` & `gateway.batch_read_receipts`, anchors root through settlement.
 
@@ -1377,7 +1377,7 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 | --- | --- |
 | Courier queue | sled `courier` tree storing `CourierReceipt`. Automatic retries (5 attempts, 100 ms exponential backoff). |
 | SLA scheduler | `Settlement::sla` vector holds active deadlines; `SLA_HISTORY_LIMIT = 256`. |
-| CLI hooks | `tb-cli compute courier status`, `tb-cli compute settlement audit` (future extension) read `compute_market.*` RPC responses. |
+| CLI hooks | `contract-cli compute courier status`, `contract-cli compute settlement audit` (future extension) read `compute_market.*` RPC responses. |
 
 ### Appendix H · AMM & HTLC Math Reference
 

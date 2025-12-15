@@ -93,7 +93,7 @@ Think of this repository like a city with different neighborhoods:
 | --- | --- | --- |
 | **`node/`** | The main blockchain software that validates transactions, mines blocks, and talks to other nodes | Full node, gateway, mempool, compute/storage pipelines, RPC, light-client streaming, telemetry. `#![forbid(unsafe_code)]` by default. |
 | **`crates/`** | Shared libraries (building blocks) used by multiple parts of the system | Reusable libraries: `transport`, `httpd`, `foundation_*`, `storage_engine`, `p2p_overlay`, `wallet`, `probe`, etc. |
-| **`cli/`** | Command-line tool (`tb-cli`) - like a control panel for interacting with the blockchain | Handles governance, wallet, bridge, compute market, storage, telemetry, diagnostics, and remediation flows. |
+| **`cli/`** | Command-line tool (`contract-cli`) - like a control panel for interacting with the blockchain | Handles governance, wallet, bridge, compute market, storage, telemetry, diagnostics, and remediation flows. |
 | **`governance/`** | Rules and voting system - how the network makes decisions and manages the treasury | Bicameral voting, treasury disbursements, parameter adjustments, release attestations |
 | **`crates/energy-market/`** | NEW! Energy trading marketplace with oracle-verified meter readings and multi-scheme signature verification (Ed25519 + optional post-quantum) | Providers register, meters submit signed readings, buyers settle against credits, receipts stored in ledger |
 | **`crates/ad_market/`** | Privacy-aware advertising system — groups users into broad "cohorts" (site type, badges, approximate presence), not individual tracking. Advertisers bid on cohorts, not people. | Domain tiers, interest tags, presence buckets, privacy budgets, uplift experiments. See [`node/src/ad_policy_snapshot.rs`](node/src/ad_policy_snapshot.rs), [`node/src/ad_readiness.rs`](node/src/ad_readiness.rs), [`cli/src/ad_market.rs`](cli/src/ad_market.rs), [`docs/architecture.md#ad-market`](docs/architecture.md#ad-market). |
@@ -102,7 +102,7 @@ Think of this repository like a city with different neighborhoods:
 
 ### Recent Major Additions
 - **Treasury Disbursement System**: Complete end-to-end workflow for governance-approved fund distributions with RPC handlers (`gov.treasury.submit_disbursement`, `execute_disbursement`, `rollback_disbursement`) and full validation
-- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `tb-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
+- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `contract-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
 - **Energy Market Signature Verification**: Trait-based multi-provider signature system with Ed25519 (always available) and Dilithium (post-quantum, feature-gated), enabling oracle meter readings to be cryptographically verified
 - **Comprehensive Testing**: 100+ new unit tests covering signature verification, credit persistence across provider restarts, oracle timeout enforcement, and disbursement validation
 
@@ -120,18 +120,20 @@ Want to see The Block running on your machine? Here's the fastest path:
 
 # 2. Build the node and CLI
 cargo build -p the_block --release
-cargo build -p contract-cli --bin tb-cli
+cargo build -p contract-cli --bin contract-cli
 
 # 3. Start a local node
-./target/release/tb-cli node start --config config/node.toml
+./target/release/contract-cli node start --config config/node.toml
 
 # 4. In another terminal, try some commands:
-./target/release/tb-cli wallet new              # Create a wallet
-./target/release/tb-cli explorer blocks --tail 5   # See recent blocks
-./target/release/tb-cli tx send --help          # Explore sending BLOCK
+./target/release/contract-cli wallet new              # Create a wallet
+./target/release/contract-cli explorer blocks --tail 5   # See recent blocks
+./target/release/contract-cli tx send --help          # Explore sending BLOCK
 ```
 
 That's it! You're running a local blockchain. See [`docs/operations.md`](docs/operations.md) for production deployment.
+
+> **Homebrew updates on macOS:** `scripts/bootstrap.sh` now exports `HOMEBREW_NO_AUTO_UPDATE=1` before touching Homebrew so it never rewrites every cask when you run it. Run `brew update` manually before the bootstrap if you need newer packages (or unset the variable before the script: `HOMEBREW_NO_AUTO_UPDATE=0 ./scripts/bootstrap.sh`). The script also downloads the macOS `cargo-make`/`cargo-nextest` assets (`x86_64-apple-darwin` and `aarch64-apple-darwin`), so rerunning it on Apple Silicon should no longer end with `unsupported architecture: arm64-Darwin`.
 
 ---
 
@@ -152,7 +154,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
    ```
 5. **Start a local node**:
    ```bash
-   tb-cli node start --config node/.env.example
+   contract-cli node start --config node/.env.example
    ```
    Environment variables use the `TB_*` namespace; inspect `node/src/config.rs` for every knob.
 

@@ -278,10 +278,10 @@ economics_ad_split_bps{recipient="platform"} - 2800
 
 ```bash
 # Check economic snapshot
-tb-cli economics snapshot --epoch latest
+contract-cli economics snapshot --epoch latest
 
 # View all control law parameters
-tb-cli governance params list --filter economics_*
+contract-cli governance params list --filter economics_*
 
 # Check telemetry
 curl localhost:9090/metrics | grep economics_
@@ -291,13 +291,13 @@ curl localhost:9090/metrics | grep economics_
 
 ```bash
 # Example: Adjust inflation target from 5% to 4%
-tb-cli governance propose param-update \
+contract-cli governance propose param-update \
   --key InflationTargetBps \
   --value 400 \
   --reason "Lower inflation to 4% for token stability"
 
 # Example: Increase energy margin target from 25% to 30%
-tb-cli governance propose param-update \
+contract-cli governance propose param-update \
   --key EnergyMarginTargetBps \
   --value 3000 \
   --reason "Increase energy provider profitability target"
@@ -309,12 +309,12 @@ If a control law goes haywire:
 
 ```bash
 # Option 1: Freeze a specific layer (proposal required)
-tb-cli governance propose freeze-control-law \
+contract-cli governance propose freeze-control-law \
   --layer subsidy_allocator \
   --duration 100_epochs
 
 # Option 2: Manual parameter override
-tb-cli governance propose param-update \
+contract-cli governance propose param-update \
   --key SubsidyAllocatorDriftRate \
   --value 0 \
   --reason "Freeze subsidy reallocation temporarily"
@@ -725,6 +725,6 @@ The "sweet spot" (200M CT/year, 100 nodes, $1 price) is now a **stable basin**, 
 
 **For operators:** Start with [docs/economics_operator_runbook.md](../docs/economics_operator_runbook.md)
 **For developers:** See integration code at [node/src/lib.rs:4725-4778](../node/src/lib.rs#L4725-L4778)
-**For governance:** Review parameter reference above and propose adjustments via `tb-cli gov propose`
+**For governance:** Review parameter reference above and propose adjustments via `contract-cli gov propose`
 
 This is the PEAK optimization.

@@ -3,7 +3,7 @@
 ## 1. Modules & Data Sources
 - `crates/jurisdiction/` — Defines `JurisdictionId`, policy packs, fee overrides, feature toggles, and audit logging helpers. Policy manifests live under `crates/jurisdiction/policies/*.toml`.
 - `node/src/jurisdiction.rs` & `node/src/kyc.rs` — Apply policy packs to gateway, node CLI, and RPC flows. Jurisdiction modules feed law-enforcement logging per AGENTS spec.
-- `node/src/rpc/jurisdiction.rs` — JSON-RPC endpoints `jurisdiction.active_pack`, `jurisdiction.list`, `jurisdiction.override`, `jurisdiction.reset`. CLI `tb-cli jurisdiction ...` references these methods.
+- `node/src/rpc/jurisdiction.rs` — JSON-RPC endpoints `jurisdiction.active_pack`, `jurisdiction.list`, `jurisdiction.override`, `jurisdiction.reset`. CLI `contract-cli jurisdiction ...` references these methods.
 - `docs/security_and_privacy.md#kyc-jurisdiction-and-compliance` — Canonical narrative for compliance posture.
 
 ## 2. State & Storage Layout
@@ -14,10 +14,10 @@
 | `node/src/kyc.rs::AuditEntry` | Records LE queries, jurisdiction overrides, and portal usage. Stored in `kyc:audit`. |
 
 ## 3. RPC/CLI Workflows
-1. `tb-cli jurisdiction list` → RPC `jurisdiction.list` enumerates available packs (pulled from crate-l1 definitions).
-2. `tb-cli jurisdiction set --pack US_CA` → RPC `jurisdiction.override` writes override entry scoped to account/node identity. CLI enforces signature + logging of reason codes.
-3. `tb-cli jurisdiction reset` → `jurisdiction.reset` removes override, falling back to governance defaults seeded in bootstrap scripts (`docs/operations.md#bootstrap-and-configuration`).
-4. `tb-cli kyc audit-log` → `node/src/rpc/identity.rs` (LE portal) surfaces aggregated logs filtered by pack ID.
+1. `contract-cli jurisdiction list` → RPC `jurisdiction.list` enumerates available packs (pulled from crate-l1 definitions).
+2. `contract-cli jurisdiction set --pack US_CA` → RPC `jurisdiction.override` writes override entry scoped to account/node identity. CLI enforces signature + logging of reason codes.
+3. `contract-cli jurisdiction reset` → `jurisdiction.reset` removes override, falling back to governance defaults seeded in bootstrap scripts (`docs/operations.md#bootstrap-and-configuration`).
+4. `contract-cli kyc audit-log` → `node/src/rpc/identity.rs` (LE portal) surfaces aggregated logs filtered by pack ID.
 
 ## 4. Interaction with Subsystems
 - **Gateway** — `node/src/gateway/policy.rs` merges jurisdiction pack settings into read/write quotas and UI warnings (JSON output consumed by law-enforcement portal). `gateway` telemetry exports `gateway_jurisdiction_overrides_total`.

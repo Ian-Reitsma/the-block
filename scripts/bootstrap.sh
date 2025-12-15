@@ -298,6 +298,12 @@ else
     aarch64-Linux)
       pkg="cargo-make-v${CARGO_MAKE_VERSION}-aarch64-unknown-linux-gnu.zip"
       ;;
+    x86_64-Darwin)
+      pkg="cargo-make-v${CARGO_MAKE_VERSION}-x86_64-apple-darwin.zip"
+      ;;
+    arm64-Darwin)
+      pkg="cargo-make-v${CARGO_MAKE_VERSION}-aarch64-apple-darwin.zip"
+      ;;
     *)
       cecho red "unsupported architecture: ${arch}-${os}"
       exit 1
@@ -313,33 +319,44 @@ else
 fi
 
 # Bundled cargo-nextest release compatible with rustc 1.86
-NEXTEST_VERSION=0.9.97-b.2
+# Use a real nextest version number here (example: 0.9.97)
+NEXTEST_VERSION=0.9.97
+
 if cargo nextest --version 2>/dev/null | grep -q "$NEXTEST_VERSION"; then
   cecho green "   ✓ cargo-nextest already installed"
 else
-  arch=$(uname -m)
   os=$(uname -s)
-  case "${arch}-${os}" in
-    x86_64-Linux)
-      pkg="cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+  case "$os" in
+    Linux)
+      arch=$(uname -m)
+      case "$arch" in
+        x86_64)  platform="x86_64-unknown-linux-gnu.tar.gz" ;;
+        aarch64) platform="aarch64-unknown-linux-gnu.tar.gz" ;;
+        *) cecho red "unsupported architecture: ${arch}-${os}"; exit 1 ;;
+      esac
       ;;
-    aarch64-Linux)
-      pkg="cargo-nextest-${NEXTEST_VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+    Darwin)
+      platform="universal-apple-darwin.tar.gz"
       ;;
     *)
-      cecho red "unsupported architecture: ${arch}-${os}"
+      cecho red "unsupported OS: ${os}"
       exit 1
       ;;
   esac
-  url="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/${pkg}"
+
+  url="https://get.nexte.st/${NEXTEST_VERSION}/${platform}"
   tmpdir=$(mktemp -d)
-  run_step "download cargo-nextest" bash -c "curl -Ls '$url' | tar -xz -C '$tmpdir'"
+
+  run_step "download cargo-nextest" curl -fLsS "$url" -o "$tmpdir/nextest.tar.gz"
+  run_step "extract cargo-nextest" tar -xzf "$tmpdir/nextest.tar.gz" -C "$tmpdir"
+
   bindir="${CARGO_HOME:-$HOME/.cargo}/bin"
   mkdir -p "$bindir"
   run_step "install cargo-nextest" mv "$tmpdir/cargo-nextest" "$bindir/"
   chmod +x "$bindir/cargo-nextest"
   run_step "verify cargo-nextest" cargo nextest --version
 fi
+
 
 # The in-house python bridge is stubbed; skip maturin installs for now
 skip_step "maturin/pip install (python bridge disabled)"

@@ -8,7 +8,7 @@
 
 ## Phase 2 — Energy Credits Vertical MVP
 - Land `crates/energy-market` + `crates/oracle-adapter` (Step 2) with provider registration, oracle fetch/submit, EWMA reputation updates, and settlement plumbing.
-- Expose RPC `energy.*` endpoints plus CLI `tb-cli energy` commands. Update dashboards + telemetry counters.
+- Expose RPC `energy.*` endpoints plus CLI `contract-cli energy` commands. Update dashboards + telemetry counters.
 - Build `services/mock-energy-oracle` and smoke-test flows locally. Add docs (`docs/testnet/ENERGY_QUICKSTART.md`).
 - Outcome: feature-complete vertical gated behind feature flag or governance parameter.
 

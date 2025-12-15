@@ -9,8 +9,8 @@ Example payloads for governance operations, particularly treasury disbursements.
 A complete example of a treasury disbursement proposal payload. Use this as a template when creating disbursement proposals via:
 
 ```bash
-tb-cli gov disburse preview --json disbursement_example.json
-tb-cli gov disburse create --json disbursement_example.json
+contract-cli gov disburse preview --json disbursement_example.json
+contract-cli gov disburse create --json disbursement_example.json
 ```
 
 **Key Fields:**

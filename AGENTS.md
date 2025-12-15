@@ -183,7 +183,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 - The transport crate front-loads Quinn and s2n providers behind trait abstractions, advertises provider capabilities to the handshake layer, forwards per-provider telemetry counters, and lets integration suites swap in mock QUIC implementations deterministically.
 - Wallet binaries ship on `ed25519-dalek 2.2.x`, propagate multisig signer sets, escrow hash algorithms, and remote signer telemetry, surfacing localized fee-floor coaching with JSON automation hooks for dashboards.
 - Wrapper telemetry exports runtime/transport/overlay/storage/coding/codec/crypto metadata, feeds the aggregator `/wrappers` endpoint, powers the `contract-cli system dependencies` command, and keeps Grafana dashboards aligned with dependency-policy violations.
-- SNARK receipts now run through the in-house Groth16 backend with Halo-style circuits, caching compiled wasm digests per workload, producing CPU/GPU prover telemetry (`snark_prover_latency_seconds`, `snark_prover_failure_total`), attaching proof bundles (with fingerprints + circuit artifacts) to SLA history, auto-selecting GPU provers whenever providers advertise CUDA/ROCm capability, and exposing data via `compute_market.sla_history` + `tb-cli compute proofs`.
+- SNARK receipts now run through the in-house Groth16 backend with Halo-style circuits, caching compiled wasm digests per workload, producing CPU/GPU prover telemetry (`snark_prover_latency_seconds`, `snark_prover_failure_total`), attaching proof bundles (with fingerprints + circuit artifacts) to SLA history, auto-selecting GPU provers whenever providers advertise CUDA/ROCm capability, and exposing data via `compute_market.sla_history` + `contract-cli compute proofs`.
 - Compute-market matching enforces lane-aware batching with fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards, and records payouts exclusively in CT with receipts anchored directly into the consolidated subsidy ledger.
 - Mobile gateway caches persist encrypted responses and offline transactions to sled-backed storage with TTL sweeping, max-size guardrails, eviction telemetry, and CLI/RPC status & flush endpoints so mobile users can recover across restarts without leaking stale data. Sweepers drain a min-heap of expirations, boot-time replays rebuild the queue, and ChaCha20-Poly1305 keys derive from `TB_MOBILE_CACHE_KEY_HEX` (or fall back to `TB_NODE_KEY_HEX`) to harden the cache at rest.
 - Light-client device probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, stream `the_block_light_client_device_status{field,freshness}` telemetry (fresh/cached/fallback), surface gating messages in the CLI/RPC, honour overrides stored in `~/.the_block/light_client.toml`, and embed the latest device snapshot inside compressed log uploads.
@@ -612,7 +612,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 
 ### 15.A Governance & Treasury Surface
 - **Treasury payload alignment** — Extend the governance DAG schemas (`governance/`), `node/src/governance`, `cli/src/governance`, explorer dashboards, and `node/src/treasury_executor.rs` to express multi-stage treasury approvals with attested release bundles before permitting external submissions. Reference lines `AGENTS.md:121-122` in every PR thread so reviewers can trace the stalled dependency.
-- **UX + telemetry updates** — Document the refreshed process in [`docs/economics_and_governance.md`](docs/economics_and_governance.md#treasury) and wire coinbase-facing telemetry counters (disbursement lag, reject reasons) through `metrics-aggregator/` so dashboards expose lag/failure trends. Ensure `tb-cli` JSON snapshots surface the same payloads the explorer renders.
+- **UX + telemetry updates** — Document the refreshed process in [`docs/economics_and_governance.md`](docs/economics_and_governance.md#treasury) and wire coinbase-facing telemetry counters (disbursement lag, reject reasons) through `metrics-aggregator/` so dashboards expose lag/failure trends. Ensure `contract-cli` JSON snapshots surface the same payloads the explorer renders.
 - **Determinism + fuzz gates** — Add ledger-level tests inside the governance crate and `node/tests/` to prove streaming, rollback, and kill-switch behaviour survives deterministic replay, and record the associated `scripts/fuzz_coverage.sh` `.profraw` artifacts whenever consensus/governance code paths change.
 - **Observability hooks** — Push governance state diffs into `/wrappers` metadata and add Grafana timelines for service badges, fee-floor policies, and treasury deltas. Update [`docs/operations.md`](docs/operations.md#telemetry-wiring) with a runbook for “treasury stuck” scenarios, including CLI commands, RPCs, and log fingerprints.
 - **Explorer + CLI parity** — Work with the explorer maintainers so badge history, policy timelines, and treasury dashboards load from a single canonical snapshot JSON (shared between `cli/`, `explorer/`, and `metrics-aggregator/`), preventing drift across operator tooling.
@@ -659,7 +659,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **RPC parity + schemas** — Enforce auth/rate-limit parity for all `energy.*` RPCs, add structured errors for signature/timestamp/meter failures, and publish JSON schema snippets with round-trip CLI tests (per `AGENTS.md:132`).
 - **Dashboards + alerts** — Extend Grafana dashboards with provider counts, pending credits, dispute backlog, slash totals, and SLO/alerting for oracle latency + settlement stalls. Surface the new summary metrics (`energy_provider_total`, `energy_pending_credits_total`, `energy_active_disputes_total`, `energy_settlement_total{provider}`, etc.) through `/wrappers` and `/telemetry/summary` (`AGENTS.md:133`).
 - **State drills** — Clone the `SimpleDb` snapshot/restore drill for `TB_ENERGY_MARKET_DIR`, layering forward/backward-compatible migrations plus QUIC chaos validation for oracle transport as described in `AGENTS.md:134`.
-- **Docs alignment** — Keep [`docs/testnet/ENERGY_QUICKSTART.md`](docs/testnet/ENERGY_QUICKSTART.md) and [`docs/operations.md#energy-market-operations`](docs/operations.md#energy-market-operations) current with telemetry panels, health checks, and troubleshooting escalations. Ensure explorer timelines show the same aggregated data emitted by `tb-cli energy`.
+- **Docs alignment** — Keep [`docs/testnet/ENERGY_QUICKSTART.md`](docs/testnet/ENERGY_QUICKSTART.md) and [`docs/operations.md#energy-market-operations`](docs/operations.md#energy-market-operations) current with telemetry panels, health checks, and troubleshooting escalations. Ensure explorer timelines show the same aggregated data emitted by `contract-cli energy`.
 
 ### 15.I Energy Reliability, Security & CI
 - **Supply-chain enforcement** — Enforce release-provenance gates, secret hygiene, and log redaction for energy/oracle crates. Add throughput benchmarks, fuzzers, and deterministic replay coverage for receipts, capturing `.profraw` summaries whenever consensus/governance paths touch settlement logic (`AGENTS.md:135`).
@@ -921,7 +921,7 @@ A complete end-to-end treasury disbursement workflow from proposal submission th
 - All tests pass via `cargo check -p governance`
 
 #### What's NOT Done (Next Steps)
-- [ ] CLI commands (`tb-cli gov disburse create|preview|submit|show|queue|execute|rollback`)
+- [ ] CLI commands (`contract-cli gov disburse create|preview|submit|show|queue|execute|rollback`)
 - [ ] Ledger journal entries for state transitions (currently uses existing store methods)
 - [ ] Telemetry metrics (`governance_disbursements_total{status}`, `treasury_disbursement_backlog`)
 - [ ] Metrics aggregator endpoints (`/treasury/summary`, `/governance/disbursements`)
@@ -1008,7 +1008,7 @@ A trait-based, multi-provider signature verification system for energy market or
 - [ ] Persist energy receipts into ledger/sled trees (currently in-memory)
 - [ ] Auth and rate-limits for `energy.*` RPC handlers (currently no auth)
 - [ ] Structured error taxonomy for energy RPC
-- [x] CLI commands (`tb-cli energy market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute --json`)
+- [x] CLI commands (`contract-cli energy market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute --json`)
 - [ ] Integration tests for sustained load with mixed valid/invalid readings
 - [ ] Schema export via CLI (`--schema` flag)
 - [ ] Energy market dashboards (Grafana panels for `energy_provider_fulfillment_ms`, `energy_kwh_traded_total`, `oracle_reading_latency_seconds`, `energy_settlements_total`, `energy_signature_failure_total{provider,reason}`)
@@ -1067,16 +1067,16 @@ A trait-based, multi-provider signature verification system for energy market or
 
 #### High Priority (Blocking Production Readiness)
 1. **CLI Commands for Treasury Disbursements** (`cli/src/gov/*.rs`)
-   - `tb-cli gov disburse create --json <file>` - validate and prepare payload
-   - `tb-cli gov disburse preview --json <file>` - dry-run validation
-   - `tb-cli gov disburse submit --json <file>` - submit to RPC
-   - `tb-cli gov disburse show <id>` - fetch disbursement details
-   - `tb-cli gov disburse execute <id> --tx-hash <hash>` - mark executed
-   - `tb-cli gov disburse rollback <id> --reason <reason>` - cancel/rollback
+   - `contract-cli gov disburse create --json <file>` - validate and prepare payload
+   - `contract-cli gov disburse preview --json <file>` - dry-run validation
+   - `contract-cli gov disburse submit --json <file>` - submit to RPC
+   - `contract-cli gov disburse show <id>` - fetch disbursement details
+   - `contract-cli gov disburse execute <id> --tx-hash <hash>` - mark executed
+   - `contract-cli gov disburse rollback <id> --reason <reason>` - cancel/rollback
    - **Estimated effort**: 1-2 days (can reuse existing `cli/src/gov.rs` patterns)
 
 2. **Energy CLI schema export + automation** (`cli/src/energy/*.rs`)
-   - `tb-cli energy --schema` - export JSON schemas for the register/settle/receipt/dispute payloads
+   - `contract-cli energy --schema` - export JSON schemas for the register/settle/receipt/dispute payloads
    - Deterministic replay + fuzz coverage for the new `receipts|credits|disputes|flag-dispute|resolve-dispute` commands
    - Provider update helpers (price adjustments, stake top-ups) once governance payloads are available
    - **Estimated effort**: 2-3 days
@@ -1128,7 +1128,7 @@ A trait-based, multi-provider signature verification system for energy market or
 ### 19.7 Technical Debt & Known Issues
 
 #### Treasury CLI + Telemetry
-- Added `tb-cli gov disburse queue` to wrap `gov.treasury.queue_disbursement`; the CLI fetches the node’s current epoch when one is not provided and still exposes an `--epoch` override for manual testing.
+- Added `contract-cli gov disburse queue` to wrap `gov.treasury.queue_disbursement`; the CLI fetches the node’s current epoch when one is not provided and still exposes an `--epoch` override for manual testing.
 - Metrics aggregator and explorer now emit the full Draft/Voting/Queued/Timelocked/Executed/Finalized/RolledBack series (legacy `scheduled`/`cancelled` filters remain as aliases for compatibility).
 
 #### Compilation Warnings
@@ -1231,7 +1231,7 @@ When new metrics ship, operators must:
 #### For Operators
 - **No immediate action required** - new RPC methods are backwards compatible
 - **When Task 1 CLI ships**: Review `examples/governance/disbursement_example.json` for payload format
-- **When Task 2 CLI ships**: Operators can register provider keys via `tb-cli energy providers register-key`
+- **When Task 2 CLI ships**: Operators can register provider keys via `contract-cli energy providers register-key`
 
 #### For Next Developer
 - Start with **CLI commands** (items #1 and #2 in §19.6) - highest ROI, unblocks user testing

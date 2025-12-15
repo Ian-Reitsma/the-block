@@ -102,9 +102,9 @@ def main(argv: list[str]) -> int:
     try:
         snapshot = load_metrics(endpoint)
     except URLError as err:
-        body = f"<p class=\\"error\\">Failed to fetch metrics: {err}</p>"
+        body = f'<p class="error">Failed to fetch metrics: {err}</p>'
     except Exception as err:  # pragma: no cover - defensive
-        body = f"<p class=\\"error\\">Unexpected error: {err}</p>"
+        body = f'<p class="error">Unexpected error: {err}</p>'
     else:
         sections = {"DEX": [], "Compute": [], "Gossip": [], "Benchmarks": [], "Other": []}
         for metric in METRICS_SPEC["metrics"]:

@@ -17,7 +17,7 @@ A sample external chain header used for light client verification. Relayers subm
 **Usage:**
 ```bash
 # Submit header via RPC (typically done by relayers)
-tb-cli bridge submit-header --json header.json
+contract-cli bridge submit-header --json header.json
 ```
 
 ### `proof.json`
@@ -31,10 +31,10 @@ A Merkle proof demonstrating inclusion of a transaction or state in a submitted 
 **Usage:**
 ```bash
 # Verify proof locally
-tb-cli bridge verify-proof --header header.json --proof proof.json
+contract-cli bridge verify-proof --header header.json --proof proof.json
 
 # Claim bridged tokens with proof
-tb-cli bridge claim --proof proof.json --destination ct1...
+contract-cli bridge claim --proof proof.json --destination ct1...
 ```
 
 ## How Bridge Verification Works

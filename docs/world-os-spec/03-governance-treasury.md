@@ -19,15 +19,15 @@
 ## 3. RPC & CLI
 | Method | File | Description |
 | --- | --- | --- |
-| `governance.submit_proposal` | `node/src/rpc/governance.rs` | Accepts serialized `Proposal` JSON, persists via `GovStore::create_proposal`. CLI: `tb-cli gov submit`. |
-| `governance.proposal_status` | same | Returns vote counts, quorum status, activation/rollback windows. CLI: `tb-cli gov show --proposal <id>`. |
-| `governance.vote` | same | Records votes; CLI `tb-cli gov vote`. |
+| `governance.submit_proposal` | `node/src/rpc/governance.rs` | Accepts serialized `Proposal` JSON, persists via `GovStore::create_proposal`. CLI: `contract-cli gov submit`. |
+| `governance.proposal_status` | same | Returns vote counts, quorum status, activation/rollback windows. CLI: `contract-cli gov show --proposal <id>`. |
+| `governance.vote` | same | Records votes; CLI `contract-cli gov vote`. |
 | `governance.param_history` | same | Streams parameter changes since height. Used by monitoring + docs. |
-| `treasury.status` | `node/src/rpc/treasury.rs` | Returns `TreasuryExecutorSnapshot`, consumer/industrial balances, pending disbursements. CLI `tb-cli treasury status`. |
-| `treasury.disbursements` | same | Lists staged/approved payouts. CLI `tb-cli treasury list`. |
+| `treasury.status` | `node/src/rpc/treasury.rs` | Returns `TreasuryExecutorSnapshot`, consumer/industrial balances, pending disbursements. CLI `contract-cli treasury status`. |
+| `treasury.disbursements` | same | Lists staged/approved payouts. CLI `contract-cli treasury list`. |
 
 ## 4. Proposal Lifecycle
-1. **Authoring** — CLI `tb-cli gov submit --file proposal.json` calls `governance.submit_proposal`. JSON follows `governance::Proposal` schema (payload type defined in `governance/src/proposals.rs`).
+1. **Authoring** — CLI `contract-cli gov submit --file proposal.json` calls `governance.submit_proposal`. JSON follows `governance::Proposal` schema (payload type defined in `governance/src/proposals.rs`).
 2. **Snapshot** — Voting snapshots (badge sets) read from `node/src/service_badge.rs`. Snapshots stored in `GovStore` under `snapshot:<proposal_id>`.
 3. **Voting** — Operators and Builders submit votes via RPC `governance.vote`, signed using CLI keystore. Votes stored with chamber label, enabling bicameral thresholds enforced by `governance::bicameral::tally`.
 4. **Activation** — After quorum, proposals enter timelock defined by `governance::store::ACTIVATION_DELAY`. `GovStore` writes `proposal:<id>:status=Approved` and queues actions (param updates, disbursements, runtime/transport/storage policies) for execution.

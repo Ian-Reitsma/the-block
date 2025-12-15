@@ -16,9 +16,9 @@
 
 ### RPC & CLI Surfaces
 - `node/src/rpc/consensus.rs::difficulty` → JSON-RPC method `consensus.difficulty`. Returns current PoW target for monitoring.
-- `node/src/rpc/state_stream.rs` → long-poll snapshots for light-clients (used by CLI `tb-cli light stream`).
-- `node/src/rpc/governor.rs` + `node/src/launch_governor` → exposes checkpoint and macro-block metadata consumed by CLI `tb-cli gov checkpoints`.
-- `cli/src/node.rs` → `tb-cli node status` displays consensus height, PoH tick health, and last macro-block hash.
+- `node/src/rpc/state_stream.rs` → long-poll snapshots for light-clients (used by CLI `contract-cli light stream`).
+- `node/src/rpc/governor.rs` + `node/src/launch_governor` → exposes checkpoint and macro-block metadata consumed by CLI `contract-cli gov checkpoints`.
+- `cli/src/node.rs` → `contract-cli node status` displays consensus height, PoH tick health, and last macro-block hash.
 
 ### Message / Transaction Types
 - `node/src/transaction.rs` defines `TransactionPayload` variants (transfer, storage proof, governance). Each variant maps to a fee lane.
@@ -48,7 +48,7 @@
 | `node/src/blob_chain.rs::BlobRoot` | Contains `object_id`, `shard`, `receipt_hash`, and byte counters. | `blob_roots` sled tree + RPC exposures. |
 
 ### RPC
-- `node/src/rpc/shards.rs` (generated via `rpc/state_stream.rs`) — Allows clients to subscribe to shard roots; used by `tb-cli light follow-shard`.
+- `node/src/rpc/shards.rs` (generated via `rpc/state_stream.rs`) — Allows clients to subscribe to shard roots; used by `contract-cli light follow-shard`.
 - `node/src/rpc/storage.rs::manifest_summaries` — surfaces storage manifests along with coding algorithm selection; indirectly documents which shards hold data.
 - `node/src/rpc/ledger.rs::shard_balances` — exposes per-shard CT balances for auditing.
 
@@ -72,8 +72,8 @@
 | `SubsidyLedger` | Maintained in `node/src/ledger_binary.rs`, keyed by `subsidy:<bucket>` (STORAGE/READ/COMPUTE). |
 
 ### RPC/CLI
-- `node/src/rpc/fees.rs::base_fee` → `fees.base_fee` method; CLI `tb-cli fees show`.
-- `node/src/rpc/treasury.rs` → `treasury.status`, `treasury.streams`. CLI `tb-cli treasury list` ties into the same JSON-RPC payloads.
+- `node/src/rpc/fees.rs::base_fee` → `fees.base_fee` method; CLI `contract-cli fees show`.
+- `node/src/rpc/treasury.rs` → `treasury.status`, `treasury.streams`. CLI `contract-cli treasury list` ties into the same JSON-RPC payloads.
 - `node/src/rpc/storage.rs::upload` uses fee hints when computing per-block payments; `cli storage upload` relays base fee + EIP-1559 style tips.
 
 ### Settlement Flow

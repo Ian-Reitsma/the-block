@@ -39,16 +39,16 @@ Note: `consent_required: false` here means the system handles consent via GDPR-c
 
 ```bash
 # List available jurisdiction packs
-tb-cli jurisdiction list
+contract-cli jurisdiction list
 
 # Set jurisdiction for current node/account
-tb-cli jurisdiction set --pack US
+contract-cli jurisdiction set --pack US
 
 # Check current jurisdiction status
-tb-cli jurisdiction status
+contract-cli jurisdiction status
 
 # Reset to governance defaults
-tb-cli jurisdiction reset
+contract-cli jurisdiction reset
 ```
 
 ## How Jurisdictions Affect Behavior

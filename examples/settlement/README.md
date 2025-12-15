@@ -25,10 +25,10 @@ A sample settlement audit report showing epoch-level receipt validation results.
 **Usage:**
 ```bash
 # Generate audit report for an epoch
-tb-cli storage audit --epoch 42
+contract-cli storage audit --epoch 42
 
 # View settlement status
-tb-cli storage settlement-status --epoch 42
+contract-cli storage settlement-status --epoch 42
 ```
 
 ## Settlement Flow

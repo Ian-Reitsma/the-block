@@ -16,9 +16,9 @@ dashboard:
 	make -C monitoring dashboard
 
 doc-ci:
-        @rustc tools/refcheck.rs -O -o /tmp/refcheck
-        @/tmp/refcheck .
-        cargo test --doc --all-features
+	@rustc tools/refcheck.rs -O -o /tmp/refcheck
+	@/tmp/refcheck .
+	cargo test --doc --all-features
 
 dependency-check:
 	cargo run -p dependency_registry -- --check config/dependency_policies.toml

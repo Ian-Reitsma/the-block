@@ -9,7 +9,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 > | Interface | What It Is | When to Use |
 > |-----------|------------|-------------|
 > | **JSON-RPC** | Machine-to-machine API (JSON over HTTP) | Building apps, automation, integrations |
-> | **CLI (`tb-cli`)** | Command-line tool — a "friendly face" over RPC | Manual operations, debugging, scripting |
+> | **CLI (`contract-cli`)** | Command-line tool — a "friendly face" over RPC | Manual operations, debugging, scripting |
 > | **Explorer & Dashboards** | Web UI for viewing chain state | Human operators watching the network |
 >
 > All three talk to the same underlying node. The CLI is essentially a wrapper around RPC calls with nice formatting.
@@ -48,50 +48,50 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Fault handling: clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after 31 attempts, and expose regression coverage for bounded retries.
 - Streaming: `state_stream` (light-client snapshots), `compute.job_cancel`, and telemetry correlations.
 
-## CLI (`tb-cli`)
+## CLI (`contract-cli`)
 - Main entry in `cli/src/main.rs`. Subcommands include: `node`, `gov`, `wallet`, `bridge`, `dex`, `compute`, `storage`, `gateway`, `mesh`, `light`, `telemetry`, `probe`, `diagnostics`, `service-badge`, `remediation`, `ai`, `ann`, `identity`.
-- `tb-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
+- `contract-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
 - Provider trust roots live in `config/default.toml` under `energy.provider_keys`. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings will be rejected once keys are registered.
-- Use `tb-cli --help` or `tb-cli <cmd> --help`. Structured output via `--format json` for automation.
+- Use `contract-cli --help` or `contract-cli <cmd> --help`. Structured output via `--format json` for automation.
 - CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.
 
 ### CLI Command Reference
 
 | Command | Purpose | Code |
 |---------|---------|------|
-| `tb-cli node` | Node lifecycle (start, stop, status) | `cli/src/node.rs` |
-| `tb-cli gov` | Governance proposals, voting, parameters | `cli/src/gov.rs` |
-| `tb-cli gov disburse` | Treasury disbursement workflow | `cli/src/gov.rs` |
-| `tb-cli wallet` | Wallet creation, signing, balances | `cli/src/wallet.rs` |
-| `tb-cli bridge` | Cross-chain bridge operations | `cli/src/bridge.rs` |
-| `tb-cli dex` | DEX trading, order books, trust lines | `cli/src/dex.rs` |
-| `tb-cli compute` | Compute market jobs, receipts, proofs | `cli/src/compute.rs` |
-| `tb-cli storage` | File storage operations | `cli/src/storage.rs` |
-| `tb-cli energy` | Energy market (register, settle, readings) | `cli/src/energy.rs` |
-| `tb-cli gateway` | Gateway and DNS management | `cli/src/gateway.rs` |
-| `tb-cli mesh` | LocalNet/mesh peer operations | `cli/src/mesh.rs` |
-| `tb-cli light` | Light client sync and proofs | `cli/src/light_sync.rs` |
-| `tb-cli telemetry` | Telemetry metrics and wrappers | `cli/src/telemetry.rs` |
-| `tb-cli probe` | Network probing and diagnostics | `cli/src/probe.rs` |
-| `tb-cli diagnostics` | Debug dumps (mempool, scheduler, gossip, RPC) | `cli/src/debug_cli.rs` |
-| `tb-cli service-badge` | Badge issuance, revocation, verification | `cli/src/service_badge.rs` |
-| `tb-cli remediation` | Network partition recovery tools | `cli/src/remediation.rs` |
-| `tb-cli ai` | AI diagnostics and analysis | `cli/src/ai.rs` |
-| `tb-cli ann` | Ad network/ANN mesh operations | `cli/src/ann.rs` |
-| `tb-cli identity` | DID and handle management | `cli/src/identity.rs` |
-| `tb-cli config` | Configuration management | `cli/src/config.rs` |
-| `tb-cli logs` | Log searching and filtering | `cli/src/logs.rs` |
-| `tb-cli tls` | TLS certificate management | `cli/src/tls.rs` |
-| `tb-cli scheduler` | Scheduler queue statistics | `cli/src/scheduler.rs` |
-| `tb-cli explorer` | Explorer sync and queries | `cli/src/explorer.rs` |
-| `tb-cli wasm` | WASM build and deployment | `cli/src/wasm.rs` |
-| `tb-cli contract` | Smart contract deploy/call | `cli/src/contract_dev.rs` |
-| `tb-cli vm` | VM tracing and debugging | `cli/src/vm.rs` |
+| `contract-cli node` | Node lifecycle (start, stop, status) | `cli/src/node.rs` |
+| `contract-cli gov` | Governance proposals, voting, parameters | `cli/src/gov.rs` |
+| `contract-cli gov disburse` | Treasury disbursement workflow | `cli/src/gov.rs` |
+| `contract-cli wallet` | Wallet creation, signing, balances | `cli/src/wallet.rs` |
+| `contract-cli bridge` | Cross-chain bridge operations | `cli/src/bridge.rs` |
+| `contract-cli dex` | DEX trading, order books, trust lines | `cli/src/dex.rs` |
+| `contract-cli compute` | Compute market jobs, receipts, proofs | `cli/src/compute.rs` |
+| `contract-cli storage` | File storage operations | `cli/src/storage.rs` |
+| `contract-cli energy` | Energy market (register, settle, readings) | `cli/src/energy.rs` |
+| `contract-cli gateway` | Gateway and DNS management | `cli/src/gateway.rs` |
+| `contract-cli mesh` | LocalNet/mesh peer operations | `cli/src/mesh.rs` |
+| `contract-cli light` | Light client sync and proofs | `cli/src/light_sync.rs` |
+| `contract-cli telemetry` | Telemetry metrics and wrappers | `cli/src/telemetry.rs` |
+| `contract-cli probe` | Network probing and diagnostics | `cli/src/probe.rs` |
+| `contract-cli diagnostics` | Debug dumps (mempool, scheduler, gossip, RPC) | `cli/src/debug_cli.rs` |
+| `contract-cli service-badge` | Badge issuance, revocation, verification | `cli/src/service_badge.rs` |
+| `contract-cli remediation` | Network partition recovery tools | `cli/src/remediation.rs` |
+| `contract-cli ai` | AI diagnostics and analysis | `cli/src/ai.rs` |
+| `contract-cli ann` | Ad network/ANN mesh operations | `cli/src/ann.rs` |
+| `contract-cli identity` | DID and handle management | `cli/src/identity.rs` |
+| `contract-cli config` | Configuration management | `cli/src/config.rs` |
+| `contract-cli logs` | Log searching and filtering | `cli/src/logs.rs` |
+| `contract-cli tls` | TLS certificate management | `cli/src/tls.rs` |
+| `contract-cli scheduler` | Scheduler queue statistics | `cli/src/scheduler.rs` |
+| `contract-cli explorer` | Explorer sync and queries | `cli/src/explorer.rs` |
+| `contract-cli wasm` | WASM build and deployment | `cli/src/wasm.rs` |
+| `contract-cli contract` | Smart contract deploy/call | `cli/src/contract_dev.rs` |
+| `contract-cli vm` | VM tracing and debugging | `cli/src/vm.rs` |
 
-**Energy CLI** (`tb-cli energy`) wraps the `energy.*` RPCs (`register`, `market`, `settle`, `submit-reading`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads. See `docs/testnet/ENERGY_QUICKSTART.md` for walkthroughs.
+**Energy CLI** (`contract-cli energy`) wraps the `energy.*` RPCs (`register`, `market`, `settle`, `submit-reading`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads. See `docs/testnet/ENERGY_QUICKSTART.md` for walkthroughs.
 
 ### Energy RPC payloads, auth, and error contracts
-- Endpoints live under `energy.*` and inherit the RPC server’s mutual-TLS/auth policy (`TB_RPC_AUTH_TOKEN`, allowlists) plus IP-based rate limiting defined in `docs/operations.md#gateway-policy`. Use `tb-cli diagnostics rpc-policy` to inspect the live policy before enabling public oracle submitters.
+- Endpoints live under `energy.*` and inherit the RPC server’s mutual-TLS/auth policy (`TB_RPC_AUTH_TOKEN`, allowlists) plus IP-based rate limiting defined in `docs/operations.md#gateway-policy`. Use `contract-cli diagnostics rpc-policy` to inspect the live policy before enabling public oracle submitters.
 - Endpoint map:
 
 | Method | Description | Request Body |
@@ -136,11 +136,11 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `StaleReading`, `InvalidMeterValue`, `CreditExpired` when timestamps regress or expiry exceeded.
   - Signature/format errors: RPC rejects payloads where `meter_hash` is not 32 bytes, numbers are missing, or signatures fail decoding (and, once the oracle verifier lands, cryptographic verification failures).
 - Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.
-- Observer tooling: `tb-cli energy market --verbose` dumps the whole response, `tb-cli energy receipts|credits --json` streams paginated settlements/credits, and `tb-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits. `tb-cli energy disputes|flag-dispute|resolve-dispute` mirrors the RPC contracts for dispute management.
+- Observer tooling: `contract-cli energy market --verbose` dumps the whole response, `contract-cli energy receipts|credits --json` streams paginated settlements/credits, and `contract-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits. `contract-cli energy disputes|flag-dispute|resolve-dispute` mirrors the RPC contracts for dispute management.
 - Remaining RPC/CLI work items (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`) focus on explorer timelines, richer governance payloads, and tightening per-endpoint rate limiting once the QUIC chaos drills complete.
 
 ### Treasury disbursement CLI, RPC, and schema
-- Disbursement proposals live inside the governance namespace. CLI entrypoints sit under `tb-cli gov disburse`:
+- Disbursement proposals live inside the governance namespace. CLI entrypoints sit under `contract-cli gov disburse`:
   - `create` scaffolds a JSON template (see `examples/governance/disbursement_example.json`) and fills in proposer defaults (badge identity, default timelock/rollback windows).
   - `preview --json <file>` validates the payload against the schema and prints the derived timeline: quorum requirements, vote window, activation epoch, timelock height, and resulting treasury deltas.
   - `submit --json <file>` posts the signed proposal to the node via `gov.treasury.submit_disbursement`; dry-run with `--check` to ensure hashes match before sending live traffic.
@@ -181,7 +181,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `gov.treasury.disbursement { id }` – fetch canonical status/timeline for a single record.
   - `gov.treasury.queue_disbursement { id, current_epoch? }`, `gov.treasury.execute_disbursement { id, tx_hash, receipts }`, `gov.treasury.rollback_disbursement { id, reason }` – maintenance hooks for executor operators (all auth gated). Passing `current_epoch = 0` tells the node to derive it from block height automatically.
   - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings.
-- CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `tb-cli gov disburse preview --json … --check` during docs tests.
+- CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `contract-cli gov disburse preview --json … --check` during docs tests.
 - Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see `explorer/src/treasury.rs`.
 
 
@@ -196,13 +196,13 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `Client::with_tls_from_env(&["TB_NODE_TLS","TB_HTTP_TLS"])` to reuse the same certs as RPC/gateway surfaces.
   - `RequestBuilder::json(value)` for canonical JSON encoding and `send()` for async execution. Blocking variants offer the same API for CLI tools.
 - TLS rotation:
-  - Set `TB_NET_CERT_STORE_PATH` to control where mutual-TLS certs are stored. `tb-cli net rotate-cert` and `tb-cli net rotate-key` (see `cli/src/net.rs`) wrap the RPCs that rotate QUIC certs and peer keys.
-  - Diagnostics: `tb-cli net quic failures --url <rpc>` lists handshake failures; `tb-cli net overlay-status` confirms which overlay backend is active and where the peer DB lives.
-- HTTP troubleshooting: both the node and CLI honour `TB_RPC_TIMEOUT_MS`, `TB_RPC_TIMEOUT_JITTER_MS`, and `TB_RPC_MAX_RETRIES`. Use `tb-cli net dns verify` to confirm TXT records and `tb-cli net gossip-status` to inspect HTTP routing metadata exposed via gossip debug RPCs.
+  - Set `TB_NET_CERT_STORE_PATH` to control where mutual-TLS certs are stored. `contract-cli net rotate-cert` and `contract-cli net rotate-key` (see `cli/src/net.rs`) wrap the RPCs that rotate QUIC certs and peer keys.
+  - Diagnostics: `contract-cli net quic failures --url <rpc>` lists handshake failures; `contract-cli net overlay-status` confirms which overlay backend is active and where the peer DB lives.
+- HTTP troubleshooting: both the node and CLI honour `TB_RPC_TIMEOUT_MS`, `TB_RPC_TIMEOUT_JITTER_MS`, and `TB_RPC_MAX_RETRIES`. Use `contract-cli net dns verify` to confirm TXT records and `contract-cli net gossip-status` to inspect HTTP routing metadata exposed via gossip debug RPCs.
 
 ## DNS and Naming
 - Publishing: `node/src/gateway/dns.rs` writes `.block` zone files or external DNS records using schemas under `docs/spec/dns_record.schema.json`.
-- CLI: `tb-cli gateway dns publish`, `tb-cli gateway dns audit`.
+- CLI: `contract-cli gateway dns publish`, `contract-cli gateway dns audit`.
 
 ## Explorer and Log Indexer
 - Explorer + indexer live under `explorer/` and share the governance crate with the node. They expose HTTP APIs for proposals, treasury events, storage receipts, compute payouts, and light-client timelines.
@@ -221,18 +221,18 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Emits Prometheus lines when `--prom` is set, so it doubles as a blackbox exporter.
 
 ## Storage and Blob APIs
-- CLI: `tb-cli storage put|get|manifest|repair`, `tb-cli blob summarize`, `tb-cli storage providers`.
+- CLI: `contract-cli storage put|get|manifest|repair`, `contract-cli blob summarize`, `contract-cli storage providers`.
 - RPC: `storage.put_blob`, `storage.get_manifest`, `storage.list_providers`.
 - Blob manifests follow the binary schema in `node/src/storage/manifest_binary.rs`; object receipts encode `StoreReceipt` structs consumed by the ledger.
 
 ## Compute, Energy, and Ad Market APIs
-- Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (`compute.job_cancel`). Courier snapshots stream through `compute_market.courier_status`, proof bundles (with fingerprints + circuit artifacts) are downloadable via `compute_market.sla_history(limit)`, `tb-cli compute proofs --limit N` pretty-prints recent SLA/proof entries, `tb-cli explorer sync-proofs --db explorer.db` ingests them into the explorer SQLite tables (`compute_sla_history` + `compute_sla_proofs`), and the explorer HTTP server exposes `/compute/sla/history?limit=N` so dashboards can render proof fingerprints without RPC access. The `snark` CLI (`cli/src/snark.rs`) still outputs attested circuit artifacts for out-of-band prover rollout.
+- Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (`compute.job_cancel`). Courier snapshots stream through `compute_market.courier_status`, proof bundles (with fingerprints + circuit artifacts) are downloadable via `compute_market.sla_history(limit)`, `contract-cli compute proofs --limit N` pretty-prints recent SLA/proof entries, `contract-cli explorer sync-proofs --db explorer.db` ingests them into the explorer SQLite tables (`compute_sla_history` + `compute_sla_proofs`), and the explorer HTTP server exposes `/compute/sla/history?limit=N` so dashboards can render proof fingerprints without RPC access. The `snark` CLI (`cli/src/snark.rs`) still outputs attested circuit artifacts for out-of-band prover rollout.
 - Energy RPC/CLI: `energy.register_provider`, `energy.market_state`, `energy.settle`, and `energy.submit_reading` expose the `crates/energy-market` state plus oracle submissions. Governance feeds `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps` into this module, so operators can tune the market via proposals rather than recompiling.
 - Ad market RPC/CLI: campaigns now target multi-signal cohorts (domain tiers, badge mixes, interest tags, and proof-of-presence buckets). Key endpoints:
   - `ad_market.inventory`, `ad_market.list_campaigns`, `ad_market.distribution`, `ad_market.budget`, `ad_market.broker_state`, `ad_market.readiness` return selector-aware snapshots. Every `CohortPriceSnapshot`/`ReadinessSnapshot` carries `selectors_version`, `domain_tier`, `interest_tags`, optional `presence_bucket`, and privacy-budget gauges so downstream tooling can render per-segment pricing/utilization/freshness.
-  - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `tb-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
-  - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `tb-cli ad-market presence list|reserve`.
-  - Conversion/value APIs: `ad_market.record_conversion` now supports `value_ct`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `tb-cli ad-market record-conversion --file conversion.json`.
+  - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `contract-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
+  - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `contract-cli ad-market presence list|reserve`.
+  - Conversion/value APIs: `ad_market.record_conversion` now supports `value_ct`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `contract-cli ad-market record-conversion --file conversion.json`.
 
 ### Presence Cohort JSON Schemas
 
@@ -508,13 +508,13 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 Dashboards must be refreshed (per `docs/operations.md#telemetry-wiring`) whenever new selectors or RPC knobs land; capture the `/wrappers` hash plus Grafana screenshots in every PR.
 
 ## Light-Client Streaming
-- RPC: `light.subscribe`, `light.get_block_range`, `light.get_device_status`, `state_stream.subscribe`. CLI: `tb-cli light sync`, `tb-cli light snapshot`, `tb-cli light device-status`.
+- RPC: `light.subscribe`, `light.get_block_range`, `light.get_device_status`, `state_stream.subscribe`. CLI: `contract-cli light sync`, `contract-cli light snapshot`, `contract-cli light device-status`.
 - Mobile heuristics (battery, bandwidth, overrides) persist under `~/.the_block/light_client.toml`.
 
 ## Bridge, DEX, and Identity APIs
 - Bridge RPC: `bridge.submit_proof`, `bridge.challenge`, `bridge.status`, `bridge.claim_reward`. CLI mirrors the same set.
 - DEX RPC/CLI: order placement, swaps, trust-line routing, escrow proofs, HTLC settlement.
-- Identity RPC: DID registration, revocation, handle lookup; CLI uses `tb-cli identity`.
+- Identity RPC: DID registration, revocation, handle lookup; CLI uses `contract-cli identity`.
 
 ## Wallet APIs
 - CLI supports multisig, hardware signers, remote signers, and escrow-hash configuration: see `cli/src/wallet.rs` and `node/src/bin/wallet.rs`.
