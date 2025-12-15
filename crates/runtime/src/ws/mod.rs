@@ -152,6 +152,10 @@ where
         }
     }
 
+    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+        buf.truncate(pos + 4);
+    }
+
     let headers = std::str::from_utf8(&buf)
         .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid utf8 in handshake"))?;
     if !headers.starts_with("HTTP/1.1 101") {
@@ -234,6 +238,10 @@ pub struct CloseFrame {
     pub code: u16,
     pub reason: String,
 }
+
+/// Close code and reason used when the transport drops unexpectedly.
+pub const ABNORMAL_CLOSE_CODE: u16 = 1006;
+pub const ABNORMAL_CLOSE_REASON: &str = "abnormal closure";
 
 /// WebSocket messages surfaced to callers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,7 +455,18 @@ impl WebSocketStream {
         }
 
         loop {
-            let frame = self.read_frame().await?;
+            let frame = match self.read_frame().await {
+                Ok(frame) => frame,
+                Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                    self.closed = true;
+                    let close = CloseFrame {
+                        code: ABNORMAL_CLOSE_CODE,
+                        reason: ABNORMAL_CLOSE_REASON.to_string(),
+                    };
+                    return Ok(Some(Message::Close(Some(close))));
+                }
+                Err(err) => return Err(err),
+            };
             match frame.opcode {
                 OpCode::Continuation | OpCode::Text | OpCode::Binary => {
                     if let Some(msg) = self.handle_fragmented(frame).await? {

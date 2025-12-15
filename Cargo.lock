@@ -455,6 +455,7 @@ dependencies = [
  "rand",
  "runtime",
  "sys",
+ "testkit",
 ]
 
 [[package]]
@@ -870,6 +871,38 @@ dependencies = [
  "crypto_suite",
  "dependency_guard",
  "the_block",
+]
+
+[[package]]
+name = "tb-sim"
+version = "0.1.0"
+dependencies = [
+ "cli_core",
+ "codec",
+ "coding",
+ "crypto_suite",
+ "dex",
+ "diagnostics",
+ "dkg",
+ "explorer",
+ "foundation_lazy",
+ "foundation_object_store",
+ "foundation_serde",
+ "foundation_serialization",
+ "foundation_time",
+ "http_env",
+ "httpd",
+ "ledger",
+ "light-client",
+ "monitoring-build",
+ "p2p_overlay",
+ "rand",
+ "runtime",
+ "storage_engine",
+ "sys",
+ "the_block",
+ "thiserror",
+ "transport",
 ]
 
 [[package]]

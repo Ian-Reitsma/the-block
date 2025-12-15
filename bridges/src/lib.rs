@@ -176,6 +176,17 @@ pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_su
 pub static PROOF_VERIFY_FAILURE_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_failure_counter);
 
 #[cfg(feature = "telemetry")]
+static PROOF_COUNTER_TEST_GUARD: Lazy<std::sync::Mutex<()>> =
+    Lazy::new(|| std::sync::Mutex::new(()));
+
+#[cfg(feature = "telemetry")]
+pub fn proof_counter_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    PROOF_COUNTER_TEST_GUARD
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+}
+
+#[cfg(feature = "telemetry")]
 pub static BRIDGE_INVALID_PROOF_TOTAL: Lazy<Counter> = Lazy::new(bridge_invalid_proof_counter);
 
 #[cfg(feature = "telemetry")]

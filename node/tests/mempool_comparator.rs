@@ -13,8 +13,7 @@ use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-    });
+    ONCE.call_once(|| {});
     let _ = fs::remove_dir_all("chain_db");
 }
 

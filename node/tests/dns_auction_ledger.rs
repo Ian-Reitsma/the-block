@@ -484,14 +484,23 @@ fn dns_auction_summary_reports_metrics() {
         ("min_bid_ct", Value::Number(Number::from(1_500))),
         ("protocol_fee_bps", Value::Number(Number::from(400))),
         ("royalty_bps", Value::Number(Number::from(100))),
-        ("seller_account", Value::String("seller-summary".to_string())),
+        (
+            "seller_account",
+            Value::String("seller-summary".to_string()),
+        ),
     ]))
     .expect("list settled domain");
     place_bid(&json_map(vec![
         ("domain", Value::String(settled_domain.to_string())),
-        ("bidder_account", Value::String("bidder-summary".to_string())),
+        (
+            "bidder_account",
+            Value::String("bidder-summary".to_string()),
+        ),
         ("bid_ct", Value::Number(Number::from(1_700))),
-        ("stake_reference", Value::String("stake-summary".to_string())),
+        (
+            "stake_reference",
+            Value::String("stake-summary".to_string()),
+        ),
     ]))
     .expect("settled bid");
     complete_sale(&json_map(vec![
@@ -506,7 +515,10 @@ fn dns_auction_summary_reports_metrics() {
         ("min_bid_ct", Value::Number(Number::from(900))),
         ("protocol_fee_bps", Value::Number(Number::from(300))),
         ("royalty_bps", Value::Number(Number::from(50))),
-        ("seller_account", Value::String("seller-summary".to_string())),
+        (
+            "seller_account",
+            Value::String("seller-summary".to_string()),
+        ),
     ]))
     .expect("list active domain");
     place_bid(&json_map(vec![
@@ -522,12 +534,8 @@ fn dns_auction_summary_reports_metrics() {
         Value::Number(Number::from(3_600)),
     )]))
     .expect("auction snapshot");
-    let summary = snapshot["summary"]
-        .as_object()
-        .expect("summary object");
-    let counts = summary["auction_counts"]
-        .as_object()
-        .expect("counts map");
+    let summary = snapshot["summary"].as_object().expect("summary object");
+    let counts = summary["auction_counts"].as_object().expect("counts map");
     assert!(
         counts["active"].as_u64().unwrap_or(0) >= 1,
         "active auctions reported"

@@ -4,8 +4,8 @@ use std::string::FromUtf8Error;
 use crate::Serialize;
 use serde::de::value::{IntoDeserializer, StringDeserializer};
 use serde::de::{
-    self, DeserializeOwned, DeserializeSeed, EnumAccess, MapAccess, SeqAccess,
-    VariantAccess, Visitor,
+    self, DeserializeOwned, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess,
+    Visitor,
 };
 use serde::ser::{
     self, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
@@ -881,7 +881,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         let value = self.read_u64()?;
         // Validate the value fits in usize on this platform
         if value > usize::MAX as u64 {
-            return Err(Error::message("u64 value too large for usize on this platform"));
+            return Err(Error::message(
+                "u64 value too large for usize on this platform",
+            ));
         }
         visitor.visit_usize(value as usize)
     }
@@ -893,7 +895,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         let value = self.read_i64()?;
         // Validate the value fits in isize on this platform
         if value > isize::MAX as i64 || value < isize::MIN as i64 {
-            return Err(Error::message("i64 value out of range for isize on this platform"));
+            return Err(Error::message(
+                "i64 value out of range for isize on this platform",
+            ));
         }
         visitor.visit_isize(value as isize)
     }

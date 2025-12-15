@@ -1992,12 +1992,8 @@ fn rpc_record_conversion_rejects_malformed_payload() {
 
 #[testkit::tb_serial]
 fn presence_listing_and_reservation_flow() {
-    let (_dir, harness, _) =
-        build_in_memory_harness("presence_flow", MarketplaceConfig::default());
-    let market_impl = harness
-        .in_memory_market
-        .as_ref()
-        .expect("in-memory market");
+    let (_dir, harness, _) = build_in_memory_harness("presence_flow", MarketplaceConfig::default());
+    let market_impl = harness.in_memory_market.as_ref().expect("in-memory market");
 
     let mut metadata = HashMap::new();
     metadata.insert("conversion_token_hash".to_string(), "deadbeef".to_string());
@@ -2013,10 +2009,8 @@ fn presence_listing_and_reservation_flow() {
         .register_campaign(campaign)
         .expect("campaign registered");
 
-    let bucket_us =
-        seed_presence_bucket(market_impl, "bucket-us", "US", PresenceKind::LocalNet);
-    let _bucket_eu =
-        seed_presence_bucket(market_impl, "bucket-eu", "NL", PresenceKind::RangeBoost);
+    let bucket_us = seed_presence_bucket(market_impl, "bucket-us", "US", PresenceKind::LocalNet);
+    let _bucket_eu = seed_presence_bucket(market_impl, "bucket-eu", "NL", PresenceKind::RangeBoost);
 
     let list_all = expect_ok(harness.call("ad_market.list_presence_cohorts", parse_json("{}")));
     let cohorts = list_all["cohorts"]
@@ -2051,11 +2045,13 @@ fn presence_listing_and_reservation_flow() {
     ));
     let reserve = expect_ok(harness.call("ad_market.reserve_presence", ok_params));
     assert_eq!(reserve["status"].as_str(), Some("ok"));
-    assert!(reserve["reservation_id"]
-        .as_str()
-        .expect("reservation id")
-        .len()
-        > 8);
+    assert!(
+        reserve["reservation_id"]
+            .as_str()
+            .expect("reservation id")
+            .len()
+            > 8
+    );
     assert!(
         reserve["expires_at_micros"].as_u64().is_some(),
         "reservation expiry returned"

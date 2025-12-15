@@ -8,11 +8,13 @@
 > |---------|---------------|
 > | **Block** | A page in a shared ledger. Every ~1 second, a new page is added containing recent transactions. Once added, it can't be changed. |
 > | **Consensus** | How nodes (computers running the software) agree on which page is next. This prevents anyone from cheating or rewriting history. |
-> | **CT (Consumer Token)** | The single currency that moves through the system. You can send it, receive it, pay for services, or earn it by contributing. |
+> | **BLOCK** | The single currency that moves through the system. You can send it, receive it, pay for services, or earn it by contributing. |
 >
 > **Reading this doc:** If you want to know *what lives where* in the codebase, read this. If you want *wire-level technical details*, read [`docs/architecture.md`](architecture.md).
 
-The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into CT rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
+The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
+
+> **Legacy labels:** Internally we still refer to `amount_ct`, `amount_it`, `STORAGE_SUB_CT`, etc., so tooling and telemetry preserve those names even though the transferred token is BLOCK. When reading the code or metrics, treat CT/IT as shorthand for BLOCK-ledger buckets (via `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `metrics-aggregator/src/lib.rs`).
 
 ## Mission
 - Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.

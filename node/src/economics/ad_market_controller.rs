@@ -29,7 +29,7 @@ impl Default for AdMarketParams {
         Self {
             platform_take_target_bps: 2800, // 28% (beat Google's 30%)
             user_share_target_bps: 2200,    // 22% (meaningful UBI)
-            drift_rate: 0.01,                // 1% drift per epoch
+            drift_rate: 0.01,               // 1% drift per epoch
         }
     }
 }
@@ -55,7 +55,7 @@ impl Default for TariffParams {
     fn default() -> Self {
         Self {
             public_revenue_target_bps: 1000, // 10% of treasury inflow
-            drift_rate: 0.05,                 // 5% drift per epoch
+            drift_rate: 0.05,                // 5% drift per epoch
             tariff_min_bps: 0,
             tariff_max_bps: 200, // 2% max
         }
@@ -105,11 +105,7 @@ impl AdMarketDriftController {
 
     /// Drift splits toward target (for when we have measured actual splits)
     #[allow(dead_code)]
-    fn drift_splits(
-        &self,
-        current_platform_bps: u16,
-        current_user_bps: u16,
-    ) -> AdMarketSnapshot {
+    fn drift_splits(&self, current_platform_bps: u16, current_user_bps: u16) -> AdMarketSnapshot {
         let k = self.params.drift_rate;
 
         // Drift platform take
@@ -125,7 +121,9 @@ impl AdMarketDriftController {
         // Convert to bps
         let t_next_bps = (t_next * 10_000.0).round() as u16;
         let u_next_bps = (u_next * 10_000.0).round() as u16;
-        let p_next_bps = 10_000u16.saturating_sub(t_next_bps).saturating_sub(u_next_bps);
+        let p_next_bps = 10_000u16
+            .saturating_sub(t_next_bps)
+            .saturating_sub(u_next_bps);
 
         AdMarketSnapshot {
             platform_take_bps: t_next_bps,
@@ -187,8 +185,8 @@ impl TariffController {
         let tau_next = tau_current + k * (tau_implied_bps as f64 - tau_current);
 
         // Clamp to bounds
-        let tau_next_bps = (tau_next.round() as u16)
-            .clamp(self.params.tariff_min_bps, self.params.tariff_max_bps);
+        let tau_next_bps =
+            (tau_next.round() as u16).clamp(self.params.tariff_min_bps, self.params.tariff_max_bps);
 
         // Compute actual treasury contribution
         let actual_revenue = (non_kyc_volume_block as f64) * (tau_next_bps as f64) / 10_000.0;
@@ -237,13 +235,13 @@ mod tests {
 
         // Start at different splits
         let current_platform = 3000; // 30%
-        let current_user = 2000;     // 20%
+        let current_user = 2000; // 20%
 
         let splits = controller.drift_splits(current_platform, current_user);
 
         // Should drift toward targets
         assert!(splits.platform_take_bps < current_platform); // Moving down toward 28%
-        assert!(splits.user_share_bps > current_user);        // Moving up toward 22%
+        assert!(splits.user_share_bps > current_user); // Moving up toward 22%
 
         // Should sum to 10000
         assert_eq!(
@@ -275,11 +273,8 @@ mod tests {
         let non_kyc_volume = 2_000_000u64;
         let current_tariff = 50u16; // 0.5%
 
-        let snapshot = controller.compute_next_tariff(
-            non_kyc_volume,
-            treasury_inflow,
-            current_tariff,
-        );
+        let snapshot =
+            controller.compute_next_tariff(non_kyc_volume, treasury_inflow, current_tariff);
 
         // Should drift up to increase revenue
         // Need 100k from 2M volume → 5% tariff (500 bps)
@@ -309,11 +304,8 @@ mod tests {
         let non_kyc_volume = 500_000u64;
         let current_tariff = 50u16;
 
-        let snapshot = controller.compute_next_tariff(
-            non_kyc_volume,
-            treasury_inflow,
-            current_tariff,
-        );
+        let snapshot =
+            controller.compute_next_tariff(non_kyc_volume, treasury_inflow, current_tariff);
 
         // Should drift up but not hit max yet (5% drift)
         assert!(snapshot.tariff_bps > current_tariff);
@@ -338,11 +330,8 @@ mod tests {
         let non_kyc_volume = 100_000_000u64; // 100M volume
         let current_tariff = 100u16;
 
-        let snapshot = controller.compute_next_tariff(
-            non_kyc_volume,
-            treasury_inflow,
-            current_tariff,
-        );
+        let snapshot =
+            controller.compute_next_tariff(non_kyc_volume, treasury_inflow, current_tariff);
 
         // Should clamp at min
         assert!(snapshot.tariff_bps >= tariff_min);

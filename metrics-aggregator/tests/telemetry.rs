@@ -1,6 +1,6 @@
 use foundation_serialization::json::{self, Value};
 use httpd::{Method, StatusCode};
-use metrics_aggregator::{router, AppState};
+use metrics_aggregator::{metrics_registry_guard, router, AppState};
 use runtime::telemetry::TEXT_MIME;
 use std::future::Future;
 use sys::tempfile;
@@ -9,12 +9,40 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime::block_on(future)
 }
 
+async fn scrape_metrics(app: &httpd::Router<AppState>) -> String {
+    let resp = app
+        .handle(app.request_builder().path("/metrics").build())
+        .await
+        .expect("scrape metrics");
+    String::from_utf8(resp.body().to_vec()).expect("metrics payload")
+}
+
+fn metric_value(metrics: &str, metric: &str) -> f64 {
+    metrics
+        .lines()
+        .find_map(|line| {
+            if !line.starts_with(metric) {
+                return None;
+            }
+            let next = line.chars().nth(metric.len());
+            if !matches!(next, Some(' ') | Some('{')) {
+                return None;
+            }
+            line.split_whitespace().nth(1)?.parse::<f64>().ok()
+        })
+        .unwrap_or(0.0)
+}
+
 #[test]
 fn telemetry_round_trip() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state.clone());
+        let baseline_metrics = scrape_metrics(&app).await;
+        let baseline_ingest =
+            metric_value(&baseline_metrics, "aggregator_telemetry_ingest_total");
 
         let payload = json::value_from_str(
             r#"{
@@ -122,19 +150,24 @@ fn telemetry_round_trip() {
             body.contains("# TYPE cluster_peer_active_total gauge"),
             "metrics payload missing active peer gauge: {body}"
         );
+        let ingest_total = metric_value(&body, "aggregator_telemetry_ingest_total");
         assert!(
-            body.contains("aggregator_telemetry_ingest_total 1"),
-            "metrics payload missing telemetry ingest counter: {body}"
+            ingest_total >= baseline_ingest + 1.0,
+            "telemetry ingest counter did not advance: baseline={baseline_ingest}, current={ingest_total}"
         );
     });
 }
 
 #[test]
 fn telemetry_rejects_schema_drift() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state.clone());
+        let baseline_metrics = scrape_metrics(&app).await;
+        let baseline_schema_errors =
+            metric_value(&baseline_metrics, "aggregator_telemetry_schema_error_total");
 
         let invalid = json::value_from_str(
             r#"{
@@ -178,15 +211,17 @@ fn telemetry_rejects_schema_drift() {
             .await
             .unwrap();
         let metrics = String::from_utf8(resp.body().to_vec()).unwrap();
+        let schema_errors = metric_value(&metrics, "aggregator_telemetry_schema_error_total");
         assert!(
-            metrics.contains("aggregator_telemetry_schema_error_total 1"),
-            "metrics payload missing schema error counter: {metrics}"
+            schema_errors >= baseline_schema_errors + 1.0,
+            "schema error counter did not advance: baseline={baseline_schema_errors}, current={schema_errors}"
         );
     });
 }
 
 #[test]
 fn runtime_bridge_updates_foundation_metrics() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);

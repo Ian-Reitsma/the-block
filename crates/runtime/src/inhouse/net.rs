@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::{Shutdown, SocketAddr};
+use std::net::{Shutdown, SocketAddr, TcpListener as StdTcpListener};
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(target_os = "windows")]
@@ -25,6 +25,10 @@ fn reactor_raw_of<T: AsRawSocket>(value: &T) -> super::ReactorRaw {
     value.as_raw_socket()
 }
 
+fn tcp_debug_enabled() -> bool {
+    std::env::var("RUNTIME_TCP_DEBUG").is_ok()
+}
+
 pub(crate) struct TcpListener {
     reactor: Arc<ReactorInner>,
     inner: Mutex<SysTcpListener>,
@@ -43,6 +47,27 @@ impl TcpListener {
             inner: Mutex::new(listener),
             registration,
         })
+    }
+
+    pub(crate) fn from_std(runtime: &InHouseRuntime, listener: SysTcpListener) -> io::Result<Self> {
+        let reactor = runtime.reactor();
+        let fd = reactor_raw_of(&listener);
+        let registration =
+            IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
+        Ok(Self {
+            reactor,
+            inner: Mutex::new(listener),
+            registration,
+        })
+    }
+
+    pub(crate) fn into_std(self) -> io::Result<StdTcpListener> {
+        let cloned = {
+            let guard = self.inner.lock().recover();
+            guard.try_clone_std()?
+        };
+        cloned.set_nonblocking(false)?;
+        Ok(cloned)
     }
 
     pub(crate) fn accept(&self) -> AcceptFuture<'_> {
@@ -68,7 +93,7 @@ pub(crate) struct TcpStream {
 }
 
 impl TcpStream {
-    fn new(reactor: Arc<ReactorInner>, stream: SysTcpStream) -> io::Result<Self> {
+    pub(crate) fn new(reactor: Arc<ReactorInner>, stream: SysTcpStream) -> io::Result<Self> {
         let fd = reactor_raw_of(&stream);
         let registration = IoRegistration::new(
             reactor,
@@ -309,8 +334,22 @@ impl Future for TcpReadFuture<'_> {
         let this = self.get_mut();
         loop {
             match this.stream.inner.read(this.buf) {
-                Ok(bytes) => return Poll::Ready(Ok(bytes)),
+                Ok(bytes) => {
+                    if tcp_debug_enabled() {
+                        eprintln!(
+                            "[TCP] fd={} read {} bytes",
+                            this.stream.registration.fd, bytes
+                        );
+                    }
+                    return Poll::Ready(Ok(bytes));
+                }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    if tcp_debug_enabled() {
+                        eprintln!(
+                            "[TCP] fd={} read would block; awaiting readiness",
+                            this.stream.registration.fd
+                        );
+                    }
                     match this.stream.registration.poll_read_ready(cx) {
                         Poll::Ready(Ok(())) => continue,
                         Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
@@ -335,8 +374,22 @@ impl Future for TcpWriteFuture<'_> {
         let this = self.get_mut();
         loop {
             match this.stream.inner.write(this.buf) {
-                Ok(bytes) => return Poll::Ready(Ok(bytes)),
+                Ok(bytes) => {
+                    if tcp_debug_enabled() {
+                        eprintln!(
+                            "[TCP] fd={} wrote {} bytes",
+                            this.stream.registration.fd, bytes
+                        );
+                    }
+                    return Poll::Ready(Ok(bytes));
+                }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    if tcp_debug_enabled() {
+                        eprintln!(
+                            "[TCP] fd={} write would block; awaiting readiness",
+                            this.stream.registration.fd
+                        );
+                    }
                     match this.stream.registration.poll_write_ready(cx) {
                         Poll::Ready(Ok(())) => continue,
                         Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),

@@ -6,19 +6,19 @@
 //! 3. **Market Multipliers**: Dual control (utilization + cost-coverage)
 //! 4. **Ad & Tariff Controllers**: Drift splits and tariffs toward governance targets
 
-pub mod inflation_controller; // Legacy - kept for backward compatibility
-pub mod network_issuance; // NEW: Formula-driven issuance
-pub mod subsidy_allocator;
-pub mod market_multiplier;
 pub mod ad_market_controller;
 pub mod event;
+pub mod inflation_controller; // Legacy - kept for backward compatibility
+pub mod market_multiplier;
+pub mod network_issuance; // NEW: Formula-driven issuance
+pub mod subsidy_allocator;
 
-pub use inflation_controller::InflationController; // Legacy
-pub use network_issuance::NetworkIssuanceController; // NEW
-pub use subsidy_allocator::SubsidyAllocator;
-pub use market_multiplier::MarketMultiplierController;
 pub use ad_market_controller::{AdMarketDriftController, TariffController};
 pub use event::*;
+pub use inflation_controller::InflationController; // Legacy
+pub use market_multiplier::MarketMultiplierController;
+pub use network_issuance::NetworkIssuanceController; // NEW
+pub use subsidy_allocator::SubsidyAllocator;
 
 use foundation_serialization::{Deserialize, Serialize};
 
@@ -234,7 +234,7 @@ impl GovernanceEconomicParams {
                 previous_annual_issuance_block,
             },
             network_issuance: network_issuance::NetworkIssuanceParams {
-                max_supply_block: 40_000_000, // Hard-coded: 40M BLOCK cap
+                max_supply_block: 40_000_000,      // Hard-coded: 40M BLOCK cap
                 expected_total_blocks: 20_000_000, // ~231 days at 1 block/sec
                 baseline_tx_count: 100,
                 baseline_tx_volume_block: 10_000,
@@ -245,7 +245,7 @@ impl GovernanceEconomicParams {
                 decentralization_multiplier_max: 1.5,
                 // Adaptive baselines enabled by default
                 adaptive_baselines_enabled: true,
-                baseline_ema_alpha: 0.05,  // 20-epoch smoothing
+                baseline_ema_alpha: 0.05, // 20-epoch smoothing
                 baseline_min_tx_count: 50,
                 baseline_max_tx_count: 10_000,
                 baseline_min_tx_volume: 5_000,

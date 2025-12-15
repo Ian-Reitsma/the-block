@@ -1,7 +1,7 @@
 use foundation_serialization::json;
 use governance::codec::{balance_history_to_json, disbursements_to_json_array};
 use governance::treasury::{DisbursementDetails, DisbursementPayload};
-use metrics_aggregator::{router, AppState};
+use metrics_aggregator::{metrics_registry_guard, router, AppState};
 use std::env;
 use std::fs;
 use std::future::Future;
@@ -17,6 +17,7 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
 
 #[test]
 fn treasury_metrics_exposed_via_prometheus() {
+    let _guard = metrics_registry_guard();
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
@@ -83,6 +84,7 @@ fn treasury_metrics_exposed_via_prometheus() {
 
 #[test]
 fn treasury_metrics_from_store_source() {
+    let _guard = metrics_registry_guard();
     let dir = tempfile::tempdir().expect("temp dir");
     let gov_path = dir.path().join("gov.db");
     let store = GovStore::open(&gov_path);
@@ -131,6 +133,7 @@ fn treasury_metrics_from_store_source() {
 
 #[test]
 fn treasury_metrics_accept_legacy_string_fields() {
+    let _guard = metrics_registry_guard();
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 

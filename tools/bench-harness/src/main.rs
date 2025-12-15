@@ -331,7 +331,8 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
     let mut payload = vec![0u8; bytes];
     rng.fill_bytes(&mut payload);
 
-    let rs = erasure_coder_for("reed-solomon", data, parity).context("failed to create reed-solomon coder")?;
+    let rs = erasure_coder_for("reed-solomon", data, parity)
+        .context("failed to create reed-solomon coder")?;
     let xor = erasure_coder_for("xor", data, parity).context("failed to create xor coder")?;
     let hybrid = compressor_for("lz77-rle", 4).context("failed to create lz77-rle compressor")?;
     let rle = compressor_for("rle", 0).context("failed to create rle compressor")?;
@@ -359,7 +360,9 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
             rs_slots[0] = None;
         }
         let start = Instant::now();
-        let recovered = rs.reconstruct(&rs_batch.metadata, &rs_slots).context("reed-solomon reconstruct failed")?;
+        let recovered = rs
+            .reconstruct(&rs_batch.metadata, &rs_slots)
+            .context("reed-solomon reconstruct failed")?;
         rs_decode += start.elapsed();
         assert_eq!(recovered, payload);
 
@@ -374,16 +377,22 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
             xor_slots[0] = None;
         }
         let start = Instant::now();
-        let xor_recovered = xor.reconstruct(&xor_batch.metadata, &xor_slots).context("xor reconstruct failed")?;
+        let xor_recovered = xor
+            .reconstruct(&xor_batch.metadata, &xor_slots)
+            .context("xor reconstruct failed")?;
         xor_decode += start.elapsed();
         assert_eq!(xor_recovered, payload);
 
         let start = Instant::now();
-        let hybrid_buf = hybrid.compress(&payload).context("lz77-rle compress failed")?;
+        let hybrid_buf = hybrid
+            .compress(&payload)
+            .context("lz77-rle compress failed")?;
         hybrid_compress += start.elapsed();
         hybrid_bytes += hybrid_buf.len();
         let start = Instant::now();
-        let hybrid_plain = hybrid.decompress(&hybrid_buf).context("lz77-rle decompress failed")?;
+        let hybrid_plain = hybrid
+            .decompress(&hybrid_buf)
+            .context("lz77-rle decompress failed")?;
         hybrid_decompress += start.elapsed();
         assert_eq!(hybrid_plain, payload);
 

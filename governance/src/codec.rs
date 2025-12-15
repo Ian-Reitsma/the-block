@@ -54,6 +54,12 @@ impl BinaryWriter {
         self.buf.extend_from_slice(bytes);
     }
 
+    /// Writes raw bytes without a length prefix. Use this when you've already
+    /// written the length manually.
+    pub fn write_raw_bytes(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
     pub fn write_string(&mut self, value: &str) {
         self.write_bytes(value.as_bytes());
     }
@@ -887,18 +893,18 @@ impl BinaryCodec for TreasuryDisbursement {
         let proposal_bytes =
             foundation_serialization::binary::encode(&self.proposal).unwrap_or_else(|_| Vec::new());
         (proposal_bytes.len() as u32).encode(writer);
-        writer.write_bytes(&proposal_bytes);
+        writer.write_raw_bytes(&proposal_bytes);
 
         let expected_receipts_bytes =
             foundation_serialization::binary::encode(&self.expected_receipts)
                 .unwrap_or_else(|_| Vec::new());
         (expected_receipts_bytes.len() as u32).encode(writer);
-        writer.write_bytes(&expected_receipts_bytes);
+        writer.write_raw_bytes(&expected_receipts_bytes);
 
         let receipts_bytes =
             foundation_serialization::binary::encode(&self.receipts).unwrap_or_else(|_| Vec::new());
         (receipts_bytes.len() as u32).encode(writer);
-        writer.write_bytes(&receipts_bytes);
+        writer.write_raw_bytes(&receipts_bytes);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {

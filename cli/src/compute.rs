@@ -618,9 +618,18 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             let client = RpcClient::from_env();
             let params = json_object_from([("limit", json_u64(limit as u64))]);
             let payload = json_rpc_request("compute_market.sla_history", params);
-            if let Ok(resp) = client.call(&url, &payload) {
-                if let Ok(text) = resp.text() {
-                    write_sla_history_from_str(&text, out)?;
+            eprintln!("[CLI] Making RPC call to: {}", url);
+            match client.call(&url, &payload) {
+                Ok(resp) => {
+                    eprintln!("[CLI] RPC call succeeded, parsing response...");
+                    if let Ok(text) = resp.text() {
+                        write_sla_history_from_str(&text, out)?;
+                    } else {
+                        eprintln!("[CLI] Failed to get response text");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[CLI] RPC call FAILED: {:?}", e);
                 }
             }
         }

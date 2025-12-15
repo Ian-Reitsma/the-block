@@ -248,7 +248,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 
 ## 1 · Project Mission & Scope — Production-Grade Mandate
 
-**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (CT) proof‑of‑work + proof‑of‑service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility.
+**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (BLOCK) proof‑of‑work + proof‑of-service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility. The code still refers to `CT/IT` in field names (`amount_ct`, `amount_it`, `STORAGE_SUB_CT`, etc.), so treat those as legacy ledger labels that describe BLOCK balances.
 The repository owns exactly four responsibility domains:
 
 | Domain        | In-Scope Artifacts                                                     | Out-of-Scope (must live in sibling repos) |

@@ -1,5 +1,7 @@
 use std::io::{self, ErrorKind};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{
+    SocketAddr, TcpListener as StdTcpListener, TcpStream as StdTcpStream, ToSocketAddrs,
+};
 
 #[cfg(feature = "inhouse-backend")]
 use crate::inhouse;
@@ -125,6 +127,36 @@ impl TcpListener {
             TcpListenerInner::Stub(listener) => listener.local_addr(),
         }
     }
+
+    pub fn from_std(listener: StdTcpListener) -> io::Result<Self> {
+        let handle = crate::handle();
+        #[cfg(feature = "inhouse-backend")]
+        if let Some(rt) = handle.inhouse_runtime() {
+            listener.set_nonblocking(true)?;
+            let sys_listener = sys::net::TcpListener::from_std(listener)?;
+            let runtime_listener = inhouse::net::TcpListener::from_std(rt.as_ref(), sys_listener)?;
+            return Ok(Self {
+                inner: TcpListenerInner::InHouse(runtime_listener),
+            });
+        }
+        #[allow(unreachable_code)]
+        Err(io::Error::new(
+            ErrorKind::Other,
+            "no tcp listener backend available",
+        ))
+    }
+
+    pub fn into_std(self) -> io::Result<StdTcpListener> {
+        match self.inner {
+            #[cfg(feature = "inhouse-backend")]
+            TcpListenerInner::InHouse(listener) => listener.into_std(),
+            #[cfg(feature = "stub-backend")]
+            TcpListenerInner::Stub(_) => Err(io::Error::new(
+                ErrorKind::Other,
+                "tcp listener backend does not support std conversion",
+            )),
+        }
+    }
 }
 
 impl TcpStream {
@@ -146,6 +178,23 @@ impl TcpStream {
             });
         }
         #[allow(unreachable_code)]
+        Err(io::Error::new(
+            ErrorKind::Other,
+            "no tcp stream backend available",
+        ))
+    }
+
+    pub fn from_std(stream: StdTcpStream) -> io::Result<Self> {
+        let handle = crate::handle();
+        #[cfg(feature = "inhouse-backend")]
+        if let Some(rt) = handle.inhouse_runtime() {
+            stream.set_nonblocking(true)?;
+            let sys_stream = sys::net::TcpStream::from_std(stream);
+            let tcp_stream = inhouse::net::TcpStream::new(rt.reactor(), sys_stream)?;
+            return Ok(Self {
+                inner: TcpStreamInner::InHouse(tcp_stream),
+            });
+        }
         Err(io::Error::new(
             ErrorKind::Other,
             "no tcp stream backend available",

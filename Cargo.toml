@@ -19,7 +19,7 @@ members = [
   "crates/coding",
   "crates/testkit_macros",
   "fuzz",
-  # "sim",  # Excluded: transport feature configuration issues with --all-features
+  "sim",
   "tools/xtask",
   "tools/indexer",
   "tools/bench-harness",
@@ -115,3 +115,8 @@ serde = { package = "foundation_serde", path = "crates/foundation_serde", defaul
 # level again via a `.cargo/config.toml` override whenever deeper symbolisation
 # is required.
 debug = 1
+
+# Optimize crypto_suite in test builds because the in-house Ed25519
+# implementation is extremely slow in debug mode (can cause test timeouts).
+[profile.test.package.crypto_suite]
+opt-level = 2

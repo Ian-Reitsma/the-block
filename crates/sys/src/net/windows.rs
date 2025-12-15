@@ -253,6 +253,10 @@ impl TcpStream {
         Ok((Self { inner: stream }, connected))
     }
 
+    pub fn from_std(stream: std::net::TcpStream) -> Self {
+        TcpStream { inner: stream }
+    }
+
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
         self.inner.take_error()
     }
@@ -346,6 +350,20 @@ impl TcpListener {
         let listener = unsafe { std::net::TcpListener::from_raw_socket(socket) };
         listener.set_nonblocking(true)?;
         Ok(Self { inner: listener })
+    }
+
+    pub fn from_std(listener: std::net::TcpListener) -> io::Result<Self> {
+        ensure_wsa_started()?;
+        listener.set_nonblocking(true)?;
+        Ok(Self { inner: listener })
+    }
+
+    pub fn into_std(self) -> std::net::TcpListener {
+        self.inner
+    }
+
+    pub fn try_clone_std(&self) -> io::Result<std::net::TcpListener> {
+        self.inner.try_clone()
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {

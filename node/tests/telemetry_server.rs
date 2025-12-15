@@ -7,8 +7,7 @@ use std::net::TcpStream;
 
 use the_block::{serve_metrics_with_shutdown, telemetry};
 
-fn init() {
-}
+fn init() {}
 
 #[test]
 fn metrics_http_exporter_serves_foundation_text() {

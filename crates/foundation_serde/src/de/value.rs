@@ -599,7 +599,12 @@ where
     {
         let de = StrDeserializer::new(self.value);
         let value = seed.deserialize(de)?;
-        Ok((value, UnitOnly { marker: std::marker::PhantomData }))
+        Ok((
+            value,
+            UnitOnly {
+                marker: std::marker::PhantomData,
+            },
+        ))
     }
 }
 
@@ -670,7 +675,12 @@ where
     {
         let de = StringDeserializer::new(self.value);
         let value = seed.deserialize(de)?;
-        Ok((value, UnitOnly { marker: std::marker::PhantomData }))
+        Ok((
+            value,
+            UnitOnly {
+                marker: std::marker::PhantomData,
+            },
+        ))
     }
 }
 

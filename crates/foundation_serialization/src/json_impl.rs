@@ -1378,7 +1378,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_i64()
+                let value = n
+                    .as_i64()
                     .ok_or_else(|| Error::message("expected signed integer"))?;
                 if value > i8::MAX as i64 || value < i8::MIN as i64 {
                     return Err(Error::message("value out of range for i8"));
@@ -1395,7 +1396,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_i64()
+                let value = n
+                    .as_i64()
                     .ok_or_else(|| Error::message("expected signed integer"))?;
                 if value > i16::MAX as i64 || value < i16::MIN as i64 {
                     return Err(Error::message("value out of range for i16"));
@@ -1412,7 +1414,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_i64()
+                let value = n
+                    .as_i64()
                     .ok_or_else(|| Error::message("expected signed integer"))?;
                 if value > i32::MAX as i64 || value < i32::MIN as i64 {
                     return Err(Error::message("value out of range for i32"));
@@ -1442,7 +1445,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::String(s) => {
-                let v = s.parse::<i128>()
+                let v = s
+                    .parse::<i128>()
                     .map_err(|_| Error::message("invalid i128 string"))?;
                 visitor.visit_i128(v)
             }
@@ -1456,7 +1460,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_u64()
+                let value = n
+                    .as_u64()
                     .ok_or_else(|| Error::message("expected unsigned integer"))?;
                 if value > u8::MAX as u64 {
                     return Err(Error::message("value out of range for u8"));
@@ -1473,7 +1478,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_u64()
+                let value = n
+                    .as_u64()
                     .ok_or_else(|| Error::message("expected unsigned integer"))?;
                 if value > u16::MAX as u64 {
                     return Err(Error::message("value out of range for u16"));
@@ -1490,7 +1496,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_u64()
+                let value = n
+                    .as_u64()
                     .ok_or_else(|| Error::message("expected unsigned integer"))?;
                 if value > u32::MAX as u64 {
                     return Err(Error::message("value out of range for u32"));
@@ -1520,7 +1527,8 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::String(s) => {
-                let v = s.parse::<u128>()
+                let v = s
+                    .parse::<u128>()
                     .map_err(|_| Error::message("invalid u128 string"))?;
                 visitor.visit_u128(v)
             }
@@ -1534,10 +1542,13 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_u64()
+                let value = n
+                    .as_u64()
                     .ok_or_else(|| Error::message("expected unsigned integer"))?;
                 if value > usize::MAX as u64 {
-                    return Err(Error::message("u64 value too large for usize on this platform"));
+                    return Err(Error::message(
+                        "u64 value too large for usize on this platform",
+                    ));
                 }
                 visitor.visit_usize(value as usize)
             }
@@ -1551,10 +1562,13 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer {
     {
         match self.value {
             Value::Number(n) => {
-                let value = n.as_i64()
+                let value = n
+                    .as_i64()
                     .ok_or_else(|| Error::message("expected signed integer"))?;
                 if value > isize::MAX as i64 || value < isize::MIN as i64 {
-                    return Err(Error::message("i64 value out of range for isize on this platform"));
+                    return Err(Error::message(
+                        "i64 value out of range for isize on this platform",
+                    ));
                 }
                 visitor.visit_isize(value as isize)
             }

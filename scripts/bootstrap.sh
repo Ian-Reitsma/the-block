@@ -26,6 +26,8 @@ cecho() {
 set -Euo pipefail
 IFS=$'\n\t'
 
+export HOMEBREW_NO_AUTO_UPDATE=1
+
 APP_NAME="the-block"
 REQUIRED_PYTHON="3.12.3"
 PARTIAL_RUN_FLAG=".bootstrap_partial"
@@ -194,7 +196,11 @@ install_deps_brew() {
     run_step "install Homebrew" /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     eval "$(/opt/homebrew/bin/brew shellenv)"
   fi
-  run_step "brew update" brew update
+  if [[ "${HOMEBREW_NO_AUTO_UPDATE:-0}" == "1" ]]; then
+    cecho yellow "Skipping Homebrew update because HOMEBREW_NO_AUTO_UPDATE=1"
+  else
+    run_step "brew update" brew update
+  fi
   run_step "brew install build deps" brew install git jq lsof pkg-config openssl@3 python@3.12 cmake make unzip
 }
 

@@ -3,7 +3,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, MutexGuard, OnceLock,
 };
 use std::time::Duration;
 
@@ -29,8 +29,17 @@ fn test_config() -> Config {
     }
 }
 
+fn transport_test_guard() -> MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
 #[test]
 fn handshake_success_roundtrip() {
+    let _guard = transport_test_guard();
     runtime::block_on(async {
         let cfg = test_config();
         let factory = DefaultFactory::default();
@@ -51,18 +60,26 @@ fn handshake_success_roundtrip() {
             .await
             .expect("handshake succeeds");
         adapter.send(&conn, b"hello inhouse").await.expect("send");
-        let payload = adapter.recv(&conn).await.expect("recv payload");
+        let payload = runtime::timeout(Duration::from_secs(5), adapter.recv(&conn))
+            .await
+            .expect("timed out waiting for application ack")
+            .expect("connection closed before ack");
         assert_eq!(payload, b"hello inhouse");
 
         let stats = adapter.connection_stats();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].0, listen_addr);
         assert!(stats[0].1.deliveries >= 1);
+
+        // Prevent the listener from being dropped to avoid cancelling
+        // the server loop via EndpointInner::drop
+        std::mem::forget(listener);
     });
 }
 
 #[test]
 fn handshake_rejects_mismatched_certificate() {
+    let _guard = transport_test_guard();
     runtime::block_on(async {
         let cfg = test_config();
         let factory = DefaultFactory::default();
@@ -98,11 +115,15 @@ fn handshake_rejects_mismatched_certificate() {
 
         // Drop any lingering state so subsequent tests observe a clean table.
         adapter.drop_connection(&listen_addr);
+
+        // Prevent the listener from being dropped to avoid cancelling the server loop
+        std::mem::forget(listener);
     });
 }
 
 #[test]
 fn verify_remote_certificate_matches_generated_material() {
+    let _guard = transport_test_guard();
     runtime::block_on(async {
         let cfg = test_config();
         let factory = DefaultFactory::default();
@@ -112,7 +133,7 @@ fn verify_remote_certificate_matches_generated_material() {
         let adapter = registry.inhouse().expect("inhouse adapter");
 
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
-        let (_listener, cert) = adapter.listen(addr).await.expect("listen");
+        let (listener, cert) = adapter.listen(addr).await.expect("listen");
 
         let (fingerprint, verifying_key, der) = match cert {
             CertificateHandle::Inhouse(cert) => {
@@ -131,6 +152,9 @@ fn verify_remote_certificate_matches_generated_material() {
             .verify_remote_certificate(&[0u8; 32], &[])
             .expect_err("empty certificate rejected");
         assert!(err.to_string().contains("certificate"));
+
+        // Prevent the listener from being dropped to avoid cancelling the server loop
+        std::mem::forget(listener);
     });
 }
 
@@ -170,6 +194,7 @@ fn provider_capabilities_surface_in_registry() {
 
 #[test]
 fn handshake_metadata_tracks_latency_and_reuse() {
+    let _guard = transport_test_guard();
     runtime::block_on(async {
         let cfg = test_config();
         let factory = DefaultFactory::default();
@@ -226,5 +251,8 @@ fn handshake_metadata_tracks_latency_and_reuse() {
         assert!(Arc::ptr_eq(first_conn, second_conn));
 
         adapter.drop_connection(&listen_addr);
+
+        // Prevent the listener from being dropped to avoid cancelling the server loop
+        std::mem::forget(listener);
     });
 }

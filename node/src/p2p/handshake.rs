@@ -491,10 +491,7 @@ mod tests {
         let expected = Some(transport::ProviderKind::Inhouse);
         #[cfg(not(feature = "inhouse"))]
         let expected = Some(transport::ProviderKind::Quinn);
-        assert_eq!(
-            super::infer_quic_provider_kind(&hello),
-            expected
-        );
+        assert_eq!(super::infer_quic_provider_kind(&hello), expected);
     }
 
     #[cfg(all(feature = "quic", feature = "s2n-quic"))]

@@ -8,7 +8,7 @@ Security is enforced in code, not promises. This guide consolidates the former t
 >
 > | Threat | What They Might Try | How We Defend |
 > |--------|---------------------|---------------|
-> | **Token thieves** | Steal CT by forging signatures or exploiting bugs | Ed25519/Dilithium signatures, `#![forbid(unsafe_code)]`, audit gates |
+> | **Token thieves** | Steal BLOCK by forging signatures or exploiting bugs (code still shows CT field names) | Ed25519/Dilithium signatures, `#![forbid(unsafe_code)]`, audit gates |
 > | **Censors** | Block certain users or transactions | Decentralized consensus, multiple relayers, gossip protocols |
 > | **Fake readings** | Submit false energy/compute data to earn undeserved rewards | Oracle signature verification, slashing for bad behavior |
 > | **Data snoops** | Spy on what users are reading/storing | Encrypted payloads, privacy-preserving read receipts, no logging of content |

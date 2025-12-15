@@ -514,21 +514,19 @@ pub fn handle(cmd: EnergyCmd) {
             meter_hash,
             buyer,
             url,
-        } => {
-            match meter_hash {
-                Some(hash) => {
-                    let pairs = vec![
-                        ("provider_id", json_string(provider_id)),
-                        ("kwh_consumed", json_u64(kwh_consumed)),
-                        ("meter_hash", json_string(hash)),
-                        ("buyer", json_string(buyer)),
-                    ];
-                    let payload = json_rpc_request("energy.settle", json_object_from(pairs));
-                    dispatch(&client, &url, payload).map(|text| println!("{text}"))
-                }
-                None => Err("missing --meter-hash".to_string()),
+        } => match meter_hash {
+            Some(hash) => {
+                let pairs = vec![
+                    ("provider_id", json_string(provider_id)),
+                    ("kwh_consumed", json_u64(kwh_consumed)),
+                    ("meter_hash", json_string(hash)),
+                    ("buyer", json_string(buyer)),
+                ];
+                let payload = json_rpc_request("energy.settle", json_object_from(pairs));
+                dispatch(&client, &url, payload).map(|text| println!("{text}"))
             }
-        }
+            None => Err("missing --meter-hash".to_string()),
+        },
         EnergyCmd::SubmitReading { reading, url } => {
             let payload = json_rpc_request("energy.submit_reading", reading);
             dispatch(&client, &url, payload).map(|text| println!("{text}"))

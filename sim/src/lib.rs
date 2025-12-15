@@ -195,7 +195,7 @@ impl Simulation {
     /// Export aggregated state to a governance decision template (JSON).
     pub fn export_governance<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         #[derive(Serialize)]
-        struct Governance<'a> {
+        struct Governance {
             total_subsidy: f64,
             total_supply: f64,
             liquidity: f64,
@@ -203,7 +203,6 @@ impl Simulation {
             consumer_demand: f64,
             industrial_demand: f64,
             nodes: u64,
-            _p: std::marker::PhantomData<&'a ()>,
         }
         let g = Governance {
             total_subsidy: self.subsidy,
@@ -213,7 +212,6 @@ impl Simulation {
             consumer_demand: self.demand.consumer_growth,
             industrial_demand: self.demand.industrial_growth,
             nodes: self.nodes,
-            _p: std::marker::PhantomData,
         };
         let data = json::to_vec_pretty(&g).expect("serialize governance");
         std::fs::write(path, data)

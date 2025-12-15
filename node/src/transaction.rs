@@ -777,6 +777,9 @@ mod tests {
         // Corrupt the signature
         signed.signature.ed25519[0] ^= 0xFF;
 
-        assert!(!verify_signed_tx(&signed), "corrupted signature should fail verification");
+        assert!(
+            !verify_signed_tx(&signed),
+            "corrupted signature should fail verification"
+        );
     }
 }

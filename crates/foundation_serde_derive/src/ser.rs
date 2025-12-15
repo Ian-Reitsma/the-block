@@ -32,7 +32,9 @@ pub fn expand_derive_serialize(input: &DeriveInput) -> syn::Result<TokenStream> 
     // Add Serialize bounds to where clause
     let where_clause = generics_with_bounds.make_where_clause();
     for type_param in type_params {
-        where_clause.predicates.push(syn::parse_quote!(#type_param: #serde_path::Serialize));
+        where_clause
+            .predicates
+            .push(syn::parse_quote!(#type_param: #serde_path::Serialize));
     }
 
     let (impl_generics, ty_generics, where_clause) = generics_with_bounds.split_for_impl();
@@ -100,79 +102,85 @@ fn impl_serialize_enum(
     data: &syn::DataEnum,
     serde_path: &TokenStream,
 ) -> syn::Result<TokenStream> {
-    let variant_arms = data.variants.iter().enumerate().map(|(variant_index, variant)| {
-        let variant_name = &variant.ident;
-        let variant_name_str = get_variant_name(variant);
-        let variant_index = variant_index as u32;
+    let variant_arms = data
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(variant_index, variant)| {
+            let variant_name = &variant.ident;
+            let variant_name_str = get_variant_name(variant);
+            let variant_index = variant_index as u32;
 
-        match &variant.fields {
-            Fields::Unit => {
-                quote! {
-                    #name::#variant_name => {
-                        serializer.serialize_unit_variant(
-                            stringify!(#name),
-                            #variant_index,
-                            #variant_name_str,
-                        )
-                    }
-                }
-            }
-            Fields::Unnamed(fields) => {
-                let field_count = fields.unnamed.len();
-                let field_names: Vec<Ident> = (0..field_count)
-                    .map(|i| quote::format_ident!("__field{}", i))
-                    .collect();
-
-                let serialize_fields = field_names.iter().map(|field_name| {
+            match &variant.fields {
+                Fields::Unit => {
                     quote! {
-                        state.serialize_field(#field_name)?;
-                    }
-                });
-
-                quote! {
-                    #name::#variant_name(#(#field_names),*) => {
-                        use #serde_path::ser::SerializeTupleVariant;
-                        let mut state = serializer.serialize_tuple_variant(
-                            stringify!(#name),
-                            #variant_index,
-                            #variant_name_str,
-                            #field_count,
-                        )?;
-                        #(#serialize_fields)*
-                        state.end()
+                        #name::#variant_name => {
+                            serializer.serialize_unit_variant(
+                                stringify!(#name),
+                                #variant_index,
+                                #variant_name_str,
+                            )
+                        }
                     }
                 }
-            }
-            Fields::Named(fields) => {
-                let field_count = fields.named.len();
-                let field_names: Vec<&Ident> = fields.named.iter()
-                    .map(|f| f.ident.as_ref().unwrap())
-                    .collect();
+                Fields::Unnamed(fields) => {
+                    let field_count = fields.unnamed.len();
+                    let field_names: Vec<Ident> = (0..field_count)
+                        .map(|i| quote::format_ident!("__field{}", i))
+                        .collect();
 
-                let serialize_fields = fields.named.iter().map(|f| {
-                    let field_name = &f.ident;
-                    let field_name_str = get_field_name(f);
+                    let serialize_fields = field_names.iter().map(|field_name| {
+                        quote! {
+                            state.serialize_field(#field_name)?;
+                        }
+                    });
+
                     quote! {
-                        state.serialize_field(#field_name_str, #field_name)?;
+                        #name::#variant_name(#(#field_names),*) => {
+                            use #serde_path::ser::SerializeTupleVariant;
+                            let mut state = serializer.serialize_tuple_variant(
+                                stringify!(#name),
+                                #variant_index,
+                                #variant_name_str,
+                                #field_count,
+                            )?;
+                            #(#serialize_fields)*
+                            state.end()
+                        }
                     }
-                });
+                }
+                Fields::Named(fields) => {
+                    let field_count = fields.named.len();
+                    let field_names: Vec<&Ident> = fields
+                        .named
+                        .iter()
+                        .map(|f| f.ident.as_ref().unwrap())
+                        .collect();
 
-                quote! {
-                    #name::#variant_name { #(#field_names),* } => {
-                        use #serde_path::ser::SerializeStructVariant;
-                        let mut state = serializer.serialize_struct_variant(
-                            stringify!(#name),
-                            #variant_index,
-                            #variant_name_str,
-                            #field_count,
-                        )?;
-                        #(#serialize_fields)*
-                        state.end()
+                    let serialize_fields = fields.named.iter().map(|f| {
+                        let field_name = &f.ident;
+                        let field_name_str = get_field_name(f);
+                        quote! {
+                            state.serialize_field(#field_name_str, #field_name)?;
+                        }
+                    });
+
+                    quote! {
+                        #name::#variant_name { #(#field_names),* } => {
+                            use #serde_path::ser::SerializeStructVariant;
+                            let mut state = serializer.serialize_struct_variant(
+                                stringify!(#name),
+                                #variant_index,
+                                #variant_name_str,
+                                #field_count,
+                            )?;
+                            #(#serialize_fields)*
+                            state.end()
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     Ok(quote! {
         match self {
@@ -187,7 +195,7 @@ fn get_serde_path(attrs: &[syn::Attribute]) -> TokenStream {
             if let Ok(meta_list) = attr.meta.require_list() {
                 // Parse as comma-separated nested meta items
                 let parsed = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
                 );
 
                 if let Ok(nested) = parsed {
@@ -221,7 +229,8 @@ fn get_field_name(field: &syn::Field) -> String {
                 let tokens = &meta_list.tokens;
                 let tokens_str = tokens.to_string();
                 if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str.trim_start_matches("rename = ")
+                    let name = tokens_str
+                        .trim_start_matches("rename = ")
                         .trim_matches('"')
                         .trim();
                     return name.to_string();
@@ -241,7 +250,8 @@ fn get_variant_name(variant: &syn::Variant) -> String {
                 let tokens = &meta_list.tokens;
                 let tokens_str = tokens.to_string();
                 if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str.trim_start_matches("rename = ")
+                    let name = tokens_str
+                        .trim_start_matches("rename = ")
                         .trim_matches('"')
                         .trim();
                     return name.to_string();

@@ -473,6 +473,7 @@ pub struct AppState {
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     bridge_hooks: BridgeRemediationHooks,
+    test_session: u64,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -557,6 +558,7 @@ impl AppState {
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             bridge_hooks: BridgeRemediationHooks::from_env(),
+            test_session: current_test_session(),
             leader_flag: Arc::new(AtomicBool::new(false)),
             leader_id: Arc::new(RwLock::new(None)),
             leader_fencing: Arc::new(AtomicU64::new(0)),
@@ -1193,8 +1195,15 @@ impl AppState {
 
     fn bridge_remediation_dispatches(&self) -> Vec<BridgeRemediationDispatchRecord> {
         let log = bridge_dispatch_log();
+        let current_session = current_test_session();
         log.lock()
-            .map(|entries| entries.iter().cloned().collect())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|record| record.test_session == current_session)
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -3915,26 +3924,43 @@ fn aggregator_metrics() -> &'static AggregatorMetrics {
     Lazy::force(&METRICS)
 }
 
+pub fn metrics_registry_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: concurrency::Lazy<std::sync::Mutex<()>> =
+        concurrency::Lazy::new(|| std::sync::Mutex::new(()));
+    GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 static TLS_WARNING_SNAPSHOTS: Lazy<Mutex<HashMap<(String, String), TlsWarningSnapshot>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 static BRIDGE_DISPATCH_LOG: OnceLock<Arc<Mutex<VecDeque<BridgeRemediationDispatchRecord>>>> =
     OnceLock::new();
+static BRIDGE_DISPATCH_TEST_SESSION: AtomicU64 = AtomicU64::new(0);
 
 fn bridge_dispatch_log() -> &'static Arc<Mutex<VecDeque<BridgeRemediationDispatchRecord>>> {
     BRIDGE_DISPATCH_LOG.get_or_init(|| Arc::new(Mutex::new(VecDeque::new())))
+}
+
+fn current_test_session() -> u64 {
+    BRIDGE_DISPATCH_TEST_SESSION.load(Ordering::Relaxed)
 }
 
 pub struct BridgeRemediationDispatchLogGuard {
     _lock: MutexGuard<'static, ()>,
 }
 
+static DISPATCH_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn dispatch_test_lock() -> &'static Mutex<()> {
+    DISPATCH_TEST_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 pub fn reset_bridge_remediation_dispatch_log() -> BridgeRemediationDispatchLogGuard {
-    static DISPATCH_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let lock = DISPATCH_TEST_LOCK
-        .get_or_init(|| Mutex::new(()))
+    let lock = dispatch_test_lock()
         .lock()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
+    // Increment session ID to isolate this test from background tasks of previous tests
+    BRIDGE_DISPATCH_TEST_SESSION.fetch_add(1, Ordering::Relaxed);
     if let Some(log) = BRIDGE_DISPATCH_LOG.get() {
         if let Ok(mut guard) = log.lock() {
             guard.clear();
@@ -4145,9 +4171,11 @@ struct BridgeRemediationDispatchRecord {
     status: String,
     dispatched_at: u64,
     acknowledgement: Option<BridgeDispatchAckRecord>,
+    test_session: u64,
 }
 
 impl BridgeRemediationDispatchRecord {
+    #[allow(dead_code)]
     fn new(
         action: BridgeRemediationAction,
         target: &str,
@@ -4161,6 +4189,25 @@ impl BridgeRemediationDispatchRecord {
             status: status.to_string(),
             dispatched_at,
             acknowledgement,
+            test_session: current_test_session(),
+        }
+    }
+
+    fn new_with_session(
+        action: BridgeRemediationAction,
+        target: &str,
+        status: &str,
+        dispatched_at: u64,
+        acknowledgement: Option<BridgeDispatchAckRecord>,
+        test_session: u64,
+    ) -> Self {
+        Self {
+            action,
+            target: target.to_string(),
+            status: status.to_string(),
+            dispatched_at,
+            acknowledgement,
+            test_session,
         }
     }
 
@@ -5811,12 +5858,17 @@ fn record_dispatch_outcome(
         .as_ref()
         .map(|update| update.action.clone())
         .unwrap_or_else(|| action.clone());
-    let record = BridgeRemediationDispatchRecord::new(
+    let session = state
+        .as_ref()
+        .map(|s| s.test_session)
+        .unwrap_or_else(current_test_session);
+    let record = BridgeRemediationDispatchRecord::new_with_session(
         record_action,
         target,
         status,
         dispatched_at,
         acknowledgement,
+        session,
     );
     if let Ok(mut guard) = bridge_dispatch_log().lock() {
         guard.push_back(record);
@@ -9113,6 +9165,7 @@ mod tests {
 
     #[test]
     fn tls_env_warning_ingest_updates_counter() {
+        let _guard = metrics_registry_guard();
         install_tls_env_warning_forwarder();
         reset_tls_warning_snapshots();
         let metrics = aggregator_metrics();
@@ -9354,6 +9407,7 @@ mod tests {
 
     #[test]
     fn tls_warning_retention_override_applies() {
+        let _guard = metrics_registry_guard();
         reset_tls_warning_snapshots();
         let dir = tempfile::tempdir().unwrap();
         let _state = AppState::new_with_opts(
@@ -9378,7 +9432,10 @@ mod tests {
         }
 
         prune_tls_warning_snapshots_for_test(20);
-        let snapshots = tls_warning_snapshots();
+        let snapshots: Vec<_> = tls_warning_snapshots()
+            .into_iter()
+            .filter(|s| s.prefix == "TB_OVERRIDE")
+            .collect();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].prefix, "TB_OVERRIDE");
         assert_eq!(snapshots[0].code, "fresh");
@@ -9386,6 +9443,7 @@ mod tests {
 
     #[test]
     fn tls_warning_status_reports_counts_and_retention() {
+        let _guard = metrics_registry_guard();
         install_tls_env_warning_forwarder();
         reset_tls_warning_snapshots();
         let metrics = aggregator_metrics();
@@ -9437,6 +9495,7 @@ mod tests {
 
     #[test]
     fn tls_warning_status_endpoint_exposes_payload() {
+        let _guard = metrics_registry_guard();
         install_tls_env_warning_forwarder();
         reset_tls_warning_snapshots();
         run_async(async {
@@ -9491,6 +9550,7 @@ mod tests {
 
     #[test]
     fn tls_env_warning_ingest_handles_nested_samples() {
+        let _guard = metrics_registry_guard();
         install_tls_env_warning_forwarder();
         let metrics = aggregator_metrics();
         for labels in [

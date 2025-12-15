@@ -9,8 +9,7 @@ use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-    });
+    ONCE.call_once(|| {});
 }
 
 #[test]

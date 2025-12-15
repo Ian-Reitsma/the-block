@@ -1283,14 +1283,19 @@ impl<'de> Deserialize<'de> for SystemTime {
                     }
                 }
 
-                let secs: u64 = secs_since_epoch.ok_or_else(|| Error::missing_field("secs_since_epoch"))?;
+                let secs: u64 =
+                    secs_since_epoch.ok_or_else(|| Error::missing_field("secs_since_epoch"))?;
                 let nanos: u32 = nanos.ok_or_else(|| Error::missing_field("nanos"))?;
 
                 Ok(UNIX_EPOCH + Duration::new(secs, nanos))
             }
         }
 
-        deserializer.deserialize_struct("SystemTime", &["secs_since_epoch", "nanos"], SystemTimeVisitor)
+        deserializer.deserialize_struct(
+            "SystemTime",
+            &["secs_since_epoch", "nanos"],
+            SystemTimeVisitor,
+        )
     }
 }
 
@@ -1313,9 +1318,9 @@ impl<'de> Deserialize<'de> for Ipv4Addr {
             where
                 E: Error,
             {
-                value.parse::<Ipv4Addr>().map_err(|_| {
-                    Error::custom(format!("invalid IPv4 address: {}", value))
-                })
+                value
+                    .parse::<Ipv4Addr>()
+                    .map_err(|_| Error::custom(format!("invalid IPv4 address: {}", value)))
             }
         }
 
@@ -1341,9 +1346,9 @@ impl<'de> Deserialize<'de> for Ipv6Addr {
             where
                 E: Error,
             {
-                value.parse::<Ipv6Addr>().map_err(|_| {
-                    Error::custom(format!("invalid IPv6 address: {}", value))
-                })
+                value
+                    .parse::<Ipv6Addr>()
+                    .map_err(|_| Error::custom(format!("invalid IPv6 address: {}", value)))
             }
         }
 
@@ -1369,9 +1374,9 @@ impl<'de> Deserialize<'de> for IpAddr {
             where
                 E: Error,
             {
-                value.parse::<IpAddr>().map_err(|_| {
-                    Error::custom(format!("invalid IP address: {}", value))
-                })
+                value
+                    .parse::<IpAddr>()
+                    .map_err(|_| Error::custom(format!("invalid IP address: {}", value)))
             }
         }
 
@@ -1397,9 +1402,9 @@ impl<'de> Deserialize<'de> for SocketAddrV4 {
             where
                 E: Error,
             {
-                value.parse::<SocketAddrV4>().map_err(|_| {
-                    Error::custom(format!("invalid IPv4 socket address: {}", value))
-                })
+                value
+                    .parse::<SocketAddrV4>()
+                    .map_err(|_| Error::custom(format!("invalid IPv4 socket address: {}", value)))
             }
         }
 
@@ -1425,9 +1430,9 @@ impl<'de> Deserialize<'de> for SocketAddrV6 {
             where
                 E: Error,
             {
-                value.parse::<SocketAddrV6>().map_err(|_| {
-                    Error::custom(format!("invalid IPv6 socket address: {}", value))
-                })
+                value
+                    .parse::<SocketAddrV6>()
+                    .map_err(|_| Error::custom(format!("invalid IPv6 socket address: {}", value)))
             }
         }
 
@@ -1453,9 +1458,9 @@ impl<'de> Deserialize<'de> for SocketAddr {
             where
                 E: Error,
             {
-                value.parse::<SocketAddr>().map_err(|_| {
-                    Error::custom(format!("invalid socket address: {}", value))
-                })
+                value
+                    .parse::<SocketAddr>()
+                    .map_err(|_| Error::custom(format!("invalid socket address: {}", value)))
             }
         }
 
@@ -1889,9 +1894,12 @@ where
             }
         }
 
-        deserializer.deserialize_tuple(N, ArrayVisitor {
-            marker: std::marker::PhantomData,
-        })
+        deserializer.deserialize_tuple(
+            N,
+            ArrayVisitor {
+                marker: std::marker::PhantomData,
+            },
+        )
     }
 }
 

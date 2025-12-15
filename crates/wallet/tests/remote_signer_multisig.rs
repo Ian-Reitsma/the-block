@@ -4,9 +4,29 @@ use std::time::Duration;
 
 use httpd::StatusCode;
 use ledger::crypto::remote_tag;
-use wallet::{remote_signer::RemoteSigner, WalletError, WalletSigner};
+use wallet::{WalletError, WalletSigner, remote_signer::RemoteSigner};
 
 use support::HttpSignerMock;
+
+struct RemoteSignerTimeout(Option<String>);
+
+impl RemoteSignerTimeout {
+    fn set_ms(ms: &str) -> Self {
+        let previous = std::env::var("REMOTE_SIGNER_TIMEOUT_MS").ok();
+        std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", ms);
+        RemoteSignerTimeout(previous)
+    }
+}
+
+impl Drop for RemoteSignerTimeout {
+    fn drop(&mut self) {
+        if let Some(value) = self.0.take() {
+            std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", value);
+        } else {
+            std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
+        }
+    }
+}
 
 #[test]
 #[testkit::tb_serial]
@@ -14,6 +34,7 @@ fn multisig_success_and_failure() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    let _timeout_guard = RemoteSignerTimeout::set_ms("30000");
 
     let signer_a = HttpSignerMock::success();
     let signer_b = HttpSignerMock::success();
@@ -37,6 +58,7 @@ fn multisig_threshold_fails_when_signer_returns_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    let _timeout_guard = RemoteSignerTimeout::set_ms("30000");
 
     let good = HttpSignerMock::success();
     let bad = HttpSignerMock::failing(StatusCode::INTERNAL_SERVER_ERROR);
@@ -57,6 +79,7 @@ fn multisig_rejects_invalid_signatures() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    let _timeout_guard = RemoteSignerTimeout::set_ms("30000");
 
     let good = HttpSignerMock::success();
     let bad = HttpSignerMock::invalid_signature();
@@ -77,7 +100,7 @@ fn multisig_times_out_slow_signers() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
-    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "50");
+    let _timeout_guard = RemoteSignerTimeout::set_ms("50");
 
     let fast = HttpSignerMock::success();
     let slow = HttpSignerMock::delayed(Duration::from_millis(200));
@@ -86,6 +109,5 @@ fn multisig_times_out_slow_signers() {
     let err = signer
         .sign_multisig(b"timeout")
         .expect_err("timeout enforced");
-    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
     assert!(matches!(err, WalletError::Timeout));
 }

@@ -196,10 +196,16 @@ impl SignatureVerifier for DilithiumVerifier {
                 // TEMPORARY: dilithium5 not yet available in pqcrypto_dilithium, using dilithium3 as fallback
                 use pqcrypto_dilithium::dilithium3::*;
                 let pk = PublicKey::from_bytes(public_key).map_err(|e| {
-                    VerificationError::MalformedPublicKey(format!("dilithium3 (level5 fallback): {}", e))
+                    VerificationError::MalformedPublicKey(format!(
+                        "dilithium3 (level5 fallback): {}",
+                        e
+                    ))
                 })?;
                 let sig = DetachedSignature::from_bytes(&reading.signature).map_err(|e| {
-                    VerificationError::MalformedSignature(format!("dilithium3 (level5 fallback): {}", e))
+                    VerificationError::MalformedSignature(format!(
+                        "dilithium3 (level5 fallback): {}",
+                        e
+                    ))
                 })?;
                 verify_detached_signature(&sig, message.as_bytes(), &pk).map_err(|e| {
                     VerificationError::InvalidSignature {

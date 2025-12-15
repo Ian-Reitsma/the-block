@@ -47,7 +47,7 @@ foundation_object_store = { path = "../crates/foundation_object_store" }
 p2p_overlay = { path = "../crates/p2p_overlay", optional = true }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 storage_engine = { path = "../crates/storage_engine", optional = true, default-features = false }
-transport = { path = "../crates/transport", optional = true }
+transport = { path = "../crates/transport", optional = true, features = ["inhouse"] }
 thiserror = { path = "../crates/thiserror" }
 sys = { path = "../crates/sys" }
 

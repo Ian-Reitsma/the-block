@@ -63,9 +63,9 @@ impl std::error::Error for Error {
 }
 
 // Re-export traits from foundation_serde (aliased as 'serde' in Cargo.toml)
-pub use ::serde::{de, ser};
 pub use ::serde::Deserialize;
 pub use ::serde::Serialize;
+pub use ::serde::{de, ser};
 
 // Re-export derive macros from foundation_serde_derive
 // Note: In Rust, derive macros and traits can share names as they're in different namespaces

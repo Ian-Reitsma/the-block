@@ -131,9 +131,7 @@ fn pipeline_repair_round_trip_with_xor_coder() {
 
     let log_dir = dir.path().join("repair_log");
     let log = RepairLog::new(&log_dir);
-    let mut repair_db = SimpleDb::open_named(names::STORAGE_PIPELINE, path_str);
-    let summary =
-        repair::run_once(&mut repair_db, &log, RepairRequest::default()).expect("repair run");
+    let summary = repair::run_once(&mut db, &log, RepairRequest::default()).expect("repair run");
     assert_eq!(summary.successes, 1);
     assert!(summary.failures == 0);
 

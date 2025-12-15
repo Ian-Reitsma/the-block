@@ -3,9 +3,9 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use sys::tempfile;
 use tb_sim::dependency_fault_harness::{
-    run_simulation, BackendSelections, CodingBackendChoice, FaultSpec, SimulationRequest,
-    StorageBackendChoice,
+    run_simulation, CodingBackendChoice, FaultSpec, SimulationRequest, StorageBackendChoice,
 };
 
 #[test]

@@ -8,8 +8,8 @@ use cli_core::{
 use foundation_serialization::json::{self, Value};
 use foundation_telemetry::TelemetrySummary;
 use httpd::Method;
-use the_block::http_client;
 use std::collections::VecDeque;
+use the_block::http_client;
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};

@@ -9,10 +9,10 @@
 //! The NHI score ranges from 0.0 (unhealthy) to 1.0 (optimal health).
 //! This metric is used by adaptive security systems to adjust parameters.
 
+use concurrency::Lazy;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use concurrency::Lazy;
 
 /// Network Health Index configuration
 #[derive(Debug, Clone)]
@@ -49,9 +49,9 @@ impl Default for NetworkHealthConfig {
             stability_weight: 0.25,
             target_min_peers: 8,
             target_optimal_peers: 50,
-            churn_window_secs: 3600, // 1 hour
+            churn_window_secs: 3600,    // 1 hour
             target_max_churn_rate: 5.0, // 5 peers/hour
-            nhi_smoothing_alpha: 0.1, // Slow smoothing for stability
+            nhi_smoothing_alpha: 0.1,   // Slow smoothing for stability
         }
     }
 }

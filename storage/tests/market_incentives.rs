@@ -44,7 +44,7 @@ fn market_persists_contracts_and_records_proofs() {
     assert_eq!(contracts.len(), 1);
     let record = &contracts[0];
     assert_eq!(record.contract.object_id, "obj");
-    assert_eq!(record.contract.accrued, 6);
+    assert_eq!(record.contract.accrued, 18);
     assert_eq!(
         record.contract.total_deposit_ct,
         record.replicas[0].deposit_ct

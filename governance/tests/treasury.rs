@@ -1,4 +1,7 @@
-use governance::{DisbursementDetails, DisbursementPayload, DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryDisbursement};
+use governance::{
+    DisbursementDetails, DisbursementPayload, DisbursementStatus, GovStore,
+    TreasuryBalanceEventKind, TreasuryDisbursement,
+};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use std::{

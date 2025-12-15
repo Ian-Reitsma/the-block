@@ -12,7 +12,7 @@ Quick local setup for experimentation:
 
 # 2. Build
 cargo build -p the_block --release
-cargo build -p cli --bin tb-cli
+cargo build -p contract-cli --bin tb-cli
 
 # 3. Start a single node with default config
 ./target/release/tb-cli node start --config config/node.toml
@@ -23,8 +23,8 @@ curl http://localhost:26658/metrics | head -20
 ```
 
 **What's a "testnet" vs "mainnet"?**
-- **Testnet**: A practice network with fake CT. Safe to experiment, break things, learn.
-- **Mainnet**: The real network with real CT. Production readiness required.
+- **Testnet**: A practice network with fake BLOCK. Safe to experiment, break things, learn.
+- **Mainnet**: The real network with real BLOCK. Production readiness required.
 
 For production deployment, read the rest of this guide.
 
@@ -57,7 +57,7 @@ For backup/restore, copy these directories while the node is stopped (or use the
 4. Use `scripts/bootstrap_ps1` on Windows/WSL; the runtime works cross-platform and telemetry pipes remain identical.
 
 ## Building and Testing
-- `cargo build -p the_block --release` builds the node; `cargo build -p cli --bin tb-cli` compiles the CLI.
+- `cargo build -p the_block --release` builds the node; `cargo build -p contract-cli --bin tb-cli` compiles the CLI.
 - `cargo nextest run --all-features` exercises the multi-crate workspace with the telemetry feature enabled.
 - Python demo: `python demo.py` wires the PyO3 module from `node/src/py.rs` for deterministic replay tests.
 - **Workstream checklist** — Ship every change with the standard gate run (`just lint`, `just fmt`, `just test-fast`, the required tier of `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, and `scripts/fuzz_coverage.sh`). Attach the log (or CI link) plus fuzz `.profraw` artifacts to the PR so reviewers can verify compliance with `AGENTS.md §0.6`.
@@ -163,7 +163,7 @@ cp -r /path/to/node/governor/decisions /backup/decisions_$(date +%Y%m%d)
 - **Metrics/telemetry** — The node exposes `treasury_balance_ct`, `treasury_balance_it`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator fans them out via the new `/treasury/summary` and `/governance/disbursements` endpoints; dashboards reference the same expressions (`treasury_disbursement_count`, `treasury_disbursement_scheduled_oldest_age_seconds`, etc.). Guard rails: alert if backlog age exceeds 2 hours or if any proposal stalls longer than `ROLLBACK_WINDOW_EPOCHS`.
 - **Explorer/CLI parity** — Explorer timelines (proposal metadata, quorum/votes, timelock height, execution tx hash, receipts, rollback annotations) must match `tb-cli gov disburse show`. CI enforces this by running `tb-cli gov disburse preview --json examples/governance/disbursement_example.json --check` plus ledger replay tests. When the executor misbehaves, run `tb-cli gov treasury executor-status` to inspect lease holders and intent queues before issuing a rollback.
 - **Rollbacks** — Within the block-height-bounded window you can call `tb-cli gov disburse rollback --id … --reason …`. This records a compensating ledger event, marks the disbursement `RolledBack`, and pushes the rationale into `provenance.json`. Include screenshots/log excerpts when filing incident reports under `docs/operations.md#troubleshooting-playbook`.
-- **Dashboards** — After edits to `metrics-aggregator/**` or `monitoring/**`, re-run `npm ci --prefix monitoring && make monitor`, refresh the treasury panels (count by status, CT amount by status, timelock age), and capture new screenshots for the ops wiki.
+- **Dashboards** — After edits to `metrics-aggregator/**` or `monitoring/**`, re-run `npm ci --prefix monitoring && make monitor`, refresh the treasury panels (count by status, BLOCK amount by status—exposed via `treasury_disbursement_amount_ct`), timelock age, and capture new screenshots for the ops wiki.
 
 ## Energy Market Operations
 - **Scope** — Everything is first-party: `crates/energy-market` (providers/credits/receipts + metrics), `node/src/energy.rs` (sled store + treasury hooks), `node/src/rpc/energy.rs` (JSON-RPC), `cli/src/energy.rs` (operator commands), `crates/oracle-adapter` (ingest client), and `services/mock-energy-oracle` (World OS drill). No third-party RPC stacks or DBs.

@@ -3,9 +3,18 @@
 use crypto_suite::hashing::blake3;
 use diagnostics;
 use http_env::server_tls_from_env;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tls_warning::WarningOrigin;
+
+/// Guard to serialize TLS warning tests that manipulate global state.
+fn tls_warning_test_guard() -> MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
 
 fn unique_suffix() -> u128 {
     SystemTime::now()
@@ -16,6 +25,8 @@ fn unique_suffix() -> u128 {
 
 #[test]
 fn tls_env_warning_metrics_increment_on_log() {
+    let _guard = tls_warning_test_guard();
+    http_env::clear_tls_warning_sinks_for_testing();
     the_block::telemetry::reset_tls_env_warning_forwarder_for_testing();
     the_block::telemetry::install_tls_env_warning_forwarder();
     the_block::telemetry::clear_tls_env_warning_snapshots_for_testing();
@@ -134,6 +145,8 @@ fn tls_env_warning_metrics_increment_on_log() {
 
 #[test]
 fn tls_env_warning_metrics_from_diagnostics_without_sink() {
+    let _guard = tls_warning_test_guard();
+    http_env::clear_tls_warning_sinks_for_testing();
     the_block::telemetry::reset_tls_env_warning_forwarder_for_testing();
     the_block::telemetry::ensure_tls_env_warning_diagnostics_bridge();
     the_block::telemetry::clear_tls_env_warning_snapshots_for_testing();
@@ -246,6 +259,8 @@ fn tls_env_warning_metrics_from_diagnostics_without_sink() {
 
 #[test]
 fn tls_env_warning_telemetry_sink_captures_forwarder_events() {
+    let _guard = tls_warning_test_guard();
+    http_env::clear_tls_warning_sinks_for_testing();
     the_block::telemetry::reset_tls_env_warning_forwarder_for_testing();
     the_block::telemetry::clear_tls_env_warning_snapshots_for_testing();
     the_block::telemetry::install_tls_env_warning_forwarder();
@@ -330,6 +345,8 @@ fn tls_env_warning_telemetry_sink_captures_forwarder_events() {
 
 #[test]
 fn tls_env_warning_telemetry_sink_captures_diagnostics_bridge_events() {
+    let _guard = tls_warning_test_guard();
+    http_env::clear_tls_warning_sinks_for_testing();
     the_block::telemetry::reset_tls_env_warning_forwarder_for_testing();
     the_block::telemetry::ensure_tls_env_warning_diagnostics_bridge();
     the_block::telemetry::clear_tls_env_warning_snapshots_for_testing();

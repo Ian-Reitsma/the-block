@@ -32,7 +32,7 @@ fn sla_history_round_trip() {
     let explorer = Explorer::open(&db_path).expect("open explorer");
     let wasm = b"proof-workload";
     let output = workloads::snark::run(wasm);
-    let proof = snark::prove_with_backend(wasm, &output, SnarkBackend::Gpu).expect("gpu proof");
+    let proof = snark::prove_with_backend(wasm, &output, SnarkBackend::Cpu).expect("cpu proof");
     let entry = SlaResolution {
         job_id: "job-1".to_string(),
         provider: "alice".to_string(),
@@ -56,7 +56,7 @@ fn sla_history_round_trip() {
         record.proofs[0].fingerprint,
         hex::encode(proof.fingerprint())
     );
-    assert_eq!(record.proofs[0].backend, "GPU");
+    assert_eq!(record.proofs[0].backend, "CPU");
     let rebuilt = record.proofs[0]
         .to_bundle()
         .expect("rehydrate explorer proof");

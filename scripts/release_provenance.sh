@@ -50,8 +50,16 @@ if [ ! -d "$VENDOR_STAGE" ]; then
   echo "cargo vendor failed to populate $VENDOR_STAGE" >&2
   exit 1
 fi
-VENDOR_HASH=$(cd "$VENDOR_STAGE" && tar --sort=name --owner=0 --group=0 --numeric-owner \
-  --mtime=@"${SOURCE_DATE_EPOCH}" -cf - . | sha256sum | awk '{print $1}')
+# Use find with sort for deterministic ordering (works on both GNU and BSD tar)
+# Note: --mtime=@TIMESTAMP is GNU tar specific; BSD tar doesn't support it
+if tar --version 2>&1 | grep -q "GNU tar"; then
+  MTIME_ARG="--mtime=@${SOURCE_DATE_EPOCH}"
+else
+  MTIME_ARG=""
+fi
+VENDOR_HASH=$(cd "$VENDOR_STAGE" && find . -print0 | LC_ALL=C sort -z | \
+  tar --null -T - --no-recursion --owner=0 --group=0 --numeric-owner \
+  $MTIME_ARG -cf - | sha256sum | awk '{print $1}')
 rm -rf "$VENDOR_STAGE"
 echo "$VENDOR_HASH" > "$OUTDIR/vendor-sha256.txt"
 SNAPSHOT_HASH=$(sha256sum "$SNAPSHOT_PATH" | awk '{print $1}')
@@ -119,9 +127,10 @@ fi
 (
   cd "$OUTDIR"
   : > checksums.txt
+  # Use portable find (BSD find doesn't support -printf)
   while IFS= read -r entry; do
     sha256sum "$entry" >> checksums.txt
-  done < <(find . -maxdepth 1 -type f -printf '%P\n' | sort)
+  done < <(find . -maxdepth 1 -type f | sed 's|^\./||' | sort)
 )
 printf "vendor-tree  %s\n" "$VENDOR_HASH" >> "$OUTDIR/checksums.txt"
 

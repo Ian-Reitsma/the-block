@@ -138,11 +138,20 @@ JSON
         cp "$out_dir/provider.failover.json" "$archive_dir/$run_id/provider.failover.json"
         bundle_path="$archive_dir/${run_id}.zip"
         printf 'stub bundle\n' > "$bundle_path"
-        bundle_size=$(stat -c%s "$bundle_path")
-        snapshot_size=$(stat -c%s "$archive_dir/$run_id/status.snapshot.json")
-        diff_size=$(stat -c%s "$archive_dir/$run_id/status.diff.json")
-        overlay_size=$(stat -c%s "$archive_dir/$run_id/overlay.readiness.json")
-        provider_size=$(stat -c%s "$archive_dir/$run_id/provider.failover.json")
+        # Portable stat: use -c on GNU, -f on BSD
+        if stat -c%s "$bundle_path" >/dev/null 2>&1; then
+          bundle_size=$(stat -c%s "$bundle_path")
+          snapshot_size=$(stat -c%s "$archive_dir/$run_id/status.snapshot.json")
+          diff_size=$(stat -c%s "$archive_dir/$run_id/status.diff.json")
+          overlay_size=$(stat -c%s "$archive_dir/$run_id/overlay.readiness.json")
+          provider_size=$(stat -c%s "$archive_dir/$run_id/provider.failover.json")
+        else
+          bundle_size=$(stat -f%z "$bundle_path")
+          snapshot_size=$(stat -f%z "$archive_dir/$run_id/status.snapshot.json")
+          diff_size=$(stat -f%z "$archive_dir/$run_id/status.diff.json")
+          overlay_size=$(stat -f%z "$archive_dir/$run_id/overlay.readiness.json")
+          provider_size=$(stat -f%z "$archive_dir/$run_id/provider.failover.json")
+        fi
         cat > "$archive_dir/$run_id/manifest.json" <<MANIFEST
 {
   "run_id": "$run_id",

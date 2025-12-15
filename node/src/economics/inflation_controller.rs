@@ -6,7 +6,7 @@
 //! Instead of fixed 200M BLOCK/year, issuance adapts to keep inflation stable
 //! even if token price or adoption changes dramatically.
 
-use super::{InflationSnapshot};
+use super::InflationSnapshot;
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Inflation control parameters (all from governance)
@@ -36,7 +36,7 @@ impl Default for InflationParams {
             controller_gain: 0.10,
             min_annual_issuance_block: 50_000_000,
             max_annual_issuance_block: 300_000_000,
-            previous_annual_issuance_block: 40_000_000,  // Bootstrap: 40M BLOCK/year
+            previous_annual_issuance_block: 40_000_000, // Bootstrap: 40M BLOCK/year
         }
     }
 }

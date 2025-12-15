@@ -81,31 +81,20 @@ If you're new to blockchain development, here's a quick reference:
 
 ## Performance and Benchmarks
 - Bench harnesses sit under `benches/`, `monitoring/build`, and `node/benches`. Publish results through the metrics exporter by setting `TB_BENCH_PROM_PATH`.
-- `docs/benchmarks.md` content moved here: store thresholds in `config/benchmarks/<name>.thresholds`, compare to `monitoring/metrics.json`, and watch Grafana’s **Benchmarks** row.
+- Thresholds live in `config/benchmarks/<name>.thresholds`, metrics compare to `monitoring/metrics.json`, and Grafana’s **Benchmarks** row visualizes the same targets so operators can detect regressions early.
 
 ## Contract and VM Development
-- WASM tooling: `cli/src/wasm.rs`, `node/src/vm`, `node/src/vm/debugger.rs`. Use `docs/architecture.md#virtual-machine-and-wasm` for runtime behaviour.
-- `docs/contract_dev.md`, `docs/wasm_contracts.md`, and `docs/vm_debugging.md` merged here.
-- CLI flow: `tb-cli wasm build`, `tb-cli contract deploy`, `tb-cli contract call`, `tb-cli vm trace`.
-- Gas model (`node/src/vm/gas.rs`):
-  - Each opcode has a base cost (`cost(op)`), and storage/hash-heavy ops add explicit constants (`GAS_STORAGE_READ`, `GAS_STORAGE_WRITE`, `GAS_HASH`).
-  - `GasMeter` enforces limits and reports `used()` for fee accounting. ABI helpers (`node/src/vm/abi.rs`) encode `(gas_limit, gas_price)` as a 16-byte blob when interacting with wallets.
-- Debugger + traces: `node/src/vm/debugger.rs` steps through opcodes, exposes `VmDebugger::into_trace()` (stack, gas, opcode, pc). CLI `tb-cli vm trace --tx <hash> --json` prints entries like:
-
-  ```json
-  {"pc":12,"opcode":"SSTORE","gas_before":1200,"gas_after":696,"stack":[1,2,3]}
-  ```
-
-  Use it alongside `tb-cli contract disasm` when diagnosing mispriced contracts.
+- WASM tooling lives in `cli/src/wasm.rs`, `node/src/vm`, and `node/src/vm/debugger.rs`. Use [`docs/architecture.md#virtual-machine-and-wasm`](architecture.md#virtual-machine-and-wasm) for runtime behaviour and `node/src/vm/abi.rs` for ABI encodings.
+- CLI flows: `tb-cli wasm build`, `tb-cli contract deploy`, `tb-cli contract call`, `tb-cli vm trace`. `tb-cli contract disasm` plus `VmDebugger::into_trace()` (`node/src/vm/debugger.rs`) help you step through bad gas pricing. The gas meter adds per-opcode constants (`GAS_STORAGE_READ`, `GAS_STORAGE_WRITE`, `GAS_HASH`) and reports `used()` so fee accounting stays deterministic.
 
 ## Python + Headless Tooling
 - `demo.py` exercises the `node/src/py.rs` bridge for deterministic ledger replay and educational demos.
-- Headless tooling (`docs/headless.md` content) stays in `cli/src/headless.rs` and `docs/apis_and_tooling.md`.
+- Headless tooling now lives in `cli/src/headless.rs` and `docs/apis_and_tooling.md`; `tb-cli explain tx|block|governance` renders JSON traces while governance knobs like `ai_diagnostics_enabled` gate ANN-based alerts (see the telemetry/AI sections in this handbook and [`docs/architecture.md#auxiliary-services`](architecture.md#auxiliary-services)).
 
 ## Dependency Policy
 - Policies live in `config/dependency_policies.toml`. Run `cargo run -p dependency_registry -- --check config/dependency_policies.toml` (or `just dependency-audit`) to refresh `docs/dependency_inventory*.json`.
 - After dependency changes: run `cargo vendor`, regenerate `provenance.json` + `checksums.txt`, and update [`docs/security_and_privacy.md#release-provenance-and-supply-chain`](security_and_privacy.md#release-provenance-and-supply-chain) with the attestation summary. CI rejects PRs that skip these artifacts.
-- The pivot strategy formerly described in `docs/pivot_dependency_strategy.md` now reads: wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards.
+- Wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards so the “pivot strategy” lives in code history rather than a deleted doc.
 - Never introduce `reqwest`, `serde_json`, `bincode`, etc. Production crates must route through the first-party facades.
 
 ## Formal Methods and Verification
@@ -120,7 +109,7 @@ If you're new to blockchain development, here's a quick reference:
   - Use the harness before altering consensus/governance logic; CI expects new scenarios for major protocol toggles.
 
 ## Logging and Traceability
-- Logging guidelines from `docs/logging.md` live here: use structured events, avoid PII, include `component`, `peer`, `slot`, `lane`, `job_id` labels.
+- Logging guidelines live in this handbook and [`docs/security_and_privacy.md#privacy-layers`](security_and_privacy.md#privacy-layers): use structured events, avoid PII, and include `component`, `peer`, `slot`, `lane`, `job_id` labels so telemetry stays machine-readable.
 - Traces feed into the metrics aggregator and optionally into external stacks via exporters (no vendor lock-in required).
 
 ## Explainability and AI Diagnostics

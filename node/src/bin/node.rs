@@ -644,13 +644,9 @@ enum Commands {
     /// Sign a transaction JSON payload with the given key
     SignTx { key_id: String, tx_json: String },
     /// Compute-related utilities
-    Compute {
-        cmd: ComputeCmd,
-    },
+    Compute { cmd: ComputeCmd },
     /// Service badge utilities
-    Badge {
-        cmd: BadgeCmd,
-    },
+    Badge { cmd: BadgeCmd },
 }
 
 #[derive(Debug)]
