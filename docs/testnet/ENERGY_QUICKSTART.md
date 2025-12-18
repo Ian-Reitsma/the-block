@@ -1,5 +1,7 @@
 # World OS Energy Testnet Quickstart
 
+This drill mirrors the production energy-market stack: the same governance parameters, signature verification logic, and dynamic fee formulas described in `docs/economics_and_governance.md` run here, just with mock oracle inputs and relaxed RPC auth. Launch Governor still manages readiness gates (operational + naming today, future energy gate under `AGENTS.md §15`), so treat this testnet as a staging ground for autopilot changes—shadow mode first, then apply once telemetry looks healthy. Watch the new `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, and `economics_block_reward_per_block` gauges; they are the same inputs the governor uses before flipping the testnet/mainnet economics gate.
+
 Use this flow to exercise the end-to-end energy market: registering providers, submitting signed meter readings, validating credits, settling receipts, and rehearsing disputes before we open the lanes widely.
 
 ## Prerequisites

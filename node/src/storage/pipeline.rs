@@ -1436,6 +1436,14 @@ pub fn set_bytes_per_sender_epoch_cap(v: u64) {
     BYTES_PER_SENDER_EPOCH_CAP.store(v, AtomicOrdering::Relaxed);
 }
 
+pub fn l2_cap_bytes_per_epoch() -> u64 {
+    L2_CAP_BYTES_PER_EPOCH.load(AtomicOrdering::Relaxed)
+}
+
+pub fn bytes_per_sender_epoch_cap() -> u64 {
+    BYTES_PER_SENDER_EPOCH_CAP.load(AtomicOrdering::Relaxed)
+}
+
 fn pipeline_dir() -> String {
     env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string())
 }

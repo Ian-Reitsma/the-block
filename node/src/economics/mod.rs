@@ -11,6 +11,7 @@ pub mod event;
 pub mod inflation_controller; // Legacy - kept for backward compatibility
 pub mod market_multiplier;
 pub mod network_issuance; // NEW: Formula-driven issuance
+pub mod replay; // Consensus-critical economics replay
 pub mod subsidy_allocator;
 
 pub use ad_market_controller::{AdMarketDriftController, TariffController};
@@ -18,6 +19,7 @@ pub use event::*;
 pub use inflation_controller::InflationController; // Legacy
 pub use market_multiplier::MarketMultiplierController;
 pub use network_issuance::NetworkIssuanceController; // NEW
+pub use replay::{replay_economics_to_height, replay_economics_to_tip, ReplayedEconomicsState};
 pub use subsidy_allocator::SubsidyAllocator;
 
 use foundation_serialization::{Deserialize, Serialize};
@@ -32,6 +34,10 @@ pub struct EconomicSnapshot {
     pub multipliers: MultiplierSnapshot,
     pub ad_market: AdMarketSnapshot,
     pub tariff: TariffSnapshot,
+    /// Updated adaptive baselines (to be persisted for next epoch)
+    pub updated_baseline_tx_count: u64,
+    pub updated_baseline_tx_volume: u64,
+    pub updated_baseline_miners: u64,
 }
 
 /// Inflation state
@@ -42,6 +48,7 @@ pub struct InflationSnapshot {
     pub annual_issuance_block: u64,
     pub realized_inflation_bps: u16,
     pub target_inflation_bps: u16,
+    pub block_reward_per_block: u64,
 }
 
 /// Subsidy allocation state
@@ -82,8 +89,30 @@ pub struct TariffSnapshot {
     pub treasury_contribution_bps: u16,
 }
 
+impl Default for SubsidySnapshot {
+    fn default() -> Self {
+        Self {
+            storage_share_bps: 0,
+            compute_share_bps: 0,
+            energy_share_bps: 0,
+            ad_share_bps: 0,
+        }
+    }
+}
+
+impl Default for TariffSnapshot {
+    fn default() -> Self {
+        Self {
+            tariff_bps: 0,
+            non_kyc_volume_block: 0,
+            treasury_contribution_bps: 0,
+        }
+    }
+}
+
 /// Market metrics for control loop input
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct MarketMetrics {
     pub storage: MarketMetric,
     pub compute: MarketMetric,
@@ -92,7 +121,8 @@ pub struct MarketMetrics {
 }
 
 /// Individual market metric
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct MarketMetric {
     /// Utilization ratio [0.0, 1.0]
     pub utilization: f64,
@@ -137,7 +167,14 @@ pub fn execute_epoch_economics(
     gov_params: &GovernanceEconomicParams,
 ) -> EconomicSnapshot {
     // Layer 1: Network-Driven Issuance (Formula-Based)
-    let mut network_issuance = NetworkIssuanceController::new(gov_params.network_issuance.clone());
+    // CRITICAL: Use with_baselines() to preserve adaptive baseline state across epochs.
+    // Using new() here would reset baselines every epoch, defeating the "adaptive" feature.
+    let mut network_issuance = NetworkIssuanceController::with_baselines(
+        gov_params.network_issuance.clone(),
+        gov_params.network_issuance.baseline_tx_count,
+        gov_params.network_issuance.baseline_tx_volume_block,
+        gov_params.network_issuance.baseline_miners,
+    );
 
     // Compute average market utilization for activity multiplier
     let avg_market_utilization = (metrics.storage.utilization
@@ -170,6 +207,7 @@ pub fn execute_epoch_economics(
         annual_issuance_block: annual_issuance,
         realized_inflation_bps,
         target_inflation_bps: 0, // No target - formula-driven
+        block_reward_per_block: block_reward,
     };
 
     // Layer 2: Subsidy allocation
@@ -191,6 +229,10 @@ pub fn execute_epoch_economics(
         gov_params.tariff_prev.tariff_bps,
     );
 
+    // Get updated baselines from the controller (after compute_block_reward updated them)
+    let (updated_baseline_tx_count, updated_baseline_tx_volume, updated_baseline_miners) =
+        network_issuance.get_adaptive_baselines();
+
     EconomicSnapshot {
         epoch,
         inflation,
@@ -198,6 +240,9 @@ pub fn execute_epoch_economics(
         multipliers,
         ad_market,
         tariff,
+        updated_baseline_tx_count,
+        updated_baseline_tx_volume,
+        updated_baseline_miners,
     }
 }
 
@@ -224,6 +269,9 @@ impl GovernanceEconomicParams {
         previous_annual_issuance_block: u64,
         subsidy_prev: SubsidySnapshot,
         tariff_prev: TariffSnapshot,
+        baseline_tx_count: u64,
+        baseline_tx_volume: u64,
+        baseline_miners: u64,
     ) -> Self {
         Self {
             inflation: inflation_controller::InflationParams {
@@ -236,9 +284,9 @@ impl GovernanceEconomicParams {
             network_issuance: network_issuance::NetworkIssuanceParams {
                 max_supply_block: 40_000_000,      // Hard-coded: 40M BLOCK cap
                 expected_total_blocks: 20_000_000, // ~231 days at 1 block/sec
-                baseline_tx_count: 100,
-                baseline_tx_volume_block: 10_000,
-                baseline_miners: 10,
+                baseline_tx_count,      // From persisted state
+                baseline_tx_volume_block: baseline_tx_volume, // From persisted state
+                baseline_miners,        // From persisted state
                 activity_multiplier_min: 0.5,
                 activity_multiplier_max: 2.0,
                 decentralization_multiplier_min: 0.5,

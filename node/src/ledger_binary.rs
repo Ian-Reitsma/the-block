@@ -10,6 +10,7 @@ use crate::localnet::AssistReceipt;
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{Account, Block, ChainDisk, MempoolEntryDisk, Params, TokenAmount, TokenBalance};
+use crate::economics;
 
 /// Encode an [`Account`] into the canonical binary layout.
 pub fn encode_account(account: &Account) -> EncodeResult<Vec<u8>> {
@@ -283,7 +284,7 @@ fn read_session(reader: &mut Reader<'_>) -> binary_struct::Result<SessionPolicy>
 }
 
 fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
-    writer.write_u64(16); // Updated from 18 after emission/block_reward consolidation
+    writer.write_u64(29); // Updated to match the current number of encoded fields
     writer.write_string("schema_version");
     writer.write_u64(disk.schema_version as u64);
     writer.write_string("chain");
@@ -316,6 +317,32 @@ fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
     writer.write_u64(disk.epoch_bytes_out);
     writer.write_string("recent_timestamps");
     write_u64_vec(writer, &disk.recent_timestamps, "recent_timestamps")?;
+    writer.write_string("economics_block_reward_per_block");
+    writer.write_u64(disk.economics_block_reward_per_block);
+    writer.write_string("economics_prev_annual_issuance_block");
+    writer.write_u64(disk.economics_prev_annual_issuance_block);
+    writer.write_string("economics_prev_subsidy");
+    write_subsidy_snapshot(writer, &disk.economics_prev_subsidy)?;
+    writer.write_string("economics_prev_tariff");
+    write_tariff_snapshot(writer, &disk.economics_prev_tariff)?;
+    writer.write_string("economics_epoch_tx_volume_block");
+    writer.write_u64(disk.economics_epoch_tx_volume_block);
+    writer.write_string("economics_epoch_tx_count");
+    writer.write_u64(disk.economics_epoch_tx_count);
+    writer.write_string("economics_epoch_treasury_inflow_block");
+    writer.write_u64(disk.economics_epoch_treasury_inflow_block);
+    writer.write_string("economics_epoch_storage_payout_block");
+    writer.write_u64(disk.economics_epoch_storage_payout_block);
+    writer.write_string("economics_epoch_compute_payout_block");
+    writer.write_u64(disk.economics_epoch_compute_payout_block);
+    writer.write_string("economics_epoch_ad_payout_block");
+    writer.write_u64(disk.economics_epoch_ad_payout_block);
+    writer.write_string("economics_baseline_tx_count");
+    writer.write_u64(disk.economics_baseline_tx_count);
+    writer.write_string("economics_baseline_tx_volume");
+    writer.write_u64(disk.economics_baseline_tx_volume);
+    writer.write_string("economics_baseline_miners");
+    writer.write_u64(disk.economics_baseline_miners);
     Ok(())
 }
 
@@ -341,6 +368,19 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut epoch_cpu_ms = None;
     let mut epoch_bytes_out = None;
     let mut recent_timestamps = None;
+    let mut economics_block_reward_per_block = None;
+    let mut economics_prev_annual_issuance_block = None;
+    let mut economics_prev_subsidy = None;
+    let mut economics_prev_tariff = None;
+    let mut economics_epoch_tx_volume_block = None;
+    let mut economics_epoch_tx_count = None;
+    let mut economics_epoch_treasury_inflow_block = None;
+    let mut economics_epoch_storage_payout_block = None;
+    let mut economics_epoch_compute_payout_block = None;
+    let mut economics_epoch_ad_payout_block = None;
+    let mut economics_baseline_tx_count = None;
+    let mut economics_baseline_tx_volume = None;
+    let mut economics_baseline_miners = None;
 
     decode_struct(reader, None, |key, reader| match key {
         // Changed from Some(18) to support both old (18) and new (16) field formats
@@ -419,6 +459,71 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             read_u64_vec(reader, "recent_timestamps")?,
             "recent_timestamps",
         ),
+        "economics_block_reward_per_block" => assign_once(
+            &mut economics_block_reward_per_block,
+            reader.read_u64()?,
+            "economics_block_reward_per_block",
+        ),
+        "economics_prev_annual_issuance_block" => assign_once(
+            &mut economics_prev_annual_issuance_block,
+            reader.read_u64()?,
+            "economics_prev_annual_issuance_block",
+        ),
+        "economics_prev_subsidy" => assign_once(
+            &mut economics_prev_subsidy,
+            read_subsidy_snapshot(reader)?,
+            "economics_prev_subsidy",
+        ),
+        "economics_prev_tariff" => assign_once(
+            &mut economics_prev_tariff,
+            read_tariff_snapshot(reader)?,
+            "economics_prev_tariff",
+        ),
+        "economics_epoch_tx_volume_block" => assign_once(
+            &mut economics_epoch_tx_volume_block,
+            reader.read_u64()?,
+            "economics_epoch_tx_volume_block",
+        ),
+        "economics_epoch_tx_count" => assign_once(
+            &mut economics_epoch_tx_count,
+            reader.read_u64()?,
+            "economics_epoch_tx_count",
+        ),
+        "economics_epoch_treasury_inflow_block" => assign_once(
+            &mut economics_epoch_treasury_inflow_block,
+            reader.read_u64()?,
+            "economics_epoch_treasury_inflow_block",
+        ),
+        "economics_epoch_storage_payout_block" => assign_once(
+            &mut economics_epoch_storage_payout_block,
+            reader.read_u64()?,
+            "economics_epoch_storage_payout_block",
+        ),
+        "economics_epoch_compute_payout_block" => assign_once(
+            &mut economics_epoch_compute_payout_block,
+            reader.read_u64()?,
+            "economics_epoch_compute_payout_block",
+        ),
+        "economics_epoch_ad_payout_block" => assign_once(
+            &mut economics_epoch_ad_payout_block,
+            reader.read_u64()?,
+            "economics_epoch_ad_payout_block",
+        ),
+        "economics_baseline_tx_count" => assign_once(
+            &mut economics_baseline_tx_count,
+            reader.read_u64()?,
+            "economics_baseline_tx_count",
+        ),
+        "economics_baseline_tx_volume" => assign_once(
+            &mut economics_baseline_tx_volume,
+            reader.read_u64()?,
+            "economics_baseline_tx_volume",
+        ),
+        "economics_baseline_miners" => assign_once(
+            &mut economics_baseline_miners,
+            reader.read_u64()?,
+            "economics_baseline_miners",
+        ),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
@@ -444,6 +549,26 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
         epoch_cpu_ms: epoch_cpu_ms.unwrap_or_default(),
         epoch_bytes_out: epoch_bytes_out.unwrap_or_default(),
         recent_timestamps: recent_timestamps.unwrap_or_default(),
+        economics_block_reward_per_block: economics_block_reward_per_block
+            .unwrap_or_default(),
+        economics_prev_annual_issuance_block: economics_prev_annual_issuance_block
+            .unwrap_or_default(),
+        economics_prev_subsidy: economics_prev_subsidy.unwrap_or_default(),
+        economics_prev_tariff: economics_prev_tariff.unwrap_or_default(),
+        economics_prev_market_metrics: crate::economics::MarketMetrics::default(),
+        economics_epoch_tx_volume_block: economics_epoch_tx_volume_block
+            .unwrap_or_default(),
+        economics_epoch_tx_count: economics_epoch_tx_count.unwrap_or_default(),
+        economics_epoch_treasury_inflow_block: economics_epoch_treasury_inflow_block
+            .unwrap_or_default(),
+        economics_epoch_storage_payout_block: economics_epoch_storage_payout_block
+            .unwrap_or_default(),
+        economics_epoch_compute_payout_block: economics_epoch_compute_payout_block
+            .unwrap_or_default(),
+        economics_epoch_ad_payout_block: economics_epoch_ad_payout_block.unwrap_or_default(),
+        economics_baseline_tx_count: economics_baseline_tx_count.unwrap_or(100),
+        economics_baseline_tx_volume: economics_baseline_tx_volume.unwrap_or(10_000),
+        economics_baseline_miners: economics_baseline_miners.unwrap_or(10),
     })
 }
 
@@ -774,6 +899,101 @@ fn read_params(reader: &mut Reader<'_>) -> binary_struct::Result<Params> {
     })?;
 
     Ok(params)
+}
+
+fn write_subsidy_snapshot(
+    writer: &mut Writer,
+    snapshot: &economics::SubsidySnapshot,
+) -> EncodeResult<()> {
+    writer.write_u64(4);
+    writer.write_string("storage_share_bps");
+    writer.write_u64(snapshot.storage_share_bps as u64);
+    writer.write_string("compute_share_bps");
+    writer.write_u64(snapshot.compute_share_bps as u64);
+    writer.write_string("energy_share_bps");
+    writer.write_u64(snapshot.energy_share_bps as u64);
+    writer.write_string("ad_share_bps");
+    writer.write_u64(snapshot.ad_share_bps as u64);
+    Ok(())
+}
+
+fn read_subsidy_snapshot(
+    reader: &mut Reader<'_>,
+) -> binary_struct::Result<economics::SubsidySnapshot> {
+    let mut storage_share_bps = None;
+    let mut compute_share_bps = None;
+    let mut energy_share_bps = None;
+    let mut ad_share_bps = None;
+    decode_struct(reader, Some(4), |key, reader| match key {
+        "storage_share_bps" => assign_once(
+            &mut storage_share_bps,
+            reader.read_u64()?,
+            "storage_share_bps",
+        ),
+        "compute_share_bps" => assign_once(
+            &mut compute_share_bps,
+            reader.read_u64()?,
+            "compute_share_bps",
+        ),
+        "energy_share_bps" => assign_once(
+            &mut energy_share_bps,
+            reader.read_u64()?,
+            "energy_share_bps",
+        ),
+        "ad_share_bps" => assign_once(
+            &mut ad_share_bps,
+            reader.read_u64()?,
+            "ad_share_bps",
+        ),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+    Ok(economics::SubsidySnapshot {
+        storage_share_bps: storage_share_bps.unwrap_or_default() as u16,
+        compute_share_bps: compute_share_bps.unwrap_or_default() as u16,
+        energy_share_bps: energy_share_bps.unwrap_or_default() as u16,
+        ad_share_bps: ad_share_bps.unwrap_or_default() as u16,
+    })
+}
+
+fn write_tariff_snapshot(
+    writer: &mut Writer,
+    snapshot: &economics::TariffSnapshot,
+) -> EncodeResult<()> {
+    writer.write_u64(3);
+    writer.write_string("tariff_bps");
+    writer.write_u64(snapshot.tariff_bps as u64);
+    writer.write_string("non_kyc_volume_block");
+    writer.write_u64(snapshot.non_kyc_volume_block);
+    writer.write_string("treasury_contribution_bps");
+    writer.write_u64(snapshot.treasury_contribution_bps as u64);
+    Ok(())
+}
+
+fn read_tariff_snapshot(
+    reader: &mut Reader<'_>,
+) -> binary_struct::Result<economics::TariffSnapshot> {
+    let mut tariff_bps = None;
+    let mut non_kyc_volume_block = None;
+    let mut treasury_contribution_bps = None;
+    decode_struct(reader, Some(3), |key, reader| match key {
+        "tariff_bps" => assign_once(&mut tariff_bps, reader.read_u64()?, "tariff_bps"),
+        "non_kyc_volume_block" => assign_once(
+            &mut non_kyc_volume_block,
+            reader.read_u64()?,
+            "non_kyc_volume_block",
+        ),
+        "treasury_contribution_bps" => assign_once(
+            &mut treasury_contribution_bps,
+            reader.read_u64()?,
+            "treasury_contribution_bps",
+        ),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+    Ok(economics::TariffSnapshot {
+        tariff_bps: tariff_bps.unwrap_or_default() as u16,
+        non_kyc_volume_block: non_kyc_volume_block.unwrap_or_default(),
+        treasury_contribution_bps: treasury_contribution_bps.unwrap_or_default() as u16,
+    })
 }
 
 fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()> {
@@ -1224,6 +1444,20 @@ mod tests {
             epoch_cpu_ms: 17,
             epoch_bytes_out: 18,
             recent_timestamps: vec![19, 20],
+            economics_block_reward_per_block: 21,
+            economics_prev_annual_issuance_block: 22,
+            economics_prev_subsidy: crate::economics::SubsidySnapshot::default(),
+            economics_prev_tariff: crate::economics::TariffSnapshot::default(),
+            economics_epoch_tx_volume_block: 23,
+            economics_epoch_tx_count: 24,
+            economics_epoch_treasury_inflow_block: 25,
+            economics_epoch_storage_payout_block: 1000,
+            economics_epoch_compute_payout_block: 2000,
+            economics_epoch_ad_payout_block: 3000,
+            economics_baseline_tx_count: 100,
+            economics_baseline_tx_volume: 10_000,
+            economics_baseline_miners: 10,
+            economics_prev_market_metrics: crate::economics::MarketMetrics::default(),
         };
         let bytes = encode_chain_disk(&disk).expect("encode");
         let decoded = decode_chain_disk(&bytes).expect("decode");

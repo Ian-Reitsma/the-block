@@ -5321,6 +5321,54 @@ pub static ECONOMICS_REALIZED_INFLATION_BPS: Lazy<IntGaugeHandle> = Lazy::new(||
     g.handle()
 });
 
+pub static ECONOMICS_BLOCK_REWARD_PER_BLOCK: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_block_reward_per_block",
+        "Base BLOCK reward computed by the network issuance controller",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_EPOCH_TX_COUNT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_epoch_tx_count",
+        "Number of transactions included in the last epoch",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_EPOCH_TX_VOLUME_BLOCK: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_epoch_tx_volume_block",
+        "Sum of consumer+industrial amounts plus tips per epoch",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
+pub static ECONOMICS_EPOCH_TREASURY_INFLOW_BLOCK: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "economics_epoch_treasury_inflow_block",
+        "Treasury contributions recognized in the last epoch",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.handle()
+});
+
 pub static ECONOMICS_SUBSIDY_SHARE_BPS: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new(
@@ -7292,6 +7340,8 @@ pub fn update_economics_telemetry(snapshot: &crate::economics::EconomicSnapshot)
     // Layer 1: Inflation
     ECONOMICS_ANNUAL_ISSUANCE_BLOCK.set(snapshot.inflation.annual_issuance_block as i64);
     ECONOMICS_REALIZED_INFLATION_BPS.set(snapshot.inflation.realized_inflation_bps as i64);
+    ECONOMICS_BLOCK_REWARD_PER_BLOCK
+        .set(snapshot.inflation.block_reward_per_block as i64);
 
     // Layer 2: Subsidy allocation
     ECONOMICS_SUBSIDY_SHARE_BPS
@@ -7376,3 +7426,22 @@ pub fn update_economics_market_metrics(metrics: &crate::economics::MarketMetrics
 
 #[cfg(not(feature = "telemetry"))]
 pub fn update_economics_market_metrics(_metrics: &crate::economics::MarketMetrics) {}
+
+#[cfg(feature = "telemetry")]
+pub fn update_economics_epoch_metrics(
+    tx_count: u64,
+    tx_volume_block: u64,
+    treasury_inflow_block: u64,
+) {
+    ECONOMICS_EPOCH_TX_COUNT.set(tx_count as i64);
+    ECONOMICS_EPOCH_TX_VOLUME_BLOCK.set(tx_volume_block as i64);
+    ECONOMICS_EPOCH_TREASURY_INFLOW_BLOCK.set(treasury_inflow_block as i64);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn update_economics_epoch_metrics(
+    _tx_count: u64,
+    _tx_volume_block: u64,
+    _treasury_inflow_block: u64,
+) {
+}

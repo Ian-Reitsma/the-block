@@ -1,0 +1,7 @@
+{
+  "name": "metal-orchard",
+  "private": true,
+  "scripts": {
+    "openapi:generate": "node scripts/generate-openapi.js"
+  }
+}

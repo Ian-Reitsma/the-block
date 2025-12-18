@@ -163,9 +163,10 @@ pub mod blob_chain;
 
 pub mod economics;
 pub use economics::{
-    execute_epoch_economics, AdMarketDriftController, ControlLawUpdateEvent, EconomicSnapshot,
+    execute_epoch_economics, replay_economics_to_height, replay_economics_to_tip,
+    AdMarketDriftController, ControlLawUpdateEvent, EconomicSnapshot,
     GovernanceEconomicParams, InflationController, MarketMetric, MarketMetrics,
-    MarketMultiplierController, SubsidyAllocator, TariffController,
+    MarketMultiplierController, ReplayedEconomicsState, SubsidyAllocator, TariffController,
 };
 
 pub mod governance;
@@ -372,9 +373,6 @@ const DB_EMISSION: &str = "emission";
 // === Monetary constants ===
 const MAX_SUPPLY_BLOCK: u64 = 40_000_000; // 40M BLOCK total supply cap (like Bitcoin's 21M)
 const INITIAL_BLOCK_REWARD: u64 = 50_000; // Bootstrap reward, adjusted by formula per block
-const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
-const DECAY_DENOMINATOR: u64 = 100_000;
-
 // === Startup rebuild tuning ===
 /// Number of mempool entries processed per batch during `Blockchain::open`.
 pub const STARTUP_REBUILD_BATCH: usize = 256;
@@ -962,14 +960,32 @@ pub struct Blockchain {
     logistic_lock_end: u64,
     logistic_factor: f64,
     // Economic Control Law State
+    /// Most recent base reward produced by the network issuance controller
+    pub economics_block_reward_per_block: u64,
     /// Previous epoch's annual BLOCK issuance (for inflation controller continuity)
     pub economics_prev_annual_issuance_block: u64,
     /// Previous epoch's subsidy allocation shares
     pub economics_prev_subsidy: economics::SubsidySnapshot,
     /// Previous epoch's tariff state
     pub economics_prev_tariff: economics::TariffSnapshot,
+    /// Previous epoch's market metrics snapshot (for Launch Governor economics gate)
+    pub economics_prev_market_metrics: economics::MarketMetrics,
     /// Current epoch transaction volume (for tariff controller)
     pub economics_epoch_tx_volume_block: u64,
+    /// Current epoch transaction count (for issuance formula)
+    pub economics_epoch_tx_count: u64,
+    /// Current epoch treasury inflow (for tariff controller)
+    pub economics_epoch_treasury_inflow_block: u64,
+    /// Storage-related payouts accumulated this epoch (storage + read subsidies)
+    pub economics_epoch_storage_payout_block: u64,
+    /// Compute subsidies accumulated this epoch
+    pub economics_epoch_compute_payout_block: u64,
+    /// Advertising payouts accumulated this epoch
+    pub economics_epoch_ad_payout_block: u64,
+    /// Network issuance adaptive baselines (persisted across epochs)
+    pub economics_baseline_tx_count: u64,
+    pub economics_baseline_tx_volume: u64,
+    pub economics_baseline_miners: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1006,6 +1022,34 @@ pub struct ChainDisk {
     pub epoch_bytes_out: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub recent_timestamps: Vec<u64>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_block_reward_per_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_prev_annual_issuance_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_prev_subsidy: economics::SubsidySnapshot,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_prev_tariff: economics::TariffSnapshot,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_prev_market_metrics: economics::MarketMetrics,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_tx_volume_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_tx_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_treasury_inflow_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_storage_payout_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_compute_payout_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_epoch_ad_payout_block: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_baseline_tx_count: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_baseline_tx_volume: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub economics_baseline_miners: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1108,6 +1152,7 @@ impl Default for Blockchain {
             logistic_last_n: 0.0,
             logistic_lock_end: 0,
             logistic_factor: 1.0,
+            economics_block_reward_per_block: INITIAL_BLOCK_REWARD,
             economics_prev_annual_issuance_block: 40_000_000, // Bootstrap: 40M BLOCK/year
             economics_prev_subsidy: economics::SubsidySnapshot {
                 storage_share_bps: 1500,
@@ -1120,7 +1165,16 @@ impl Default for Blockchain {
                 non_kyc_volume_block: 0,
                 treasury_contribution_bps: 0,
             },
+            economics_prev_market_metrics: economics::MarketMetrics::default(),
             economics_epoch_tx_volume_block: 0,
+            economics_epoch_tx_count: 0,
+            economics_epoch_treasury_inflow_block: 0,
+            economics_epoch_storage_payout_block: 0,
+            economics_epoch_compute_payout_block: 0,
+            economics_epoch_ad_payout_block: 0,
+            economics_baseline_tx_count: 100, // Default from NetworkIssuanceParams
+            economics_baseline_tx_volume: 10_000,
+            economics_baseline_miners: 10,
         }
     }
 }
@@ -1137,6 +1191,30 @@ impl Drop for Blockchain {
     }
 }
 
+fn ratio_u64(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        (numerator as f64 / denominator as f64).clamp(0.0, 1.0)
+    }
+}
+
+fn margin_from_totals(payout: u128, cost: u128) -> f64 {
+    if cost == 0 {
+        if payout == 0 {
+            0.0
+        } else {
+            2.0
+        }
+    } else {
+        ((payout as f64 - cost as f64) / cost as f64).clamp(-2.0, 2.0)
+    }
+}
+
+fn u128_to_f64(value: u128) -> f64 {
+    value as f64
+}
+
 impl Blockchain {
     fn shard_cache_guard(&self) -> MutexGuard<'_, LruCache<(ShardId, Vec<u8>), Vec<u8>>> {
         self.shard_cache
@@ -1146,6 +1224,117 @@ impl Blockchain {
 
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+
+    fn build_market_metrics(
+        &self,
+        storage_payout_total: u64,
+        compute_payout_total: u64,
+        ad_payout_total: u64,
+        ad_total_usd_micros: u64,
+        ad_settlement_count: u64,
+        ad_last_ct_price_usd_micros: u64,
+        compute_util_percent: u64,
+        energy_snapshot: &crate::energy::EnergySnapshot,
+    ) -> economics::MarketMetrics {
+        let storage_capacity = crate::storage::pipeline::l2_cap_bytes_per_epoch();
+        let storage_utilization = ratio_u64(self.epoch_storage_bytes, storage_capacity);
+        let rent_rate = self.params.rent_rate_ct_per_byte.max(0) as u64;
+        let storage_cost_total =
+            u128::from(self.epoch_storage_bytes).saturating_mul(rent_rate as u128);
+        let storage_payout_total = u128::from(storage_payout_total);
+        let storage_metric = economics::MarketMetric {
+            utilization: storage_utilization,
+            average_cost_block: u128_to_f64(storage_cost_total),
+            effective_payout_block: storage_payout_total as f64,
+            provider_margin: margin_from_totals(storage_payout_total, storage_cost_total),
+        };
+
+        let compute_utilization =
+            ((compute_util_percent as f64) / 100.0).clamp(0.0, 1.0);
+        let compute_units = self.epoch_cpu_ms.max(1);
+        let spot_price = crate::compute_market::price_board::spot_price_per_unit(FeeLane::Industrial)
+            .unwrap_or(0);
+        let compute_cost_total =
+            u128::from(spot_price).saturating_mul(u128::from(compute_units));
+        let compute_payout_total_u128 = u128::from(compute_payout_total);
+        let compute_metric = economics::MarketMetric {
+            utilization: compute_utilization,
+            average_cost_block: u128_to_f64(compute_cost_total),
+            effective_payout_block: compute_payout_total_u128 as f64,
+            provider_margin: margin_from_totals(compute_payout_total_u128, compute_cost_total),
+        };
+
+        let energy_capacity_kwh: u64 = energy_snapshot
+            .providers
+            .iter()
+            .map(|p| p.capacity_kwh)
+            .sum();
+        let energy_consumed_kwh: u64 = energy_snapshot
+            .receipts
+            .iter()
+            .map(|r| r.kwh_delivered)
+            .sum();
+        let energy_payout_total: u64 = energy_snapshot
+            .receipts
+            .iter()
+            .map(|r| {
+                r.price_paid
+                    .saturating_sub(r.treasury_fee)
+                    .saturating_sub(r.slash_applied)
+            })
+            .sum();
+        let (weighted_cost_sum, total_capacity_weight) = energy_snapshot.providers.iter().fold(
+            (0u128, 0u128),
+            |(sum, weight), provider| {
+                let cap = provider.capacity_kwh as u128;
+                let price = provider.price_per_kwh as u128;
+                (
+                    sum.saturating_add(cap.saturating_mul(price)),
+                    weight.saturating_add(cap),
+                )
+            },
+        );
+        let avg_energy_cost_per_kwh = if total_capacity_weight == 0 {
+            0u128
+        } else {
+            weighted_cost_sum / total_capacity_weight
+        };
+        let energy_cost_total =
+            avg_energy_cost_per_kwh.saturating_mul(u128::from(energy_consumed_kwh));
+        let energy_metric = economics::MarketMetric {
+            utilization: ratio_u64(energy_consumed_kwh, energy_capacity_kwh),
+            average_cost_block: u128_to_f64(energy_cost_total),
+            effective_payout_block: energy_payout_total as f64,
+            provider_margin: margin_from_totals(u128::from(energy_payout_total), energy_cost_total),
+        };
+
+        let ad_capacity = self.params.ad_cap_provider_count.max(1) as u64;
+        let ad_utilization = ratio_u64(ad_settlement_count, ad_capacity);
+        let ad_cost_block = if ad_last_ct_price_usd_micros == 0 {
+            0.0
+        } else {
+            (ad_total_usd_micros as f64) / (ad_last_ct_price_usd_micros as f64)
+        };
+        let ad_effective_payout = ad_payout_total as f64;
+        let ad_margin = if ad_cost_block > 0.0 {
+            ((ad_effective_payout - ad_cost_block) / ad_cost_block).clamp(-2.0, 2.0)
+        } else {
+            0.0
+        };
+        let ad_metric = economics::MarketMetric {
+            utilization: ad_utilization,
+            average_cost_block: ad_cost_block,
+            effective_payout_block: ad_effective_payout,
+            provider_margin: ad_margin,
+        };
+
+        economics::MarketMetrics {
+            storage: storage_metric,
+            compute: compute_metric,
+            energy: energy_metric,
+            ad: ad_metric,
+        }
     }
     /// Return the latest state root for a shard if available.
     pub fn get_shard_root(&self, shard: ShardId) -> Option<[u8; 32]> {
@@ -1729,11 +1918,29 @@ impl Blockchain {
                 let _ = db.insert(SCHEMA_KEY, bytes);
             }
         }
-        let (mut chain, mut accounts, em, br, bh, mempool_disk, base_fee, recent_ts) =
-            if let Some(raw) = db.get(DB_CHAIN) {
-                match ledger_binary::decode_chain_disk(&raw) {
-                    Ok(mut disk) => {
-                        if disk.schema_version > 7 {
+        let (
+            mut chain,
+            mut accounts,
+            em,
+            br,
+            bh,
+            mempool_disk,
+            base_fee,
+            recent_ts,
+            econ_block_reward,
+            econ_prev_annual,
+            econ_prev_subsidy,
+            econ_prev_tariff,
+            econ_epoch_tx_volume,
+            econ_epoch_tx_count,
+            econ_epoch_treasury_inflow,
+            econ_epoch_storage_payout,
+            econ_epoch_compute_payout,
+            econ_epoch_ad_payout,
+        ) = if let Some(raw) = db.get(DB_CHAIN) {
+            match ledger_binary::decode_chain_disk(&raw) {
+                Ok(mut disk) => {
+                        if disk.schema_version > 11 {
                             return Err(py_value_err("DB schema too new"));
                         }
                         if disk.schema_version < 3 {
@@ -1837,6 +2044,24 @@ impl Blockchain {
                                 emission_year_ago: disk.emission_year_ago,
                                 inflation_epoch_marker: disk.inflation_epoch_marker,
                                 recent_timestamps: Vec::new(),
+                                economics_block_reward_per_block: disk
+                                    .economics_block_reward_per_block,
+                                economics_prev_annual_issuance_block: disk
+                                    .economics_prev_annual_issuance_block,
+                                economics_prev_subsidy: disk.economics_prev_subsidy.clone(),
+                                economics_prev_tariff: disk.economics_prev_tariff.clone(),
+                                economics_prev_market_metrics: disk.economics_prev_market_metrics.clone(),
+                                economics_epoch_tx_volume_block: disk
+                                    .economics_epoch_tx_volume_block,
+                                economics_epoch_tx_count: disk.economics_epoch_tx_count,
+                                economics_epoch_treasury_inflow_block: disk
+                                    .economics_epoch_treasury_inflow_block,
+                                economics_epoch_storage_payout_block: 0,
+                                economics_epoch_compute_payout_block: 0,
+                                economics_epoch_ad_payout_block: 0,
+                                economics_baseline_tx_count: disk.economics_baseline_tx_count,
+                                economics_baseline_tx_volume: disk.economics_baseline_tx_volume,
+                                economics_baseline_miners: disk.economics_baseline_miners,
                             };
                             db.insert(
                                 DB_CHAIN,
@@ -1854,6 +2079,16 @@ impl Blockchain {
                                 migrated.mempool,
                                 migrated.base_fee,
                                 migrated.recent_timestamps,
+                                migrated.economics_block_reward_per_block,
+                                migrated.economics_prev_annual_issuance_block,
+                                migrated.economics_prev_subsidy,
+                                migrated.economics_prev_tariff,
+                                migrated.economics_epoch_tx_volume_block,
+                                migrated.economics_epoch_tx_count,
+                                migrated.economics_epoch_treasury_inflow_block,
+                                migrated.economics_epoch_storage_payout_block,
+                                migrated.economics_epoch_compute_payout_block,
+                                migrated.economics_epoch_ad_payout_block,
                             )
                         } else {
                             if disk.emission == 0 && !disk.chain.is_empty() {
@@ -2013,6 +2248,14 @@ impl Blockchain {
                                         .unwrap_or_else(|e| panic!("serialize: {e}")),
                                 );
                             }
+                            if disk.schema_version < 11 {
+                                disk.schema_version = 11;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
                             (
                                 disk.chain,
                                 disk.accounts,
@@ -2022,6 +2265,16 @@ impl Blockchain {
                                 disk.mempool,
                                 disk.base_fee,
                                 disk.recent_timestamps.clone(),
+                                disk.economics_block_reward_per_block,
+                                disk.economics_prev_annual_issuance_block,
+                                disk.economics_prev_subsidy.clone(),
+                                disk.economics_prev_tariff.clone(),
+                                disk.economics_epoch_tx_volume_block,
+                                disk.economics_epoch_tx_count,
+                                disk.economics_epoch_treasury_inflow_block,
+                                disk.economics_epoch_storage_payout_block,
+                                disk.economics_epoch_compute_payout_block,
+                                disk.economics_epoch_ad_payout_block,
                             )
                         }
                     }
@@ -2131,6 +2384,20 @@ impl Blockchain {
                             epoch_cpu_ms: 0,
                             epoch_bytes_out: 0,
                             recent_timestamps: Vec::new(),
+                            economics_block_reward_per_block: br,
+                            economics_prev_annual_issuance_block: 0,
+                            economics_prev_subsidy: economics::SubsidySnapshot::default(),
+                            economics_prev_tariff: economics::TariffSnapshot::default(),
+                            economics_prev_market_metrics: economics::MarketMetrics::default(),
+                            economics_epoch_tx_volume_block: 0,
+                            economics_epoch_tx_count: 0,
+                            economics_epoch_treasury_inflow_block: 0,
+                            economics_epoch_storage_payout_block: 0,
+                            economics_epoch_compute_payout_block: 0,
+                            economics_epoch_ad_payout_block: 0,
+                            economics_baseline_tx_count: 100,
+                            economics_baseline_tx_volume: 10_000,
+                            economics_baseline_miners: 10,
                         };
                         db.insert(
                             DB_CHAIN,
@@ -2148,21 +2415,41 @@ impl Blockchain {
                             disk_new.mempool,
                             disk_new.base_fee,
                             disk_new.recent_timestamps,
+                            disk_new.economics_block_reward_per_block,
+                            disk_new.economics_prev_annual_issuance_block,
+                            disk_new.economics_prev_subsidy,
+                            disk_new.economics_prev_tariff,
+                            disk_new.economics_epoch_tx_volume_block,
+                            disk_new.economics_epoch_tx_count,
+                            disk_new.economics_epoch_treasury_inflow_block,
+                            0,
+                            0,
+                            0,
                         )
                     }
                 }
-            } else {
-                (
-                    Vec::new(),
-                    HashMap::new(),
-                    0,
-                    TokenAmount::new(INITIAL_BLOCK_REWARD),
-                    0,
-                    Vec::new(),
-                    1,
-                    Vec::new(),
-                )
-            };
+        } else {
+            (
+                Vec::new(),
+                HashMap::new(),
+                0,
+                TokenAmount::new(INITIAL_BLOCK_REWARD),
+                0,
+                Vec::new(),
+                1,
+                Vec::new(),
+                0,
+                0,
+                economics::SubsidySnapshot::default(),
+                economics::TariffSnapshot::default(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+        };
 
         // Load any persisted shard state roots.
         let shard_roots: HashMap<ShardId, [u8; 32]> = db
@@ -2211,6 +2498,16 @@ impl Blockchain {
         bc.block_height = bh;
         bc.recent_miners = VecDeque::new();
         bc.recent_timestamps = VecDeque::from(recent_ts);
+        bc.economics_block_reward_per_block = econ_block_reward;
+        bc.economics_prev_annual_issuance_block = econ_prev_annual;
+        bc.economics_prev_subsidy = econ_prev_subsidy;
+        bc.economics_prev_tariff = econ_prev_tariff;
+        bc.economics_epoch_tx_volume_block = econ_epoch_tx_volume;
+        bc.economics_epoch_tx_count = econ_epoch_tx_count;
+        bc.economics_epoch_treasury_inflow_block = econ_epoch_treasury_inflow;
+        bc.economics_epoch_storage_payout_block = econ_epoch_storage_payout;
+        bc.economics_epoch_compute_payout_block = econ_epoch_compute_payout;
+        bc.economics_epoch_ad_payout_block = econ_epoch_ad_payout;
         // Load any previously emitted macro blocks.
         let mut h = bc.macro_interval;
         while let Some(bytes) = bc.db.get(&MacroBlock::db_key(h)) {
@@ -2570,7 +2867,7 @@ impl Blockchain {
     pub fn schema_version(&self) -> usize {
         // Bump this constant whenever the serialized `ChainDisk` format changes.
         // Older binaries must refuse to open newer databases.
-        7
+        11
     }
 
     /// Persist the entire chain + state under the current schema
@@ -2627,6 +2924,20 @@ impl Blockchain {
             epoch_cpu_ms: self.epoch_cpu_ms,
             epoch_bytes_out: self.epoch_bytes_out,
             recent_timestamps: self.recent_timestamps.iter().copied().collect(),
+            economics_block_reward_per_block: self.economics_block_reward_per_block,
+            economics_prev_annual_issuance_block: self.economics_prev_annual_issuance_block,
+            economics_prev_subsidy: self.economics_prev_subsidy.clone(),
+            economics_prev_tariff: self.economics_prev_tariff.clone(),
+            economics_prev_market_metrics: self.economics_prev_market_metrics.clone(),
+            economics_epoch_tx_volume_block: self.economics_epoch_tx_volume_block,
+            economics_epoch_tx_count: self.economics_epoch_tx_count,
+            economics_epoch_treasury_inflow_block: self.economics_epoch_treasury_inflow_block,
+            economics_epoch_storage_payout_block: self.economics_epoch_storage_payout_block,
+            economics_epoch_compute_payout_block: self.economics_epoch_compute_payout_block,
+            economics_epoch_ad_payout_block: self.economics_epoch_ad_payout_block,
+            economics_baseline_tx_count: self.economics_baseline_tx_count,
+            economics_baseline_tx_volume: self.economics_baseline_tx_volume,
+            economics_baseline_miners: self.economics_baseline_miners,
         };
         let bytes = ledger_binary::encode_chain_disk(&disk)
             .map_err(|e| py_value_err(format!("Serialization error: {e}")))?;
@@ -3853,14 +4164,13 @@ impl Blockchain {
                 .ok_or_else(|| py_value_err("empty chain"))?
         };
 
-        // apply decay first so reward reflects current height
-        self.block_reward = TokenAmount::new(
-            u64::try_from(
-                (u128::from(self.block_reward.0) * u128::from(DECAY_NUMERATOR))
-                    / u128::from(DECAY_DENOMINATOR),
-            )
-            .map_err(|_| py_value_err("reward overflow"))?,
-        );
+        // use the network-controlled base reward (falling back to the genesis value)
+        let base_reward = if self.economics_block_reward_per_block == 0 {
+            INITIAL_BLOCK_REWARD
+        } else {
+            self.economics_block_reward_per_block
+        };
+        self.block_reward = TokenAmount::new(base_reward);
         let active_eff = {
             let mut counts: HashMap<String, u64> = HashMap::new();
             for m in self
@@ -3950,12 +4260,20 @@ impl Blockchain {
             let exp = expected
                 .entry(from.clone())
                 .or_insert_with(|| self.accounts.get(&from).map(|a| a.nonce + 1).unwrap_or(1));
-            if tx.payload.nonce == *exp {
-                included.push(tx.clone());
-                *exp += 1;
-                if let Some(list) = deferred.get_mut(&from) {
-                    loop {
-                        if let Some(pos) = list.iter().position(|t| t.payload.nonce == *exp) {
+                if tx.payload.nonce == *exp {
+                    included.push(tx.clone());
+                    *exp += 1;
+                    let tx_volume = tx.payload.amount_consumer
+                        .saturating_add(tx.payload.amount_industrial)
+                        .saturating_add(tx.tip);
+                    self.economics_epoch_tx_count =
+                        self.economics_epoch_tx_count.saturating_add(1);
+                    self.economics_epoch_tx_volume_block = self
+                        .economics_epoch_tx_volume_block
+                        .saturating_add(tx_volume);
+                    if let Some(list) = deferred.get_mut(&from) {
+                        loop {
+                            if let Some(pos) = list.iter().position(|t| t.payload.nonce == *exp) {
                             let tx2 = list.remove(pos);
                             included.push(tx2.clone());
                             *exp += 1;
@@ -3994,17 +4312,57 @@ impl Blockchain {
             .epoch_read_bytes
             .saturating_sub(self.settled_read_bytes);
         let read_sub_ct = (self.gamma_read_sub_ct_raw as u64).saturating_mul(delta_read_bytes);
-        let compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
+        let mut compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
             .saturating_mul(self.epoch_cpu_ms)
             .saturating_add(
                 (self.lambda_bytes_out_sub_ct_raw as u64).saturating_mul(self.epoch_bytes_out),
             );
-        let mut base_coinbase_consumer = reward
-            .0
+
+        // === SUPPLY CAP ENFORCEMENT (EARLY) ===
+        // Enforce MAX_SUPPLY_BLOCK cap on subsidies + reward BEFORE distributions.
+        // We'll check again later after rebates are calculated, but this early check
+        // prevents inconsistencies in subsidy distributions.
+        let remaining_supply = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
+        let preliminary_mint = storage_sub_ct
+            .saturating_add(read_sub_ct)
+            .saturating_add(compute_sub_ct)
+            .saturating_add(reward.0);
+
+        // Make subsidies mutable so we can clamp them if needed
+        let mut storage_sub_ct = storage_sub_ct;
+        let mut read_sub_ct = read_sub_ct;
+
+        if preliminary_mint > remaining_supply {
+            // Approaching cap - preserve subsidies first, clamp reward
+            let subsidies_only = storage_sub_ct
+                .saturating_add(read_sub_ct)
+                .saturating_add(compute_sub_ct);
+
+            if subsidies_only <= remaining_supply {
+                // Subsidies fit, zero reward
+                reward = TokenAmount::new(0);
+            } else {
+                // Even subsidies exceed cap - scale proportionally
+                let scale = (remaining_supply as f64) / (subsidies_only as f64);
+                storage_sub_ct = ((storage_sub_ct as f64) * scale).floor() as u64;
+                read_sub_ct = ((read_sub_ct as f64) * scale).floor() as u64;
+                compute_sub_ct = ((compute_sub_ct as f64) * scale).floor() as u64;
+                reward = TokenAmount::new(0);
+            }
+        }
+
+        let mut base_coinbase_consumer = reward.0
             .checked_add(storage_sub_ct)
             .and_then(|v| v.checked_add(compute_sub_ct))
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
+
+        self.economics_epoch_storage_payout_block = self
+            .economics_epoch_storage_payout_block
+            .saturating_add(storage_sub_ct.saturating_add(read_sub_ct));
+        self.economics_epoch_compute_payout_block = self
+            .economics_epoch_compute_payout_block
+            .saturating_add(compute_sub_ct);
 
         let viewer_deltas: Vec<(String, u64)> = self
             .epoch_viewer_bytes
@@ -4186,6 +4544,16 @@ impl Blockchain {
         let ad_liquidity_it_token = TokenAmount::new(ad_liquidity_it_total);
         let ad_miner_it_token = TokenAmount::new(ad_miner_it_total);
 
+        let ad_total_ct = ad_viewer_total
+            .saturating_add(ad_host_total)
+            .saturating_add(ad_hardware_total)
+            .saturating_add(ad_verifier_total)
+            .saturating_add(ad_liquidity_total)
+            .saturating_add(ad_miner_total);
+        self.economics_epoch_ad_payout_block = self
+            .economics_epoch_ad_payout_block
+            .saturating_add(ad_total_ct);
+
         self.settled_read_bytes = self.settled_read_bytes.saturating_add(delta_read_bytes);
         for (addr, total) in &self.epoch_viewer_bytes {
             self.settled_viewer_bytes.insert(addr.clone(), *total);
@@ -4227,16 +4595,48 @@ impl Blockchain {
 
         let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
         let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
+        let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
             if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut, 0) {
                 diagnostics::log::warn!(format!(
                     "failed to accrue treasury disbursement share: {err}"
                 ));
+                #[cfg(feature = "telemetry")]
+                diagnostics::tracing::error!(
+                    treasury_cut,
+                    "treasury_accrual_failed"
+                );
             } else {
                 base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
+                actual_treasury_accrued = treasury_cut;
             }
         }
-        let rebate_ct = self.proof_tracker.claim_all(index);
+        self.economics_epoch_treasury_inflow_block = self
+            .economics_epoch_treasury_inflow_block
+            .saturating_add(actual_treasury_accrued);
+
+        // === SUPPLY CAP ENFORCEMENT (FINAL - REBATES) ===
+        // Subsidies and reward were already clamped earlier. Now clamp rebates if needed.
+        let mut rebate_ct = self.proof_tracker.claim_all(index);
+        let remaining = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
+        let subsidies_and_reward = storage_sub_ct
+            .saturating_add(read_sub_ct)
+            .saturating_add(compute_sub_ct)
+            .saturating_add(reward.0);
+
+        if subsidies_and_reward.saturating_add(rebate_ct) > remaining {
+            // Clamp rebates to fit within remaining cap
+            let rebate_max = remaining.saturating_sub(subsidies_and_reward);
+            if rebate_ct > rebate_max {
+                rebate_ct = rebate_max;
+                #[cfg(feature = "telemetry")]
+                diagnostics::tracing::warn!(
+                    remaining, rebate_clamped = rebate_max,
+                    "supply_cap_clamping_rebates"
+                );
+            }
+        }
+
         let coinbase_consumer_total = base_coinbase_consumer
             .checked_add(rebate_ct)
             .and_then(|v| v.checked_add(fee_industrial_u64))
@@ -4659,35 +5059,30 @@ impl Blockchain {
                         self.economics_prev_annual_issuance_block,
                         self.economics_prev_subsidy.clone(),
                         self.economics_prev_tariff.clone(),
+                        self.economics_baseline_tx_count,
+                        self.economics_baseline_tx_volume,
+                        self.economics_baseline_miners,
                     );
 
-                    // Build metrics from epoch data
-                    let metrics = economics::MarketMetrics {
-                        storage: economics::MarketMetric {
-                            utilization: (self.epoch_storage_bytes as f64)
-                                / (stats.epoch_secs * 1_000_000.0),
-                            provider_margin: 0.0, // TODO: compute from settlement data
-                            ..Default::default()
-                        },
-                        compute: economics::MarketMetric {
-                            utilization: (self.epoch_cpu_ms as f64) / (stats.epoch_secs * 1000.0),
-                            provider_margin: 0.0,
-                            ..Default::default()
-                        },
-                        energy: economics::MarketMetric::default(), // TODO: wire when energy market launches
-                        ad: economics::MarketMetric::default(), // TODO: compute from ad settlements
-                    };
+                    let total_ad_spend = ad_total_usd_micros;
+                    let energy_snapshot = crate::energy::market_snapshot();
+                    let metrics = self.build_market_metrics(
+                        self.economics_epoch_storage_payout_block,
+                        self.economics_epoch_compute_payout_block,
+                        self.economics_epoch_ad_payout_block,
+                        total_ad_spend,
+                        ad_settlement_count,
+                        ad_last_ct_price_usd_micros,
+                        util,
+                        &energy_snapshot,
+                    );
 
-                    // Compute total ad spend from settlements
-                    let total_ad_spend = self
-                        .pending_ad_settlements
-                        .iter()
-                        .map(|s| s.total_usd_micros)
-                        .sum::<u64>();
+                    // Persist market metrics for Launch Governor economics gate sampling
+                    self.economics_prev_market_metrics = metrics.clone();
 
                     // Collect network activity metrics for formula-based issuance
                     let network_activity = economics::NetworkActivity {
-                        tx_count: 0, // TODO: track tx count per epoch
+                        tx_count: self.economics_epoch_tx_count,
                         tx_volume_block: self.economics_epoch_tx_volume_block,
                         unique_miners: self.recent_miners.len() as u64,
                         block_height: self.block_height,
@@ -4702,7 +5097,7 @@ impl Blockchain {
                         self.emission, // total_emission (same as circulating for now)
                         self.economics_epoch_tx_volume_block, // non-KYC volume
                         total_ad_spend,
-                        0, // TODO: track treasury inflow
+                        self.economics_epoch_treasury_inflow_block,
                         &econ_params,
                     );
 
@@ -4711,16 +5106,37 @@ impl Blockchain {
                         econ_snapshot.inflation.annual_issuance_block;
                     self.economics_prev_subsidy = econ_snapshot.subsidies.clone();
                     self.economics_prev_tariff = econ_snapshot.tariff.clone();
+                    self.economics_block_reward_per_block =
+                        econ_snapshot.inflation.block_reward_per_block;
+                    self.block_reward =
+                        TokenAmount::new(self.economics_block_reward_per_block);
+                    // Persist updated adaptive baselines for next epoch
+                    self.economics_baseline_tx_count = econ_snapshot.updated_baseline_tx_count;
+                    self.economics_baseline_tx_volume = econ_snapshot.updated_baseline_tx_volume;
+                    self.economics_baseline_miners = econ_snapshot.updated_baseline_miners;
 
                     // Update telemetry
                     #[cfg(feature = "telemetry")]
                     {
+                        let epoch_tx_count = self.economics_epoch_tx_count;
+                        let epoch_tx_volume = self.economics_epoch_tx_volume_block;
+                        let epoch_treasury_inflow = self.economics_epoch_treasury_inflow_block;
                         crate::telemetry::update_economics_telemetry(&econ_snapshot);
                         crate::telemetry::update_economics_market_metrics(&metrics);
+                        crate::telemetry::update_economics_epoch_metrics(
+                            epoch_tx_count,
+                            epoch_tx_volume,
+                            epoch_treasury_inflow,
+                        );
                     }
 
-                    // Reset epoch tx volume counter
+                    // Reset epoch counters
                     self.economics_epoch_tx_volume_block = 0;
+                    self.economics_epoch_tx_count = 0;
+                    self.economics_epoch_treasury_inflow_block = 0;
+                    self.economics_epoch_storage_payout_block = 0;
+                    self.economics_epoch_compute_payout_block = 0;
+                    self.economics_epoch_ad_payout_block = 0;
 
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
@@ -4981,7 +5397,22 @@ impl Blockchain {
                         .map_err(|e| py_value_err(format!("shard state write: {e}")))?;
                 }
 
-                let minted = reward.0.saturating_add(rebate_ct);
+                // Total minted = subsidies + reward + rebates (all clamped by cap enforcement earlier)
+                let minted = storage_sub_ct
+                    .saturating_add(read_sub_ct)
+                    .saturating_add(compute_sub_ct)
+                    .saturating_add(reward.0)
+                    .saturating_add(rebate_ct);
+
+                // Paranoid assertion: ensure we never exceed cap
+                debug_assert!(
+                    self.emission.saturating_add(minted) <= MAX_SUPPLY_BLOCK,
+                    "Cap enforcement failed: emission {} + minted {} > MAX_SUPPLY_BLOCK {}",
+                    self.emission,
+                    minted,
+                    MAX_SUPPLY_BLOCK
+                );
+
                 self.emission = self.emission.saturating_add(minted);
                 self.macro_acc = self.macro_acc.saturating_add(minted);
                 self.block_height += 1;
@@ -5220,6 +5651,10 @@ impl Blockchain {
             return Err(py_value_err("Invalid incoming chain"));
         }
 
+        // Replay economics from the incoming chain to get the correct economics state
+        // This is consensus-critical: we must use the chain's own economics, not local state
+        let replayed_econ = replay_economics_to_tip(&new_chain, &self.params);
+
         let old_chain = self.chain.clone();
         let lca = old_chain
             .iter()
@@ -5239,10 +5674,19 @@ impl Blockchain {
         self.chain.clear();
         self.accounts.clear();
         self.emission = 0;
-        self.block_reward = TokenAmount::new(INITIAL_BLOCK_REWARD);
         self.block_height = 0;
+        self.economics_epoch_tx_volume_block = 0;
+        self.economics_epoch_tx_count = 0;
+        self.economics_epoch_treasury_inflow_block = 0;
+        self.economics_epoch_storage_payout_block = 0;
+        self.economics_epoch_compute_payout_block = 0;
+        self.economics_epoch_ad_payout_block = 0;
+        let mut epoch_tx_window: VecDeque<(u64, u64)> =
+            VecDeque::with_capacity(EPOCH_BLOCKS as usize + 1);
 
         for block in &new_chain {
+            let mut block_tx_count = 0u64;
+            let mut block_tx_volume = 0u64;
             let miner_addr = block
                 .transactions
                 .first()
@@ -5251,6 +5695,11 @@ impl Blockchain {
             let mut fee_tot_consumer: u128 = 0;
             let mut fee_tot_industrial: u128 = 0;
             for tx in block.transactions.iter().skip(1) {
+                block_tx_count = block_tx_count.saturating_add(1);
+                block_tx_volume = block_tx_volume
+                    .saturating_add(tx.payload.amount_consumer)
+                    .saturating_add(tx.payload.amount_industrial)
+                    .saturating_add(tx.tip);
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = to_array_32(&tx.public_key)
                         .ok_or_else(|| py_value_err("Invalid pubkey in chain"))?;
@@ -5316,9 +5765,21 @@ impl Blockchain {
             {
                 return Err(py_value_err("Fee mismatch"));
             }
-            let expected_consumer = self.block_reward.0 as u128
+            // Validate read subsidy role splits
+            let read_role_sum = block.read_sub_viewer_ct.0 as u128
+                + block.read_sub_host_ct.0 as u128
+                + block.read_sub_hardware_ct.0 as u128
+                + block.read_sub_verifier_ct.0 as u128
+                + block.read_sub_liquidity_ct.0 as u128;
+            if read_role_sum > block.read_sub_ct.0 as u128 {
+                return Err(py_value_err("Read subsidy role sum exceeds total"));
+            }
+            let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
+            // Use REPLAYED economics from the incoming chain, not local self.block_reward
+            // This is consensus-critical: chain economics must be deterministic
+            let expected_consumer = replayed_econ.block_reward_per_block as u128
                 + block.storage_sub_ct.0 as u128
-                + block.read_sub_ct.0 as u128
+                + read_miner_share
                 + block.compute_sub_ct.0 as u128
                 + block.proof_rebate_ct.0 as u128
                 + fee_tot_consumer
@@ -5360,13 +5821,6 @@ impl Blockchain {
                     return Err(py_value_err("Coinbase mismatch"));
                 }
             }
-            self.block_reward = TokenAmount::new(
-                u64::try_from(
-                    (u128::from(self.block_reward.0) * u128::from(DECAY_NUMERATOR))
-                        / u128::from(DECAY_DENOMINATOR),
-                )
-                .map_err(|_| py_value_err("reward overflow"))?,
-            );
             self.emission += block.coinbase_consumer.0 + block.coinbase_industrial.0;
             self.chain.push(block.clone());
             state::append_difficulty(
@@ -5386,6 +5840,10 @@ impl Blockchain {
             self.difficulty = next;
             self.retune_hint = hint;
             self.block_height += 1;
+            epoch_tx_window.push_back((block_tx_count, block_tx_volume));
+            if epoch_tx_window.len() > EPOCH_BLOCKS as usize {
+                epoch_tx_window.pop_front();
+            }
         }
 
         let last = self.chain.last().map_or(1, |b| b.difficulty);
@@ -5394,6 +5852,13 @@ impl Blockchain {
             consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
         self.difficulty = next;
         self.retune_hint = hint;
+
+        // Update economics state from the replayed chain economics (not preserved local state)
+        self.block_reward = TokenAmount::new(replayed_econ.block_reward_per_block);
+        self.economics_block_reward_per_block = replayed_econ.block_reward_per_block;
+        self.economics_prev_subsidy = replayed_econ.prev_subsidy;
+        self.economics_prev_tariff = replayed_econ.prev_tariff;
+        self.economics_prev_annual_issuance_block = replayed_econ.prev_annual_issuance;
 
         Ok(())
     }
@@ -5422,6 +5887,14 @@ impl Blockchain {
 
     #[allow(dead_code)]
     fn is_valid_chain_rust(&self, chain: &[Block]) -> bool {
+        // Replay economics from genesis to validate coinbase rewards deterministically
+        // This ensures two nodes seeing the same chain compute identical economics
+        let replayed_econ = if !chain.is_empty() {
+            replay_economics_to_tip(chain, &self.params)
+        } else {
+            ReplayedEconomicsState::default()
+        };
+
         for i in 0..chain.len() {
             let b = &chain[i];
             let expected_prev = if i == 0 {
@@ -5568,10 +6041,23 @@ impl Blockchain {
             {
                 return false;
             }
-            let expected_consumer = self.block_reward.0 as u128
+            // Validate read subsidy role splits
+            let read_role_sum = b.read_sub_viewer_ct.0 as u128
+                + b.read_sub_host_ct.0 as u128
+                + b.read_sub_hardware_ct.0 as u128
+                + b.read_sub_verifier_ct.0 as u128
+                + b.read_sub_liquidity_ct.0 as u128;
+            if read_role_sum > b.read_sub_ct.0 as u128 {
+                return false;
+            }
+            let read_miner_share = b.read_sub_ct.0 as u128 - read_role_sum;
+            // Use REPLAYED economics state, not local self.block_reward
+            // This is consensus-critical: two nodes must agree on expected rewards
+            let expected_consumer = replayed_econ.block_reward_per_block as u128
                 + b.storage_sub_ct.0 as u128
-                + b.read_sub_ct.0 as u128
+                + read_miner_share
                 + b.compute_sub_ct.0 as u128
+                + b.proof_rebate_ct.0 as u128
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
@@ -5946,6 +6432,7 @@ mod tests {
     fn read_subsidy_split_distribution() {
         let mut bc = Blockchain::default();
         bc.block_reward = TokenAmount::new(0);
+        bc.economics_block_reward_per_block = 1; // Set to 1 to avoid INITIAL_BLOCK_REWARD fallback, but effectively zero after logistic factor
         bc.beta_storage_sub_ct_raw = 0;
         bc.kappa_cpu_sub_ct_raw = 0;
         bc.lambda_bytes_out_sub_ct_raw = 0;
@@ -6024,7 +6511,9 @@ mod tests {
             .get(miner)
             .map(|a| a.balance.consumer)
             .unwrap_or(0);
-        assert_eq!(miner_balance, 0);
+        // Miner gets 1 from minimal base reward (economics_block_reward_per_block=1)
+        // The test sets this to 1 to avoid INITIAL_BLOCK_REWARD fallback while keeping reward minimal
+        assert_eq!(miner_balance, 1);
     }
 
     #[test]
@@ -6101,6 +6590,78 @@ mod tests {
         });
         let err = bc.submit_read_ack(ack).expect_err("ack rejected");
         assert_eq!(err, ReadAckError::InvalidSelectionReceipt);
+    }
+}
+
+#[cfg(test)]
+mod market_metric_tests {
+    use super::*;
+    use energy_market::{EnergyProvider, EnergyReceipt, H256};
+
+    #[test]
+    fn market_metrics_reflect_epoch_activity() {
+        let mut bc = Blockchain::default();
+        bc.epoch_storage_bytes = 10_000;
+        bc.epoch_cpu_ms = 2_000;
+        bc.economics_epoch_storage_payout_block = 5_000;
+        bc.economics_epoch_compute_payout_block = 3_000;
+        bc.economics_epoch_ad_payout_block = 1_000;
+        bc.params.rent_rate_ct_per_byte = 5;
+        bc.params.ad_cap_provider_count = 10;
+
+        crate::compute_market::price_board::record_price(FeeLane::Industrial, 100, 1.0);
+
+        let provider = EnergyProvider {
+            provider_id: "provider-a".into(),
+            owner: "owner".into(),
+            location: "US_CA".into(),
+            capacity_kwh: 1_000,
+            available_kwh: 1_000,
+            price_per_kwh: 4,
+            reputation_score: 0.5,
+            meter_address: "meter-1".into(),
+            total_delivered_kwh: 0,
+            staked_balance: 0,
+            last_fulfillment_latency_ms: None,
+            last_meter_value: None,
+            last_meter_timestamp: None,
+            bayesian_reputation: Default::default(),
+        };
+        let receipt = EnergyReceipt {
+            buyer: "buyer".into(),
+            seller: provider.provider_id.clone(),
+            kwh_delivered: 200,
+            price_paid: 800,
+            block_settled: 1,
+            treasury_fee: 0,
+            meter_reading_hash: H256::default(),
+            slash_applied: 0,
+        };
+        let energy_snapshot = crate::energy::EnergySnapshot {
+            providers: vec![provider],
+            receipts: vec![receipt],
+            credits: Vec::new(),
+            disputes: Vec::new(),
+        };
+
+        let metrics = bc.build_market_metrics(
+            bc.economics_epoch_storage_payout_block,
+            bc.economics_epoch_compute_payout_block,
+            bc.economics_epoch_ad_payout_block,
+            1_000_000,
+            5,
+            100_000,
+            50,
+            &energy_snapshot,
+        );
+
+        assert!(metrics.storage.utilization > 0.0);
+        assert!(metrics.storage.effective_payout_block > 0.0);
+        assert!(metrics.compute.average_cost_block > 0.0);
+        assert!(metrics.compute.effective_payout_block > 0.0);
+        assert!(metrics.energy.utilization > 0.0);
+        assert!(metrics.ad.average_cost_block > 0.0);
+        assert!(metrics.ad.provider_margin >= -2.0);
     }
 }
 

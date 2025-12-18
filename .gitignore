@@ -1,49 +1,332 @@
-.env
-env/
-.emv/
+# Python Virtual Environments
 venv/
-.venv/
-.DS_Store
-.vscode/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv
 *.pyc
 __pycache__/
+*.egg-info/
+dist/
+build/
 
+# Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+PIPFILE.lock
 
-# Added by cargo
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.sublime-project
+.sublime-workspace
+*.sublime-project
+*.sublime-workspace
+.emacs.d/
+.vim/
+*.code-workspace
+.project
+.pydevproject
+.settings/
+*.iml
+.gradle/
+.nb-gradle/
 
-/target
-.bootstrap_partial
-.hooks/
-xtask/target/
-# Local chain state
-chain_db/
-# Temporary snapshot directories
-snapshot/
-# RustSec advisory database cache
-# NPM artifacts
+# Testing
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Environments
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+.DStore
+*.swp
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# Logs
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Local development
+.vscode/settings.json
+.vscode/launch.json
+.env.dev
+.env.test
+
+# Build artifacts
+.dist/
+.build/
+*.whl
+*.tar.gz
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.postgres
+
+# Node modules (if using any JS tools)
 node_modules/
-# Build artifacts from monitoring stack
-monitoring/bin/
-# AI agent/cache folders
+npm-debug.log
+yarn-error.log
+.yarn/cache/
+.yarn/unplugged/
+
+# Machine Learning / Data Science
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+
+# Model Files (Large)
+*.bin
+*.safetensors
+*.pt
+*.pth
+models/
+checkpoints/
+saved_models/
+*.onnx
+
+# Llama / LLM Specific
+# Keep these out of git - they're huge!
+llama-**/
+.perplexity/llama/models/
+.perplexity/llama/checkpoints/
+.perplexity/llama/output/
+.perplexity/llama/evaluation_results/
+.perplexity/starcoder/models/
+.perplexity/starcoder/checkpoints/
+
+# LoRA adapters (can be large)
+peft_model/
+adapter_*
+lora_*/
+
+# Dataset files (can be very large)
+*.dataset
+*.parquet
+*.arrow
+datasets/
+data/raw/
+*.csv.gz
+
+# GPU/CUDA
+.cuda/
+cuda_profiling/
+*.nvprof
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+.#*
+
+# Cache directories
+.cache/
+.pytest_cache/
+.hypothesis/
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Documentation build
+build/
+dist/
+siteDocs/
+_build/
+.sphinx/
+
+# Distribution / packaging
+PIPFILE.lock
+setup.py.bak
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Perplexity/Claude specific
 .perplexity/
-claude-cli/
-# Local node data and logs
-node-data/
-node-data-*/
-demo_logs/
-db
-data/
-!crates/zkp/data/
-node/ban_db/
+.claude/
+conversation_history/
+*.conversation
+
+# OS specific
+.AppleDouble
+.LSOverride
+.windows/
+.DS_Store
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.fseventsd/
+.Spotlight-V100
+.Trashes
+._.Trashes
+._*
+
+# Editor backup files
+*.orig
+*.rej
+*.patch
+
+# Private/sensitive
+.secrets/
+secrets/
+*.key
+*.pem
+private_key*
+config/secrets.yaml
+.env.production
+.env.staging
+
+# Temporary directories
+tmp/
+temp/
+.temp/
+.tmp/
+
+# Lock files (project-specific - keep these if collaboration needed)
+# poetry.lock
+# Pipfile.lock
+
+# Generated files
+*.generated.py
+*.auto.py
+
+# Blockchain/Web3 specific
+.ganache/
+.hardhat/
+*.pkey
+*.secret
+mnemonic.txt
+
+# Test outputs
+test-results/
+test_output/
+.coverage.html/
+htmlcov/
+
+# Miscellaneous
+.history/
+.vscode-settings.json
+.precommit
+local.properties
+
+# The Block Runtime Artifacts (never commit these - they're node-local state)
+# Rust build artifacts
+target/
+
+# Node runtime databases
+node/*_db/
+node/dns_db/
+node/governance_db/
+node/ledger_db/
+node/state_db/
+
+# Node snapshots and history
 node/snapshots/
-formal/.fstar/
-formal/*.checked
-# Documentation artifacts
-docs/images/
-# Fuzz artifacts
-fuzz/wal/
-fuzz/artifacts/
-net/fuzz/artifacts/
-gateway/fuzz/artifacts/
-*/fuzz/corpus/*/
-*.profraw
+node/diff_history/
+node/governance/history/
+
+# LLM model weights and artifacts
+qwen/
+
+# Runtime logs and state files
+*.wal.log
+**/wal.log
+**/kalman_state.json
+**/events.log
+**/util_history.json
+
+# Keep documentation and source code
+!*.md
+!*.py
+!*.yaml
+!*.yml
+!*.json
+!.gitkeep
+!README.md
+
+# Exception: exclude runtime JSON state files even with the !*.json rule above
+node/diff_history/**/*.json
+node/governance/history/**/*.json

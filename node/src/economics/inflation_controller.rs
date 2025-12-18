@@ -9,6 +9,8 @@
 use super::InflationSnapshot;
 use foundation_serialization::{Deserialize, Serialize};
 
+const BLOCKS_PER_YEAR: u64 = 31_536_000;
+
 /// Inflation control parameters (all from governance)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -65,6 +67,7 @@ impl InflationController {
                 annual_issuance_block: self.params.min_annual_issuance_block,
                 realized_inflation_bps: 0,
                 target_inflation_bps: self.params.target_inflation_bps,
+                block_reward_per_block: self.params.min_annual_issuance_block / BLOCKS_PER_YEAR,
             };
         }
 
@@ -96,6 +99,7 @@ impl InflationController {
             annual_issuance_block: i_next,
             realized_inflation_bps,
             target_inflation_bps: self.params.target_inflation_bps,
+            block_reward_per_block: i_next / BLOCKS_PER_YEAR,
         }
     }
 }

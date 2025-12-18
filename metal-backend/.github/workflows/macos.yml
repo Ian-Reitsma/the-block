@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    name: macos-${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner: [macos-13, macos-14]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.3.app
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          brew install cmake@3.28 ninja ccache
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-${{ matrix.runner }}-ccache-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.runner }}-ccache-
+      - name: Cache build
+        uses: actions/cache@v3
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ matrix.runner }}-build-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.runner }}-build-
+      - name: Configure
+        env:
+          CMAKE_C_FLAGS: -Werror
+          CMAKE_CXX_FLAGS: -Werror
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build and Test
+        run: cmake --build build --target test
+
+  benchmark:
+    name: bench-${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    needs: macos
+    strategy:
+      matrix:
+        runner: [macos-13, macos-14]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.3.app
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          brew install cmake@3.28 ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+      - name: Build bench
+        run: cmake --build build --target orchard_bench
+      - name: Run benchmarks
+        run: python benchmarks/run.py -o bench-results
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: bench-${{ matrix.runner }}-${{ github.sha }}
+          path: bench-results

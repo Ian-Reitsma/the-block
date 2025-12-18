@@ -132,6 +132,10 @@ impl<'a> Runtime<'a> {
         crate::gateway::dns::set_rehearsal(enabled);
     }
 
+    pub fn set_launch_economics(&mut self, enabled: bool) {
+        self.bc.params.launch_economics_autopilot = if enabled { 1 } else { 0 };
+    }
+
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
         self.bc.set_consumer_p90_comfort(v);
     }
@@ -297,6 +301,8 @@ pub struct Params {
     pub launch_operational_flag: i64,
     #[serde(default = "default_dns_rehearsal_enabled")]
     pub dns_rehearsal_enabled: i64,
+    #[serde(default = "default_launch_economics_autopilot")]
+    pub launch_economics_autopilot: i64,
     #[serde(default = "default_ad_readiness_window_secs")]
     pub ad_readiness_window_secs: i64,
     #[serde(default = "default_ad_readiness_min_unique_viewers")]
@@ -499,6 +505,7 @@ impl Default for Params {
             dual_token_settlement_enabled: default_dual_token_settlement_enabled(),
             launch_operational_flag: 0,
             dns_rehearsal_enabled: default_dns_rehearsal_enabled(),
+            launch_economics_autopilot: default_launch_economics_autopilot(),
             ad_readiness_window_secs: default_ad_readiness_window_secs(),
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
@@ -966,6 +973,10 @@ impl Params {
                 .get("dns_rehearsal_enabled")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_dns_rehearsal_enabled),
+            launch_economics_autopilot: obj
+                .get("launch_economics_autopilot")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_launch_economics_autopilot),
             ad_readiness_window_secs: obj
                 .get("ad_readiness_window_secs")
                 .and_then(Value::as_i64)
@@ -1286,6 +1297,10 @@ const fn default_dual_token_settlement_enabled() -> i64 {
 
 const fn default_dns_rehearsal_enabled() -> i64 {
     1
+}
+
+const fn default_launch_economics_autopilot() -> i64 {
+    0
 }
 
 const fn default_ad_readiness_window_secs() -> i64 {
