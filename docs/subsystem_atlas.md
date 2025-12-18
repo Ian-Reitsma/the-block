@@ -18,7 +18,7 @@ When you want to do something specific, here's where to look:
 | **Add telemetry for a new metric** | `node/src/telemetry.rs`, update dashboards in `monitoring/` | [`architecture.md#telemetry-and-instrumentation`](architecture.md#telemetry-and-instrumentation) |
 | **Modify consensus rules** | `node/src/consensus`, `node/src/blockchain` | [`architecture.md#ledger-and-consensus`](architecture.md#ledger-and-consensus) |
 | **Update storage pipeline** | `node/src/storage/pipeline.rs`, `coding/`, `storage_market/` | [`architecture.md#storage-and-state`](architecture.md#storage-and-state) |
-| **Add a new CLI command** | `cli/src/*.rs`, register in `cli/src/main.rs` | [`apis_and_tooling.md#cli`](apis_and_tooling.md#cli-tb-cli) |
+| **Add a new CLI command** | `cli/src/*.rs`, register in `cli/src/main.rs` | [`apis_and_tooling.md#cli`](apis_and_tooling.md#cli-contract-cli) |
 | **Configure launch governor gates** | `node/src/launch_governor/mod.rs`, `node/src/governor_snapshot.rs`, `node/src/rpc/governor.rs` | [`architecture.md#launch-governor`](architecture.md#launch-governor), [`operations.md#launch-governor-operations`](operations.md#launch-governor-operations) |
 
 ## Subsystem Directory
@@ -100,7 +100,7 @@ This atlas supplements `AGENTS.md`, `docs/overview.md`, and the subsystem specs 
 | --- | --- | --- |
 | `node/` | Full node (consensus, networking, storage, compute, RPC, gateway, CLI helpers). Contains every runtime component that actually runs on validators and gateways. | `docs/architecture.md`, `docs/operations.md`, `docs/apis_and_tooling.md` |
 | `crates/` | Reusable first-party libraries: transport, HTTP/TLS, serialization, telemetry helpers, overlay store, wallet SDKs, probes, oracle adapters, etc. | Each crate has inline docs; `docs/developer_handbook.md#workspace-layout` |
-| `cli/` | `tb-cli` binary. Implements governance commands, wallet flows, compute/energy tooling, diagnostics, explorer helpers. | `docs/apis_and_tooling.md#cli` |
+| `cli/` | `contract-cli` binary. Implements governance commands, wallet flows, compute/energy tooling, diagnostics, explorer helpers. | `docs/apis_and_tooling.md#cli` |
 | `metrics-aggregator/` | Service that ingests `/metrics` feeds, performs correlation, exposes `/wrappers` + `/telemetry/summary`, archives TLS warnings, and serves Grafana datasources. | `docs/operations.md#metrics-aggregator-ops` |
 | `monitoring/` | Grafana dashboards, Prometheus rules, `make monitor` scripts. All dashboard JSON lives here. | `docs/operations.md#monitoring-and-dashboards` |
 | `bridges/` | Cross-chain light clients, relayer state machines, HTLC helpers used by the node and CLI. | `docs/architecture.md#token-bridges`, `docs/security_and_privacy.md#bridge-and-cross-chain-security` |

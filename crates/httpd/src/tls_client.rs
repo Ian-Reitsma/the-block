@@ -13,9 +13,11 @@ use rand::rngs::OsRng;
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
+use std::thread;
+use std::time::Duration;
 
 const MAX_RECORD_CHUNK: usize = 16 * 1024;
 
@@ -138,12 +140,12 @@ impl TlsConnector {
             signature.as_deref(),
         );
         let len = (hello.len() as u32).to_be_bytes();
-        stream.write_all(&len)?;
-        stream.write_all(&hello)?;
+        blocking_write_all(&mut stream, &len)?;
+        blocking_write_all(&mut stream, &hello)?;
         stream.flush()?;
 
         let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf)?;
+        blocking_read_exact(&mut stream, &mut len_buf)?;
         let frame_len = u32::from_be_bytes(len_buf) as usize;
         if frame_len > HANDSHAKE_MAX_LEN {
             return Err(TlsConnectorError::InvalidCertificate(
@@ -151,7 +153,7 @@ impl TlsConnector {
             ));
         }
         let mut frame = vec![0u8; frame_len];
-        stream.read_exact(&mut frame)?;
+        blocking_read_exact(&mut stream, &mut frame)?;
         let server = ServerHelloFrame::decode(&frame)?;
         if server.magic != *HANDSHAKE_MAGIC {
             return Err(TlsConnectorError::InvalidCertificate(
@@ -715,19 +717,19 @@ impl ClientTlsStream {
 
     fn read_record(&mut self) -> io::Result<Option<Vec<u8>>> {
         let mut header = [0u8; 12];
-        match self.stream.read_exact(&mut header) {
-            Ok(()) => {}
+        match blocking_read_exact(&mut self.stream, &mut header) {
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
             Err(err) => return Err(err),
+            Ok(()) => {}
         }
         let length = u32::from_be_bytes(header[..4].try_into().unwrap()) as usize;
         let padded = ((length / tls::AES_BLOCK) + 1) * tls::AES_BLOCK;
         let mut iv = [0u8; tls::AES_BLOCK];
-        self.stream.read_exact(&mut iv)?;
+        blocking_read_exact(&mut self.stream, &mut iv)?;
         let mut ciphertext = vec![0u8; padded];
-        self.stream.read_exact(&mut ciphertext)?;
+        blocking_read_exact(&mut self.stream, &mut ciphertext)?;
         let mut mac = [0u8; tls::MAC_LEN];
-        self.stream.read_exact(&mut mac)?;
+        blocking_read_exact(&mut self.stream, &mut mac)?;
         let mut frame = Vec::with_capacity(12 + tls::AES_BLOCK + padded + tls::MAC_LEN);
         frame.extend_from_slice(&header);
         frame.extend_from_slice(&iv);
@@ -750,7 +752,7 @@ impl ClientTlsStream {
             self.write_seq,
             chunk,
         )?;
-        self.stream.write_all(&frame)?;
+        blocking_write_all(&mut self.stream, &frame)?;
         self.write_seq = self.write_seq.wrapping_add(1);
         Ok(())
     }
@@ -762,7 +764,7 @@ impl ClientTlsStream {
             self.write_seq,
             &[],
         )?;
-        self.stream.write_all(&frame)?;
+        blocking_write_all(&mut self.stream, &frame)?;
         self.stream.flush()?;
         self.stream.shutdown(std::net::Shutdown::Both)
     }
@@ -899,4 +901,56 @@ pub fn tls_connector_from_env_any(
         }
     }
     Ok(None)
+}
+
+fn is_would_block(err: &io::Error) -> bool {
+    err.kind() == ErrorKind::WouldBlock
+}
+
+fn blocking_read(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<usize> {
+    loop {
+        match stream.read(buf) {
+            Ok(0) => return Ok(0),
+            Ok(n) => return Ok(n),
+            Err(err) if is_would_block(&err) => {
+                thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn blocking_read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buf.len() {
+        let n = blocking_read(stream, &mut buf[offset..])?;
+        if n == 0 {
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "tcp stream closed while reading",
+            ));
+        }
+        offset += n;
+    }
+    Ok(())
+}
+
+fn blocking_write_all(stream: &mut TcpStream, mut buf: &[u8]) -> io::Result<()> {
+    while !buf.is_empty() {
+        match stream.write(buf) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    ErrorKind::WriteZero,
+                    "tcp stream closed while writing",
+                ));
+            }
+            Ok(n) => buf = &buf[n..],
+            Err(err) if is_would_block(&err) => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }

@@ -1,7 +1,7 @@
 //! Deserialize derive implementation.
 
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, Ident};
 
@@ -19,8 +19,12 @@ pub fn expand_derive_deserialize(input: &DeriveInput) -> syn::Result<TokenStream
     let type_params: Vec<_> = generics.type_params().map(|param| &param.ident).collect();
 
     let deserialize_impl = match &input.data {
-        Data::Struct(data) => impl_deserialize_struct(name, &ty_generics, &type_params, &data.fields, &serde_path)?,
-        Data::Enum(data) => impl_deserialize_enum(name, &ty_generics, &type_params, data, &serde_path)?,
+        Data::Struct(data) => {
+            impl_deserialize_struct(name, &ty_generics, &type_params, &data.fields, &serde_path)?
+        }
+        Data::Enum(data) => {
+            impl_deserialize_enum(name, &ty_generics, &type_params, data, &serde_path)?
+        }
         Data::Union(_) => {
             return Err(syn::Error::new(
                 input.span(),
@@ -39,7 +43,9 @@ pub fn expand_derive_deserialize(input: &DeriveInput) -> syn::Result<TokenStream
     // Add Deserialize bounds to where clause
     let where_clause = impl_generics.make_where_clause();
     for type_param in type_params {
-        where_clause.predicates.push(syn::parse_quote!(#type_param: #serde_path::Deserialize<'de>));
+        where_clause
+            .predicates
+            .push(syn::parse_quote!(#type_param: #serde_path::Deserialize<'de>));
     }
 
     let (impl_generics, _, where_clause) = impl_generics.split_for_impl();
@@ -66,23 +72,29 @@ fn impl_deserialize_struct(
 ) -> syn::Result<TokenStream> {
     match fields {
         Fields::Named(fields) => {
-            let field_names: Vec<_> = fields.named.iter()
+            let field_names: Vec<_> = fields
+                .named
+                .iter()
                 .map(|f| f.ident.as_ref().unwrap())
                 .collect();
-            let field_name_strs: Vec<_> = fields.named.iter()
-                .map(|f| get_field_name(f))
-                .collect();
+            let field_name_strs: Vec<_> = fields.named.iter().map(|f| get_field_name(f)).collect();
+            let field_defaults: Vec<_> =
+                fields.named.iter().map(|f| get_field_default(f)).collect();
             let field_count = fields.named.len();
 
             let visitor_name = format_ident!("__Visitor");
 
-            let field_enum_variants: Vec<_> = (0..field_count).map(|i| {
-                format_ident!("Field{}", i)
-            }).collect();
+            let field_enum_variants: Vec<_> = (0..field_count)
+                .map(|i| format_ident!("Field{}", i))
+                .collect();
 
-            let field_matches = field_name_strs.iter().zip(&field_enum_variants).map(|(field_str, variant)| {
-                quote! { #field_str => Ok(__Field::#variant) }
-            });
+            let field_matches =
+                field_name_strs
+                    .iter()
+                    .zip(&field_enum_variants)
+                    .map(|(field_str, variant)| {
+                        quote! { #field_str => Ok(__Field::#variant) }
+                    });
 
             // Create zipped iteration for match arms
             let field_match_arms: Vec<_> = field_enum_variants.iter()
@@ -95,6 +107,26 @@ fn impl_deserialize_struct(
                                 return Err(#serde_path::de::Error::duplicate_field(#field_name_str));
                             }
                             #field_name = Some(map.next_value()?);
+                        }
+                    }
+                })
+                .collect();
+
+            // Build field initializers that either use defaults or error if missing
+            let field_inits: Vec<_> = field_names.iter()
+                .zip(&field_defaults)
+                .zip(&field_name_strs)
+                .map(|((field_name, default), field_name_str)| {
+                    match default {
+                        Some(default_expr) => {
+                            quote! {
+                                #field_name: #field_name.unwrap_or_else(|| #default_expr)
+                            }
+                        }
+                        None => {
+                            quote! {
+                                #field_name: #field_name.ok_or_else(|| #serde_path::de::Error::missing_field(#field_name_str))?
+                            }
                         }
                     }
                 })
@@ -163,12 +195,8 @@ fn impl_deserialize_struct(
                             }
                         }
 
-                        #(
-                            let #field_names = #field_names.ok_or_else(|| #serde_path::de::Error::missing_field(#field_name_strs))?;
-                        )*
-
                         Ok(#name {
-                            #(#field_names,)*
+                            #(#field_inits,)*
                         })
                     }
                 }
@@ -251,9 +279,7 @@ fn impl_deserialize_enum(
     data: &syn::DataEnum,
     serde_path: &TokenStream,
 ) -> syn::Result<TokenStream> {
-    let variant_name_strs: Vec<_> = data.variants.iter()
-        .map(|v| get_variant_name(v))
-        .collect();
+    let variant_name_strs: Vec<_> = data.variants.iter().map(|v| get_variant_name(v)).collect();
 
     let variant_arms = data.variants.iter().enumerate().map(|(i, variant)| {
         let variant_name = &variant.ident;
@@ -441,7 +467,7 @@ fn get_serde_path(attrs: &[syn::Attribute]) -> TokenStream {
             if let Ok(meta_list) = attr.meta.require_list() {
                 // Parse as comma-separated nested meta items
                 let parsed = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
                 );
 
                 if let Ok(nested) = parsed {
@@ -474,7 +500,8 @@ fn get_field_name(field: &syn::Field) -> String {
                 let tokens = &meta_list.tokens;
                 let tokens_str = tokens.to_string();
                 if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str.trim_start_matches("rename = ")
+                    let name = tokens_str
+                        .trim_start_matches("rename = ")
                         .trim_matches('"')
                         .trim();
                     return name.to_string();
@@ -485,6 +512,43 @@ fn get_field_name(field: &syn::Field) -> String {
     field.ident.as_ref().unwrap().to_string()
 }
 
+fn get_field_default(field: &syn::Field) -> Option<TokenStream> {
+    for attr in &field.attrs {
+        if attr.path().is_ident("serde") {
+            if let Ok(meta_list) = attr.meta.require_list() {
+                // Parse the nested meta items properly
+                let nested = meta_list
+                    .parse_args_with(
+                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                    )
+                    .ok()?;
+
+                for meta in nested {
+                    match &meta {
+                        // Handle #[serde(default)]
+                        syn::Meta::Path(path) if path.is_ident("default") => {
+                            return Some(quote! { ::core::default::Default::default() });
+                        }
+                        // Handle #[serde(default = "path")]
+                        syn::Meta::NameValue(nv) if nv.path.is_ident("default") => {
+                            if let syn::Expr::Lit(expr_lit) = &nv.value {
+                                if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                                    let path_str = lit_str.value();
+                                    if let Ok(path) = syn::parse_str::<syn::Path>(&path_str) {
+                                        return Some(quote! { #path() });
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn get_variant_name(variant: &syn::Variant) -> String {
     for attr in &variant.attrs {
         if attr.path().is_ident("serde") {
@@ -492,7 +556,8 @@ fn get_variant_name(variant: &syn::Variant) -> String {
                 let tokens = &meta_list.tokens;
                 let tokens_str = tokens.to_string();
                 if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str.trim_start_matches("rename = ")
+                    let name = tokens_str
+                        .trim_start_matches("rename = ")
                         .trim_matches('"')
                         .trim();
                     return name.to_string();

@@ -392,23 +392,38 @@ pub fn prove_with_backend(
     output: &[u8],
     backend: SnarkBackend,
 ) -> Result<ProofBundle, SnarkError> {
+    eprintln!(
+        "[SNARK] prove_with_backend ENTER (backend={:?}, wasm_len={})",
+        backend,
+        wasm.len()
+    );
+
+    eprintln!("[SNARK] Calling compile_circuit...");
     let compiled = compile_circuit(wasm)?;
+    eprintln!("[SNARK] compile_circuit DONE");
+
+    eprintln!("[SNARK] Deriving circuit inputs...");
     let inputs = CircuitInputs::derive(wasm, output);
+    eprintln!("[SNARK] Circuit inputs derived");
+
     let artifact = CircuitArtifact::new(compiled.digest, inputs.wasm_hash);
     let circuit = ProgramCircuit::new(
         inputs.program_fe.clone(),
         inputs.output_fe.clone(),
         inputs.witness_fe.clone(),
     );
+    eprintln!("[SNARK] Circuit created, calling run_prover...");
     let start = Instant::now();
     let proof = match run_prover(&compiled.params, circuit.clone(), backend) {
         Ok(proof) => proof,
         Err(err) => {
+            eprintln!("[SNARK] run_prover FAILED: {:?}", err);
             #[cfg(feature = "telemetry")]
             record_prover_failure(backend);
             return Err(err);
         }
     };
+    eprintln!("[SNARK] run_prover SUCCESS");
     let elapsed = start.elapsed();
     let latency_ms = u64::try_from(elapsed.as_millis())
         .unwrap_or(u64::MAX)
@@ -464,9 +479,20 @@ fn run_prover(
     circuit: ProgramCircuit,
     backend: SnarkBackend,
 ) -> Result<Proof, SnarkError> {
+    eprintln!("[SNARK] run_prover ENTER (backend={:?})", backend);
     match backend {
-        SnarkBackend::Cpu => Groth16Bn256::prove(params, circuit, &mut ()).map_err(Into::into),
-        SnarkBackend::Gpu => gpu_prove(params, circuit),
+        SnarkBackend::Cpu => {
+            eprintln!("[SNARK] Calling Groth16Bn256::prove (CPU)...");
+            let result = Groth16Bn256::prove(params, circuit, &mut ()).map_err(Into::into);
+            eprintln!("[SNARK] Groth16Bn256::prove returned");
+            result
+        }
+        SnarkBackend::Gpu => {
+            eprintln!("[SNARK] Calling gpu_prove...");
+            let result = gpu_prove(params, circuit);
+            eprintln!("[SNARK] gpu_prove returned");
+            result
+        }
     }
 }
 
@@ -481,18 +507,31 @@ fn gpu_prove(_params: &Parameters, _circuit: ProgramCircuit) -> Result<Proof, Sn
 }
 
 fn compile_circuit(wasm: &[u8]) -> Result<Arc<CompiledCircuit>, SnarkError> {
+    eprintln!("[SNARK] compile_circuit ENTER");
     let digest = digest(wasm);
+    eprintln!("[SNARK] Digest computed, checking cache...");
+
+    eprintln!("[SNARK] Acquiring cache lock...");
     if let Some(compiled) = CIRCUIT_CACHE.guard().get(&digest) {
+        eprintln!("[SNARK] Cache HIT - returning cached circuit");
         return Ok(compiled.clone());
     }
+    eprintln!("[SNARK] Cache MISS - need to setup circuit");
+
+    eprintln!("[SNARK] Calling Groth16Bn256::setup...");
     let params = Arc::new(Groth16Bn256::setup(ProgramCircuit::blank(), &mut ())?);
+    eprintln!("[SNARK] setup DONE, preparing verifying key...");
+
     let verifier = Arc::new(Groth16Bn256::prepare_verifying_key(&params));
+    eprintln!("[SNARK] Verifying key prepared, caching entry...");
+
     let entry = Arc::new(CompiledCircuit {
         digest,
         params,
         verifier,
     });
     CIRCUIT_CACHE.guard().insert(digest, entry.clone());
+    eprintln!("[SNARK] compile_circuit complete");
     Ok(entry)
 }
 

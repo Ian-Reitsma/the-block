@@ -1108,7 +1108,7 @@ impl Default for Blockchain {
             logistic_last_n: 0.0,
             logistic_lock_end: 0,
             logistic_factor: 1.0,
-            economics_prev_annual_issuance_block: 40_000_000,  // Bootstrap: 40M BLOCK/year
+            economics_prev_annual_issuance_block: 40_000_000, // Bootstrap: 40M BLOCK/year
             economics_prev_subsidy: economics::SubsidySnapshot {
                 storage_share_bps: 1500,
                 compute_share_bps: 3000,
@@ -1729,23 +1729,314 @@ impl Blockchain {
                 let _ = db.insert(SCHEMA_KEY, bytes);
             }
         }
-        let (
-            mut chain,
-            mut accounts,
-            em,
-            br,
-            bh,
-            mempool_disk,
-            base_fee,
-            recent_ts,
-        ) = if let Some(raw) = db.get(DB_CHAIN) {
-            match ledger_binary::decode_chain_disk(&raw) {
-                Ok(mut disk) => {
-                    if disk.schema_version > 7 {
-                        return Err(py_value_err("DB schema too new"));
+        let (mut chain, mut accounts, em, br, bh, mempool_disk, base_fee, recent_ts) =
+            if let Some(raw) = db.get(DB_CHAIN) {
+                match ledger_binary::decode_chain_disk(&raw) {
+                    Ok(mut disk) => {
+                        if disk.schema_version > 7 {
+                            return Err(py_value_err("DB schema too new"));
+                        }
+                        if disk.schema_version < 3 {
+                            let mut migrated_chain = disk.chain.clone();
+                            for b in &mut migrated_chain {
+                                if let Some(cb) = b.transactions.first() {
+                                    b.coinbase_consumer =
+                                        TokenAmount::new(cb.payload.amount_consumer);
+                                    b.coinbase_industrial =
+                                        TokenAmount::new(cb.payload.amount_industrial);
+                                }
+                                let mut fee_consumer: u128 = 0;
+                                let mut fee_industrial: u128 = 0;
+                                for tx in b.transactions.iter().skip(1) {
+                                    if let Ok((c, i)) =
+                                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                    {
+                                        fee_consumer += c as u128;
+                                        fee_industrial += i as u128;
+                                    }
+                                }
+                                let fee_consumer_u64 = u64::try_from(fee_consumer).unwrap_or(0);
+                                let fee_industrial_u64 = u64::try_from(fee_industrial).unwrap_or(0);
+                                let mut h = blake3::Hasher::new();
+                                h.update(&fee_consumer_u64.to_le_bytes());
+                                h.update(&fee_industrial_u64.to_le_bytes());
+                                b.fee_checksum = h.finalize().to_hex().to_string();
+                                b.hash = calculate_hash(
+                                    b.index,
+                                    &b.previous_hash,
+                                    b.timestamp_millis,
+                                    b.nonce,
+                                    b.difficulty,
+                                    b.base_fee,
+                                    b.coinbase_consumer,
+                                    b.coinbase_industrial,
+                                    b.storage_sub_ct,
+                                    b.read_sub_ct,
+                                    b.read_sub_viewer_ct,
+                                    b.read_sub_host_ct,
+                                    b.read_sub_hardware_ct,
+                                    b.read_sub_verifier_ct,
+                                    b.read_sub_liquidity_ct,
+                                    b.ad_viewer_ct,
+                                    b.ad_host_ct,
+                                    b.ad_hardware_ct,
+                                    b.ad_verifier_ct,
+                                    b.ad_liquidity_ct,
+                                    b.ad_miner_ct,
+                                    b.ad_host_it,
+                                    b.ad_hardware_it,
+                                    b.ad_verifier_it,
+                                    b.ad_liquidity_it,
+                                    b.ad_miner_it,
+                                    b.ad_total_usd_micros,
+                                    b.ad_settlement_count,
+                                    b.ad_oracle_ct_price_usd_micros,
+                                    b.ad_oracle_it_price_usd_micros,
+                                    b.compute_sub_ct,
+                                    b.proof_rebate_ct,
+                                    b.storage_sub_it,
+                                    b.read_sub_it,
+                                    b.compute_sub_it,
+                                    b.read_root,
+                                    &b.fee_checksum,
+                                    &b.transactions,
+                                    &b.state_root,
+                                    &b.l2_roots,
+                                    &b.l2_sizes,
+                                    b.vdf_commit,
+                                    b.vdf_output,
+                                    &b.vdf_proof,
+                                    b.retune_hint,
+                                );
+                            }
+                            let mut em_c = 0u64;
+                            let mut em_i = 0u64;
+                            for b in &migrated_chain {
+                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                            }
+                            let bh = migrated_chain.len() as u64;
+                            let migrated = ChainDisk {
+                                schema_version: 3,
+                                chain: migrated_chain,
+                                accounts: disk.accounts,
+                                emission: em_c.saturating_add(em_i),
+                                block_reward: if disk.block_reward.get() == 0 {
+                                    TokenAmount::new(INITIAL_BLOCK_REWARD)
+                                } else {
+                                    disk.block_reward
+                                },
+                                block_height: bh,
+                                mempool: Vec::new(),
+                                base_fee: disk.base_fee,
+                                params: Params::default(),
+                                epoch_storage_bytes: 0,
+                                epoch_read_bytes: 0,
+                                epoch_cpu_ms: 0,
+                                epoch_bytes_out: 0,
+                                emission_year_ago: disk.emission_year_ago,
+                                inflation_epoch_marker: disk.inflation_epoch_marker,
+                                recent_timestamps: Vec::new(),
+                            };
+                            db.insert(
+                                DB_CHAIN,
+                                ledger_binary::encode_chain_disk(&migrated)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                            db.remove(DB_ACCOUNTS);
+                            db.remove(DB_EMISSION);
+                            (
+                                migrated.chain,
+                                migrated.accounts,
+                                migrated.emission,
+                                migrated.block_reward,
+                                migrated.block_height,
+                                migrated.mempool,
+                                migrated.base_fee,
+                                migrated.recent_timestamps,
+                            )
+                        } else {
+                            if disk.emission == 0 && !disk.chain.is_empty() {
+                                let mut em_c = 0u64;
+                                let mut em_i = 0u64;
+                                for b in &disk.chain {
+                                    em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                    em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                                }
+                                disk.emission = em_c.saturating_add(em_i);
+                                disk.block_height = disk.chain.len() as u64;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 4 {
+                                let mut em_c = 0u64;
+                                let mut em_i = 0u64;
+                                for b in &mut disk.chain {
+                                    if let Some(cb) = b.transactions.first() {
+                                        b.coinbase_consumer =
+                                            TokenAmount::new(cb.payload.amount_consumer);
+                                        b.coinbase_industrial =
+                                            TokenAmount::new(cb.payload.amount_industrial);
+                                    }
+                                    let mut fee_c: u128 = 0;
+                                    let mut fee_i: u128 = 0;
+                                    for tx in b.transactions.iter().skip(1) {
+                                        if let Ok((c, i)) =
+                                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                        {
+                                            fee_c += c as u128;
+                                            fee_i += i as u128;
+                                        }
+                                    }
+                                    let fc = u64::try_from(fee_c).unwrap_or(0);
+                                    let fi = u64::try_from(fee_i).unwrap_or(0);
+                                    let mut h = blake3::Hasher::new();
+                                    h.update(&fc.to_le_bytes());
+                                    h.update(&fi.to_le_bytes());
+                                    b.fee_checksum = h.finalize().to_hex().to_string();
+                                    b.hash = calculate_hash(
+                                        b.index,
+                                        &b.previous_hash,
+                                        b.timestamp_millis,
+                                        b.nonce,
+                                        b.difficulty,
+                                        b.base_fee,
+                                        b.coinbase_consumer,
+                                        b.coinbase_industrial,
+                                        b.storage_sub_ct,
+                                        b.read_sub_ct,
+                                        b.read_sub_viewer_ct,
+                                        b.read_sub_host_ct,
+                                        b.read_sub_hardware_ct,
+                                        b.read_sub_verifier_ct,
+                                        b.read_sub_liquidity_ct,
+                                        b.ad_viewer_ct,
+                                        b.ad_host_ct,
+                                        b.ad_hardware_ct,
+                                        b.ad_verifier_ct,
+                                        b.ad_liquidity_ct,
+                                        b.ad_miner_ct,
+                                        b.ad_host_it,
+                                        b.ad_hardware_it,
+                                        b.ad_verifier_it,
+                                        b.ad_liquidity_it,
+                                        b.ad_miner_it,
+                                        b.ad_total_usd_micros,
+                                        b.ad_settlement_count,
+                                        b.ad_oracle_ct_price_usd_micros,
+                                        b.ad_oracle_it_price_usd_micros,
+                                        b.compute_sub_ct,
+                                        b.proof_rebate_ct,
+                                        b.storage_sub_it,
+                                        b.read_sub_it,
+                                        b.compute_sub_it,
+                                        b.read_root,
+                                        &b.fee_checksum,
+                                        &b.transactions,
+                                        &b.state_root,
+                                        &b.l2_roots,
+                                        &b.l2_sizes,
+                                        b.vdf_commit,
+                                        b.vdf_output,
+                                        &b.vdf_proof,
+                                        b.retune_hint,
+                                    );
+                                    em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                    em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                                }
+                                disk.emission = em_c.saturating_add(em_i);
+                                disk.block_height = disk.chain.len() as u64;
+                                for e in &mut disk.mempool {
+                                    e.timestamp_ticks = e.timestamp_millis;
+                                }
+                                disk.schema_version = 4;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 5 {
+                                if disk.base_fee == 0 {
+                                    disk.base_fee = 1;
+                                }
+                                disk.schema_version = 5;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 6 {
+                                disk.schema_version = 6;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 7 {
+                                if disk.recent_timestamps.is_empty() {
+                                    disk.recent_timestamps = Vec::new();
+                                }
+                                disk.schema_version = 7;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 8 {
+                                disk.schema_version = 8;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 9 {
+                                disk.schema_version = 9;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            if disk.schema_version < 10 {
+                                disk.schema_version = 10;
+                                db.insert(
+                                    DB_CHAIN,
+                                    ledger_binary::encode_chain_disk(&disk)
+                                        .unwrap_or_else(|e| panic!("serialize: {e}")),
+                                );
+                            }
+                            (
+                                disk.chain,
+                                disk.accounts,
+                                disk.emission,
+                                disk.block_reward,
+                                disk.block_height,
+                                disk.mempool,
+                                disk.base_fee,
+                                disk.recent_timestamps.clone(),
+                            )
+                        }
                     }
-                    if disk.schema_version < 3 {
-                        let mut migrated_chain = disk.chain.clone();
+                    Err(_) => {
+                        let chain = ledger_binary::decode_block_vec(&raw).unwrap_or_default();
+                        let accounts: HashMap<String, Account> = db
+                            .get(DB_ACCOUNTS)
+                            .and_then(|iv| ledger_binary::decode_account_map_bytes(&iv).ok())
+                            .unwrap_or_default();
+                        let (_em, br, _bh) = db
+                            .get(DB_EMISSION)
+                            .and_then(|iv| ledger_binary::decode_emission_tuple(&iv).ok())
+                            .map(|(em_c, em_i, br_c, br_i, bh)| (em_c + em_i, br_c + br_i, bh))
+                            .unwrap_or((0, INITIAL_BLOCK_REWARD, 0));
+                        let mut migrated_chain = chain.clone();
                         for b in &mut migrated_chain {
                             if let Some(cb) = b.transactions.first() {
                                 b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
@@ -1823,354 +2114,55 @@ impl Blockchain {
                             em_i = em_i.saturating_add(b.coinbase_industrial.get());
                         }
                         let bh = migrated_chain.len() as u64;
-                        let migrated = ChainDisk {
+                        let disk_new = ChainDisk {
                             schema_version: 3,
                             chain: migrated_chain,
-                            accounts: disk.accounts,
+                            accounts: accounts.clone(),
                             emission: em_c.saturating_add(em_i),
-                            block_reward: if disk.block_reward.get() == 0 {
-                                TokenAmount::new(INITIAL_BLOCK_REWARD)
-                            } else {
-                                disk.block_reward
-                            },
+                            emission_year_ago: 0,
+                            inflation_epoch_marker: 0,
+                            block_reward: TokenAmount::new(br),
                             block_height: bh,
                             mempool: Vec::new(),
-                            base_fee: disk.base_fee,
+                            base_fee: 1,
                             params: Params::default(),
                             epoch_storage_bytes: 0,
                             epoch_read_bytes: 0,
                             epoch_cpu_ms: 0,
                             epoch_bytes_out: 0,
-                            emission_year_ago: disk.emission_year_ago,
-                            inflation_epoch_marker: disk.inflation_epoch_marker,
                             recent_timestamps: Vec::new(),
                         };
                         db.insert(
                             DB_CHAIN,
-                            ledger_binary::encode_chain_disk(&migrated)
+                            ledger_binary::encode_chain_disk(&disk_new)
                                 .unwrap_or_else(|e| panic!("serialize: {e}")),
                         );
                         db.remove(DB_ACCOUNTS);
                         db.remove(DB_EMISSION);
                         (
-                            migrated.chain,
-                            migrated.accounts,
-                            migrated.emission,
-                            migrated.block_reward,
-                            migrated.block_height,
-                            migrated.mempool,
-                            migrated.base_fee,
-                            migrated.recent_timestamps,
-                        )
-                    } else {
-                        if disk.emission == 0 && !disk.chain.is_empty() {
-                            let mut em_c = 0u64;
-                            let mut em_i = 0u64;
-                            for b in &disk.chain {
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
-                                em_i = em_i.saturating_add(b.coinbase_industrial.get());
-                            }
-                            disk.emission = em_c.saturating_add(em_i);
-                            disk.block_height = disk.chain.len() as u64;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 4 {
-                            let mut em_c = 0u64;
-                            let mut em_i = 0u64;
-                            for b in &mut disk.chain {
-                                if let Some(cb) = b.transactions.first() {
-                                    b.coinbase_consumer =
-                                        TokenAmount::new(cb.payload.amount_consumer);
-                                    b.coinbase_industrial =
-                                        TokenAmount::new(cb.payload.amount_industrial);
-                                }
-                                let mut fee_c: u128 = 0;
-                                let mut fee_i: u128 = 0;
-                                for tx in b.transactions.iter().skip(1) {
-                                    if let Ok((c, i)) =
-                                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
-                                    {
-                                        fee_c += c as u128;
-                                        fee_i += i as u128;
-                                    }
-                                }
-                                let fc = u64::try_from(fee_c).unwrap_or(0);
-                                let fi = u64::try_from(fee_i).unwrap_or(0);
-                                let mut h = blake3::Hasher::new();
-                                h.update(&fc.to_le_bytes());
-                                h.update(&fi.to_le_bytes());
-                                b.fee_checksum = h.finalize().to_hex().to_string();
-                                b.hash = calculate_hash(
-                                    b.index,
-                                    &b.previous_hash,
-                                    b.timestamp_millis,
-                                    b.nonce,
-                                    b.difficulty,
-                                    b.base_fee,
-                                    b.coinbase_consumer,
-                                    b.coinbase_industrial,
-                                    b.storage_sub_ct,
-                                    b.read_sub_ct,
-                                    b.read_sub_viewer_ct,
-                                    b.read_sub_host_ct,
-                                    b.read_sub_hardware_ct,
-                                    b.read_sub_verifier_ct,
-                                    b.read_sub_liquidity_ct,
-                                    b.ad_viewer_ct,
-                                    b.ad_host_ct,
-                                    b.ad_hardware_ct,
-                                    b.ad_verifier_ct,
-                                    b.ad_liquidity_ct,
-                                    b.ad_miner_ct,
-                                    b.ad_host_it,
-                                    b.ad_hardware_it,
-                                    b.ad_verifier_it,
-                                    b.ad_liquidity_it,
-                                    b.ad_miner_it,
-                                    b.ad_total_usd_micros,
-                                    b.ad_settlement_count,
-                                    b.ad_oracle_ct_price_usd_micros,
-                                    b.ad_oracle_it_price_usd_micros,
-                                    b.compute_sub_ct,
-                                    b.proof_rebate_ct,
-                                    b.storage_sub_it,
-                                    b.read_sub_it,
-                                    b.compute_sub_it,
-                                    b.read_root,
-                                    &b.fee_checksum,
-                                    &b.transactions,
-                                    &b.state_root,
-                                    &b.l2_roots,
-                                    &b.l2_sizes,
-                                    b.vdf_commit,
-                                    b.vdf_output,
-                                    &b.vdf_proof,
-                                    b.retune_hint,
-                                );
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
-                                em_i = em_i.saturating_add(b.coinbase_industrial.get());
-                            }
-                            disk.emission = em_c.saturating_add(em_i);
-                            disk.block_height = disk.chain.len() as u64;
-                            for e in &mut disk.mempool {
-                                e.timestamp_ticks = e.timestamp_millis;
-                            }
-                            disk.schema_version = 4;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 5 {
-                            if disk.base_fee == 0 {
-                                disk.base_fee = 1;
-                            }
-                            disk.schema_version = 5;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 6 {
-                            disk.schema_version = 6;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 7 {
-                            if disk.recent_timestamps.is_empty() {
-                                disk.recent_timestamps = Vec::new();
-                            }
-                            disk.schema_version = 7;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 8 {
-                            disk.schema_version = 8;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 9 {
-                            disk.schema_version = 9;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        if disk.schema_version < 10 {
-                            disk.schema_version = 10;
-                            db.insert(
-                                DB_CHAIN,
-                                ledger_binary::encode_chain_disk(&disk)
-                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
-                            );
-                        }
-                        (
-                            disk.chain,
-                            disk.accounts,
-                            disk.emission,
-                            disk.block_reward,
-                            disk.block_height,
-                            disk.mempool,
-                            disk.base_fee,
-                            disk.recent_timestamps.clone(),
+                            disk_new.chain,
+                            disk_new.accounts,
+                            disk_new.emission,
+                            disk_new.block_reward,
+                            disk_new.block_height,
+                            disk_new.mempool,
+                            disk_new.base_fee,
+                            disk_new.recent_timestamps,
                         )
                     }
                 }
-                Err(_) => {
-                    let chain = ledger_binary::decode_block_vec(&raw).unwrap_or_default();
-                    let accounts: HashMap<String, Account> = db
-                        .get(DB_ACCOUNTS)
-                        .and_then(|iv| ledger_binary::decode_account_map_bytes(&iv).ok())
-                        .unwrap_or_default();
-                    let (_em, br, _bh) = db
-                        .get(DB_EMISSION)
-                        .and_then(|iv| ledger_binary::decode_emission_tuple(&iv).ok())
-                        .map(|(em_c, em_i, br_c, br_i, bh)| {
-                            (em_c + em_i, br_c + br_i, bh)
-                        })
-                        .unwrap_or((0, INITIAL_BLOCK_REWARD, 0));
-                    let mut migrated_chain = chain.clone();
-                    for b in &mut migrated_chain {
-                        if let Some(cb) = b.transactions.first() {
-                            b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
-                            b.coinbase_industrial = TokenAmount::new(cb.payload.amount_industrial);
-                        }
-                        let mut fee_consumer: u128 = 0;
-                        let mut fee_industrial: u128 = 0;
-                        for tx in b.transactions.iter().skip(1) {
-                            if let Ok((c, i)) =
-                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
-                            {
-                                fee_consumer += c as u128;
-                                fee_industrial += i as u128;
-                            }
-                        }
-                        let fee_consumer_u64 = u64::try_from(fee_consumer).unwrap_or(0);
-                        let fee_industrial_u64 = u64::try_from(fee_industrial).unwrap_or(0);
-                        let mut h = blake3::Hasher::new();
-                        h.update(&fee_consumer_u64.to_le_bytes());
-                        h.update(&fee_industrial_u64.to_le_bytes());
-                        b.fee_checksum = h.finalize().to_hex().to_string();
-                        b.hash = calculate_hash(
-                            b.index,
-                            &b.previous_hash,
-                            b.timestamp_millis,
-                            b.nonce,
-                            b.difficulty,
-                            b.base_fee,
-                            b.coinbase_consumer,
-                            b.coinbase_industrial,
-                            b.storage_sub_ct,
-                            b.read_sub_ct,
-                            b.read_sub_viewer_ct,
-                            b.read_sub_host_ct,
-                            b.read_sub_hardware_ct,
-                            b.read_sub_verifier_ct,
-                            b.read_sub_liquidity_ct,
-                            b.ad_viewer_ct,
-                            b.ad_host_ct,
-                            b.ad_hardware_ct,
-                            b.ad_verifier_ct,
-                            b.ad_liquidity_ct,
-                            b.ad_miner_ct,
-                            b.ad_host_it,
-                            b.ad_hardware_it,
-                            b.ad_verifier_it,
-                            b.ad_liquidity_it,
-                            b.ad_miner_it,
-                            b.ad_total_usd_micros,
-                            b.ad_settlement_count,
-                            b.ad_oracle_ct_price_usd_micros,
-                            b.ad_oracle_it_price_usd_micros,
-                            b.compute_sub_ct,
-                            b.proof_rebate_ct,
-                            b.storage_sub_it,
-                            b.read_sub_it,
-                            b.compute_sub_it,
-                            b.read_root,
-                            &b.fee_checksum,
-                            &b.transactions,
-                            &b.state_root,
-                            &b.l2_roots,
-                            &b.l2_sizes,
-                            b.vdf_commit,
-                            b.vdf_output,
-                            &b.vdf_proof,
-                            b.retune_hint,
-                        );
-                    }
-                    let mut em_c = 0u64;
-                    let mut em_i = 0u64;
-                    for b in &migrated_chain {
-                        em_c = em_c.saturating_add(b.coinbase_consumer.get());
-                        em_i = em_i.saturating_add(b.coinbase_industrial.get());
-                    }
-                    let bh = migrated_chain.len() as u64;
-                    let disk_new = ChainDisk {
-                        schema_version: 3,
-                        chain: migrated_chain,
-                        accounts: accounts.clone(),
-                        emission: em_c.saturating_add(em_i),
-                        emission_year_ago: 0,
-                        inflation_epoch_marker: 0,
-                        block_reward: TokenAmount::new(br),
-                        block_height: bh,
-                        mempool: Vec::new(),
-                        base_fee: 1,
-                        params: Params::default(),
-                        epoch_storage_bytes: 0,
-                        epoch_read_bytes: 0,
-                        epoch_cpu_ms: 0,
-                        epoch_bytes_out: 0,
-                        recent_timestamps: Vec::new(),
-                    };
-                    db.insert(
-                        DB_CHAIN,
-                        ledger_binary::encode_chain_disk(&disk_new)
-                            .unwrap_or_else(|e| panic!("serialize: {e}")),
-                    );
-                    db.remove(DB_ACCOUNTS);
-                    db.remove(DB_EMISSION);
-                    (
-                        disk_new.chain,
-                        disk_new.accounts,
-                        disk_new.emission,
-                        disk_new.block_reward,
-                        disk_new.block_height,
-                        disk_new.mempool,
-                        disk_new.base_fee,
-                        disk_new.recent_timestamps,
-                    )
-                }
-            }
-        } else {
-            (
-                Vec::new(),
-                HashMap::new(),
-                0,
-                TokenAmount::new(INITIAL_BLOCK_REWARD),
-                0,
-                Vec::new(),
-                1,
-                Vec::new(),
-            )
-        };
+            } else {
+                (
+                    Vec::new(),
+                    HashMap::new(),
+                    0,
+                    TokenAmount::new(INITIAL_BLOCK_REWARD),
+                    0,
+                    Vec::new(),
+                    1,
+                    Vec::new(),
+                )
+            };
 
         // Load any persisted shard state roots.
         let shard_roots: HashMap<ShardId, [u8; 32]> = db
@@ -3926,8 +3918,7 @@ impl Blockchain {
             }
         }
         let logistic = self.logistic_factor;
-        let mut reward =
-            TokenAmount::new((self.block_reward.0 as f64 * logistic).round() as u64);
+        let mut reward = TokenAmount::new((self.block_reward.0 as f64 * logistic).round() as u64);
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::ACTIVE_MINERS.set(active_eff.round() as i64);
@@ -4249,7 +4240,13 @@ impl Blockchain {
         let coinbase_consumer_total = base_coinbase_consumer
             .checked_add(rebate_ct)
             .and_then(|v| v.checked_add(fee_industrial_u64))
-            .and_then(|v| if dual_token_enabled { v.checked_add(ad_miner_it_total) } else { Some(v) })
+            .and_then(|v| {
+                if dual_token_enabled {
+                    v.checked_add(ad_miner_it_total)
+                } else {
+                    Some(v)
+                }
+            })
             .ok_or_else(|| py_value_err("Fee overflow"))?;
         let coinbase_industrial_total = 0;
 
@@ -4629,10 +4626,7 @@ impl Blockchain {
                     let rolling = if prev == 0 {
                         0.0
                     } else {
-                        let delta = self
-                            .emission
-                            .checked_sub(prev)
-                            .ok_or(BalanceUnderflow)?;
+                        let delta = self.emission.checked_sub(prev).ok_or(BalanceUnderflow)?;
                         delta as f64 / prev as f64
                     };
                     let raw = retune_multipliers(
@@ -4670,7 +4664,8 @@ impl Blockchain {
                     // Build metrics from epoch data
                     let metrics = economics::MarketMetrics {
                         storage: economics::MarketMetric {
-                            utilization: (self.epoch_storage_bytes as f64) / (stats.epoch_secs * 1_000_000.0),
+                            utilization: (self.epoch_storage_bytes as f64)
+                                / (stats.epoch_secs * 1_000_000.0),
                             provider_margin: 0.0, // TODO: compute from settlement data
                             ..Default::default()
                         },
@@ -4684,7 +4679,9 @@ impl Blockchain {
                     };
 
                     // Compute total ad spend from settlements
-                    let total_ad_spend = self.pending_ad_settlements.iter()
+                    let total_ad_spend = self
+                        .pending_ad_settlements
+                        .iter()
                         .map(|s| s.total_usd_micros)
                         .sum::<u64>();
 
@@ -4701,7 +4698,7 @@ impl Blockchain {
                         epoch,
                         &metrics,
                         &network_activity,
-                        self.emission, // circulating_block
+                        self.emission,                        // circulating_block
                         self.emission, // total_emission (same as circulating for now)
                         self.economics_epoch_tx_volume_block, // non-KYC volume
                         total_ad_spend,
@@ -4710,7 +4707,8 @@ impl Blockchain {
                     );
 
                     // Update blockchain state with results
-                    self.economics_prev_annual_issuance_block = econ_snapshot.inflation.annual_issuance_block;
+                    self.economics_prev_annual_issuance_block =
+                        econ_snapshot.inflation.annual_issuance_block;
                     self.economics_prev_subsidy = econ_snapshot.subsidies.clone();
                     self.economics_prev_tariff = econ_snapshot.tariff.clone();
 

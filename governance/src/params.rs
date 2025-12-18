@@ -1291,45 +1291,162 @@ impl Params {
             bridge_challenge_slash: take_i64("bridge_challenge_slash")?,
             bridge_duty_window_secs: take_i64("bridge_duty_window_secs")?,
             // Economic Control Laws - use defaults if not present for backward compatibility
-            inflation_target_bps: obj.get("inflation_target_bps").and_then(Value::as_i64).unwrap_or_else(default_inflation_target_bps),
-            inflation_controller_gain: obj.get("inflation_controller_gain").and_then(Value::as_i64).unwrap_or_else(default_inflation_controller_gain),
-            min_annual_issuance_block: obj.get("min_annual_issuance_block").and_then(Value::as_i64).unwrap_or_else(default_min_annual_issuance_block),
-            max_annual_issuance_block: obj.get("max_annual_issuance_block").and_then(Value::as_i64).unwrap_or_else(default_max_annual_issuance_block),
-            storage_util_target_bps: obj.get("storage_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_util_target_bps),
-            storage_margin_target_bps: obj.get("storage_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_storage_margin_target_bps),
-            compute_util_target_bps: obj.get("compute_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_compute_util_target_bps),
-            compute_margin_target_bps: obj.get("compute_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_compute_margin_target_bps),
-            energy_util_target_bps: obj.get("energy_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_energy_util_target_bps),
-            energy_margin_target_bps: obj.get("energy_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_energy_margin_target_bps),
-            ad_util_target_bps: obj.get("ad_util_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_util_target_bps),
-            ad_margin_target_bps: obj.get("ad_margin_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_margin_target_bps),
-            subsidy_allocator_alpha: obj.get("subsidy_allocator_alpha").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_alpha),
-            subsidy_allocator_beta: obj.get("subsidy_allocator_beta").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_beta),
-            subsidy_allocator_temperature: obj.get("subsidy_allocator_temperature").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_temperature),
-            subsidy_allocator_drift_rate: obj.get("subsidy_allocator_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_subsidy_allocator_drift_rate),
-            storage_util_responsiveness: obj.get("storage_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_storage_util_responsiveness),
-            storage_cost_responsiveness: obj.get("storage_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_storage_cost_responsiveness),
-            storage_multiplier_floor: obj.get("storage_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_storage_multiplier_floor),
-            storage_multiplier_ceiling: obj.get("storage_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_storage_multiplier_ceiling),
-            compute_util_responsiveness: obj.get("compute_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_compute_util_responsiveness),
-            compute_cost_responsiveness: obj.get("compute_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_compute_cost_responsiveness),
-            compute_multiplier_floor: obj.get("compute_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_compute_multiplier_floor),
-            compute_multiplier_ceiling: obj.get("compute_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_compute_multiplier_ceiling),
-            energy_util_responsiveness: obj.get("energy_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_energy_util_responsiveness),
-            energy_cost_responsiveness: obj.get("energy_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_energy_cost_responsiveness),
-            energy_multiplier_floor: obj.get("energy_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_energy_multiplier_floor),
-            energy_multiplier_ceiling: obj.get("energy_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_energy_multiplier_ceiling),
-            ad_util_responsiveness: obj.get("ad_util_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_ad_util_responsiveness),
-            ad_cost_responsiveness: obj.get("ad_cost_responsiveness").and_then(Value::as_i64).unwrap_or_else(default_ad_cost_responsiveness),
-            ad_multiplier_floor: obj.get("ad_multiplier_floor").and_then(Value::as_i64).unwrap_or_else(default_ad_multiplier_floor),
-            ad_multiplier_ceiling: obj.get("ad_multiplier_ceiling").and_then(Value::as_i64).unwrap_or_else(default_ad_multiplier_ceiling),
-            ad_platform_take_target_bps: obj.get("ad_platform_take_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_platform_take_target_bps),
-            ad_user_share_target_bps: obj.get("ad_user_share_target_bps").and_then(Value::as_i64).unwrap_or_else(default_ad_user_share_target_bps),
-            ad_drift_rate: obj.get("ad_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_ad_drift_rate),
-            tariff_public_revenue_target_bps: obj.get("tariff_public_revenue_target_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_public_revenue_target_bps),
-            tariff_drift_rate: obj.get("tariff_drift_rate").and_then(Value::as_i64).unwrap_or_else(default_tariff_drift_rate),
-            tariff_min_bps: obj.get("tariff_min_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_min_bps),
-            tariff_max_bps: obj.get("tariff_max_bps").and_then(Value::as_i64).unwrap_or_else(default_tariff_max_bps),
+            inflation_target_bps: obj
+                .get("inflation_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_inflation_target_bps),
+            inflation_controller_gain: obj
+                .get("inflation_controller_gain")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_inflation_controller_gain),
+            min_annual_issuance_block: obj
+                .get("min_annual_issuance_block")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_min_annual_issuance_block),
+            max_annual_issuance_block: obj
+                .get("max_annual_issuance_block")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_max_annual_issuance_block),
+            storage_util_target_bps: obj
+                .get("storage_util_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_util_target_bps),
+            storage_margin_target_bps: obj
+                .get("storage_margin_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_margin_target_bps),
+            compute_util_target_bps: obj
+                .get("compute_util_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_util_target_bps),
+            compute_margin_target_bps: obj
+                .get("compute_margin_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_margin_target_bps),
+            energy_util_target_bps: obj
+                .get("energy_util_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_util_target_bps),
+            energy_margin_target_bps: obj
+                .get("energy_margin_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_margin_target_bps),
+            ad_util_target_bps: obj
+                .get("ad_util_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_util_target_bps),
+            ad_margin_target_bps: obj
+                .get("ad_margin_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_margin_target_bps),
+            subsidy_allocator_alpha: obj
+                .get("subsidy_allocator_alpha")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_subsidy_allocator_alpha),
+            subsidy_allocator_beta: obj
+                .get("subsidy_allocator_beta")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_subsidy_allocator_beta),
+            subsidy_allocator_temperature: obj
+                .get("subsidy_allocator_temperature")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_subsidy_allocator_temperature),
+            subsidy_allocator_drift_rate: obj
+                .get("subsidy_allocator_drift_rate")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_subsidy_allocator_drift_rate),
+            storage_util_responsiveness: obj
+                .get("storage_util_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_util_responsiveness),
+            storage_cost_responsiveness: obj
+                .get("storage_cost_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_cost_responsiveness),
+            storage_multiplier_floor: obj
+                .get("storage_multiplier_floor")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_multiplier_floor),
+            storage_multiplier_ceiling: obj
+                .get("storage_multiplier_ceiling")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_storage_multiplier_ceiling),
+            compute_util_responsiveness: obj
+                .get("compute_util_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_util_responsiveness),
+            compute_cost_responsiveness: obj
+                .get("compute_cost_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_cost_responsiveness),
+            compute_multiplier_floor: obj
+                .get("compute_multiplier_floor")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_multiplier_floor),
+            compute_multiplier_ceiling: obj
+                .get("compute_multiplier_ceiling")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_compute_multiplier_ceiling),
+            energy_util_responsiveness: obj
+                .get("energy_util_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_util_responsiveness),
+            energy_cost_responsiveness: obj
+                .get("energy_cost_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_cost_responsiveness),
+            energy_multiplier_floor: obj
+                .get("energy_multiplier_floor")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_multiplier_floor),
+            energy_multiplier_ceiling: obj
+                .get("energy_multiplier_ceiling")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_multiplier_ceiling),
+            ad_util_responsiveness: obj
+                .get("ad_util_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_util_responsiveness),
+            ad_cost_responsiveness: obj
+                .get("ad_cost_responsiveness")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_cost_responsiveness),
+            ad_multiplier_floor: obj
+                .get("ad_multiplier_floor")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_multiplier_floor),
+            ad_multiplier_ceiling: obj
+                .get("ad_multiplier_ceiling")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_multiplier_ceiling),
+            ad_platform_take_target_bps: obj
+                .get("ad_platform_take_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_platform_take_target_bps),
+            ad_user_share_target_bps: obj
+                .get("ad_user_share_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_user_share_target_bps),
+            ad_drift_rate: obj
+                .get("ad_drift_rate")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_drift_rate),
+            tariff_public_revenue_target_bps: obj
+                .get("tariff_public_revenue_target_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_tariff_public_revenue_target_bps),
+            tariff_drift_rate: obj
+                .get("tariff_drift_rate")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_tariff_drift_rate),
+            tariff_min_bps: obj
+                .get("tariff_min_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_tariff_min_bps),
+            tariff_max_bps: obj
+                .get("tariff_max_bps")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_tariff_max_bps),
         };
         Ok(params)
     }

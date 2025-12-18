@@ -1,12 +1,21 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use testkit::bench;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn bench_env_guard() -> MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
 
 #[test]
 fn run_executes_body_requested_iterations() {
@@ -56,6 +65,7 @@ fn unique_path(suffix: &str) -> PathBuf {
 
 #[test]
 fn history_records_runs_with_percentiles() {
+    let _guard = bench_env_guard();
     let history_path = unique_path("history");
     std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
     bench::run("history_record", 2, || {});
@@ -91,6 +101,7 @@ fn history_records_runs_with_percentiles() {
 
 #[test]
 fn history_records_missing_percentiles_as_empty_fields() {
+    let _guard = bench_env_guard();
     let history_path = unique_path("history_missing");
     std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
     bench::record_result(
@@ -131,6 +142,7 @@ fn history_records_missing_percentiles_as_empty_fields() {
 
 #[test]
 fn history_ewma_persists_when_percentiles_missing() {
+    let _guard = bench_env_guard();
     let history_path = unique_path("history_mixed");
     std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
     bench::record_result(
@@ -191,12 +203,15 @@ fn history_ewma_persists_when_percentiles_missing() {
 
 #[test]
 fn regression_thresholds_trigger_alert_files() {
+    let _guard = bench_env_guard();
     let history_path = unique_path("history_regression");
     let alert_path = unique_path("alert");
     std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
     std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
     std::env::set_var("TB_BENCH_REGRESSION_THRESHOLDS", "per_iter=0");
-    bench::run("threshold_regression", 1, || {});
+    bench::run("threshold_regression", 1, || {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    });
     std::env::remove_var("TB_BENCH_HISTORY_PATH");
     std::env::remove_var("TB_BENCH_ALERT_PATH");
     std::env::remove_var("TB_BENCH_REGRESSION_THRESHOLDS");
@@ -218,6 +233,7 @@ fn regression_thresholds_trigger_alert_files() {
 
 #[test]
 fn malformed_threshold_entries_are_ignored() {
+    let _guard = bench_env_guard();
     let alert_path = unique_path("alert_malformed");
     std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
     std::env::set_var("TB_BENCH_REGRESSION_THRESHOLDS", "p50=abc,per_iter=");
@@ -234,6 +250,7 @@ fn malformed_threshold_entries_are_ignored() {
 
 #[test]
 fn thresholds_are_case_insensitive() {
+    let _guard = bench_env_guard();
     let alert_path = unique_path("alert_ci");
     std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
     std::env::set_var("TB_BENCH_REGRESSION_THRESHOLDS", "P50=0.0000001");
@@ -249,6 +266,7 @@ fn thresholds_are_case_insensitive() {
 
 #[test]
 fn threshold_directory_overrides_apply() {
+    let _guard = bench_env_guard();
     let history_path = unique_path("history_config");
     let alert_path = unique_path("alert_config");
     let threshold_dir = unique_path("threshold_dir");
@@ -258,7 +276,9 @@ fn threshold_directory_overrides_apply() {
     std::env::set_var("TB_BENCH_HISTORY_PATH", &history_path);
     std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
     std::env::set_var("TB_BENCH_THRESHOLD_DIR", &threshold_dir);
-    bench::run("threshold_config", 1, || {});
+    bench::run("threshold_config", 1, || {
+        thread::sleep(Duration::from_millis(1));
+    });
     std::env::remove_var("TB_BENCH_HISTORY_PATH");
     std::env::remove_var("TB_BENCH_ALERT_PATH");
     std::env::remove_var("TB_BENCH_THRESHOLD_DIR");
@@ -281,6 +301,7 @@ fn threshold_directory_overrides_apply() {
 
 #[test]
 fn unknown_threshold_keys_are_ignored_with_warning() {
+    let _guard = bench_env_guard();
     let alert_path = unique_path("alert_unknown");
     std::env::set_var("TB_BENCH_ALERT_PATH", &alert_path);
     std::env::set_var("TB_BENCH_REGRESSION_THRESHOLDS", "p42=1");

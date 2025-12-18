@@ -13,7 +13,7 @@ use foundation_serialization::json::{
 };
 use httpd::{Method, StatusCode};
 use runtime;
-use std::io::{self, Write as IoWrite};
+use std::io::{self, Read, Write as IoWrite};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
@@ -258,9 +258,32 @@ fn provider_balances_payload_uses_fixed_request_id() {
 
 #[test]
 fn cli_proofs_fetch_and_verify() {
+    // Clear ALL TLS-related environment variables to ensure plain HTTP
+    for prefix in &["TB_RPC_TLS", "TB_HTTP_TLS", "SSL", "TLS"] {
+        for suffix in &[
+            "_CA_CERT",
+            "_CLIENT_CERT",
+            "_CLIENT_KEY",
+            "_CERT_FILE",
+            "_KEY_FILE",
+            "_CACERT",
+        ] {
+            let var_name = format!("{}{}", prefix, suffix);
+            std::env::remove_var(&var_name);
+        }
+    }
+    // Also clear common SSL/TLS env vars
+    std::env::remove_var("SSL_CERT_FILE");
+    std::env::remove_var("SSL_CERT_DIR");
+    std::env::remove_var("REQUESTS_CA_BUNDLE");
+    std::env::remove_var("CURL_CA_BUNDLE");
+
+    // Enable plain HTTP mode for testing with mock servers
+    std::env::set_var("TB_HTTP_PLAIN", "1");
+
     let wasm = b"cli-proof-wasm";
     let output = workloads::snark::run(wasm);
-    let bundle = snark::prove_with_backend(wasm, &output, SnarkBackend::Gpu).expect("gpu proof");
+    let bundle = snark::prove_with_backend(wasm, &output, SnarkBackend::Cpu).expect("cpu proof");
     let payload = mock_sla_history_response(&bundle);
     let (url, handle) = match spawn_mock_rpc(payload.clone()) {
         Ok(pair) => pair,
@@ -271,6 +294,7 @@ fn cli_proofs_fetch_and_verify() {
         Err(err) => panic!("spawn mock rpc: {err}"),
     };
     let mut buffer = Vec::new();
+    eprintln!("[TEST] Calling compute_handle_with_writer...");
     compute_handle_with_writer(
         ComputeCmd::Proofs {
             url: url.clone(),
@@ -279,7 +303,9 @@ fn cli_proofs_fetch_and_verify() {
         &mut buffer,
     )
     .expect("cli proofs command");
+    eprintln!("[TEST] compute_handle_with_writer done, joining server thread...");
     handle.join().expect("server thread");
+    eprintln!("[TEST] Server thread joined, parsing response...");
     let parsed = parse_sla_history_from_str(&payload).expect("parse history");
     assert_eq!(parsed.len(), 1);
     let proof = parsed[0].proofs.first().expect("proof entry");
@@ -303,9 +329,32 @@ fn cli_proofs_fetch_and_verify() {
 
 #[test]
 fn explorer_sync_proofs_serves_http_history() {
+    // Clear ALL TLS-related environment variables to ensure plain HTTP
+    for prefix in &["TB_RPC_TLS", "TB_HTTP_TLS", "SSL", "TLS"] {
+        for suffix in &[
+            "_CA_CERT",
+            "_CLIENT_CERT",
+            "_CLIENT_KEY",
+            "_CERT_FILE",
+            "_KEY_FILE",
+            "_CACERT",
+        ] {
+            let var_name = format!("{}{}", prefix, suffix);
+            std::env::remove_var(&var_name);
+        }
+    }
+    // Also clear common SSL/TLS env vars
+    std::env::remove_var("SSL_CERT_FILE");
+    std::env::remove_var("SSL_CERT_DIR");
+    std::env::remove_var("REQUESTS_CA_BUNDLE");
+    std::env::remove_var("CURL_CA_BUNDLE");
+
+    // Enable plain HTTP mode for testing with mock servers
+    std::env::set_var("TB_HTTP_PLAIN", "1");
+
     let wasm = b"cli-proof-wasm";
     let output = workloads::snark::run(wasm);
-    let bundle = snark::prove_with_backend(wasm, &output, SnarkBackend::Gpu).expect("gpu proof");
+    let bundle = snark::prove_with_backend(wasm, &output, SnarkBackend::Cpu).expect("cpu proof");
     let payload = mock_sla_history_response(&bundle);
     let (url, handle) = match spawn_mock_rpc(payload.clone()) {
         Ok(pair) => pair,
@@ -355,21 +404,37 @@ fn spawn_mock_rpc(payload: String) -> io::Result<(String, thread::JoinHandle<()>
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = format!("http://{}", listener.local_addr()?);
     let handle = thread::spawn(move || {
+        eprintln!("[SERVER] Thread started, waiting for connection...");
         if let Ok((mut stream, _)) = listener.accept() {
+            eprintln!("[SERVER] Connection accepted, reading request...");
+            // Read the incoming HTTP request to prevent client from hanging
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            eprintln!("[SERVER] Request read, sending response...");
+
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{}",
                 payload.len(),
                 payload
             );
             let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+            eprintln!("[SERVER] Response sent, shutting down stream...");
+            // Explicitly shutdown and drop the stream to close the connection
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            drop(stream);
+            eprintln!("[SERVER] Stream closed");
         }
+        // Explicitly drop the listener so the thread can exit
+        drop(listener);
+        eprintln!("[SERVER] Thread exiting");
     });
     Ok((addr, handle))
 }
 
 fn mock_sla_history_response(bundle: &ProofBundle) -> String {
     let mut proof_map = JsonMap::new();
-    proof_map.insert("backend".to_string(), JsonValue::String("GPU".to_string()));
+    proof_map.insert("backend".to_string(), JsonValue::String("CPU".to_string()));
     proof_map.insert(
         "fingerprint".to_string(),
         JsonValue::String(hex::encode(bundle.fingerprint())),

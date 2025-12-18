@@ -2,7 +2,7 @@ use std::{collections::HashSet, time::Instant};
 
 use foundation_serialization::json::{Map, Value};
 use httpd::{Method, StatusCode};
-use metrics_aggregator::{router, AppState};
+use metrics_aggregator::{metrics_registry_guard, router, AppState};
 use runtime::block_on;
 use sys::tempfile;
 
@@ -125,6 +125,7 @@ fn extract_role_labels(body: &str, metric: &str) -> HashSet<String> {
 
 #[test]
 fn explorer_payout_counters_increment_on_ingest() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");
@@ -272,6 +273,7 @@ fn explorer_payout_counters_increment_on_ingest() {
 
 #[test]
 fn explorer_payout_summary_metrics_exposed() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");
@@ -359,6 +361,7 @@ fn explorer_payout_summary_metrics_exposed() {
 
 #[test]
 fn explorer_payout_counters_ignore_decreases() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");
@@ -489,6 +492,7 @@ fn explorer_payout_counters_ignore_decreases() {
 
 #[test]
 fn explorer_payout_ingest_handles_high_role_cardinality() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");
@@ -597,6 +601,7 @@ fn explorer_payout_ingest_handles_high_role_cardinality() {
 
 #[test]
 fn explorer_payout_counters_remain_monotonic_with_role_churn() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");
@@ -761,6 +766,7 @@ fn explorer_payout_counters_remain_monotonic_with_role_churn() {
 
 #[test]
 fn explorer_payout_counters_are_peer_scoped() {
+    let _guard = metrics_registry_guard();
     block_on(async {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("metrics.db");

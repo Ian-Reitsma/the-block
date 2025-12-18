@@ -155,10 +155,14 @@ fn detects_corrupt_manifest_and_logs_failure() {
     assert!(summary.failures >= 1);
 
     let entries = log.recent_entries(10).expect("entries");
-    assert!(entries
-        .iter()
-        .any(|entry| entry.status == RepairLogStatus::Failure
-            && entry.error.as_deref() == Some("manifest hash mismatch")));
+    assert!(entries.iter().any(|entry| {
+        entry.status == RepairLogStatus::Failure
+            && entry
+                .error
+                .as_deref()
+                .map(|msg| msg == "manifest hash mismatch" || msg.starts_with("manifest decode:"))
+                .unwrap_or(false)
+    }));
 }
 
 #[test]

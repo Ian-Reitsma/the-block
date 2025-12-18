@@ -19,7 +19,7 @@ Extend the unified CT economic engine to measurable physical resources (energy, 
 - Pricing: same EWMA smoothing factor (`alpha = 0.3`) used by `storage_market::ReplicaIncentive::record_outcome`, implemented via `update_energy_provider_ewma` in the energy crate.
 - Quotas: per-jurisdiction enforcement uses `crates/jurisdiction` APIs (`jurisdiction::limit_for("energy")`). Settlements fail fast if provider exceeds quota.
 - Settlement cadence: configurable toggles in governance proposal `UpdateEnergyMarketParams` choose between real-time (`settle_energy_delivery` executes immediately) vs batched (settlement engine sweeps pending receipts each block).
-- Disputes: governance receives oracle disputes via `tb-cli gov submit --payload UpdateEnergyMarketParams` specifying slashing rate + timeout. CLI `tb-cli energy disputes` surfaces outstanding cases.
+- Disputes: governance receives oracle disputes via `contract-cli gov submit --payload UpdateEnergyMarketParams` specifying slashing rate + timeout. CLI `contract-cli energy disputes` surfaces outstanding cases.
 
 ### Meter/Oracle Requirements
 - Signed readings include Unix timestamp, provider ID, jurisdiction, and measurement payload. Format defined in `crates/oracle-adapter::MeterReading` implementation (JSON encoded, hashed with BLAKE3).
@@ -30,13 +30,13 @@ Extend the unified CT economic engine to measurable physical resources (energy, 
 ## Settlement Flow (Energy Vertical)
 1. Provider calls `register_energy_provider` via CLI/RPC. Node persists provider entry, meter address, stake, and jurisdiction data.
 2. Oracle adapter fetches signed readings and submits them through RPC `energy.submit_reading`, which validates signature + timestamp.
-3. Consumers run `tb-cli energy settle` referencing provider ID + kWh consumed. Node verifies latest readings, computes price (`price_per_kwh` × amount), applies jurisdiction fee, transfers CT (95% provider, 5% treasury), emits `EnergyReceipt`.
+3. Consumers run `contract-cli energy settle` referencing provider ID + kWh consumed. Node verifies latest readings, computes price (`price_per_kwh` × amount), applies jurisdiction fee, transfers CT (95% provider, 5% treasury), emits `EnergyReceipt`.
 4. EWMA reputation updated via `update_energy_provider_ewma`. Telemetry counters `energy_providers_count`, `energy_kwh_traded_total`, and histograms `oracle_reading_latency_seconds` updated for dashboards.
 5. Governance monitors `energy_market_health` (see Step 3.7) to trigger parameter tweaks.
 
 ## Data & RPC Surfaces
 - **RPC** (to be added): `energy.register_provider`, `energy.market_state`, `energy.settle`, `energy.submit_reading`, `energy.providers`, `energy.receipts`.
-- **CLI**: `tb-cli energy register|market|settle|submit-reading` (see Step 3.2 instructions).
+- **CLI**: `contract-cli energy register|market|settle|submit-reading` (see Step 3.2 instructions).
 - **Storage**: sled tree `energy:providers` storing `EnergyProvider` records, `energy:receipts` storing `EnergyReceipt`, `energy:credits` for outstanding balances.
 - **Explorer**: extend `provider_stats` table with `energy_capacity_kwh` and `reputation` columns. Quickstart doc `docs/testnet/ENERGY_QUICKSTART.md` explains flows.
 

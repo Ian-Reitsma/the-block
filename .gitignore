@@ -24,6 +24,9 @@ snapshot/
 node_modules/
 # Build artifacts from monitoring stack
 monitoring/bin/
+# AI agent/cache folders
+.perplexity/
+claude-cli/
 # Local node data and logs
 node-data/
 node-data-*/

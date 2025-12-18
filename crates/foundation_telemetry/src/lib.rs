@@ -412,7 +412,8 @@ mod tests {
                     "metrics": [
                         {"metric": "foo", "labels": {"region": "us"}, "value": 1.0}
                     ]
-                }
+                },
+                "ad_readiness": null
             }"#,
         )
         .expect("valid summary json")

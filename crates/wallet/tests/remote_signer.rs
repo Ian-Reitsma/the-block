@@ -9,26 +9,29 @@ use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 use support::{HttpSignerMock, TlsWebSocketSignerMock};
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_roundtrip() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    // Increase timeout for debug builds where crypto is unoptimized
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "30000");
     let server = HttpSignerMock::success();
     let url = server.url().to_string();
     let signer = RemoteSigner::connect_multi(&vec![url.clone()], 1).expect("connect");
     let msg = b"hello";
     let sig = signer.sign(msg).expect("sign");
     signer.public_key().verify(&remote_tag(msg), &sig).unwrap();
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_signature_roundtrip_bytes() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    // Increase timeout for debug builds where crypto is unoptimized
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "30000");
     let server = HttpSignerMock::success();
     let url = server.url().to_string();
     let signer = RemoteSigner::connect(&url).expect("connect");
@@ -40,9 +43,9 @@ fn remote_signer_signature_roundtrip_bytes() {
         .public_key()
         .verify(&remote_tag(msg), &sig_roundtrip)
         .expect("verify");
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_connect_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
@@ -52,12 +55,13 @@ fn remote_signer_connect_error() {
     assert!(res.is_err());
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_threshold_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    // Increase timeout for debug builds where crypto is unoptimized
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "30000");
     let good = HttpSignerMock::success();
     let bad = HttpSignerMock::failing(StatusCode::INTERNAL_SERVER_ERROR);
     let signer =
@@ -65,9 +69,9 @@ fn remote_signer_threshold_error() {
             .expect("connect");
     let res = signer.sign_multisig(b"data");
     assert!(res.is_err());
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_invalid_signature() {
     std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
@@ -77,7 +81,6 @@ fn remote_signer_invalid_signature() {
     assert!(res.is_err());
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_timeout() {
     std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "100");
@@ -88,7 +91,6 @@ fn remote_signer_timeout() {
     std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
 }
 
-#[test]
 #[testkit::tb_serial]
 fn remote_signer_mtls_ws() {
     use base64_fp::encode_standard;
@@ -96,6 +98,9 @@ fn remote_signer_mtls_ws() {
     use foundation_tls::{sign_with_ca_ed25519, SelfSignedCertParams};
     use rand::rngs::OsRng;
     use rand::RngCore;
+
+    // Increase timeout for debug builds where crypto is unoptimized
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "30000");
 
     fn der_to_pem(label: &str, der: &[u8]) -> String {
         let mut pem = String::new();
@@ -203,6 +208,7 @@ fn remote_signer_mtls_ws() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
     std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
 }
 
 #[test]

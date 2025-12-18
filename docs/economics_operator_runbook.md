@@ -92,7 +92,7 @@ economics_annual_issuance_ct increasing rapidly
 **Immediate Actions:**
 1. Check circulating supply calculation:
    ```bash
-   tb-cli explorer state --field emission_consumer
+   contract-cli explorer state --field emission_consumer
    ```
 2. Verify epoch boundary execution:
    ```bash
@@ -100,7 +100,7 @@ economics_annual_issuance_ct increasing rapidly
    ```
 3. Check for unexpected CT minting:
    ```bash
-   tb-cli explorer blocks --tail 100 | grep coinbase
+   contract-cli explorer blocks --tail 100 | grep coinbase
    ```
 
 **Root Causes & Fixes:**
@@ -140,7 +140,7 @@ economics_market_multiplier{market="energy"} >= 9.5
    ```
 3. Review recent parameter changes:
    ```bash
-   tb-cli gov proposals --status executed | grep -E "energy|multiplier"
+   contract-cli gov proposals --status executed | grep -E "energy|multiplier"
    ```
 
 **Root Causes & Fixes:**
@@ -179,7 +179,7 @@ stddev(economics_subsidy_share_bps{market="storage"}[1h]) > 200
    ```
 3. Verify drift rate:
    ```bash
-   tb-cli gov params get subsidy_allocator_drift_rate
+   contract-cli gov params get subsidy_allocator_drift_rate
    ```
 
 **Root Causes & Fixes:**
@@ -214,7 +214,7 @@ economics_treasury_contribution_bps < 500  # Still below target
    ```
 2. Review treasury inflows:
    ```bash
-   tb-cli gov treasury balance
+   contract-cli gov treasury balance
    ```
 3. Calculate required tariff:
    ```bash
@@ -258,7 +258,7 @@ economics_provider_margin{market="compute"} < 0 for 30+ epochs
    ```
 3. Review payout calculations:
    ```bash
-   tb-cli explorer settlements --market compute --tail 100
+   contract-cli explorer settlements --market compute --tail 100
    ```
 
 **Root Causes & Fixes:**
@@ -329,7 +329,7 @@ abs(economics_treasury_contribution_bps - 1000) / 100  # Target deviation
 **Diagnosis:**
 ```bash
 # Check if node is mining
-tb-cli explorer blocks --tail 10
+contract-cli explorer blocks --tail 10
 
 # Check epoch boundary hits
 grep "Epoch boundary" <node-logs> | tail -20
@@ -375,10 +375,10 @@ grep economics /etc/prometheus/prometheus.yml
 **Diagnosis:**
 ```bash
 # Verify proposal execution
-tb-cli gov proposals --id <proposal-id> --status
+contract-cli gov proposals --id <proposal-id> --status
 
 # Check current parameters
-tb-cli gov params get inflation_target_bps
+contract-cli gov params get inflation_target_bps
 
 # Verify node has latest params
 grep "from_governance_params" <node-logs> | tail -1
@@ -403,7 +403,7 @@ grep "from_governance_params" <node-logs> | tail -1
 **Procedure:**
 1. **Draft emergency proposal:**
    ```bash
-   tb-cli gov propose \
+   contract-cli gov propose \
      --title "EMERGENCY: Fix inflation controller gain" \
      --body "Inflation error exceeding 500 bps. Doubling controller gain." \
      --param inflation_controller_gain=200
@@ -433,7 +433,7 @@ grep "from_governance_params" <node-logs> | tail -1
 
 2. **Treasury disbursement:**
    ```bash
-   tb-cli gov disburse propose \
+   contract-cli gov disburse propose \
      --recipient <market_subsidy_pool> \
      --amount <needed_ct> \
      --justification "Emergency: Compute market collapse"

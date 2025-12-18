@@ -1,86 +1,43 @@
 #![cfg(feature = "inhouse-backend")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use runtime::net::{TcpListener, TcpStream};
+#[path = "support/ws_shared.rs"]
+mod ws_shared;
+use ws_shared::*;
+
+use foundation_async::sync::oneshot;
+use rand::RngCore;
+use runtime::net::TcpStream;
 use runtime::ws::{self, Message, ServerStream};
 use runtime::{self, spawn};
 use std::net::SocketAddr;
-use std::sync::Once;
-
-fn ensure_inhouse_backend() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        std::env::set_var("TB_RUNTIME_BACKEND", "inhouse");
-        assert_eq!(runtime::handle().backend_name(), "inhouse");
-    });
-}
-
-async fn read_handshake_request(stream: &mut TcpStream) -> String {
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 64];
-    loop {
-        let n = stream.read(&mut tmp).await.expect("read handshake");
-        assert!(n > 0, "handshake must not terminate early");
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-    }
-    String::from_utf8(buf).expect("handshake utf8")
-}
-
-fn extract_key(request: &str) -> &str {
-    request
-        .lines()
-        .find_map(|line| line.strip_prefix("Sec-WebSocket-Key: "))
-        .map(str::trim)
-        .expect("sec-websocket-key present")
-}
-
-async fn write_fragmented_text(stream: &mut TcpStream, payload: &str) {
-    let bytes = payload.as_bytes();
-    let mid = bytes.len() / 2;
-    send_frame(stream, 0x1, false, &bytes[..mid]).await;
-    send_frame(stream, 0x0, true, &bytes[mid..]).await;
-}
-
-async fn send_frame(stream: &mut TcpStream, opcode: u8, fin: bool, payload: &[u8]) {
-    use rand::RngCore;
-    let mut header = Vec::with_capacity(2 + payload.len());
-    header.push((if fin { 0x80 } else { 0x00 }) | opcode);
-    let mask_bit = 0x80;
-    if payload.len() < 126 {
-        header.push(mask_bit | payload.len() as u8);
-    } else {
-        panic!("test frame too large");
-    }
-    let mut mask = [0u8; 4];
-    rand::thread_rng().fill_bytes(&mut mask);
-    header.extend_from_slice(&mask);
-    let mut masked = payload.to_vec();
-    for (idx, byte) in masked.iter_mut().enumerate() {
-        *byte ^= mask[idx % 4];
-    }
-    stream.write_all(&header).await.expect("write header");
-    stream.write_all(&masked).await.expect("write payload");
-}
+use std::thread;
 
 #[test]
 fn server_unmasks_payloads() {
     ensure_inhouse_backend();
+    let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().unwrap();
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+                .expect("bind listener");
+        let addr = std_listener.local_addr().unwrap();
+        let (conn_tx, conn_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let (stream, _) = std_listener.accept().expect("accept");
+            let _ = conn_tx.send(stream);
+        });
 
         let server = spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("accept");
+            let std_stream = conn_rx.await.expect("accepted stream");
+            let mut stream =
+                TcpStream::from_std(std_stream).expect("convert accepted stream to runtime");
             let request = read_handshake_request(&mut stream).await;
             let key = extract_key(&request).to_string();
             ws::write_server_handshake(&mut stream, &key, &[]) // respond
                 .await
                 .expect("handshake resp");
+            runtime::yield_now().await;
             let mut ws = ServerStream::new(stream);
             if let Some(Message::Binary(data)) = ws.recv().await.expect("recv binary") {
                 assert_eq!(data, vec![1, 2, 3, 4]);
@@ -90,6 +47,7 @@ fn server_unmasks_payloads() {
             ws.send(Message::Close(None)).await.expect("close");
         });
 
+        runtime::yield_now().await;
         let mut stream = TcpStream::connect(addr).await.expect("connect");
         let key = ws::handshake_key();
         let request = format!(
@@ -116,14 +74,22 @@ fn server_unmasks_payloads() {
 #[test]
 fn fragmented_frames_are_joined() {
     ensure_inhouse_backend();
+    let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().unwrap();
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+                .expect("bind listener");
+        let addr = std_listener.local_addr().unwrap();
+        let (conn_tx, conn_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let (stream, _) = std_listener.accept().expect("accept");
+            let _ = conn_tx.send(stream);
+        });
 
         let server = spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("accept");
+            let std_stream = conn_rx.await.expect("accepted stream");
+            let mut stream =
+                TcpStream::from_std(std_stream).expect("convert accepted stream to runtime");
             let request = read_handshake_request(&mut stream).await;
             let key = extract_key(&request).to_string();
             ws::write_server_handshake(&mut stream, &key, &[]) // respond
@@ -160,14 +126,22 @@ fn fragmented_frames_are_joined() {
 #[test]
 fn ping_pong_cycle() {
     ensure_inhouse_backend();
+    let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().unwrap();
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+                .expect("bind listener");
+        let addr = std_listener.local_addr().unwrap();
+        let (conn_tx, conn_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let (stream, _) = std_listener.accept().expect("accept");
+            let _ = conn_tx.send(stream);
+        });
 
         let server = spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("accept");
+            let std_stream = conn_rx.await.expect("accepted stream");
+            let mut stream =
+                TcpStream::from_std(std_stream).expect("convert accepted stream to runtime");
             let request = read_handshake_request(&mut stream).await;
             let key = extract_key(&request).to_string();
             ws::write_server_handshake(&mut stream, &key, &[]) // respond
@@ -204,6 +178,162 @@ fn ping_pong_cycle() {
             other => panic!("unexpected response: {other:?}"),
         }
         client.recv().await.expect("close");
+        server.await.expect("server task");
+    });
+}
+
+#[test]
+fn abrupt_server_disconnect_reports_abnormal_close() {
+    ensure_inhouse_backend();
+    let _guard = websocket_test_guard();
+    runtime::block_on(async {
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+                .expect("bind listener");
+        let addr = std_listener.local_addr().unwrap();
+        let (conn_tx, conn_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let (stream, _) = std_listener.accept().expect("accept");
+            let _ = conn_tx.send(stream);
+        });
+
+        let server = spawn(async move {
+            let std_stream = conn_rx.await.expect("accepted stream");
+            let mut stream =
+                TcpStream::from_std(std_stream).expect("convert accepted stream to runtime");
+            let request = read_handshake_request(&mut stream).await;
+            let key = extract_key(&request).to_string();
+            ws::write_server_handshake(&mut stream, &key, &[]) // respond
+                .await
+                .expect("handshake resp");
+            runtime::yield_now().await;
+            // Drop the stream without sending a close frame to simulate an abrupt disconnect.
+            drop(stream);
+        });
+
+        runtime::yield_now().await;
+        let mut stream = TcpStream::connect(addr).await.expect("connect");
+        let key = ws::handshake_key();
+        let request = format!(
+            "GET /logs HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("write request");
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
+            .await
+            .expect("validate handshake");
+
+        let mut client = ws::ClientStream::new(stream);
+        let close = client.recv().await.expect("close");
+        match close {
+            Some(Message::Close(Some(frame))) => {
+                assert_eq!(frame.code, ws::ABNORMAL_CLOSE_CODE);
+                assert_eq!(frame.reason, ws::ABNORMAL_CLOSE_REASON);
+            }
+            other => panic!("unexpected close result: {other:?}"),
+        }
+
+        server.await.expect("server task");
+    });
+}
+
+#[test]
+fn fragmented_close_frame_payload_delivered() {
+    ensure_inhouse_backend();
+    let _guard = websocket_test_guard();
+    runtime::block_on(async {
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+                .expect("bind listener");
+        let addr = std_listener.local_addr().unwrap();
+        let (conn_tx, conn_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let (stream, _) = std_listener.accept().expect("accept");
+            let _ = conn_tx.send(stream);
+        });
+        let reason = "fragmented reason";
+
+        let server = spawn(async move {
+            let std_stream = conn_rx.await.expect("accepted stream");
+            let mut stream =
+                TcpStream::from_std(std_stream).expect("convert accepted stream to runtime");
+            let request = read_handshake_request(&mut stream).await;
+            let key = extract_key(&request).to_string();
+            ws::write_server_handshake(&mut stream, &key, &[]) // respond
+                .await
+                .expect("handshake resp");
+            runtime::yield_now().await;
+            let mut ready_signal = [0u8; 5];
+            stream
+                .read_exact(&mut ready_signal)
+                .await
+                .expect("read ready signal");
+            assert_eq!(&ready_signal, b"ready");
+
+            let code = 4001u16;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&code.to_be_bytes());
+            payload.extend_from_slice(reason.as_bytes());
+
+            let mut mask = [0u8; 4];
+            rand::thread_rng().fill_bytes(&mut mask);
+            let mut masked = payload.clone();
+            for (idx, byte) in masked.iter_mut().enumerate() {
+                *byte ^= mask[idx % 4];
+            }
+
+            let mut header = Vec::with_capacity(2 + mask.len());
+            header.push(0x80 | 0x8);
+            header.push(0x80 | (masked.len() as u8));
+            header.extend_from_slice(&mask);
+            stream.write_all(&header).await.expect("write close header");
+
+            let split = masked.len() / 2;
+            stream
+                .write_all(&masked[..split])
+                .await
+                .expect("write first chunk");
+            runtime::yield_now().await;
+            stream
+                .write_all(&masked[split..])
+                .await
+                .expect("write second chunk");
+            runtime::yield_now().await;
+            let mut ack_buf = [0u8; 16];
+            let _ = stream.read(&mut ack_buf).await;
+        });
+
+        runtime::yield_now().await;
+        let mut stream = TcpStream::connect(addr).await.expect("connect");
+        let key = ws::handshake_key();
+        let request = format!(
+            "GET /logs HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("write request");
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
+            .await
+            .expect("validate handshake");
+        stream
+            .write_all(b"ready")
+            .await
+            .expect("write ready signal");
+
+        let mut client = ws::ClientStream::new(stream);
+        match client.recv().await.expect("close payload") {
+            Some(Message::Close(Some(frame))) => {
+                assert_eq!(frame.code, 4001);
+                assert_eq!(frame.reason, reason);
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+
         server.await.expect("server task");
     });
 }

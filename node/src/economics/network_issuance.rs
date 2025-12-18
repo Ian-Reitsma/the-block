@@ -4,8 +4,8 @@
 //! based on real network activity metrics:
 //!
 //! **Formula:**
-//! ```
-//! block_reward = base_reward × activity_multiplier × decentralization_factor × supply_decay
+//! ```text
+//! block_reward = base_reward * activity_multiplier * decentralization_factor * supply_decay
 //! ```
 //!
 //! Where:
@@ -48,7 +48,7 @@ pub struct NetworkIssuanceParams {
     /// Total supply cap (40M BLOCK)
     pub max_supply_block: u64,
 
-    /// Expected total blocks to reach 90% of cap (~Bitcoin's 210k blocks × ~100 halvings)
+    /// Expected total blocks to reach 90% of cap (~Bitcoin's 210k blocks * ~100 halvings)
     pub expected_total_blocks: u64,
 
     /// Base transactions per epoch to achieve 1.0 activity multiplier (initial bootstrap value)
@@ -70,7 +70,7 @@ pub struct NetworkIssuanceParams {
 
     /// Adaptive baselines configuration
     pub adaptive_baselines_enabled: bool,
-    pub baseline_ema_alpha: f64,  // EMA smoothing factor (0.05 = ~20 epoch smoothing)
+    pub baseline_ema_alpha: f64, // EMA smoothing factor (0.05 = ~20 epoch smoothing)
     pub baseline_min_tx_count: u64,
     pub baseline_max_tx_count: u64,
     pub baseline_min_tx_volume: u64,
@@ -100,7 +100,7 @@ impl Default for NetworkIssuanceParams {
             decentralization_multiplier_max: 1.5,
             // Adaptive baselines enabled by default
             adaptive_baselines_enabled: true,
-            baseline_ema_alpha: 0.05,  // 20-epoch smoothing
+            baseline_ema_alpha: 0.05, // 20-epoch smoothing
             // Bounds to prevent extreme baseline drift
             baseline_min_tx_count: 50,
             baseline_max_tx_count: 10_000,
@@ -134,7 +134,7 @@ impl NetworkIssuanceController {
     /// Update adaptive baselines with observed network activity
     ///
     /// Uses exponential moving average (EMA) to smooth baseline adjustments:
-    /// EMA_new = α × observed + (1 - α) × EMA_old
+    /// EMA_new = α * observed + (1 - α) * EMA_old
     ///
     /// This should be called after each reward computation to keep baselines current.
     pub fn update_baselines(&mut self, metrics: &NetworkMetrics) {
@@ -153,8 +153,8 @@ impl NetworkIssuanceController {
         );
 
         // Update tx_volume baseline
-        self.adaptive_baseline_tx_volume =
-            alpha * (metrics.tx_volume_block as f64) + (1.0 - alpha) * self.adaptive_baseline_tx_volume;
+        self.adaptive_baseline_tx_volume = alpha * (metrics.tx_volume_block as f64)
+            + (1.0 - alpha) * self.adaptive_baseline_tx_volume;
         self.adaptive_baseline_tx_volume = self.adaptive_baseline_tx_volume.clamp(
             self.params.baseline_min_tx_volume as f64,
             self.params.baseline_max_tx_volume as f64,
@@ -183,33 +183,33 @@ impl NetworkIssuanceController {
     /// # Formula Breakdown:
     ///
     /// 1. **Base Reward:** Evenly distributes total supply across expected blocks
-    ///    ```
-    ///    base = (max_supply × 0.9) / expected_total_blocks
+    ///    ```text
+    ///    base = (max_supply * 0.9) / expected_total_blocks
     ///    ```
     ///    (Using 90% instead of 100% to leave room for tail emission)
     ///
     /// 2. **Activity Multiplier:** Rewards scale with network usage
-    ///    ```
-    ///    activity = sqrt(tx_count / baseline_tx_count) ×
-    ///               sqrt(tx_volume / baseline_tx_volume) ×
+    ///    ```text
+    ///    activity = sqrt(tx_count / baseline_tx_count) *
+    ///               sqrt(tx_volume / baseline_tx_volume) *
     ///               (1 + avg_utilization)
     ///    ```
     ///    Clamped to [0.5, 2.0] range
     ///
     /// 3. **Decentralization Factor:** Rewards scale with validator diversity
-    ///    ```
+    ///    ```text
     ///    decentralization = sqrt(unique_miners / baseline_miners)
     ///    ```
     ///    Clamped to [0.5, 1.5] range
     ///
     /// 4. **Supply Decay:** Natural halvening as cap approaches
-    ///    ```
+    ///    ```text
     ///    decay = (max_supply - emission) / max_supply
     ///    ```
     ///
     /// **Final:**
-    /// ```
-    /// block_reward = base × activity × decentralization × decay
+    /// ```text
+    /// block_reward = base * activity * decentralization * decay
     /// ```
     pub fn compute_block_reward(&mut self, metrics: &NetworkMetrics) -> u64 {
         // 1. Base reward: Distribute 90% of cap over expected blocks
@@ -240,11 +240,10 @@ impl NetworkIssuanceController {
         // Utilization bonus: 0% util = 1.0x, 100% util = 2.0x
         let utilization_bonus = 1.0 + metrics.avg_market_utilization.clamp(0.0, 1.0);
 
-        let activity_multiplier = (tx_factor * volume_factor * utilization_bonus)
-            .clamp(
-                self.params.activity_multiplier_min,
-                self.params.activity_multiplier_max,
-            );
+        let activity_multiplier = (tx_factor * volume_factor * utilization_bonus).clamp(
+            self.params.activity_multiplier_min,
+            self.params.activity_multiplier_max,
+        );
 
         // 3. Decentralization factor (rewards having more unique miners)
         let baseline_miners = if self.params.adaptive_baselines_enabled {
@@ -254,14 +253,16 @@ impl NetworkIssuanceController {
         };
 
         let miner_ratio = (metrics.unique_miners as f64) / baseline_miners.max(1.0);
-        let decentralization_multiplier = miner_ratio.max(0.01).sqrt()
-            .clamp(
-                self.params.decentralization_multiplier_min,
-                self.params.decentralization_multiplier_max,
-            );
+        let decentralization_multiplier = miner_ratio.max(0.01).sqrt().clamp(
+            self.params.decentralization_multiplier_min,
+            self.params.decentralization_multiplier_max,
+        );
 
         // 4. Supply decay factor (natural halvening)
-        let remaining = self.params.max_supply_block.saturating_sub(metrics.total_emission);
+        let remaining = self
+            .params
+            .max_supply_block
+            .saturating_sub(metrics.total_emission);
         let supply_decay = (remaining as f64) / (self.params.max_supply_block as f64);
 
         // Combine all factors
@@ -326,8 +327,12 @@ mod tests {
         // Decentralization at baseline = 1.0x
         // Supply decay at 0 emission = 1.0x
         // Utilization bonus at 50% = 1.5x
-        // Expected: 1.8 × 1.0 × 1.0 × 1.0 ≈ 1.8, but with 1.5x util bonus = 2.7
-        assert!(reward >= 2 && reward <= 3, "Baseline reward should be ~2-3 BLOCK, got {}", reward);
+        // Expected: 1.8 * 1.0 * 1.0 * 1.0 ≈ 1.8, but with 1.5x util bonus = 2.7
+        assert!(
+            reward >= 2 && reward <= 3,
+            "Baseline reward should be ~2-3 BLOCK, got {}",
+            reward
+        );
     }
 
     #[test]
@@ -358,10 +363,16 @@ mod tests {
         let high_reward = controller.compute_block_reward(&high_activity_metrics);
 
         // High activity should give higher reward
-        assert!(high_reward > baseline_reward, "High activity should boost rewards");
+        assert!(
+            high_reward > baseline_reward,
+            "High activity should boost rewards"
+        );
 
         // But capped at 2x
-        assert!(high_reward <= baseline_reward * 2, "Activity boost capped at 2x");
+        assert!(
+            high_reward <= baseline_reward * 2,
+            "Activity boost capped at 2x"
+        );
     }
 
     #[test]
@@ -421,12 +432,18 @@ mod tests {
         let early_reward = controller.compute_block_reward(&early_metrics);
         let late_reward = controller.compute_block_reward(&late_metrics);
 
-        assert!(late_reward < early_reward, "Late emission should have lower rewards due to decay");
+        assert!(
+            late_reward < early_reward,
+            "Late emission should have lower rewards due to decay"
+        );
 
         // With 90% emitted (supply_decay = 0.10), late reward should be significantly lower
         // Due to 1 BLOCK minimum floor, we get ~50% reduction rather than 10x
         // Accept at least 50% reduction as "drastically reduced"
-        assert!(late_reward <= early_reward / 2, "Near cap, rewards should be drastically reduced (at least 2x)");
+        assert!(
+            late_reward <= early_reward / 2,
+            "Near cap, rewards should be drastically reduced (at least 2x)"
+        );
     }
 
     #[test]
@@ -448,8 +465,16 @@ mod tests {
 
         // Formula naturally produces tiny rewards near cap due to supply decay
         // Should never exceed remaining supply, and should be very small (<= 10)
-        assert!(reward <= 10, "Reward should not exceed remaining supply: got {}", reward);
-        assert!(reward < 10, "Reward should be drastically reduced near cap: got {}", reward);
+        assert!(
+            reward <= 10,
+            "Reward should not exceed remaining supply: got {}",
+            reward
+        );
+        assert!(
+            reward < 10,
+            "Reward should be drastically reduced near cap: got {}",
+            reward
+        );
     }
 
     #[test]
@@ -469,7 +494,7 @@ mod tests {
 
         let reward = controller.compute_block_reward(&metrics);
 
-        // Should still get some reward (base × 0.5 activity × 0.5 decentralization)
+        // Should still get some reward (base * 0.5 activity * 0.5 decentralization)
         assert!(reward > 0, "Zero activity should still give minimum reward");
     }
 
@@ -483,16 +508,25 @@ mod tests {
         let mut controller = NetworkIssuanceController::new(params.clone());
 
         // Initial baselines should be static params (100, 10_000, 10)
-        assert_eq!(controller.adaptive_baseline_tx_count as u64, params.baseline_tx_count);
-        assert_eq!(controller.adaptive_baseline_tx_volume as u64, params.baseline_tx_volume_block);
-        assert_eq!(controller.adaptive_baseline_miners as u64, params.baseline_miners);
+        assert_eq!(
+            controller.adaptive_baseline_tx_count as u64,
+            params.baseline_tx_count
+        );
+        assert_eq!(
+            controller.adaptive_baseline_tx_volume as u64,
+            params.baseline_tx_volume_block
+        );
+        assert_eq!(
+            controller.adaptive_baseline_miners as u64,
+            params.baseline_miners
+        );
 
         // Feed high activity for several epochs
         for _ in 0..20 {
             let metrics = NetworkMetrics {
-                tx_count: 500,  // 5x baseline
-                tx_volume_block: 50_000,  // 5x baseline
-                unique_miners: 50,  // 5x baseline
+                tx_count: 500,           // 5x baseline
+                tx_volume_block: 50_000, // 5x baseline
+                unique_miners: 50,       // 5x baseline
                 avg_market_utilization: 0.5,
                 block_height: 1000,
                 total_emission: 0,
@@ -501,12 +535,21 @@ mod tests {
         }
 
         // Baselines should have adapted upward (with alpha=0.2, after 20 epochs should be close to new values)
-        assert!(controller.adaptive_baseline_tx_count > 100.0,
-            "tx_count baseline should adapt upward, got {}", controller.adaptive_baseline_tx_count);
-        assert!(controller.adaptive_baseline_tx_volume > 10_000.0,
-            "tx_volume baseline should adapt upward, got {}", controller.adaptive_baseline_tx_volume);
-        assert!(controller.adaptive_baseline_miners > 10.0,
-            "miners baseline should adapt upward, got {}", controller.adaptive_baseline_miners);
+        assert!(
+            controller.adaptive_baseline_tx_count > 100.0,
+            "tx_count baseline should adapt upward, got {}",
+            controller.adaptive_baseline_tx_count
+        );
+        assert!(
+            controller.adaptive_baseline_tx_volume > 10_000.0,
+            "tx_volume baseline should adapt upward, got {}",
+            controller.adaptive_baseline_tx_volume
+        );
+        assert!(
+            controller.adaptive_baseline_miners > 10.0,
+            "miners baseline should adapt upward, got {}",
+            controller.adaptive_baseline_miners
+        );
 
         // Should be bounded by max limits
         assert!(controller.adaptive_baseline_tx_count <= params.baseline_max_tx_count as f64);
@@ -536,11 +579,17 @@ mod tests {
         }
 
         // Baselines should NOT have changed (still at initial values)
-        assert_eq!(controller.adaptive_baseline_tx_count as u64, params.baseline_tx_count,
-            "With adaptive disabled, tx_count baseline should remain static");
-        assert_eq!(controller.adaptive_baseline_tx_volume as u64, params.baseline_tx_volume_block,
-            "With adaptive disabled, tx_volume baseline should remain static");
-        assert_eq!(controller.adaptive_baseline_miners as u64, params.baseline_miners,
-            "With adaptive disabled, miners baseline should remain static");
+        assert_eq!(
+            controller.adaptive_baseline_tx_count as u64, params.baseline_tx_count,
+            "With adaptive disabled, tx_count baseline should remain static"
+        );
+        assert_eq!(
+            controller.adaptive_baseline_tx_volume as u64, params.baseline_tx_volume_block,
+            "With adaptive disabled, tx_volume baseline should remain static"
+        );
+        assert_eq!(
+            controller.adaptive_baseline_miners as u64, params.baseline_miners,
+            "With adaptive disabled, miners baseline should remain static"
+        );
     }
 }

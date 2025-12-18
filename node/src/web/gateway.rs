@@ -1480,8 +1480,8 @@ mod tests {
         assert!(ack.creative_id.is_none());
         #[cfg(feature = "telemetry")]
         {
-            let counter = telemetry::AD_READINESS_SKIPPED
-                .with_label_values(&["insufficient_unique_viewers"]);
+            let counter =
+                telemetry::AD_READINESS_SKIPPED.with_label_values(&["insufficient_unique_viewers"]);
             assert_eq!(counter.get(), 1);
         }
 
@@ -1851,7 +1851,10 @@ mod tests {
         assert!((candidate.requested_kappa - 0.66).abs() < f64::EPSILON);
         assert!((candidate.shadow_price - 0.33).abs() < f64::EPSILON);
         assert_eq!(receipt.badge_soft_intent.as_ref(), Some(&ann_receipt));
-        let receipt_snapshot = receipt.badge_soft_intent_snapshot.as_ref().expect("snapshot");
+        let receipt_snapshot = receipt
+            .badge_soft_intent_snapshot
+            .as_ref()
+            .expect("snapshot");
         assert_eq!(receipt_snapshot.fingerprint, snapshot.fingerprint);
         assert_eq!(receipt_snapshot.bucket_hashes, snapshot.bucket_hashes);
         assert_eq!(receipt_snapshot.dimensions, snapshot.dimensions);
@@ -2133,7 +2136,11 @@ mod tests {
         assert_eq!(guard.pending(), 1);
         let bundle = guard.dequeue().expect("bundle enqueued");
         assert_eq!(bundle.payload, mesh_payload);
-        let relays: Vec<String> = bundle.proofs.iter().map(|proof| proof.relay.clone()).collect();
+        let relays: Vec<String> = bundle
+            .proofs
+            .iter()
+            .map(|proof| proof.relay.clone())
+            .collect();
         assert_eq!(relays, vec!["relay-1".to_string(), "relay-2".to_string()]);
     }
 

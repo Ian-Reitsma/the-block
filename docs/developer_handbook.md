@@ -76,55 +76,44 @@ If you're new to blockchain development, here's a quick reference:
 
 ## Debugging and Diagnostics
 - Enable `RUST_LOG=trace` plus the diagnostics subscriber when chasing runtime issues; `diagnostics::tracing` is wired everywhere.
-- `cli/src/debug_cli.rs` and `tb-cli diagnostics …` provide structured dumps for mempool, scheduler, gossip, mesh, TLS, and telemetry state.
+- `cli/src/debug_cli.rs` and `contract-cli diagnostics …` provide structured dumps for mempool, scheduler, gossip, mesh, TLS, and telemetry state.
 - Use `docs/operations.md#probe-cli-and-diagnostics` for probe commands.
 
 ## Performance and Benchmarks
 - Bench harnesses sit under `benches/`, `monitoring/build`, and `node/benches`. Publish results through the metrics exporter by setting `TB_BENCH_PROM_PATH`.
-- `docs/benchmarks.md` content moved here: store thresholds in `config/benchmarks/<name>.thresholds`, compare to `monitoring/metrics.json`, and watch Grafana’s **Benchmarks** row.
+- Thresholds live in `config/benchmarks/<name>.thresholds`, metrics compare to `monitoring/metrics.json`, and Grafana’s **Benchmarks** row visualizes the same targets so operators can detect regressions early.
 
 ## Contract and VM Development
-- WASM tooling: `cli/src/wasm.rs`, `node/src/vm`, `node/src/vm/debugger.rs`. Use `docs/architecture.md#virtual-machine-and-wasm` for runtime behaviour.
-- `docs/contract_dev.md`, `docs/wasm_contracts.md`, and `docs/vm_debugging.md` merged here.
-- CLI flow: `tb-cli wasm build`, `tb-cli contract deploy`, `tb-cli contract call`, `tb-cli vm trace`.
-- Gas model (`node/src/vm/gas.rs`):
-  - Each opcode has a base cost (`cost(op)`), and storage/hash-heavy ops add explicit constants (`GAS_STORAGE_READ`, `GAS_STORAGE_WRITE`, `GAS_HASH`).
-  - `GasMeter` enforces limits and reports `used()` for fee accounting. ABI helpers (`node/src/vm/abi.rs`) encode `(gas_limit, gas_price)` as a 16-byte blob when interacting with wallets.
-- Debugger + traces: `node/src/vm/debugger.rs` steps through opcodes, exposes `VmDebugger::into_trace()` (stack, gas, opcode, pc). CLI `tb-cli vm trace --tx <hash> --json` prints entries like:
-
-  ```json
-  {"pc":12,"opcode":"SSTORE","gas_before":1200,"gas_after":696,"stack":[1,2,3]}
-  ```
-
-  Use it alongside `tb-cli contract disasm` when diagnosing mispriced contracts.
+- WASM tooling lives in `cli/src/wasm.rs`, `node/src/vm`, and `node/src/vm/debugger.rs`. Use [`docs/architecture.md#virtual-machine-and-wasm`](architecture.md#virtual-machine-and-wasm) for runtime behaviour and `node/src/vm/abi.rs` for ABI encodings.
+- CLI flows: `contract-cli wasm build`, `contract-cli contract deploy`, `contract-cli contract call`, `contract-cli vm trace`. `contract-cli contract disasm` plus `VmDebugger::into_trace()` (`node/src/vm/debugger.rs`) help you step through bad gas pricing. The gas meter adds per-opcode constants (`GAS_STORAGE_READ`, `GAS_STORAGE_WRITE`, `GAS_HASH`) and reports `used()` so fee accounting stays deterministic.
 
 ## Python + Headless Tooling
 - `demo.py` exercises the `node/src/py.rs` bridge for deterministic ledger replay and educational demos.
-- Headless tooling (`docs/headless.md` content) stays in `cli/src/headless.rs` and `docs/apis_and_tooling.md`.
+- Headless tooling now lives in `cli/src/headless.rs` and `docs/apis_and_tooling.md`; `contract-cli explain tx|block|governance` renders JSON traces while governance knobs like `ai_diagnostics_enabled` gate ANN-based alerts (see the telemetry/AI sections in this handbook and [`docs/architecture.md#auxiliary-services`](architecture.md#auxiliary-services)).
 
 ## Dependency Policy
 - Policies live in `config/dependency_policies.toml`. Run `cargo run -p dependency_registry -- --check config/dependency_policies.toml` (or `just dependency-audit`) to refresh `docs/dependency_inventory*.json`.
 - After dependency changes: run `cargo vendor`, regenerate `provenance.json` + `checksums.txt`, and update [`docs/security_and_privacy.md#release-provenance-and-supply-chain`](security_and_privacy.md#release-provenance-and-supply-chain) with the attestation summary. CI rejects PRs that skip these artifacts.
-- The pivot strategy formerly described in `docs/pivot_dependency_strategy.md` now reads: wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards.
+- Wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards so the “pivot strategy” lives in code history rather than a deleted doc.
 - Never introduce `reqwest`, `serde_json`, `bincode`, etc. Production crates must route through the first-party facades.
 
 ## Formal Methods and Verification
 - Formal specs (`formal/*.fst`, `docs/formal.md`) integrate with CI. Run `make -C formal` or `cargo test -p formal` to re-check F* proofs before merging math-heavy changes.
 - zk-SNARK and Dilithium proofs are stored alongside code; refer to `docs/maths/` for derivations.
 - Prover benchmarking harnesses live under `node/src/compute_market/tests/prover.rs` so you can run focused comparisons between CPU and GPU provers (`cargo test -p the_block prover_cpu_gpu_latency_smoke`).
-- `tb-cli compute proofs --limit 10` calls `compute_market.sla_history` and prints proof fingerprints, backend selection, and circuit artifacts so you can validate end-to-end traces without spelunking the settlement sled DB.
-- `tb-cli explorer sync-proofs --db explorer.db --url http://localhost:26658` takes the same RPC output, persists `Vec<ProofBundle>` records inside the explorer SQLite tables, and lets you re-verify bundles (or feed `/compute/sla/history`) without granting RPC access to dashboards.
+- `contract-cli compute proofs --limit 10` calls `compute_market.sla_history` and prints proof fingerprints, backend selection, and circuit artifacts so you can validate end-to-end traces without spelunking the settlement sled DB.
+- `contract-cli explorer sync-proofs --db explorer.db --url http://localhost:26658` takes the same RPC output, persists `Vec<ProofBundle>` records inside the explorer SQLite tables, and lets you re-verify bundles (or feed `/compute/sla/history`) without granting RPC access to dashboards.
 - Simulation framework lives under `sim/`:
   - Scenarios are regular Rust binaries (see `sim/examples/basic.rs`, `sim/fee_spike.rs`, `sim/compute_market/*`). They accept `--scenario <name> --out <dir>` flags and emit JSON summaries (latency histograms, slashing events, etc.).
   - `cargo run -p sim -- --scenario dependency_fault --config sim/src/dependency_fault_harness/config.toml` reproduces dependency-fault drills. Logs land in `sim/target/`.
   - Use the harness before altering consensus/governance logic; CI expects new scenarios for major protocol toggles.
 
 ## Logging and Traceability
-- Logging guidelines from `docs/logging.md` live here: use structured events, avoid PII, include `component`, `peer`, `slot`, `lane`, `job_id` labels.
+- Logging guidelines live in this handbook and [`docs/security_and_privacy.md#privacy-layers`](security_and_privacy.md#privacy-layers): use structured events, avoid PII, and include `component`, `peer`, `slot`, `lane`, `job_id` labels so telemetry stays machine-readable.
 - Traces feed into the metrics aggregator and optionally into external stacks via exporters (no vendor lock-in required).
 
 ## Explainability and AI Diagnostics
-- `docs/explain.md` + `docs/ai_diagnostics.md` merged here. CLI commands `tb-cli explain tx|block|governance` render JSON traces; governance toggles `ai_diagnostics_enabled` to control ANN-based alerts.
+- `docs/explain.md` + `docs/ai_diagnostics.md` merged here. CLI commands `contract-cli explain tx|block|governance` render JSON traces; governance toggles `ai_diagnostics_enabled` to control ANN-based alerts.
 
 ## Developer Support Scripts
 - `Justfile` targets include bootstrap, fmt/lint/test, docs, coverage, fuzz, and docker image builds.
@@ -136,12 +125,12 @@ If you're new to blockchain development, here's a quick reference:
 - **Crates and modules** — `crates/energy-market` owns the provider/credit/receipt data model, metrics, and serialization; `node/src/energy.rs` persists the market via `SimpleDb` (sled under `TB_ENERGY_MARKET_DIR`, default `energy_market/`), exposes health checks, and records treasury accruals. RPC handlers live in `node/src/rpc/energy.rs`, CLI glue in `cli/src/energy.rs`, oracle ingestion under `crates/oracle-adapter`, and the mock oracle service in `services/mock-energy-oracle`.
 - **Configuration** — Set `TB_ENERGY_MARKET_DIR` to relocate the sled DB (mirrors other `SimpleDb` consumers). Governance parameters (`energy_min_stake`, `energy_oracle_timeout_blocks`, `energy_slashing_rate_bps`) live in the shared `governance` crate; the runtime hooks call `node::energy::set_governance_params` so proposal activations atomically retune stakes, expiry, and slashing without code changes.
 - **Provider keys** — Oracle trust roots live in node config (`energy.provider_keys` array inside `config/default.toml`). Each entry is a `{ provider_id, public_key_hex }` pair; reloading the config hot-swaps the verifier registry via `node::energy::configure_provider_keys` so ops can rotate/revoke keys without restarts.
-- **RPC and CLI flows** — `tb-cli energy register|market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute` speak the same JSON schema the RPC expects (see `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`). Use `--verbose` or `--format json` to dump raw payloads for automation or explorer ingestion. Example round-trip:
+- **RPC and CLI flows** — `contract-cli energy register|market|receipts|credits|settle|submit-reading|disputes|flag-dispute|resolve-dispute` speak the same JSON schema the RPC expects (see `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`). Use `--verbose` or `--format json` to dump raw payloads for automation or explorer ingestion. Example round-trip:
   ```bash
-  tb-cli energy register 10000 120 --meter-address meter_a --jurisdiction US_CA --stake 5000 --owner acct
-  tb-cli energy market --provider-id energy-0x00 --verbose | jq .
-  tb-cli energy submit-reading --reading-json @reading.json
-  tb-cli energy settle energy-0x00 400 --meter-hash <hex> --buyer acct_consumer
+  contract-cli energy register 10000 120 --meter-address meter_a --jurisdiction US_CA --stake 5000 --owner acct
+  contract-cli energy market --provider-id energy-0x00 --verbose | jq .
+  contract-cli energy submit-reading --reading-json @reading.json
+  contract-cli energy settle energy-0x00 400 --meter-hash <hex> --buyer acct_consumer
   ```
 - **Telemetry & metrics** — The crate emits `energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_signature_failure_total{provider,reason}`, `energy_provider_fulfillment_ms`, `energy_avg_price`, `energy_kwh_traded_total`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
 - **Testing** — Run `cargo test -p energy-market` for unit coverage and `cargo test -p node --test gov_param_wiring` to ensure governance parameters round-trip correctly. Use `scripts/deploy-worldos-testnet.sh` + `docs/testnet/ENERGY_QUICKSTART.md` for integration drills (node + mock oracle + telemetry). When altering serialization, add vectors under `crates/energy-market/tests` and extend the CLI tests in `cli/tests/` to keep JSON schemas stable.

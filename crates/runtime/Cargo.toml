@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 default = ["inhouse-backend"]
 inhouse-backend = ["dep:foundation_metrics"]
+# Note: stub-backend and inhouse-backend are mutually exclusive
+# When using --all-features, inhouse-backend takes precedence
 stub-backend = ["dep:foundation_metrics"]
 
 [dependencies]
@@ -16,4 +18,3 @@ base64_fp = { path = "../base64_fp" }
 rand = { path = "../rand" }
 crypto_suite = { path = "../crypto_suite" }
 sys = { path = "../sys" }
-

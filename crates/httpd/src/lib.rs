@@ -1347,11 +1347,9 @@ where
         let (stream, remote) = listener.accept().await?;
         let router = router.clone();
         let config = config.clone();
-        spawn(async move {
-            if let Err(err) = handle_connection(stream, remote, router, config).await {
-                debug!(?err, "http connection error");
-            }
-        });
+        if let Err(err) = handle_connection(stream, remote, router, config).await {
+            debug!(?err, "http connection error");
+        }
     }
 }
 
@@ -1384,6 +1382,37 @@ where
             }
         });
     }
+}
+
+/// Handles a single plaintext connection using the provided router and configuration.
+pub async fn serve_stream<State, S>(
+    stream: S,
+    remote: SocketAddr,
+    router: Router<State>,
+    config: ServerConfig,
+) -> Result<(), HttpError>
+where
+    State: Send + Sync + 'static,
+    S: ConnectionIo + UpgradeIo,
+{
+    handle_connection(stream, remote, router, config).await
+}
+
+/// Handles a single TLS connection by performing the handshake and then serving HTTP traffic.
+pub async fn serve_tls_stream<State>(
+    stream: TcpStream,
+    remote: SocketAddr,
+    router: Router<State>,
+    config: ServerConfig,
+    tls: ServerTlsConfig,
+) -> Result<(), HttpError>
+where
+    State: Send + Sync + 'static,
+{
+    let tls_stream = TlsStream::accept(stream, tls.inner())
+        .await
+        .map_err(HttpError::Io)?;
+    serve_stream(tls_stream, remote, router, config).await
 }
 
 async fn handle_connection<State, S>(
@@ -1495,7 +1524,9 @@ where
                     .await
                     .map_err(|_| HttpError::Timeout)??;
                     let raw_stream = stream.into_inner().into_websocket()?;
-                    spawn(async move {
+                    // Spawn the handler in a detached task so it runs to completion
+                    // without blocking the serve loop. The spawned task will log any errors.
+                    runtime::spawn(async move {
                         if let Err(err) = on_upgrade(ServerStream::from_io(raw_stream)).await {
                             debug!(?err, "websocket handler error");
                         }

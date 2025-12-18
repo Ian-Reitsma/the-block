@@ -91,12 +91,18 @@ fn main() {
     }
 }
 
+#[cfg(not(test))]
 fn run_cli() -> Result<(), CliError> {
     let mut argv = std::env::args();
     let _bin = argv.next().unwrap_or_else(|| "log-indexer".into());
+    let args = argv.collect::<Vec<_>>();
+    run_cli_with_args(&args)
+}
+
+fn run_cli_with_args(args: &[String]) -> Result<(), CliError> {
     let command = build_command();
     let parser = Parser::new(&command);
-    let matches = match parser.parse(&argv.collect::<Vec<_>>()) {
+    let matches = match parser.parse(args) {
         Ok(matches) => matches,
         Err(ParseError::HelpRequested(path)) => {
             print_help_for_path(&command, &path);
@@ -306,4 +312,67 @@ fn find_command<'a>(root: &'a CliCommand, path: &[&str]) -> Option<&'a CliComman
         }
     }
     Some(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::SystemTime;
+
+    fn run_args(args: &[&str]) -> Result<(), CliError> {
+        let owned: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        run_cli_with_args(&owned)
+    }
+
+    fn unique_paths() -> (PathBuf, PathBuf) {
+        let mut base = std::env::temp_dir();
+        base.push(format!(
+            "log_indexer_cli_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&base);
+        let log = base.join("input.log");
+        let db = base.join("store");
+        (log, db)
+    }
+
+    #[test]
+    fn run_cli_requires_subcommand() {
+        let args: Vec<String> = Vec::new();
+        match run_cli_with_args(&args) {
+            Err(CliError::Usage(msg)) => assert!(msg.contains("missing subcommand")),
+            other => panic!("expected usage error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn index_command_propagates_errors() {
+        let (log, db) = unique_paths();
+        match run_args(&[
+            "index",
+            log.to_string_lossy().as_ref(),
+            db.to_string_lossy().as_ref(),
+        ]) {
+            Err(CliError::Failure(err)) => {
+                let _ = err.to_string();
+            }
+            other => panic!("expected indexing failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_command_propagates_errors() {
+        let (_, db) = unique_paths();
+        let db_str = db.to_string_lossy().to_string();
+        match run_args(&["search", db_str.as_str(), "--limit", "not-a-number"]) {
+            Err(CliError::Usage(msg)) => assert!(!msg.is_empty()),
+            other => panic!("expected usage error for invalid limit, got {other:?}"),
+        }
+    }
 }

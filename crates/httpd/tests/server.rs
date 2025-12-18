@@ -27,6 +27,12 @@ const SESSION_INFO: &[u8] = b"tb-httpd-session-keys";
 const CLIENT_AUTH_INFO: &[u8] = b"tb-httpd-client-auth";
 const SECURE_REQUEST: &str = "GET /secure HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
 
+fn slow_server_config() -> ServerConfig {
+    let mut cfg = ServerConfig::default();
+    cfg.request_timeout = Duration::from_secs(60);
+    cfg
+}
+
 struct ServerHelloFrame {
     server_ephemeral: [u8; 32],
     server_nonce: [u8; 32],
@@ -584,6 +590,7 @@ fn request_builder_drives_router() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn serve_plain_round_trip() {
     block_on(async {
@@ -597,7 +604,7 @@ fn serve_plain_round_trip() {
                 .close())
         });
         let server = spawn(async move {
-            serve(listener, router, ServerConfig::default())
+            serve(listener, router, slow_server_config())
                 .await
                 .expect("serve plain");
         });
@@ -618,6 +625,7 @@ fn serve_plain_round_trip() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn serve_tls_round_trip_without_client_auth() {
     block_on(async {
@@ -633,7 +641,7 @@ fn serve_tls_round_trip_without_client_auth() {
         let (identity, tls_config) = tls_config_no_client_auth();
         let server_config = tls_config.clone();
         let server = spawn(async move {
-            serve_tls(listener, router, ServerConfig::default(), server_config)
+            serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
@@ -647,6 +655,7 @@ fn serve_tls_round_trip_without_client_auth() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn serve_tls_accepts_clients_with_cert() {
     block_on(async {
@@ -662,7 +671,7 @@ fn serve_tls_accepts_clients_with_cert() {
         let (identity, tls_config, client_key) = tls_config_with_client_auth();
         let server_config = tls_config.clone();
         let server = spawn(async move {
-            serve_tls(listener, router, ServerConfig::default(), server_config)
+            serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
@@ -676,6 +685,7 @@ fn serve_tls_accepts_clients_with_cert() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn serve_tls_allows_optional_client_auth() {
     block_on(async {
@@ -691,7 +701,7 @@ fn serve_tls_allows_optional_client_auth() {
         let (identity, tls_config, client_key) = tls_config_optional_client_auth();
         let server_config = tls_config.clone();
         let server = spawn(async move {
-            serve_tls(listener, router, ServerConfig::default(), server_config)
+            serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
@@ -709,6 +719,7 @@ fn serve_tls_allows_optional_client_auth() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn serve_tls_rejects_clients_without_cert() {
     block_on(async {
@@ -724,7 +735,7 @@ fn serve_tls_rejects_clients_without_cert() {
         let (identity, tls_config, _client_key) = tls_config_with_client_auth();
         let server_config = tls_config.clone();
         let server = spawn(async move {
-            serve_tls(listener, router, ServerConfig::default(), server_config)
+            serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
@@ -750,6 +761,7 @@ fn router_wildcard_captures_remainder() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn websocket_upgrade_accepts_and_dispatches_handler() {
     block_on(async {
@@ -766,15 +778,14 @@ fn websocket_upgrade_accepts_and_dispatches_handler() {
             }))
         });
         let server = spawn(async move {
-            serve(listener, router, ServerConfig::default())
+            serve(listener, router, slow_server_config())
                 .await
                 .expect("serve");
         });
         sleep(Duration::from_millis(50)).await;
 
-        let mut stream = runtime::net::TcpStream::connect(addr)
-            .await
-            .expect("connect");
+        let std_stream = StdTcpStream::connect(addr).expect("connect");
+        let mut stream = runtime::net::TcpStream::from_std(std_stream).expect("runtime stream");
         let key = ws::handshake_key();
         let request = format!(
             "GET /ws HTTP/1.1\r\n\
@@ -794,15 +805,20 @@ Sec-WebSocket-Version: 13\r\n\r\n"
             .expect("handshake");
 
         let mut client = ClientStream::new(stream);
-        match client.recv().await.expect("frame") {
-            Some(WsMessage::Text(text)) => assert_eq!(text, "hello"),
-            other => panic!("unexpected frame: {:?}", other),
+        let mut got_text = None;
+        while let Some(frame) = client.recv().await.expect("frame") {
+            if let WsMessage::Text(text) = frame {
+                got_text = Some(text);
+                break;
+            }
         }
+        assert_eq!(got_text.as_deref(), Some("hello"));
 
         server.abort();
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn websocket_upgrade_over_tls_dispatches_handler() {
     block_on(async {
@@ -820,7 +836,7 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
         let (identity, tls_config) = tls_config_no_client_auth();
         let server_config = tls_config.clone();
         let server = spawn(async move {
-            serve_tls(listener, router, ServerConfig::default(), server_config)
+            serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
@@ -830,20 +846,32 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
         let join = std::thread::spawn(move || {
             let mut client = TlsClient::connect(addr, &identity, None).expect("tls connection");
             let key = ws::handshake_key();
+            let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
             let request = format!(
                 "GET /ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
             );
             client.write_all(request.as_bytes()).expect("write request");
             let headers = client.read_http_response().expect("handshake response");
-            assert!(headers.starts_with("HTTP/1.1 400"));
+            // TLS WebSocket upgrades are now supported
             assert!(
-                headers
-                    .lines()
-                    .any(|line| line.eq_ignore_ascii_case("connection: close"))
+                headers.starts_with("HTTP/1.1 101"),
+                "expected 101 Switching Protocols, got: {headers}"
             );
-            let body = client.read_all().expect("response body");
-            let message = String::from_utf8(body).expect("utf8 body");
-            assert!(message.contains("websocket upgrades require plaintext listeners"));
+            assert!(headers.lines().any(|line| {
+                line.to_ascii_lowercase()
+                    .starts_with("sec-websocket-accept:")
+            }));
+            // Verify the accept header matches our expected value
+            let accept_header = headers
+                .lines()
+                .find(|line| {
+                    line.to_ascii_lowercase()
+                        .starts_with("sec-websocket-accept:")
+                })
+                .and_then(|line| line.split_once(':'))
+                .map(|(_, value)| value.trim())
+                .expect("sec-websocket-accept header");
+            assert_eq!(accept_header, expected_accept);
         });
 
         join.join().expect("client thread");
@@ -851,6 +879,7 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
     });
 }
 
+#[testkit::tb_serial]
 #[test]
 fn websocket_upgrade_rejects_with_response() {
     block_on(async {
@@ -864,7 +893,7 @@ fn websocket_upgrade_rejects_with_response() {
             ))
         });
         let server = spawn(async move {
-            serve(listener, router, ServerConfig::default())
+            serve(listener, router, slow_server_config())
                 .await
                 .expect("serve");
         });

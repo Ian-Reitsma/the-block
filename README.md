@@ -32,7 +32,7 @@ BLOCK is the single currency that powers everything on The Block. Think of it li
 - **Pay for services** — storage, compute, energy
 - **Reward work** — earn BLOCK by running infrastructure
 
-**Supply Cap:** 40 million BLOCK maximum (like Bitcoin's 21M cap), with formula-driven issuance that responds to network activity.
+**Supply Cap:** 40 million BLOCK maximum, with formula-driven issuance that responds to network activity.
 
 **Mini-stories showing how BLOCK moves around:**
 
@@ -59,7 +59,7 @@ This means when you run The Block, you're not duct-taping together 50 different 
 
 ## Technical Summary
 
-The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (CT), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
+The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (BLOCK), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
 
 ---
 
@@ -70,10 +70,6 @@ Most blockchains focus only on sending money around. The Block goes further - it
 - **Storage providers** keep your files safe (like Dropbox, but decentralized)
 - **Compute providers** run programs for you (like AWS, but decentralized)
 - **Energy market** lets you buy and sell real-world electricity with built-in verification
-  - Configure oracle trust roots directly in `config/default.toml` via `energy.provider_keys` (each entry maps a provider ID to a 32-byte Ed25519 public key). Reloading the config hot-swaps the verifier registry so you can roll keys without restarting nodes.
-  - Meter submissions are rejected unless they carry a valid Ed25519 signature over the canonical payload (`MeterReadingPayload::signing_bytes`). Telemetry surfaces failures via `energy_signature_failure_total{provider,reason}` so operators can alert on bad or missing signatures.
-  - Dispute workflows now live behind first-party RPCs (`energy.disputes`, `energy.flag_dispute`, `energy.resolve_dispute`, `energy.receipts`, `energy.credits`) and the matching CLI (`tb-cli energy disputes|receipts|credits|flag-dispute|resolve-dispute`). Operators can page through outstanding credits/receipts, flag a `meter_hash`, and record resolutions without spelunking sled snapshots or pushing ad-hoc governance proposals.
-  - Energy telemetry exports provider/credit/dispute gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`) plus counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`). Dashboards wire these straight into Grafana via the metrics-aggregator.
 
 Instead of paying these providers per request with transaction fees (which gets expensive fast), The Block pays them automatically when new blocks are mined - similar to how Bitcoin pays miners, but for many types of useful work.
 
@@ -97,7 +93,7 @@ Think of this repository like a city with different neighborhoods:
 | --- | --- | --- |
 | **`node/`** | The main blockchain software that validates transactions, mines blocks, and talks to other nodes | Full node, gateway, mempool, compute/storage pipelines, RPC, light-client streaming, telemetry. `#![forbid(unsafe_code)]` by default. |
 | **`crates/`** | Shared libraries (building blocks) used by multiple parts of the system | Reusable libraries: `transport`, `httpd`, `foundation_*`, `storage_engine`, `p2p_overlay`, `wallet`, `probe`, etc. |
-| **`cli/`** | Command-line tool (`tb-cli`) - like a control panel for interacting with the blockchain | Handles governance, wallet, bridge, compute market, storage, telemetry, diagnostics, and remediation flows. |
+| **`cli/`** | Command-line tool (`contract-cli`) - like a control panel for interacting with the blockchain | Handles governance, wallet, bridge, compute market, storage, telemetry, diagnostics, and remediation flows. |
 | **`governance/`** | Rules and voting system - how the network makes decisions and manages the treasury | Bicameral voting, treasury disbursements, parameter adjustments, release attestations |
 | **`crates/energy-market/`** | NEW! Energy trading marketplace with oracle-verified meter readings and multi-scheme signature verification (Ed25519 + optional post-quantum) | Providers register, meters submit signed readings, buyers settle against credits, receipts stored in ledger |
 | **`crates/ad_market/`** | Privacy-aware advertising system — groups users into broad "cohorts" (site type, badges, approximate presence), not individual tracking. Advertisers bid on cohorts, not people. | Domain tiers, interest tags, presence buckets, privacy budgets, uplift experiments. See [`node/src/ad_policy_snapshot.rs`](node/src/ad_policy_snapshot.rs), [`node/src/ad_readiness.rs`](node/src/ad_readiness.rs), [`cli/src/ad_market.rs`](cli/src/ad_market.rs), [`docs/architecture.md#ad-market`](docs/architecture.md#ad-market). |
@@ -106,7 +102,7 @@ Think of this repository like a city with different neighborhoods:
 
 ### Recent Major Additions
 - **Treasury Disbursement System**: Complete end-to-end workflow for governance-approved fund distributions with RPC handlers (`gov.treasury.submit_disbursement`, `execute_disbursement`, `rollback_disbursement`) and full validation
-- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `tb-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
+- **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `contract-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
 - **Energy Market Signature Verification**: Trait-based multi-provider signature system with Ed25519 (always available) and Dilithium (post-quantum, feature-gated), enabling oracle meter readings to be cryptographically verified
 - **Comprehensive Testing**: 100+ new unit tests covering signature verification, credit persistence across provider restarts, oracle timeout enforcement, and disbursement validation
 
@@ -124,18 +120,20 @@ Want to see The Block running on your machine? Here's the fastest path:
 
 # 2. Build the node and CLI
 cargo build -p the_block --release
-cargo build -p cli --bin tb-cli
+cargo build -p contract-cli --bin contract-cli
 
 # 3. Start a local node
-./target/release/tb-cli node start --config config/node.toml
+./target/release/contract-cli node start --config config/node.toml
 
 # 4. In another terminal, try some commands:
-./target/release/tb-cli wallet new              # Create a wallet
-./target/release/tb-cli explorer blocks --tail 5   # See recent blocks
-./target/release/tb-cli tx send --help          # Explore sending CT
+./target/release/contract-cli wallet new              # Create a wallet
+./target/release/contract-cli explorer blocks --tail 5   # See recent blocks
+./target/release/contract-cli tx send --help          # Explore sending BLOCK
 ```
 
 That's it! You're running a local blockchain. See [`docs/operations.md`](docs/operations.md) for production deployment.
+
+> **Homebrew updates on macOS:** `scripts/bootstrap.sh` now exports `HOMEBREW_NO_AUTO_UPDATE=1` before touching Homebrew so it never rewrites every cask when you run it. Run `brew update` manually before the bootstrap if you need newer packages (or unset the variable before the script: `HOMEBREW_NO_AUTO_UPDATE=0 ./scripts/bootstrap.sh`). The script also downloads the macOS `cargo-make`/`cargo-nextest` assets (`x86_64-apple-darwin` and `aarch64-apple-darwin`), so rerunning it on Apple Silicon should no longer end with `unsupported architecture: arm64-Darwin`.
 
 ---
 
@@ -156,7 +154,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
    ```
 5. **Start a local node**:
    ```bash
-   tb-cli node start --config node/.env.example
+   contract-cli node start --config node/.env.example
    ```
    Environment variables use the `TB_*` namespace; inspect `node/src/config.rs` for every knob.
 
@@ -177,13 +175,15 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 | --- | --- |
 | [`docs/overview.md`](docs/overview.md) | Mission, design pillars, repo layout, document map. |
 | [`docs/architecture.md`](docs/architecture.md) | Ledger & consensus, networking, storage, compute marketplace, bridges/DEX, gateway, telemetry. |
-| [`docs/economics_and_governance.md`](docs/economics_and_governance.md) | CT supply, fee lanes, subsidy multipliers, treasury, governance DAG, settlement math. |
+| [`docs/economics_and_governance.md`](docs/economics_and_governance.md) | BLOCK supply, fee lanes, subsidy multipliers, treasury, governance DAG, settlement math; the code still uses `amount_ct/amount_it` ledger labels to describe the same BLOCK flows. |
 | [`docs/operations.md`](docs/operations.md) | Bootstrap, configuration, telemetry wiring, runbooks, probe/diagnostics, WAL/snapshot care, deployments. |
 | [`docs/security_and_privacy.md`](docs/security_and_privacy.md) | Threat model, crypto stack, remote signers, jurisdiction packs, LE portal, supply-chain security. |
 | [`docs/developer_handbook.md`](docs/developer_handbook.md) | Environment setup, coding standards, testing/fuzzing, simulation, dependency policy, WASM/contracts, contribution flow. |
 | [`docs/apis_and_tooling.md`](docs/apis_and_tooling.md) | JSON-RPC, CLI, gateway HTTP & DNS, explorer, light-client streaming, storage APIs, probe CLI, metrics schemas. |
 
 Everything is kept in sync with `mdbook`; CI blocks merges if documentation drifts from the implementation.
+
+> **Note:** The canonical currency name is **BLOCK** and every user-facing surface should use BLOCK, but the ledger still exposes fields like `amount_ct`, `amount_it`, `STORAGE_SUB_CT`, and gauge names ending in `_ct`. Those legacy `CT` labels describe BLOCK-denominated balances—see `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, and `metrics-aggregator/src/lib.rs` for the live encoding so you understand the mapping when the code talks about CT.
 
 ---
 

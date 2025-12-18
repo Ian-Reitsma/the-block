@@ -39,9 +39,9 @@ This index records where every pre-consolidation document landed. Each bullet li
 - `docs/bridge_security.md`, `docs/htlc_swaps.md`, `docs/risk_register.md`, `docs/audit_handbook.md` → [`Bridge and Cross-Chain Security` and `Risk Register`](security_and_privacy.md#bridge-and-cross-chain-security)
 
 ## Developer Handbook (`docs/developer_handbook.md`)
-- `docs/developer_setup.md`, `docs/development.md`, `docs/concurrency.md`, `docs/logging.md`, `docs/debugging.md`, `docs/testing.md`, `docs/performance.md`, `docs/benchmarks.md`, `docs/formal.md`, `docs/simulation_framework.md` → [`Environment Setup`, `Coding Standards`, `Testing`, `Performance`, and `Formal Methods`](developer_handbook.md#environment-setup)
-- `docs/contract_dev.md`, `docs/wasm_contracts.md`, `docs/vm_debugging.md`, `docs/vm.md` → [`Contract and VM Development`](developer_handbook.md#contract-and-vm-development)
-- `docs/demo.md`, `docs/headless.md`, `docs/explain.md`, `docs/ai_diagnostics.md` → [`Python + Headless Tooling` and `Explainability`](developer_handbook.md#python--headless-tooling)
+- `docs/developer_setup.md`, `docs/development.md`, `docs/concurrency.md`, `docs/logging.md`, `docs/debugging.md`, `docs/testing.md`, `docs/performance.md`, `docs/benchmarks.md`, `docs/formal.md`, `docs/simulation_framework.md` → [`Developer Handbook: Environment Setup`, `Coding Standards`, `Testing Strategy`, `Performance and Benchmarks`, and `Formal Methods`](developer_handbook.md#environment-setup)
+- `docs/contract_dev.md`, `docs/wasm_contracts.md`, `docs/vm_debugging.md`, `docs/vm.md` → [`Developer Handbook: Contract and VM Development`](developer_handbook.md#contract-and-vm-development)
+- `docs/demo.md`, `docs/headless.md`, `docs/explain.md`, `docs/ai_diagnostics.md` → [`Developer Handbook: Python + Headless Tooling` and `Explainability`](developer_handbook.md#python--headless-tooling)
 - `docs/pivot_dependency_strategy.md`, `docs/dependency_inventory.md`, `docs/first_party_dependency_audit.md`, `docs/contributing.md` → [`Dependency Policy` and `Contribution Flow`](developer_handbook.md#dependency-policy)
 
 ## APIs and Tooling (`docs/apis_and_tooling.md`)

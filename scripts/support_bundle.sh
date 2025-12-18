@@ -21,7 +21,7 @@ if curl -fsS http://localhost:9898/metrics > "$TMP/metrics.txt"; then
 fi
 uname -a > "$TMP/uname.txt"
 
-( cd "$TMP" && tar --sort=name --owner=0 --group=0 --numeric-owner --exclude="$OUT" -czf "$OUT" . )
+( cd "$TMP" && find . -print0 | LC_ALL=C sort -z | tar --null -T - --no-recursion --owner=0 --group=0 --numeric-owner --exclude="$OUT" -czf "$OUT" )
 mv "$TMP/$OUT" "$OUT"
 rm -rf "$TMP"
 echo "Bundle written to $OUT"

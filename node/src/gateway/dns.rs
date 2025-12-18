@@ -53,6 +53,9 @@ static LEDGER_CONTEXT: Lazy<Mutex<Option<Arc<dyn DomainLedger + Send + Sync>>>> 
 static LEDGER_COUNTER: AtomicU64 = AtomicU64::new(1);
 static SANDBOX_LEDGER: Lazy<Arc<dyn DomainLedger + Send + Sync>> =
     Lazy::new(|| Arc::new(SandboxLedger::new()) as Arc<dyn DomainLedger + Send + Sync>);
+const SANDBOX_LEDGER_LOG_CAPACITY: usize = 1024;
+static SANDBOX_LEDGER_LOG: Lazy<Mutex<VecDeque<SandboxLedgerRecord>>> =
+    Lazy::new(|| Mutex::new(VecDeque::with_capacity(SANDBOX_LEDGER_LOG_CAPACITY)));
 const DNS_METRIC_CAPACITY: usize = 4096;
 static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
     Lazy::new(|| Mutex::new(VecDeque::with_capacity(DNS_METRIC_CAPACITY)));
@@ -87,13 +90,13 @@ static DYNAMIC_RESERVE_CONFIG: Lazy<Mutex<DynamicReservePricingConfig>> =
 /// Compute dynamic reserve price based on domain quality metrics
 ///
 /// Formula:
-/// ```
-/// reserve_price = base_reserve × length_multiplier × history_multiplier
+/// ```text
+/// reserve_price = base_reserve * length_multiplier * history_multiplier
 ///
 /// where:
-///   length_multiplier = max(0.2, 1.0 - sensitivity × max(0, length - 3))
+///   length_multiplier = max(0.2, 1.0 - sensitivity * max(0, length - 3))
 ///   history_multiplier = if prior auction exists:
-///                          1.0 + history_weight × ((historical_price / base_reserve) - 1.0).clamp(0.0, 2.0)
+///                          1.0 + history_weight * ((historical_price / base_reserve) - 1.0).clamp(0.0, 2.0)
 ///                        else:
 ///                          1.0
 /// ```
@@ -370,10 +373,7 @@ fn stats_value(samples: &[u64]) -> Value {
             "max",
             Value::Number(Number::from(*sorted.last().unwrap_or(&0))),
         ),
-        (
-            "samples",
-            Value::Number(Number::from(sorted.len() as u64)),
-        ),
+        ("samples", Value::Number(Number::from(sorted.len() as u64))),
     ])
 }
 
@@ -665,6 +665,7 @@ impl SandboxLedger {
         if commands.is_empty() {
             return;
         }
+        let _ = self.seq.fetch_add(1, Ordering::SeqCst);
         let entries: Vec<SandboxCommandRecord> = commands
             .iter()
             .map(|cmd| SandboxCommandRecord {
@@ -682,14 +683,11 @@ impl SandboxLedger {
             ts: now_ts(),
             commands: entries,
         };
-        if let Ok(bytes) = foundation_serialization::json::to_vec(&record) {
-            let key = format!(
-                "dns_sandbox/{:020}",
-                self.seq.fetch_add(1, Ordering::SeqCst)
-            );
-            let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = db.insert(&key, bytes);
+        let mut log = SANDBOX_LEDGER_LOG.lock().unwrap_or_else(|e| e.into_inner());
+        if log.len() >= SANDBOX_LEDGER_LOG_CAPACITY {
+            log.pop_front();
         }
+        log.push_back(record);
     }
 }
 
@@ -2375,24 +2373,24 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
     for domain in domains {
         if let Some(bytes) = db.get(&auction_key(&domain)) {
             let record = decode_auction(&bytes)?;
-             let entry = status_counts.entry(record.status).or_insert(0);
-             *entry = entry.saturating_add(1);
-             if matches!(record.status, AuctionStatus::Active) {
-                 next_end_ts = Some(match next_end_ts {
-                     Some(current) => current.min(record.end_ts),
-                     None => record.end_ts,
-                 });
-                 last_end_ts = Some(match last_end_ts {
-                     Some(current) => current.max(record.end_ts),
-                     None => record.end_ts,
-                 });
-                 let coverage = record
-                     .highest_bid
-                     .as_ref()
-                     .map(|bid| bid.amount_ct)
-                     .unwrap_or(record.min_bid_ct);
-                 coverage_demand_ct = coverage_demand_ct.saturating_add(coverage);
-             }
+            let entry = status_counts.entry(record.status).or_insert(0);
+            *entry = entry.saturating_add(1);
+            if matches!(record.status, AuctionStatus::Active) {
+                next_end_ts = Some(match next_end_ts {
+                    Some(current) => current.min(record.end_ts),
+                    None => record.end_ts,
+                });
+                last_end_ts = Some(match last_end_ts {
+                    Some(current) => current.max(record.end_ts),
+                    None => record.end_ts,
+                });
+                let coverage = record
+                    .highest_bid
+                    .as_ref()
+                    .map(|bid| bid.amount_ct)
+                    .unwrap_or(record.min_bid_ct);
+                coverage_demand_ct = coverage_demand_ct.saturating_add(coverage);
+            }
             auctions.push(auction_to_json(&record));
         }
         if let Some(bytes) = db.get(&ownership_key(&domain)) {
@@ -2423,9 +2421,7 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
     let coverage_ratio_ppm = ppm_ratio(total_locked, coverage_demand_ct);
     let active = *status_counts.get(&AuctionStatus::Active).unwrap_or(&0);
     let settled = *status_counts.get(&AuctionStatus::Settled).unwrap_or(&0);
-    let cancelled = *status_counts
-        .get(&AuctionStatus::Cancelled)
-        .unwrap_or(&0);
+    let cancelled = *status_counts.get(&AuctionStatus::Cancelled).unwrap_or(&0);
     #[cfg(feature = "telemetry")]
     update_dns_auction_status_metrics(active, settled, cancelled);
 
@@ -3107,9 +3103,12 @@ mod tests {
 
         // 3-char domain: 1.0x multiplier
         let price_3char = compute_dynamic_reserve_price("abc", None);
-        assert_eq!(price_3char, base, "3-char domain should get 1.0x base price");
+        assert_eq!(
+            price_3char, base,
+            "3-char domain should get 1.0x base price"
+        );
 
-        // 4-char domain: 0.9x multiplier (1.0 - 0.1 × 1)
+        // 4-char domain: 0.9x multiplier (1.0 - 0.1 * 1)
         let price_4char = compute_dynamic_reserve_price("abcd", None);
         assert_eq!(price_4char, 900, "4-char domain should get 0.9x base price");
 
@@ -3119,7 +3118,10 @@ mod tests {
 
         // Very long domain: should floor at 0.2x
         let price_long = compute_dynamic_reserve_price("verylongdomainname", None);
-        assert_eq!(price_long, 200, "Long domains should floor at 0.2x base price");
+        assert_eq!(
+            price_long, 200,
+            "Long domains should floor at 0.2x base price"
+        );
     }
 
     #[test]
@@ -3150,15 +3152,21 @@ mod tests {
         };
 
         // With history_weight = 0.5 and 2x historical price:
-        // history_multiplier = 1.0 + 0.5 × (2.0 - 1.0) = 1.5
-        // For 4-char domain "test": price = 1000 × 0.9 (length) × 1.5 (history) = 1350
+        // history_multiplier = 1.0 + 0.5 * (2.0 - 1.0) = 1.5
+        // For 4-char domain "test": price = 1000 * 0.9 (length) * 1.5 (history) = 1350
         let price_with_history = compute_dynamic_reserve_price("test", Some(&prior));
-        assert_eq!(price_with_history, 1350, "Should apply historical premium (4-char: 0.9 × 1.5 = 1.35x)");
+        assert_eq!(
+            price_with_history, 1350,
+            "Should apply historical premium (4-char: 0.9 * 1.5 = 1.35x)"
+        );
 
         // Test with cancelled auction (no history bonus)
         prior.status = AuctionStatus::Cancelled;
         let price_cancelled = compute_dynamic_reserve_price("test", Some(&prior));
-        assert_eq!(price_cancelled, 900, "Cancelled auction should not get history bonus (4-char only)");
+        assert_eq!(
+            price_cancelled, 900,
+            "Cancelled auction should not get history bonus (4-char only)"
+        );
     }
 
     #[test]
@@ -3173,7 +3181,10 @@ mod tests {
         }
 
         let price = compute_dynamic_reserve_price("xyz", None);
-        assert_eq!(price, 5000, "When disabled, should return base price regardless of domain");
+        assert_eq!(
+            price, 5000,
+            "When disabled, should return base price regardless of domain"
+        );
 
         // Re-enable for other tests
         {
@@ -3193,8 +3204,8 @@ mod tests {
         let _chain = install_test_chain(&[]);
 
         // List without specifying min_bid - should use computed reserve
-        // "xyz.block" = 9 chars -> length_multiplier = 1.0 - 0.1 × (9-3) = 0.4
-        // Expected: 1000 × 0.4 = 400 CT
+        // "xyz.block" = 9 chars -> length_multiplier = 1.0 - 0.1 * (9-3) = 0.4
+        // Expected: 1000 * 0.4 = 400 CT
         let listing = list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             // min_bid_ct NOT specified - should default to dynamic reserve
@@ -3205,8 +3216,11 @@ mod tests {
 
         // Verify the min_bid was set to dynamic reserve price
         let auction = &listing["auction"];
-        assert_eq!(auction["min_bid_ct"].as_u64(), Some(400),
-                   "Should use dynamic reserve (9-char domain \"xyz.block\": 400 CT)");
+        assert_eq!(
+            auction["min_bid_ct"].as_u64(),
+            Some(400),
+            "Should use dynamic reserve (9-char domain \"xyz.block\": 400 CT)"
+        );
 
         clear_domain_state(domain);
     }

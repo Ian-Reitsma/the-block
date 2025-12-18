@@ -296,9 +296,11 @@ mod tests {
     fn duration_arithmetic() {
         let base = UtcDateTime::from_unix_timestamp(0).unwrap();
         let later = base + Duration::days(2) + Duration::hours(6);
-        assert_eq!(later.unix_timestamp().unwrap(), 183_600);
+        // 2 days = 2 * 86400 = 172800, 6 hours = 6 * 3600 = 21600, total = 194400
+        assert_eq!(later.unix_timestamp().unwrap(), 194_400);
         let earlier = later - Duration::hours(1);
-        assert_eq!(earlier.unix_timestamp().unwrap(), 179_000);
+        // 194400 - 3600 = 190800
+        assert_eq!(earlier.unix_timestamp().unwrap(), 190_800);
     }
 
     #[test]

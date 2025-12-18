@@ -50,5 +50,11 @@ else
   rsync -a --delete "$STAGING"/ "$ROOT/vendor"/
 fi
 
-HASH=$(cd "$STAGING" && tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - . | sha256sum | awk '{print $1}')
+# Note: --mtime=@TIMESTAMP is GNU tar specific; BSD tar doesn't support it
+if tar --version 2>&1 | grep -q "GNU tar"; then
+  MTIME_ARG="--mtime=@0"
+else
+  MTIME_ARG=""
+fi
+HASH=$(cd "$STAGING" && find . -print0 | LC_ALL=C sort -z | tar --null -T - --no-recursion --owner=0 --group=0 --numeric-owner $MTIME_ARG -cf - | sha256sum | awk '{print $1}')
 echo "vendor tree sha256: $HASH"

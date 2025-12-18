@@ -108,7 +108,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Range-boost deliveries and ANN payloads register as gossip hops, keeping mesh telemetry side-by-side with QUIC counts.
 
 ### QUIC Transport
-- The in-house transport crate (`crates/transport`) abstracts Quinn and s2n providers. `node/src/net/quic.rs` publishes diag snapshots through RPC/CLI (`tb-cli net quic-stats`).
+- The in-house transport crate (`crates/transport`) abstracts Quinn and s2n providers. `node/src/net/quic.rs` publishes diag snapshots through RPC/CLI (`contract-cli net quic-stats`).
 - Mutual-TLS materials derive from node keys, are cached, and rotate via governance toggles. Chaos tooling lives in `docs/operations.md#chaos-and-fault-drills`.
 
 ### LocalNet and Range Boost
@@ -144,7 +144,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - See also `state/README.md` and `docs/operations.md#storage-snapshots-and-wal-management` for crash replay and compaction guidance.
 
 ### Snapshots and State Pruning
-- WAL + snapshot lifecycle is inside `node/src/storage/wal.rs`, `docs/operations.md#wal-and-snapshots`, and CLI commands `tb-cli snapshots ...`.
+- WAL + snapshot lifecycle is inside `node/src/storage/wal.rs`, `docs/operations.md#wal-and-snapshots`, and CLI commands `contract-cli snapshots ...`.
 - State pruning logic lives under `node/src/state_pruning.rs`; governance knobs guard pruning depth and compaction windows.
 
 ### Repair and Simulation
@@ -183,7 +183,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 ### Workloads and SNARK Receipts
 - Supported workloads: transcode, inference, GPU hash, SNARK. SNARK proofs now run through `node/src/compute_market/snark.rs`, which wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled shapes per digest, and chooses CPU/GPU provers (with telemetry exported via `snark_prover_latency_seconds{backend}` / `snark_prover_failure_total{backend}`).
 - Proof bundles carry circuit/output/witness commitments and serialized proof bytes; they are attached to SLA records in `compute_market::settlement` and surfaced over RPC via `compute_market.sla_history`.
-- Explorer ingest mirrors the same payloads: `tb-cli explorer sync-proofs --db explorer.db --url http://node:26658` streams `compute_market.sla_history(limit)` responses, persists the serialized `Vec<ProofBundle>` per job (`compute_sla_proofs` table), and exposes them under `/compute/sla/history` so dashboards can render fingerprints/artifacts without talking to the node.
+- Explorer ingest mirrors the same payloads: `contract-cli explorer sync-proofs --db explorer.db --url http://node:26658` streams `compute_market.sla_history(limit)` responses, persists the serialized `Vec<ProofBundle>` per job (`compute_sla_proofs` table), and exposes them under `/compute/sla/history` so dashboards can render fingerprints/artifacts without talking to the node.
 - Providers that advertise CUDA/ROCm GPUs (or dedicated accelerators) automatically attempt GPU proving first; failures fall back to CPU while feeding scheduler accelerator telemetry so providers can be reweighted.
 - Benchmark harnesses for the prover live under `node/src/compute_market/tests/prover.rs` so operators can compare CPU/GPU latency locally before enabling accelerators.
 
@@ -211,7 +211,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 
 - Energy credits live in `crates/energy-market` with the node wrapper in `node/src/energy.rs`. Providers, credits, and receipts persist in sled via `SimpleDb::open_named(names::ENERGY_MARKET, …)`; set `TB_ENERGY_MARKET_DIR` to relocate the DB. The store snapshots to bytes (`EnergyMarket::{to_bytes,from_bytes}`) on every mutation and uses the same fsync+rename discipline as other `SimpleDb` consumers so restarts replay identical state.
 - Oracle trust roots are defined in `config/default.toml` under `energy.provider_keys`. Each entry maps a provider ID to a 32-byte Ed25519 public key; reloads hot-swap the verifier registry via `node::energy::configure_provider_keys` so operators can rotate or revoke keys without restarts.
-- RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`, `energy.receipts`, `energy.credits`, `energy.disputes`, `energy.flag_dispute`, and `energy.resolve_dispute`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, receipts, credits, and disputes so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `tb-cli energy` calls.
+- RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`, `energy.receipts`, `energy.credits`, `energy.disputes`, `energy.flag_dispute`, and `energy.resolve_dispute`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, receipts, credits, and disputes so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `contract-cli energy` calls.
 - Governance owns `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps`. Proposals feed those values through the shared governance crate, latch them in `node/src/governance/params.rs`, then invoke `node::energy::set_governance_params`, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.
 - Observability: `energy_market` emits gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_avg_price`), counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_kwh_traded_total`, `energy_signature_failure_total{provider,reason}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.
 

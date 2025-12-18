@@ -1,12 +1,12 @@
 pub mod a_star;
 pub mod ban_store;
 pub mod discovery;
+pub mod health; // Network Health Index
 pub mod listener;
 mod message;
 pub mod peer;
 mod peer_metrics_binary;
 pub mod peer_metrics_store;
-pub mod health; // Network Health Index
 #[cfg(all(feature = "quic", feature = "quinn"))]
 pub mod quic;
 #[cfg(all(feature = "quic", feature = "quinn"))]

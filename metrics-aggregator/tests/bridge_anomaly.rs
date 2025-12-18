@@ -1,9 +1,9 @@
 use foundation_serialization::json::{self, Value};
 use httpd::{Method, Router, StatusCode};
 use metrics_aggregator::{
-    install_bridge_http_client_override, reset_bridge_remediation_ack_metrics,
-    reset_bridge_remediation_dispatch_log, router, AppState, BridgeHttpClientOverride,
-    BridgeHttpClientOverrideGuard, BridgeHttpOverrideResponse,
+    install_bridge_http_client_override, metrics_registry_guard,
+    reset_bridge_remediation_ack_metrics, reset_bridge_remediation_dispatch_log, router, AppState,
+    BridgeHttpClientOverride, BridgeHttpClientOverrideGuard, BridgeHttpOverrideResponse,
 };
 use std::{
     collections::HashMap,
@@ -422,6 +422,7 @@ impl RemediationSpoolSandbox {
 
 #[test]
 fn remediation_spool_sandbox_restores_environment() {
+    let _guard = metrics_registry_guard();
     let sentinels = [
         (RemediationSpoolTarget::Page, "preserve-page"),
         (RemediationSpoolTarget::Throttle, "preserve-throttle"),
@@ -637,6 +638,7 @@ async fn wait_for_spool_gauge(app: &Router<AppState>, expected: f64, attempts: u
 
 #[test]
 fn bridge_anomaly_detector_flags_spikes() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
@@ -708,6 +710,7 @@ fn bridge_anomaly_detector_flags_spikes() {
 
 #[test]
 fn bridge_anomaly_detector_respects_cooldown_and_labels() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
@@ -821,6 +824,7 @@ fn bridge_anomaly_detector_respects_cooldown_and_labels() {
 
 #[test]
 fn bridge_remediation_exposes_actions() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -925,6 +929,7 @@ fn bridge_remediation_exposes_actions() {
 
 #[test]
 fn bridge_remediation_emits_throttle_playbook() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -996,6 +1001,7 @@ fn bridge_remediation_emits_throttle_playbook() {
 
 #[test]
 fn bridge_remediation_dispatches_to_spool_hooks() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1185,6 +1191,7 @@ fn bridge_remediation_dispatches_to_spool_hooks() {
 
 #[test]
 fn bridge_remediation_records_http_acknowledgements() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1287,6 +1294,7 @@ fn bridge_remediation_records_http_acknowledgements() {
 
 #[test]
 fn bridge_remediation_parses_text_acknowledgements() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1375,6 +1383,7 @@ fn bridge_remediation_parses_text_acknowledgements() {
 
 #[test]
 fn bridge_remediation_retries_pending_acknowledgements() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1465,6 +1474,7 @@ fn bridge_remediation_retries_pending_acknowledgements() {
 
 #[test]
 fn bridge_remediation_escalates_pending_acknowledgements() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1562,6 +1572,7 @@ fn bridge_remediation_escalates_pending_acknowledgements() {
 
 #[test]
 fn bridge_remediation_ack_policy_respects_playbook_overrides() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1638,6 +1649,7 @@ fn bridge_remediation_ack_policy_respects_playbook_overrides() {
 
 #[test]
 fn bridge_remediation_records_http_closure_acknowledgements() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1737,6 +1749,7 @@ fn bridge_remediation_records_http_closure_acknowledgements() {
 
 #[test]
 fn bridge_remediation_records_spool_failures() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let dir = tempfile::tempdir().unwrap();
@@ -1808,6 +1821,7 @@ fn bridge_remediation_records_spool_failures() {
 
 #[test]
 fn bridge_remediation_records_skipped_dispatch_when_unconfigured() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         let _url_guard = EnvGuard::set("TB_REMEDIATION_ESCALATE_URLS", "");
@@ -1874,6 +1888,7 @@ fn bridge_remediation_records_skipped_dispatch_when_unconfigured() {
 
 #[test]
 fn bridge_anomaly_flags_liquidity_spikes() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
@@ -1937,6 +1952,7 @@ fn bridge_anomaly_flags_liquidity_spikes() {
 
 #[test]
 fn bridge_metric_gauges_persist_across_restart() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("metrics.db");
@@ -2001,6 +2017,7 @@ fn bridge_metric_gauges_persist_across_restart() {
 
 #[test]
 fn bridge_remediation_ack_latency_persists_across_restart() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();
@@ -2128,6 +2145,7 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
 
 #[test]
 fn bridge_remediation_cleans_spool_artifacts_after_restart() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();
@@ -2263,6 +2281,7 @@ fn bridge_remediation_cleans_spool_artifacts_after_restart() {
 
 #[test]
 fn bridge_remediation_retains_spool_artifacts_after_retry_exhaustion() {
+    let _guard = metrics_registry_guard();
     run_async(async {
         let _dispatch_guard = reset_bridge_remediation_dispatch_log();
         reset_bridge_remediation_ack_metrics();

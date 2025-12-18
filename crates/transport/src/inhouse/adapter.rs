@@ -322,15 +322,24 @@ impl Connection {
 
     async fn send(&self, data: &[u8]) -> DiagResult<()> {
         let frame = encode_application_data(&self.inner.handshake_id, data);
-        let mut socket = {
-            let mut guard = self.inner.socket.lock().await;
-            guard
-                .take()
-                .ok_or_else(|| anyhow!("connection socket closed"))?
+        let mut socket = loop {
+            {
+                let mut guard = self.inner.socket.lock().await;
+                if let Some(s) = guard.take() {
+                    break s;
+                }
+            }
+            // Socket temporarily in use by receiver, yield and retry
+            runtime::yield_now().await;
+            if self.inner.shutdown.is_cancelled() {
+                return Err(anyhow!("connection socket closed"));
+            }
         };
         let result = socket.send_to(&frame, self.inner.remote_addr).await;
-        let mut guard = self.inner.socket.lock().await;
-        *guard = Some(socket);
+        {
+            let mut guard = self.inner.socket.lock().await;
+            *guard = Some(socket);
+        }
         result.map_err(|err| anyhow!("send datagram: {err}"))?;
         Ok(())
     }
@@ -534,7 +543,7 @@ async fn client_receiver_loop(
         if shutdown.is_cancelled() {
             break;
         }
-        match recv_datagram(&socket).await {
+        match recv_datagram(&socket, &shutdown).await {
             Ok((payload, addr)) => {
                 if addr != connection.remote_addr {
                     continue;
@@ -558,22 +567,51 @@ async fn client_receiver_loop(
     }
 }
 
+/// Timeout for recv_from to periodically release the socket, allowing send() to proceed.
+const RECV_YIELD_INTERVAL: Duration = Duration::from_millis(50);
+
 async fn recv_datagram(
     socket: &Arc<AsyncMutex<Option<UdpSocket>>>,
+    shutdown: &CancellationToken,
 ) -> std::io::Result<(Vec<u8>, SocketAddr)> {
-    let mut udp = {
-        let mut guard = socket.lock().await;
-        guard
-            .take()
-            .ok_or_else(|| IoError::new(ErrorKind::NotConnected, "connection socket closed"))?
-    };
     let mut buf = vec![0u8; MAX_DATAGRAM];
-    let result = udp.recv_from(&mut buf).await;
-    let mut guard = socket.lock().await;
-    *guard = Some(udp);
-    let (len, addr) = result?;
-    buf.truncate(len);
-    Ok((buf, addr))
+    loop {
+        if shutdown.is_cancelled() {
+            return Err(IoError::new(ErrorKind::NotConnected, "connection closed"));
+        }
+        // Acquire socket, with retry if send() has it temporarily
+        let mut udp = loop {
+            {
+                let mut guard = socket.lock().await;
+                if let Some(s) = guard.take() {
+                    break s;
+                }
+            }
+            // Socket temporarily in use by sender, yield and retry
+            runtime::yield_now().await;
+            if shutdown.is_cancelled() {
+                return Err(IoError::new(ErrorKind::NotConnected, "connection closed"));
+            }
+        };
+        // Use a timeout so we periodically release the socket, allowing send() to proceed
+        let result = runtime::timeout(RECV_YIELD_INTERVAL, udp.recv_from(&mut buf)).await;
+        // Always put socket back before processing result
+        {
+            let mut guard = socket.lock().await;
+            *guard = Some(udp);
+        }
+        match result {
+            Ok(Ok((len, addr))) => {
+                buf.truncate(len);
+                return Ok((buf, addr));
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_timeout) => {
+                // Timeout - loop again to release socket for potential send()
+                continue;
+            }
+        }
+    }
 }
 
 async fn server_loop(
@@ -697,7 +735,7 @@ impl HandshakeTable {
     ) -> Option<Vec<u8>> {
         self.prune_expired();
         let entry = self.entries.get_mut(handshake)?;
-        if entry.addr != addr || !entry.established {
+        if entry.addr != addr {
             return None;
         }
         entry.refresh();
@@ -829,6 +867,7 @@ mod tests {
         table.prune_expired();
         assert!(table.ack_payload(&handshake, addr, b"payload").is_none());
     }
+
 
     #[test]
     fn retransmit_schedule_bounds_backoff() {

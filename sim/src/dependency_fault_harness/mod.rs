@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use diagnostics::{anyhow, Context, Result};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
+use foundation_serialization::ser::Serializer;
 use foundation_serialization::Serialize;
 use runtime::sync::CancellationToken;
 use sys::tempfile;
@@ -261,7 +262,7 @@ impl ScenarioMetrics {
 }
 
 /// File artifacts emitted for each scenario.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct ScenarioReport {
     pub metrics: ScenarioMetrics,
     pub metrics_path: PathBuf,
@@ -269,11 +270,42 @@ pub struct ScenarioReport {
     pub log_path: Option<PathBuf>,
 }
 
+impl Serialize for ScenarioReport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use foundation_serialization::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ScenarioReport", 4)?;
+        state.serialize_field("metrics", &self.metrics)?;
+        state.serialize_field("metrics_path", &self.metrics_path.display().to_string())?;
+        state.serialize_field("summary_path", &self.summary_path.display().to_string())?;
+        state.serialize_field(
+            "log_path",
+            &self.log_path.as_ref().map(|p| p.display().to_string()),
+        )?;
+        state.end()
+    }
+}
+
 /// Summary for the entire simulation run.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SimulationSummary {
     pub base_dir: PathBuf,
     pub reports: Vec<ScenarioReport>,
+}
+
+impl Serialize for SimulationSummary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use foundation_serialization::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("SimulationSummary", 2)?;
+        state.serialize_field("base_dir", &self.base_dir.display().to_string())?;
+        state.serialize_field("reports", &self.reports)?;
+        state.end()
+    }
 }
 
 /// Run the dependency fault simulation and return the summary.
@@ -603,7 +635,16 @@ fn run_transport_probe(
             ProviderCapability::TelemetryCallbacks,
         ],
     };
-    let mut transport = SimulatedTransport::new(meta, injector.get(FaultTarget::Transport));
+    let fault = injector.get(FaultTarget::Transport);
+    if let Some(kind) = fault {
+        match kind {
+            FaultKind::Timeout => metrics
+                .fault_events
+                .push("transport timeout injected".into()),
+            FaultKind::Panic => metrics.fault_events.push("transport panic injected".into()),
+        }
+    }
+    let mut transport = SimulatedTransport::new(meta, fault);
     for attempt in 0..3 {
         match runtime::block_on(transport.connect()) {
             Ok(_) => metrics.transport_success += 1,
@@ -622,7 +663,14 @@ fn run_overlay_probe(
     metrics: &mut ScenarioMetrics,
     logs: &mut Vec<String>,
 ) -> Result<()> {
-    let mut overlay = SimulatedOverlay::new(selections.overlay, injector.get(FaultTarget::Overlay));
+    let fault = injector.get(FaultTarget::Overlay);
+    if let Some(kind) = fault {
+        match kind {
+            FaultKind::Timeout => metrics.fault_events.push("overlay timeout injected".into()),
+            FaultKind::Panic => metrics.fault_events.push("overlay panic injected".into()),
+        }
+    }
+    let mut overlay = SimulatedOverlay::new(selections.overlay, fault);
     overlay.bootstrap()?;
     metrics.overlay_peers = overlay.diagnostics()?.active_peers;
     metrics.overlay_claims = overlay.claims();
@@ -638,6 +686,12 @@ fn run_storage_probe(
     logs: &mut Vec<String>,
 ) -> Result<()> {
     let fault = injector.get(FaultTarget::Storage);
+    if let Some(kind) = fault {
+        match kind {
+            FaultKind::Timeout => metrics.fault_events.push("storage timeout injected".into()),
+            FaultKind::Panic => metrics.fault_events.push("storage panic injected".into()),
+        }
+    }
     let storage = SimulatedStorage::new(selections.storage, fault);
     storage.ensure_cf("receipts").map_err(|e| anyhow!("{e}"))?;
     for idx in 0..4 {
@@ -1326,7 +1380,7 @@ impl RuntimeBackendChoice {
         }
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         self.as_env()
     }
 }
@@ -1336,7 +1390,7 @@ impl TransportBackendChoice {
         &["quinn", "s2n"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             TransportBackendChoice::Quinn => "quinn",
             TransportBackendChoice::S2n => "s2n",
@@ -1349,7 +1403,7 @@ impl OverlayBackendChoice {
         &["inhouse", "stub"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             OverlayBackendChoice::Inhouse => "inhouse",
             OverlayBackendChoice::Stub => "stub",
@@ -1362,7 +1416,7 @@ impl StorageBackendChoice {
         &["rocksdb-compat", "inhouse", "memory"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             StorageBackendChoice::LegacyRocksDb => "rocksdb-compat",
             StorageBackendChoice::Inhouse => "inhouse",
@@ -1376,7 +1430,7 @@ impl CodingBackendChoice {
         &["reed-solomon", "xor"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             CodingBackendChoice::ReedSolomon => "reed-solomon",
             CodingBackendChoice::Xor => "xor",
@@ -1389,7 +1443,7 @@ impl CryptoBackendChoice {
         &["dalek", "fallback"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             CryptoBackendChoice::Dalek => "dalek",
             CryptoBackendChoice::Fallback => "fallback",
@@ -1402,7 +1456,7 @@ impl CodecBackendChoice {
         &["json", "binary"]
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             CodecBackendChoice::Json => "json",
             CodecBackendChoice::Binary => "binary",

@@ -219,11 +219,16 @@ fn run_executor_tick(
     let mut last_error: Option<String> = None;
 
     for disbursement in disbursements {
-        // Check if disbursement is in a state where it's waiting to be executed
-        if !matches!(
+        // Check if disbursement is in a state where it's waiting to be executed.
+        // Process disbursements that are:
+        // 1. Queued or Timelocked (governance-approved disbursements ready for execution)
+        // 2. Draft without proposal metadata (treasury-initiated, no governance required)
+        let is_executable = matches!(
             disbursement.status,
             DisbursementStatus::Queued { .. } | DisbursementStatus::Timelocked { .. }
-        ) {
+        ) || (matches!(disbursement.status, DisbursementStatus::Draft { .. })
+            && disbursement.proposal.is_none());
+        if !is_executable {
             continue;
         }
         if disbursement.scheduled_epoch > current_epoch {
@@ -2943,6 +2948,18 @@ impl GovStore {
             if entry.id == id {
                 match entry.status {
                     DisbursementStatus::Timelocked { .. } => {}
+                    DisbursementStatus::Draft { .. } => {
+                        // Allow direct execution of draft disbursements that don't require
+                        // governance approval (i.e., those without proposal metadata)
+                        if entry.proposal.is_some() {
+                            return Err(sled::Error::Unsupported(
+                                format!(
+                                    "disbursement {id} requires governance approval; advance through voting first"
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
                     DisbursementStatus::Queued { .. } => {
                         return Err(sled::Error::Unsupported(
                             format!("disbursement {id} still timelocked; advance state before execution").into(),

@@ -8,12 +8,40 @@ const AF_INET: i32 = 2;
 const AF_INET6: i32 = 10;
 const SOCK_STREAM: i32 = 1;
 const SOCK_DGRAM: i32 = 2;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const SOCK_CLOEXEC: i32 = 0o2000000;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const SOCK_NONBLOCK: i32 = 0o0004000;
 const IPPROTO_TCP: i32 = 6;
 const IPPROTO_UDP: i32 = 17;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const SOL_SOCKET: i32 = 1;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const SOL_SOCKET: i32 = 0xffff;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const SO_REUSEADDR: i32 = 2;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const SO_REUSEADDR: i32 = 0x0004;
+const O_NONBLOCK: i32 = 0o0004000;
+const F_GETFL: i32 = 3;
+const F_SETFL: i32 = 4;
+const F_GETFD: i32 = 1;
+const F_SETFD: i32 = 2;
+const FD_CLOEXEC: i32 = 1;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 const EINPROGRESS: i32 = 115;
@@ -29,13 +57,40 @@ const EINPROGRESS: i32 = 36;
 
 #[repr(C)]
 struct SockAddr {
-    sa_family: u16,
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
+    sa_len: u8,
+    sa_family: u8,
     sa_data: [u8; 14],
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[repr(C)]
 struct sockaddr_in {
     sin_family: u16,
+    sin_port: u16,
+    sin_addr: in_addr,
+    sin_zero: [u8; 8],
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+#[repr(C)]
+struct sockaddr_in {
+    sin_len: u8,
+    sin_family: u8,
     sin_port: u16,
     sin_addr: in_addr,
     sin_zero: [u8; 8],
@@ -46,9 +101,28 @@ struct in_addr {
     s_addr: u32,
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[repr(C)]
 struct sockaddr_in6 {
     sin6_family: u16,
+    sin6_port: u16,
+    sin6_flowinfo: u32,
+    sin6_addr: in6_addr,
+    sin6_scope_id: u32,
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+#[repr(C)]
+struct sockaddr_in6 {
+    sin6_len: u8,
+    sin6_family: u8,
     sin6_port: u16,
     sin6_flowinfo: u32,
     sin6_addr: in6_addr,
@@ -70,8 +144,26 @@ impl SockAddrInternal {
         match addr {
             SocketAddr::V4(v4) => {
                 let ip = v4.ip().octets();
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 let sin = sockaddr_in {
                     sin_family: AF_INET as u16,
+                    sin_port: v4.port().to_be(),
+                    sin_addr: in_addr {
+                        s_addr: u32::from_ne_bytes(ip),
+                    },
+                    sin_zero: [0; 8],
+                };
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "ios",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd",
+                    target_os = "dragonfly"
+                ))]
+                let sin = sockaddr_in {
+                    sin_len: size_of::<sockaddr_in>() as u8,
+                    sin_family: AF_INET as u8,
                     sin_port: v4.port().to_be(),
                     sin_addr: in_addr {
                         s_addr: u32::from_ne_bytes(ip),
@@ -81,8 +173,27 @@ impl SockAddrInternal {
                 (Self::V4(sin), size_of::<sockaddr_in>() as u32)
             }
             SocketAddr::V6(v6) => {
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 let sin6 = sockaddr_in6 {
                     sin6_family: AF_INET6 as u16,
+                    sin6_port: v6.port().to_be(),
+                    sin6_flowinfo: v6.flowinfo(),
+                    sin6_addr: in6_addr {
+                        s6_addr: v6.ip().octets(),
+                    },
+                    sin6_scope_id: v6.scope_id(),
+                };
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "ios",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd",
+                    target_os = "dragonfly"
+                ))]
+                let sin6 = sockaddr_in6 {
+                    sin6_len: size_of::<sockaddr_in6>() as u8,
+                    sin6_family: AF_INET6 as u8,
                     sin6_port: v6.port().to_be(),
                     sin6_flowinfo: v6.flowinfo(),
                     sin6_addr: in6_addr {
@@ -110,14 +221,52 @@ extern "C" {
     fn listen(fd: i32, backlog: i32) -> i32;
     fn setsockopt(fd: i32, level: i32, optname: i32, optval: *const i32, optlen: u32) -> i32;
     fn close(fd: i32) -> i32;
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
 fn create_socket(domain: i32, ty: i32, protocol: i32) -> io::Result<RawFd> {
-    let fd = unsafe { socket(domain, ty | SOCK_CLOEXEC | SOCK_NONBLOCK, protocol) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let fd = unsafe { socket(domain, ty | SOCK_CLOEXEC | SOCK_NONBLOCK, protocol) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(fd)
     }
-    Ok(fd)
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let fd = unsafe { socket(domain, ty, protocol) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // Set non-blocking using fcntl
+        let flags = unsafe { fcntl(fd, F_GETFL) };
+        if flags < 0 {
+            let err = io::Error::last_os_error();
+            close_fd(fd);
+            return Err(err);
+        }
+        let res = unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) };
+        if res < 0 {
+            let err = io::Error::last_os_error();
+            close_fd(fd);
+            return Err(err);
+        }
+        // Set close-on-exec using fcntl
+        let flags = unsafe { fcntl(fd, F_GETFD) };
+        if flags < 0 {
+            let err = io::Error::last_os_error();
+            close_fd(fd);
+            return Err(err);
+        }
+        let res = unsafe { fcntl(fd, F_SETFD, flags | FD_CLOEXEC) };
+        if res < 0 {
+            let err = io::Error::last_os_error();
+            close_fd(fd);
+            return Err(err);
+        }
+        Ok(fd)
+    }
 }
 
 fn set_reuseaddr(fd: RawFd) -> io::Result<()> {
@@ -187,6 +336,11 @@ impl TcpStream {
         let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
         stream.set_nonblocking(true)?;
         Ok((TcpStream { inner: stream }, connected))
+    }
+
+    pub fn from_std(stream: std::net::TcpStream) -> Self {
+        let _ = stream.set_nonblocking(true);
+        TcpStream { inner: stream }
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
@@ -272,6 +426,19 @@ impl TcpListener {
         let listener = unsafe { std::net::TcpListener::from_raw_fd(fd) };
         listener.set_nonblocking(true)?;
         Ok(Self { inner: listener })
+    }
+
+    pub fn from_std(listener: std::net::TcpListener) -> io::Result<Self> {
+        listener.set_nonblocking(true)?;
+        Ok(Self { inner: listener })
+    }
+
+    pub fn into_std(self) -> std::net::TcpListener {
+        self.inner
+    }
+
+    pub fn try_clone_std(&self) -> io::Result<std::net::TcpListener> {
+        self.inner.try_clone()
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {

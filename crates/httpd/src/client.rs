@@ -11,6 +11,7 @@ use std::io;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
+use std::thread;
 use std::time::Duration;
 
 /// Configuration toggles applied to outbound HTTP requests.
@@ -576,9 +577,7 @@ fn execute_https_blocking(
     request_timeout: Duration,
     max_response_bytes: usize,
 ) -> Result<ClientResponse, ClientError> {
-    use std::net::TcpStream as StdTcpStream;
-
-    let stream = StdTcpStream::connect_timeout(&addr, connect_timeout)?;
+    let stream = connect_blocking_with_retry(&addr, connect_timeout)?;
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(request_timeout));
     let _ = stream.set_write_timeout(Some(request_timeout));
@@ -628,6 +627,41 @@ fn build_request(
     }
     request.push_str("\r\n");
     Ok(request)
+}
+
+fn connect_blocking_with_retry(
+    addr: &std::net::SocketAddr,
+    timeout: Duration,
+) -> io::Result<std::net::TcpStream> {
+    const MAX_ATTEMPTS: usize = 6;
+    let mut delay = Duration::from_millis(25);
+    for attempt in 0..MAX_ATTEMPTS {
+        match std::net::TcpStream::connect_timeout(addr, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(err) if should_retry_connect(&err) && attempt + 1 < MAX_ATTEMPTS => {
+                thread::sleep(delay);
+                delay = (delay + delay).min(Duration::from_millis(300));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::Other,
+        "exhausted tcp connect retries",
+    ))
+}
+
+fn should_retry_connect(err: &io::Error) -> bool {
+    if err.kind() == io::ErrorKind::WouldBlock {
+        return true;
+    }
+    match err.raw_os_error() {
+        Some(code) => matches!(
+            code,
+            35 | 36 | 37 | 60 | 61 | 10035 | 10036 | 10037 | 114 | 115
+        ),
+        None => false,
+    }
 }
 
 fn read_response_blocking(

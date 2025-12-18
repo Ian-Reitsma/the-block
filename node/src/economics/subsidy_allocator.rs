@@ -43,20 +43,20 @@ impl Default for SubsidyParams {
     fn default() -> Self {
         Self {
             // Utilization targets
-            storage_util_target_bps: 4000,  // 40%
-            compute_util_target_bps: 6000,  // 60%
-            energy_util_target_bps: 5000,   // 50%
-            ad_util_target_bps: 5000,       // 50%
+            storage_util_target_bps: 4000, // 40%
+            compute_util_target_bps: 6000, // 60%
+            energy_util_target_bps: 5000,  // 50%
+            ad_util_target_bps: 5000,      // 50%
 
             // Margin targets
-            storage_margin_target_bps: 5000,  // 50%
-            compute_margin_target_bps: 5000,  // 50%
-            energy_margin_target_bps: 2500,   // 25%
-            ad_margin_target_bps: 3000,       // 30%
+            storage_margin_target_bps: 5000, // 50%
+            compute_margin_target_bps: 5000, // 50%
+            energy_margin_target_bps: 2500,  // 25%
+            ad_margin_target_bps: 3000,      // 30%
 
             // Distress scoring
-            alpha: 0.60,  // 60% weight on utilization
-            beta: 0.40,   // 40% weight on margin
+            alpha: 0.60, // 60% weight on utilization
+            beta: 0.40,  // 40% weight on margin
 
             // Control parameters
             temperature: 1.0,
@@ -262,7 +262,7 @@ mod tests {
                 ..Default::default()
             },
             energy: MarketMetric {
-                utilization: 0.20, // Low utilization
+                utilization: 0.20,      // Low utilization
                 provider_margin: -0.15, // Unprofitable! (like -$9/epoch)
                 ..Default::default()
             },
@@ -308,7 +308,7 @@ mod tests {
                 ..Default::default()
             },
             compute: MarketMetric {
-                utilization: 0.90, // Very high utilization
+                utilization: 0.90,     // Very high utilization
                 provider_margin: 0.80, // Very profitable
                 ..Default::default()
             },

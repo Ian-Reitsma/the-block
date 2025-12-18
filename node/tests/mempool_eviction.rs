@@ -12,8 +12,7 @@ static INIT: Once = Once::new();
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    INIT.call_once(|| {
-    });
+    INIT.call_once(|| {});
 }
 
 fn build_tx(sk: &[u8], from: &str, to: &str, fee: u64, nonce: u64) -> SignedTransaction {

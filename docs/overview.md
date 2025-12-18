@@ -8,11 +8,13 @@
 > |---------|---------------|
 > | **Block** | A page in a shared ledger. Every ~1 second, a new page is added containing recent transactions. Once added, it can't be changed. |
 > | **Consensus** | How nodes (computers running the software) agree on which page is next. This prevents anyone from cheating or rewriting history. |
-> | **CT (Consumer Token)** | The single currency that moves through the system. You can send it, receive it, pay for services, or earn it by contributing. |
+> | **BLOCK** | The single currency that moves through the system. You can send it, receive it, pay for services, or earn it by contributing. |
 >
 > **Reading this doc:** If you want to know *what lives where* in the codebase, read this. If you want *wire-level technical details*, read [`docs/architecture.md`](architecture.md).
 
-The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into CT rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
+The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
+
+> **Legacy labels:** Internally we still refer to `amount_ct`, `amount_it`, `STORAGE_SUB_CT`, etc., so tooling and telemetry preserve those names even though the transferred token is BLOCK. When reading the code or metrics, treat CT/IT as shorthand for BLOCK-ledger buckets (via `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `metrics-aggregator/src/lib.rs`).
 
 ## Mission
 - Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.
@@ -27,7 +29,7 @@ The Block is the unification layer for storage, compute, networking, and governa
 | **Consensus & Ledger** | Decides which transactions "really happened" and in what order. Makes sure everyone agrees on the same history. | `node/src/consensus`, `node/src/blockchain`, `bridges`, `ledger`, `poh` | Hybrid PoW/PoS leader schedule, macro-block checkpoints, Kalman retarget, ledger invariants, bridge proofs. |
 | **Serialization & Tooling** | Agrees on a specific binary format so nodes written in different languages still understand each other. | `crates/foundation_serialization`, `crates/codec`, `docs/spec/*.json` | Canonical binary layout, cross-language vectors, CLI/SDK adapters. |
 | **Cryptography & Identity** | Makes sure signatures can't be faked and identities can be updated or revoked. Handles keys and proofs. | `crypto`, `crates/crypto_suite`, `node/src/identity`, `dkg`, `zkp`, `remote_signer` | Hash/signature primitives, DKG, commit–reveal, identity registries, PQ hooks. |
-| **Core Tooling & UX** | The command-line app (`tb-cli`), dashboards, and explorer that people actually touch. | `cli`, `gateway`, `explorer`, `metrics-aggregator`, `monitoring`, `docs/apis_and_tooling.md` | RPC & CLI surfaces, gateways, dashboards, probe CLI, release tooling. |
+| **Core Tooling & UX** | The command-line app (`contract-cli`), dashboards, and explorer that people actually touch. | `cli`, `gateway`, `explorer`, `metrics-aggregator`, `monitoring`, `docs/apis_and_tooling.md` | RPC & CLI surfaces, gateways, dashboards, probe CLI, release tooling. |
 
 ## Design Pillars
 | Pillar | Enforcement | Evidence |
@@ -66,7 +68,7 @@ Imagine Alice wants to store a file on The Block. Here's what happens step by st
 | --- | --- |
 | `node/` | Full node, gateway stack, compute/storage/bridge/mempool modules, RPC server. |
 | `crates/` | First-party libraries: transport, HTTP, serialization, overlay, runtime, coding/erasure, wallet SDKs. |
-| `cli/` | `tb-cli` binary with governance, bridge, wallet, identity, compute, telemetry, and remediation commands. |
+| `cli/` | `contract-cli` binary with governance, bridge, wallet, identity, compute, telemetry, and remediation commands. |
 | `metrics-aggregator/` | Aggregates Prometheus-style metrics, publishes dashboards, verifies TLS & governance state. |
 | `monitoring/` | Grafana/Prometheus templates and scripts (build via `npm ci --prefix monitoring`). |
 | `storage_market/`, `dex/`, `bridges/`, `gateway/` | Dedicated crates for specialized subsystems referenced throughout the docs. |
@@ -87,7 +89,7 @@ As an energy provider, you register once, then your smart meter sends signed rea
 **Technical Details:**
 - **Code surface** — `crates/energy-market` implements providers, credits, receipts, and telemetry; `node/src/energy.rs` persists them in sled (`SimpleDb::open_named(names::ENERGY_MARKET, …)`), applies governance hooks, and exposes health checks. RPC handlers live in `node/src/rpc/energy.rs`, the CLI entry point is `cli/src/energy.rs`, and oracle ingestion goes through `crates/oracle-adapter` plus the `services/mock-energy-oracle` binary used by the World OS drill.
 - **State & persistence** — Energy state is serialized with `foundation_serialization::binary::{encode,decode}` and stored wherever `TB_ENERGY_MARKET_DIR` points (default `energy_market/`). Snapshots occur after every mutation, mirroring the fsync+rename workflow the rest of `SimpleDb` uses so restarts replay identical providers/credits/receipts. Governance parameters (`energy_min_stake`, `energy_oracle_timeout_blocks`, `energy_slashing_rate_bps`) share the same proposal pipeline as other params; once a proposal activates, `node::energy::set_governance_params` updates the runtime config and re-snapshots the sled DB.
-- **RPC & CLI** — The JSON-RPC namespace exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, and `energy.settle`. Requests use the exact schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`, including the shared `MeterReadingPayload` used by oracle adapters, CLI tooling, and explorers. `tb-cli energy` prints tabular output by default, toggles JSON via `--verbose`/`--format json`, and pipes raw payloads to automation without diverging from the node schema.
+- **RPC & CLI** — The JSON-RPC namespace exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, and `energy.settle`. Requests use the exact schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`, including the shared `MeterReadingPayload` used by oracle adapters, CLI tooling, and explorers. `contract-cli energy` prints tabular output by default, toggles JSON via `--verbose`/`--format json`, and pipes raw payloads to automation without diverging from the node schema.
 - **Observability & operations** — Runtime metrics include gauges (`energy_providers_count`, `energy_avg_price`), counters (`energy_kwh_traded_total`, `energy_settlements_total{provider}`, `energy_signature_failure_total{provider,reason}`), and histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`). `node::energy::check_energy_market_health` logs warnings when pending credits pile up or settlements stall. `docs/testnet/ENERGY_QUICKSTART.md` plus `scripts/deploy-worldos-testnet.sh` describe the canonical bootstrap procedure (node + mock oracle + telemetry stack); `docs/operations.md#energy-market-operations` extends the runbook with backup, dispute, and alerting guidance.
 - **Security & governance alignment** — The outstanding work (oracle signature enforcement, dispute RPCs, explorer timelines, QUIC chaos drills, sled snapshot drills, release-provenance gates) is tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks` and summarized in `AGENTS.md`. `docs/security_and_privacy.md#energy-oracle-safety` documents key hygiene, secret sourcing, and telemetry redaction requirements for oracle adapters.
 

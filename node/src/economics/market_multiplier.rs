@@ -38,7 +38,7 @@ pub struct MarketMultiplierParams {
 impl Default for MarketMultiplierParams {
     fn default() -> Self {
         Self {
-            util_target_bps: 5000, // 50%
+            util_target_bps: 5000,   // 50%
             margin_target_bps: 3000, // 30%
             util_responsiveness: 2.0,
             cost_responsiveness: 1.0,
@@ -62,7 +62,7 @@ impl Default for MultiplierParams {
     fn default() -> Self {
         Self {
             storage: MarketMultiplierParams {
-                util_target_bps: 4000, // 40%
+                util_target_bps: 4000,   // 40%
                 margin_target_bps: 5000, // 50%
                 util_responsiveness: 2.0,
                 cost_responsiveness: 1.0,
@@ -70,7 +70,7 @@ impl Default for MultiplierParams {
                 multiplier_ceiling: 3.0,
             },
             compute: MarketMultiplierParams {
-                util_target_bps: 6000, // 60%
+                util_target_bps: 6000,   // 60%
                 margin_target_bps: 5000, // 50%
                 util_responsiveness: 2.0,
                 cost_responsiveness: 1.0,
@@ -78,7 +78,7 @@ impl Default for MultiplierParams {
                 multiplier_ceiling: 3.0,
             },
             energy: MarketMultiplierParams {
-                util_target_bps: 5000, // 50%
+                util_target_bps: 5000,   // 50%
                 margin_target_bps: 2500, // 25%
                 util_responsiveness: 2.0,
                 cost_responsiveness: 1.0,
@@ -86,7 +86,7 @@ impl Default for MultiplierParams {
                 multiplier_ceiling: 3.0,
             },
             ad: MarketMultiplierParams {
-                util_target_bps: 5000, // 50%
+                util_target_bps: 5000,   // 50%
                 margin_target_bps: 3000, // 30%
                 util_responsiveness: 2.0,
                 cost_responsiveness: 1.0,
@@ -109,18 +109,11 @@ impl MarketMultiplierController {
     /// Compute all market multipliers
     pub fn compute_multipliers(&self, metrics: &MarketMetrics) -> MultiplierSnapshot {
         MultiplierSnapshot {
-            storage_multiplier: self.compute_market_multiplier(
-                &metrics.storage,
-                &self.params.storage,
-            ),
-            compute_multiplier: self.compute_market_multiplier(
-                &metrics.compute,
-                &self.params.compute,
-            ),
-            energy_multiplier: self.compute_market_multiplier(
-                &metrics.energy,
-                &self.params.energy,
-            ),
+            storage_multiplier: self
+                .compute_market_multiplier(&metrics.storage, &self.params.storage),
+            compute_multiplier: self
+                .compute_market_multiplier(&metrics.compute, &self.params.compute),
+            energy_multiplier: self.compute_market_multiplier(&metrics.energy, &self.params.energy),
             ad_multiplier: self.compute_market_multiplier(&metrics.ad, &self.params.ad),
         }
     }
@@ -215,10 +208,10 @@ mod tests {
 
         let metrics = MarketMetrics {
             energy: MarketMetric {
-                utilization: 0.50, // At target
-                average_cost_block: 200.0, // High cost
+                utilization: 0.50,             // At target
+                average_cost_block: 200.0,     // High cost
                 effective_payout_block: 150.0, // Below needed payout
-                provider_margin: -0.15, // Unprofitable
+                provider_margin: -0.15,        // Unprofitable
             },
             ..Default::default()
         };
@@ -240,7 +233,7 @@ mod tests {
                 utilization: 0.90, // Very high (target 60%)
                 average_cost_block: 100.0,
                 effective_payout_block: 300.0, // Very profitable
-                provider_margin: 2.0, // 200% margin
+                provider_margin: 2.0,          // 200% margin
             },
             ..Default::default()
         };
@@ -259,10 +252,10 @@ mod tests {
 
         let metrics = MarketMetrics {
             energy: MarketMetric {
-                utilization: 0.0, // Zero utilization
-                average_cost_block: 1000.0, // Very high cost
+                utilization: 0.0,             // Zero utilization
+                average_cost_block: 1000.0,   // Very high cost
                 effective_payout_block: 10.0, // Very low payout
-                provider_margin: -10.0, // Massively unprofitable
+                provider_margin: -10.0,       // Massively unprofitable
             },
             ..Default::default()
         };
@@ -281,8 +274,8 @@ mod tests {
 
         let metrics = MarketMetrics {
             ad: MarketMetric {
-                utilization: 0.20, // Below target
-                average_cost_block: 0.0, // No cost data
+                utilization: 0.20,           // Below target
+                average_cost_block: 0.0,     // No cost data
                 effective_payout_block: 0.0, // No payout data
                 provider_margin: 0.0,
             },

@@ -342,7 +342,8 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut epoch_bytes_out = None;
     let mut recent_timestamps = None;
 
-    decode_struct(reader, None, |key, reader| match key { // Changed from Some(18) to support both old (18) and new (16) field formats
+    decode_struct(reader, None, |key, reader| match key {
+        // Changed from Some(18) to support both old (18) and new (16) field formats
         "schema_version" => assign_once(
             &mut schema_version,
             reader.read_u64().map(|v| v as usize)?,
@@ -365,7 +366,11 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             reader.read_u64()?,
             "emission_industrial",
         ),
-        "emission_year_ago" => assign_once(&mut emission_year_ago, reader.read_u64()?, "emission_year_ago"),
+        "emission_year_ago" => assign_once(
+            &mut emission_year_ago,
+            reader.read_u64()?,
+            "emission_year_ago",
+        ),
         "emission_consumer_year_ago" => assign_once(
             &mut emission_consumer_year_ago,
             reader.read_u64()?,
@@ -424,7 +429,8 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
         emission: emission.unwrap_or_else(|| {
             emission_consumer.unwrap_or_default() + emission_industrial.unwrap_or_default()
         }),
-        emission_year_ago: emission_year_ago.unwrap_or_else(|| emission_consumer_year_ago.unwrap_or_default()),
+        emission_year_ago: emission_year_ago
+            .unwrap_or_else(|| emission_consumer_year_ago.unwrap_or_default()),
         inflation_epoch_marker: inflation_epoch_marker.unwrap_or_default(),
         block_reward: TokenAmount::new(block_reward.unwrap_or_else(|| {
             block_reward_consumer.unwrap_or_default() + block_reward_industrial.unwrap_or_default()

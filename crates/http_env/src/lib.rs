@@ -179,6 +179,16 @@ pub fn has_tls_warning_sinks() -> bool {
         .unwrap_or(false)
 }
 
+/// Clears all registered TLS warning sinks.
+///
+/// Intended for use in tests to avoid cross-test contamination when multiple
+/// suites manipulate sink registration concurrently.
+pub fn clear_tls_warning_sinks_for_testing() {
+    if let Ok(mut guard) = warning_cell().sinks.lock() {
+        guard.clear();
+    }
+}
+
 pub fn install_tls_warning_handler<F>(handler: F) -> TlsEnvWarningGuard
 where
     F: Fn(&TlsEnvWarning) + Send + Sync + 'static,

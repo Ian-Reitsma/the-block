@@ -37,7 +37,7 @@ pub struct EnergyProvider {
     pub capacity_kwh: u64,
     pub available_kwh: u64,
     pub price_per_kwh: Balance,
-    pub reputation_score: f64,  // Legacy simple score (for backward compat)
+    pub reputation_score: f64, // Legacy simple score (for backward compat)
     pub meter_address: OracleAddress,
     pub total_delivered_kwh: u64,
     pub staked_balance: Balance,
@@ -45,7 +45,7 @@ pub struct EnergyProvider {
     pub last_meter_value: Option<u64>,
     pub last_meter_timestamp: Option<UnixTimestamp>,
     #[serde(default)]
-    pub bayesian_reputation: BayesianReputation,  // Advanced multi-factor reputation
+    pub bayesian_reputation: BayesianReputation, // Advanced multi-factor reputation
 }
 
 impl EnergyProvider {
@@ -260,7 +260,7 @@ impl BayesianReputation {
             * meter_score.powf(W_METER)
             * latency_score.powf(W_LATENCY)
             * capacity_score.powf(W_CAPACITY))
-            .clamp(0.0, 1.0);
+        .clamp(0.0, 1.0);
     }
 
     /// Get current composite score
@@ -285,7 +285,7 @@ impl BayesianReputation {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct EnergyMarketConfig {
     pub min_stake: Balance,
-    pub treasury_fee_bps: u16,  // Now a base/minimum fee (dynamic fees added above this)
+    pub treasury_fee_bps: u16, // Now a base/minimum fee (dynamic fees added above this)
     pub ewma_alpha: f64,
     pub jurisdiction_fee_bps: u16,
     pub oracle_timeout_blocks: u64,
@@ -297,9 +297,9 @@ pub struct EnergyMarketConfig {
     pub peak_hour_utc: u8,
     // Bayesian reputation parameters
     pub bayesian_reputation_enabled: bool,
-    pub latency_threshold_ms: u64,        // Acceptable fulfillment latency
-    pub min_reputation_score: f64,        // Minimum score before deactivation
-    pub min_reputation_confidence: f64,   // Minimum confidence before enforcing deactivation
+    pub latency_threshold_ms: u64, // Acceptable fulfillment latency
+    pub min_reputation_score: f64, // Minimum score before deactivation
+    pub min_reputation_confidence: f64, // Minimum confidence before enforcing deactivation
 }
 
 impl Default for EnergyMarketConfig {
@@ -313,13 +313,13 @@ impl Default for EnergyMarketConfig {
             slashing_rate_bps: 0,
             // Dynamic fee defaults
             dynamic_fees_enabled: true,
-            congestion_sensitivity: 0.1,  // Controls how aggressively fees respond to congestion
-            target_utilization: 0.7,      // 70% target grid utilization
-            peak_hour_utc: 19,            // 19:00 UTC (7pm)
+            congestion_sensitivity: 0.1, // Controls how aggressively fees respond to congestion
+            target_utilization: 0.7,     // 70% target grid utilization
+            peak_hour_utc: 19,           // 19:00 UTC (7pm)
             // Bayesian reputation defaults
             bayesian_reputation_enabled: true,
-            latency_threshold_ms: 5000,   // 5 seconds acceptable latency
-            min_reputation_score: 0.3,    // Deactivate providers below 30% score
+            latency_threshold_ms: 5000,     // 5 seconds acceptable latency
+            min_reputation_score: 0.3,      // Deactivate providers below 30% score
             min_reputation_confidence: 0.7, // Require 70% confidence before deactivation
         }
     }
@@ -557,7 +557,9 @@ impl EnergyMarket {
 
         // 1. Congestion multiplier (higher utilization → higher fees)
         let total_capacity: u64 = self.providers.values().map(|p| p.capacity_kwh).sum();
-        let total_consumed: u64 = self.providers.values()
+        let total_consumed: u64 = self
+            .providers
+            .values()
             .map(|p| p.capacity_kwh.saturating_sub(p.available_kwh))
             .sum();
 
@@ -568,7 +570,8 @@ impl EnergyMarket {
         };
 
         let utilization_error = current_utilization - self.config.target_utilization;
-        let congestion_multiplier = 1.0 + utilization_error.tanh() * (1.0 / self.config.congestion_sensitivity);
+        let congestion_multiplier =
+            1.0 + utilization_error.tanh() * (1.0 / self.config.congestion_sensitivity);
         let congestion_multiplier = congestion_multiplier.clamp(0.5, 2.0);
 
         // 2. Liquidity discount (more providers → lower fees to encourage competition)
@@ -711,23 +714,25 @@ impl EnergyMarket {
         }
 
         // Update delivery reliability
-        provider.bayesian_reputation.update_delivery(delivery_success);
+        provider
+            .bayesian_reputation
+            .update_delivery(delivery_success);
 
         // Update meter accuracy
-        provider.bayesian_reputation.update_meter_accuracy(meter_consistent);
+        provider
+            .bayesian_reputation
+            .update_meter_accuracy(meter_consistent);
 
         // Update response latency
         let latency_ms = fulfillment_time.as_millis() as u64;
-        provider.bayesian_reputation.update_latency(
-            latency_ms,
-            self.config.latency_threshold_ms,
-        );
+        provider
+            .bayesian_reputation
+            .update_latency(latency_ms, self.config.latency_threshold_ms);
 
         // Update capacity stability (compare current vs total capacity)
-        provider.bayesian_reputation.update_capacity_stability(
-            provider.available_kwh,
-            provider.capacity_kwh,
-        );
+        provider
+            .bayesian_reputation
+            .update_capacity_stability(provider.available_kwh, provider.capacity_kwh);
 
         // Update the simple reputation_score field for backward compatibility
         provider.reputation_score = provider.bayesian_reputation.score();
@@ -1090,14 +1095,16 @@ mod tests {
         // Add 3 providers with total capacity 3000 kWh
         for i in 0..3 {
             let meter = format!("meter-{}", i);
-            market.register_energy_provider(
-                format!("owner-{}", i),
-                1000, // 1000 kWh capacity each
-                2,    // price
-                meter,
-                "jurisdiction-1".into(),
-                1000, // stake
-            ).expect("provider registration succeeds");
+            market
+                .register_energy_provider(
+                    format!("owner-{}", i),
+                    1000, // 1000 kWh capacity each
+                    2,    // price
+                    meter,
+                    "jurisdiction-1".into(),
+                    1000, // stake
+                )
+                .expect("provider registration succeeds");
         }
 
         // Scenario 1: Low utilization (10%) - fees should be lower than base
@@ -1362,8 +1369,8 @@ mod tests {
         let result = market.update_bayesian_reputation(
             &provider_id,
             Duration::from_millis(2000), // Fast
-            true,  // Delivery success
-            true,  // Meter consistent
+            true,                        // Delivery success
+            true,                        // Meter consistent
         );
 
         assert!(result.is_ok());
@@ -1398,19 +1405,17 @@ mod tests {
 
         // Build up good reputation
         for _ in 0..5 {
-            market.update_bayesian_reputation(
-                &provider_id,
-                Duration::from_millis(1000),
-                true,
-                true,
-            ).expect("update succeeds");
+            market
+                .update_bayesian_reputation(&provider_id, Duration::from_millis(1000), true, true)
+                .expect("update succeeds");
         }
 
         let provider = market.providers.get(&provider_id).unwrap();
         let score_before = provider.bayesian_reputation.score();
 
         // Apply penalty
-        market.penalize_provider_reputation(&provider_id, 3.0)
+        market
+            .penalize_provider_reputation(&provider_id, 3.0)
             .expect("penalize succeeds");
 
         let provider = market.providers.get(&provider_id).unwrap();

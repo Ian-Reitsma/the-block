@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread;
 use std::time::Duration;
 
 use foundation_serialization::json;
@@ -7,7 +11,7 @@ use httpd::{
     HttpError, Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode,
     WebSocketResponse,
 };
-use runtime::{self, net::TcpListener, ws::Message};
+use runtime::{self, ws::Message};
 use wallet::{Wallet, WalletError, WalletSigner};
 
 #[derive(Clone)]
@@ -54,7 +58,8 @@ fn success_response(state: &SignerState, request: SignRequest) -> Result<Respons
 
 pub struct HttpSignerMock {
     url: String,
-    handle: runtime::JoinHandle<std::io::Result<()>>,
+    shutdown: Arc<AtomicBool>,
+    _thread: thread::JoinHandle<()>,
 }
 
 impl HttpSignerMock {
@@ -75,18 +80,19 @@ impl HttpSignerMock {
     }
 
     pub fn with_behavior(behavior: SignerBehavior) -> Self {
-        runtime::block_on(async move {
-            let wallet = Wallet::generate();
-            let pk_hex = wallet.public_key_hex();
-            let state = SignerState {
-                wallet: Arc::new(wallet),
-                pk_hex,
-                behavior,
-            };
-            let router = build_http_router(state.clone());
-            let (url, handle) = spawn_httpd(router, "http", None).await;
-            HttpSignerMock { url, handle }
-        })
+        let wallet = Wallet::generate();
+        let pk_hex = wallet.public_key_hex();
+        let state = SignerState {
+            wallet: Arc::new(wallet),
+            pk_hex,
+            behavior,
+        };
+        let (url, shutdown, thread) = spawn_threaded_httpd(state, "http", None);
+        HttpSignerMock {
+            url,
+            shutdown,
+            _thread: thread,
+        }
     }
 
     pub fn url(&self) -> &str {
@@ -96,30 +102,33 @@ impl HttpSignerMock {
 
 impl Drop for HttpSignerMock {
     fn drop(&mut self) {
-        self.handle.abort();
+        self.shutdown.store(true, Ordering::SeqCst);
+        // Thread will exit on its own when shutdown is set
     }
 }
 
 #[allow(dead_code)]
 pub struct TlsWebSocketSignerMock {
     url: String,
-    handle: runtime::JoinHandle<std::io::Result<()>>,
+    shutdown: Arc<AtomicBool>,
+    _thread: thread::JoinHandle<()>,
 }
 
 #[allow(dead_code)]
 impl TlsWebSocketSignerMock {
     pub fn new(wallet: Wallet, tls: ServerTlsConfig) -> Self {
-        runtime::block_on(async move {
-            let pk_hex = wallet.public_key_hex();
-            let state = SignerState {
-                wallet: Arc::new(wallet),
-                pk_hex,
-                behavior: SignerBehavior::Success,
-            };
-            let router = build_websocket_router(state.clone());
-            let (url, handle) = spawn_httpd(router, "wss", Some(tls)).await;
-            TlsWebSocketSignerMock { url, handle }
-        })
+        let pk_hex = wallet.public_key_hex();
+        let state = SignerState {
+            wallet: Arc::new(wallet),
+            pk_hex,
+            behavior: SignerBehavior::Success,
+        };
+        let (url, shutdown, thread) = spawn_threaded_httpd(state, "wss", Some(tls));
+        TlsWebSocketSignerMock {
+            url,
+            shutdown,
+            _thread: thread,
+        }
     }
 
     pub fn url(&self) -> &str {
@@ -129,7 +138,8 @@ impl TlsWebSocketSignerMock {
 
 impl Drop for TlsWebSocketSignerMock {
     fn drop(&mut self) {
-        self.handle.abort();
+        self.shutdown.store(true, Ordering::SeqCst);
+        // Thread will exit on its own when shutdown is set
     }
 }
 
@@ -207,22 +217,197 @@ fn build_websocket_router(state: SignerState) -> Router<SignerState> {
     })
 }
 
-async fn spawn_httpd(
-    router: Router<SignerState>,
+/// Spawns a simple HTTP server on a separate OS thread.
+/// Uses blocking I/O to avoid runtime complexities.
+fn spawn_threaded_httpd(
+    state: SignerState,
     scheme: &str,
     tls: Option<ServerTlsConfig>,
-) -> (String, runtime::JoinHandle<std::io::Result<()>>) {
-    let listener = TcpListener::bind("127.0.0.1:0".parse().expect("bind addr"))
-        .await
-        .expect("bind listener");
-    let addr = listener.local_addr().expect("listener address");
-    let url = format!("{scheme}://{addr}");
-    let handle = if let Some(tls_cfg) = tls {
-        runtime::spawn(async move {
-            httpd::serve_tls(listener, router, ServerConfig::default(), tls_cfg).await
-        })
+) -> (String, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener as StdTcpListener;
+    use std::sync::mpsc;
+
+    let (addr_tx, addr_rx) = mpsc::channel();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = Arc::clone(&shutdown);
+
+    // For TLS, we still need to use the runtime approach
+    if tls.is_some() {
+        // Fall back to original implementation for TLS
+        let thread = thread::spawn(move || {
+            runtime::block_on(async move {
+                let listener = runtime::net::TcpListener::bind("127.0.0.1:0".parse().unwrap())
+                    .await
+                    .expect("bind listener");
+                let addr = listener.local_addr().expect("listener address");
+                addr_tx.send(addr).expect("send addr");
+
+                let tls_cfg = tls.unwrap();
+                let router = build_websocket_router(state);
+                let mut config = ServerConfig::default();
+                config.keep_alive = Duration::ZERO;
+
+                loop {
+                    if shutdown_clone.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let accept_result =
+                        runtime::timeout(Duration::from_millis(100), listener.accept()).await;
+                    match accept_result {
+                        Ok(Ok((stream, remote))) => {
+                            if shutdown_clone.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            let _ = httpd::serve_tls_stream(
+                                stream,
+                                remote,
+                                router.clone(),
+                                config.clone(),
+                                tls_cfg.clone(),
+                            )
+                            .await;
+                        }
+                        _ => continue,
+                    }
+                }
+            });
+        });
+
+        let addr = addr_rx.recv().expect("recv addr");
+        let url = format!("{scheme}://127.0.0.1:{}", addr.port());
+        thread::sleep(Duration::from_millis(50));
+        return (url, shutdown, thread);
+    }
+
+    // For plain HTTP, use simple blocking I/O
+    let thread = thread::spawn(move || {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        addr_tx.send(addr).expect("send addr");
+
+        for stream in listener.incoming() {
+            if shutdown_clone.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Set read timeout to avoid blocking forever
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+            // Read HTTP request
+            let mut reader = BufReader::new(&stream);
+            let mut request_line = String::new();
+            if reader.read_line(&mut request_line).is_err() {
+                continue;
+            }
+
+            // Parse method and path
+            let parts: Vec<&str> = request_line.split_whitespace().collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            let method = parts[0];
+            let path = parts[1];
+
+            // Read headers
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() || line == "\r\n" || line == "\n" {
+                    break;
+                }
+                if line.to_lowercase().starts_with("content-length:") {
+                    if let Some(len) = line.split(':').nth(1) {
+                        content_length = len.trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            // Read body if present
+            let mut body = vec![0u8; content_length];
+            if content_length > 0 {
+                if reader.read_exact(&mut body).is_err() {
+                    continue;
+                }
+            }
+
+            // Handle request
+            let response = match (method, path) {
+                ("GET", "/pubkey") => {
+                    let json = format!(r#"{{"pubkey":"{}"}}"#, state.pk_hex);
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        json.len(),
+                        json
+                    )
+                }
+                ("POST", "/sign") => match handle_sign_request(&state, &body) {
+                    Ok(json) => format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        json.len(),
+                        json
+                    ),
+                    Err(status) => format!("HTTP/1.1 {}\r\nConnection: close\r\n\r\n", status),
+                },
+                _ => "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".to_string(),
+            };
+
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+
+    let addr = addr_rx.recv().expect("recv addr");
+    let url = format!("{scheme}://127.0.0.1:{}", addr.port());
+    thread::sleep(Duration::from_millis(50));
+    (url, shutdown, thread)
+}
+
+fn handle_sign_request(state: &SignerState, body: &[u8]) -> Result<String, u16> {
+    let body_str = std::str::from_utf8(body).map_err(|_| 400u16)?;
+
+    // Use a simple manual JSON parser to avoid serde issues with extra fields
+    let msg_value = extract_json_field(body_str, "msg").ok_or(400u16)?;
+
+    match &state.behavior {
+        SignerBehavior::Success => {
+            let msg = crypto_suite::hex::decode(&msg_value).map_err(|_| 400u16)?;
+            let sig = state.wallet.sign(&msg).map_err(|_| 500u16)?;
+            let sig_hex = crypto_suite::hex::encode(sig.to_bytes());
+            Ok(format!(r#"{{"sig":"{}"}}"#, sig_hex))
+        }
+        SignerBehavior::Failure(status) => Err(status.as_u16()),
+        SignerBehavior::InvalidSignature => Ok(r#"{"sig":"00"}"#.to_string()),
+        SignerBehavior::Delay(duration) => {
+            thread::sleep(*duration);
+            let msg = crypto_suite::hex::decode(&msg_value).map_err(|_| 400u16)?;
+            let sig = state.wallet.sign(&msg).map_err(|_| 500u16)?;
+            let sig_hex = crypto_suite::hex::encode(sig.to_bytes());
+            Ok(format!(r#"{{"sig":"{}"}}"#, sig_hex))
+        }
+    }
+}
+
+/// Simple JSON field extractor that doesn't require serde
+fn extract_json_field(json: &str, field: &str) -> Option<String> {
+    let pattern = format!(r#""{}":"#, field);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+
+    // Find the value - handle string values
+    if rest.starts_with('"') {
+        let rest = &rest[1..]; // skip opening quote
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
     } else {
-        runtime::spawn(async move { httpd::serve(listener, router, ServerConfig::default()).await })
-    };
-    (url, handle)
+        // Handle non-string values
+        let end = rest.find(|c: char| c == ',' || c == '}')?;
+        Some(rest[..end].to_string())
+    }
 }

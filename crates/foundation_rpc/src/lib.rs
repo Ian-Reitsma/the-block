@@ -11,7 +11,6 @@ use foundation_serialization::de::DeserializeOwned;
 use foundation_serialization::json::{self, Map, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{HttpError, Request as HttpRequest, Response as HttpResponse, StatusCode};
-use std::borrow::Cow;
 use thiserror::Error;
 
 /// JSON-RPC version identifier carried by every envelope.

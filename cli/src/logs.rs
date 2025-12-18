@@ -569,12 +569,19 @@ mod log_store {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use foundation_lazy::sync::Lazy;
         use foundation_tui::prompt::testing::with_passphrase_override;
         use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
+        use std::sync::{Arc, Mutex, MutexGuard};
+
+        fn prompt_override_guard() -> MutexGuard<'static, ()> {
+            static GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+            GUARD.lock().unwrap_or_else(|poison| poison.into_inner())
+        }
 
         #[test]
         fn prompt_optional_skips_when_existing() {
+            let _guard = prompt_override_guard();
             let invoked = Arc::new(AtomicBool::new(false));
             let captured = Arc::clone(&invoked);
             let result = with_passphrase_override(
@@ -591,6 +598,7 @@ mod log_store {
 
         #[test]
         fn prompt_optional_prompts_and_trims() {
+            let _guard = prompt_override_guard();
             let value = with_passphrase_override(
                 |_| Ok("  secret  ".to_string()),
                 || prompt_optional_passphrase(None, "prompt"),
@@ -601,6 +609,7 @@ mod log_store {
 
         #[test]
         fn prompt_optional_filters_empty() {
+            let _guard = prompt_override_guard();
             let value = with_passphrase_override(
                 |_| Ok("   ".to_string()),
                 || prompt_optional_passphrase(None, "prompt"),
@@ -611,6 +620,7 @@ mod log_store {
 
         #[test]
         fn prompt_required_returns_existing() {
+            let _guard = prompt_override_guard();
             let result = with_passphrase_override(
                 |_| Ok("should-not-run".to_string()),
                 || prompt_required_passphrase(Some("value".into()), "prompt", "error"),
@@ -621,6 +631,7 @@ mod log_store {
 
         #[test]
         fn prompt_required_reads_when_missing() {
+            let _guard = prompt_override_guard();
             let result = with_passphrase_override(
                 |_| Ok("new-pass".to_string()),
                 || prompt_required_passphrase(None, "prompt", "error"),

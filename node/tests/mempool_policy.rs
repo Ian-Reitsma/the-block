@@ -19,8 +19,7 @@ static PY_INIT: Once = Once::new();
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    PY_INIT.call_once(|| {
-    });
+    PY_INIT.call_once(|| {});
 }
 
 fn build_signed_tx(

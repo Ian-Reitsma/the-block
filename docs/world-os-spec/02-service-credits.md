@@ -10,7 +10,7 @@
 - `storage_market/` — Contract & replica state persisted through sled `Engine`. `ReplicaIncentive` tracks deposits, EWMA proof scores, and block numbers.
 - `node/src/storage` — Upload/repair flows, manifest metadata, proof verification.
 - `node/src/rpc/storage.rs` — JSON-RPC handlers: `storage.upload`, `storage.challenge`, `storage.incentives`, `storage.provider_profiles`, `storage.manifest_summaries`, `storage.repair_run`, `storage.repair_chunk`, `storage.set_provider_maintenance`.
-- `cli/src/storage.rs` — `tb-cli storage upload|challenge|providers` map 1:1 to the RPC functions.
+- `cli/src/storage.rs` — `contract-cli storage upload|challenge|providers` map 1:1 to the RPC functions.
 
 ### State Structures
 | Item | Description |
@@ -30,7 +30,7 @@
 ### Modules
 - `node/src/compute_market/` — Scheduler, matcher, receipts, settlement engine, SNARK bundle cache, pricing board.
 - `node/src/rpc/compute_market.rs` — Methods: `compute.stats`, `compute.scheduler_metrics`, `compute.scheduler_stats`, `compute.reputation_get`, `compute.job_requirements`, `compute.job_cancel`, `compute.provider_hardware`, `compute.settlement_audit`, `compute.provider_balances`, `compute.recent_roots`, `compute.sla_history`.
-- `cli/src/compute.rs` — Subcommands `tb-cli compute submit|cancel|providers|settlements` mirroring RPC.
+- `cli/src/compute.rs` — Subcommands `contract-cli compute submit|cancel|providers|settlements` mirroring RPC.
 
 ### State Structures
 | Item | Description |
@@ -52,7 +52,7 @@
 - `node/src/gateway` — Read path, rate limiting, cached telemetry.
 - `gateway/` services (Rust) handle LocalNet and Range Boost logic (see `docs/architecture.md#localnet-and-range-boost`).
 - `node/src/rpc/gateway.rs` (via `gateway/read_receipt.rs`) — Methods `gateway.reads_since`, `gateway.cache_status`, `gateway.flush_cache`.
-- `cli/src/gateway.rs` — `tb-cli gateway cache|reads` commands.
+- `cli/src/gateway.rs` — `contract-cli gateway cache|reads` commands.
 
 ### State
 | Item | Description |

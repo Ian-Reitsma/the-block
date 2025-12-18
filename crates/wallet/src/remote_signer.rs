@@ -8,13 +8,17 @@ use diagnostics::tracing::{info, warn};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
-use httpd::{join_path, BlockingClient, ClientConfig, ClientTlsStream, Method, TlsConnector, Uri};
+use httpd::{
+    join_path, BlockingClient, ClientConfig, ClientTlsStream, Method, TlsConnector,
+    TlsConnectorError, Uri,
+};
 use ledger::crypto::remote_tag;
 use rand::{Rng, RngCore};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::{TcpStream as StdTcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// Cache of signer public keys with an expiry.
@@ -52,6 +56,9 @@ pub struct RemoteSigner {
 }
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const CONNECT_RETRY_LIMIT: usize = 30;
+const CONNECT_RETRY_INITIAL_DELAY_MS: u64 = 20;
+const CONNECT_RETRY_MAX_DELAY_MS: u64 = 1_000;
 
 struct Frame {
     opcode: u8,
@@ -66,8 +73,22 @@ fn generate_trace_id() -> String {
     bytes[8] = (bytes[8] & 0x3F) | 0x80;
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9],
-        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
     )
 }
 
@@ -535,14 +556,13 @@ impl RemoteSigner {
         let addr = url
             .socket_addr()
             .ok_or_else(|| WalletError::Failure("missing address".into()))?;
-        let tcp =
-            std::net::TcpStream::connect(&addr).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let tcp_factory = || connect_with_retry(|| StdTcpStream::connect(&addr));
         let mut ws = if let Some(connector) = &self.tls {
-            let tls_stream = connector
-                .connect(host, tcp)
+            let tls_stream = tls_connect_with_retry(connector, host, tcp_factory)
                 .map_err(|e| WalletError::Failure(e.to_string()))?;
             BlockingWebSocket::tls(tls_stream)
         } else {
+            let tcp = tcp_factory().map_err(|e| WalletError::Failure(e.to_string()))?;
             BlockingWebSocket::plain(tcp)
         };
 
@@ -594,11 +614,6 @@ fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyRes
     let socket = addrs
         .next()
         .ok_or_else(|| WalletError::Failure("no socket addresses".into()))?;
-    let stream = StdTcpStream::connect_timeout(&socket, timeout)
-        .map_err(|err| WalletError::Failure(err.to_string()))?;
-    let _ = stream.set_read_timeout(Some(timeout));
-    let _ = stream.set_write_timeout(Some(timeout));
-
     let connector = if let Some(conn) = tls {
         conn.clone()
     } else {
@@ -609,9 +624,13 @@ fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyRes
             .map_err(|err| WalletError::Failure(err.to_string()))?
     };
 
-    let mut tls_stream = connector
-        .connect(host, stream)
-        .map_err(|err| WalletError::Failure(err.to_string()))?;
+    let mut tls_stream = tls_connect_with_retry(&connector, host, || {
+        let stream = connect_with_retry(|| StdTcpStream::connect_timeout(&socket, timeout))?;
+        let _ = stream.set_read_timeout(Some(timeout));
+        let _ = stream.set_write_timeout(Some(timeout));
+        Ok(stream)
+    })
+    .map_err(|err| WalletError::Failure(err.to_string()))?;
 
     let mut path = url.path().to_string();
     if path.is_empty() {
@@ -688,6 +707,81 @@ fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyRes
     body.truncate(content_length);
     let body_text = String::from_utf8(body).map_err(|err| WalletError::Failure(err.to_string()))?;
     json::from_str(&body_text).map_err(|err| WalletError::Failure(err.to_string()))
+}
+
+fn connect_with_retry<F>(mut attempt: F) -> io::Result<StdTcpStream>
+where
+    F: FnMut() -> io::Result<StdTcpStream>,
+{
+    let mut delay = Duration::from_millis(CONNECT_RETRY_INITIAL_DELAY_MS);
+    for remaining in 0..CONNECT_RETRY_LIMIT {
+        match attempt() {
+            Ok(stream) => return Ok(stream),
+            Err(err) if should_retry_connect(&err) && remaining + 1 < CONNECT_RETRY_LIMIT => {
+                warn!(error=?err, "tcp connect retry");
+                thread::sleep(delay);
+                delay = (delay + delay).min(Duration::from_millis(CONNECT_RETRY_MAX_DELAY_MS));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(io::Error::new(
+        ErrorKind::Other,
+        "connect retries exhausted",
+    ))
+}
+
+fn should_retry_connect(err: &io::Error) -> bool {
+    if err.kind() == ErrorKind::WouldBlock {
+        return true;
+    }
+    match err.raw_os_error() {
+        Some(code) => matches!(code, 35 | 36 | 37 | 10035 | 10036 | 10037 | 114 | 115),
+        None => false,
+    }
+}
+
+fn tls_connect_with_retry<F>(
+    connector: &TlsConnector,
+    host: &str,
+    mut stream_factory: F,
+) -> Result<ClientTlsStream, TlsConnectorError>
+where
+    F: FnMut() -> io::Result<StdTcpStream>,
+{
+    let mut delay = Duration::from_millis(CONNECT_RETRY_INITIAL_DELAY_MS);
+    for attempt in 0..CONNECT_RETRY_LIMIT {
+        let stream = match stream_factory() {
+            Ok(stream) => stream,
+            Err(err) if should_retry_connect(&err) && attempt + 1 < CONNECT_RETRY_LIMIT => {
+                warn!(error=?err, attempt, "tcp connect retry before tls handshake");
+                thread::sleep(delay);
+                delay = (delay + delay).min(Duration::from_millis(CONNECT_RETRY_MAX_DELAY_MS));
+                continue;
+            }
+            Err(err) => return Err(TlsConnectorError::Io(err)),
+        };
+        match connector.connect(host, stream) {
+            Ok(tls) => return Ok(tls),
+            Err(err) if should_retry_tls(&err) && attempt + 1 < CONNECT_RETRY_LIMIT => {
+                warn!(error=?err, attempt, "tls handshake retry");
+                thread::sleep(delay);
+                delay = (delay + delay).min(Duration::from_millis(CONNECT_RETRY_MAX_DELAY_MS));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(TlsConnectorError::Io(io::Error::new(
+        ErrorKind::Other,
+        "tls connect retries exhausted",
+    )))
+}
+
+fn should_retry_tls(err: &TlsConnectorError) -> bool {
+    match err {
+        TlsConnectorError::Io(io_err) => should_retry_connect(io_err),
+        _ => false,
+    }
 }
 
 fn map_tls_error(err: io::Error) -> WalletError {

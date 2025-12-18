@@ -236,12 +236,10 @@ pub fn current_advertisement() -> Option<CertAdvertisement> {
         #[cfg(feature = "s2n-quic")]
         Ok(ActiveProvider::S2n(adapter)) => adapter.current_advertisement().map(from_s2n_advert),
         #[cfg(feature = "inhouse")]
-        Ok(ActiveProvider::Inhouse { store, .. }) => {
-            store.load_certificate().map(|cert| {
-                let advert = transport::InhouseAdvertisement::from(&cert);
-                from_inhouse_advert(advert)
-            })
-        }
+        Ok(ActiveProvider::Inhouse { store, .. }) => store.load_certificate().map(|cert| {
+            let advert = transport::InhouseAdvertisement::from(&cert);
+            from_inhouse_advert(advert)
+        }),
         Err(_) => None,
     }
 }

@@ -3,7 +3,7 @@
 ## 1. Ad / ANN Market
 ### Modules & Files
 - `crates/ad_market/` — Core library implementing ANN book, bid/ask records, and settlement math. Uses `foundation_serialization` for deterministic encoding.
-- `node/src/rpc/ad_market.rs` — JSON-RPC endpoints `ad.market_state`, `ad.submit_bid`, `ad.cancel`, `ad.snapshot`. Exposed via CLI `tb-cli ad ...` and explorer dashboards.
+- `node/src/rpc/ad_market.rs` — JSON-RPC endpoints `ad.market_state`, `ad.submit_bid`, `ad.cancel`, `ad.snapshot`. Exposed via CLI `contract-cli ad ...` and explorer dashboards.
 - `cli/src/ad.rs` — CLI commands for registration, bidding, and introspection.
 - `monitoring/src/dashboard.rs` — Panels for `ad_total_usd_micros`, ANN settlement counts, and price curves (see `BRIDGE_SETTLEMENT_RESULTS_PANEL_TITLE` for reference).
 
@@ -23,7 +23,7 @@
 ## 2. Storage Market (recap)
 Covered deeply in `02-service-credits.md`. Key market hooks:
 - RPC `storage.upload/challenge/provider_profiles/incentives/repair_*`.
-- CLI `tb-cli storage` commands.
+- CLI `contract-cli storage` commands.
 - Telemetry `storage_contract_created_total`, `retrieval_success_total`, `retrieval_failure_total`.
 These patterns are cloned for the energy vertical.
 
@@ -34,7 +34,7 @@ See `02-service-credits.md`. Additional market features:
 - Telemetry histograms `match_loop_latency_seconds{lane}` emitted via `foundation_metrics` and ingested by `metrics-aggregator`.
 
 ## 4. Bridge / Settlement Markets
-- `bridges/` crate + `node/src/rpc/bridge.rs` implement cross-chain settlement (withdrawals + proof submissions). CLI `tb-cli bridge settlement` uses RPC `bridge.submit_settlement`.
+- `bridges/` crate + `node/src/rpc/bridge.rs` implement cross-chain settlement (withdrawals + proof submissions). CLI `contract-cli bridge settlement` uses RPC `bridge.submit_settlement`.
 - `monitoring/src/dashboard.rs` includes `bridge_settlement_results_total` panel; keep energy settlements keyed similarly for parity.
 
 ## 5. Explorer / Indexer Hooks

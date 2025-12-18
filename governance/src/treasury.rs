@@ -202,6 +202,14 @@ impl TreasuryDisbursement {
 
     pub fn from_payload(id: u64, payload: DisbursementPayload) -> Self {
         let created_at = now_ts();
+        // Convert empty/default proposal metadata to None to indicate this is a
+        // treasury-initiated disbursement that doesn't require governance approval.
+        // If the proposal has any non-default values, preserve it for governance workflow.
+        let proposal = if payload.proposal == DisbursementProposalMetadata::default() {
+            None
+        } else {
+            Some(payload.proposal)
+        };
         Self {
             id,
             destination: payload.disbursement.destination,
@@ -211,7 +219,7 @@ impl TreasuryDisbursement {
             scheduled_epoch: payload.disbursement.scheduled_epoch,
             created_at,
             status: DisbursementStatus::Draft { created_at },
-            proposal: Some(payload.proposal),
+            proposal,
             expected_receipts: payload.disbursement.expected_receipts,
             receipts: Vec::new(),
         }

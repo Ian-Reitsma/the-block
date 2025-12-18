@@ -1,9 +1,9 @@
 use crate::header::{verify_pow, PowHeader};
 use crate::light_client::{header_hash, verify, Header};
 use crate::Bridge;
-#[cfg(feature = "telemetry")]
-use crate::BRIDGE_INVALID_PROOF_TOTAL;
 use crate::{light_client::Proof, relayer::RelayerSet, RelayerBundle};
+#[cfg(feature = "telemetry")]
+use crate::{BRIDGE_INVALID_PROOF_TOTAL, PROOF_VERIFY_FAILURE_TOTAL, PROOF_VERIFY_SUCCESS_TOTAL};
 use foundation_serialization::json;
 
 pub fn lock(
@@ -26,7 +26,10 @@ pub fn lock(
     if valid < bridge.cfg.relayer_quorum || !has_primary || !pow_ok {
         #[cfg(feature = "telemetry")]
         {
+            #[cfg(all(test, feature = "telemetry"))]
+            let _guard = crate::proof_counter_test_guard();
             BRIDGE_INVALID_PROOF_TOTAL.inc();
+            PROOF_VERIFY_FAILURE_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
         relayers.mark_duty_failure(relayer);
@@ -41,7 +44,10 @@ pub fn lock(
     if !verify(&h, proof) {
         #[cfg(feature = "telemetry")]
         {
+            #[cfg(all(test, feature = "telemetry"))]
+            let _guard = crate::proof_counter_test_guard();
             BRIDGE_INVALID_PROOF_TOTAL.inc();
+            PROOF_VERIFY_FAILURE_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
         relayers.mark_duty_failure(relayer);
@@ -51,7 +57,10 @@ pub fn lock(
     if !bridge.verified_headers.insert(hh) {
         #[cfg(feature = "telemetry")]
         {
+            #[cfg(all(test, feature = "telemetry"))]
+            let _guard = crate::proof_counter_test_guard();
             BRIDGE_INVALID_PROOF_TOTAL.inc();
+            PROOF_VERIFY_FAILURE_TOTAL.inc();
         }
         relayers.slash(relayer, amount.min(1));
         relayers.mark_duty_failure(relayer);
@@ -66,5 +75,11 @@ pub fn lock(
     let _ = std::fs::write(&path, rendered.as_bytes());
     *bridge.locked.entry(user.to_string()).or_insert(0) += amount;
     relayers.mark_duty_completion(relayer);
+    #[cfg(feature = "telemetry")]
+    {
+        #[cfg(all(test, feature = "telemetry"))]
+        let _guard = crate::proof_counter_test_guard();
+        PROOF_VERIFY_SUCCESS_TOTAL.inc();
+    }
     true
 }

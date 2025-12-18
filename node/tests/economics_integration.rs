@@ -2,7 +2,6 @@
 ///
 /// This test verifies that the 4-layer economic control system converges
 /// to stable equilibrium over time and responds appropriately to market changes.
-
 use the_block::{
     economics::{
         execute_epoch_economics, GovernanceEconomicParams, MarketMetric, MarketMetrics,
@@ -17,7 +16,7 @@ fn test_economic_convergence_over_100_epochs() {
     let gov_params = Params::default();
 
     // Bootstrap values
-    let mut prev_annual_issuance_block = 40_000_000u64;  // Bootstrap: 40M BLOCK/year
+    let mut prev_annual_issuance_block = 40_000_000u64; // Bootstrap: 40M BLOCK/year
     let mut prev_subsidy = SubsidySnapshot {
         storage_share_bps: 1500, // 15%
         compute_share_bps: 3000, // 30%
@@ -94,9 +93,9 @@ fn test_economic_convergence_over_100_epochs() {
             &network_activity,
             circulating_block,
             epoch * 1000, // Rough estimate: total emission grows each epoch
-            100_000_000, // non-KYC volume
-            50_000_000,  // ad spend
-            10_000_000,  // treasury inflow
+            100_000_000,  // non-KYC volume
+            50_000_000,   // ad spend
+            10_000_000,   // treasury inflow
             &econ_params,
         );
 
@@ -117,7 +116,7 @@ fn test_economic_convergence_over_100_epochs() {
             diff * diff
         })
         .sum::<f64>()
-        / 4.0;
+            / 4.0;
         subsidy_variance_history.push(subsidy_variance);
 
         // Update for next epoch
@@ -145,7 +144,10 @@ fn test_economic_convergence_over_100_epochs() {
 
     // 1. Formula-driven inflation should be stable (not oscillating wildly)
     let final_inflation = inflation_history.last().unwrap();
-    println!("Final inflation: {} bps (formula-driven, no target)", final_inflation);
+    println!(
+        "Final inflation: {} bps (formula-driven, no target)",
+        final_inflation
+    );
 
     // Check inflation is reasonable (not zero, not runaway)
     assert!(
@@ -156,16 +158,22 @@ fn test_economic_convergence_over_100_epochs() {
 
     // Check inflation is relatively stable (last 20 epochs should have low variance)
     let late_inflation: Vec<u16> = inflation_history.iter().rev().take(20).copied().collect();
-    let late_avg = late_inflation.iter().map(|&x| x as f64).sum::<f64>() / late_inflation.len() as f64;
-    let late_variance = late_inflation.iter()
+    let late_avg =
+        late_inflation.iter().map(|&x| x as f64).sum::<f64>() / late_inflation.len() as f64;
+    let late_variance = late_inflation
+        .iter()
         .map(|&x| {
             let diff = (x as f64) - late_avg;
             diff * diff
         })
-        .sum::<f64>() / late_inflation.len() as f64;
+        .sum::<f64>()
+        / late_inflation.len() as f64;
     let late_stddev = late_variance.sqrt();
 
-    println!("Late inflation stability: avg={:.1} bps, stddev={:.1} bps", late_avg, late_stddev);
+    println!(
+        "Late inflation stability: avg={:.1} bps, stddev={:.1} bps",
+        late_avg, late_stddev
+    );
 
     // Inflation should be stable (low variance in final epochs)
     assert!(
@@ -177,7 +185,10 @@ fn test_economic_convergence_over_100_epochs() {
     // 2. Subsidy variance should decrease (system stabilizing)
     let early_variance = subsidy_variance_history[10..30].iter().sum::<f64>() / 20.0;
     let late_variance = subsidy_variance_history[130..150].iter().sum::<f64>() / 20.0;
-    println!("Early subsidy variance: {:.2}, Late subsidy variance: {:.2}", early_variance, late_variance);
+    println!(
+        "Early subsidy variance: {:.2}, Late subsidy variance: {:.2}",
+        early_variance, late_variance
+    );
 
     // Variance should reduce by at least 20% as system stabilizes
     assert!(
@@ -284,7 +295,7 @@ fn test_economic_response_to_market_shock() {
             ..Default::default()
         },
         energy: MarketMetric {
-            utilization: 0.20, // Low utilization
+            utilization: 0.20,      // Low utilization
             provider_margin: -0.15, // Unprofitable!
             ..Default::default()
         },
@@ -378,9 +389,9 @@ fn test_tariff_controller_convergence() {
             &network_activity,
             4_000_000_000,
             epoch * 100_000, // Gradual emission growth
-            200_000_000, // Consistent non-KYC volume
+            200_000_000,     // Consistent non-KYC volume
             50_000_000,
-            20_000_000,  // Treasury inflow
+            20_000_000, // Treasury inflow
             &econ_params,
         );
 
@@ -398,7 +409,10 @@ fn test_tariff_controller_convergence() {
     let final_contribution = prev_tariff.treasury_contribution_bps;
     let contribution_error = (final_contribution as i32 - 1000).abs();
 
-    println!("Final treasury contribution: {} bps (target: 1000 bps)", final_contribution);
+    println!(
+        "Final treasury contribution: {} bps (target: 1000 bps)",
+        final_contribution
+    );
 
     // Should be within 200 bps of target after 50 epochs
     assert!(

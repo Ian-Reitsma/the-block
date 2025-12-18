@@ -2,15 +2,16 @@
 #![recursion_limit = "65536"]
 
 use runtime;
-use std::sync::Once;
 use std::time::{Duration, Instant};
 
 fn ensure_inhouse_backend() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        std::env::set_var("TB_RUNTIME_BACKEND", "inhouse");
-        assert_eq!(runtime::handle().backend_name(), "inhouse");
-    });
+    // When inhouse-backend feature is enabled, it's the default backend.
+    // No need to set env vars - just verify it's active.
+    assert_eq!(
+        runtime::handle().backend_name(),
+        "inhouse",
+        "inhouse backend should be active"
+    );
 }
 
 #[test]

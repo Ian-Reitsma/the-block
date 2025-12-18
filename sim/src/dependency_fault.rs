@@ -8,25 +8,28 @@ fn main() {
 }
 
 #[cfg(feature = "dependency-fault")]
+use std::path::PathBuf;
+#[cfg(feature = "dependency-fault")]
+use std::time::Duration;
+
+#[cfg(feature = "dependency-fault")]
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    help::HelpGenerator,
+    parse::{Matches, ParseError, Parser},
+};
+#[cfg(feature = "dependency-fault")]
 use diagnostics::anyhow::{self, Result};
+#[cfg(feature = "dependency-fault")]
+use tb_sim::dependency_fault_harness::{
+    run_simulation, BackendSelections, CodecBackendChoice, CodingBackendChoice,
+    CryptoBackendChoice, FaultSpec, OverlayBackendChoice, RuntimeBackendChoice, SimulationRequest,
+    StorageBackendChoice, TransportBackendChoice, OUTPUT_ROOT,
+};
 
 #[cfg(feature = "dependency-fault")]
 fn main() -> Result<()> {
-    use std::path::PathBuf;
-    use std::time::Duration;
-
-    use cli_core::{
-        arg::{ArgSpec, FlagSpec, OptionSpec},
-        command::{Command, CommandBuilder, CommandId},
-        help::HelpGenerator,
-        parse::{Matches, ParseError, Parser},
-    };
-    use tb_sim::dependency_fault_harness::{
-        run_simulation, BackendSelections, CodecBackendChoice, CodingBackendChoice,
-        CryptoBackendChoice, FaultSpec, OverlayBackendChoice, RuntimeBackendChoice,
-        SimulationRequest, StorageBackendChoice, TransportBackendChoice, OUTPUT_ROOT,
-    };
-
     let command = build_command();
     let mut argv = std::env::args();
     let bin = argv
@@ -45,18 +48,18 @@ fn main() -> Result<()> {
             print_root_help(&command, &bin);
             return Ok(());
         }
-        Err(ParseError::UnknownFlag(flag)) => {
-            println!("unknown flag '{flag}'\n");
+        Err(ParseError::UnknownOption(flag)) => {
+            println!("unknown option '{flag}'\n");
             print_root_help(&command, &bin);
             return Ok(());
         }
-        Err(err) => return Err(anyhow::anyhow!(err.to_string())),
+        Err(err) => return Err(anyhow::anyhow!(err)),
     };
 
     let runtime = parse_choice(&matches, "runtime", RuntimeBackendChoice::Inhouse)?;
     let transport = parse_choice(&matches, "transport", TransportBackendChoice::Quinn)?;
     let overlay = parse_choice(&matches, "overlay", OverlayBackendChoice::Inhouse)?;
-    let storage = parse_choice(&matches, "storage", StorageBackendChoice::RocksDb)?;
+    let storage = parse_choice(&matches, "storage", StorageBackendChoice::LegacyRocksDb)?;
     let coding = parse_choice(&matches, "coding", CodingBackendChoice::ReedSolomon)?;
     let crypto = parse_choice(&matches, "crypto", CryptoBackendChoice::Dalek)?;
     let codec = parse_choice(&matches, "codec", CodecBackendChoice::Binary)?;
@@ -147,7 +150,7 @@ fn build_command() -> Command {
     ))
     .arg(ArgSpec::Option(
         OptionSpec::new("storage", "storage", "Storage backend")
-            .default(StorageBackendChoice::RocksDb.as_str())
+            .default(StorageBackendChoice::LegacyRocksDb.as_str())
             .value_enum(StorageBackendChoice::variants()),
     ))
     .arg(ArgSpec::Option(

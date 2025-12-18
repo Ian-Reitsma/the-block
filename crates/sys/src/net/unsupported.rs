@@ -16,6 +16,10 @@ impl TcpStream {
         Ok(None)
     }
 
+    pub fn from_std(_stream: std::net::TcpStream) -> Self {
+        TcpStream
+    }
+
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -109,6 +113,24 @@ impl TcpListener {
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "tcp listener is not supported on this platform",
+        ))
+    }
+
+    pub fn from_std(_listener: std::net::TcpListener) -> io::Result<Self> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "tcp listener is not supported on this platform",
+        ))
+    }
+
+    pub fn into_std(self) -> std::net::TcpListener {
+        panic!("tcp listener is not supported on this platform");
+    }
+
+    pub fn try_clone_std(&self) -> io::Result<std::net::TcpListener> {
         Err(io::Error::new(
             ErrorKind::Unsupported,
             "tcp listener is not supported on this platform",

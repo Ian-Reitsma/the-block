@@ -353,7 +353,10 @@ impl PeerSet {
         let allowed = {
             let mut metrics = peer_metrics_guard();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
-            let network_health = crate::net::health::global_health_tracker().lock().unwrap().current_health_index();
+            let network_health = crate::net::health::global_health_tracker()
+                .lock()
+                .unwrap()
+                .current_health_index();
             pm.reputation.decay(peer_reputation_decay(), network_health);
             pm.last_updated = now_secs();
             let score = pm.reputation.score;
@@ -410,7 +413,10 @@ impl PeerSet {
         let score = {
             let mut metrics = peer_metrics_guard();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
-            let network_health = crate::net::health::global_health_tracker().lock().unwrap().current_health_index();
+            let network_health = crate::net::health::global_health_tracker()
+                .lock()
+                .unwrap()
+                .current_health_index();
             pm.reputation.decay(peer_reputation_decay(), network_health);
             pm.last_updated = now_secs();
             let s = pm.reputation.score;
@@ -859,9 +865,9 @@ pub struct PeerReputation {
 
     /// Component scores (tracked separately, then combined)
     #[serde(default)]
-    pub message_validity: f64,  // Valid messages vs invalid/malformed
+    pub message_validity: f64, // Valid messages vs invalid/malformed
     #[serde(default)]
-    pub response_quality: f64,  // Timely, complete responses
+    pub response_quality: f64, // Timely, complete responses
     #[serde(default)]
     pub resource_behavior: f64, // Bandwidth/connection fairness
     #[serde(default)]
@@ -967,7 +973,8 @@ impl PeerReputation {
 
         // In unhealthy networks, be more lenient about slow responses
         let health_factor = network_health.clamp(0.0, 1.0);
-        let adaptive_penalty = penalty_factor + (1.0 - penalty_factor) * (1.0 - health_factor) * 0.5;
+        let adaptive_penalty =
+            penalty_factor + (1.0 - penalty_factor) * (1.0 - health_factor) * 0.5;
 
         self.response_quality *= adaptive_penalty;
         self.response_quality = self.response_quality.max(0.1);
@@ -981,7 +988,7 @@ impl PeerReputation {
         self.protocol_violations = self.protocol_violations.saturating_add(1);
 
         let penalty = match severity {
-            ViolationSeverity::Minor => 0.98,   // 2% penalty
+            ViolationSeverity::Minor => 0.98,    // 2% penalty
             ViolationSeverity::Moderate => 0.90, // 10% penalty
             ViolationSeverity::Severe => 0.70,   // 30% penalty
         };
@@ -1022,9 +1029,9 @@ impl PeerReputation {
     /// (one very bad component drags down the whole score)
     fn recompute_composite(&mut self) {
         // Weights (must sum to 1.0)
-        const W_MSG: f64 = 0.3;   // Message validity most important
+        const W_MSG: f64 = 0.3; // Message validity most important
         const W_RESP: f64 = 0.25; // Response quality
-        const W_RES: f64 = 0.2;   // Resource behavior
+        const W_RES: f64 = 0.2; // Resource behavior
         const W_PROT: f64 = 0.25; // Protocol adherence
 
         // Weighted geometric mean
@@ -1032,7 +1039,7 @@ impl PeerReputation {
             * self.response_quality.powf(W_RESP)
             * self.resource_behavior.powf(W_RES)
             * self.protocol_adherence.powf(W_PROT))
-            .clamp(0.0, 1.0);
+        .clamp(0.0, 1.0);
     }
 
     /// Check if peer should be banned based on reputation
@@ -1049,7 +1056,8 @@ impl PeerReputation {
 
     /// Get component with lowest score (for diagnostics)
     fn weakest_component(&self) -> &'static str {
-        let min = self.message_validity
+        let min = self
+            .message_validity
             .min(self.response_quality)
             .min(self.resource_behavior)
             .min(self.protocol_adherence);
@@ -2501,9 +2509,12 @@ mod tests {
         let unhealthy_network_score = rep.score;
 
         // Healthy network should recover faster (closer to 1.0)
-        assert!(healthy_network_score > unhealthy_network_score,
+        assert!(
+            healthy_network_score > unhealthy_network_score,
             "Healthy network ({}) should forgive faster than unhealthy ({})",
-            healthy_network_score, unhealthy_network_score);
+            healthy_network_score,
+            unhealthy_network_score
+        );
     }
 
     #[test]
@@ -2513,15 +2524,23 @@ mod tests {
         // Perfect in 3 dimensions, terrible in 1
         rep.message_validity = 1.0;
         rep.response_quality = 1.0;
-        rep.resource_behavior = 0.2;  // Bad resource behavior
+        rep.resource_behavior = 0.2; // Bad resource behavior
         rep.protocol_adherence = 1.0;
         rep.recompute_composite();
 
         // Geometric mean should drag composite down (not arithmetic average)
         // With weights: 0.3, 0.25, 0.2, 0.25
         // GM = 1.0^0.3 × 1.0^0.25 × 0.2^0.2 × 1.0^0.25 = 0.2^0.2 ≈ 0.725
-        assert!(rep.score < 0.8, "One bad component should drag down composite: got {}", rep.score);
-        assert!(rep.score > 0.6, "But not too much with low weight: got {}", rep.score);
+        assert!(
+            rep.score < 0.8,
+            "One bad component should drag down composite: got {}",
+            rep.score
+        );
+        assert!(
+            rep.score > 0.6,
+            "But not too much with low weight: got {}",
+            rep.score
+        );
     }
 
     #[test]
@@ -2538,9 +2557,12 @@ mod tests {
         rep_unhealthy.record_invalid_message(0.2);
         let score_unhealthy = rep_unhealthy.score;
 
-        assert!(score_healthy < score_unhealthy,
+        assert!(
+            score_healthy < score_unhealthy,
             "Healthy network ({}) should penalize more than unhealthy ({})",
-            score_healthy, score_unhealthy);
+            score_healthy,
+            score_unhealthy
+        );
     }
 
     #[test]
@@ -2549,16 +2571,28 @@ mod tests {
 
         // Fast response (<1s): no penalty
         rep.record_slow_response(500, 0.8);
-        assert_eq!(rep.response_quality, 1.0, "Fast response should not be penalized");
+        assert_eq!(
+            rep.response_quality, 1.0,
+            "Fast response should not be penalized"
+        );
 
         // Slow response (3s): moderate penalty
         rep.record_slow_response(3000, 0.8);
-        assert!(rep.response_quality < 1.0, "Slow response should be penalized");
-        assert!(rep.response_quality > 0.9, "Moderate slowness gets moderate penalty");
+        assert!(
+            rep.response_quality < 1.0,
+            "Slow response should be penalized"
+        );
+        assert!(
+            rep.response_quality > 0.9,
+            "Moderate slowness gets moderate penalty"
+        );
 
         // Very slow response (10s): large penalty
         rep.record_slow_response(10000, 0.8);
-        assert!(rep.response_quality < 0.9, "Very slow response heavily penalized");
+        assert!(
+            rep.response_quality < 0.9,
+            "Very slow response heavily penalized"
+        );
     }
 
     #[test]
@@ -2575,9 +2609,12 @@ mod tests {
         rep.record_protocol_violation(ViolationSeverity::Severe);
         let score_severe = rep.protocol_adherence;
 
-        assert!(score_severe < score_minor,
+        assert!(
+            score_severe < score_minor,
             "Severe violations ({}) should penalize more than minor ({})",
-            score_severe, score_minor);
+            score_severe,
+            score_minor
+        );
     }
 
     #[test]
@@ -2586,10 +2623,16 @@ mod tests {
         rep.score = 0.2; // Borderline reputation
 
         // Healthy network: stricter threshold (ban at 0.3)
-        assert!(rep.should_ban(0.9), "Should ban with score 0.2 in healthy network (threshold 0.3)");
+        assert!(
+            rep.should_ban(0.9),
+            "Should ban with score 0.2 in healthy network (threshold 0.3)"
+        );
 
         // Unhealthy network: lenient threshold (ban at 0.1)
-        assert!(!rep.should_ban(0.0), "Should NOT ban with score 0.2 in unhealthy network (threshold 0.1)");
+        assert!(
+            !rep.should_ban(0.0),
+            "Should NOT ban with score 0.2 in unhealthy network (threshold 0.1)"
+        );
     }
 
     #[test]
@@ -2604,8 +2647,14 @@ mod tests {
         // Reward good behavior
         rep.record_good_behavior(BehaviorCategory::MessageValidity, 0.05);
 
-        assert!(rep.message_validity > 0.8, "Good behavior should improve component");
-        assert!(rep.score > initial_score, "Good behavior should improve composite");
+        assert!(
+            rep.message_validity > 0.8,
+            "Good behavior should improve component"
+        );
+        assert!(
+            rep.score > initial_score,
+            "Good behavior should improve composite"
+        );
         assert!(rep.message_validity <= 1.0, "Rewards should not exceed max");
     }
 
@@ -2613,7 +2662,7 @@ mod tests {
     fn test_reputation_weakest_component_identification() {
         let mut rep = PeerReputation::default();
 
-        rep.message_validity = 0.3;  // Weakest
+        rep.message_validity = 0.3; // Weakest
         rep.response_quality = 0.9;
         rep.resource_behavior = 0.8;
         rep.protocol_adherence = 0.7;
@@ -2642,9 +2691,15 @@ mod tests {
         rep.decay(0.01, 0.5);
 
         // Counters should have decayed significantly
-        assert!(rep.invalid_messages < 100, "Invalid message count should decay");
+        assert!(
+            rep.invalid_messages < 100,
+            "Invalid message count should decay"
+        );
         assert!(rep.slow_responses < 50, "Slow response count should decay");
-        assert!(rep.protocol_violations < 30, "Protocol violation count should decay");
+        assert!(
+            rep.protocol_violations < 30,
+            "Protocol violation count should decay"
+        );
     }
 }
 
