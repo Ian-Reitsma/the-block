@@ -21,6 +21,7 @@ The Block is the unification layer for storage, compute, networking, and governa
 - Pay operators for real service (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) instead of speculative gas schedules.
 - Treat governance as an engineering surface: the same crate powers the node, CLI, explorer, and telemetry so proposals, fee-floor policies, and service-badge status never drift.
 - Ship first-party clients: the in-house HTTP/TLS stack (`crates/httpd` + `crates/transport`) fronts every RPC, gateway, and gossip surface, and dependency pivots move through governance before they land in production.
+- Automate readiness via the Launch Governor: a streak-based autopilot (`node/src/launch_governor`) watches chain/DNS (and soon economics/market) telemetry, records signed decisions, and flips runtime gates so testnet/mainnet transitions stay auditable.
 
 ## Responsibility Domains
 
@@ -30,6 +31,7 @@ The Block is the unification layer for storage, compute, networking, and governa
 | **Serialization & Tooling** | Agrees on a specific binary format so nodes written in different languages still understand each other. | `crates/foundation_serialization`, `crates/codec`, `docs/spec/*.json` | Canonical binary layout, cross-language vectors, CLI/SDK adapters. |
 | **Cryptography & Identity** | Makes sure signatures can't be faked and identities can be updated or revoked. Handles keys and proofs. | `crypto`, `crates/crypto_suite`, `node/src/identity`, `dkg`, `zkp`, `remote_signer` | Hash/signature primitives, DKG, commit–reveal, identity registries, PQ hooks. |
 | **Core Tooling & UX** | The command-line app (`contract-cli`), dashboards, and explorer that people actually touch. | `cli`, `gateway`, `explorer`, `metrics-aggregator`, `monitoring`, `docs/apis_and_tooling.md` | RPC & CLI surfaces, gateways, dashboards, probe CLI, release tooling. |
+| **Launch Governor & Autopilot** | Automates readiness transitions (operational, DNS, upcoming economics/market gates) and publishes signed intent snapshots, watching the `economics_epoch_*` gauges plus `economics_block_reward_per_block` before promoting reward gates. | `node/src/launch_governor`, `node/src/governor_snapshot.rs`, `docs/architecture.md#launch-governor`, `docs/operations.md#launch-governor-operations` | Streak-tuned gating, decision signing, economics/market gates in backlog. |
 
 ## Design Pillars
 | Pillar | Enforcement | Evidence |
@@ -118,6 +120,7 @@ Terms you'll encounter in architecture docs:
 ## Document Map
 All remaining detail sits in six focused guides:
 - [`docs/architecture.md`](architecture.md) — ledger, networking, storage, compute, bridges, gateway, telemetry.
+- [`docs/architecture.md#launch-governor`](architecture.md#launch-governor) — autopilot design, gate signals, env vars, and RPCs.
 - [`docs/economics_and_governance.md`](economics_and_governance.md) — CT supply, fees, treasury, proposals, service badges, kill switches.
 - [`docs/operations.md`](operations.md) — bootstrap, deployments, telemetry wiring, dashboards, runbooks, chaos & recovery.
 - [`docs/security_and_privacy.md`](security_and_privacy.md) — threat modelling, cryptography, remote signer flows, jurisdiction policy packs, LE portal, supply-chain controls.

@@ -47,6 +47,9 @@ fn test_economic_convergence_over_100_epochs() {
             prev_annual_issuance_block,
             prev_subsidy.clone(),
             prev_tariff.clone(),
+            100,    // baseline_tx_count
+            10_000, // baseline_tx_volume
+            10,     // baseline_miners
         );
 
         // Simulate market conditions that vary over time
@@ -97,6 +100,11 @@ fn test_economic_convergence_over_100_epochs() {
             50_000_000,   // ad spend
             10_000_000,   // treasury inflow
             &econ_params,
+        );
+
+        assert!(
+            snapshot.inflation.block_reward_per_block > 0,
+            "block reward must be positive"
         );
 
         // Record metrics
@@ -257,6 +265,9 @@ fn test_economic_response_to_market_shock() {
         prev_annual_issuance_block,
         prev_subsidy.clone(),
         prev_tariff.clone(),
+        100,    // baseline_tx_count
+        10_000, // baseline_tx_volume
+        10,     // baseline_miners
     );
 
     let network_activity = the_block::economics::NetworkActivity {
@@ -311,6 +322,9 @@ fn test_economic_response_to_market_shock() {
         prev_annual_issuance_block,
         prev_subsidy.clone(),
         prev_tariff.clone(),
+        100,    // baseline_tx_count
+        10_000, // baseline_tx_volume
+        10,     // baseline_miners
     );
 
     let shocked_activity = the_block::economics::NetworkActivity {
@@ -374,6 +388,9 @@ fn test_tariff_controller_convergence() {
                 ad_share_bps: 2500,
             },
             prev_tariff.clone(),
+            100,    // baseline_tx_count
+            10_000, // baseline_tx_volume
+            10,     // baseline_miners
         );
 
         let network_activity = the_block::economics::NetworkActivity {
@@ -422,4 +439,164 @@ fn test_tariff_controller_convergence() {
     );
 
     println!("✓ Tariff controller converged successfully");
+}
+
+#[test]
+fn test_launch_governor_economics_gate_lifecycle() {
+    // Integration test for Launch Governor economics gate showing full lifecycle:
+    // healthy → unhealthy → healthy with gate Enter/Exit actions
+
+    use the_block::launch_governor::{EconomicsSample, GateAction};
+
+    // Create controller with 3-streak requirement
+    let window_secs = 3600;
+    let mut ctrl = the_block::launch_governor::EconomicsController::new(window_secs);
+
+    println!("\n=== Phase 1: Bootstrap (gate inactive) ===");
+
+    // Initially gate should be inactive
+    assert!(!ctrl.active(), "Gate should start inactive");
+    assert_eq!(ctrl.enter(), 0, "Enter streak should be 0");
+
+    // === Phase 2: Feed healthy economics for 3 epochs to trigger Enter ===
+    println!("\n=== Phase 2: Healthy economics (should trigger Enter after 3 streaks) ===");
+
+    let healthy_sample = EconomicsSample {
+        epoch_tx_count: 100,
+        epoch_tx_volume_block: 10_000,
+        epoch_treasury_inflow_block: 5_000,
+        block_reward_per_block: 100,
+        market_metrics: MarketMetrics {
+            storage: MarketMetric {
+                utilization: 0.40,
+                provider_margin: 0.50,
+                ..Default::default()
+            },
+            compute: MarketMetric {
+                utilization: 0.60,
+                provider_margin: 0.50,
+                ..Default::default()
+            },
+            energy: MarketMetric {
+                utilization: 0.50,
+                provider_margin: 0.25,
+                ..Default::default()
+            },
+            ad: MarketMetric {
+                utilization: 0.50,
+                provider_margin: 0.30,
+                ..Default::default()
+            },
+        },
+    };
+
+    // Epoch 1: healthy, enter_streak = 1
+    let eval1 = ctrl.evaluate(1, &healthy_sample);
+    assert!(eval1.is_none(), "Should not produce intent on first healthy sample");
+    assert_eq!(ctrl.enter(), 1, "Enter streak should be 1");
+    println!("Epoch 1: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
+
+    // Epoch 2: healthy, enter_streak = 2
+    let eval2 = ctrl.evaluate(2, &healthy_sample);
+    assert!(eval2.is_none(), "Should not produce intent on second healthy sample");
+    assert_eq!(ctrl.enter(), 2, "Enter streak should be 2");
+    println!("Epoch 2: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
+
+    // Epoch 3: healthy, enter_streak = 3, should trigger Enter
+    let eval3 = ctrl.evaluate(3, &healthy_sample);
+    assert!(eval3.is_some(), "Should produce Enter intent on third healthy sample");
+    let eval3 = eval3.unwrap();
+    assert_eq!(eval3.action, GateAction::Enter, "Action should be Enter");
+    assert!(ctrl.active(), "Gate should be active after Enter");
+    assert_eq!(ctrl.enter(), 3, "Enter streak should be 3");
+    println!("Epoch 3: enter_streak={}, active={}, action={:?}", ctrl.enter(), ctrl.active(), eval3.action);
+    println!("✓ Gate entered after 3 healthy epochs");
+
+    // === Phase 3: Feed unhealthy economics for 3 epochs to trigger Exit ===
+    println!("\n=== Phase 3: Unhealthy economics (should trigger Exit after 3 streaks) ===");
+
+    // Create unhealthy sample (dead chain: insufficient activity)
+    let unhealthy_sample = EconomicsSample {
+        epoch_tx_count: 5,  // Below MIN_TX_COUNT=10
+        epoch_tx_volume_block: 500,  // Below MIN_TX_VOLUME=1000
+        epoch_treasury_inflow_block: 0,  // Zero treasury
+        block_reward_per_block: 100,
+        market_metrics: MarketMetrics {
+            storage: MarketMetric {
+                utilization: 0.40,
+                provider_margin: 0.50,
+                ..Default::default()
+            },
+            compute: MarketMetric {
+                utilization: 0.60,
+                provider_margin: 0.50,
+                ..Default::default()
+            },
+            energy: MarketMetric {
+                utilization: 0.50,
+                provider_margin: 0.25,
+                ..Default::default()
+            },
+            ad: MarketMetric {
+                utilization: 0.50,
+                provider_margin: 0.30,
+                ..Default::default()
+            },
+        },
+    };
+
+    // Epoch 4: unhealthy, exit_streak = 1
+    let eval4 = ctrl.evaluate(4, &unhealthy_sample);
+    assert!(eval4.is_none(), "Should not produce intent on first unhealthy sample");
+    assert_eq!(ctrl.exit(), 1, "Exit streak should be 1");
+    assert_eq!(ctrl.enter(), 0, "Enter streak should reset to 0");
+    assert!(ctrl.active(), "Gate should still be active");
+    println!("Epoch 4: exit_streak={}, active={}", ctrl.exit(), ctrl.active());
+
+    // Epoch 5: unhealthy, exit_streak = 2
+    let eval5 = ctrl.evaluate(5, &unhealthy_sample);
+    assert!(eval5.is_none(), "Should not produce intent on second unhealthy sample");
+    assert_eq!(ctrl.exit(), 2, "Exit streak should be 2");
+    println!("Epoch 5: exit_streak={}, active={}", ctrl.exit(), ctrl.active());
+
+    // Epoch 6: unhealthy, exit_streak = 3, should trigger Exit
+    let eval6 = ctrl.evaluate(6, &unhealthy_sample);
+    assert!(eval6.is_some(), "Should produce Exit intent on third unhealthy sample");
+    let eval6 = eval6.unwrap();
+    assert_eq!(eval6.action, GateAction::Exit, "Action should be Exit");
+    assert!(!ctrl.active(), "Gate should be inactive after Exit");
+    assert_eq!(ctrl.exit(), 3, "Exit streak should be 3");
+    println!("Epoch 6: exit_streak={}, active={}, action={:?}", ctrl.exit(), ctrl.active(), eval6.action);
+    println!("✓ Gate exited after 3 unhealthy epochs");
+
+    // === Phase 4: Feed healthy economics again to trigger re-Enter ===
+    println!("\n=== Phase 4: Return to healthy economics (should trigger re-Enter) ===");
+
+    // Epoch 7: healthy, enter_streak = 1
+    let eval7 = ctrl.evaluate(7, &healthy_sample);
+    assert!(eval7.is_none(), "Should not produce intent on first healthy sample");
+    assert_eq!(ctrl.enter(), 1, "Enter streak should be 1");
+    assert_eq!(ctrl.exit(), 0, "Exit streak should reset to 0");
+    println!("Epoch 7: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
+
+    // Epoch 8: healthy, enter_streak = 2
+    let eval8 = ctrl.evaluate(8, &healthy_sample);
+    assert!(eval8.is_none(), "Should not produce intent on second healthy sample");
+    assert_eq!(ctrl.enter(), 2, "Enter streak should be 2");
+    println!("Epoch 8: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
+
+    // Epoch 9: healthy, enter_streak = 3, should trigger re-Enter
+    let eval9 = ctrl.evaluate(9, &healthy_sample);
+    assert!(eval9.is_some(), "Should produce Enter intent on third healthy sample");
+    let eval9 = eval9.unwrap();
+    assert_eq!(eval9.action, GateAction::Enter, "Action should be Enter");
+    assert!(ctrl.active(), "Gate should be active after re-Enter");
+    assert_eq!(ctrl.enter(), 3, "Enter streak should be 3");
+    println!("Epoch 9: enter_streak={}, active={}, action={:?}", ctrl.enter(), ctrl.active(), eval9.action);
+    println!("✓ Gate re-entered after returning to healthy economics");
+
+    println!("\n✓ Launch Governor economics gate lifecycle test completed successfully");
+    println!("  - Gate activated when economics became healthy");
+    println!("  - Gate deactivated when economics became unhealthy");
+    println!("  - Gate reactivated when economics recovered");
 }

@@ -131,6 +131,25 @@ impl NetworkIssuanceController {
         }
     }
 
+    /// Create controller with previous adaptive baselines
+    ///
+    /// Use this when continuing from a previous epoch to preserve baseline state.
+    /// This is CRITICAL for consensus: baselines must carry across epochs or the
+    /// "adaptive" feature becomes placebo.
+    pub fn with_baselines(
+        params: NetworkIssuanceParams,
+        prev_tx_count: u64,
+        prev_tx_volume: u64,
+        prev_miners: u64,
+    ) -> Self {
+        Self {
+            adaptive_baseline_tx_count: prev_tx_count as f64,
+            adaptive_baseline_tx_volume: prev_tx_volume as f64,
+            adaptive_baseline_miners: prev_miners as f64,
+            params,
+        }
+    }
+
     /// Update adaptive baselines with observed network activity
     ///
     /// Uses exponential moving average (EMA) to smooth baseline adjustments:

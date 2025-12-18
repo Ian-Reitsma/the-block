@@ -102,6 +102,27 @@ export TB_GOVERNOR_SIGN=1                       # Enable decision signing
 export TB_NODE_KEY_HEX=<32-byte-hex>            # Required if signing enabled
 ```
 
+### Modes: Shadow vs Active
+
+1. **Shadow mode (recommended for new gates):**
+   - Start the governor with `TB_GOVERNOR_ENABLED=1` but build/run with the “shadow” feature (or temporarily comment out the `apply_intent` call) so intents are recorded but no parameters flip.
+   - Monitor `governor.decisions`/`governor.snapshot` output and ensure metrics summaries make sense.
+   - Keep a run log in your ops notes (epoch range, observed metrics, whether signatures verified).
+
+2. **Active mode:**
+   - Enable `TB_GOVERNOR_ENABLED=1` with `apply_intent` live so successful streaks flip runtime params (`launch_operational_flag`, `dns_rehearsal_enabled`, etc.).
+   - Production runs **must** set `TB_GOVERNOR_SIGN=1` and provide `TB_NODE_KEY_HEX` so every decision snapshot has an attestation.
+   - Alert on gate transitions and intent failures (see below).
+
+### Recommended Settings
+
+| Setting | Shared Testnet | Mainnet |
+|---------|----------------|---------|
+| `TB_GOVERNOR_ENABLED` | `1` | `1` |
+| `TB_GOVERNOR_SIGN` | Optional (enable before public beta) | **Required (`1`)** |
+| `TB_GOVERNOR_WINDOW_SECS` | `2 × epoch` (fast feedback) | `≥4 × epoch` (less flapping) |
+| Gate promotion | Announce in Discord/docs; verify telemetry manually | Require signed decision snapshots, `governor.decisions` ACK from at least two operators |
+
 ### Monitoring Gate Status
 
 ```bash
@@ -130,6 +151,101 @@ curl -X POST http://localhost:8545 \
 | naming | `Inactive` → `Rehearsal` | DNS metrics healthy, test auctions enabled |
 | naming | `Rehearsal` → `Trade` | Stake coverage met, live auctions enabled |
 | naming | `Trade` → `Rehearsal` | Disputes/failures spiked, reverting to test mode |
+| economics | `Inactive` → `Active` | Economics healthy, mainnet-ready autopilot enabled |
+| economics | `Active` → `Inactive` | Economics unhealthy, reverting to safe mode |
+
+### Economics Gate Health Checks
+
+The economics gate validates four categories of network health before enabling mainnet-ready economics autopilot. All four checks must pass consistently (default: 3-epoch streak) before the gate activates.
+
+#### 1. Activity Sufficiency (Dead Chain Detection)
+
+Ensures the network has sufficient transaction volume to support meaningful economic activity.
+
+| Metric | Threshold | Meaning |
+|--------|-----------|---------|
+| `epoch_tx_count` | ≥ 10 transactions | Minimum transaction count per epoch |
+| `epoch_tx_volume_block` | ≥ 1,000 BLOCK | Minimum total transaction volume per epoch |
+
+**Failure condition:** Either threshold violated indicates a dead or inactive chain.
+
+#### 2. Reward Stability
+
+Detects pathological reward volatility that could destabilize mining economics.
+
+| Metric | Threshold | Meaning |
+|--------|-----------|---------|
+| `block_reward_per_block` volatility | < 2,000 bps (20%) | Maximum standard deviation of rewards over rolling window |
+
+**Failure condition:** Reward variance exceeding 20% indicates unstable issuance policy or controller malfunction.
+
+#### 3. Treasury Health
+
+Validates that the treasury is accumulating revenue from network activity.
+
+| Metric | Threshold | Meaning |
+|--------|-----------|---------|
+| `epoch_treasury_inflow_block` | > 0 BLOCK | Treasury must have positive inflow |
+| Treasury stability | Not collapsing | Recent epochs show consistent or growing inflow |
+
+**Failure condition:** Zero treasury inflow or consistent decline indicates broken fee collection or unsustainable economics.
+
+#### 4. Market Sanity
+
+Validates that all four markets (storage, compute, energy, advertising) have reasonable utilization and provider margins.
+
+| Market | Utilization Range | Provider Margin Range |
+|--------|-------------------|----------------------|
+| Storage | 1% - 95% | -50% to +300% |
+| Compute | 1% - 95% | -50% to +300% |
+| Energy | 1% - 95% | -50% to +300% |
+| Advertising | 1% - 95% | -50% to +300% |
+
+**Failure conditions:**
+- **Utilization < 1%:** Market is effectively dead (no demand)
+- **Utilization > 95%:** Market is oversaturated (supply shortage)
+- **Margin < -50%:** Providers losing money catastrophically (exodus risk)
+- **Margin > +300%:** Price gouging or market manipulation
+
+### Economics Gate Monitoring
+
+The economics gate samples real blockchain metrics every epoch from these gauges (persisted in `node/src/lib.rs`):
+
+```bash
+# Check economics metrics via RPC
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"metrics.economics","params":[],"id":1}'
+```
+
+Expected output includes:
+- `economics_epoch_tx_count`: Transaction count for current/previous epoch
+- `economics_epoch_tx_volume_block`: Transaction volume in BLOCK
+- `economics_epoch_treasury_inflow_block`: Treasury revenue
+- `economics_block_reward_per_block`: Current block reward
+- `economics_prev_market_metrics`: Previous epoch's market utilization and margins
+
+### Economics Gate Operational Notes
+
+1. **Testnet vs Mainnet:**
+   - Testnet: May temporarily disable checks during bootstrap or stress tests
+   - Mainnet: All checks must remain active; disabled gate blocks "mainnet-ready" status
+
+2. **Safe Mode Behavior:**
+   - When economics gate is `Inactive`, the `launch_economics_autopilot` parameter is set to `0`
+   - Issuance reverts to conservative formula-based mode
+   - Subsidy allocation uses safe defaults until health recovers
+
+3. **Alert Thresholds:**
+   - **Critical:** Economics gate exits (health failing for 3+ epochs)
+   - **Warning:** Any single health check failing (1-2 epoch streak)
+   - **Info:** Gate enters (healthy for 3+ epochs, autopilot enabled)
+
+4. **Recovery Process:**
+   - Fix root cause (restart activity, repair markets, restore treasury flow)
+   - Monitor for 3 consecutive healthy epochs
+   - Gate automatically re-enters when streak requirement met
+   - Verify `launch_economics_autopilot` parameter flips back to `1`
 
 ### Backup and Recovery
 

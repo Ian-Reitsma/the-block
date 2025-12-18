@@ -738,6 +738,12 @@ impl HandshakeTable {
         if entry.addr != addr {
             return None;
         }
+        // SECURITY: Only ACK application data if handshake is fully established
+        // (i.e., client sent ClientFinish). This prevents pre-handshake traffic
+        // from being treated as valid and bypassing the handshake gate.
+        if !entry.established {
+            return None;
+        }
         entry.refresh();
         Some(encode_application_ack(handshake, payload))
     }

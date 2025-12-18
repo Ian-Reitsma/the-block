@@ -225,6 +225,7 @@ pub struct IntentSummary {
 pub trait SignalProvider: Send + Sync {
     fn chain_sample(&self, window_secs: u64) -> ChainSample;
     fn dns_sample(&self, window_secs: u64) -> DnsSample;
+    fn economics_sample(&self, window_secs: u64) -> EconomicsSample;
 }
 
 #[derive(Clone, Default)]
@@ -244,6 +245,15 @@ pub struct DnsSample {
     pub settle_durations_ms: Option<Vec<u64>>,
     pub stake_coverage_ratio: Option<f64>,
     pub settlement_p90_ct: Option<u64>,
+}
+
+#[derive(Clone, Default)]
+pub struct EconomicsSample {
+    pub epoch_tx_count: u64,
+    pub epoch_tx_volume_block: u64,
+    pub epoch_treasury_inflow_block: u64,
+    pub block_reward_per_block: u64,
+    pub market_metrics: crate::economics::MarketMetrics,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -372,6 +382,17 @@ impl SignalProvider for LiveSignalProvider {
             settlement_p90_ct: settlement_p90,
         }
     }
+
+    fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
+        let guard = self.chain.lock().unwrap_or_else(|e| e.into_inner());
+        EconomicsSample {
+            epoch_tx_count: guard.economics_epoch_tx_count,
+            epoch_tx_volume_block: guard.economics_epoch_tx_volume_block,
+            epoch_treasury_inflow_block: guard.economics_epoch_treasury_inflow_block,
+            block_reward_per_block: guard.economics_block_reward_per_block,
+            market_metrics: guard.economics_prev_market_metrics.clone(),
+        }
+    }
 }
 
 fn peer_liveness_ratio(window_secs: u64) -> Option<RatioSample> {
@@ -408,7 +429,7 @@ struct GateRuntime {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum GateState {
+pub enum GateState {
     Inactive,
     Active,
     Rehearsal,
@@ -530,6 +551,7 @@ impl SharedState {
             GateRuntime::new("operational", required),
         );
         gates.insert("naming".into(), GateRuntime::new("naming", required));
+        gates.insert("economics".into(), GateRuntime::new("economics", required));
         Self {
             enabled: config.enabled,
             base_path: config.base_path.to_string_lossy().into_owned(),
@@ -656,6 +678,7 @@ async fn run_service(
     let mut intent_seq = 0u64;
     let mut operational_ctrl = OperationalController::new(window_secs);
     let mut naming_ctrl = NamingController::new(window_secs);
+    let mut economics_ctrl = EconomicsController::new(window_secs);
     loop {
         if cancel.is_cancelled() {
             break;
@@ -710,14 +733,36 @@ async fn run_service(
             naming_ctrl.required(),
             naming_ctrl.eval(),
         );
+        let economics_sample = provider.economics_sample(window_secs);
+        if let Some(eval) = economics_ctrl.evaluate(epoch, &economics_sample) {
+            if let Some(intent) = plan_intent(
+                &base_path,
+                &mut intent_seq,
+                "economics",
+                eval.action,
+                epoch,
+                eval.metrics.clone(),
+                eval.reason.clone(),
+            ) {
+                process_intent(intent, &chain, &shared);
+            }
+        }
+        shared.update_gate(
+            "economics",
+            economics_ctrl.gate_state(),
+            economics_ctrl.enter(),
+            economics_ctrl.exit(),
+            economics_ctrl.required(),
+            economics_ctrl.eval(),
+        );
         sleep(Duration::from_secs(window_secs.max(1))).await;
     }
 }
 
-struct PlannedEval {
-    action: GateAction,
-    reason: String,
-    metrics: JsonValue,
+pub struct PlannedEval {
+    pub action: GateAction,
+    pub reason: String,
+    pub metrics: JsonValue,
 }
 
 fn plan_intent(
@@ -731,13 +776,16 @@ fn plan_intent(
 ) -> Option<IntentRecord> {
     let id = format!("{gate}-{epoch}-{seq}");
     *seq = seq.saturating_add(1);
-    let params_patch = match action {
-        GateAction::Enter => json_map(vec![("operational", JsonValue::Bool(true))]),
-        GateAction::Exit => json_map(vec![("operational", JsonValue::Bool(false))]),
-        GateAction::Rehearsal => {
+    let params_patch = match (gate, action) {
+        ("operational", GateAction::Enter) => json_map(vec![("operational", JsonValue::Bool(true))]),
+        ("operational", GateAction::Exit) => json_map(vec![("operational", JsonValue::Bool(false))]),
+        ("economics", GateAction::Enter) => json_map(vec![("economics_autopilot", JsonValue::Bool(true))]),
+        ("economics", GateAction::Exit) => json_map(vec![("economics_autopilot", JsonValue::Bool(false))]),
+        ("naming", GateAction::Rehearsal) => {
             json_map(vec![("naming_mode", JsonValue::String("rehearsal".into()))])
         }
-        GateAction::Trade => json_map(vec![("naming_mode", JsonValue::String("trade".into()))]),
+        ("naming", GateAction::Trade) => json_map(vec![("naming_mode", JsonValue::String("trade".into()))]),
+        _ => json_map(vec![]), // Fallback for unknown gate/action combinations
     };
     let epoch_apply = epoch + 1;
     let payload = DecisionPayload {
@@ -789,11 +837,16 @@ fn apply_intent(
         let mut guard = chain.lock().unwrap_or_else(|e| e.into_inner());
         let params_snapshot = guard.params.clone();
         let mut runtime = Runtime::new(&mut *guard);
-        match intent.action {
-            GateAction::Enter => runtime.set_launch_operational(true),
-            GateAction::Exit => runtime.set_launch_operational(false),
-            GateAction::Rehearsal => runtime.set_dns_rehearsal(true),
-            GateAction::Trade => runtime.set_dns_rehearsal(false),
+        match (intent.gate.as_str(), intent.action) {
+            ("operational", GateAction::Enter) => runtime.set_launch_operational(true),
+            ("operational", GateAction::Exit) => runtime.set_launch_operational(false),
+            ("economics", GateAction::Enter) => runtime.set_launch_economics(true),
+            ("economics", GateAction::Exit) => runtime.set_launch_economics(false),
+            ("naming", GateAction::Rehearsal) => runtime.set_dns_rehearsal(true),
+            ("naming", GateAction::Trade) => runtime.set_dns_rehearsal(false),
+            _ => {
+                // Unknown gate/action combination, no runtime change
+            }
         }
         runtime.set_current_params(&params_snapshot);
     }
@@ -1373,6 +1426,242 @@ impl NamingController {
     }
 }
 
+pub struct EconomicsController {
+    required_streak: u64,
+    enter_streak: u64,
+    exit_streak: u64,
+    active: bool,
+    last_eval: GateEval,
+    history_capacity: usize,
+    // Activity sufficiency histories
+    tx_count_history: VecDeque<f64>,
+    tx_volume_history: VecDeque<f64>,
+    // Reward stability history
+    reward_history: VecDeque<f64>,
+    // Treasury health history
+    treasury_history: VecDeque<f64>,
+    // Market sanity histories (per market: storage, compute, energy, ad)
+    storage_util_history: VecDeque<f64>,
+    storage_margin_history: VecDeque<f64>,
+    compute_util_history: VecDeque<f64>,
+    compute_margin_history: VecDeque<f64>,
+    energy_util_history: VecDeque<f64>,
+    energy_margin_history: VecDeque<f64>,
+    ad_util_history: VecDeque<f64>,
+    ad_margin_history: VecDeque<f64>,
+}
+
+impl EconomicsController {
+    pub fn new(window_secs: u64) -> Self {
+        let epoch_secs = crate::EPOCH_BLOCKS.max(1);
+        let required_streak = (epoch_secs / window_secs.max(1)).max(1);
+        let history_capacity = (required_streak as usize).max(4) * 2;
+        Self {
+            required_streak,
+            enter_streak: 0,
+            exit_streak: 0,
+            active: false,
+            last_eval: GateEval::default(),
+            history_capacity,
+            tx_count_history: VecDeque::with_capacity(history_capacity),
+            tx_volume_history: VecDeque::with_capacity(history_capacity),
+            reward_history: VecDeque::with_capacity(history_capacity),
+            treasury_history: VecDeque::with_capacity(history_capacity),
+            storage_util_history: VecDeque::with_capacity(history_capacity),
+            storage_margin_history: VecDeque::with_capacity(history_capacity),
+            compute_util_history: VecDeque::with_capacity(history_capacity),
+            compute_margin_history: VecDeque::with_capacity(history_capacity),
+            energy_util_history: VecDeque::with_capacity(history_capacity),
+            energy_margin_history: VecDeque::with_capacity(history_capacity),
+            ad_util_history: VecDeque::with_capacity(history_capacity),
+            ad_margin_history: VecDeque::with_capacity(history_capacity),
+        }
+    }
+
+    pub fn evaluate(&mut self, epoch: u64, sample: &EconomicsSample) -> Option<PlannedEval> {
+        // Push current values into histories
+        let capacity = self.history_capacity;
+        Self::push_history(&mut self.tx_count_history, capacity, sample.epoch_tx_count as f64);
+        Self::push_history(&mut self.tx_volume_history, capacity, sample.epoch_tx_volume_block as f64);
+        Self::push_history(&mut self.reward_history, capacity, sample.block_reward_per_block as f64);
+        Self::push_history(&mut self.treasury_history, capacity, sample.epoch_treasury_inflow_block as f64);
+        Self::push_history(&mut self.storage_util_history, capacity, sample.market_metrics.storage.utilization);
+        Self::push_history(&mut self.storage_margin_history, capacity, sample.market_metrics.storage.provider_margin);
+        Self::push_history(&mut self.compute_util_history, capacity, sample.market_metrics.compute.utilization);
+        Self::push_history(&mut self.compute_margin_history, capacity, sample.market_metrics.compute.provider_margin);
+        Self::push_history(&mut self.energy_util_history, capacity, sample.market_metrics.energy.utilization);
+        Self::push_history(&mut self.energy_margin_history, capacity, sample.market_metrics.energy.provider_margin);
+        Self::push_history(&mut self.ad_util_history, capacity, sample.market_metrics.ad.utilization);
+        Self::push_history(&mut self.ad_margin_history, capacity, sample.market_metrics.ad.provider_margin);
+
+        // Need at least 2 samples to evaluate deltas
+        if self.tx_count_history.len() < 2 || self.reward_history.len() < 2 {
+            return None;
+        }
+
+        // A) Activity sufficiency (dead-chain detector)
+        const MIN_TX_COUNT: f64 = 10.0;
+        const MIN_TX_VOLUME: f64 = 1000.0;
+        let activity_ok = sample.epoch_tx_count as f64 >= MIN_TX_COUNT
+            && sample.epoch_tx_volume_block as f64 >= MIN_TX_VOLUME;
+
+        // B) Reward stability (unstable issuance detector)
+        let reward_p90_delta = diff_percentile(&self.reward_history, 0.9);
+        let reward_median = median_f64(&self.reward_history).unwrap_or(sample.block_reward_per_block as f64);
+        let reward_volatility_bps = if reward_median > 0.0 {
+            (reward_p90_delta / reward_median * 10000.0) as u64
+        } else {
+            u64::MAX
+        };
+        const MAX_REWARD_VOLATILITY_BPS: u64 = 2000; // 20% max volatility
+        let reward_stable = reward_volatility_bps <= MAX_REWARD_VOLATILITY_BPS;
+
+        // C) Treasury health (zero-treasury detector)
+        let treasury_ok = sample.epoch_treasury_inflow_block > 0;
+        let treasury_delta = diff_percentile(&self.treasury_history, 0.75);
+        let treasury_prev = *self.treasury_history.get(self.treasury_history.len() - 2).unwrap_or(&0.0);
+        let treasury_not_collapsing = sample.epoch_treasury_inflow_block as f64 >= (treasury_prev - treasury_delta);
+
+        // D) Market sanity (insane margins detector)
+        const MIN_UTIL: f64 = 0.01; // 1% minimum utilization
+        const MAX_UTIL: f64 = 0.95; // 95% max utilization
+        const MIN_MARGIN: f64 = -0.5; // -50% minimum margin (can be negative but not too extreme)
+        const MAX_MARGIN: f64 = 3.0; // 300% max margin (catch pathological pricing)
+
+        let storage_sane = sample.market_metrics.storage.utilization >= MIN_UTIL
+            && sample.market_metrics.storage.utilization <= MAX_UTIL
+            && sample.market_metrics.storage.provider_margin >= MIN_MARGIN
+            && sample.market_metrics.storage.provider_margin <= MAX_MARGIN;
+
+        let compute_sane = sample.market_metrics.compute.utilization >= MIN_UTIL
+            && sample.market_metrics.compute.utilization <= MAX_UTIL
+            && sample.market_metrics.compute.provider_margin >= MIN_MARGIN
+            && sample.market_metrics.compute.provider_margin <= MAX_MARGIN;
+
+        let energy_sane = sample.market_metrics.energy.utilization >= MIN_UTIL
+            && sample.market_metrics.energy.utilization <= MAX_UTIL
+            && sample.market_metrics.energy.provider_margin >= MIN_MARGIN
+            && sample.market_metrics.energy.provider_margin <= MAX_MARGIN;
+
+        let ad_sane = sample.market_metrics.ad.utilization >= MIN_UTIL
+            && sample.market_metrics.ad.utilization <= MAX_UTIL
+            && sample.market_metrics.ad.provider_margin >= MIN_MARGIN
+            && sample.market_metrics.ad.provider_margin <= MAX_MARGIN;
+
+        let markets_sane = storage_sane && compute_sane && energy_sane && ad_sane;
+
+        // Build metrics JSON
+        let metrics = json_map(vec![
+            ("epoch_tx_count", JsonValue::Number(JsonNumber::from(sample.epoch_tx_count))),
+            ("epoch_tx_volume", JsonValue::Number(JsonNumber::from(sample.epoch_tx_volume_block))),
+            ("epoch_treasury_inflow", JsonValue::Number(JsonNumber::from(sample.epoch_treasury_inflow_block))),
+            ("block_reward", JsonValue::Number(JsonNumber::from(sample.block_reward_per_block))),
+            ("reward_volatility_bps", JsonValue::Number(JsonNumber::from(reward_volatility_bps))),
+            ("storage_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.storage.utilization).unwrap_or(JsonNumber::from(0u64)))),
+            ("storage_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.storage.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
+            ("compute_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.compute.utilization).unwrap_or(JsonNumber::from(0u64)))),
+            ("compute_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.compute.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
+            ("energy_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.energy.utilization).unwrap_or(JsonNumber::from(0u64)))),
+            ("energy_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.energy.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
+            ("ad_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.ad.utilization).unwrap_or(JsonNumber::from(0u64)))),
+            ("ad_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.ad.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
+        ]);
+
+        // Enter conditions: ALL must pass
+        let enter_ok = activity_ok && reward_stable && treasury_ok && treasury_not_collapsing && markets_sane;
+
+        // Exit conditions: ANY critical failure
+        let exit_ok = !(sample.epoch_tx_count < (MIN_TX_COUNT as u64)
+            || sample.epoch_treasury_inflow_block == 0
+            || !reward_stable
+            || !markets_sane);
+
+        let reason = format!(
+            "activity={} reward_vol={}bps treasury={} markets={}",
+            if activity_ok { "ok" } else { "FAIL" },
+            reward_volatility_bps,
+            if treasury_ok && treasury_not_collapsing { "ok" } else { "FAIL" },
+            if markets_sane { "ok" } else { "FAIL" }
+        );
+
+        self.last_eval = GateEval {
+            enter_ok,
+            exit_ok,
+            reason: reason.clone(),
+            metrics: metrics.clone(),
+        };
+
+        // Update streaks
+        if enter_ok {
+            self.enter_streak = self.enter_streak.saturating_add(1);
+        } else {
+            self.enter_streak = 0;
+        }
+
+        if !exit_ok {
+            self.exit_streak = self.exit_streak.saturating_add(1);
+        } else {
+            self.exit_streak = 0;
+        }
+
+        // Generate intent if streak threshold met
+        if !self.active && self.enter_streak >= self.required_streak {
+            self.active = true;
+            self.exit_streak = 0;
+            Some(PlannedEval {
+                action: GateAction::Enter,
+                reason: format!("epoch {epoch}: economics enter streak met"),
+                metrics,
+            })
+        } else if self.active && self.exit_streak >= self.required_streak {
+            self.active = false;
+            self.enter_streak = 0;
+            Some(PlannedEval {
+                action: GateAction::Exit,
+                reason: format!("epoch {epoch}: economics exit streak met"),
+                metrics,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn push_history(history: &mut VecDeque<f64>, capacity: usize, value: f64) {
+        if history.len() == capacity {
+            history.pop_front();
+        }
+        history.push_back(value);
+    }
+
+    pub fn gate_state(&self) -> GateState {
+        if self.active {
+            GateState::Active
+        } else {
+            GateState::Inactive
+        }
+    }
+
+    pub fn enter(&self) -> u64 {
+        self.enter_streak
+    }
+
+    pub fn exit(&self) -> u64 {
+        self.exit_streak
+    }
+
+    pub fn required(&self) -> u64 {
+        self.required_streak
+    }
+
+    pub fn eval(&self) -> &GateEval {
+        &self.last_eval
+    }
+
+    pub fn active(&self) -> bool {
+        self.active
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1408,6 +1697,10 @@ mod tests {
 
         fn dns_sample(&self, _window_secs: u64) -> DnsSample {
             self.dns_samples.front().cloned().unwrap_or_default()
+        }
+
+        fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
+            EconomicsSample::default()
         }
     }
 
@@ -1500,5 +1793,179 @@ mod tests {
         };
         let trade_eval = ctrl.evaluate(3, &trade_sample).expect("trade");
         assert_eq!(trade_eval.action, GateAction::Trade);
+    }
+
+    #[test]
+    fn economics_controller_rejects_dead_chain() {
+        let mut ctrl = EconomicsController::new(crate::EPOCH_BLOCKS * 2);
+
+        // First sample to establish baseline
+        let baseline = EconomicsSample {
+            epoch_tx_count: 100,
+            epoch_tx_volume_block: 10000,
+            epoch_treasury_inflow_block: 1000,
+            block_reward_per_block: 50000,
+            market_metrics: crate::economics::MarketMetrics {
+                storage: crate::economics::MarketMetric {
+                    utilization: 0.5,
+                    average_cost_block: 100.0,
+                    effective_payout_block: 150.0,
+                    provider_margin: 0.5,
+                },
+                compute: crate::economics::MarketMetric {
+                    utilization: 0.4,
+                    average_cost_block: 80.0,
+                    effective_payout_block: 120.0,
+                    provider_margin: 0.5,
+                },
+                energy: crate::economics::MarketMetric {
+                    utilization: 0.3,
+                    average_cost_block: 60.0,
+                    effective_payout_block: 90.0,
+                    provider_margin: 0.5,
+                },
+                ad: crate::economics::MarketMetric {
+                    utilization: 0.6,
+                    average_cost_block: 120.0,
+                    effective_payout_block: 180.0,
+                    provider_margin: 0.5,
+                },
+            },
+        };
+        assert!(ctrl.evaluate(1, &baseline).is_none());
+
+        // Dead chain: zero tx_count
+        let dead_chain = EconomicsSample {
+            epoch_tx_count: 0, // Below MIN_TX_COUNT
+            epoch_tx_volume_block: 0, // Below MIN_TX_VOLUME
+            ..baseline.clone()
+        };
+        let eval = ctrl.evaluate(2, &dead_chain);
+        assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
+        assert!(!ctrl.last_eval.enter_ok);
+    }
+
+    #[test]
+    fn economics_controller_rejects_unstable_rewards() {
+        let mut ctrl = EconomicsController::new(crate::EPOCH_BLOCKS * 2);
+
+        let baseline = EconomicsSample {
+            epoch_tx_count: 100,
+            epoch_tx_volume_block: 10000,
+            epoch_treasury_inflow_block: 1000,
+            block_reward_per_block: 50000,
+            market_metrics: healthy_market_metrics(),
+        };
+        assert!(ctrl.evaluate(1, &baseline).is_none());
+
+        // Unstable reward: massive volatility
+        let unstable = EconomicsSample {
+            block_reward_per_block: 1000, // Huge drop from 50000
+            ..baseline.clone()
+        };
+        ctrl.evaluate(2, &unstable);
+
+        // Add more samples to establish high volatility pattern
+        ctrl.evaluate(3, &EconomicsSample { block_reward_per_block: 90000, ..baseline.clone() });
+        let eval = ctrl.evaluate(4, &EconomicsSample { block_reward_per_block: 5000, ..baseline.clone() });
+
+        assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
+        assert!(!ctrl.last_eval.enter_ok);
+    }
+
+    #[test]
+    fn economics_controller_rejects_zero_treasury() {
+        let mut ctrl = EconomicsController::new(crate::EPOCH_BLOCKS * 2);
+
+        let baseline = EconomicsSample {
+            epoch_tx_count: 100,
+            epoch_tx_volume_block: 10000,
+            epoch_treasury_inflow_block: 1000,
+            block_reward_per_block: 50000,
+            market_metrics: healthy_market_metrics(),
+        };
+        assert!(ctrl.evaluate(1, &baseline).is_none());
+
+        // Zero treasury
+        let zero_treasury = EconomicsSample {
+            epoch_treasury_inflow_block: 0,
+            ..baseline.clone()
+        };
+        let eval = ctrl.evaluate(2, &zero_treasury);
+        assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
+        assert!(!ctrl.last_eval.enter_ok);
+    }
+
+    #[test]
+    fn economics_controller_rejects_insane_margins() {
+        let mut ctrl = EconomicsController::new(crate::EPOCH_BLOCKS * 2);
+
+        let baseline = EconomicsSample {
+            epoch_tx_count: 100,
+            epoch_tx_volume_block: 10000,
+            epoch_treasury_inflow_block: 1000,
+            block_reward_per_block: 50000,
+            market_metrics: healthy_market_metrics(),
+        };
+        assert!(ctrl.evaluate(1, &baseline).is_none());
+
+        // Insane margins: storage margin way too high (pathological pricing)
+        let mut insane_metrics = healthy_market_metrics();
+        insane_metrics.storage.provider_margin = 5.0; // 500% margin, above MAX_MARGIN (3.0)
+
+        let insane = EconomicsSample {
+            market_metrics: insane_metrics,
+            ..baseline.clone()
+        };
+        let eval = ctrl.evaluate(2, &insane);
+        assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
+        assert!(!ctrl.last_eval.enter_ok);
+    }
+
+    #[test]
+    fn economics_controller_enters_when_healthy() {
+        let mut ctrl = EconomicsController::new(crate::EPOCH_BLOCKS * 2);
+
+        let healthy = EconomicsSample {
+            epoch_tx_count: 100,
+            epoch_tx_volume_block: 10000,
+            epoch_treasury_inflow_block: 1000,
+            block_reward_per_block: 50000,
+            market_metrics: healthy_market_metrics(),
+        };
+
+        // Need to build up streak
+        assert!(ctrl.evaluate(1, &healthy).is_none());
+        let eval = ctrl.evaluate(2, &healthy).expect("enter");
+        assert_eq!(eval.action, GateAction::Enter);
+    }
+
+    fn healthy_market_metrics() -> crate::economics::MarketMetrics {
+        crate::economics::MarketMetrics {
+            storage: crate::economics::MarketMetric {
+                utilization: 0.5,
+                average_cost_block: 100.0,
+                effective_payout_block: 150.0,
+                provider_margin: 0.5,
+            },
+            compute: crate::economics::MarketMetric {
+                utilization: 0.4,
+                average_cost_block: 80.0,
+                effective_payout_block: 120.0,
+                provider_margin: 0.5,
+            },
+            energy: crate::economics::MarketMetric {
+                utilization: 0.3,
+                average_cost_block: 60.0,
+                effective_payout_block: 90.0,
+                provider_margin: 0.5,
+            },
+            ad: crate::economics::MarketMetric {
+                utilization: 0.6,
+                average_cost_block: 120.0,
+                effective_payout_block: 180.0,
+                provider_margin: 0.5,
+            },
+        }
     }
 }

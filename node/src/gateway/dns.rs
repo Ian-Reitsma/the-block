@@ -2866,6 +2866,7 @@ mod tests {
         clear_ledger_context();
     }
 
+    #[test]
     #[testkit::tb_serial]
     fn resale_respects_royalty_distribution() {
         let domain = "resale-test.block";
@@ -3030,6 +3031,7 @@ mod tests {
         clear_domain_state(domain);
     }
 
+    #[test]
     #[testkit::tb_serial]
     fn outbid_releases_prior_stake() {
         let domain = "stake-release.block";

@@ -323,6 +323,13 @@ The governor manages two primary gates:
 | **operational** | Core network readiness | `Enter` (enable), `Exit` (disable) |
 | **naming** | DNS auction readiness | `Rehearsal` (test mode), `Trade` (live auctions) |
 
+Upcoming gates extend the same pattern:
+
+| Gate (planned) | Scope | Notes |
+|----------------|-------|-------|
+| **economics** | Block reward + subsidy autopilot | Shadow mode will ensure `NetworkIssuanceController` outputs count/volume/treasury metrics (`economics_epoch_*`) and the persisted `economics_block_reward_per_block` stay within bounds before runtime parameters flip. |
+| **storage**, **compute**, **energy**, **ad** | Market-specific rehearsal/live toggles | Each gate will watch the telemetry already described in the respective architecture sections (utilization, margins, disputes, backlog) and will only enable “trade” mode after sustained streaks. Backlog tracked in `AGENTS.md §15`. |
+
 Gate states progress as: `Inactive` → `Active`/`Rehearsal` → `Trade`
 
 ### Signal Providers
@@ -361,13 +368,15 @@ Intent records include:
 
 ### Configuration
 
-| Environment Variable | Purpose | Default |
+| Environment Variable | Purpose | Default/Guidance |
 |---------------------|---------|---------|
-| `TB_GOVERNOR_ENABLED` | Enable governor | `false` |
-| `TB_GOVERNOR_DB` | Database path | `governor_db/` |
-| `TB_GOVERNOR_WINDOW_SECS` | Evaluation window | 2 × epoch duration |
-| `TB_GOVERNOR_SIGN` | Sign decision payloads | `false` |
-| `TB_NODE_KEY_HEX` | Hex-encoded Ed25519 key for signing | (required if signing) |
+| `TB_GOVERNOR_ENABLED` | Enables the background task | `false` by default; **must be `1` on shared testnets and mainnet** |
+| `TB_GOVERNOR_DB` | SimpleDb path for intent history | `governor_db/` relative to node data dir |
+| `TB_GOVERNOR_WINDOW_SECS` | Rolling window used for signal sampling | Default `2 ×` epoch. Increase (e.g. `4 ×`) on mainnet to avoid flapping. |
+| `TB_GOVERNOR_SIGN` | Emit signed decision sidecars | `0` for local/dev. **Set to `1` on production clusters** so every intent has an Ed25519 attestation. |
+| `TB_NODE_KEY_HEX` | Hex-encoded Ed25519 secret used for signing | Required when `TB_GOVERNOR_SIGN=1`. |
+
+**Modes:** New gates should ship in **shadow mode** first—emit intents + snapshots but skip `apply_intent`—until operators confirm the metrics and thresholds behave as expected. Switch to active mode by enabling `TB_GOVERNOR_ENABLED=1` (and keeping `apply_intent` wired) only after the shadow run is documented in `docs/operations.md`.
 
 ### RPC Methods
 

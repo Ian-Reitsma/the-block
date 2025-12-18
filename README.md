@@ -23,6 +23,7 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
   - **Bandwidth** (helping data move around)
 - **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving "cohorts" defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
 - **Single Currency (BLOCK)**: Fixed supply of 40 million BLOCK tokens (similar to Bitcoin's 21M cap). You can send and receive BLOCK like Bitcoin or cash, and it pays for all services on the network. Formula-driven issuance based on network activity - no arbitrary constants.
+- **Launch Governor Autopilot**: A readiness controller watches block smoothness, replay success, peer liveness, DNS auction health, and (soon) per-market telemetry. It flips gates like `operational` and `naming` only after streak-based thresholds are met, persists signed decision snapshots, and lets operators keep testnet/mainnet runs auditable without manual babysitting.
 - **Governance**: Instead of a small group deciding how the blockchain works, BLOCK holders can vote on proposals to change rules, distribute funds from the treasury, and upgrade the network.
 
 ### BLOCK in Everyday Terms
@@ -32,7 +33,7 @@ BLOCK is the single currency that powers everything on The Block. Think of it li
 - **Pay for services** — storage, compute, energy
 - **Reward work** — earn BLOCK by running infrastructure
 
-**Supply Cap:** 40 million BLOCK maximum, with formula-driven issuance that responds to network activity.
+**Supply Cap:** 40 million BLOCK maximum, with formula-driven issuance that responds to network activity. There is no premine: genesis starts at zero emission, and every BLOCK in circulation is minted through the public reward formula.
 
 **Mini-stories showing how BLOCK moves around:**
 
@@ -61,6 +62,8 @@ This means when you run The Block, you're not duct-taping together 50 different 
 
 The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (BLOCK), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
 
+**Readiness autopilot:** The Launch Governor (`node/src/launch_governor`) consumes chain + DNS telemetry (and soon economics/market metrics) to drive testnet and mainnet gating. It records signed decisions, enforces streak-based enter/exit thresholds, and ties into governance runtime flags so feature transitions are reproducible and reviewable.
+
 ---
 
 ## Why it exists
@@ -76,11 +79,16 @@ Instead of paying these providers per request with transaction fees (which gets 
 ### For Developers: Design Pillars
 - **Reward verifiable service:** storage/compute/bandwidth subsidies (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) are minted directly in each coinbase instead of billing per request. This eliminates micro-transaction overhead and makes services economically viable.
 
+- **Formula-driven monetary policy:** block rewards come from a single network-activity formula shared by the node, CLI, explorer, and telemetry (`docs/economics_and_governance.md#network-driven-block-issuance`). Governance can adjust smoothing bounds and baselines, but there are no hidden constants or manual issuance tweaks.
+  The same telemetry counters (`economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, plus `economics_block_reward_per_block`) feed Launch Governor's autopilot so testnet/mainnet promotions happen when throughput, volume, and treasury inflow all meet policy thresholds.
+
 - **Deterministic governance:** the shared `governance` crate powers the node, CLI, explorer, and metrics aggregator so proposals, fee floors, and treasury state never drift. Every participant runs identical governance logic, ensuring the network can coordinate upgrades and treasury disbursements without hard forks.
 
 - **Reproducible, sovereign builds:** dependency snapshots via `cargo vendor`, first-party `foundation_serialization`, and provenance tracking keep binaries auditable. Telemetry advertises exactly which runtime/transport/storage/coding providers are active, so node operators can verify they're running authentic software.
 
 - **First-party tooling:** gateway HTTP, DNS publishing, CLI, probe, explorer, light clients, and telemetry stacks all reuse the same crates. No vendor lock-in, no mystery dependencies - everything is built, tested, and shipped together.
+
+- **Automated readiness gates:** the Launch Governor evaluates chain, DNS, and market telemetry to enable or disable subsystems (`operational`, `naming`, upcoming economics/market gates). Every transition is streak-gated, timelocked, and recorded, so “testnet that runs itself” is auditable.
 
 ---
 
@@ -175,6 +183,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 | --- | --- |
 | [`docs/overview.md`](docs/overview.md) | Mission, design pillars, repo layout, document map. |
 | [`docs/architecture.md`](docs/architecture.md) | Ledger & consensus, networking, storage, compute marketplace, bridges/DEX, gateway, telemetry. |
+| [`docs/architecture.md#launch-governor`](docs/architecture.md#launch-governor) | Launch autopilot, readiness gates, decision snapshots, and configuration. |
 | [`docs/economics_and_governance.md`](docs/economics_and_governance.md) | BLOCK supply, fee lanes, subsidy multipliers, treasury, governance DAG, settlement math; the code still uses `amount_ct/amount_it` ledger labels to describe the same BLOCK flows. |
 | [`docs/operations.md`](docs/operations.md) | Bootstrap, configuration, telemetry wiring, runbooks, probe/diagnostics, WAL/snapshot care, deployments. |
 | [`docs/security_and_privacy.md`](docs/security_and_privacy.md) | Threat model, crypto stack, remote signers, jurisdiction packs, LE portal, supply-chain security. |

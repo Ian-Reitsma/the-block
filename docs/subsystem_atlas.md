@@ -1,27 +1,27 @@
 # Subsystem Atlas
 
-<<<<<<< HEAD
-Quick reference for navigating the codebase. Find what you need fast.
+This atlas supplements `AGENTS.md`, `docs/overview.md`, and the subsystem specs by mapping every major path in the repository to plain-language descriptions. Treat it as the first stop for new contributors (or agents) who need to understand where a concept lives without digging through source code. Each entry lists the canonical files, the kind of work that happens there, and the doc sections that provide deeper context.
 
 ## Common Tasks → Paths
 
-When you want to do something specific, here's where to look:
+When you want to change something specific, start here:
 
 | Task | Code Paths | Doc References |
 |------|------------|----------------|
 | **Change how transaction fees work** | `node/src/fee`, `governance/src/params.rs`, `cli/src/fee_estimator.rs` | [`economics_and_governance.md#fee-lanes-and-rebates`](economics_and_governance.md#fee-lanes-and-rebates) |
-| **Add a new governance parameter** | `governance/src/params.rs`, `node/src/governance/params.rs`, `cli/src/gov.rs` | [`economics_and_governance.md#governance-parameters`](economics_and_governance.md#governance-parameters) |
-| **Integrate a new data source into the ad market** | `crates/ad_market`, `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | [`architecture.md#ad-market`](architecture.md) |
-| **Add a new RPC endpoint** | `node/src/rpc/*.rs`, `cli/src/*.rs` (corresponding CLI wrapper) | [`apis_and_tooling.md#json-rpc`](apis_and_tooling.md#json-rpc) |
-| **Modify energy market behavior** | `crates/energy-market`, `node/src/energy.rs`, `node/src/rpc/energy.rs`, `cli/src/energy.rs` | [`architecture.md#energy-market`](architecture.md#energy-market) |
-| **Change compute market pricing/SLA** | `node/src/compute_market/settlement.rs`, `governance/src/params.rs` | [`architecture.md#compute-marketplace`](architecture.md#compute-marketplace) |
-| **Add telemetry for a new metric** | `node/src/telemetry.rs`, update dashboards in `monitoring/` | [`architecture.md#telemetry-and-instrumentation`](architecture.md#telemetry-and-instrumentation) |
+| **Economic autopilot** | `node/src/lib.rs`, `node/src/economics/mod.rs`, `node/src/telemetry.rs` | `NetworkIssuanceController` uses `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, and `economics_block_reward_per_block` to align block rewards before Launch Governor flips gates (`docs/economics_and_governance.md#network-driven-block-issuance`). |
+| **Add or tune a governance parameter** | `governance/src/params.rs`, `node/src/governance/params.rs`, `cli/src/gov.rs` | [`economics_and_governance.md#governance-parameters`](economics_and_governance.md#governance-parameters) |
+| **Integrate a new ad-market data source** | `crates/ad_market`, `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | [`architecture.md#ad-market`](architecture.md#ad-market) |
+| **Add a new RPC endpoint** | `node/src/rpc/*.rs`, `cli/src/*.rs` | [`apis_and_tooling.md#json-rpc`](apis_and_tooling.md#json-rpc) |
+| **Modify energy market behavior** | `crates/energy-market`, `node/src/energy.rs`, `node/src/rpc/energy.rs`, `cli/src/energy.rs` | [`architecture.md#energy-governance-and-rpc-next-tasks`](architecture.md#energy-governance-and-rpc-next-tasks) |
+| **Change compute-market pricing/SLA** | `node/src/compute_market/settlement.rs`, `governance/src/params.rs`, `monitoring/` dashboards | [`architecture.md#compute-marketplace`](architecture.md#compute-marketplace) |
+| **Add telemetry for a new metric** | `node/src/telemetry.rs`, `metrics-aggregator/`, `monitoring/` | [`architecture.md#telemetry-and-instrumentation`](architecture.md#telemetry-and-instrumentation) |
 | **Modify consensus rules** | `node/src/consensus`, `node/src/blockchain` | [`architecture.md#ledger-and-consensus`](architecture.md#ledger-and-consensus) |
 | **Update storage pipeline** | `node/src/storage/pipeline.rs`, `coding/`, `storage_market/` | [`architecture.md#storage-and-state`](architecture.md#storage-and-state) |
 | **Add a new CLI command** | `cli/src/*.rs`, register in `cli/src/main.rs` | [`apis_and_tooling.md#cli`](apis_and_tooling.md#cli-contract-cli) |
-| **Configure launch governor gates** | `node/src/launch_governor/mod.rs`, `node/src/governor_snapshot.rs`, `node/src/rpc/governor.rs` | [`architecture.md#launch-governor`](architecture.md#launch-governor), [`operations.md#launch-governor-operations`](operations.md#launch-governor-operations) |
+| **Configure or extend Launch Governor gates** | `node/src/launch_governor/mod.rs`, `node/src/governor_snapshot.rs`, `node/src/rpc/governor.rs` | [`architecture.md#launch-governor`](architecture.md#launch-governor), [`operations.md#launch-governor-operations`](operations.md#launch-governor-operations) |
 
-## Subsystem Directory
+## Workspace Atlas
 
 ### Core Infrastructure
 
@@ -91,32 +91,7 @@ If you see old names in code, here's what they mean now:
 | Various `docs/*.md` that no longer exist | See [`LEGACY_MAPPING.md`](LEGACY_MAPPING.md) | Consolidated into main docs |
 
 See [`LEGACY_MAPPING.md`](LEGACY_MAPPING.md) for the full historical mapping.
-=======
-This atlas supplements `AGENTS.md`, `docs/overview.md`, and the subsystem specs by mapping every major path in the repository to plain-language descriptions. Treat it as the first stop for new contributors (or agents) who need to understand where a concept lives without digging through source code. Each entry lists the canonical files, the kind of work that happens there, and the doc sections that provide deeper context.
-
-## Workspace Atlas
-
-| Path | What it contains | Key docs / notes |
-| --- | --- | --- |
-| `node/` | Full node (consensus, networking, storage, compute, RPC, gateway, CLI helpers). Contains every runtime component that actually runs on validators and gateways. | `docs/architecture.md`, `docs/operations.md`, `docs/apis_and_tooling.md` |
-| `crates/` | Reusable first-party libraries: transport, HTTP/TLS, serialization, telemetry helpers, overlay store, wallet SDKs, probes, oracle adapters, etc. | Each crate has inline docs; `docs/developer_handbook.md#workspace-layout` |
-| `cli/` | `contract-cli` binary. Implements governance commands, wallet flows, compute/energy tooling, diagnostics, explorer helpers. | `docs/apis_and_tooling.md#cli` |
-| `metrics-aggregator/` | Service that ingests `/metrics` feeds, performs correlation, exposes `/wrappers` + `/telemetry/summary`, archives TLS warnings, and serves Grafana datasources. | `docs/operations.md#metrics-aggregator-ops` |
-| `monitoring/` | Grafana dashboards, Prometheus rules, `make monitor` scripts. All dashboard JSON lives here. | `docs/operations.md#monitoring-and-dashboards` |
-| `bridges/` | Cross-chain light clients, relayer state machines, HTLC helpers used by the node and CLI. | `docs/architecture.md#token-bridges`, `docs/security_and_privacy.md#bridge-and-cross-chain-security` |
-| `dex/` | Decentralized exchange logic: trust lines, escrow proofs, AMM math, routing. Linked into the node + CLI. | `docs/architecture.md#dex-and-trust-lines` |
-| `storage_market/`, `storage/`, `state/` | Storage contracts, blob pipelines, sled-backed metadata, RocksDB integration, snapshot tooling. | `docs/architecture.md#storage-and-state`, `docs/operations.md#storage-and-state` |
-| `governance/`, `examples/governance/` | Governance DAG, proposal store, CLI samples, replay harnesses. | `docs/economics_and_governance.md` |
-| `ledger/`, `utxo/`, `transaction/`, `tx/` | Ledger data structures, UTXO tracking, transaction serialization, test vectors. | `docs/architecture.md#ledger-and-consensus` |
-| `energy/`, `crates/energy-market`, `crates/oracle-adapter`, `services/mock-energy-oracle` | Energy market runtime, oracle adapters, mock services for drills. | `docs/architecture.md#energy-governance-and-rpc-next-tasks`, `docs/testnet/ENERGY_QUICKSTART.md`, `config/default.toml` (`energy.provider_keys`), `docs/operations.md#energy-market-operations` |
-| `compute_market/` (under `node/` + `crates/`) | Compute workloads, SNARK receipts, SLA enforcement, courier queues, lane scheduler. | `docs/architecture.md#compute-marketplace` |
-| `gateway/`, `web/` | HTTP surface, DNS publisher, mobile cache, read receipt batching, explorer web artifacts. | `docs/architecture.md#gateway-and-client-access` |
-| `scripts/`, `tools/`, `deploy/`, `nix/`, `Justfile`, `Makefile` | Automation for bootstrap, CI, release, chaos drills, reproducible builds. | `docs/developer_handbook.md`, `docs/operations.md` |
-| `tests/`, `node/tests/`, `gateway/tests/`, `bridges/tests/`, `fuzz/`, `formal/`, `sim/` | Deterministic replay harnesses, integration suites, fuzzers, simulation frameworks. | `docs/developer_handbook.md#testing-strategy`, `docs/developer_handbook.md#formal-methods` |
-
 The remaining directories (`crypto/`, `inflation/`, `privacy/`, `services/`, `examples/`, `explorer/`, etc.) each host standalone binaries, proofs, or sample artifacts. Use `rg --files` plus this atlas to jump into the relevant code when the doc map alone is not enough.
-
-## Node Subsystem Index
 
 The `node/` crate is densely packed. This index spells out every module so that even contributors with zero blockchain experience can map functionality to files.
 

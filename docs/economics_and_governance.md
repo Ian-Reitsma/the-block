@@ -24,6 +24,38 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
 - Industrial workload gauges (`industrial_backlog`, `industrial_utilization`) flow from storage/compute telemetry into `Block::industrial_subsidies()`.
 - Personal rebates are ledger entries only. They auto-apply to the submitter’s own write traffic before dipping into transferable CT and never circulate.
 
+## Network-Driven BLOCK Issuance
+
+> **Plain English:** Instead of targeting a fixed inflation rate, the protocol mints new BLOCK based on how busy (and how decentralized) the network actually is, while respecting the 40 M cap.
+
+The canonical issuance controller lives in `node/src/economics/network_issuance.rs` and is mirrored in telemetry/CLI/explorer. Every block reward is derived from the same four-factor formula:
+
+\[
+\text{reward} = \text{base} \times \text{activity} \times \text{decentralization} \times \text{supply\_decay}
+\]
+
+- **Base reward** — distribute 90 % of the 40 M cap evenly across the expected number of blocks (`max_supply_block`, `expected_total_blocks`). Using 90 % leaves room for tail emission.
+- **Activity multiplier** — geometric mean of transaction-count ratio, transaction-volume ratio, and `(1 + avg_market_utilization)`; each input is smoothed via adaptive baselines (EMA with governance-set clamps) so a growing network naturally earns more while a quiet network decays back toward 1.0 ×. Bounds: `[activity_multiplier_min, activity_multiplier_max]`.
+- **Decentralization factor** — `sqrt(unique_miners / baseline_miners)` with the same EMA/bounds treatment. More independent miners increase rewards; a shrinking set dampens them. Bounds: `[decentralization_multiplier_min, decentralization_multiplier_max]`.
+- **Supply decay** — linear decay based on remaining supply `(MAX_SUPPLY_BLOCK - emission) / MAX_SUPPLY_BLOCK`; prevents the cap from being exceeded and emulates a halving-style tail.
+
+All state for this controller (EMA baselines, clamp bounds, alpha values) is stored in the governance params struct `NetworkIssuanceParams` and exposed via telemetry so replay stays deterministic.
+
+### Telemetry-driven gating
+
+Every epoch `node/src/lib.rs` increments the on-chain counters `economics_epoch_tx_count`,
+`economics_epoch_tx_volume_block`, and `economics_epoch_treasury_inflow_block` as transactions hit the
+chain. Those counters, along with `recent_miners` and the stored circulations, feed `NetworkIssuanceController`
+inside `execute_epoch_economics()`, which writes the next `economics_block_reward_per_block`.
+Telemetry mirrors the same values (`ECONOMICS_EPOCH_*` gauges plus `ECONOMICS_BLOCK_REWARD_PER_BLOCK`)
+so Launch Governor's autopilot can verify throughput, volume, and treasury inflow before flipping the
+testnet → mainnet gate. Each node persists the latest base reward in `ChainDisk` so restarts follow the same
+control decisions and progress toward the live network with no manual tuning.
+
+### Legacy Inflation Controller (compatibility only)
+
+The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_controller_gain`, `min_annual_issuance_block`, and `max_annual_issuance_block`. These still exist for backward compatibility with tooling, but they are no longer the primary monetary policy. Any proposal that touches those fields must explicitly justify how it keeps the network-driven issuance formula aligned; otherwise the docs and `NetworkIssuanceController` are treated as the source of truth.
+
 ## Energy Market Economics
 - **Single-token model** — Energy payouts settle in CT just like storage/compute. Credits (`EnergyCredit`) and receipts (`EnergyReceipt`) are internal ledger objects stored in `SimpleDb::open_named(names::ENERGY_MARKET, …)`; settlement burns meter credits, decrements provider capacity, and records `EnergyReceipt { buyer, seller, kwh_delivered, price_paid, treasury_fee, slash_applied }`.
 - **Treasury integration** — `node::energy::settle_energy_delivery` forwards `treasury_fee + slash_applied` to `NODE_GOV_STORE.record_treasury_accrual`, so explorer/CLI treasury views capture energy fees without extra plumbing. Governance proposals can earmark these accruals like any other treasury inflow.
@@ -56,6 +88,8 @@ Everything settles in CT. Consumer workloads, industrial compute/storage, and go
   \]
   with hysteresis (ΔN ≈ √N*) that damps flash joins/leaves.
 - Governance, ledger, CLI, explorer, and metrics aggregator all pull multiplier history through the shared `governance` crate to avoid drift.
+
+> **Implementation note:** The subsidy allocator, multiplier controller, and ad/tariff drift controllers run every epoch today. Provider margin inputs for storage/compute/ad are still being wired (see `AGENTS.md §15`), so telemetry may show placeholders until those metrics land. The formulas above remain authoritative and must be kept in sync with `node/src/economics/**/*.rs`.
 
 ## Fee Lanes and Rebates
 

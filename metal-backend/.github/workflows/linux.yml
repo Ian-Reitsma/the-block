@@ -1,0 +1,26 @@
+name: linux
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Build and Test
+        run: cmake --build build --target test 2>&1 | tee build.log
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-test-${{ github.sha }}
+          path: build.log

@@ -116,6 +116,13 @@ Quick Index
 - Consensus, overlay, codec, storage, and governance paths must pass `scripts/fuzz_coverage.sh`; attach the `.profraw` summary (or exported report) to the PR.
 - Dashboard parity is mandatory: whenever `metrics-aggregator/**` or `monitoring/**` changes, run `npm ci --prefix monitoring && make monitor` and update the Grafana docs/screenshots.
 
+### 0.2a Monetary Policy & Autopilot Contract
+- **One issuance engine.** `NetworkIssuanceController` (`node/src/economics/network_issuance.rs`) is the canonical source of truth for block rewards. Legacy decay/logistic helpers are strictly smoothing aids; if code deviates from the documented formula, fix the docs + controller before touching mining logic. Any proposal touching `inflation_*` knobs must explain how it keeps the controller aligned.
+- **No hidden premine.** Genesis starts at zero emission; `scripts/analytics/coin-stats.py` exists only for design exploration. Shipping a premine or “founder pool” requires a public spec + governance proposal and must be reflected in this file before implementation.
+- **Launch Governor owns readiness.** All automatic transitions between bootstrap/testnet/mainnet (operational, naming, and future economics/market gates) flow through `node/src/launch_governor`. Decisions are logged, timelocked, and optionally signed (`TB_GOVERNOR_SIGN=1`). No other subsystem may “flip mainnet switches” ad hoc—wire your feature into a governor gate, add the metrics it needs, and document the streak thresholds here + in `docs/architecture.md`.
+- **Shadow → apply.** New gates run in shadow mode first (emit intents + snapshots, no state change) until telemetry proves they’re stable. Only then do we allow `apply_intent` to mutate runtime params. Document both modes plus rollback instructions in `docs/operations.md`.
+- **Backlog traces.** Missing telemetry inputs (tx_count, treasury inflow, provider margins, etc.) and the mining/epoch economics unification must be tracked in §15 with file pointers so we never regress into “two sources of truth.” The new `economics_epoch_*` counters and `economics_block_reward_per_block` now live under `node/src/lib.rs` and `node/src/telemetry.rs`, and Launch Governor reads these exact gauges before flipping the economics gate.
+
 #### Concrete Example: Changing CT Fee Floor Behavior
 
 Say you want to change how CT fee floors work (e.g., increase the base fee target from 50% to 60% mempool fullness). Here's the actual order of operations:
@@ -149,6 +156,7 @@ Say you want to change how CT fee floors work (e.g., increase the base fee targe
 - Any new metric or CLI surface must be documented in [`docs/operations.md`](docs/operations.md#telemetry-wiring) and wired through the metrics aggregator `/wrappers` endpoint; update explorer/CLI help where applicable.
 
 ### 0.4 Developer Hygiene & Security
+- **Runtime artifacts are NEVER committed.** All node-local state (databases, snapshots, history files, logs, build artifacts) must stay out of version control. This includes `target/`, `node/*_db/`, `node/snapshots/`, `node/diff_history/`, `node/governance/history/`, `qwen/`, and any `*.wal.log` or runtime JSON state files. These artifacts are unique to each node and pollute deterministic replay tests if committed. The `.gitignore` enforces this; if `git status` shows runtime state after a node run, that's a bug—update `.gitignore` and use `git rm --cached` to untrack the files.
 - All runtime knobs live in `node/src/config.rs` under the `TB_*` namespace. Do not invent ad-hoc env vars; add them to the config map with doc updates if needed.
 - Supply-chain rules: after dependency updates, rerun `cargo vendor`, refresh `provenance.json` and `checksums.txt`, and follow [`docs/security_and_privacy.md`](docs/security_and_privacy.md#release-provenance-and-supply-chain).
 - Remote signer and wallet changes must update the law-enforcement/jurisdiction docs in [`docs/security_and_privacy.md`](docs/security_and_privacy.md#kyc-jurisdiction-and-compliance) and include regression tests under `tests/remote_signer_*.rs`.
@@ -609,6 +617,12 @@ The following items block mainnet readiness and should be prioritized. Each task
 8. **Stage a docs pass after each regression fix**
    - The build currently fails fast because documentation lags behind implementation; require a `docs/` update in every follow-up
      PR that touches staking, governance, RPC, or telemetry so contributors keep operator guidance accurate.
+9. **Unify block reward issuance paths**
+   - Replace the legacy per-block decay/logistic reward calculation in `node/src/lib.rs::{mine_block_with_ts,apply_block}` with the output of `NetworkIssuanceController`, keeping the logistic factor (miner-fairness weighting) as a multiplier only. Add regression tests proving that block minting, ledger replay, telemetry, and explorer views all reflect the same reward numbers and update `docs/economics_and_governance.md` when behaviour changes.
+10. **Wire missing economics metrics**
+    - `node/src/lib.rs` now propagates the real `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, and `economics_block_reward_per_block` values into `execute_epoch_economics()`. Keep `docs/economics_and_governance.md` and the telemetry dashboards aligned with these counters so the governor/readers can trace the exact inputs feeding each issuance decision.
+11. **Add economics/market gates to the Launch Governor**
+    - The governor’s new economics gate already consumes those gauges before promoting published intents. Continue documenting the gate thresholds in `docs/architecture.md#launch-governor`, ensure `governor.status`/`governor.decisions` cover the economics gate alongside naming/operational ones, and keep the telemetry runbooks in `docs/operations.md` + `docs/testnet/ENERGY_QUICKSTART.md` current with the gate signals.
 
 ### 15.A Governance & Treasury Surface
 - **Treasury payload alignment** — Extend the governance DAG schemas (`governance/`), `node/src/governance`, `cli/src/governance`, explorer dashboards, and `node/src/treasury_executor.rs` to express multi-stage treasury approvals with attested release bundles before permitting external submissions. Reference lines `AGENTS.md:121-122` in every PR thread so reviewers can trace the stalled dependency.
