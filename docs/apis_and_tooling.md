@@ -26,6 +26,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 | `ad_market` | Ad bidding, cohort queries, policy snapshots | `ad_market.submit_bid`, `ad_market.policy_snapshot` | `node/src/rpc/ad_market.rs` |
 | `governance` | Proposals, voting, parameters | `governance.proposals` | `node/src/rpc/governance.rs` |
 | `governor` | Launch readiness gates, staged rollout | `governor.status`, `governor.decisions` | `node/src/rpc/governor.rs` |
+
+`governor.status` now returns the deterministic `economics_prev_market_metrics` array (ppm values per market) alongside the gate states and intents, so dashboards and CLI tooling can correlate the Prometheus gauges `economics_prev_market_metrics_{utilization,provider_margin}_ppm` with the persisted sample the governor records.
 | `treasury` | Disbursements, balances | `treasury.balance`, `treasury.submit_disbursement` | `node/src/rpc/treasury.rs` |
 | `energy` | Energy market operations | `energy.register_provider`, `energy.settle` | `node/src/rpc/energy.rs` |
 | `peer` | Network peer info | `peer.list`, `peer.stats` | `node/src/rpc/peer.rs` |

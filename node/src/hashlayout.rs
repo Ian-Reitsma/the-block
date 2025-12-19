@@ -50,6 +50,7 @@ pub struct BlockEncoder<'a> {
     pub vdf_commit: [u8; 32],
     pub vdf_output: [u8; 32],
     pub vdf_proof: &'a [u8],
+    pub receipts_serialized: &'a [u8],
 }
 
 impl<'a> HashEncoder for BlockEncoder<'a> {
@@ -103,6 +104,10 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.vdf_output);
         h.update(&(self.vdf_proof.len() as u32).to_le_bytes());
         h.update(self.vdf_proof);
+        // Consensus-critical: Include receipts in block hash
+        // Receipts are serialized as bytes to ensure deterministic hashing
+        h.update(&(self.receipts_serialized.len() as u32).to_le_bytes());
+        h.update(self.receipts_serialized);
         for id in self.tx_ids {
             h.update(id);
         }

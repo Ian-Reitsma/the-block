@@ -377,6 +377,42 @@ pub fn settle_energy_delivery(
     Ok(receipt)
 }
 
+pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
+    // Drain receipts under lock, then release lock before doing I/O
+    let receipts = {
+        let mut guard = store();
+        guard.market.drain_receipts()
+    }; // Lock released here
+
+    // Record telemetry for drain operation
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::receipts::RECEIPT_DRAIN_OPERATIONS_TOTAL.inc();
+        if !receipts.is_empty() {
+            diagnostics::tracing::debug!(
+                receipt_count = receipts.len(),
+                market = "energy",
+                "Drained energy receipts"
+            );
+        }
+    }
+
+    // Persist market state outside of critical section to avoid blocking
+    if !receipts.is_empty() {
+        // Re-acquire lock only for persistence
+        let mut guard = store();
+        if let Err(err) = guard.persist_market() {
+            warn!(
+                ?err,
+                receipt_count = receipts.len(),
+                "failed to persist energy market after draining receipts"
+            );
+        }
+    }
+
+    receipts
+}
+
 fn record_treasury_fee(amount_ct: u64) {
     if amount_ct == 0 {
         return;

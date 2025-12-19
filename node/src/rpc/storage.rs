@@ -46,13 +46,15 @@ fn market_path() -> String {
     std::env::var("TB_STORAGE_MARKET_DIR").unwrap_or_else(|_| "storage_market".to_string())
 }
 
-type StorageMarketHandle = Arc<StorageMarket>;
+use concurrency::{mutex, MutexExt, MutexT};
+
+type StorageMarketHandle = Arc<MutexT<StorageMarket>>;
 
 static MARKET: Lazy<StorageMarketHandle> = Lazy::new(|| {
     let path = market_path();
     let market = StorageMarket::open(&path)
         .unwrap_or_else(|err| panic!("failed to open storage market at {path}: {err}"));
-    Arc::new(market)
+    Arc::new(mutex(market))
 });
 
 fn market_error_value(err: StorageMarketError) -> Value {
@@ -235,7 +237,7 @@ pub fn upload(
         .iter()
         .map(|(provider, _)| Value::String(provider.clone()))
         .collect();
-    match MARKET.register_contract(contract, replicas.clone()) {
+    match MARKET.guard().register_contract(contract, replicas.clone()) {
         Ok(record) => {
             #[cfg(feature = "telemetry")]
             {
@@ -267,7 +269,7 @@ pub fn challenge(
     proof: [u8; 32],
     current_block: u64,
 ) -> foundation_serialization::json::Value {
-    let record = match MARKET.load_contract(object_id) {
+    let record = match MARKET.guard().load_contract(object_id) {
         Ok(Some(record)) => record,
         Ok(None) => return error_value("not_found"),
         Err(err) => return market_error_value(err),
@@ -281,7 +283,10 @@ pub fn challenge(
             {
                 crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
             }
-            match MARKET.record_proof_outcome(object_id, provider_id, current_block, true) {
+            match MARKET
+                .guard()
+                .record_proof_outcome(object_id, provider_id, current_block, true)
+            {
                 Ok(proof_record) => json_object(vec![
                     ("status", Value::String("ok".to_string())),
                     ("proof", proof_record_value(&proof_record)),
@@ -312,7 +317,10 @@ pub fn challenge(
                 let updated = reputation.saturating_sub(1);
                 crate::compute_market::scheduler::merge_reputation(&provider, updated, u64::MAX);
             }
-            let _ = MARKET.record_proof_outcome(object_id, provider_id, current_block, false);
+            let _ =
+                MARKET
+                    .guard()
+                    .record_proof_outcome(object_id, provider_id, current_block, false);
             error_value("challenge_failed")
         }
     }
@@ -400,7 +408,7 @@ pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::V
 
 /// Return the incentive snapshot for all registered replicas.
 pub fn incentives_snapshot() -> foundation_serialization::json::Value {
-    match MARKET.contracts() {
+    match MARKET.guard().contracts() {
         Ok(records) => {
             let mut replicas = Vec::new();
             for record in records {
@@ -574,6 +582,42 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
         ("policy", policy),
         ("manifests", Value::Array(entries)),
     ])
+}
+
+/// Drain pending storage market receipts for block inclusion.
+///
+/// This function accesses the global storage market instance, drains all pending
+/// settlement receipts, and converts them to the canonical `StorageReceipt` format
+/// used in blocks.
+pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
+    let receipts: Vec<_> = MARKET
+        .guard()
+        .drain_receipts()
+        .into_iter()
+        .map(|r| crate::receipts::StorageReceipt {
+            contract_id: r.contract_id,
+            provider: r.provider,
+            bytes: r.bytes,
+            price_ct: r.price_ct,
+            block_height: r.block_height,
+            provider_escrow: r.provider_escrow,
+        })
+        .collect();
+
+    // Record telemetry for drain operation
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::receipts::RECEIPT_DRAIN_OPERATIONS_TOTAL.inc();
+        if !receipts.is_empty() {
+            diagnostics::tracing::debug!(
+                receipt_count = receipts.len(),
+                market = "storage",
+                "Drained storage receipts"
+            );
+        }
+    }
+
+    receipts
 }
 
 #[cfg(test)]

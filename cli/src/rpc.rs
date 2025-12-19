@@ -1,5 +1,6 @@
 #![allow(clippy::module_name_repetitions)]
 
+use foundation_serialization::json::Value;
 use foundation_serialization::{Deserialize, Serialize};
 use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
@@ -8,7 +9,9 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::http_client;
-use crate::json_helpers::{json_object_from, json_rpc_request, json_string, json_u64};
+use crate::json_helpers::{
+    json_array_from, json_object_from, json_rpc_request, json_string, json_u64,
+};
 use crate::tx::FeeLane;
 
 const MAX_BACKOFF_EXPONENT: u32 = 30;
@@ -133,6 +136,25 @@ impl RpcClient {
         Ok(res.result)
     }
 
+    pub fn governor_status(&self, url: &str) -> Result<Value, RpcClientError> {
+        let payload = json_rpc_request("governor.status", Value::Array(vec![]));
+        let envelope = self
+            .call(url, &payload)?
+            .json::<RpcEnvelope<Value>>()
+            .map_err(RpcClientError::from)?;
+        extract_rpc_result(envelope)
+    }
+
+    pub fn governor_decisions(&self, url: &str, limit: u64) -> Result<Value, RpcClientError> {
+        let params = json_array_from(vec![json_u64(limit)]);
+        let payload = json_rpc_request("governor.decisions", params);
+        let envelope = self
+            .call(url, &payload)?
+            .json::<RpcEnvelope<Value>>()
+            .map_err(RpcClientError::from)?;
+        extract_rpc_result(envelope)
+    }
+
     #[allow(dead_code)]
     pub fn record_wallet_qos_event(
         &self,
@@ -190,6 +212,7 @@ fn env_var<T: std::str::FromStr>(key: &str, default: T) -> T {
 pub enum RpcClientError {
     Transport(HttpClientError),
     InjectedFault,
+    Rpc { code: i64, message: String },
 }
 
 impl fmt::Display for RpcClientError {
@@ -197,6 +220,9 @@ impl fmt::Display for RpcClientError {
         match self {
             RpcClientError::Transport(err) => write!(f, "transport error: {err}"),
             RpcClientError::InjectedFault => f.write_str("fault injection triggered"),
+            RpcClientError::Rpc { code, message } => {
+                write!(f, "rpc error {code}: {message}")
+            }
         }
     }
 }
@@ -206,6 +232,7 @@ impl std::error::Error for RpcClientError {
         match self {
             RpcClientError::Transport(err) => Some(err),
             RpcClientError::InjectedFault => None,
+            RpcClientError::Rpc { .. } => None,
         }
     }
 }
@@ -245,6 +272,22 @@ struct RpcErrorBody {
 struct RpcEnvelope<T> {
     result: Option<T>,
     error: Option<RpcErrorBody>,
+}
+
+fn extract_rpc_result(envelope: RpcEnvelope<Value>) -> Result<Value, RpcClientError> {
+    if let Some(error) = envelope.error {
+        Err(RpcClientError::Rpc {
+            code: error.code,
+            message: error.message,
+        })
+    } else if let Some(result) = envelope.result {
+        Ok(result)
+    } else {
+        Err(RpcClientError::Rpc {
+            code: -1,
+            message: "missing result".into(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

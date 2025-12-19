@@ -6,11 +6,11 @@ use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 use crate::accounts::abstraction::SessionPolicy;
 use crate::block_binary;
 use crate::blockchain::macro_block::MacroBlock;
+use crate::economics;
 use crate::localnet::AssistReceipt;
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{Account, Block, ChainDisk, MempoolEntryDisk, Params, TokenAmount, TokenBalance};
-use crate::economics;
 
 /// Encode an [`Account`] into the canonical binary layout.
 pub fn encode_account(account: &Account) -> EncodeResult<Vec<u8>> {
@@ -284,7 +284,7 @@ fn read_session(reader: &mut Reader<'_>) -> binary_struct::Result<SessionPolicy>
 }
 
 fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
-    writer.write_u64(29); // Updated to match the current number of encoded fields
+    writer.write_u64(30); // Updated to match the current number of encoded fields
     writer.write_string("schema_version");
     writer.write_u64(disk.schema_version as u64);
     writer.write_string("chain");
@@ -325,6 +325,8 @@ fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
     write_subsidy_snapshot(writer, &disk.economics_prev_subsidy)?;
     writer.write_string("economics_prev_tariff");
     write_tariff_snapshot(writer, &disk.economics_prev_tariff)?;
+    writer.write_string("economics_prev_market_metrics");
+    write_market_metrics(writer, &disk.economics_prev_market_metrics)?;
     writer.write_string("economics_epoch_tx_volume_block");
     writer.write_u64(disk.economics_epoch_tx_volume_block);
     writer.write_string("economics_epoch_tx_count");
@@ -372,6 +374,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut economics_prev_annual_issuance_block = None;
     let mut economics_prev_subsidy = None;
     let mut economics_prev_tariff = None;
+    let mut economics_prev_market_metrics = None;
     let mut economics_epoch_tx_volume_block = None;
     let mut economics_epoch_tx_count = None;
     let mut economics_epoch_treasury_inflow_block = None;
@@ -479,6 +482,11 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             read_tariff_snapshot(reader)?,
             "economics_prev_tariff",
         ),
+        "economics_prev_market_metrics" => assign_once(
+            &mut economics_prev_market_metrics,
+            read_market_metrics(reader)?,
+            "economics_prev_market_metrics",
+        ),
         "economics_epoch_tx_volume_block" => assign_once(
             &mut economics_epoch_tx_volume_block,
             reader.read_u64()?,
@@ -549,15 +557,13 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
         epoch_cpu_ms: epoch_cpu_ms.unwrap_or_default(),
         epoch_bytes_out: epoch_bytes_out.unwrap_or_default(),
         recent_timestamps: recent_timestamps.unwrap_or_default(),
-        economics_block_reward_per_block: economics_block_reward_per_block
-            .unwrap_or_default(),
+        economics_block_reward_per_block: economics_block_reward_per_block.unwrap_or_default(),
         economics_prev_annual_issuance_block: economics_prev_annual_issuance_block
             .unwrap_or_default(),
         economics_prev_subsidy: economics_prev_subsidy.unwrap_or_default(),
         economics_prev_tariff: economics_prev_tariff.unwrap_or_default(),
-        economics_prev_market_metrics: crate::economics::MarketMetrics::default(),
-        economics_epoch_tx_volume_block: economics_epoch_tx_volume_block
-            .unwrap_or_default(),
+        economics_prev_market_metrics: economics_prev_market_metrics.unwrap_or_default(),
+        economics_epoch_tx_volume_block: economics_epoch_tx_volume_block.unwrap_or_default(),
         economics_epoch_tx_count: economics_epoch_tx_count.unwrap_or_default(),
         economics_epoch_treasury_inflow_block: economics_epoch_treasury_inflow_block
             .unwrap_or_default(),
@@ -940,11 +946,7 @@ fn read_subsidy_snapshot(
             reader.read_u64()?,
             "energy_share_bps",
         ),
-        "ad_share_bps" => assign_once(
-            &mut ad_share_bps,
-            reader.read_u64()?,
-            "ad_share_bps",
-        ),
+        "ad_share_bps" => assign_once(&mut ad_share_bps, reader.read_u64()?, "ad_share_bps"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
     Ok(economics::SubsidySnapshot {
@@ -993,6 +995,97 @@ fn read_tariff_snapshot(
         tariff_bps: tariff_bps.unwrap_or_default() as u16,
         non_kyc_volume_block: non_kyc_volume_block.unwrap_or_default(),
         treasury_contribution_bps: treasury_contribution_bps.unwrap_or_default() as u16,
+    })
+}
+
+/// Round f64 to 6 decimal places for deterministic serialization.
+/// This ensures cross-platform consistency and avoids floating-point drift.
+fn round_f64(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
+fn write_market_metric(writer: &mut Writer, metric: &economics::MarketMetric) -> EncodeResult<()> {
+    writer.write_u64(4);
+    writer.write_string("utilization");
+    writer.write_f64(round_f64(metric.utilization));
+    writer.write_string("average_cost_block");
+    writer.write_f64(round_f64(metric.average_cost_block));
+    writer.write_string("effective_payout_block");
+    writer.write_f64(round_f64(metric.effective_payout_block));
+    writer.write_string("provider_margin");
+    writer.write_f64(round_f64(metric.provider_margin));
+    Ok(())
+}
+
+fn read_market_metric(reader: &mut Reader<'_>) -> binary_struct::Result<economics::MarketMetric> {
+    let mut utilization = None;
+    let mut average_cost_block = None;
+    let mut effective_payout_block = None;
+    let mut provider_margin = None;
+    decode_struct(reader, Some(4), |key, reader| match key {
+        "utilization" => assign_once(
+            &mut utilization,
+            round_f64(reader.read_f64()?),
+            "utilization",
+        ),
+        "average_cost_block" => assign_once(
+            &mut average_cost_block,
+            round_f64(reader.read_f64()?),
+            "average_cost_block",
+        ),
+        "effective_payout_block" => assign_once(
+            &mut effective_payout_block,
+            round_f64(reader.read_f64()?),
+            "effective_payout_block",
+        ),
+        "provider_margin" => assign_once(
+            &mut provider_margin,
+            round_f64(reader.read_f64()?),
+            "provider_margin",
+        ),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+    Ok(economics::MarketMetric {
+        utilization: utilization.unwrap_or_default(),
+        average_cost_block: average_cost_block.unwrap_or_default(),
+        effective_payout_block: effective_payout_block.unwrap_or_default(),
+        provider_margin: provider_margin.unwrap_or_default(),
+    })
+}
+
+fn write_market_metrics(
+    writer: &mut Writer,
+    metrics: &economics::MarketMetrics,
+) -> EncodeResult<()> {
+    writer.write_u64(4);
+    writer.write_string("storage");
+    write_market_metric(writer, &metrics.storage)?;
+    writer.write_string("compute");
+    write_market_metric(writer, &metrics.compute)?;
+    writer.write_string("energy");
+    write_market_metric(writer, &metrics.energy)?;
+    writer.write_string("ad");
+    write_market_metric(writer, &metrics.ad)?;
+    Ok(())
+}
+
+fn read_market_metrics(reader: &mut Reader<'_>) -> binary_struct::Result<economics::MarketMetrics> {
+    let mut storage = None;
+    let mut compute = None;
+    let mut energy = None;
+    let mut ad = None;
+    decode_struct(reader, Some(4), |key, reader| match key {
+        "storage" => assign_once(&mut storage, read_market_metric(reader)?, "storage"),
+        "compute" => assign_once(&mut compute, read_market_metric(reader)?, "compute"),
+        "energy" => assign_once(&mut energy, read_market_metric(reader)?, "energy"),
+        "ad" => assign_once(&mut ad, read_market_metric(reader)?, "ad"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+    Ok(economics::MarketMetrics {
+        storage: storage.unwrap_or_default(),
+        compute: compute.unwrap_or_default(),
+        energy: energy.unwrap_or_default(),
+        ad: ad.unwrap_or_default(),
     })
 }
 
@@ -1289,6 +1382,7 @@ mod tests {
             dilithium_pubkey: vec![],
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![],
+            receipts: Vec::new(),
         }
     }
 

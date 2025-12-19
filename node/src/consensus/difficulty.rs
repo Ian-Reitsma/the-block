@@ -195,6 +195,7 @@ mod tests {
                 dilithium_pubkey: Vec::new(),
                 #[cfg(feature = "quantum")]
                 dilithium_sig: Vec::new(),
+                receipts: Vec::new(),
             });
             ts += 2_000; // twice the target spacing
         }

@@ -1,0 +1,411 @@
+{
+  "dashboard": {
+    "title": "The Block - Receipt System Monitoring",
+    "tags": ["receipts", "blockchain", "markets"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Receipt Count Per Block",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "receipts_per_block",
+            "legendFormat": "Total Receipts",
+            "refId": "A"
+          },
+          {
+            "expr": "receipts_storage_per_block",
+            "legendFormat": "Storage",
+            "refId": "B"
+          },
+          {
+            "expr": "receipts_compute_per_block",
+            "legendFormat": "Compute",
+            "refId": "C"
+          },
+          {
+            "expr": "receipts_energy_per_block",
+            "legendFormat": "Energy",
+            "refId": "D"
+          },
+          {
+            "expr": "receipts_ad_per_block",
+            "legendFormat": "Ad",
+            "refId": "E"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Receipt Count"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [8000], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "name": "High Receipt Count Alert",
+          "message": "Receipt count approaching limit (10k)"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Receipt Size Per Block",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "receipt_bytes_per_block",
+            "legendFormat": "Receipt Bytes",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "bytes", "label": "Size"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [8000000], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "name": "High Receipt Size Alert",
+          "message": "Receipt size approaching limit (10MB)"
+        },
+        "thresholds": [
+          {
+            "value": 8000000,
+            "colorMode": "critical",
+            "op": "gt",
+            "fill": true,
+            "line": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "CRITICAL: Receipt Encoding Failures",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "receipt_encoding_failures_total",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          }
+        },
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [0], "type": "gt"},
+              "query": {"params": ["A", "1m", "now"]},
+              "reducer": {"params": [], "type": "diff"},
+              "type": "query"
+            }
+          ],
+          "name": "Receipt Encoding Failure",
+          "message": "CRITICAL: Receipt encoding is failing - consensus may be compromised"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Receipt Validation Failures",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "receipt_validation_failures_total",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Receipt Decoding Failures",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "receipt_decoding_failures_total",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Receipt Drain Operations",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "rate(receipt_drain_operations_total[5m])",
+            "legendFormat": "Drains/sec",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10, "color": "yellow"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Pending Receipts by Market",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "pending_receipts_storage",
+            "legendFormat": "Storage",
+            "refId": "A"
+          },
+          {
+            "expr": "pending_receipts_compute",
+            "legendFormat": "Compute",
+            "refId": "B"
+          },
+          {
+            "expr": "pending_receipts_energy",
+            "legendFormat": "Energy",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Pending Count"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [1000], "type": "gt"},
+              "query": {"params": ["A", "10m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "name": "High Pending Receipts",
+          "message": "Pending receipts building up - check if receipts are being drained"
+        }
+      },
+      {
+        "id": 8,
+        "title": "Cumulative Receipts by Market",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "receipts_storage_total",
+            "legendFormat": "Storage Total",
+            "refId": "A"
+          },
+          {
+            "expr": "receipts_compute_total",
+            "legendFormat": "Compute Total",
+            "refId": "B"
+          },
+          {
+            "expr": "receipts_energy_total",
+            "legendFormat": "Energy Total",
+            "refId": "C"
+          },
+          {
+            "expr": "receipts_ad_total",
+            "legendFormat": "Ad Total",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Total Receipts"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Settlement Volume by Market (CT)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "receipt_settlement_storage_ct",
+            "legendFormat": "Storage",
+            "refId": "A"
+          },
+          {
+            "expr": "receipt_settlement_compute_ct",
+            "legendFormat": "Compute",
+            "refId": "B"
+          },
+          {
+            "expr": "receipt_settlement_energy_ct",
+            "legendFormat": "Energy",
+            "refId": "C"
+          },
+          {
+            "expr": "receipt_settlement_ad_ct",
+            "legendFormat": "Ad",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Settlement (CT)"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Receipt Throughput (rate per minute)",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(receipts_storage_total[1m])",
+            "legendFormat": "Storage/min",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(receipts_compute_total[1m])",
+            "legendFormat": "Compute/min",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(receipts_energy_total[1m])",
+            "legendFormat": "Energy/min",
+            "refId": "C"
+          },
+          {
+            "expr": "rate(receipts_ad_total[1m])",
+            "legendFormat": "Ad/min",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Receipts/min"},
+          {"format": "short"}
+        ]
+      }
+    ],
+    "templating": {
+      "list": []
+    },
+    "annotations": {
+      "list": [
+        {
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": false,
+          "iconColor": "rgba(255, 96, 96, 1)",
+          "name": "Alerts",
+          "type": "tags"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"]
+    }
+  }
+}

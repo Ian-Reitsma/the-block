@@ -3014,7 +3014,7 @@ pub fn retune_multipliers(
         None => StdRng::from_rng(rand::thread_rng()).expect("rng seed"),
     };
     let noisy: [i64; 4] = raw.map(|v| {
-        let u: f64 = rng.gen::<f64>() - 0.5;
+        let u: f64 = rng.r#gen::<f64>() - 0.5;
         let noise = if u >= 0.0 {
             -b * (1.0_f64 - 2.0_f64 * u).ln()
         } else {

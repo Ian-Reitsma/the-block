@@ -207,46 +207,86 @@ fn run_executor_tick(
     }
 
     let current_epoch = (config.epoch_source)();
-    let mut disbursements = store.load_disbursements()?;
-    disbursements.sort_by_key(|d| d.id);
+
+    // SCALABILITY: Load disbursements in batched mode to avoid scanning entire list.
+    // For 1,000+ pending payouts, process in batches to prevent executor stalls.
+    // Configuration: max disbursements processed per tick
+    const MAX_BATCH_SIZE: usize = 100;
+    const MAX_SCAN_SIZE: usize = 500; // Early-exit after scanning this many
+
+    let all_disbursements = store.load_disbursements()?;
     let mut staged_lookup: HashMap<u64, SignedExecutionIntent> = store
         .load_execution_intents()?
         .into_iter()
         .map(|intent| (intent.disbursement_id, intent))
         .collect();
 
+    // Pre-filter executable disbursements to avoid scanning non-executable ones
+    let mut executable_disbursements: Vec<_> = all_disbursements
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, disbursement)| {
+            // Early-exit optimization: stop scanning after MAX_SCAN_SIZE entries
+            if idx >= MAX_SCAN_SIZE {
+                return None;
+            }
+
+            // Check if disbursement is in a state where it's waiting to be executed.
+            // Process disbursements that are:
+            // 1. Queued or Timelocked (governance-approved disbursements ready for execution)
+            // 2. Draft without proposal metadata (treasury-initiated, no governance required)
+            let is_executable =
+                matches!(
+                    disbursement.status,
+                    DisbursementStatus::Queued { .. } | DisbursementStatus::Timelocked { .. }
+                ) || (matches!(disbursement.status, DisbursementStatus::Draft { .. })
+                    && disbursement.proposal.is_none());
+
+            if !is_executable {
+                return None;
+            }
+
+            // Filter by scheduled epoch
+            if disbursement.scheduled_epoch > current_epoch {
+                return None;
+            }
+
+            Some(disbursement)
+        })
+        .collect();
+
+    // Sort by ID for deterministic execution order
+    executable_disbursements.sort_by_key(|d| d.id);
+
+    // Batch processing: limit to MAX_BATCH_SIZE per tick
+    let batch = if executable_disbursements.len() > MAX_BATCH_SIZE {
+        &executable_disbursements[..MAX_BATCH_SIZE]
+    } else {
+        &executable_disbursements[..]
+    };
+
     let mut pending_matured = 0u64;
     let mut last_error: Option<String> = None;
 
-    for disbursement in disbursements {
-        // Check if disbursement is in a state where it's waiting to be executed.
-        // Process disbursements that are:
-        // 1. Queued or Timelocked (governance-approved disbursements ready for execution)
-        // 2. Draft without proposal metadata (treasury-initiated, no governance required)
-        let is_executable = matches!(
-            disbursement.status,
-            DisbursementStatus::Queued { .. } | DisbursementStatus::Timelocked { .. }
-        ) || (matches!(disbursement.status, DisbursementStatus::Draft { .. })
-            && disbursement.proposal.is_none());
-        if !is_executable {
-            continue;
-        }
-        if disbursement.scheduled_epoch > current_epoch {
-            continue;
-        }
+    // Process the current batch
+    for disbursement in batch {
+        // Additional dependency check (if configured)
         if let Some(check) = &config.dependency_check {
-            if !check(store, &disbursement)? {
+            if !check(store, disbursement)? {
                 continue;
             }
         }
+
         pending_matured = pending_matured.saturating_add(1);
+
         let intent = if let Some(existing) = staged_lookup.remove(&disbursement.id) {
             existing
         } else {
-            let intent = (config.signer)(&disbursement)?;
+            let intent = (config.signer)(disbursement)?;
             store.record_execution_intent(intent.clone())?;
             intent
         };
+
         match (config.submitter)(&intent) {
             Ok(tx_hash) => {
                 store.execute_disbursement(disbursement.id, &tx_hash, Vec::new())?;

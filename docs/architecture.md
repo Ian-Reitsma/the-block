@@ -77,6 +77,331 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Distributed handles, DIDs, and registry logic live in `node/src/identity`. Binary codecs for handles/DIDs ensure explorers, wallets, and RPC share the same storage bytes.
 - Light clients rely on this identity layer for DID revocation proofs and remote signer flows (`node/src/light_client`).
 
+## Market Receipts and Audit Trail
+
+> **Plain English:** Every time a market settles (storage provided, compute executed, energy delivered, ad shown), the system creates a "receipt" — permanent proof of what happened. These receipts:
+> 1. **Live on-chain** — Stored in every block
+> 2. **Prove consensus** — Included in block hash so nodes validate them
+> 3. **Drive economics** — Launch Governor uses receipts to measure real market activity
+> 4. **Enable auditing** — Anyone can replay the chain and verify all settlements
+>
+> **Why this matters:** Without receipts in consensus, malicious nodes could lie about market activity. With receipts, the entire network validates every settlement.
+
+### Receipt Types and Schema
+
+**Four market receipt types exist** (`node/src/receipts.rs`):
+
+#### Storage Receipt
+```rust
+pub struct StorageReceipt {
+    pub file_id: String,           // Unique file identifier
+    pub provider: String,          // Storage provider address
+    pub bytes_stored: u64,         // Total bytes in this settlement
+    pub cost_ct: u64,              // BLOCK paid to provider
+    pub block_height: u64,         // When this settled
+    pub duration_epochs: u32,      // How many epochs of storage
+}
+```
+**Tracks:** File storage settlements, bytes delivered, provider compensation
+
+#### Compute Receipt
+```rust
+pub struct ComputeReceipt {
+    pub job_id: String,            // Unique job identifier
+    pub worker: String,            // Compute provider address
+    pub compute_units: u64,        // Units consumed
+    pub cost_ct: u64,              // BLOCK paid to worker
+    pub block_height: u64,         // When job completed
+    pub proof_type: String,        // "snark", "trusted", etc.
+}
+```
+**Tracks:** Computation jobs, resource usage, verification method
+
+#### Energy Receipt
+```rust
+pub struct EnergyReceipt {
+    pub meter_id: String,          // Smart meter identifier
+    pub provider: String,          // Energy provider address
+    pub kwh_delivered: u64,        // Energy delivered (in milliwatt-hours)
+    pub cost_ct: u64,              // BLOCK paid to provider
+    pub block_height: u64,         // Settlement block
+    pub oracle_signature: Vec<u8>, // Oracle attestation
+}
+```
+**Tracks:** Energy delivery, meter readings, oracle verification
+
+#### Ad Receipt
+```rust
+pub struct AdReceipt {
+    pub campaign_id: String,       // Campaign identifier
+    pub publisher: String,         // Publisher address
+    pub impressions: u64,          // Impressions delivered
+    pub spend_ct: u64,             // BLOCK spent by advertiser
+    pub block_height: u64,         // Settlement block
+    pub conversions: u32,          // Attributed conversions
+}
+```
+**Tracks:** Ad delivery, impressions, spend, attribution
+
+### Receipt Lifecycle
+
+**End-to-End Flow:**
+
+```
+┌─────────────────┐
+│ Market Activity │  (Storage/Compute/Energy/Ad)
+│  (off-chain)    │
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Market Contract │  Validates settlement
+│  Settlement     │  Creates Receipt struct
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Pending Buffer  │  Market holds receipts during epoch
+│ (per market)    │  Accumulates all settlements
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Assembly  │  Miner collects all pending receipts
+│  (consensus)    │  Serializes via encode_receipts()
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Hash      │  receipts_serialized included in BLAKE3
+│  Calculation    │  Makes receipts consensus-critical
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Broadcast │  Full block with receipts propagates
+│  (gossip)       │  All nodes validate receipts via hash
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Telemetry       │  receipt_storage_total++
+│  Recording      │  receipt_bytes_per_block updated
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Metrics Engine  │  Derives market utilization
+│  Derivation     │  Calculates provider margins
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Launch Governor │  Uses metrics for economic gates
+│  Consumption    │  Adjusts subsidy allocation
+└─────────────────┘
+```
+
+### Consensus Integration
+
+**Block Hash Calculation** (`node/src/hashlayout.rs`):
+
+```rust
+pub struct BlockEncoder<'a> {
+    // ... existing fields ...
+    pub receipts_serialized: &'a [u8],  // Added December 2025
+}
+
+impl<'a> HashEncoder for BlockEncoder<'a> {
+    fn encode(&self, h: &mut Hasher) {
+        // ... hash all block fields ...
+        
+        // Consensus-critical: receipts affect block hash
+        h.update(&(self.receipts_serialized.len() as u32).to_le_bytes());
+        h.update(self.receipts_serialized);
+        
+        // ... continue hashing ...
+    }
+}
+```
+
+**Why receipts are in the hash:**
+- Prevents nodes from lying about market activity
+- Enables deterministic metrics derivation
+- Makes receipt tampering result in hash mismatch (rejected block)
+- Allows lightweight receipt verification (just check block hash)
+
+**Block Construction Pattern:**
+```rust
+// 1. Collect receipts from all markets
+let mut receipts = Vec::new();
+receipts.extend(storage_market.drain_pending_receipts());
+receipts.extend(compute_market.drain_pending_receipts());
+receipts.extend(energy_market.drain_pending_receipts());
+receipts.extend(ad_market.drain_pending_receipts());
+
+// 2. Serialize for consensus
+let receipts_bytes = block_binary::encode_receipts(&receipts)?;
+
+// 3. Build block encoder
+let encoder = hashlayout::BlockEncoder {
+    // ... other fields ...
+    receipts_serialized: &receipts_bytes,
+};
+
+// 4. Calculate hash (includes receipts)
+let hash = encoder.encode(&mut hasher);
+
+// 5. Construct final block
+Block {
+    hash,
+    receipts,  // Stored in block
+    // ... other fields ...
+}
+```
+
+### Receipt Serialization
+
+**Binary Format** (`node/src/block_binary.rs`):
+
+```rust
+pub fn encode_receipts(receipts: &[Receipt]) -> EncodeResult<Vec<u8>> {
+    let mut writer = Writer::with_capacity(receipts.len() * 256);
+    write_receipts(&mut writer, receipts)?;
+    Ok(writer.finish())
+}
+
+fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()> {
+    writer.write_array(receipts.len(), |array_writer| {
+        for receipt in receipts {
+            array_writer.item_with(|item_writer| {
+                write_receipt(item_writer, receipt)
+            });
+        }
+    });
+    Ok(())
+}
+```
+
+**Determinism guarantees:**
+- Fixed field order (no HashMap iteration)
+- Length-prefixed arrays
+- Platform-independent encoding (no native integers)
+- Same serialization across all nodes
+
+### Telemetry and Observability
+
+**Receipt Metrics** (`node/src/telemetry/receipts.rs`):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `receipts_storage_total` | Counter | Total storage receipts processed |
+| `receipts_compute_total` | Counter | Total compute receipts processed |
+| `receipts_energy_total` | Counter | Total energy receipts processed |
+| `receipts_ad_total` | Counter | Total ad receipts processed |
+| `receipts_per_block` | Gauge | Receipts in current block |
+| `receipts_storage_per_block` | Gauge | Storage receipts in current block |
+| `receipts_compute_per_block` | Gauge | Compute receipts in current block |
+| `receipts_energy_per_block` | Gauge | Energy receipts in current block |
+| `receipts_ad_per_block` | Gauge | Ad receipts in current block |
+| `receipt_bytes_per_block` | Gauge | Serialized receipt size (bytes) |
+| `receipt_settlement_storage_ct` | Gauge | Storage settlement amount (BLOCK) |
+| `receipt_settlement_compute_ct` | Gauge | Compute settlement amount (BLOCK) |
+| `receipt_settlement_energy_ct` | Gauge | Energy settlement amount (BLOCK) |
+| `receipt_settlement_ad_ct` | Gauge | Ad settlement amount (BLOCK) |
+| `metrics_derivation_duration_ms` | Histogram | Time to derive metrics from receipts |
+
+**Usage:**
+```rust
+#[cfg(feature = "telemetry")]
+{
+    let serialized = block_binary::encode_receipts(&block.receipts).unwrap_or_default();
+    telemetry::receipts::record_receipts(&block.receipts, serialized.len());
+}
+```
+
+### Economic Metrics Derivation
+
+**Deterministic Engine** (`node/src/economics/deterministic_metrics.rs`):
+
+```rust
+pub fn derive_market_metrics_from_chain(
+    blocks: &[Block],
+) -> MarketMetrics {
+    let mut metrics = MarketMetrics::default();
+    
+    for block in blocks {
+        for receipt in &block.receipts {
+            match receipt {
+                Receipt::Storage(r) => {
+                    metrics.storage_volume += r.bytes_stored;
+                    metrics.storage_revenue += r.cost_ct;
+                },
+                Receipt::Compute(r) => {
+                    metrics.compute_units += r.compute_units;
+                    metrics.compute_revenue += r.cost_ct;
+                },
+                Receipt::Energy(r) => {
+                    metrics.energy_kwh += r.kwh_delivered;
+                    metrics.energy_revenue += r.cost_ct;
+                },
+                Receipt::Ad(r) => {
+                    metrics.ad_impressions += r.impressions;
+                    metrics.ad_revenue += r.spend_ct;
+                },
+            }
+        }
+    }
+    
+    // Calculate derived metrics
+    metrics.storage_utilization = calculate_utilization(
+        metrics.storage_volume,
+        STORAGE_CAPACITY,
+    );
+    // ... other calculations ...
+    
+    metrics
+}
+```
+
+**Launch Governor Integration:**
+
+The Launch Governor consumes receipt-derived metrics:
+
+```rust
+// In launch_governor gate evaluation
+let metrics = derive_market_metrics_from_chain(&recent_blocks);
+
+if metrics.storage_utilization >= STORAGE_GATE_THRESHOLD
+    && metrics.compute_utilization >= COMPUTE_GATE_THRESHOLD
+    && metrics.energy_utilization >= ENERGY_GATE_THRESHOLD
+    && metrics.ad_utilization >= AD_GATE_THRESHOLD
+{
+    // Activate economics gate
+    create_intent(GateType::Economics, metrics);
+}
+```
+
+See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alerting.
+
+### Implementation Status
+
+**✅ Complete (December 2025):**
+- Receipt type definitions (`node/src/receipts.rs`)
+- Block serialization with receipts
+- Consensus hash integration (`node/src/hashlayout.rs`)
+- Telemetry system (`node/src/telemetry/receipts.rs`)
+- Metrics derivation engine
+- Integration tests
+- Documentation
+
+**⏳ In Progress:**
+- BlockEncoder call site updates (manual grep + edit)
+- Market receipt emission (ad, storage, compute, energy)
+- Deployment to testnet
+
+**See:** `RECEIPT_INTEGRATION_INDEX.md` for complete status, guides, and next steps.
+
 ## Networking and Propagation
 
 > **Plain English:** Nodes need to talk to each other to share blocks and transactions. This section covers how they find each other, establish secure connections, and gossip information across the network.
@@ -366,6 +691,8 @@ Intent records include:
 - `snapshot_hash_hex` — BLAKE3 hash for auditability
 - `metrics` — Summary and raw metrics that triggered the decision
 
+The RPC output now also contains an `economics_prev_market_metrics` array derived from `EconomicsPrevMetric`, and `tb-cli governor status` prints this deterministic snapshot alongside the regular `economics_sample`. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped `economics_prev_market_metrics_{utilization,provider_margin}_ppm`.
+
 ### Configuration
 
 | Environment Variable | Purpose | Default/Guidance |
@@ -382,7 +709,7 @@ Intent records include:
 
 | Method | Description |
 |--------|-------------|
-| `governor.status` | Current gate states, epoch, pending intents |
+| `governor.status` | Current gate states, epoch, pending intents, plus the deterministic `EconomicsPrevMetric` snapshot (`economics_prev_market_metrics`) that mirrors the `economics_prev_market_metrics_{utilization,provider_margin}_ppm` gauges. |
 | `governor.decisions` | Recent intent history (with `limit` param) |
 | `governor.snapshot` | Load persisted decision for specific epoch |
 
@@ -423,6 +750,7 @@ Intent records include:
 - Ad targeting is now spec'd as a multi-signal platform, not a badge-only preview. `crates/ad_market` hosts the cohort schema, privacy budget manager, uplift estimator, budget broker, and attestation logic; `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs`, and `node/src/read_receipt.rs` persist/snapshot selector utilization, while `node/src/rpc/ad_market.rs`, `cli/src/ad_market.rs`, `cli/src/gov.rs`, and `cli/src/explorer.rs` surface every selector knob through the RPC/CLI/explorer stack.
 - **Cohort schema (`CohortKeyV2`)** — Cohorts are keyed by `{domain,String, domain_tier:DomainTier, domain_owner?:AccountId, provider?:String, badges:Vec<BadgeId>, interest_tags:Vec<InterestTagId>, presence_bucket?:PresenceBucket, selectors_version:u16}` with `DomainTier ∈ {premium,reserved,community,unverified}` sourced from `node/src/gateway/dns.rs` stakes, governance-owned interest tags, and Range Boost presence buckets. Sled keys migrate via dual writes (`cohort_v1:*` + `cohort_v2:*`) plus reversible replays inside `node/src/ad_policy_snapshot.rs`/`node/src/ad_readiness.rs` so operators can downgrade if the migration stalls.
 - **Multi-signal auctions** — `crates/ad_market/src/budget.rs` teaches the budget broker to price and pace selectors individually via `{selector: SelectorBidSpec {clearing_price_usd_micros, shading_factor_bps, slot_cap, max_pacing_ppm}}`. RPC payloads (`node/src/rpc/ad_market.rs`) and CLI helpers expose selector maps for `register_campaign`, `inventory`, `distribution`, `budget`, and `readiness` so advertisers can mix badges, interest tags, domains, and presence. Explorer summaries render per-selector revenue in `cli/src/explorer.rs`.
+- **Self-tuning PI controller** — Budget pacing now hinges on a PI controller that runs inside each `CampaignBudgetState`. The controller tracks the relative error between `epoch_spend` and `epoch_target`, integrates it, and applies a `dual_price` adjustment once per reservation; the error zero-crossings feed a Ziegler-Nichols inspired tuner that recalculates `Kp/Ki` so the spend stays within the configured robustness window. The tuning knobs live in `BudgetBrokerConfig.pi_tuner` (fields: `enabled`, `kp_min`, `kp_max`, `ki_min`, `ki_max`, `ki_ratio`, `tuning_sensitivity`, `zero_cross_min_interval_micros`, and `max_integral`) and are normalized alongside the existing step/dual steps. `CampaignBudgetSnapshot.pi_controller` persists the controller state so deterministic replays keep the same gain history, and the resulting `dual_price`/`kappa` traces continue to surface through the existing telemetry guards.
 - **Proof-of-presence targeting** — `node/src/localnet`, `node/src/range_boost`, and `node/src/service_badge.rs` mint `PresenceReceipt {beacon_id,device_key,mesh_node,location_bucket,radius_meters,confidence_bps,minted_at_micros,expires_at_micros}` entries that `crates/ad_market/src/attestation.rs` verifies. Receipts are cached in a privacy-safe sled store, gated by governance knobs `TB_PRESENCE_TTL_SECS`, `TB_PRESENCE_RADIUS_METERS`, and `TB_PRESENCE_PROOF_CACHE_SIZE`, and exposed through new RPCs (`ad_market.list_presence_cohorts`, `ad_market.reserve_presence`). Node `bin` logic already cancels reservations when `presence_badge` checks fail; this feature extends those hooks to the new attestation types and read-readiness rehearsal gate.
 - **Domain marketplace + interest ingestion** — `node/src/gateway/dns.rs` emits ownership tiers and auction/intent metadata that feed the ad-policy snapshot. A governance-owned registry maps `.block` categories and premium tiers to `interest_tags`, so advertisers can reserve or exclude those audiences. Synchronization happens alongside the ad policy snapshot pruning pipeline, and readiness snapshots surface `domain_tier_supply_ppm` and `interest_tag_supply_ppm` buckets for operators. Docs (`docs/system_reference.md`, `docs/apis_and_tooling.md`) enumerate RPC validation errors for misaligned tiers/tags.
 - **Analytics, conversions, and uplift** — `crates/ad_market/src/uplift.rs` now manages holdout cohorts per selector, exposing readiness/ROAS deltas via `ad_market.readiness`. `ad_market.record_conversion` accepts `value_usd_micros`, `value_ct`, `currency_code`, `attribution_window_secs`, and `selector_weights[]` so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.

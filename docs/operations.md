@@ -85,6 +85,169 @@ For backup/restore, copy these directories while the node is stopped (or use the
 - Bridge remediation constants (`BRIDGE_REMEDIATION_*`) now reference `docs/operations.md#bridge-liquidity-remediation`; update dashboards accordingly.
 - Set `TB_METRICS_ARCHIVE` to append raw JSON into a log for offline audit.
 
+## Receipt Telemetry
+
+> **Plain English:** Receipts are audit trails for market activity. Every storage, compute, energy, and ad settlement creates a receipt. Telemetry tracks how many receipts flow through the network, their sizes, and settlement amounts. This data feeds the Launch Governor's economic gates.
+
+### Receipt Metrics Reference
+
+Receipt telemetry (`node/src/telemetry/receipts.rs`) exports 15 metrics in three categories:
+
+**Counters (lifetime totals):** `receipts_storage_total`, `receipts_compute_total`, `receipts_energy_total`, `receipts_ad_total`
+
+**Gauges (current block):** `receipts_per_block`, `receipts_{storage,compute,energy,ad}_per_block`, `receipt_bytes_per_block`, `receipt_settlement_{storage,compute,energy,ad}_ct`
+
+**Histograms:** `metrics_derivation_duration_ms` (p50/p95/p99)
+
+### Query Examples
+
+```bash
+# All receipt metrics
+curl http://localhost:26658/metrics | grep receipt
+
+# Receipt rate (per second, 5min average)
+rate(receipts_storage_total[5m])  # In Prometheus
+rate(receipts_compute_total[5m])
+rate(receipts_energy_total[5m])
+rate(receipts_ad_total[5m])
+
+# Total market revenue (BLOCK per minute)
+sum(rate(receipt_settlement_storage_ct[1m]) +
+    rate(receipt_settlement_compute_ct[1m]) +
+    rate(receipt_settlement_energy_ct[1m]) +
+    rate(receipt_settlement_ad_ct[1m]))
+```
+
+### Grafana Dashboards
+
+**Receipt Emission Panel:**
+```json
+{
+  "title": "Receipt Rate by Market",
+  "targets": [
+    {"expr": "rate(receipts_storage_total[5m])", "legendFormat": "Storage"},
+    {"expr": "rate(receipts_compute_total[5m])", "legendFormat": "Compute"},
+    {"expr": "rate(receipts_energy_total[5m])", "legendFormat": "Energy"},
+    {"expr": "rate(receipts_ad_total[5m])", "legendFormat": "Ad"}
+  ],
+  "type": "graph",
+  "yaxis": {"label": "Receipts/sec"}
+}
+```
+
+**Settlement Revenue Panel:**
+```json
+{
+  "title": "Market Revenue (BLOCK/min)",
+  "targets": [
+    {"expr": "rate(receipt_settlement_storage_ct[1m])", "legendFormat": "Storage"},
+    {"expr": "rate(receipt_settlement_compute_ct[1m])", "legendFormat": "Compute"},
+    {"expr": "rate(receipt_settlement_energy_ct[1m])", "legendFormat": "Energy"},
+    {"expr": "rate(receipt_settlement_ad_ct[1m])", "legendFormat": "Ad"}
+  ],
+  "type": "graph"
+}
+```
+
+### Alert Rules
+
+```yaml
+# Critical: All receipts stopped
+- alert: ReceiptsStalled
+  expr: sum(rate(receipts_storage_total[10m]) + rate(receipts_compute_total[10m]) + rate(receipts_energy_total[10m]) + rate(receipts_ad_total[10m])) == 0
+  for: 15m
+  severity: critical
+  annotations:
+    summary: "No receipts for 15+ minutes - markets may be down"
+
+# Warning: Single market inactive
+- alert: MarketReceiptsStalled
+  expr: rate(receipts_storage_total[10m]) == 0 or rate(receipts_compute_total[10m]) == 0 or rate(receipts_energy_total[10m]) == 0 or rate(receipts_ad_total[10m]) == 0
+  for: 30m
+  severity: warning
+  annotations:
+    summary: "Market has no receipt activity for 30+ minutes"
+
+# Warning: Receipt size excessive
+- alert: ReceiptSizeExcessive
+  expr: receipt_bytes_per_block > 200000
+  for: 5m
+  severity: warning
+  annotations:
+    summary: "Receipt size >200KB may impact propagation"
+
+# Warning: Metrics derivation slow
+- alert: MetricsDerivationSlow
+  expr: histogram_quantile(0.99, metrics_derivation_duration_ms) > 100
+  for: 10m
+  severity: warning
+  annotations:
+    summary: "p99 metrics derivation >100ms"
+```
+
+### Troubleshooting
+
+**All metrics zero:**
+- Check Phase 1 deployment (receipts in block hash)
+- Check Phase 2 deployment (markets emit receipts)
+- Verify telemetry enabled (`--features telemetry`)
+- Inspect block: `curl .../eth_getBlockByNumber | jq '.result.receipts'`
+
+**One market zero:**
+- That market not integrated yet (see `MARKET_RECEIPT_INTEGRATION.md`)
+- Check market settlement code calls `pending_receipts.push()`
+- Verify block construction collects from that market
+
+**Bytes per block >200KB:**
+- Receipt spam or batch settlement
+- Check receipt count: Many small vs few large receipts
+- Consider market batching adjustments
+
+**Slow derivation (p99 >100ms):**
+- Profile `derive_market_metrics_from_chain()`
+- Too many receipts per block
+- Optimize iteration or add caching
+
+### Integration with Launch Governor
+
+Receipts feed the economics gate through derived metrics:
+
+```rust
+let metrics = derive_market_metrics_from_chain(&recent_blocks);
+// Checks utilization >= thresholds for all 4 markets
+if all_markets_healthy(metrics) {
+    activate_economics_gate();
+}
+```
+
+**Monitor correlation:**
+```bash
+# Raw receipts
+curl .../metrics | grep receipts_
+
+# Derived utilization (what Governor sees)
+curl .../metrics | grep economics_prev_market_metrics_utilization_ppm
+
+# More receipts should = higher utilization
+```
+
+### Operations Checklist
+
+**Daily:** Check receipt counters increment, all 4 markets active, settlement amounts reasonable
+
+**Weekly:** Export metrics to CSV, correlate with Governor status, review p99 latency
+
+**Monthly:** Analyze growth trends, compare market utilization, update alert thresholds
+
+**Post-Deployment:** Verify receipts in first block, telemetry populates within 5min, Grafana updates, test alerts
+
+### See Also
+
+- **Architecture:** `docs/architecture.md#market-receipts-and-audit-trail`
+- **Integration Guide:** `MARKET_RECEIPT_INTEGRATION.md`
+- **Telemetry Code:** `node/src/telemetry/receipts.rs`
+- **Metrics Engine:** `node/src/economics/deterministic_metrics.rs`
+
 ## Launch Governor Operations
 
 The launch governor automates network readiness transitions by monitoring chain and DNS metrics. See `docs/architecture.md#launch-governor` for the full technical design.
@@ -139,8 +302,24 @@ curl -X POST http://localhost:8545 \
 # Retrieve signed snapshot for specific epoch
 curl -X POST http://localhost:8545 \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"governor.snapshot","params":[42],"id":1}'
+-d '{"jsonrpc":"2.0","method":"governor.snapshot","params":[42],"id":1}'
 ```
+
+Prefer `tb-cli governor status` for an operator-friendly experience: it emits the same JSON (including `economics_sample`, `autopilot_enabled`, and `schema_version`) plus a human summary that lists each gate, streaks, and the persisted market metrics snapshot. Use `tb-cli governor status --rpc <endpoint>` when telemetry and ledger state differ.
+
+To audit a specific economics decision, run `tb-cli governor intents --gate economics --limit 20`. Each intent shows the action, reason, and deterministic metrics snapshot that triggered the autopilot change; those snapshots mirror the `economics_prev_market_metrics_{utilization,provider_margin}_ppm` gauges and make replay audits deterministic.
+
+### Economics Autopilot CLI
+
+1. Run `tb-cli governor status --rpc <endpoint>` after a restart or whenever gate behavior is under question:
+   - Make sure `enabled`, `schema_version`, and `autopilot_enabled` match the runtime configuration.
+   - Inspect `economics_sample.market_metrics` for `{market, utilization_ppm, provider_margin_ppm}` entries that mirror the `economics_prev_market_metrics_*` gauges you’re watching in Prometheus/Grafana.
+   - Read the gate streak/reason output to understand why the governor did (or did not) flip the economics gate.
+   - The JSON payload also includes `economics_prev_market_metrics`, and the CLI prints a matching `telemetry gauges (ppm)` section so you can cross-check the `economics_prev_market_metrics_{utilization,provider_margin}_ppm` Prom series without leaving the terminal.
+2. Use `tb-cli governor intents --gate economics --limit 20 [--json]` to replay recent intent history:
+   - The reason string plus the deterministic metrics snapshot makes it easy to correlate a toggle with a specific utilization/margin delta.
+   - Compare the ppm snapshots with the Prometheus-series to confirm telemetry and persistence stayed aligned.
+3. When you need an authoritative record, call `governor.snapshot` for the relevant epoch; the JSON payload includes the same `economics_sample` snapshot recorded by the CLI.
 
 ### Understanding Gate Transitions
 

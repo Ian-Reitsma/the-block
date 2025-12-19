@@ -299,6 +299,10 @@ pub struct Market {
     offers: HashMap<String, Offer>,
     jobs: HashMap<String, JobState>,
     seen_jobs: std::collections::HashSet<String>,
+    /// Pending compute settlement receipts for block inclusion
+    pending_receipts: Vec<crate::ComputeReceipt>,
+    /// Current block height for receipt emission
+    current_block: u64,
 }
 
 impl Market {
@@ -309,23 +313,61 @@ impl Market {
             offers: HashMap::new(),
             jobs: HashMap::new(),
             seen_jobs: std::collections::HashSet::new(),
+            pending_receipts: Vec::new(),
+            current_block: 0,
         }
+    }
+
+    /// Drain pending compute settlement receipts for block inclusion
+    pub fn drain_receipts(&mut self) -> Vec<crate::ComputeReceipt> {
+        std::mem::take(&mut self.pending_receipts)
+    }
+
+    /// Set the current block height for receipt emission.
+    /// Must be called before draining receipts during block construction.
+    pub fn set_current_block(&mut self, block_height: u64) {
+        self.current_block = block_height;
     }
 
     fn sweep_overdue_jobs(&mut self) {
         for resolution in settlement::Settlement::sweep_overdue() {
-            if let SlaResolutionKind::Violated { .. } = resolution.outcome {
-                if let Some(state) = self.jobs.remove(&resolution.job_id) {
-                    scheduler::record_failure(&state.provider);
-                    if state.job.capability.accelerator.is_some() {
-                        scheduler::record_accelerator_failure(&state.provider);
-                        #[cfg(feature = "telemetry")]
-                        crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            match &resolution.outcome {
+                SlaResolutionKind::Violated { .. } => {
+                    if let Some(state) = self.jobs.remove(&resolution.job_id) {
+                        scheduler::record_failure(&state.provider);
+                        if state.job.capability.accelerator.is_some() {
+                            scheduler::record_accelerator_failure(&state.provider);
+                            #[cfg(feature = "telemetry")]
+                            crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+                        }
                     }
+                    scheduler::end_job(&resolution.job_id);
+                    #[cfg(feature = "telemetry")]
+                    crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
                 }
-                scheduler::end_job(&resolution.job_id);
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
+                SlaResolutionKind::Completed => {
+                    if let Some(state) = self.jobs.remove(&resolution.job_id) {
+                        let total_units: u64 = state.job.workloads.iter().map(|w| w.units()).sum();
+                        let total_payment = total_units.saturating_mul(state.price_per_unit);
+                        let verified = state.paid_slices == state.job.slices.len();
+
+                        self.pending_receipts.push(crate::ComputeReceipt {
+                            job_id: resolution.job_id.clone(),
+                            provider: state.provider.clone(),
+                            compute_units: total_units,
+                            payment_ct: total_payment,
+                            block_height: self.current_block,
+                            verified,
+                        });
+                    }
+                    scheduler::end_job(&resolution.job_id);
+                }
+                SlaResolutionKind::Cancelled { .. } => {
+                    if let Some(_state) = self.jobs.remove(&resolution.job_id) {
+                        // Cancelled jobs don't emit receipts
+                    }
+                    scheduler::end_job(&resolution.job_id);
+                }
             }
         }
     }
@@ -770,6 +812,41 @@ impl Market {
             1.0 + pending as f64 / capacity as f64
         }
     }
+}
+
+/// Global compute market instance for receipt emission
+static COMPUTE_MARKET: concurrency::Lazy<concurrency::MutexT<Market>> =
+    concurrency::Lazy::new(|| concurrency::mutex(Market::new()));
+
+/// Access the global compute market instance
+fn compute_market() -> concurrency::MutexGuard<'static, Market> {
+    COMPUTE_MARKET.guard()
+}
+
+/// Set the current block height for compute receipt emission.
+/// Must be called before draining receipts during block construction.
+pub fn set_compute_current_block(block_height: u64) {
+    compute_market().set_current_block(block_height);
+}
+
+/// Drain pending compute market receipts for block inclusion
+pub fn drain_compute_receipts() -> Vec<crate::ComputeReceipt> {
+    let receipts = compute_market().drain_receipts();
+
+    // Record telemetry for drain operation
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::receipts::RECEIPT_DRAIN_OPERATIONS_TOTAL.inc();
+        if !receipts.is_empty() {
+            diagnostics::tracing::debug!(
+                receipt_count = receipts.len(),
+                market = "compute",
+                "Drained compute receipts"
+            );
+        }
+    }
+
+    receipts
 }
 
 fn prefer_gpu_backend(capability: &scheduler::Capability) -> bool {

@@ -1045,17 +1045,17 @@ mod tests {
         array
     }
 
-    fn maybe_vec<T, F>(rng: &mut Rng, len: usize, mut gen: F) -> Vec<T>
+    fn maybe_vec<T, F>(rng: &mut Rng, len: usize, mut r#gen: F) -> Vec<T>
     where
         F: FnMut(&mut Rng) -> T,
     {
         if len == 0 || rng.bool() {
             return Vec::new();
         }
-        (0..len).map(|_| gen(rng)).collect()
+        (0..len).map(|_| r#gen(rng)).collect()
     }
 
-    fn maybe_vec_from<T, F>(rng: &mut Rng, len: usize, mut gen: F) -> Vec<T>
+    fn maybe_vec_from<T, F>(rng: &mut Rng, len: usize, mut r#gen: F) -> Vec<T>
     where
         F: FnMut(&mut Rng) -> T,
     {
@@ -1063,7 +1063,7 @@ mod tests {
             return Vec::new();
         }
         if rng.bool() {
-            (0..len).map(|_| gen(rng)).collect()
+            (0..len).map(|_| r#gen(rng)).collect()
         } else {
             Vec::new()
         }

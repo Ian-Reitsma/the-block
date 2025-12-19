@@ -526,6 +526,7 @@ mod tests {
             dilithium_pubkey: vec![1, 3, 5],
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![2, 4, 6],
+            receipts: Vec::new(),
         }
     }
 

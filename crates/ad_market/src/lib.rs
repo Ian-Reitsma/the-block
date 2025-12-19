@@ -1,6 +1,6 @@
 use crate::budget::{
     BidShadingApplication as BudgetBidShadingApplication,
-    BidShadingGuidance as BudgetBidShadingGuidance,
+    BidShadingGuidance as BudgetBidShadingGuidance, PiControllerSnapshot, PiTunerConfig,
 };
 use crypto_suite::{hashing::blake3, hex};
 use foundation_metrics::{gauge, histogram, increment_counter};
@@ -3448,6 +3448,30 @@ fn budget_broker_config_to_value(config: &BudgetBrokerConfig) -> JsonValue {
         "epochs_per_budget".into(),
         JsonValue::from(config.epochs_per_budget),
     );
+    map.insert(
+        "pi_tuner".into(),
+        pi_tuner_config_to_value(&config.pi_tuner),
+    );
+    JsonValue::Object(map)
+}
+
+fn pi_tuner_config_to_value(config: &PiTunerConfig) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert("enabled".into(), JsonValue::Bool(config.enabled));
+    map.insert("kp_min".into(), JsonValue::from(config.kp_min));
+    map.insert("kp_max".into(), JsonValue::from(config.kp_max));
+    map.insert("ki_min".into(), JsonValue::from(config.ki_min));
+    map.insert("ki_max".into(), JsonValue::from(config.ki_max));
+    map.insert("ki_ratio".into(), JsonValue::from(config.ki_ratio));
+    map.insert(
+        "tuning_sensitivity".into(),
+        JsonValue::from(config.tuning_sensitivity),
+    );
+    map.insert(
+        "zero_cross_min_interval_micros".into(),
+        JsonValue::from(config.zero_cross_min_interval_micros),
+    );
+    map.insert("max_integral".into(), JsonValue::from(config.max_integral));
     JsonValue::Object(map)
 }
 
@@ -3484,8 +3508,50 @@ fn budget_broker_config_from_value(
         },
         smoothing: read_f64(map, "smoothing")?,
         epochs_per_budget: read_u64(map, "epochs_per_budget")?,
+        pi_tuner: if let Some(pi_value) = map.get("pi_tuner") {
+            pi_tuner_config_from_value(pi_value)?
+        } else {
+            defaults.pi_tuner
+        },
     };
     Ok(config.normalized())
+}
+
+fn pi_tuner_config_from_value(value: &JsonValue) -> Result<PiTunerConfig, PersistenceError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid("pi_tuner must be an object"))?;
+    let mut config = PiTunerConfig::default();
+    if let Some(enabled) = map.get("enabled") {
+        config.enabled = enabled
+            .as_bool()
+            .ok_or_else(|| invalid("pi_tuner.enabled must be a boolean"))?;
+    }
+    if map.contains_key("kp_min") {
+        config.kp_min = read_f64(map, "kp_min")?;
+    }
+    if map.contains_key("kp_max") {
+        config.kp_max = read_f64(map, "kp_max")?;
+    }
+    if map.contains_key("ki_min") {
+        config.ki_min = read_f64(map, "ki_min")?;
+    }
+    if map.contains_key("ki_max") {
+        config.ki_max = read_f64(map, "ki_max")?;
+    }
+    if map.contains_key("ki_ratio") {
+        config.ki_ratio = read_f64(map, "ki_ratio")?;
+    }
+    if map.contains_key("tuning_sensitivity") {
+        config.tuning_sensitivity = read_f64(map, "tuning_sensitivity")?;
+    }
+    if map.contains_key("zero_cross_min_interval_micros") {
+        config.zero_cross_min_interval_micros = read_u64(map, "zero_cross_min_interval_micros")?;
+    }
+    if map.contains_key("max_integral") {
+        config.max_integral = read_f64(map, "max_integral")?;
+    }
+    Ok(config)
 }
 
 fn cohort_key_snapshot_to_value(snapshot: &CohortKeySnapshot) -> JsonValue {
@@ -3741,7 +3807,47 @@ fn campaign_budget_snapshot_to_value(snapshot: &CampaignBudgetSnapshot) -> JsonV
         .map(cohort_budget_snapshot_to_value)
         .collect();
     map.insert("cohorts".into(), JsonValue::Array(cohorts));
+    if let Some(pi_controller) = &snapshot.pi_controller {
+        map.insert(
+            "pi_controller".into(),
+            pi_controller_snapshot_to_value(pi_controller),
+        );
+    }
     JsonValue::Object(map)
+}
+
+fn pi_controller_snapshot_to_value(snapshot: &PiControllerSnapshot) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert("kp".into(), JsonValue::from(snapshot.kp));
+    map.insert("ki".into(), JsonValue::from(snapshot.ki));
+    map.insert("integral".into(), JsonValue::from(snapshot.integral));
+    if let Some(last) = snapshot.last_cross_micros {
+        map.insert("last_cross_micros".into(), JsonValue::from(last));
+    }
+    if let Some(period) = snapshot.period_estimate_secs {
+        map.insert("period_estimate_secs".into(), JsonValue::from(period));
+    }
+    map.insert(
+        "amplitude_since_cross".into(),
+        JsonValue::from(snapshot.amplitude_since_cross),
+    );
+    JsonValue::Object(map)
+}
+
+fn pi_controller_snapshot_from_value(
+    value: &JsonValue,
+) -> Result<PiControllerSnapshot, PersistenceError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid("pi_controller must be an object"))?;
+    Ok(PiControllerSnapshot {
+        kp: read_f64(map, "kp")?,
+        ki: read_f64(map, "ki")?,
+        integral: read_f64(map, "integral")?,
+        last_cross_micros: map.get("last_cross_micros").and_then(JsonValue::as_u64),
+        period_estimate_secs: map.get("period_estimate_secs").and_then(JsonValue::as_f64),
+        amplitude_since_cross: read_f64(map, "amplitude_since_cross")?,
+    })
 }
 
 fn campaign_budget_snapshot_from_value(
@@ -3760,6 +3866,10 @@ fn campaign_budget_snapshot_from_value(
             .collect::<Result<Vec<_>, _>>()?,
         _ => return Err(invalid("cohorts must be an array")),
     };
+    let pi_controller = map
+        .get("pi_controller")
+        .map(pi_controller_snapshot_from_value)
+        .transpose()?;
     Ok(CampaignBudgetSnapshot {
         campaign_id: read_string(map, "campaign_id")?,
         total_budget: read_u64(map, "total_budget")?,
@@ -3769,6 +3879,7 @@ fn campaign_budget_snapshot_from_value(
         epoch_impressions: read_u64(map, "epoch_impressions")?,
         dual_price: read_f64(map, "dual_price")?,
         cohorts,
+        pi_controller,
     })
 }
 

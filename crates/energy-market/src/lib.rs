@@ -421,6 +421,11 @@ impl EnergyMarket {
         &self.receipts
     }
 
+    /// Drain all pending receipts and return them for inclusion in a block.
+    pub fn drain_receipts(&mut self) -> Vec<EnergyReceipt> {
+        std::mem::take(&mut self.receipts)
+    }
+
     pub fn verifier_registry(&self) -> &VerifierRegistry {
         &self.verifier_registry
     }

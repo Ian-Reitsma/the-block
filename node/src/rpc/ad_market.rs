@@ -365,6 +365,11 @@ fn campaign_budget_snapshot_to_value(snapshot: &CampaignBudgetSnapshot) -> Value
                 .collect(),
         ),
     );
+    if let Some(pi_controller) = &snapshot.pi_controller {
+        if let Ok(value) = foundation_serialization::json::to_value(pi_controller) {
+            map.insert("pi_controller".into(), value);
+        }
+    }
     Value::Object(map)
 }
 
@@ -585,6 +590,7 @@ mod tests {
             epoch_impressions: 25,
             dual_price,
             cohorts: vec![cohort],
+            pi_controller: None,
         }
     }
 

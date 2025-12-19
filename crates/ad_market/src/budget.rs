@@ -18,6 +18,8 @@ pub struct BudgetBrokerConfig {
     pub shadow_price_cap: f64,
     pub smoothing: f64,
     pub epochs_per_budget: u64,
+    #[serde(default)]
+    pub pi_tuner: PiTunerConfig,
 }
 
 impl BudgetBrokerConfig {
@@ -33,6 +35,7 @@ impl BudgetBrokerConfig {
             .clamp(self.min_kappa.max(0.0), self.max_kappa * 2.0);
         self.smoothing = self.smoothing.clamp(0.0, 1.0);
         self.epochs_per_budget = self.epochs_per_budget.max(1);
+        self.pi_tuner = self.pi_tuner.normalized();
         self
     }
 }
@@ -49,11 +52,218 @@ impl Default for BudgetBrokerConfig {
             shadow_price_cap: 4.0,
             smoothing: 0.2,
             epochs_per_budget: 96,
+            pi_tuner: PiTunerConfig::default(),
         }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PiTunerConfig {
+    pub enabled: bool,
+    pub kp_min: f64,
+    pub kp_max: f64,
+    pub ki_min: f64,
+    pub ki_max: f64,
+    pub ki_ratio: f64,
+    pub tuning_sensitivity: f64,
+    pub zero_cross_min_interval_micros: u64,
+    pub max_integral: f64,
+}
+
+impl Default for PiTunerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            kp_min: 0.01,
+            kp_max: 0.5,
+            ki_min: 0.001,
+            ki_max: 0.1,
+            ki_ratio: 0.5,
+            tuning_sensitivity: 0.8,
+            zero_cross_min_interval_micros: 200_000,
+            max_integral: 10.0,
+        }
+    }
+}
+
+impl PiTunerConfig {
+    fn normalized(mut self) -> Self {
+        if self.kp_min < 0.0 {
+            self.kp_min = 0.0;
+        }
+        if self.kp_max < self.kp_min {
+            self.kp_max = self.kp_min.max(self.kp_max);
+        }
+        if self.ki_min < 0.0 {
+            self.ki_min = 0.0;
+        }
+        if self.ki_max < self.ki_min {
+            self.ki_max = self.ki_min.max(self.ki_max);
+        }
+        self.ki_ratio = self.ki_ratio.clamp(0.1, 2.0);
+        self.tuning_sensitivity = self.tuning_sensitivity.clamp(0.001, 10.0);
+        if self.zero_cross_min_interval_micros == 0 {
+            self.zero_cross_min_interval_micros = 1;
+        }
+        if self.max_integral <= 0.0 {
+            self.max_integral = 1.0;
+        }
+        self
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PiControllerSnapshot {
+    pub kp: f64,
+    pub ki: f64,
+    pub integral: f64,
+    #[serde(default)]
+    pub last_cross_micros: Option<u64>,
+    #[serde(default)]
+    pub period_estimate_secs: Option<f64>,
+    pub amplitude_since_cross: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SelfTuningPiController {
+    config: PiTunerConfig,
+    kp: f64,
+    ki: f64,
+    integral: f64,
+    last_error: f64,
+    last_zero_cross_micros: Option<u64>,
+    period_estimate_secs: Option<f64>,
+    amplitude_since_cross: f64,
+}
+
+impl SelfTuningPiController {
+    fn new(config: &PiTunerConfig, base_dual_step: f64) -> Self {
+        let normalized = config.clone();
+        let kp = base_dual_step.clamp(normalized.kp_min, normalized.kp_max);
+        let ki = (base_dual_step * normalized.ki_ratio).clamp(normalized.ki_min, normalized.ki_max);
+        Self {
+            config: normalized,
+            kp,
+            ki,
+            integral: 0.0,
+            last_error: 0.0,
+            last_zero_cross_micros: None,
+            period_estimate_secs: None,
+            amplitude_since_cross: 0.0,
+        }
+    }
+
+    fn from_snapshot(
+        snapshot: Option<&PiControllerSnapshot>,
+        config: &PiTunerConfig,
+        base_dual_step: f64,
+    ) -> Self {
+        let mut controller = Self::new(config, base_dual_step);
+        if let Some(snapshot) = snapshot {
+            controller.restore(snapshot);
+        }
+        controller
+    }
+
+    fn reset(&mut self) {
+        self.integral = 0.0;
+        self.last_error = 0.0;
+        self.last_zero_cross_micros = None;
+        self.period_estimate_secs = None;
+        self.amplitude_since_cross = 0.0;
+    }
+
+    fn reconfigure(&mut self, config: &PiTunerConfig, base_dual_step: f64) {
+        self.config = config.clone();
+        self.kp = self.kp.clamp(self.config.kp_min, self.config.kp_max);
+        self.ki = self.ki.clamp(self.config.ki_min, self.config.ki_max);
+        if !self.config.enabled {
+            self.kp = base_dual_step.clamp(self.config.kp_min, self.config.kp_max);
+            self.ki = (base_dual_step * self.config.ki_ratio)
+                .clamp(self.config.ki_min, self.config.ki_max);
+        }
+        self.integral = self
+            .integral
+            .clamp(-self.config.max_integral, self.config.max_integral);
+    }
+
+    fn snapshot(&self) -> PiControllerSnapshot {
+        PiControllerSnapshot {
+            kp: self.kp,
+            ki: self.ki,
+            integral: self.integral,
+            last_cross_micros: self.last_zero_cross_micros,
+            period_estimate_secs: self.period_estimate_secs,
+            amplitude_since_cross: self.amplitude_since_cross,
+        }
+    }
+
+    fn restore(&mut self, snapshot: &PiControllerSnapshot) {
+        self.kp = snapshot.kp.clamp(self.config.kp_min, self.config.kp_max);
+        self.ki = snapshot.ki.clamp(self.config.ki_min, self.config.ki_max);
+        self.integral = snapshot
+            .integral
+            .clamp(-self.config.max_integral, self.config.max_integral);
+        self.last_zero_cross_micros = snapshot.last_cross_micros;
+        self.period_estimate_secs = snapshot.period_estimate_secs;
+        self.amplitude_since_cross = snapshot.amplitude_since_cross;
+    }
+
+    fn update(&mut self, error: f64, micros: u64) -> f64 {
+        self.track_zero_crossing(error, micros);
+        if !self.config.enabled {
+            return self.kp * error;
+        }
+        self.integral =
+            (self.integral + error).clamp(-self.config.max_integral, self.config.max_integral);
+        self.kp * error + self.ki * self.integral
+    }
+
+    fn track_zero_crossing(&mut self, error: f64, micros: u64) {
+        let previous_sign = self.last_error.signum();
+        let current_sign = error.signum();
+        if previous_sign != 0.0
+            && current_sign != 0.0
+            && previous_sign != current_sign
+            && self
+                .last_zero_cross_micros
+                .map(|prev| {
+                    micros.saturating_sub(prev) >= self.config.zero_cross_min_interval_micros
+                })
+                .unwrap_or(true)
+        {
+            if let Some(prev) = self.last_zero_cross_micros {
+                let delta = micros.saturating_sub(prev);
+                if delta > 0 {
+                    self.period_estimate_secs =
+                        Some((delta as f64 / 1_000_000.0).clamp(1e-6, f64::INFINITY));
+                    self.adjust_gains();
+                }
+            }
+            self.last_zero_cross_micros = Some(micros);
+            self.amplitude_since_cross = 0.0;
+        }
+        self.amplitude_since_cross = self.amplitude_since_cross.max(error.abs());
+        self.last_error = error;
+    }
+
+    fn adjust_gains(&mut self) {
+        if !self.config.enabled {
+            return;
+        }
+        if let Some(period) = self.period_estimate_secs {
+            let amplitude = self.amplitude_since_cross.max(1e-12);
+            let ku = (self.config.tuning_sensitivity / amplitude).clamp(1e-6, 1_000_000.0);
+            let kp = (0.6 * ku).clamp(self.config.kp_min, self.config.kp_max);
+            let ki = ((1.2 * ku) / period).clamp(self.config.ki_min, self.config.ki_max);
+            self.kp = kp;
+            self.ki = ki;
+            self.amplitude_since_cross = 0.0;
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct BudgetBroker {
     config: BudgetBrokerConfig,
     campaigns: HashMap<String, CampaignBudgetState>,
@@ -202,7 +412,7 @@ impl BudgetBroker {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 struct CampaignBudgetState {
     campaign_id: String,
     total_budget: u64,
@@ -212,6 +422,7 @@ struct CampaignBudgetState {
     epoch_impressions: u64,
     dual_price: f64,
     cohorts: HashMap<CohortKey, CohortBudgetState>,
+    pi_controller: SelfTuningPiController,
 }
 
 impl CampaignBudgetState {
@@ -226,6 +437,7 @@ impl CampaignBudgetState {
             epoch_impressions: 0,
             dual_price: 0.0,
             cohorts: HashMap::new(),
+            pi_controller: SelfTuningPiController::new(&config.pi_tuner, config.dual_step),
         }
     }
 
@@ -236,6 +448,9 @@ impl CampaignBudgetState {
         self.epoch_spend = 0.0;
         self.epoch_impressions = 0;
         self.dual_price = 0.0;
+        self.pi_controller
+            .reconfigure(&config.pi_tuner, config.dual_step);
+        self.pi_controller.reset();
         for cohort in self.cohorts.values_mut() {
             cohort.reset_epoch();
         }
@@ -293,7 +508,8 @@ impl CampaignBudgetState {
         }
         let total_error = (self.epoch_spend - self.epoch_target) / self.epoch_target.max(1.0);
         let forgetting = config.dual_forgetting.clamp(0.0, 1.0);
-        let updated = self.dual_price * forgetting + config.dual_step * total_error;
+        let control = self.pi_controller.update(total_error, now_micros());
+        let updated = self.dual_price * forgetting + control;
         self.dual_price = updated.clamp(0.0, config.shadow_price_cap);
         gauge!(
             "ad_budget_dual_price",
@@ -328,6 +544,7 @@ impl CampaignBudgetState {
         for cohort in self.cohorts.values_mut() {
             cohort.reset_epoch();
         }
+        self.pi_controller.reset();
     }
 
     fn reconcile_budget(&mut self, budget_usd_micros: u64, config: &BudgetBrokerConfig) {
@@ -338,6 +555,8 @@ impl CampaignBudgetState {
             self.remaining_budget = budget_usd_micros;
         }
         self.epoch_target = compute_epoch_target(self.total_budget, config.epochs_per_budget);
+        self.pi_controller
+            .reconfigure(&config.pi_tuner, config.dual_step);
     }
 
     fn snapshot(&self) -> CampaignBudgetSnapshot {
@@ -359,6 +578,7 @@ impl CampaignBudgetState {
                     realized_spend: state.realized_spend,
                 })
                 .collect(),
+            pi_controller: Some(self.pi_controller.snapshot()),
         }
     }
 
@@ -385,6 +605,11 @@ impl CampaignBudgetState {
                 .dual_price
                 .clamp(0.0, config.shadow_price_cap.max(config.max_kappa)),
             cohorts,
+            pi_controller: SelfTuningPiController::from_snapshot(
+                snapshot.pi_controller.as_ref(),
+                &config.pi_tuner,
+                config.dual_step,
+            ),
         }
     }
 }
@@ -443,6 +668,8 @@ pub struct CampaignBudgetSnapshot {
     pub epoch_impressions: u64,
     pub dual_price: f64,
     pub cohorts: Vec<CohortBudgetSnapshot>,
+    #[serde(default)]
+    pub pi_controller: Option<PiControllerSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -697,6 +924,7 @@ mod tests {
             epoch_impressions: 50,
             dual_price,
             cohorts: vec![cohort],
+            pi_controller: None,
         }
     }
 
@@ -711,6 +939,7 @@ mod tests {
             shadow_price_cap: 1.0,
             smoothing: 0.25,
             epochs_per_budget: 16,
+            pi_tuner: PiTunerConfig::default(),
         }
     }
 

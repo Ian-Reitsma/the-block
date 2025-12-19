@@ -9,7 +9,7 @@ use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::rngs::OsRng;
 use sys::tempfile::tempdir;
-use the_block::{Blockchain, ReadAck};
+use the_block::{Blockchain, ReadAck, Receipt};
 
 fn build_signed_ack(bytes: u64, domain: &str, provider: &str) -> ReadAck {
     let mut rng = OsRng::default();
@@ -245,6 +245,19 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         liquidity_balance.consumer,
         block.read_sub_liquidity_ct.value()
     );
+
+    assert_eq!(block.receipts.len(), 1);
+    match &block.receipts[0] {
+        Receipt::Ad(ad) => {
+            assert_eq!(ad.campaign_id, "cmp-1");
+            assert_eq!(ad.publisher, host_addr);
+            assert_eq!(ad.impressions, 1);
+            assert_eq!(ad.spend_ct, 80);
+            assert_eq!(ad.block_height, block.index);
+            assert_eq!(ad.conversions, 0);
+        }
+        other => panic!("expected ad receipt, got {:?}", other.market_name()),
+    }
 }
 
 #[test]
