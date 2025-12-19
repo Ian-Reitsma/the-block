@@ -13,7 +13,7 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
     let dir = tempdir()?;
     let path = dir.path().join("market.db");
 
-    let market = StorageMarket::open(&path)?;
+    let mut market = StorageMarket::open(&path)?;
     let contract = StorageContract {
         object_id: "obj-1".into(),
         provider_id: "primary".into(),

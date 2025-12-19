@@ -148,7 +148,10 @@ impl DependencyGraph {
 
             // Build reverse index
             for dep_id in &deps {
-                dependents.entry(*dep_id).or_insert_with(Vec::new).push(disb.id);
+                dependents
+                    .entry(*dep_id)
+                    .or_insert_with(Vec::new)
+                    .push(disb.id);
             }
         }
 

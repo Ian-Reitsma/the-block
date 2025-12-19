@@ -10,9 +10,11 @@
 //! - Unknown labels are mapped to "other" to bound cardinality
 
 #[cfg(feature = "telemetry")]
-use foundation_telemetry::{Counter, Gauge, Histogram, Register};
+use super::{register_counter, register_counter_vec, register_gauge, register_histogram};
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::{Gauge, Histogram, IntCounter, IntCounterVec};
 
 // ========================================
 // LABEL SANITIZATION & CARDINALITY LIMITS
@@ -23,7 +25,9 @@ fn sanitize_oracle_error_label(reason: &str) -> &'static str {
     match reason {
         r if r.contains("invalid") || r.contains("reading") => error_reason::INVALID_READING,
         r if r.contains("stale") || r.contains("timestamp") => error_reason::STALE_TIMESTAMP,
-        r if r.contains("authorization") || r.contains("auth") => error_reason::AUTHORIZATION_FAILED,
+        r if r.contains("authorization") || r.contains("auth") => {
+            error_reason::AUTHORIZATION_FAILED
+        }
         r if r.contains("signature") || r.contains("sig") => error_reason::BAD_SIGNATURE,
         _ => "other",
     }
@@ -55,22 +59,21 @@ fn sanitize_dispute_outcome_label(outcome: &str) -> &'static str {
 
 /// Total energy readings submitted by oracle
 #[cfg(feature = "telemetry")]
-static ENERGY_READINGS_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+static ENERGY_READINGS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
         "energy_readings_total",
-        "Total energy readings submitted across all oracles"
+        "Total energy readings submitted across all oracles",
     )
-    .unwrap_or_else(|_| Counter::placeholder())
 });
 
 /// Oracle submission errors by reason
 #[cfg(feature = "telemetry")]
-static ORACLE_SUBMISSION_ERRORS_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+static ORACLE_SUBMISSION_ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "oracle_submission_errors_total",
-        "Total oracle submission failures (invalid_reading, stale_timestamp, authorization_failed)"
+        "Total oracle submission failures (invalid_reading, stale_timestamp, authorization_failed)",
+        &["reason"],
     )
-    .unwrap_or_else(|_| Counter::placeholder())
 });
 
 // ========================================
@@ -79,22 +82,22 @@ static ORACLE_SUBMISSION_ERRORS_TOTAL: Lazy<Counter> = Lazy::new(|| {
 
 /// Disputes raised by type (low_reading, outlier_detected, consensus_gap)
 #[cfg(feature = "telemetry")]
-static ENERGY_DISPUTES_RAISED_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+static ENERGY_DISPUTES_RAISED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "energy_disputes_raised_total",
-        "Total disputes initiated by type"
+        "Total disputes initiated by type",
+        &["type"],
     )
-    .unwrap_or_else(|_| Counter::placeholder())
 });
 
 /// Dispute outcomes: resolved, escalated, slashed
 #[cfg(feature = "telemetry")]
-static ENERGY_DISPUTES_RESOLVED_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+static ENERGY_DISPUTES_RESOLVED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "energy_disputes_resolved_total",
-        "Total disputes concluded with outcome"
+        "Total disputes concluded with outcome",
+        &["outcome"],
     )
-    .unwrap_or_else(|_| Counter::placeholder())
 });
 
 // ========================================
@@ -104,21 +107,19 @@ static ENERGY_DISPUTES_RESOLVED_TOTAL: Lazy<Counter> = Lazy::new(|| {
 /// Current market price per unit (updated per block)
 #[cfg(feature = "telemetry")]
 static ENERGY_MARKET_PRICE_CURRENT: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    register_gauge(
         "energy_market_price_current",
-        "Current energy market clearing price per unit"
+        "Current energy market clearing price per unit",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Current market volume in blocks
 #[cfg(feature = "telemetry")]
 static ENERGY_MARKET_VOLUME_CURRENT: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    register_gauge(
         "energy_market_volume_current",
-        "Current energy market volume in blocks"
+        "Current energy market volume in blocks",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 // ========================================
@@ -128,21 +129,19 @@ static ENERGY_MARKET_VOLUME_CURRENT: Lazy<Gauge> = Lazy::new(|| {
 /// Number of active oracles (per epoch)
 #[cfg(feature = "telemetry")]
 static ORACLE_ACTIVE_COUNT: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    register_gauge(
         "oracle_active_count",
-        "Number of active oracle operators by status"
+        "Number of active oracle operators by status",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Number of pending disputes waiting resolution
 #[cfg(feature = "telemetry")]
 static ENERGY_DISPUTES_PENDING: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    register_gauge(
         "energy_disputes_pending",
-        "Number of disputes awaiting resolution"
+        "Number of disputes awaiting resolution",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 // ========================================
@@ -152,21 +151,19 @@ static ENERGY_DISPUTES_PENDING: Lazy<Gauge> = Lazy::new(|| {
 /// Oracle-to-inclusion latency (seconds)
 #[cfg(feature = "telemetry")]
 static ORACLE_INCLUSION_LAG_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    foundation_telemetry::register_histogram!(
+    register_histogram(
         "oracle_inclusion_lag_seconds",
-        "Time from oracle submission to consensus inclusion"
+        "Time from oracle submission to consensus inclusion",
     )
-    .unwrap_or_else(|_| Histogram::placeholder())
 });
 
 /// Dispute resolution time (seconds)
 #[cfg(feature = "telemetry")]
 static ENERGY_DISPUTE_RESOLUTION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    foundation_telemetry::register_histogram!(
+    register_histogram(
         "energy_dispute_resolution_seconds",
-        "Time from dispute initiation to final resolution"
+        "Time from dispute initiation to final resolution",
     )
-    .unwrap_or_else(|_| Histogram::placeholder())
 });
 
 // ========================================

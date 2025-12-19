@@ -4497,9 +4497,10 @@ impl Blockchain {
 
         // Pre-allocate receipt vector with capacity hint (performance optimization)
         // Estimate: ad_settlements + typical counts from other markets
-        let estimated_receipt_count = ad_settlements.len()
+        let estimated_receipt_count = ad_settlements
+            .len()
             .saturating_add(100) // Storage receipts (typical)
-            .saturating_add(50)  // Compute receipts (typical)
+            .saturating_add(50) // Compute receipts (typical)
             .saturating_add(20); // Energy receipts (typical)
         let mut block_receipts: Vec<Receipt> = Vec::with_capacity(estimated_receipt_count);
 
@@ -4592,10 +4593,7 @@ impl Blockchain {
 
         // Validate receipt count and size (DoS protection)
         if let Err(e) = crate::receipts_validation::validate_receipt_count(block_receipts.len()) {
-            return Err(PyError::value(format!(
-                "Receipt validation failed: {}",
-                e
-            )));
+            return Err(PyError::value(format!("Receipt validation failed: {}", e)));
         }
 
         // Validate individual receipts
@@ -5015,15 +5013,16 @@ impl Blockchain {
         // Validate receipt size before mining (DoS protection)
         // We encode receipts once here and cache the result to avoid double encoding
         // in the hash calculation loop (performance optimization).
-        let receipts_serialized = crate::block_binary::encode_receipts(&block.receipts)
-            .map_err(|e| {
+        let receipts_serialized =
+            crate::block_binary::encode_receipts(&block.receipts).map_err(|e| {
                 PyError::runtime(format!(
                     "Failed to encode receipts for size validation: {:?}",
                     e
                 ))
             })?;
 
-        if let Err(e) = crate::receipts_validation::validate_receipt_size(receipts_serialized.len()) {
+        if let Err(e) = crate::receipts_validation::validate_receipt_size(receipts_serialized.len())
+        {
             return Err(PyError::value(format!(
                 "Receipt size validation failed: {}. Encoded size: {} bytes, Receipt count: {}",
                 e,
@@ -5092,7 +5091,10 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 {
                     // Use cached serialized receipts for telemetry (avoid third encoding)
-                    crate::telemetry::receipts::record_receipts(&block.receipts, receipts_serialized.len());
+                    crate::telemetry::receipts::record_receipts(
+                        &block.receipts,
+                        receipts_serialized.len(),
+                    );
                 }
                 let key = format!("base_fee:{}", block.index);
                 let fee_bytes = block_base_fee.to_le_bytes();
@@ -6939,31 +6941,66 @@ fn calculate_hash(
     receipts: &[Receipt],
 ) -> String {
     // CRITICAL: Receipt encoding must succeed for consensus integrity.
-    let receipts_bytes = crate::block_binary::encode_receipts(receipts)
-        .unwrap_or_else(|e| {
-            #[cfg(feature = "telemetry")]
-            crate::telemetry::receipts::RECEIPT_ENCODING_FAILURES_TOTAL.inc();
+    let receipts_bytes = crate::block_binary::encode_receipts(receipts).unwrap_or_else(|e| {
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::receipts::RECEIPT_ENCODING_FAILURES_TOTAL.inc();
 
-            panic!(
-                "CRITICAL: Receipt encoding failed during hash calculation. \
+        panic!(
+            "CRITICAL: Receipt encoding failed during hash calculation. \
                  This indicates a serious bug that will corrupt consensus. \
                  Error: {:?}, Receipt count: {}",
-                e, receipts.len()
-            );
-        });
+            e,
+            receipts.len()
+        );
+    });
 
     calculate_hash_with_cached_receipts(
-        index, prev, timestamp, nonce, difficulty, base_fee,
-        coin_c, coin_i, storage_sub, read_sub, read_sub_viewer,
-        read_sub_host, read_sub_hardware, read_sub_verifier, read_sub_liquidity,
-        ad_viewer, ad_host, ad_hardware, ad_verifier, ad_liquidity, ad_miner,
-        ad_host_it, ad_hardware_it, ad_verifier_it, ad_liquidity_it, ad_miner_it,
-        ad_total_usd_micros, ad_settlement_count,
-        ad_oracle_ct_price_usd_micros, ad_oracle_it_price_usd_micros,
-        compute_sub, proof_rebate, storage_sub_it, read_sub_it, compute_sub_it,
-        read_root, fee_checksum, txs, state_root,
-        l2_roots, l2_sizes, vdf_commit, vdf_output, vdf_proof,
-        retune_hint, &receipts_bytes
+        index,
+        prev,
+        timestamp,
+        nonce,
+        difficulty,
+        base_fee,
+        coin_c,
+        coin_i,
+        storage_sub,
+        read_sub,
+        read_sub_viewer,
+        read_sub_host,
+        read_sub_hardware,
+        read_sub_verifier,
+        read_sub_liquidity,
+        ad_viewer,
+        ad_host,
+        ad_hardware,
+        ad_verifier,
+        ad_liquidity,
+        ad_miner,
+        ad_host_it,
+        ad_hardware_it,
+        ad_verifier_it,
+        ad_liquidity_it,
+        ad_miner_it,
+        ad_total_usd_micros,
+        ad_settlement_count,
+        ad_oracle_ct_price_usd_micros,
+        ad_oracle_it_price_usd_micros,
+        compute_sub,
+        proof_rebate,
+        storage_sub_it,
+        read_sub_it,
+        compute_sub_it,
+        read_root,
+        fee_checksum,
+        txs,
+        state_root,
+        l2_roots,
+        l2_sizes,
+        vdf_commit,
+        vdf_output,
+        vdf_proof,
+        retune_hint,
+        &receipts_bytes,
     )
 }
 

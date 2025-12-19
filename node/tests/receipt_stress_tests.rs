@@ -6,12 +6,11 @@
 //! - Validation at scale
 //! - Memory pressure
 
-use the_block::receipts::{Receipt, StorageReceipt, ComputeReceipt, EnergyReceipt, AdReceipt};
-use the_block::receipts_validation::{
-    validate_receipt, validate_receipt_count, validate_receipt_size,
-    MAX_RECEIPTS_PER_BLOCK,
-};
 use the_block::block_binary::encode_receipts;
+use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
+use the_block::receipts_validation::{
+    validate_receipt, validate_receipt_count, validate_receipt_size, MAX_RECEIPTS_PER_BLOCK,
+};
 
 fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
     match receipt_type % 4 {
@@ -64,7 +63,11 @@ fn stress_max_receipts_per_block() {
     let encoded = encode_receipts(&receipts).expect("Failed to encode max receipts");
 
     // Verify encoded size is reasonable
-    println!("Max receipts ({}) encoded size: {} bytes", receipts.len(), encoded.len());
+    println!(
+        "Max receipts ({}) encoded size: {} bytes",
+        receipts.len(),
+        encoded.len()
+    );
     assert!(encoded.len() > 0);
     assert!(validate_receipt_size(encoded.len()).is_ok());
 }
@@ -83,18 +86,24 @@ fn stress_large_receipt_payload() {
     let long_id = "a".repeat(250); // Near MAX_STRING_FIELD_LENGTH
 
     let receipts: Vec<Receipt> = (0..1000)
-        .map(|i| Receipt::Storage(StorageReceipt {
-            contract_id: format!("{}_{}", long_id, i),
-            provider: format!("{}_{}", long_id, i),
-            bytes: u64::MAX / 2,
-            price_ct: u64::MAX / 2,
-            block_height: i,
-            provider_escrow: u64::MAX / 2,
-        }))
+        .map(|i| {
+            Receipt::Storage(StorageReceipt {
+                contract_id: format!("{}_{}", long_id, i),
+                provider: format!("{}_{}", long_id, i),
+                bytes: u64::MAX / 2,
+                price_ct: u64::MAX / 2,
+                block_height: i,
+                provider_escrow: u64::MAX / 2,
+            })
+        })
         .collect();
 
     let encoded = encode_receipts(&receipts).expect("Failed to encode large receipts");
-    println!("Large receipts ({}) encoded size: {} bytes", receipts.len(), encoded.len());
+    println!(
+        "Large receipts ({}) encoded size: {} bytes",
+        receipts.len(),
+        encoded.len()
+    );
     assert!(encoded.len() > 0);
 }
 
@@ -109,11 +118,18 @@ fn stress_encoding_overhead_within_limit() {
 
     // Should be well under the limit with normal-sized receipts
     assert!(validate_receipt_size(encoded.len()).is_ok());
-    println!("10,000 receipts encoded size: {} bytes ({:.2} MB)",
-             encoded.len(), encoded.len() as f64 / 1_000_000.0);
+    println!(
+        "10,000 receipts encoded size: {} bytes ({:.2} MB)",
+        encoded.len(),
+        encoded.len() as f64 / 1_000_000.0
+    );
 
     // Actual size should be reasonable (< 5MB for 10k receipts, well under the 10MB limit)
-    assert!(encoded.len() < 5_000_000, "Encoded size unexpectedly large: {}", encoded.len());
+    assert!(
+        encoded.len() < 5_000_000,
+        "Encoded size unexpectedly large: {}",
+        encoded.len()
+    );
 }
 
 #[test]
@@ -124,10 +140,22 @@ fn stress_mixed_receipt_types_at_scale() {
         .collect();
 
     // Count each type
-    let storage_count = receipts.iter().filter(|r| matches!(r, Receipt::Storage(_))).count();
-    let compute_count = receipts.iter().filter(|r| matches!(r, Receipt::Compute(_))).count();
-    let energy_count = receipts.iter().filter(|r| matches!(r, Receipt::Energy(_))).count();
-    let ad_count = receipts.iter().filter(|r| matches!(r, Receipt::Ad(_))).count();
+    let storage_count = receipts
+        .iter()
+        .filter(|r| matches!(r, Receipt::Storage(_)))
+        .count();
+    let compute_count = receipts
+        .iter()
+        .filter(|r| matches!(r, Receipt::Compute(_)))
+        .count();
+    let energy_count = receipts
+        .iter()
+        .filter(|r| matches!(r, Receipt::Energy(_)))
+        .count();
+    let ad_count = receipts
+        .iter()
+        .filter(|r| matches!(r, Receipt::Ad(_)))
+        .count();
 
     println!("Type distribution:");
     println!("  Storage: {}", storage_count);
@@ -175,7 +203,11 @@ fn stress_empty_receipts() {
 
     let encoded = encode_receipts(&receipts).expect("Failed to encode empty");
     // Empty receipts still have encoding overhead
-    assert!(encoded.len() < 100, "Empty encoding overhead too large: {}", encoded.len());
+    assert!(
+        encoded.len() < 100,
+        "Empty encoding overhead too large: {}",
+        encoded.len()
+    );
 }
 
 #[test]
@@ -193,18 +225,23 @@ fn stress_single_receipt() {
 fn stress_all_storage_receipts() {
     // Test homogeneous receipt type
     let receipts: Vec<Receipt> = (0..5000)
-        .map(|i| Receipt::Storage(StorageReceipt {
-            contract_id: format!("contract_{}", i),
-            provider: format!("provider_{}", i),
-            bytes: i * 1024,
-            price_ct: i * 10,
-            block_height: i,
-            provider_escrow: i * 100,
-        }))
+        .map(|i| {
+            Receipt::Storage(StorageReceipt {
+                contract_id: format!("contract_{}", i),
+                provider: format!("provider_{}", i),
+                bytes: i * 1024,
+                price_ct: i * 10,
+                block_height: i,
+                provider_escrow: i * 100,
+            })
+        })
         .collect();
 
     let encoded = encode_receipts(&receipts).expect("Failed to encode storage");
-    println!("5000 storage receipts encoded size: {} bytes", encoded.len());
+    println!(
+        "5000 storage receipts encoded size: {} bytes",
+        encoded.len()
+    );
     assert!(encoded.len() > 0);
 }
 
@@ -225,10 +262,18 @@ fn stress_memory_efficiency() {
     println!("Memory usage:");
     println!("  Receipt structs: ~{} bytes", receipt_memory);
     println!("  Encoded bytes: {} bytes", encoded_memory);
-    println!("  Ratio: {:.2}x", receipt_memory as f64 / encoded_memory as f64);
+    println!(
+        "  Ratio: {:.2}x",
+        receipt_memory as f64 / encoded_memory as f64
+    );
 
     // Serialized size is reasonable (within 3x of in-memory due to encoding overhead and string data)
-    assert!(encoded_memory < receipt_memory * 3, "Encoded too large: {} vs {}", encoded_memory, receipt_memory);
+    assert!(
+        encoded_memory < receipt_memory * 3,
+        "Encoded too large: {} vs {}",
+        encoded_memory,
+        receipt_memory
+    );
 }
 
 /// Performance regression test - encoding 1000 receipts should be fast
@@ -244,10 +289,18 @@ fn stress_encoding_performance() {
     let encoded = encode_receipts(&receipts).expect("Failed to encode");
     let duration = start.elapsed();
 
-    println!("Encoded 1000 receipts in {:?} ({} bytes)", duration, encoded.len());
+    println!(
+        "Encoded 1000 receipts in {:?} ({} bytes)",
+        duration,
+        encoded.len()
+    );
 
     // Should encode in under 100ms (very conservative)
-    assert!(duration.as_millis() < 100, "Encoding too slow: {:?}", duration);
+    assert!(
+        duration.as_millis() < 100,
+        "Encoding too slow: {:?}",
+        duration
+    );
 }
 
 #[test]
@@ -267,5 +320,9 @@ fn stress_validation_performance() {
     println!("Validated 10,000 receipts in {:?}", duration);
 
     // Should validate in under 100ms (very conservative)
-    assert!(duration.as_millis() < 100, "Validation too slow: {:?}", duration);
+    assert!(
+        duration.as_millis() < 100,
+        "Validation too slow: {:?}",
+        duration
+    );
 }

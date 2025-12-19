@@ -18,6 +18,7 @@ pub mod variance;
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
@@ -39,12 +40,11 @@ pub use store::{
     TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY,
     QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
-pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use treasury::{
-    parse_dependency_list, validate_disbursement_payload, DisbursementDetails,
-    DisbursementPayload, DisbursementProposalMetadata, DisbursementStatus,
-    DisbursementValidationError, SignedExecutionIntent, TreasuryBalanceEventKind,
-    TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
+    parse_dependency_list, validate_disbursement_payload, DisbursementDetails, DisbursementPayload,
+    DisbursementProposalMetadata, DisbursementStatus, DisbursementValidationError,
+    SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    TreasuryExecutorSnapshot,
 };
 
 /// Simplified address type reused across governance records.

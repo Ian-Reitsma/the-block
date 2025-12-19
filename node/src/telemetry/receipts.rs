@@ -3,222 +3,194 @@
 //! Tracks receipt emission, serialization size, and derivation performance.
 //! Enables monitoring of market activity at the consensus level.
 
+#[cfg(feature = "telemetry")]
+use super::{register_counter, register_gauge, register_histogram, register_int_gauge};
 use crate::receipts::Receipt;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::{IntCounter, Gauge, Histogram, IntGauge};
+use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_STORAGE: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipts_storage_total",
-        "Total storage receipts across all blocks"
+        "Total storage receipts across all blocks",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_COMPUTE: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipts_compute_total",
-        "Total compute receipts across all blocks"
+        "Total compute receipts across all blocks",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_ENERGY: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipts_energy_total",
-        "Total energy receipts across all blocks"
+        "Total energy receipts across all blocks",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_AD: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
-        "receipts_ad_total",
-        "Total ad receipts across all blocks"
-    )
-    .unwrap_or_else(|_| IntCounter::placeholder())
-});
+pub static RECEIPTS_AD: Lazy<IntCounter> =
+    Lazy::new(|| register_counter("receipts_ad_total", "Total ad receipts across all blocks"));
 
 /// Receipts in current block (gauge - resets per block)
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
-        "receipts_per_block",
-        "Number of receipts in current block"
-    )
-    .unwrap_or_else(|_| IntGauge::placeholder())
-});
+pub static RECEIPTS_PER_BLOCK: Lazy<IntGauge> =
+    Lazy::new(|| register_int_gauge("receipts_per_block", "Number of receipts in current block"));
 
 /// Storage receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_STORAGE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "receipts_storage_per_block",
-        "Number of storage receipts in current block"
+        "Number of storage receipts in current block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Compute receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_COMPUTE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "receipts_compute_per_block",
-        "Number of compute receipts in current block"
+        "Number of compute receipts in current block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Energy receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_ENERGY_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "receipts_energy_per_block",
-        "Number of energy receipts in current block"
+        "Number of energy receipts in current block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Ad receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_AD_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "receipts_ad_per_block",
-        "Number of ad receipts in current block"
+        "Number of ad receipts in current block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Total serialized bytes of receipts in current block
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_BYTES_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "receipt_bytes_per_block",
-        "Total serialized receipt bytes in current block"
+        "Total serialized receipt bytes in current block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Settlement amounts by market type (gauges for current block)
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_STORAGE: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "receipt_settlement_storage_ct",
-        "Total storage receipt settlement (CT) in current block"
+        "Total storage receipt settlement (CT) in current block",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_COMPUTE: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "receipt_settlement_compute_ct",
-        "Total compute receipt settlement (CT) in current block"
+        "Total compute receipt settlement (CT) in current block",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_ENERGY: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "receipt_settlement_energy_ct",
-        "Total energy receipt settlement (CT) in current block"
+        "Total energy receipt settlement (CT) in current block",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_AD: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "receipt_settlement_ad_ct",
-        "Total ad receipt settlement (CT) in current block"
+        "Total ad receipt settlement (CT) in current block",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Metrics derivation performance
 #[cfg(feature = "telemetry")]
 pub static METRICS_DERIVATION_DURATION_MS: Lazy<Histogram> = Lazy::new(|| {
-    runtime::telemetry::register_histogram!(
+    register_histogram(
         "metrics_derivation_duration_ms",
-        "Time to derive market metrics from receipts (milliseconds)"
+        "Time to derive market metrics from receipts (milliseconds)",
     )
-    .unwrap_or_else(|_| Histogram::placeholder())
 });
 
 /// Receipt encoding failures (critical metric)
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_ENCODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipt_encoding_failures_total",
-        "Total receipt encoding failures (CRITICAL - indicates data corruption risk)"
+        "Total receipt encoding failures (CRITICAL - indicates data corruption risk)",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Receipt validation failures
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_VALIDATION_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipt_validation_failures_total",
-        "Total receipt validation failures (malformed receipts)"
+        "Total receipt validation failures (malformed receipts)",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Receipt decoding failures (when reading blocks)
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_DECODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipt_decoding_failures_total",
-        "Total receipt decoding failures when reading blocks"
+        "Total receipt decoding failures when reading blocks",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Pending receipt depth gauges (per market)
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_STORAGE: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "pending_receipts_storage",
-        "Number of pending storage receipts waiting to be included in a block"
+        "Number of pending storage receipts waiting to be included in a block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_COMPUTE: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "pending_receipts_compute",
-        "Number of pending compute receipts waiting to be included in a block"
+        "Number of pending compute receipts waiting to be included in a block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_ENERGY: Lazy<IntGauge> = Lazy::new(|| {
-    runtime::telemetry::register_int_gauge!(
+    register_int_gauge(
         "pending_receipts_energy",
-        "Number of pending energy receipts waiting to be included in a block"
+        "Number of pending energy receipts waiting to be included in a block",
     )
-    .unwrap_or_else(|_| IntGauge::placeholder())
 });
 
 /// Receipt drain operations
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_DRAIN_OPERATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+    register_counter(
         "receipt_drain_operations_total",
-        "Total number of receipt drain operations across all markets"
+        "Total number of receipt drain operations across all markets",
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Record receipt emission and metrics

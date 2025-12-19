@@ -1,3 +1,5 @@
+extern crate foundation_serialization as serde;
+
 use crate::parse_utils::{
     parse_optional, parse_positional_u64, parse_u64, parse_u64_required, require_positional,
     take_string,
@@ -9,12 +11,12 @@ use cli_core::{
     parse::Matches,
 };
 use foundation_serialization::binary;
-use foundation_serialization::json::Value;
-use foundation_serialization::{json, Deserialize, Serialize};
+use foundation_serialization::json::{self, Value};
+use foundation_serialization::{Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry,
-    treasury::{ExpectedReceipt, QuorumSpec, parse_dependency_list},
+    treasury::{parse_dependency_list, ExpectedReceipt, QuorumSpec},
     DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
@@ -128,13 +130,13 @@ fn report_rpc_failure(rpc: &str, method: &str, err: &RpcClientError) {
                 match io_err.kind() {
                     io::ErrorKind::ConnectionRefused => {
                         eprintln!(
-                                "hint: the node rejected the connection; verify it is running and TB_RPC_ENDPOINT matches its listen address."
-                            );
+                            "hint: the node rejected the connection; verify it is running and TB_RPC_ENDPOINT matches its listen address."
+                        );
                     }
                     io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {
                         eprintln!(
-                                "hint: the connection dropped mid-request; check network stability or TLS configuration."
-                            );
+                            "hint: the connection dropped mid-request; check network stability or TLS configuration."
+                        );
                     }
                     _ => {}
                 }
@@ -281,65 +283,62 @@ pub struct TreasuryDisbursementQuery {
     pub max_status_ts: Option<u64>,
 }
 
-pub fn treasury_disbursement_params(query: &TreasuryDisbursementQuery) -> json::Value {
+pub fn treasury_disbursement_params(query: &TreasuryDisbursementQuery) -> Value {
     let mut params = json::Map::new();
     if let Some(filter) = query.status {
-        params.insert("status".into(), json::Value::String(filter.as_str().into()));
+        params.insert("status".into(), Value::String(filter.as_str().into()));
     }
     if let Some(cursor) = query.after_id {
-        params.insert("after_id".into(), json::Value::from(cursor));
+        params.insert("after_id".into(), Value::from(cursor));
     }
     if let Some(max) = query.limit {
-        params.insert("limit".into(), json::Value::from(max as u64));
+        params.insert("limit".into(), Value::from(max as u64));
     }
     if let Some(destination) = &query.destination {
-        params.insert(
-            "destination".into(),
-            json::Value::String(destination.clone()),
-        );
+        params.insert("destination".into(), Value::String(destination.clone()));
     }
     if let Some(min_epoch) = query.min_epoch {
-        params.insert("min_epoch".into(), json::Value::from(min_epoch));
+        params.insert("min_epoch".into(), Value::from(min_epoch));
     }
     if let Some(max_epoch) = query.max_epoch {
-        params.insert("max_epoch".into(), json::Value::from(max_epoch));
+        params.insert("max_epoch".into(), Value::from(max_epoch));
     }
     if let Some(min_amount_ct) = query.min_amount_ct {
-        params.insert("min_amount_ct".into(), json::Value::from(min_amount_ct));
+        params.insert("min_amount_ct".into(), Value::from(min_amount_ct));
     }
     if let Some(max_amount_ct) = query.max_amount_ct {
-        params.insert("max_amount_ct".into(), json::Value::from(max_amount_ct));
+        params.insert("max_amount_ct".into(), Value::from(max_amount_ct));
     }
     if let Some(min_amount_it) = query.min_amount_it {
-        params.insert("min_amount_it".into(), json::Value::from(min_amount_it));
+        params.insert("min_amount_it".into(), Value::from(min_amount_it));
     }
     if let Some(max_amount_it) = query.max_amount_it {
-        params.insert("max_amount_it".into(), json::Value::from(max_amount_it));
+        params.insert("max_amount_it".into(), Value::from(max_amount_it));
     }
     if let Some(min_created_at) = query.min_created_at {
-        params.insert("min_created_at".into(), json::Value::from(min_created_at));
+        params.insert("min_created_at".into(), Value::from(min_created_at));
     }
     if let Some(max_created_at) = query.max_created_at {
-        params.insert("max_created_at".into(), json::Value::from(max_created_at));
+        params.insert("max_created_at".into(), Value::from(max_created_at));
     }
     if let Some(min_status_ts) = query.min_status_ts {
-        params.insert("min_status_ts".into(), json::Value::from(min_status_ts));
+        params.insert("min_status_ts".into(), Value::from(min_status_ts));
     }
     if let Some(max_status_ts) = query.max_status_ts {
-        params.insert("max_status_ts".into(), json::Value::from(max_status_ts));
+        params.insert("max_status_ts".into(), Value::from(max_status_ts));
     }
-    json::Value::Object(params)
+    Value::Object(params)
 }
 
-pub fn treasury_history_params(after_id: Option<u64>, limit: Option<usize>) -> json::Value {
+pub fn treasury_history_params(after_id: Option<u64>, limit: Option<usize>) -> Value {
     let mut params = json::Map::new();
     if let Some(cursor) = after_id {
-        params.insert("after_id".into(), json::Value::from(cursor));
+        params.insert("after_id".into(), Value::from(cursor));
     }
     if let Some(max) = limit {
-        params.insert("limit".into(), json::Value::from(max as u64));
+        params.insert("limit".into(), Value::from(max as u64));
     }
-    json::Value::Object(params)
+    Value::Object(params)
 }
 
 pub fn combine_treasury_fetch_results(
@@ -1713,7 +1712,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 &client,
                 &rpc,
                 "gov.treasury.balance",
-                json::Value::Object(json::Map::new()),
+                Value::Object(json::Map::new()),
             )?;
             let balance_result = unwrap_rpc_result(balance_envelope)?;
 

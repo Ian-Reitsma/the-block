@@ -1,6 +1,6 @@
 use governance::{
-    DisbursementDetails, DisbursementPayload, DisbursementStatus, GovStore,
-    TreasuryBalanceEventKind, TreasuryDisbursement,
+    circuit_breaker::CircuitBreaker, DisbursementDetails, DisbursementPayload, DisbursementStatus,
+    GovStore, TreasuryBalanceEventKind, TreasuryDisbursement,
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -217,6 +217,8 @@ fn treasury_executor_stages_and_executes() {
         },
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
 
@@ -308,6 +310,8 @@ fn treasury_executor_reuses_staged_intents() {
         submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
     let mut attempts = 0;
@@ -403,6 +407,8 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
         },
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
     let mut observed_error = None;
@@ -491,6 +497,8 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
             submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
             dependency_check: dependency,
             nonce_floor: gate,
+            circuit_breaker: Arc::new(CircuitBreaker::default()),
+            circuit_breaker_telemetry: None,
         }
     };
 

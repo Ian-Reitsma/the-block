@@ -95,8 +95,7 @@ pub struct TreasuryExecutorConfig {
     /// Circuit breaker to prevent cascading failures during repeated submission errors
     pub circuit_breaker: Arc<CircuitBreaker>,
     /// Optional telemetry callback for circuit breaker state updates
-    pub circuit_breaker_telemetry:
-        Option<Arc<dyn Fn(u8, u64, u64) + Send + Sync>>,
+    pub circuit_breaker_telemetry: Option<Arc<dyn Fn(u8, u64, u64) + Send + Sync>>,
 }
 
 #[derive(Debug)]
@@ -278,7 +277,10 @@ fn run_executor_tick(
     if !config.circuit_breaker.allow_request() {
         let staged_total = store.load_execution_intents()?.len() as u64;
         snapshot.record_error(
-            format!("circuit_breaker_open state={:?}", config.circuit_breaker.state()),
+            format!(
+                "circuit_breaker_open state={:?}",
+                config.circuit_breaker.state()
+            ),
             0,
             staged_total,
         );

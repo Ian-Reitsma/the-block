@@ -6,12 +6,8 @@
 #[cfg(test)]
 mod tests {
     use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
-    use crate::store::{TreasuryExecutorConfig, TreasuryExecutorError};
-    use crate::treasury::{SignedExecutionIntent, TreasuryDisbursement, DisbursementStatus};
-    use std::sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    };
+    use crate::store::TreasuryExecutorError;
+    use std::sync::Arc;
     use std::time::Duration;
 
     /// Test that circuit breaker opens after threshold failures
@@ -103,12 +99,16 @@ mod tests {
     /// Test that circuit reopens on failure in half-open state
     #[test]
     fn test_circuit_reopens_on_half_open_failure() {
-        let breaker = CircuitBreaker::default();
+        let config = CircuitBreakerConfig {
+            timeout_secs: 0,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
 
         // Force to half-open
         breaker.force_open();
         std::thread::sleep(Duration::from_millis(10));
-        breaker.state.store(CircuitState::HalfOpen as u8, Ordering::Release);
+        breaker.allow_request();
         assert_eq!(breaker.state(), CircuitState::HalfOpen);
 
         // Any failure in half-open should reopen
@@ -214,10 +214,10 @@ mod tests {
     #[test]
     fn test_production_config() {
         let config = CircuitBreakerConfig {
-            failure_threshold: 5,      // Open after 5 failures
-            success_threshold: 2,       // Close after 2 successes
-            timeout_secs: 60,          // Stay open for 60 seconds
-            window_secs: 300,          // 5 minute failure window
+            failure_threshold: 5, // Open after 5 failures
+            success_threshold: 2, // Close after 2 successes
+            timeout_secs: 60,     // Stay open for 60 seconds
+            window_secs: 300,     // 5 minute failure window
         };
         let breaker = CircuitBreaker::new(config);
 

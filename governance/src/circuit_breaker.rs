@@ -58,10 +58,10 @@ pub struct CircuitBreakerConfig {
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 5,      // Open after 5 failures
-            success_threshold: 2,       // Close after 2 successes
-            timeout_secs: 60,          // Stay open for 60 seconds
-            window_secs: 300,          // 5 minute failure window
+            failure_threshold: 5, // Open after 5 failures
+            success_threshold: 2, // Close after 2 successes
+            timeout_secs: 60,     // Stay open for 60 seconds
+            window_secs: 300,     // 5 minute failure window
         }
     }
 }
@@ -220,7 +220,8 @@ impl CircuitBreaker {
     }
 
     fn transition_to_open(&self) {
-        self.state.store(CircuitState::Open as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::Open as u8, Ordering::Release);
         *self.last_state_change.lock().unwrap() = Instant::now();
         self.success_count.store(0, Ordering::Release);
 
@@ -235,7 +236,8 @@ impl CircuitBreaker {
     }
 
     fn transition_to_half_open(&self) {
-        self.state.store(CircuitState::HalfOpen as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::HalfOpen as u8, Ordering::Release);
         *self.last_state_change.lock().unwrap() = Instant::now();
         self.success_count.store(0, Ordering::Release);
 
@@ -248,7 +250,8 @@ impl CircuitBreaker {
     }
 
     fn transition_to_closed(&self) {
-        self.state.store(CircuitState::Closed as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::Closed as u8, Ordering::Release);
         *self.last_state_change.lock().unwrap() = Instant::now();
         self.failure_count.store(0, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
@@ -354,7 +357,8 @@ mod tests {
         assert_eq!(cb.state(), CircuitState::Open);
 
         // Transition to half-open
-        cb.state.store(CircuitState::HalfOpen as u8, Ordering::Release);
+        cb.state
+            .store(CircuitState::HalfOpen as u8, Ordering::Release);
 
         // Record successes
         cb.record_success();
@@ -371,7 +375,8 @@ mod tests {
         let cb = CircuitBreaker::default();
 
         // Force to half-open
-        cb.state.store(CircuitState::HalfOpen as u8, Ordering::Release);
+        cb.state
+            .store(CircuitState::HalfOpen as u8, Ordering::Release);
         assert_eq!(cb.state(), CircuitState::HalfOpen);
 
         // Any failure reopens

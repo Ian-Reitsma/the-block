@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use the_block::receipts::{Receipt, StorageReceipt, ComputeReceipt, EnergyReceipt, AdReceipt};
-use the_block::block_binary::{encode_receipts, decode_receipts};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use the_block::block_binary::{decode_receipts, encode_receipts};
+use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 
 fn create_storage_receipt(id: u64) -> Receipt {
     Receipt::Storage(StorageReceipt {
@@ -68,16 +68,18 @@ fn bench_receipt_encoding(c: &mut Criterion) {
         });
 
         // Storage-only receipts (best case)
-        let storage_receipts: Vec<Receipt> = (0..*size)
-            .map(create_storage_receipt)
-            .collect();
+        let storage_receipts: Vec<Receipt> = (0..*size).map(create_storage_receipt).collect();
 
-        group.bench_with_input(BenchmarkId::new("storage_only", size), &storage_receipts, |b, receipts| {
-            b.iter(|| {
-                let encoded = encode_receipts(black_box(receipts)).unwrap();
-                black_box(encoded);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("storage_only", size),
+            &storage_receipts,
+            |b, receipts| {
+                b.iter(|| {
+                    let encoded = encode_receipts(black_box(receipts)).unwrap();
+                    black_box(encoded);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -122,13 +124,17 @@ fn bench_receipt_roundtrip(c: &mut Criterion) {
             })
             .collect();
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &receipts, |b, receipts| {
-            b.iter(|| {
-                let encoded = encode_receipts(black_box(receipts)).unwrap();
-                let decoded = decode_receipts(black_box(&encoded)).unwrap();
-                black_box(decoded);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &receipts,
+            |b, receipts| {
+                b.iter(|| {
+                    let encoded = encode_receipts(black_box(receipts)).unwrap();
+                    let decoded = decode_receipts(black_box(&encoded)).unwrap();
+                    black_box(decoded);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -150,18 +156,20 @@ fn bench_receipt_validation(c: &mut Criterion) {
 
     // Validate many receipts
     for size in [10, 100, 1000, 10000].iter() {
-        let receipts: Vec<Receipt> = (0..*size)
-            .map(|i| create_storage_receipt(i))
-            .collect();
+        let receipts: Vec<Receipt> = (0..*size).map(|i| create_storage_receipt(i)).collect();
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &receipts, |b, receipts| {
-            b.iter(|| {
-                for (i, receipt) in receipts.iter().enumerate() {
-                    let result = validate_receipt(black_box(receipt), black_box(i as u64));
-                    black_box(result);
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &receipts,
+            |b, receipts| {
+                b.iter(|| {
+                    for (i, receipt) in receipts.iter().enumerate() {
+                        let result = validate_receipt(black_box(receipt), black_box(i as u64));
+                        black_box(result);
+                    }
+                });
+            },
+        );
     }
 
     group.finish();

@@ -1,8 +1,8 @@
+use crate::governance::treasury::parse_dependency_list;
 use crate::governance::{
     CircuitBreaker, CircuitBreakerConfig, DisbursementStatus, GovStore, SignedExecutionIntent,
     TreasuryDisbursement, TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle,
 };
-use crate::governance::treasury::parse_dependency_list;
 use crate::transaction::{binary, sign_tx, RawTxPayload};
 use crate::{Account, Blockchain, TxAdmissionError, EPOCH_BLOCKS};
 use crypto_suite::hex;
@@ -262,13 +262,9 @@ pub fn spawn_executor(
     let circuit_breaker_telemetry = {
         #[cfg(feature = "telemetry")]
         {
-            Some(Arc::new(
-                |state: u8, failures: u64, successes: u64| {
-                    crate::telemetry::treasury::set_circuit_breaker_state(
-                        state, failures, successes,
-                    );
-                },
-            ) as Arc<dyn Fn(u8, u64, u64) + Send + Sync>)
+            Some(Arc::new(|state: u8, failures: u64, successes: u64| {
+                crate::telemetry::treasury::set_circuit_breaker_state(state, failures, successes);
+            }) as Arc<dyn Fn(u8, u64, u64) + Send + Sync>)
         }
         #[cfg(not(feature = "telemetry"))]
         {

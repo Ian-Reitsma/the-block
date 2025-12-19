@@ -19,12 +19,29 @@ pub const MIN_PAYMENT_FOR_RECEIPT_CT: u64 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
-    TooManyReceipts { count: usize, max: usize },
-    ReceiptsTooLarge { bytes: usize, max: usize },
-    BlockHeightMismatch { receipt_height: u64, block_height: u64 },
-    EmptyStringField { field: &'static str },
-    StringFieldTooLong { field: &'static str, length: usize, max: usize },
-    ZeroValue { field: &'static str },
+    TooManyReceipts {
+        count: usize,
+        max: usize,
+    },
+    ReceiptsTooLarge {
+        bytes: usize,
+        max: usize,
+    },
+    BlockHeightMismatch {
+        receipt_height: u64,
+        block_height: u64,
+    },
+    EmptyStringField {
+        field: &'static str,
+    },
+    StringFieldTooLong {
+        field: &'static str,
+        length: usize,
+        max: usize,
+    },
+    ZeroValue {
+        field: &'static str,
+    },
 }
 
 impl std::fmt::Display for ValidationError {
@@ -36,14 +53,25 @@ impl std::fmt::Display for ValidationError {
             ValidationError::ReceiptsTooLarge { bytes, max } => {
                 write!(f, "Receipts too large: {} bytes (max: {})", bytes, max)
             }
-            ValidationError::BlockHeightMismatch { receipt_height, block_height } => {
-                write!(f, "Receipt block height {} doesn't match block height {}", receipt_height, block_height)
+            ValidationError::BlockHeightMismatch {
+                receipt_height,
+                block_height,
+            } => {
+                write!(
+                    f,
+                    "Receipt block height {} doesn't match block height {}",
+                    receipt_height, block_height
+                )
             }
             ValidationError::EmptyStringField { field } => {
                 write!(f, "Empty string field: {}", field)
             }
             ValidationError::StringFieldTooLong { field, length, max } => {
-                write!(f, "String field {} too long: {} chars (max: {})", field, length, max)
+                write!(
+                    f,
+                    "String field {} too long: {} chars (max: {})",
+                    field, length, max
+                )
             }
             ValidationError::ZeroValue { field } => {
                 write!(f, "Zero value in field: {}", field)
@@ -82,10 +110,14 @@ pub fn validate_receipt(receipt: &Receipt, block_height: u64) -> Result<(), Vali
             validate_string_field("provider", &r.provider)?;
 
             if r.compute_units == 0 {
-                return Err(ValidationError::ZeroValue { field: "compute_units" });
+                return Err(ValidationError::ZeroValue {
+                    field: "compute_units",
+                });
             }
             if r.payment_ct == 0 {
-                return Err(ValidationError::ZeroValue { field: "payment_ct" });
+                return Err(ValidationError::ZeroValue {
+                    field: "payment_ct",
+                });
             }
         }
         Receipt::Energy(r) => {
@@ -93,7 +125,9 @@ pub fn validate_receipt(receipt: &Receipt, block_height: u64) -> Result<(), Vali
             validate_string_field("provider", &r.provider)?;
 
             if r.energy_units == 0 {
-                return Err(ValidationError::ZeroValue { field: "energy_units" });
+                return Err(ValidationError::ZeroValue {
+                    field: "energy_units",
+                });
             }
             if r.price_ct == 0 {
                 return Err(ValidationError::ZeroValue { field: "price_ct" });
@@ -104,7 +138,9 @@ pub fn validate_receipt(receipt: &Receipt, block_height: u64) -> Result<(), Vali
             validate_string_field("publisher", &r.publisher)?;
 
             if r.impressions == 0 {
-                return Err(ValidationError::ZeroValue { field: "impressions" });
+                return Err(ValidationError::ZeroValue {
+                    field: "impressions",
+                });
             }
             if r.spend_ct == 0 {
                 return Err(ValidationError::ZeroValue { field: "spend_ct" });
@@ -186,7 +222,9 @@ mod tests {
 
         assert!(matches!(
             validate_receipt(&receipt, 100),
-            Err(ValidationError::EmptyStringField { field: "contract_id" })
+            Err(ValidationError::EmptyStringField {
+                field: "contract_id"
+            })
         ));
     }
 
@@ -229,7 +267,10 @@ mod tests {
         let result = validate_receipt_count(15_000);
         assert!(matches!(
             result,
-            Err(ValidationError::TooManyReceipts { count: 15_000, max: 10_000 })
+            Err(ValidationError::TooManyReceipts {
+                count: 15_000,
+                max: 10_000
+            })
         ));
     }
 
@@ -238,7 +279,10 @@ mod tests {
         let result = validate_receipt_size(15_000_000);
         assert!(matches!(
             result,
-            Err(ValidationError::ReceiptsTooLarge { bytes: 15_000_000, max: 10_000_000 })
+            Err(ValidationError::ReceiptsTooLarge {
+                bytes: 15_000_000,
+                max: 10_000_000
+            })
         ));
     }
 
@@ -256,7 +300,10 @@ mod tests {
 
         assert!(matches!(
             validate_receipt(&receipt, 100),
-            Err(ValidationError::StringFieldTooLong { field: "contract_id", .. })
+            Err(ValidationError::StringFieldTooLong {
+                field: "contract_id",
+                ..
+            })
         ));
     }
 }

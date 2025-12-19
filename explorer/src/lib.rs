@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
 use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
+use the_block::governance::treasury::parse_dependency_list;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
@@ -33,7 +34,6 @@ use the_block::{
     transaction::SignedTransaction,
     Block, BlockTreasuryEvent,
 };
-use the_block::governance::treasury::parse_dependency_list;
 pub mod ad_view;
 mod ai_summary;
 pub mod bridge_view;

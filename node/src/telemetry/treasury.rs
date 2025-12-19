@@ -10,10 +10,11 @@
 //! - Unknown labels are mapped to "other" to bound cardinality
 
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::{IntCounter, Gauge, Histogram, Registry};
+use super::{register_counter_vec, register_gauge, register_gauge_vec, register_histogram};
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
-use std::collections::HashSet;
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::{Gauge, GaugeVec, Histogram, IntCounterVec};
 
 // ========================================
 // LABEL SANITIZATION & CARDINALITY LIMITS
@@ -36,7 +37,9 @@ fn sanitize_status_label(status: &str) -> &'static str {
 /// Validate and sanitize an error reason label
 fn sanitize_error_reason_label(reason: &str) -> &'static str {
     match reason {
-        r if r.contains("insufficient") || r.contains("balance") => error_reason::INSUFFICIENT_FUNDS,
+        r if r.contains("insufficient") || r.contains("balance") => {
+            error_reason::INSUFFICIENT_FUNDS
+        }
         r if r.contains("target") || r.contains("destination") => error_reason::INVALID_TARGET,
         r if r.contains("stale") || r.contains("dependency") => error_reason::STALE_DEPENDENCY,
         r if r.contains("circular") => error_reason::CIRCULAR_DEPENDENCY,
@@ -64,22 +67,22 @@ fn sanitize_dependency_failure_label(failure_type: &str) -> &'static str {
 
 /// Total disbursements by status (draft, voting, queued, timelocked, executed, finalized, rolled_back)
 #[cfg(feature = "telemetry")]
-static GOVERNANCE_DISBURSEMENTS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+static GOVERNANCE_DISBURSEMENTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "governance_disbursements_total",
-        "Total number of treasury disbursements by final status"
+        "Total number of treasury disbursements by final status",
+        &["status"],
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Treasury execution errors by reason
 #[cfg(feature = "telemetry")]
-static TREASURY_EXECUTION_ERRORS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+static TREASURY_EXECUTION_ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "treasury_execution_errors_total",
-        "Total execution errors categorized by failure reason"
+        "Total execution errors categorized by failure reason",
+        &["reason"],
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 // ========================================
@@ -89,21 +92,19 @@ static TREASURY_EXECUTION_ERRORS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 /// Current treasury balance in CT
 #[cfg(feature = "telemetry")]
 static TREASURY_BALANCE_CT: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "treasury_balance_ct",
-        "Current treasury balance in CT (consumer tokens)"
+        "Current treasury balance in CT (consumer tokens)",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Current treasury balance in IT
 #[cfg(feature = "telemetry")]
 static TREASURY_BALANCE_IT: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "treasury_balance_it",
-        "Current treasury balance in IT (industrial tokens)"
+        "Current treasury balance in IT (industrial tokens)",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 // ========================================
@@ -112,12 +113,12 @@ static TREASURY_BALANCE_IT: Lazy<Gauge> = Lazy::new(|| {
 
 /// Number of pending disbursements by status
 #[cfg(feature = "telemetry")]
-static TREASURY_DISBURSEMENT_BACKLOG: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+static TREASURY_DISBURSEMENT_BACKLOG: Lazy<GaugeVec> = Lazy::new(|| {
+    register_gauge_vec(
         "treasury_disbursement_backlog",
-        "Current count of pending disbursements awaiting execution, by status"
+        "Current count of pending disbursements awaiting execution, by status",
+        &["status"],
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 // ========================================
@@ -128,31 +129,28 @@ static TREASURY_DISBURSEMENT_BACKLOG: Lazy<Gauge> = Lazy::new(|| {
 /// Values: 0 = Closed (normal), 1 = Open (rejecting), 2 = Half-Open (testing recovery)
 #[cfg(feature = "telemetry")]
 static TREASURY_CIRCUIT_BREAKER_STATE: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "treasury_circuit_breaker_state",
-        "Current state of treasury executor circuit breaker: 0=closed, 1=open, 2=half_open"
+        "Current state of treasury executor circuit breaker: 0=closed, 1=open, 2=half_open",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Failure count in current circuit breaker window
 #[cfg(feature = "telemetry")]
 static TREASURY_CIRCUIT_BREAKER_FAILURES: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "treasury_circuit_breaker_failures",
-        "Current failure count in circuit breaker window"
+        "Current failure count in circuit breaker window",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 /// Success count in half-open state
 #[cfg(feature = "telemetry")]
 static TREASURY_CIRCUIT_BREAKER_SUCCESSES: Lazy<Gauge> = Lazy::new(|| {
-    runtime::telemetry::register_gauge!(
+    register_gauge(
         "treasury_circuit_breaker_successes",
-        "Consecutive successes in half-open state"
+        "Consecutive successes in half-open state",
     )
-    .unwrap_or_else(|_| Gauge::placeholder())
 });
 
 // ========================================
@@ -162,21 +160,19 @@ static TREASURY_CIRCUIT_BREAKER_SUCCESSES: Lazy<Gauge> = Lazy::new(|| {
 /// Time from queued to executed (seconds)
 #[cfg(feature = "telemetry")]
 static TREASURY_DISBURSEMENT_LAG_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    runtime::telemetry::register_histogram!(
+    register_histogram(
         "treasury_disbursement_lag_seconds",
-        "Duration from disbursement queued to executed (seconds)"
+        "Duration from disbursement queued to executed (seconds)",
     )
-    .unwrap_or_else(|_| Histogram::placeholder())
 });
 
 /// Executor tick duration (seconds)
 #[cfg(feature = "telemetry")]
 static TREASURY_EXECUTOR_TICK_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    runtime::telemetry::register_histogram!(
+    register_histogram(
         "treasury_executor_tick_duration_seconds",
-        "Time taken by treasury executor to process one tick"
+        "Time taken by treasury executor to process one tick",
     )
-    .unwrap_or_else(|_| Histogram::placeholder())
 });
 
 // ========================================
@@ -185,12 +181,12 @@ static TREASURY_EXECUTOR_TICK_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
 
 /// Dependency validation failures
 #[cfg(feature = "telemetry")]
-static TREASURY_DEPENDENCY_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    runtime::telemetry::register_int_counter!(
+static TREASURY_DEPENDENCY_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
         "treasury_dependency_failures_total",
-        "Total dependency validation failures (circular, stale, missing)"
+        "Total dependency validation failures (circular, stale, missing)",
+        &["failure_type"],
     )
-    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 // ========================================

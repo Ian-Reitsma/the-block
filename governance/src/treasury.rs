@@ -547,10 +547,7 @@ pub fn is_eligible_for_execution(
         }
         _ => {
             return Err(DisbursementError::ValidationFailed {
-                reason: format!(
-                    "Disbursement {} not in Timelocked state",
-                    disbursement.id
-                ),
+                reason: format!("Disbursement {} not in Timelocked state", disbursement.id),
             });
         }
     }

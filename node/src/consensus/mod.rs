@@ -37,7 +37,7 @@ consensus!(
 );
 consensus!(
     pub const GENESIS_HASH: &str =
-        "2fe62d67ce9a96a1d8eac1b28ad9c484e64407ead8256ed6d86b8c66f7f1b96d",
+        "9a97fdf7ce56c92caa1f64efbe5d892fc616884d68dc67ec6df2e3649e03648b",
     "hard-coded genesis block hash"
 );
 

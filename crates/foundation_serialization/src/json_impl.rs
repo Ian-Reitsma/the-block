@@ -494,6 +494,10 @@ impl Value {
         matches!(self, Value::Object(_))
     }
 
+    pub fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
     pub fn as_object(&self) -> Option<&Map> {
         if let Value::Object(map) = self {
             Some(map)

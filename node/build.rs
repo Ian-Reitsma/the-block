@@ -21,7 +21,7 @@ fn write_genesis_stub() {
         let mut path = PathBuf::from(out_dir);
         path.push("genesis_hash.txt");
         const PLACEHOLDER: &str =
-            "2fe62d67ce9a96a1d8eac1b28ad9c484e64407ead8256ed6d86b8c66f7f1b96d";
+            "9a97fdf7ce56c92caa1f64efbe5d892fc616884d68dc67ec6df2e3649e03648b";
         if let Err(err) = fs::write(&path, PLACEHOLDER) {
             panic!("failed to write genesis hash stub: {err}");
         }

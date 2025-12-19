@@ -24,7 +24,7 @@ fn test_contract() -> StorageContract {
 fn market_persists_contracts_and_records_proofs() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("market.db");
-    let market = StorageMarket::open(&db_path).expect("open");
+    let mut market = StorageMarket::open(&db_path).expect("open");
     let contract = test_contract();
     let replica = ReplicaIncentive::new("prov".into(), 4, 6, 72);
     market
