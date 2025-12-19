@@ -127,6 +127,7 @@ All remaining detail sits in six focused guides:
 - [`docs/developer_handbook.md`](developer_handbook.md) — environment setup, coding standards, testing/fuzzing, simulation, dependency policy, tooling.
 - [`docs/apis_and_tooling.md`](apis_and_tooling.md) — JSON-RPC, CLI, gateway HTTP & DNS, explorer, probe CLI, metrics endpoints, schema references.
 - [`docs/subsystem_atlas.md`](subsystem_atlas.md) — workspace atlas + node subsystem index that maps every directory/file to plain-English context so newcomers know where to start.
+- **🆕 [`RECEIPT_INTEGRATION_INDEX.md`](../RECEIPT_INTEGRATION_INDEX.md) — Receipt integration guide**: Market audit trails, consensus validation, telemetry system, metrics derivation. See this for the complete receipt integration status, implementation guides, and next steps (December 2025).
 
 For historical breadcrumbs the removed per-subsystem files now redirect through [`docs/LEGACY_MAPPING.md`](LEGACY_MAPPING.md).
 

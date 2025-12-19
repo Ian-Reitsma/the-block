@@ -46,16 +46,12 @@ tb_prop_test!(dedup_entries_expire, |runner| {
             assert!(relay.should_process_at(&msg, after));
         })
         .expect("register deterministic case");
-
 });
 
 tb_prop_test!(fanout_respects_configuration, |runner| {
     runner
         .add_case("fanout bounds coverage", || {
-            const CASES: &[(usize, usize, usize, usize)] = &[
-                (2, 1, 1, 4),
-                (5, 2, 2, 10),
-            ];
+            const CASES: &[(usize, usize, usize, usize)] = &[(2, 1, 1, 4), (5, 2, 2, 10)];
             for &(min, base_delta, max_delta, peers_count) in CASES {
                 let base = min + base_delta;
                 let max = base + max_delta;

@@ -17,7 +17,9 @@ pub fn ensure_inhouse_backend() {
 
 pub fn websocket_test_guard() -> MutexGuard<'static, ()> {
     static GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-    GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub async fn read_handshake_request(stream: &mut TcpStream) -> String {

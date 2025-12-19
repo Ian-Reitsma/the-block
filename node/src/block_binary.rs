@@ -5,7 +5,10 @@ use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
-use crate::{Block, BlockTreasuryEvent, SignedTransaction, TokenAmount};
+use crate::{
+    AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, Receipt,
+    SignedTransaction, StorageReceipt, TokenAmount,
+};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -135,6 +138,13 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
                 }
             });
         }
+        struct_writer.field_with("receipts", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_receipts(field_writer, &block.receipts) {
+                    result = Err(err);
+                }
+            }
+        });
     });
     result
 }
@@ -191,6 +201,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut dilithium_pubkey = None;
     #[cfg(feature = "quantum")]
     let mut dilithium_sig = None;
+    let mut receipts = None;
 
     decode_struct(reader, None, |key, reader| match key {
         "index" => assign_once(&mut index, reader.read_u64()?, "index"),
@@ -310,6 +321,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         ),
         #[cfg(feature = "quantum")]
         "dilithium_sig" => assign_once(&mut dilithium_sig, reader.read_bytes()?, "dilithium_sig"),
+        "receipts" => assign_once(&mut receipts, read_receipts(reader)?, "receipts"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
@@ -365,6 +377,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         dilithium_pubkey: dilithium_pubkey.unwrap_or_default(),
         #[cfg(feature = "quantum")]
         dilithium_sig: dilithium_sig.unwrap_or_default(),
+        receipts: receipts.unwrap_or_default(),
     })
 }
 
@@ -425,6 +438,140 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
             tx_hash: tx_hash.unwrap_or_default(),
             executed_at: executed_at.unwrap_or_default(),
         })
+    })
+}
+
+fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()> {
+    write_vec(writer, receipts, "receipts", |writer, receipt| {
+        writer.write_struct(|struct_writer| match receipt {
+            Receipt::Storage(r) => {
+                struct_writer.field_string("type", "storage");
+                struct_writer.field_string("contract_id", &r.contract_id);
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_u64("bytes", r.bytes);
+                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_u64("provider_escrow", r.provider_escrow);
+            }
+            Receipt::Compute(r) => {
+                struct_writer.field_string("type", "compute");
+                struct_writer.field_string("job_id", &r.job_id);
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_u64("compute_units", r.compute_units);
+                struct_writer.field_u64("payment_ct", r.payment_ct);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_u64("verified", if r.verified { 1 } else { 0 });
+            }
+            Receipt::Energy(r) => {
+                struct_writer.field_string("type", "energy");
+                struct_writer.field_string("contract_id", &r.contract_id);
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_u64("energy_units", r.energy_units);
+                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_with("proof_hash", |field_writer| {
+                    write_fixed(field_writer, &r.proof_hash);
+                });
+            }
+            Receipt::Ad(r) => {
+                struct_writer.field_string("type", "ad");
+                struct_writer.field_string("campaign_id", &r.campaign_id);
+                struct_writer.field_string("publisher", &r.publisher);
+                struct_writer.field_u64("impressions", r.impressions);
+                struct_writer.field_u64("spend_ct", r.spend_ct);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_u64("conversions", r.conversions as u64);
+            }
+        });
+        Ok(())
+    })
+}
+
+fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
+    read_vec(reader, |reader| {
+        let mut receipt_type = None;
+        let mut contract_id = None;
+        let mut job_id = None;
+        let mut campaign_id = None;
+        let mut provider = None;
+        let mut publisher = None;
+        let mut bytes = None;
+        let mut compute_units = None;
+        let mut energy_units = None;
+        let mut impressions = None;
+        let mut price_ct = None;
+        let mut payment_ct = None;
+        let mut spend_ct = None;
+        let mut block_height = None;
+        let mut provider_escrow = None;
+        let mut verified = None;
+        let mut proof_hash = None;
+        let mut conversions = None;
+
+        decode_struct(reader, None, |key, reader| match key {
+            "type" => assign_once(&mut receipt_type, reader.read_string()?, "type"),
+            "contract_id" => assign_once(&mut contract_id, reader.read_string()?, "contract_id"),
+            "job_id" => assign_once(&mut job_id, reader.read_string()?, "job_id"),
+            "campaign_id" => assign_once(&mut campaign_id, reader.read_string()?, "campaign_id"),
+            "provider" => assign_once(&mut provider, reader.read_string()?, "provider"),
+            "publisher" => assign_once(&mut publisher, reader.read_string()?, "publisher"),
+            "bytes" => assign_once(&mut bytes, reader.read_u64()?, "bytes"),
+            "compute_units" => assign_once(&mut compute_units, reader.read_u64()?, "compute_units"),
+            "energy_units" => assign_once(&mut energy_units, reader.read_u64()?, "energy_units"),
+            "impressions" => assign_once(&mut impressions, reader.read_u64()?, "impressions"),
+            "price_ct" => assign_once(&mut price_ct, reader.read_u64()?, "price_ct"),
+            "payment_ct" => assign_once(&mut payment_ct, reader.read_u64()?, "payment_ct"),
+            "spend_ct" => assign_once(&mut spend_ct, reader.read_u64()?, "spend_ct"),
+            "block_height" => assign_once(&mut block_height, reader.read_u64()?, "block_height"),
+            "provider_escrow" => {
+                assign_once(&mut provider_escrow, reader.read_u64()?, "provider_escrow")
+            }
+            "verified" => assign_once(&mut verified, reader.read_u64()?, "verified"),
+            "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
+            "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
+            other => Err(DecodeError::UnknownField(other.to_string())),
+        })?;
+
+        let receipt_type = receipt_type.ok_or(DecodeError::MissingField("type"))?;
+        match receipt_type.as_str() {
+            "storage" => Ok(Receipt::Storage(StorageReceipt {
+                contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                bytes: bytes.ok_or(DecodeError::MissingField("bytes"))?,
+                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                provider_escrow: provider_escrow
+                    .ok_or(DecodeError::MissingField("provider_escrow"))?,
+            })),
+            "compute" => Ok(Receipt::Compute(ComputeReceipt {
+                job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                compute_units: compute_units.ok_or(DecodeError::MissingField("compute_units"))?,
+                payment_ct: payment_ct.ok_or(DecodeError::MissingField("payment_ct"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
+            })),
+            "energy" => Ok(Receipt::Energy(EnergyReceipt {
+                contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                energy_units: energy_units.ok_or(DecodeError::MissingField("energy_units"))?,
+                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                proof_hash: proof_hash.ok_or(DecodeError::MissingField("proof_hash"))?,
+            })),
+            "ad" => Ok(Receipt::Ad(AdReceipt {
+                campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,
+                publisher: publisher.ok_or(DecodeError::MissingField("publisher"))?,
+                impressions: impressions.ok_or(DecodeError::MissingField("impressions"))?,
+                spend_ct: spend_ct.ok_or(DecodeError::MissingField("spend_ct"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                conversions: conversions.ok_or(DecodeError::MissingField("conversions"))? as u32,
+            })),
+            _ => Err(DecodeError::InvalidFieldValue {
+                field: "type",
+                reason: format!("unknown receipt type: {}", receipt_type),
+            }),
+        }
     })
 }
 
@@ -518,6 +665,31 @@ fn read_retune_hint(reader: &mut Reader<'_>) -> Result<i8, DecodeError> {
     })
 }
 
+/// Encode receipts to bytes for block hashing (consensus-critical)
+///
+/// This function serializes receipts into the canonical binary format
+/// for inclusion in block hash calculation. The serialized bytes ensure
+/// deterministic hashing across all nodes.
+///
+/// # Arguments
+/// * `receipts` - Slice of receipts to serialize
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` - Serialized receipt bytes
+/// * `Err(EncodeError)` - If serialization fails
+///
+/// # Example
+/// ```ignore
+/// let receipts = vec![Receipt::Ad(ad_receipt)];
+/// let bytes = encode_receipts(&receipts)?;
+/// // Use bytes in BlockEncoder for hashing
+/// ```
+pub fn encode_receipts(receipts: &[Receipt]) -> EncodeResult<Vec<u8>> {
+    let mut writer = Writer::with_capacity(receipts.len() * 256); // Estimate 256 bytes per receipt
+    write_receipts(&mut writer, receipts)?;
+    Ok(writer.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +777,7 @@ mod tests {
             dilithium_pubkey: vec![1, 3, 5],
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![2, 4, 6],
+            receipts: Vec::new(),
         }
     }
 

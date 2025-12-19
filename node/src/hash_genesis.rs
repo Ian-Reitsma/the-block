@@ -48,6 +48,7 @@ pub const fn calculate_genesis_hash() -> &'static str {
         vdf_commit: [0; 32],
         vdf_output: [0; 32],
         vdf_proof: &[],
+        receipts_serialized: &[],
     }
     .const_hash()
 }
@@ -101,6 +102,7 @@ pub fn calculate_genesis_hash_runtime() -> String {
         vdf_commit: [0; 32],
         vdf_output: [0; 32],
         vdf_proof: &[],
+        receipts_serialized: &[],
     }
     .hash()
 }

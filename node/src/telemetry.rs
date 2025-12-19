@@ -121,6 +121,8 @@ struct GovernanceWebhookPayload<'a> {
     proposal_id: u64,
 }
 
+pub mod metrics;
+pub mod receipts;
 pub mod summary;
 
 #[cfg(feature = "telemetry")]
@@ -4517,6 +4519,7 @@ mod ad_budget_tests {
                     smoothed_error: 0.12,
                     realized_spend: 220_000.0,
                 }],
+                pi_controller: None,
             }],
         };
 
@@ -5420,6 +5423,36 @@ pub static ECONOMICS_PROVIDER_MARGIN: Lazy<GaugeVec> = Lazy::new(|| {
         ),
         &["market"],
     );
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_PREV_MARKET_UTILIZATION_PPM: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "economics_prev_market_metrics_utilization_ppm",
+            "Persisted market utilization (parts-per-million, fixed-point)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ECONOMICS_PREV_MARKET_MARGIN_PPM: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "economics_prev_market_metrics_provider_margin_ppm",
+            "Persisted provider margin (parts-per-million, fixed-point)",
+        ),
+        &["market"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -7340,8 +7373,7 @@ pub fn update_economics_telemetry(snapshot: &crate::economics::EconomicSnapshot)
     // Layer 1: Inflation
     ECONOMICS_ANNUAL_ISSUANCE_BLOCK.set(snapshot.inflation.annual_issuance_block as i64);
     ECONOMICS_REALIZED_INFLATION_BPS.set(snapshot.inflation.realized_inflation_bps as i64);
-    ECONOMICS_BLOCK_REWARD_PER_BLOCK
-        .set(snapshot.inflation.block_reward_per_block as i64);
+    ECONOMICS_BLOCK_REWARD_PER_BLOCK.set(snapshot.inflation.block_reward_per_block as i64);
 
     // Layer 2: Subsidy allocation
     ECONOMICS_SUBSIDY_SHARE_BPS
@@ -7432,10 +7464,20 @@ pub fn update_economics_epoch_metrics(
     tx_count: u64,
     tx_volume_block: u64,
     treasury_inflow_block: u64,
+    prev_metrics: &crate::economics::MarketMetrics,
 ) {
     ECONOMICS_EPOCH_TX_COUNT.set(tx_count as i64);
     ECONOMICS_EPOCH_TX_VOLUME_BLOCK.set(tx_volume_block as i64);
     ECONOMICS_EPOCH_TREASURY_INFLOW_BLOCK.set(treasury_inflow_block as i64);
+
+    for prev_metric in metrics::snapshot_from_metrics(prev_metrics) {
+        ECONOMICS_PREV_MARKET_UTILIZATION_PPM
+            .with_label_values(&[prev_metric.market])
+            .set(prev_metric.utilization_ppm);
+        ECONOMICS_PREV_MARKET_MARGIN_PPM
+            .with_label_values(&[prev_metric.market])
+            .set(prev_metric.provider_margin_ppm);
+    }
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -7443,5 +7485,6 @@ pub fn update_economics_epoch_metrics(
     _tx_count: u64,
     _tx_volume_block: u64,
     _treasury_inflow_block: u64,
+    _prev_metrics: &crate::economics::MarketMetrics,
 ) {
 }

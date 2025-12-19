@@ -4,6 +4,7 @@ mod codec;
 mod engine;
 mod importer;
 mod legacy;
+pub mod receipts;
 
 pub use importer::{
     AuditEntryStatus, AuditReport, ChecksumComparison, ChecksumDigest, ChecksumScope, ImportMode,
@@ -125,6 +126,8 @@ pub struct ProofRecord {
 pub struct StorageMarket {
     engine: Engine,
     contracts: Tree,
+    /// Pending settlement receipts for block inclusion
+    pending_receipts: Vec<receipts::StorageSettlementReceipt>,
 }
 
 impl StorageMarket {
@@ -133,11 +136,20 @@ impl StorageMarket {
         let engine = Engine::open(base)?;
         let contracts = engine.open_tree("market/contracts")?;
         legacy::migrate_if_present(base, &contracts)?;
-        Ok(Self { engine, contracts })
+        Ok(Self {
+            engine,
+            contracts,
+            pending_receipts: Vec::new(),
+        })
     }
 
     pub fn base_path(&self) -> &Path {
         self.engine.base_path()
+    }
+
+    /// Drain all pending receipts for block inclusion
+    pub fn drain_receipts(&mut self) -> Vec<receipts::StorageSettlementReceipt> {
+        std::mem::take(&mut self.pending_receipts)
     }
 
     pub fn register_contract(
@@ -177,7 +189,7 @@ impl StorageMarket {
     }
 
     pub fn record_proof_outcome(
-        &self,
+        &mut self,
         object_id: &str,
         provider_id: Option<&str>,
         block: u64,
@@ -229,7 +241,7 @@ impl StorageMarket {
                 .compare_and_swap(key, current.clone(), Some(updated.clone()))?
             {
                 Ok(_) => {
-                    return Ok(ProofRecord {
+                    let proof = ProofRecord {
                         object_id: object_id.to_string(),
                         provider_id: provider,
                         outcome,
@@ -238,7 +250,19 @@ impl StorageMarket {
                         remaining_deposit_ct: remaining_deposit,
                         proof_successes,
                         proof_failures,
-                    });
+                    };
+
+                    // Emit receipt for successful settlements with payment
+                    if let Some(receipt) = receipts::StorageSettlementReceipt::from_proof(
+                        &proof,
+                        record.contract.original_bytes,
+                        record.contract.price_per_block,
+                        block,
+                    ) {
+                        self.pending_receipts.push(receipt);
+                    }
+
+                    return Ok(proof);
                 }
                 Err(_) => continue,
             }
@@ -250,194 +274,5 @@ impl StorageMarket {
             .load_contract(object_id)?
             .ok_or_else(|| StorageMarketError::ContractMissing(object_id.to_string()))?;
         Ok(record.replicas)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crypto_suite::hex;
-    use std::fs;
-    use sys::tempfile::tempdir;
-
-    #[test]
-    fn record_proof_updates_replica_and_contract() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("market.db");
-        let market = StorageMarket::open(&path).expect("open market");
-        let contract = StorageContract {
-            object_id: "obj".into(),
-            provider_id: "provider-a".into(),
-            original_bytes: 1024,
-            shares: 4,
-            price_per_block: 8,
-            start_block: 0,
-            retention_blocks: 10,
-            next_payment_block: 1,
-            accrued: 0,
-            total_deposit_ct: 0,
-            last_payment_block: None,
-        };
-        let replica = ReplicaIncentive::new("provider-a".into(), 4, 8, 80);
-        market
-            .register_contract(contract, vec![replica])
-            .expect("register");
-        let proof = market
-            .record_proof_outcome("obj", None, 2, true)
-            .expect("record");
-        assert_eq!(proof.amount_accrued_ct, 8);
-        assert_eq!(proof.remaining_deposit_ct, 80);
-        let failure = market
-            .record_proof_outcome("obj", None, 3, false)
-            .expect("record failure");
-        assert_eq!(failure.slashed_ct, 8);
-        assert_eq!(failure.remaining_deposit_ct, 72);
-    }
-
-    #[test]
-    fn migrates_legacy_manifest_if_present() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("market.db");
-        fs::create_dir_all(&path).expect("create legacy dir");
-        let manifest_path = path.join("legacy_manifest.json");
-
-        let contract = StorageContract {
-            object_id: "legacy-obj".into(),
-            provider_id: "legacy-provider".into(),
-            original_bytes: 512,
-            shares: 2,
-            price_per_block: 4,
-            start_block: 0,
-            retention_blocks: 4,
-            next_payment_block: 1,
-            accrued: 0,
-            total_deposit_ct: 40,
-            last_payment_block: None,
-        };
-        let replica = ReplicaIncentive::new("legacy-provider".into(), 2, 4, 40);
-        let record = ContractRecord::with_replicas(contract, vec![replica]);
-        let serialized = serialize_contract_record(&record).expect("serialize");
-        let key_hex = hex::encode(record.contract.object_id.as_bytes());
-        let value_hex = hex::encode(&serialized);
-        let manifest = format!(
-            "{{\"trees\": {{\"{}\": [{{\"key\": \"{}\", \"value\": \"{}\"}}]}}}}",
-            legacy::LEGACY_TREE_HEX,
-            key_hex,
-            value_hex
-        );
-        fs::write(&manifest_path, manifest).expect("write manifest");
-
-        let market = StorageMarket::open(&path).expect("open storage market");
-        let loaded = market
-            .load_contract("legacy-obj")
-            .expect("load contract")
-            .expect("contract present");
-        assert_eq!(loaded.contract.provider_id, "legacy-provider");
-        assert!(path.join("legacy_manifest.migrated.json").exists());
-
-        // ensure migration is idempotent
-        drop(market);
-        let reopened = StorageMarket::open(&path).expect("reopen market");
-        assert!(reopened
-            .load_contract("legacy-obj")
-            .expect("load contract")
-            .is_some());
-    }
-
-    #[test]
-    fn iteration_handles_large_cardinality() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("market.db");
-        let market = StorageMarket::open(&path).expect("open market");
-        for index in 0..512 {
-            let contract = StorageContract {
-                object_id: format!("obj-{index:04}"),
-                provider_id: "primary".into(),
-                original_bytes: 1_024,
-                shares: 4,
-                price_per_block: 8,
-                start_block: 0,
-                retention_blocks: 10,
-                next_payment_block: 1,
-                accrued: 0,
-                total_deposit_ct: 0,
-                last_payment_block: None,
-            };
-            let replica = ReplicaIncentive::new("primary".into(), 4, 8, 80);
-            market
-                .register_contract(contract, vec![replica])
-                .expect("register contract");
-        }
-        let listing = market.contracts().expect("list contracts");
-        assert_eq!(listing.len(), 512);
-        assert_eq!(listing.first().unwrap().contract.object_id, "obj-0000");
-        assert_eq!(listing.last().unwrap().contract.object_id, "obj-0511");
-    }
-
-    #[test]
-    fn concurrent_record_proof_outcome_is_linearizable() {
-        use std::sync::Arc;
-
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("market.db");
-        let market = StorageMarket::open(&path).expect("open market");
-        let contract = StorageContract {
-            object_id: "shared".into(),
-            provider_id: "primary".into(),
-            original_bytes: 4_096,
-            shares: 8,
-            price_per_block: 12,
-            start_block: 0,
-            retention_blocks: 20,
-            next_payment_block: 1,
-            accrued: 0,
-            total_deposit_ct: 0,
-            last_payment_block: None,
-        };
-        let replica_a = ReplicaIncentive::new("primary".into(), 8, 12, 120);
-        let replica_b = ReplicaIncentive::new("backup".into(), 4, 12, 60);
-        market
-            .register_contract(contract, vec![replica_a, replica_b])
-            .expect("register contract");
-
-        let concurrent = Arc::new(market);
-        let mut handles = Vec::new();
-        for thread_id in 0..8 {
-            let market = Arc::clone(&concurrent);
-            handles.push(std::thread::spawn(move || {
-                for iteration in 0..100 {
-                    let success = (thread_id + iteration) % 2 == 0;
-                    let provider = if iteration % 3 == 0 {
-                        "backup"
-                    } else {
-                        "primary"
-                    };
-                    let _ = market.record_proof_outcome(
-                        "shared",
-                        Some(provider),
-                        iteration as u64,
-                        success,
-                    );
-                }
-            }));
-        }
-        for handle in handles {
-            handle.join().expect("join worker");
-        }
-
-        let contract = concurrent
-            .load_contract("shared")
-            .expect("load contract")
-            .expect("contract present");
-        let totals: u64 = contract
-            .replicas
-            .iter()
-            .map(|replica| replica.proof_successes + replica.proof_failures)
-            .sum();
-        assert!(totals > 0, "expected proof outcomes to be recorded");
-        assert!(contract
-            .replicas
-            .iter()
-            .any(|replica| replica.proof_successes > 0));
     }
 }

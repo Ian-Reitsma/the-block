@@ -204,7 +204,7 @@ Total: ~5 floating point operations per epoch boundary
 ## Implementation Status (December 2025)
 
 - **Source of truth:** `NetworkIssuanceController` (Layer 1) is the canonical issuance engine. Per-block mining logic still references legacy decay/logistic helpers; work is underway (see `AGENTS.md §15`) to route block minting through the controller output so telemetry, docs, and consensus stay aligned.
-- **Metrics:** Subsidy/multiplier/ad/tariff controllers run each epoch exactly as described, but some inputs (tx_count, treasury inflow, provider margins) are still wired to placeholders pending the telemetry plumbing referenced in the backlog.
+- **Metrics (✅ UPDATED 2025-12-18):** Subsidy/multiplier/ad/tariff controllers run each epoch with real market-derived inputs. All four markets (storage, compute, energy, ad) now feed deterministic utilization and provider margin metrics from on-chain data (`node/src/economics/replay.rs:220-439`). The previous placeholder status has been resolved.
 - **Premine:** There is no premine or hidden genesis allocation in the live codepath. The `scripts/analytics/coin-stats.py` tool exists only for design-space exploration.
 - **Governor integration:** Launch-governor gates for economics/markets are being staged; until those land, ops teams should treat the economics autopilot as active but unaudited. All readiness gating happens through `node/src/launch_governor`.
 

@@ -2,12 +2,23 @@
 ///
 /// This test verifies that the 4-layer economic control system converges
 /// to stable equilibrium over time and responds appropriately to market changes.
+use std::{
+    collections::HashMap,
+    env,
+    ffi::OsString,
+    sync::{Arc, Mutex},
+};
+
+use sys::tempfile::tempdir;
+
 use the_block::{
     economics::{
         execute_epoch_economics, GovernanceEconomicParams, MarketMetric, MarketMetrics,
         SubsidySnapshot, TariffSnapshot,
     },
     governance::Params,
+    launch_governor::{LiveSignalProvider, SignalProvider},
+    ledger_binary, Blockchain, ChainDisk, TokenAmount,
 };
 
 #[test]
@@ -448,9 +459,10 @@ fn test_launch_governor_economics_gate_lifecycle() {
 
     use the_block::launch_governor::{EconomicsSample, GateAction};
 
-    // Create controller with 3-streak requirement
+    // Create controller whose streak length ties back to runtime window sizing.
     let window_secs = 3600;
     let mut ctrl = the_block::launch_governor::EconomicsController::new(window_secs);
+    let required = ctrl.required();
 
     println!("\n=== Phase 1: Bootstrap (gate inactive) ===");
 
@@ -458,8 +470,10 @@ fn test_launch_governor_economics_gate_lifecycle() {
     assert!(!ctrl.active(), "Gate should start inactive");
     assert_eq!(ctrl.enter(), 0, "Enter streak should be 0");
 
-    // === Phase 2: Feed healthy economics for 3 epochs to trigger Enter ===
-    println!("\n=== Phase 2: Healthy economics (should trigger Enter after 3 streaks) ===");
+    // === Phase 2: Feed healthy economics for {required} epochs to trigger Enter ===
+    println!(
+        "\n=== Phase 2: Healthy economics (should trigger Enter after {required} streaks) ==="
+    );
 
     let healthy_sample = EconomicsSample {
         epoch_tx_count: 100,
@@ -490,36 +504,55 @@ fn test_launch_governor_economics_gate_lifecycle() {
         },
     };
 
-    // Epoch 1: healthy, enter_streak = 1
-    let eval1 = ctrl.evaluate(1, &healthy_sample);
-    assert!(eval1.is_none(), "Should not produce intent on first healthy sample");
-    assert_eq!(ctrl.enter(), 1, "Enter streak should be 1");
-    println!("Epoch 1: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
+    let warmup = ctrl.evaluate(1, &healthy_sample);
+    assert!(warmup.is_none(), "Warm-up sample should not trigger intent");
 
-    // Epoch 2: healthy, enter_streak = 2
-    let eval2 = ctrl.evaluate(2, &healthy_sample);
-    assert!(eval2.is_none(), "Should not produce intent on second healthy sample");
-    assert_eq!(ctrl.enter(), 2, "Enter streak should be 2");
-    println!("Epoch 2: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
-
-    // Epoch 3: healthy, enter_streak = 3, should trigger Enter
-    let eval3 = ctrl.evaluate(3, &healthy_sample);
-    assert!(eval3.is_some(), "Should produce Enter intent on third healthy sample");
-    let eval3 = eval3.unwrap();
-    assert_eq!(eval3.action, GateAction::Enter, "Action should be Enter");
-    assert!(ctrl.active(), "Gate should be active after Enter");
-    assert_eq!(ctrl.enter(), 3, "Enter streak should be 3");
-    println!("Epoch 3: enter_streak={}, active={}, action={:?}", ctrl.enter(), ctrl.active(), eval3.action);
-    println!("✓ Gate entered after 3 healthy epochs");
+    for epoch in 2..=required + 1 {
+        let eval = ctrl.evaluate(epoch, &healthy_sample);
+        if epoch < required + 1 {
+            assert!(
+                eval.is_none(),
+                "Should not produce intent before entering streak"
+            );
+            assert_eq!(
+                ctrl.enter(),
+                epoch - 1,
+                "Enter streak should increment each healthy epoch"
+            );
+        } else {
+            let enter_eval =
+                eval.expect("Should produce Enter intent once healthy streak requirement is met");
+            assert_eq!(
+                enter_eval.action,
+                GateAction::Enter,
+                "Action should be Enter"
+            );
+            assert!(ctrl.active(), "Gate should be active after Enter");
+            assert_eq!(
+                ctrl.enter(),
+                required,
+                "Enter streak should match required streak after Enter intent"
+            );
+            println!(
+                "Epoch {epoch}: enter_streak={}, active={}, action={:?}",
+                ctrl.enter(),
+                ctrl.active(),
+                enter_eval.action
+            );
+        }
+    }
+    println!("✓ Gate entered after {required} healthy epochs");
 
     // === Phase 3: Feed unhealthy economics for 3 epochs to trigger Exit ===
-    println!("\n=== Phase 3: Unhealthy economics (should trigger Exit after 3 streaks) ===");
+    println!(
+        "\n=== Phase 3: Unhealthy economics (should trigger Exit after {required} streaks) ==="
+    );
 
     // Create unhealthy sample (dead chain: insufficient activity)
     let unhealthy_sample = EconomicsSample {
-        epoch_tx_count: 5,  // Below MIN_TX_COUNT=10
-        epoch_tx_volume_block: 500,  // Below MIN_TX_VOLUME=1000
-        epoch_treasury_inflow_block: 0,  // Zero treasury
+        epoch_tx_count: 5,              // Below MIN_TX_COUNT=10
+        epoch_tx_volume_block: 500,     // Below MIN_TX_VOLUME=1000
+        epoch_treasury_inflow_block: 0, // Zero treasury
         block_reward_per_block: 100,
         market_metrics: MarketMetrics {
             storage: MarketMetric {
@@ -545,58 +578,230 @@ fn test_launch_governor_economics_gate_lifecycle() {
         },
     };
 
-    // Epoch 4: unhealthy, exit_streak = 1
-    let eval4 = ctrl.evaluate(4, &unhealthy_sample);
-    assert!(eval4.is_none(), "Should not produce intent on first unhealthy sample");
-    assert_eq!(ctrl.exit(), 1, "Exit streak should be 1");
-    assert_eq!(ctrl.enter(), 0, "Enter streak should reset to 0");
-    assert!(ctrl.active(), "Gate should still be active");
-    println!("Epoch 4: exit_streak={}, active={}", ctrl.exit(), ctrl.active());
-
-    // Epoch 5: unhealthy, exit_streak = 2
-    let eval5 = ctrl.evaluate(5, &unhealthy_sample);
-    assert!(eval5.is_none(), "Should not produce intent on second unhealthy sample");
-    assert_eq!(ctrl.exit(), 2, "Exit streak should be 2");
-    println!("Epoch 5: exit_streak={}, active={}", ctrl.exit(), ctrl.active());
-
-    // Epoch 6: unhealthy, exit_streak = 3, should trigger Exit
-    let eval6 = ctrl.evaluate(6, &unhealthy_sample);
-    assert!(eval6.is_some(), "Should produce Exit intent on third unhealthy sample");
-    let eval6 = eval6.unwrap();
-    assert_eq!(eval6.action, GateAction::Exit, "Action should be Exit");
-    assert!(!ctrl.active(), "Gate should be inactive after Exit");
-    assert_eq!(ctrl.exit(), 3, "Exit streak should be 3");
-    println!("Epoch 6: exit_streak={}, active={}, action={:?}", ctrl.exit(), ctrl.active(), eval6.action);
-    println!("✓ Gate exited after 3 unhealthy epochs");
+    let unhealthy_start = required + 2;
+    for offset in 0..required {
+        let epoch = unhealthy_start + offset;
+        let eval = ctrl.evaluate(epoch, &unhealthy_sample);
+        if offset < required - 1 {
+            assert!(
+                eval.is_none(),
+                "Should not produce exit intent before required streak"
+            );
+            assert_eq!(
+                ctrl.exit(),
+                offset + 1,
+                "Exit streak should increment for each unhealthy epoch"
+            );
+            assert!(
+                ctrl.active(),
+                "Gate should remain active until exit intent fires"
+            );
+        } else {
+            let exit_eval =
+                eval.expect("Should produce Exit intent once exit streak requirement is met");
+            assert_eq!(exit_eval.action, GateAction::Exit, "Action should be Exit");
+            assert!(!ctrl.active(), "Gate should be inactive after Exit");
+            assert_eq!(
+                ctrl.exit(),
+                required,
+                "Exit streak should match required streak after exit intent"
+            );
+            println!(
+                "Epoch {epoch}: exit_streak={}, active={}, action={:?}",
+                ctrl.exit(),
+                ctrl.active(),
+                exit_eval.action
+            );
+        }
+    }
+    println!("✓ Gate exited after {required} unhealthy epochs");
 
     // === Phase 4: Feed healthy economics again to trigger re-Enter ===
-    println!("\n=== Phase 4: Return to healthy economics (should trigger re-Enter) ===");
+    println!(
+        "\n=== Phase 4: Return to healthy economics (should trigger re-Enter after {required} healthy epochs) ==="
+    );
 
-    // Epoch 7: healthy, enter_streak = 1
-    let eval7 = ctrl.evaluate(7, &healthy_sample);
-    assert!(eval7.is_none(), "Should not produce intent on first healthy sample");
-    assert_eq!(ctrl.enter(), 1, "Enter streak should be 1");
-    assert_eq!(ctrl.exit(), 0, "Exit streak should reset to 0");
-    println!("Epoch 7: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
-
-    // Epoch 8: healthy, enter_streak = 2
-    let eval8 = ctrl.evaluate(8, &healthy_sample);
-    assert!(eval8.is_none(), "Should not produce intent on second healthy sample");
-    assert_eq!(ctrl.enter(), 2, "Enter streak should be 2");
-    println!("Epoch 8: enter_streak={}, active={}", ctrl.enter(), ctrl.active());
-
-    // Epoch 9: healthy, enter_streak = 3, should trigger re-Enter
-    let eval9 = ctrl.evaluate(9, &healthy_sample);
-    assert!(eval9.is_some(), "Should produce Enter intent on third healthy sample");
-    let eval9 = eval9.unwrap();
-    assert_eq!(eval9.action, GateAction::Enter, "Action should be Enter");
-    assert!(ctrl.active(), "Gate should be active after re-Enter");
-    assert_eq!(ctrl.enter(), 3, "Enter streak should be 3");
-    println!("Epoch 9: enter_streak={}, active={}, action={:?}", ctrl.enter(), ctrl.active(), eval9.action);
+    let recovery_start = unhealthy_start + required;
+    for offset in 0..required {
+        let epoch = recovery_start + offset;
+        let eval = ctrl.evaluate(epoch, &healthy_sample);
+        if offset < required - 1 {
+            assert!(
+                eval.is_none(),
+                "Should not produce re-enter intent before required streak"
+            );
+            assert_eq!(
+                ctrl.enter(),
+                offset + 1,
+                "Enter streak should increment while recovering"
+            );
+            assert_eq!(
+                ctrl.exit(),
+                0,
+                "Exit streak should reset once healthy sampling begins"
+            );
+        } else {
+            let reenter_eval =
+                eval.expect("Should produce Enter intent once healthy streak requirement is met");
+            assert_eq!(
+                reenter_eval.action,
+                GateAction::Enter,
+                "Action should be Enter"
+            );
+            assert!(ctrl.active(), "Gate should be active after re-Enter");
+            assert_eq!(
+                ctrl.enter(),
+                required,
+                "Enter streak should match required streak after re-Enter"
+            );
+            println!(
+                "Epoch {epoch}: enter_streak={}, active={}, action={:?}",
+                ctrl.enter(),
+                ctrl.active(),
+                reenter_eval.action
+            );
+        }
+    }
     println!("✓ Gate re-entered after returning to healthy economics");
 
     println!("\n✓ Launch Governor economics gate lifecycle test completed successfully");
     println!("  - Gate activated when economics became healthy");
     println!("  - Gate deactivated when economics became unhealthy");
     println!("  - Gate reactivated when economics recovered");
+}
+
+#[test]
+fn test_chain_disk_roundtrip_preserves_market_metrics() {
+    let metrics = sample_market_metrics();
+    let disk = ChainDisk {
+        schema_version: 42,
+        chain: Vec::new(),
+        accounts: HashMap::new(),
+        emission: 0,
+        emission_year_ago: 0,
+        inflation_epoch_marker: 0,
+        block_reward: TokenAmount::new(0),
+        block_height: 0,
+        mempool: Vec::new(),
+        base_fee: 1,
+        params: Params::default(),
+        epoch_storage_bytes: 0,
+        epoch_read_bytes: 0,
+        epoch_cpu_ms: 0,
+        epoch_bytes_out: 0,
+        recent_timestamps: Vec::new(),
+        economics_block_reward_per_block: 0,
+        economics_prev_annual_issuance_block: 0,
+        economics_prev_subsidy: SubsidySnapshot::default(),
+        economics_prev_tariff: TariffSnapshot::default(),
+        economics_prev_market_metrics: metrics.clone(),
+        economics_epoch_tx_volume_block: 0,
+        economics_epoch_tx_count: 0,
+        economics_epoch_treasury_inflow_block: 0,
+        economics_epoch_storage_payout_block: 0,
+        economics_epoch_compute_payout_block: 0,
+        economics_epoch_ad_payout_block: 0,
+        economics_baseline_tx_count: 100,
+        economics_baseline_tx_volume: 10_000,
+        economics_baseline_miners: 10,
+    };
+
+    let encoded =
+        ledger_binary::encode_chain_disk(&disk).expect("encoding chain disk should succeed");
+    let decoded =
+        ledger_binary::decode_chain_disk(&encoded).expect("decoding chain disk should succeed");
+
+    assert_market_metrics_close(&metrics, &decoded.economics_prev_market_metrics);
+}
+
+#[test]
+fn test_launch_governor_economics_sample_retains_metrics_after_restart() {
+    let _preserve = EnvVarGuard::set("TB_PRESERVE", "1");
+    let tmp_dir = tempdir().expect("create temporary directory");
+    let db_path = tmp_dir.path().to_str().expect("valid path").to_owned();
+    let expected_metrics = sample_market_metrics();
+
+    {
+        let mut blockchain =
+            Blockchain::open(&db_path).expect("open blockchain before persisting metrics");
+        blockchain.economics_prev_market_metrics = expected_metrics.clone();
+        blockchain.persist_chain().expect("persist chain disk");
+    }
+
+    let reopened = Blockchain::open(&db_path).expect("re-open blockchain after restart");
+    {
+        let chain = Arc::new(Mutex::new(reopened));
+        let provider = LiveSignalProvider::new(chain.clone());
+        let sample = provider.economics_sample(0);
+        assert_market_metrics_close(&expected_metrics, &sample.market_metrics);
+    }
+}
+
+const METRIC_EPSILON: f64 = 1.0e-6;
+
+fn sample_market_metrics() -> MarketMetrics {
+    MarketMetrics {
+        storage: market_metric(0.31, 120.5, 130.0, 0.12),
+        compute: market_metric(0.72, 210.0, 190.0, -0.05),
+        energy: market_metric(0.58, 310.25, 315.0, 0.02),
+        ad: market_metric(0.12, 42.999_999, 43.0, 0.01),
+    }
+}
+
+fn market_metric(utilization: f64, average_cost: f64, payout: f64, margin: f64) -> MarketMetric {
+    MarketMetric {
+        utilization,
+        average_cost_block: average_cost,
+        effective_payout_block: payout,
+        provider_margin: margin,
+    }
+}
+
+fn assert_market_metrics_close(expected: &MarketMetrics, actual: &MarketMetrics) {
+    assert_market_metric_close(&expected.storage, &actual.storage);
+    assert_market_metric_close(&expected.compute, &actual.compute);
+    assert_market_metric_close(&expected.energy, &actual.energy);
+    assert_market_metric_close(&expected.ad, &actual.ad);
+}
+
+fn assert_market_metric_close(expected: &MarketMetric, actual: &MarketMetric) {
+    assert!(
+        (expected.utilization - actual.utilization).abs() <= METRIC_EPSILON,
+        "utilization mismatch: expected {expected:?}, actual {actual:?}"
+    );
+    assert!(
+        (expected.average_cost_block - actual.average_cost_block).abs() <= METRIC_EPSILON,
+        "average cost mismatch: expected {expected:?}, actual {actual:?}"
+    );
+    assert!(
+        (expected.effective_payout_block - actual.effective_payout_block).abs() <= METRIC_EPSILON,
+        "effective payout mismatch: expected {expected:?}, actual {actual:?}"
+    );
+    assert!(
+        (expected.provider_margin - actual.provider_margin).abs() <= METRIC_EPSILON,
+        "provider margin mismatch: expected {expected:?}, actual {actual:?}"
+    );
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = env::var_os(key);
+        env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            env::set_var(self.key, previous);
+        } else {
+            env::remove_var(self.key);
+        }
+    }
 }

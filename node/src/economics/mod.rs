@@ -7,6 +7,7 @@
 //! 4. **Ad & Tariff Controllers**: Drift splits and tariffs toward governance targets
 
 pub mod ad_market_controller;
+pub mod deterministic_metrics;
 pub mod event;
 pub mod inflation_controller; // Legacy - kept for backward compatibility
 pub mod market_multiplier;
@@ -15,6 +16,7 @@ pub mod replay; // Consensus-critical economics replay
 pub mod subsidy_allocator;
 
 pub use ad_market_controller::{AdMarketDriftController, TariffController};
+pub use deterministic_metrics::derive_market_metrics_from_chain;
 pub use event::*;
 pub use inflation_controller::InflationController; // Legacy
 pub use market_multiplier::MarketMultiplierController;
@@ -284,9 +286,9 @@ impl GovernanceEconomicParams {
             network_issuance: network_issuance::NetworkIssuanceParams {
                 max_supply_block: 40_000_000,      // Hard-coded: 40M BLOCK cap
                 expected_total_blocks: 20_000_000, // ~231 days at 1 block/sec
-                baseline_tx_count,      // From persisted state
+                baseline_tx_count,                 // From persisted state
                 baseline_tx_volume_block: baseline_tx_volume, // From persisted state
-                baseline_miners,        // From persisted state
+                baseline_miners,                   // From persisted state
                 activity_multiplier_min: 0.5,
                 activity_multiplier_max: 2.0,
                 decentralization_multiplier_min: 0.5,

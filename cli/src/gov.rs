@@ -143,6 +143,9 @@ fn report_rpc_failure(rpc: &str, method: &str, err: &RpcClientError) {
                 eprintln!("error: rpc call '{method}' to {rpc} failed: {other}",);
             }
         },
+        RpcClientError::Rpc { code, message } => {
+            eprintln!("error: rpc call '{method}' to {rpc} failed: {code}: {message}");
+        }
         RpcClientError::InjectedFault => {
             eprintln!(
                 "error: rpc call '{method}' aborted due to TB_RPC_FAULT_RATE fault injection."

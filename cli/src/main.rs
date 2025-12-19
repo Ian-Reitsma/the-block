@@ -42,6 +42,7 @@ mod explorer;
 mod fee_estimator;
 mod gateway;
 mod gov;
+mod governor;
 mod htlc;
 mod http_client;
 mod identity;
@@ -83,6 +84,7 @@ use explorer::handle as handle_explorer;
 use gateway::handle as handle_gateway;
 use gov::handle as handle_gov;
 use gov::GovCmd;
+use governor::{handle as handle_governor, GovernorCmd};
 use htlc::handle as handle_htlc;
 use htlc::HtlcCmd;
 use identity::handle as handle_identity;
@@ -287,6 +289,11 @@ fn handle_matches(matches: Matches) -> Result<(), String> {
             handle_gov(cmd);
             Ok(())
         }
+        "governor" => {
+            let cmd = GovernorCmd::from_matches(sub_matches)?;
+            handle_governor(cmd)?;
+            Ok(())
+        }
         "htlc" => {
             let cmd = HtlcCmd::from_matches(sub_matches)?;
             handle_htlc(cmd);
@@ -374,6 +381,7 @@ fn build_root_command() -> Command {
         .subcommand(BridgeCmd::command())
         .subcommand(RemediationCmd::command())
         .subcommand(GovCmd::command())
+        .subcommand(GovernorCmd::command())
         .subcommand(HtlcCmd::command())
         .subcommand(LightSyncCmd::command())
         .subcommand(LightClientCmd::command())

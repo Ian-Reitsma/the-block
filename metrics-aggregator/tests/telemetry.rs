@@ -41,8 +41,7 @@ fn telemetry_round_trip() {
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state.clone());
         let baseline_metrics = scrape_metrics(&app).await;
-        let baseline_ingest =
-            metric_value(&baseline_metrics, "aggregator_telemetry_ingest_total");
+        let baseline_ingest = metric_value(&baseline_metrics, "aggregator_telemetry_ingest_total");
 
         let payload = json::value_from_str(
             r#"{

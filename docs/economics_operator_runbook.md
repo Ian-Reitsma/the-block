@@ -316,6 +316,11 @@ economics_treasury_contribution_bps / 100  # Actual %
 abs(economics_treasury_contribution_bps - 1000) / 100  # Target deviation
 ```
 
+### Deterministic Metrics Checks
+
+- `tb-cli governor status --rpc <endpoint>` now prints both the persisted `economics_sample` snapshot and a `telemetry gauges (ppm)` section derived from `economics_prev_market_metrics`. Use that output to confirm the controller’s persisted view matches the Prometheus gauges `economics_prev_market_metrics_{utilization,provider_margin}_ppm` before trusting any gate transition.
+- Cross-check the intent logs (`tb-cli governor intents --gate economics`) against those ppm snapshots whenever you investigate flapping or unexpected exits.
+
 ---
 
 ## Troubleshooting

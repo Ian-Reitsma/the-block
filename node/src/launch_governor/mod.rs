@@ -1,4 +1,5 @@
 use crate::blockchain::process::validate_and_apply;
+use crate::economics::deterministic_metrics;
 use crate::gateway::dns;
 use crate::governance::Runtime;
 use crate::governor_snapshot;
@@ -15,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicU64, Ordering as AtomicOrdering},
+    atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
     Arc, Mutex,
 };
 use std::time::Duration;
@@ -113,6 +114,8 @@ pub struct IntentRecord {
     pub epoch_apply: u64,
     pub params_patch: JsonValue,
     pub metrics: IntentMetrics,
+    #[serde(default)]
+    pub reason: String,
     pub snapshot_hash_hex: String,
     pub state: IntentState,
 }
@@ -130,6 +133,7 @@ impl IntentRecord {
             },
             params_patch: self.params_patch.clone(),
             metrics: self.metrics.summary.clone(),
+            reason: self.reason.clone(),
         }
     }
 }
@@ -208,6 +212,10 @@ pub struct GovernorStatus {
     pub window_secs: u64,
     pub gates: Vec<GateSnapshot>,
     pub pending: Vec<IntentSummary>,
+    pub economics_sample: JsonValue,
+    pub economics_prev_market_metrics: Vec<deterministic_metrics::EconomicsPrevMetric>,
+    pub autopilot_enabled: bool,
+    pub schema_version: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -220,6 +228,7 @@ pub struct IntentSummary {
     pub state: String,
     pub params_patch: JsonValue,
     pub metrics: JsonValue,
+    pub reason: String,
 }
 
 pub trait SignalProvider: Send + Sync {
@@ -540,6 +549,10 @@ struct SharedState {
     pending: Mutex<Vec<IntentRecord>>,
     log: Mutex<VecDeque<IntentRecord>>,
     gates: Mutex<HashMap<String, GateRuntime>>,
+    economics_sample: Mutex<Option<JsonValue>>,
+    economics_prev_metrics: Mutex<Option<Vec<deterministic_metrics::EconomicsPrevMetric>>>,
+    autopilot_enabled: AtomicBool,
+    schema_version: AtomicU64,
 }
 
 impl SharedState {
@@ -561,6 +574,10 @@ impl SharedState {
             pending: Mutex::new(Vec::new()),
             log: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             gates: Mutex::new(gates),
+            economics_sample: Mutex::new(None),
+            economics_prev_metrics: Mutex::new(None),
+            autopilot_enabled: AtomicBool::new(false),
+            schema_version: AtomicU64::new(0),
         }
     }
 
@@ -573,13 +590,63 @@ impl SharedState {
             let guard = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             guard.iter().map(|p| p.summary()).collect()
         };
+        let economics_sample = self.economics_sample();
         GovernorStatus {
             enabled: self.enabled,
             epoch: self.epoch.load(AtomicOrdering::Relaxed),
             window_secs: self.window_secs,
             gates,
             pending,
+            economics_sample,
+            economics_prev_market_metrics: self.economics_prev_market_metrics(),
+            autopilot_enabled: self.autopilot_enabled(),
+            schema_version: self.schema_version(),
         }
+    }
+
+    fn set_economics_prev_metrics(&self, metrics: Vec<deterministic_metrics::EconomicsPrevMetric>) {
+        if let Ok(mut guard) = self.economics_prev_metrics.lock() {
+            *guard = Some(metrics);
+        }
+    }
+
+    fn economics_prev_market_metrics(&self) -> Vec<deterministic_metrics::EconomicsPrevMetric> {
+        if let Ok(guard) = self.economics_prev_metrics.lock() {
+            guard.clone().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn set_economics_sample(&self, sample: JsonValue) {
+        if let Ok(mut guard) = self.economics_sample.lock() {
+            *guard = Some(sample);
+        }
+    }
+
+    fn economics_sample(&self) -> JsonValue {
+        if let Ok(guard) = self.economics_sample.lock() {
+            guard.clone().unwrap_or(JsonValue::Null)
+        } else {
+            JsonValue::Null
+        }
+    }
+
+    fn set_autopilot_enabled(&self, enabled: bool) {
+        self.autopilot_enabled
+            .store(enabled, AtomicOrdering::Relaxed);
+    }
+
+    fn autopilot_enabled(&self) -> bool {
+        self.autopilot_enabled.load(AtomicOrdering::Relaxed)
+    }
+
+    fn set_schema_version(&self, version: u64) {
+        self.schema_version.store(version, AtomicOrdering::Relaxed);
+    }
+
+    fn schema_version(&self) -> u64 {
+        self.schema_version.load(AtomicOrdering::Relaxed)
     }
 
     fn set_epoch(&self, epoch: u64) {
@@ -641,6 +708,11 @@ pub fn spawn(chain: Arc<Mutex<Blockchain>>, config: GovernorConfig) -> Option<Go
     let store = GovernorStore::open(&config.db_path);
     let shared = Arc::new(SharedState::new(&config, store));
     {
+        let guard = chain.lock().unwrap_or_else(|e| e.into_inner());
+        shared.set_autopilot_enabled(guard.params.launch_economics_autopilot != 0);
+        shared.set_schema_version(guard.schema_version() as u64);
+    }
+    {
         let mut pending = shared.pending.lock().unwrap_or_else(|e| e.into_inner());
         let mut existing = shared.store.list_pending();
         existing.sort_by(|a, b| a.epoch_apply.cmp(&b.epoch_apply));
@@ -683,10 +755,14 @@ async fn run_service(
         if cancel.is_cancelled() {
             break;
         }
-        let epoch = {
+        let (epoch, schema_version) = {
             let guard = chain.lock().unwrap_or_else(|e| e.into_inner());
-            guard.block_height / crate::EPOCH_BLOCKS
+            (
+                guard.block_height / crate::EPOCH_BLOCKS,
+                guard.schema_version() as u64,
+            )
         };
+        shared.set_schema_version(schema_version);
         shared.set_epoch(epoch);
         let base_path = shared.base_path.clone();
         let chain_sample = provider.chain_sample(window_secs);
@@ -734,6 +810,10 @@ async fn run_service(
             naming_ctrl.eval(),
         );
         let economics_sample = provider.economics_sample(window_secs);
+        shared.set_economics_prev_metrics(deterministic_metrics::snapshot_from_metrics(
+            &economics_sample.market_metrics,
+        ));
+        shared.set_economics_sample(economics_sample_snapshot(&economics_sample));
         if let Some(eval) = economics_ctrl.evaluate(epoch, &economics_sample) {
             if let Some(intent) = plan_intent(
                 &base_path,
@@ -777,21 +857,31 @@ fn plan_intent(
     let id = format!("{gate}-{epoch}-{seq}");
     *seq = seq.saturating_add(1);
     let params_patch = match (gate, action) {
-        ("operational", GateAction::Enter) => json_map(vec![("operational", JsonValue::Bool(true))]),
-        ("operational", GateAction::Exit) => json_map(vec![("operational", JsonValue::Bool(false))]),
-        ("economics", GateAction::Enter) => json_map(vec![("economics_autopilot", JsonValue::Bool(true))]),
-        ("economics", GateAction::Exit) => json_map(vec![("economics_autopilot", JsonValue::Bool(false))]),
+        ("operational", GateAction::Enter) => {
+            json_map(vec![("operational", JsonValue::Bool(true))])
+        }
+        ("operational", GateAction::Exit) => {
+            json_map(vec![("operational", JsonValue::Bool(false))])
+        }
+        ("economics", GateAction::Enter) => {
+            json_map(vec![("economics_autopilot", JsonValue::Bool(true))])
+        }
+        ("economics", GateAction::Exit) => {
+            json_map(vec![("economics_autopilot", JsonValue::Bool(false))])
+        }
         ("naming", GateAction::Rehearsal) => {
             json_map(vec![("naming_mode", JsonValue::String("rehearsal".into()))])
         }
-        ("naming", GateAction::Trade) => json_map(vec![("naming_mode", JsonValue::String("trade".into()))]),
+        ("naming", GateAction::Trade) => {
+            json_map(vec![("naming_mode", JsonValue::String("trade".into()))])
+        }
         _ => json_map(vec![]), // Fallback for unknown gate/action combinations
     };
     let epoch_apply = epoch + 1;
     let payload = DecisionPayload {
         gate: gate.into(),
         action,
-        reason,
+        reason: reason.clone(),
         intent_id: id.clone(),
         epoch: epoch_apply,
         metrics: IntentMetrics {
@@ -814,6 +904,7 @@ fn plan_intent(
             summary,
             raw: metrics_clone,
         },
+        reason,
         snapshot_hash_hex: hex::encode(hash),
         state: IntentState::Pending,
     })
@@ -848,6 +939,9 @@ fn apply_intent(
                 // Unknown gate/action combination, no runtime change
             }
         }
+        if intent.gate == "economics" {
+            shared.set_autopilot_enabled(matches!(intent.action, GateAction::Enter));
+        }
         runtime.set_current_params(&params_snapshot);
     }
     intent.state = IntentState::Applied {
@@ -865,6 +959,85 @@ fn json_map(entries: Vec<(&str, JsonValue)>) -> JsonValue {
         map.insert(k.into(), v);
     }
     JsonValue::Object(map)
+}
+
+fn to_json_number_f64(value: f64) -> JsonValue {
+    JsonNumber::from_f64(value)
+        .map(JsonValue::Number)
+        .unwrap_or(JsonValue::Null)
+}
+
+fn economics_sample_snapshot(sample: &EconomicsSample) -> JsonValue {
+    let markets = deterministic_metrics::snapshot_from_metrics(&sample.market_metrics)
+        .into_iter()
+        .map(|metric| {
+            json_map(vec![
+                ("market", JsonValue::String(metric.market.clone())),
+                (
+                    "utilization_ppm",
+                    JsonValue::Number(JsonNumber::from(metric.utilization_ppm)),
+                ),
+                (
+                    "provider_margin_ppm",
+                    JsonValue::Number(JsonNumber::from(metric.provider_margin_ppm)),
+                ),
+            ])
+        })
+        .collect::<Vec<_>>();
+    json_map(vec![
+        (
+            "epoch_tx_count",
+            JsonValue::Number(JsonNumber::from(sample.epoch_tx_count)),
+        ),
+        (
+            "epoch_tx_volume",
+            JsonValue::Number(JsonNumber::from(sample.epoch_tx_volume_block)),
+        ),
+        (
+            "epoch_treasury_inflow",
+            JsonValue::Number(JsonNumber::from(sample.epoch_treasury_inflow_block)),
+        ),
+        (
+            "block_reward",
+            JsonValue::Number(JsonNumber::from(sample.block_reward_per_block)),
+        ),
+        (
+            "storage_util",
+            to_json_number_f64(sample.market_metrics.storage.utilization),
+        ),
+        (
+            "storage_margin",
+            to_json_number_f64(sample.market_metrics.storage.provider_margin),
+        ),
+        (
+            "compute_util",
+            to_json_number_f64(sample.market_metrics.compute.utilization),
+        ),
+        (
+            "compute_margin",
+            to_json_number_f64(sample.market_metrics.compute.provider_margin),
+        ),
+        (
+            "energy_util",
+            to_json_number_f64(sample.market_metrics.energy.utilization),
+        ),
+        (
+            "energy_margin",
+            to_json_number_f64(sample.market_metrics.energy.provider_margin),
+        ),
+        (
+            "ad_util",
+            to_json_number_f64(sample.market_metrics.ad.utilization),
+        ),
+        (
+            "ad_margin",
+            to_json_number_f64(sample.market_metrics.ad.provider_margin),
+        ),
+        (
+            "market_metrics",
+            JsonValue::Array(markets.into_iter().collect()),
+        ),
+    ])
 }
 
 fn replay_success_ratio(chain: &Blockchain, window_blocks: usize) -> Option<RatioSample> {
@@ -1481,18 +1654,66 @@ impl EconomicsController {
     pub fn evaluate(&mut self, epoch: u64, sample: &EconomicsSample) -> Option<PlannedEval> {
         // Push current values into histories
         let capacity = self.history_capacity;
-        Self::push_history(&mut self.tx_count_history, capacity, sample.epoch_tx_count as f64);
-        Self::push_history(&mut self.tx_volume_history, capacity, sample.epoch_tx_volume_block as f64);
-        Self::push_history(&mut self.reward_history, capacity, sample.block_reward_per_block as f64);
-        Self::push_history(&mut self.treasury_history, capacity, sample.epoch_treasury_inflow_block as f64);
-        Self::push_history(&mut self.storage_util_history, capacity, sample.market_metrics.storage.utilization);
-        Self::push_history(&mut self.storage_margin_history, capacity, sample.market_metrics.storage.provider_margin);
-        Self::push_history(&mut self.compute_util_history, capacity, sample.market_metrics.compute.utilization);
-        Self::push_history(&mut self.compute_margin_history, capacity, sample.market_metrics.compute.provider_margin);
-        Self::push_history(&mut self.energy_util_history, capacity, sample.market_metrics.energy.utilization);
-        Self::push_history(&mut self.energy_margin_history, capacity, sample.market_metrics.energy.provider_margin);
-        Self::push_history(&mut self.ad_util_history, capacity, sample.market_metrics.ad.utilization);
-        Self::push_history(&mut self.ad_margin_history, capacity, sample.market_metrics.ad.provider_margin);
+        Self::push_history(
+            &mut self.tx_count_history,
+            capacity,
+            sample.epoch_tx_count as f64,
+        );
+        Self::push_history(
+            &mut self.tx_volume_history,
+            capacity,
+            sample.epoch_tx_volume_block as f64,
+        );
+        Self::push_history(
+            &mut self.reward_history,
+            capacity,
+            sample.block_reward_per_block as f64,
+        );
+        Self::push_history(
+            &mut self.treasury_history,
+            capacity,
+            sample.epoch_treasury_inflow_block as f64,
+        );
+        Self::push_history(
+            &mut self.storage_util_history,
+            capacity,
+            sample.market_metrics.storage.utilization,
+        );
+        Self::push_history(
+            &mut self.storage_margin_history,
+            capacity,
+            sample.market_metrics.storage.provider_margin,
+        );
+        Self::push_history(
+            &mut self.compute_util_history,
+            capacity,
+            sample.market_metrics.compute.utilization,
+        );
+        Self::push_history(
+            &mut self.compute_margin_history,
+            capacity,
+            sample.market_metrics.compute.provider_margin,
+        );
+        Self::push_history(
+            &mut self.energy_util_history,
+            capacity,
+            sample.market_metrics.energy.utilization,
+        );
+        Self::push_history(
+            &mut self.energy_margin_history,
+            capacity,
+            sample.market_metrics.energy.provider_margin,
+        );
+        Self::push_history(
+            &mut self.ad_util_history,
+            capacity,
+            sample.market_metrics.ad.utilization,
+        );
+        Self::push_history(
+            &mut self.ad_margin_history,
+            capacity,
+            sample.market_metrics.ad.provider_margin,
+        );
 
         // Need at least 2 samples to evaluate deltas
         if self.tx_count_history.len() < 2 || self.reward_history.len() < 2 {
@@ -1507,7 +1728,8 @@ impl EconomicsController {
 
         // B) Reward stability (unstable issuance detector)
         let reward_p90_delta = diff_percentile(&self.reward_history, 0.9);
-        let reward_median = median_f64(&self.reward_history).unwrap_or(sample.block_reward_per_block as f64);
+        let reward_median =
+            median_f64(&self.reward_history).unwrap_or(sample.block_reward_per_block as f64);
         let reward_volatility_bps = if reward_median > 0.0 {
             (reward_p90_delta / reward_median * 10000.0) as u64
         } else {
@@ -1519,8 +1741,12 @@ impl EconomicsController {
         // C) Treasury health (zero-treasury detector)
         let treasury_ok = sample.epoch_treasury_inflow_block > 0;
         let treasury_delta = diff_percentile(&self.treasury_history, 0.75);
-        let treasury_prev = *self.treasury_history.get(self.treasury_history.len() - 2).unwrap_or(&0.0);
-        let treasury_not_collapsing = sample.epoch_treasury_inflow_block as f64 >= (treasury_prev - treasury_delta);
+        let treasury_prev = *self
+            .treasury_history
+            .get(self.treasury_history.len() - 2)
+            .unwrap_or(&0.0);
+        let treasury_not_collapsing =
+            sample.epoch_treasury_inflow_block as f64 >= (treasury_prev - treasury_delta);
 
         // D) Market sanity (insane margins detector)
         const MIN_UTIL: f64 = 0.01; // 1% minimum utilization
@@ -1552,23 +1778,87 @@ impl EconomicsController {
 
         // Build metrics JSON
         let metrics = json_map(vec![
-            ("epoch_tx_count", JsonValue::Number(JsonNumber::from(sample.epoch_tx_count))),
-            ("epoch_tx_volume", JsonValue::Number(JsonNumber::from(sample.epoch_tx_volume_block))),
-            ("epoch_treasury_inflow", JsonValue::Number(JsonNumber::from(sample.epoch_treasury_inflow_block))),
-            ("block_reward", JsonValue::Number(JsonNumber::from(sample.block_reward_per_block))),
-            ("reward_volatility_bps", JsonValue::Number(JsonNumber::from(reward_volatility_bps))),
-            ("storage_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.storage.utilization).unwrap_or(JsonNumber::from(0u64)))),
-            ("storage_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.storage.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
-            ("compute_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.compute.utilization).unwrap_or(JsonNumber::from(0u64)))),
-            ("compute_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.compute.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
-            ("energy_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.energy.utilization).unwrap_or(JsonNumber::from(0u64)))),
-            ("energy_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.energy.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
-            ("ad_util", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.ad.utilization).unwrap_or(JsonNumber::from(0u64)))),
-            ("ad_margin", JsonValue::Number(JsonNumber::from_f64(sample.market_metrics.ad.provider_margin).unwrap_or(JsonNumber::from(0u64)))),
+            (
+                "epoch_tx_count",
+                JsonValue::Number(JsonNumber::from(sample.epoch_tx_count)),
+            ),
+            (
+                "epoch_tx_volume",
+                JsonValue::Number(JsonNumber::from(sample.epoch_tx_volume_block)),
+            ),
+            (
+                "epoch_treasury_inflow",
+                JsonValue::Number(JsonNumber::from(sample.epoch_treasury_inflow_block)),
+            ),
+            (
+                "block_reward",
+                JsonValue::Number(JsonNumber::from(sample.block_reward_per_block)),
+            ),
+            (
+                "reward_volatility_bps",
+                JsonValue::Number(JsonNumber::from(reward_volatility_bps)),
+            ),
+            (
+                "storage_util",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.storage.utilization)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "storage_margin",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.storage.provider_margin)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "compute_util",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.compute.utilization)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "compute_margin",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.compute.provider_margin)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "energy_util",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.energy.utilization)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "energy_margin",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.energy.provider_margin)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "ad_util",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.ad.utilization)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
+            (
+                "ad_margin",
+                JsonValue::Number(
+                    JsonNumber::from_f64(sample.market_metrics.ad.provider_margin)
+                        .unwrap_or(JsonNumber::from(0u64)),
+                ),
+            ),
         ]);
 
         // Enter conditions: ALL must pass
-        let enter_ok = activity_ok && reward_stable && treasury_ok && treasury_not_collapsing && markets_sane;
+        let enter_ok =
+            activity_ok && reward_stable && treasury_ok && treasury_not_collapsing && markets_sane;
 
         // Exit conditions: ANY critical failure
         let exit_ok = !(sample.epoch_tx_count < (MIN_TX_COUNT as u64)
@@ -1580,7 +1870,11 @@ impl EconomicsController {
             "activity={} reward_vol={}bps treasury={} markets={}",
             if activity_ok { "ok" } else { "FAIL" },
             reward_volatility_bps,
-            if treasury_ok && treasury_not_collapsing { "ok" } else { "FAIL" },
+            if treasury_ok && treasury_not_collapsing {
+                "ok"
+            } else {
+                "FAIL"
+            },
             if markets_sane { "ok" } else { "FAIL" }
         );
 
@@ -1665,6 +1959,7 @@ impl EconomicsController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::economics::{MarketMetric, MarketMetrics};
 
     #[allow(dead_code)] // Test utility struct for future test expansion
     struct MockProvider {
@@ -1836,7 +2131,7 @@ mod tests {
 
         // Dead chain: zero tx_count
         let dead_chain = EconomicsSample {
-            epoch_tx_count: 0, // Below MIN_TX_COUNT
+            epoch_tx_count: 0,        // Below MIN_TX_COUNT
             epoch_tx_volume_block: 0, // Below MIN_TX_VOLUME
             ..baseline.clone()
         };
@@ -1866,8 +2161,20 @@ mod tests {
         ctrl.evaluate(2, &unstable);
 
         // Add more samples to establish high volatility pattern
-        ctrl.evaluate(3, &EconomicsSample { block_reward_per_block: 90000, ..baseline.clone() });
-        let eval = ctrl.evaluate(4, &EconomicsSample { block_reward_per_block: 5000, ..baseline.clone() });
+        ctrl.evaluate(
+            3,
+            &EconomicsSample {
+                block_reward_per_block: 90000,
+                ..baseline.clone()
+            },
+        );
+        let eval = ctrl.evaluate(
+            4,
+            &EconomicsSample {
+                block_reward_per_block: 5000,
+                ..baseline.clone()
+            },
+        );
 
         assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
         assert!(!ctrl.last_eval.enter_ok);
@@ -1938,6 +2245,49 @@ mod tests {
         assert!(ctrl.evaluate(1, &healthy).is_none());
         let eval = ctrl.evaluate(2, &healthy).expect("enter");
         assert_eq!(eval.action, GateAction::Enter);
+    }
+
+    #[test]
+    fn economics_sample_snapshot_matches_deterministic_metrics() {
+        let sample = EconomicsSample {
+            epoch_tx_count: 5,
+            epoch_tx_volume_block: 10,
+            epoch_treasury_inflow_block: 2,
+            block_reward_per_block: 42,
+            market_metrics: sample_market_metrics(),
+        };
+        let snapshot = economics_sample_snapshot(&sample);
+        let markets_json = snapshot
+            .get("market_metrics")
+            .and_then(JsonValue::as_array)
+            .expect("market_metrics array present");
+        let persisted_metrics = markets_json
+            .iter()
+            .map(|value| {
+                json::from_value::<deterministic_metrics::EconomicsPrevMetric>(value.clone())
+                    .expect("produced deterministic metric entry is valid")
+            })
+            .collect::<Vec<_>>();
+        let expected = deterministic_metrics::snapshot_from_metrics(&sample.market_metrics);
+        assert_eq!(
+            persisted_metrics, expected,
+            "Economics snapshot JSON must mirror deterministic ppm helpers"
+        );
+    }
+
+    fn sample_market_metrics() -> MarketMetrics {
+        let metric = MarketMetric {
+            utilization: 0.47,
+            average_cost_block: 100.0,
+            effective_payout_block: 120.0,
+            provider_margin: 0.15,
+        };
+        MarketMetrics {
+            storage: metric.clone(),
+            compute: metric.clone(),
+            energy: metric.clone(),
+            ad: metric,
+        }
     }
 
     fn healthy_market_metrics() -> crate::economics::MarketMetrics {

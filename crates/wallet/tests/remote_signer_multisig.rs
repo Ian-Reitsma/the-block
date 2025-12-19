@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use httpd::StatusCode;
 use ledger::crypto::remote_tag;
-use wallet::{WalletError, WalletSigner, remote_signer::RemoteSigner};
+use wallet::{remote_signer::RemoteSigner, WalletError, WalletSigner};
 
 use support::HttpSignerMock;
 

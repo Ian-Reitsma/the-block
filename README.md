@@ -63,6 +63,7 @@ This means when you run The Block, you're not duct-taping together 50 different 
 The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (BLOCK), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center.
 
 **Readiness autopilot:** The Launch Governor (`node/src/launch_governor`) consumes chain + DNS telemetry (and soon economics/market metrics) to drive testnet and mainnet gating. It records signed decisions, enforces streak-based enter/exit thresholds, and ties into governance runtime flags so feature transitions are reproducible and reviewable.
+Operators can now run `tb-cli governor status` to see the persisted `EconomicsPrevMetric` snapshot plus the telemetry gauges it mirrors (`economics_prev_market_metrics_{utilization,provider_margin}_ppm`), giving a single view that ties the JSON-RPC payload to the Prometheus series you use in Grafana.
 
 ---
 
@@ -109,6 +110,12 @@ Think of this repository like a city with different neighborhoods:
 | **Tooling** (`scripts/`, `tools/`, `examples/`, `sim/`, `fuzz/`, `formal/`) | Scripts and tests to make sure everything works correctly | Bootstrap scripts, dependency policy tooling, settlement/replay harnesses, chaos testing, fuzzing, and formal verification inputs. |
 
 ### Recent Major Additions
+- **Receipt Integration System (December 2025)**: Consensus-level audit trail for all market settlements
+  - Receipts (Storage, Compute, Energy, Ad) now included in block hash for consensus validation
+  - Telemetry system tracks receipt emission by market type (`receipts_storage_total`, `receipts_per_block`, etc.)
+  - Deterministic metrics engine derives market utilization from on-chain receipt data
+  - Launch Governor can now use real market activity (not placeholders) for economic gates
+  - See `RECEIPT_INTEGRATION_INDEX.md` for complete documentation
 - **Treasury Disbursement System**: Complete end-to-end workflow for governance-approved fund distributions with RPC handlers (`gov.treasury.submit_disbursement`, `execute_disbursement`, `rollback_disbursement`) and full validation
 - **Disbursement Status Machine**: Queue/timelock/rollback logic now flows through `gov.treasury.queue_disbursement` (driven from `contract-cli gov disburse queue`, which auto-derives the current epoch), and metrics/explorer surfaces now emit the full Draft → Voting → Queued → Timelocked → Executed/Finalized/RolledBack labels so operators can see exactly where each payout sits before execution
 - **Energy Market Signature Verification**: Trait-based multi-provider signature system with Ed25519 (always available) and Dilithium (post-quantum, feature-gated), enabling oracle meter readings to be cryptographically verified

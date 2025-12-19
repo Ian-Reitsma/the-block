@@ -874,7 +874,6 @@ mod tests {
         assert!(table.ack_payload(&handshake, addr, b"payload").is_none());
     }
 
-
     #[test]
     fn retransmit_schedule_bounds_backoff() {
         let mut schedule = RetransmitSchedule::new(Duration::from_millis(120));

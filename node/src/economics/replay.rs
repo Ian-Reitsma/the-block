@@ -9,8 +9,8 @@
 //! from the chain itself (transactions, governance params, market activity).
 
 use super::{
-    execute_epoch_economics, GovernanceEconomicParams, MarketMetric,
-    MarketMetrics, NetworkActivity, SubsidySnapshot, TariffSnapshot,
+    derive_market_metrics_from_chain, execute_epoch_economics, GovernanceEconomicParams,
+    NetworkActivity, SubsidySnapshot, TariffSnapshot,
 };
 use crate::governance::Params;
 use crate::{Block, EPOCH_BLOCKS};
@@ -64,10 +64,7 @@ impl Default for ReplayedEconomicsState {
 /// - Uses ONLY data from the chain itself (tx counts, volumes, miner set)
 /// - Market metrics are derived from on-chain settlement records (not live market state)
 /// - Governance params should come from on-chain governance history (TODO: epoch versioning)
-pub fn replay_economics_to_tip(
-    chain: &[Block],
-    gov_params: &Params,
-) -> ReplayedEconomicsState {
+pub fn replay_economics_to_tip(chain: &[Block], gov_params: &Params) -> ReplayedEconomicsState {
     if chain.is_empty() {
         return ReplayedEconomicsState::default();
     }
@@ -125,7 +122,9 @@ pub fn replay_economics_to_height(
         // Accumulate epoch metrics from non-coinbase transactions
         for tx in block.transactions.iter().skip(1) {
             epoch_tx_count = epoch_tx_count.saturating_add(1);
-            let tx_volume = tx.payload.amount_consumer
+            let tx_volume = tx
+                .payload
+                .amount_consumer
                 .saturating_add(tx.payload.amount_industrial)
                 .saturating_add(tx.tip);
             epoch_tx_volume_block = epoch_tx_volume_block.saturating_add(tx_volume);
@@ -162,8 +161,8 @@ pub fn replay_economics_to_height(
                 epoch,
                 &metrics,
                 &network_activity,
-                emission, // circulating_block
-                emission, // total_emission
+                emission,              // circulating_block
+                emission,              // total_emission
                 epoch_tx_volume_block, // non_kyc_volume (TODO: track KYC status on-chain)
                 0, // total_ad_spend_block (TODO: derive from ad settlement records)
                 epoch_treasury_inflow,
@@ -191,53 +190,6 @@ pub fn replay_economics_to_height(
 
     state.block_height = target_height;
     state
-}
-
-/// Derive market metrics from on-chain settlement and subsidy data.
-///
-/// FIXME: This is currently a placeholder that returns default metrics.
-/// Instructions (section 5) require wiring real metrics from:
-/// - Storage: settlement receipts + accounting (storage/, storage_market/)
-/// - Compute: price board + scheduler (node/src/compute_market/)
-/// - Energy: market state DB + oracle (crates/energy-market/)
-/// - Ad: pending_ad_settlements + oracle conversion (crates/ad_market/)
-///
-/// For consensus, these metrics MUST be derived deterministically from
-/// on-chain data (receipts, settlements, governance snapshots), NOT from
-/// live market databases or external sources.
-fn derive_market_metrics_from_chain(
-    _chain: &[Block],
-    _epoch_start: u64,
-    _epoch_end: u64,
-) -> MarketMetrics {
-    // TODO: Implement real metric derivation per instructions section 5.2
-    // For now, return approximations to unblock validation testing
-    MarketMetrics {
-        storage: MarketMetric {
-            utilization: 0.5,
-            average_cost_block: 1000.0,
-            effective_payout_block: 1100.0,
-            provider_margin: 0.1,
-        },
-        compute: MarketMetric {
-            utilization: 0.4,
-            average_cost_block: 2000.0,
-            effective_payout_block: 2200.0,
-            provider_margin: 0.1,
-        },
-        energy: MarketMetric {
-            utilization: 0.3,
-            average_cost_block: 500.0,
-            effective_payout_block: 550.0,
-            provider_margin: 0.1,
-        },
-        ad: MarketMetric {
-            utilization: 0.2,
-            average_cost_block: 100.0,
-            effective_payout_block: 110.0,
-            provider_margin: 0.1,
-        },
-    }
 }
 
 /// Helper to convert Params to GovernanceEconomicParams

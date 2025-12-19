@@ -3927,7 +3927,9 @@ fn aggregator_metrics() -> &'static AggregatorMetrics {
 pub fn metrics_registry_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: concurrency::Lazy<std::sync::Mutex<()>> =
         concurrency::Lazy::new(|| std::sync::Mutex::new(()));
-    GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 static TLS_WARNING_SNAPSHOTS: Lazy<Mutex<HashMap<(String, String), TlsWarningSnapshot>>> =
