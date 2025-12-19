@@ -1,4 +1,4 @@
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::{json, Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codec::{BinaryCodec, BinaryWriter, Result as CodecResult};
@@ -260,6 +260,14 @@ pub fn mark_rolled_back(disbursement: &mut TreasuryDisbursement, reason: String)
     };
 }
 
+pub fn mark_rolled_back_with_error(
+    disbursement: &mut TreasuryDisbursement,
+    error: DisbursementError,
+) {
+    let reason = format!("{:?}", error);
+    mark_rolled_back(disbursement, reason);
+}
+
 pub fn mark_cancelled(disbursement: &mut TreasuryDisbursement, reason: String) {
     disbursement.status = DisbursementStatus::RolledBack {
         reason,
@@ -280,6 +288,41 @@ pub enum DisbursementValidationError {
     InvalidTimelock,
     InvalidRollbackWindow,
     ExpectedReceiptsMismatch { expected_total: u64, actual: u64 },
+}
+
+/// Explicit error states for treasury execution tracking
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub enum DisbursementError {
+    InsufficientFunds {
+        required_ct: u64,
+        required_it: u64,
+        available_ct: u64,
+        available_it: u64,
+    },
+    InvalidTarget {
+        destination: String,
+        reason: String,
+    },
+    StaleProposal {
+        proposal_id: u64,
+        current_epoch: u64,
+        scheduled_epoch: u64,
+    },
+    DependencyFailed {
+        dependency_id: u64,
+        reason: String,
+    },
+    ExecutorBacklog {
+        queue_depth: usize,
+        threshold: usize,
+    },
+    NetworkError {
+        message: String,
+    },
+    ValidationFailed {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for DisbursementValidationError {
@@ -388,6 +431,156 @@ pub fn validate_disbursement_payload(
                 expected_total: total_ct,
                 actual: payload.disbursement.amount_ct,
             });
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate dependency graph for a disbursement payload
+pub fn validate_dependencies(
+    payload: &DisbursementPayload,
+    existing_disbursements: &[TreasuryDisbursement],
+) -> Result<(), DisbursementError> {
+    for dep_id in &payload.proposal.deps {
+        // Find dependency
+        let dep = existing_disbursements
+            .iter()
+            .find(|d| d.id == *dep_id)
+            .ok_or_else(|| DisbursementError::DependencyFailed {
+                dependency_id: *dep_id,
+                reason: format!("Dependency {} not found", dep_id),
+            })?;
+
+        // Check dependency is in acceptable state
+        match &dep.status {
+            DisbursementStatus::Finalized { .. } => {
+                // Good - dependency completed successfully
+            }
+            DisbursementStatus::RolledBack { reason, .. } => {
+                return Err(DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} rolled back: {}", dep_id, reason),
+                });
+            }
+            _ => {
+                return Err(DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} not yet finalized", dep_id),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse dependency IDs out of a memo string.
+///
+/// The parser supports both JSON and key=value styles so tooling that relies on
+/// Maximum number of dependencies allowed per disbursement to prevent DOS attacks
+const MAX_DEPENDENCIES: usize = 100;
+
+/// memo-based dependency hints can stay in sync. This is the canonical implementation
+/// used by the executor, CLI, and explorer layers.
+///
+/// # Security
+/// - Limits dependency count to MAX_DEPENDENCIES (100) to prevent DOS attacks
+/// - Deduplicates dependency IDs to prevent repeated processing
+/// - Validates memo size before parsing
+pub fn parse_dependency_list(memo: &str) -> Vec<u64> {
+    let trimmed = memo.trim();
+
+    // Security: Reject excessively large memos (potential DOS)
+    if trimmed.is_empty() || trimmed.len() > 8192 {
+        return Vec::new();
+    }
+
+    let mut deps = Vec::new();
+
+    // Try JSON format first
+    if let Ok(json::Value::Object(map)) = json::from_str::<json::Value>(trimmed) {
+        if let Some(json::Value::Array(items)) = map.get("depends_on") {
+            for item in items.iter().take(MAX_DEPENDENCIES) {
+                if let Some(id) = match item {
+                    json::Value::Number(num) => num.as_u64(),
+                    json::Value::String(text) => text.trim().parse::<u64>().ok(),
+                    _ => None,
+                } {
+                    deps.push(id);
+                }
+            }
+        }
+    } else if let Some(rest) = trimmed
+        .strip_prefix("depends_on=")
+        .or_else(|| trimmed.strip_prefix("depends_on:"))
+    {
+        // Try key-value format
+        for entry in rest.split(',').take(MAX_DEPENDENCIES) {
+            if let Ok(id) = entry.trim().parse::<u64>() {
+                deps.push(id);
+            }
+        }
+    }
+
+    // Security: Deduplicate to prevent repeated processing
+    deps.sort_unstable();
+    deps.dedup();
+    deps
+}
+
+/// Check if a disbursement is eligible for execution at the given epoch
+pub fn is_eligible_for_execution(
+    disbursement: &TreasuryDisbursement,
+    current_epoch: u64,
+    existing_disbursements: &[TreasuryDisbursement],
+) -> Result<(), DisbursementError> {
+    // Check state
+    match &disbursement.status {
+        DisbursementStatus::Timelocked { ready_epoch } => {
+            if current_epoch < *ready_epoch {
+                return Err(DisbursementError::StaleProposal {
+                    proposal_id: disbursement.id,
+                    current_epoch,
+                    scheduled_epoch: *ready_epoch,
+                });
+            }
+        }
+        _ => {
+            return Err(DisbursementError::ValidationFailed {
+                reason: format!(
+                    "Disbursement {} not in Timelocked state",
+                    disbursement.id
+                ),
+            });
+        }
+    }
+
+    // Check dependencies if proposal metadata exists
+    if let Some(proposal) = &disbursement.proposal {
+        for dep_id in &proposal.deps {
+            let dep = existing_disbursements
+                .iter()
+                .find(|d| d.id == *dep_id)
+                .ok_or_else(|| DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} not found", dep_id),
+                })?;
+
+            match &dep.status {
+                DisbursementStatus::Finalized { .. } => {}
+                DisbursementStatus::RolledBack { reason, .. } => {
+                    return Err(DisbursementError::DependencyFailed {
+                        dependency_id: *dep_id,
+                        reason: format!("Dependency {} rolled back: {}", dep_id, reason),
+                    });
+                }
+                _ => {
+                    return Err(DisbursementError::DependencyFailed {
+                        dependency_id: *dep_id,
+                        reason: format!("Dependency {} not finalized", dep_id),
+                    });
+                }
+            }
         }
     }
 
@@ -525,6 +718,62 @@ mod tests {
             },
         ];
         assert!(validate_disbursement_payload(&payload).is_ok());
+    }
+
+    #[test]
+    fn parse_dependency_list_json() {
+        let memo = r#"{"depends_on": [1234, 5678]}"#;
+        assert_eq!(parse_dependency_list(memo), vec![1234, 5678]);
+    }
+
+    #[test]
+    fn parse_dependency_list_key_value() {
+        let memo = "depends_on=111,222";
+        assert_eq!(parse_dependency_list(memo), vec![111, 222]);
+    }
+
+    #[test]
+    fn parse_dependency_list_empty() {
+        assert!(parse_dependency_list("").is_empty());
+        assert!(parse_dependency_list("no deps").is_empty());
+    }
+
+    #[test]
+    fn parse_dependency_list_deduplicates() {
+        // Security: Ensure duplicate IDs are removed
+        let memo = r#"{"depends_on": [123, 456, 123, 789, 456]}"#;
+        let result = parse_dependency_list(memo);
+        assert_eq!(result, vec![123, 456, 789]);
+    }
+
+    #[test]
+    fn parse_dependency_list_limits_count() {
+        // Security: Ensure DOS protection by limiting count
+        let mut deps = Vec::new();
+        for i in 0..150 {
+            deps.push(format!("{}", i));
+        }
+        let memo = format!("depends_on={}", deps.join(","));
+        let result = parse_dependency_list(&memo);
+        // Should be limited to MAX_DEPENDENCIES (100), then deduplicated
+        assert!(result.len() <= 100);
+    }
+
+    #[test]
+    fn parse_dependency_list_rejects_huge_memo() {
+        // Security: Reject excessively large memos (> 8KB)
+        let huge_memo = "depends_on=".to_string() + &"1,".repeat(10000);
+        let result = parse_dependency_list(&huge_memo);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_dependency_list_handles_malformed_json() {
+        // Security: Ensure malformed JSON doesn't panic
+        let memo = r#"{"depends_on": [1, 2, "invalid", null, 3]}"#;
+        let result = parse_dependency_list(memo);
+        // Should parse valid numbers only
+        assert_eq!(result, vec![1, 2, 3]);
     }
 }
 

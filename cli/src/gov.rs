@@ -14,7 +14,7 @@ use foundation_serialization::{json, Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry,
-    treasury::{ExpectedReceipt, QuorumSpec},
+    treasury::{ExpectedReceipt, QuorumSpec, parse_dependency_list},
     DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
@@ -2155,33 +2155,4 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
         }
     }
     Ok(())
-}
-
-fn parse_dependency_list(memo: &str) -> Vec<u64> {
-    let trimmed = memo.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(Value::Object(map)) = json::from_str::<Value>(trimmed) {
-        if let Some(Value::Array(items)) = map.get("depends_on") {
-            return items
-                .iter()
-                .filter_map(|item| match item {
-                    Value::Number(num) => num.as_u64(),
-                    Value::String(text) => text.trim().parse::<u64>().ok(),
-                    _ => None,
-                })
-                .collect();
-        }
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix("depends_on=")
-        .or_else(|| trimmed.strip_prefix("depends_on:"))
-    {
-        return rest
-            .split(',')
-            .filter_map(|entry| entry.trim().parse::<u64>().ok())
-            .collect();
-    }
-    Vec::new()
 }

@@ -19,6 +19,7 @@ foundation_lazy = { path = "../crates/foundation_lazy" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 serde = { workspace = true }
 bridge-types = { path = "../crates/bridge-types" }
+diagnostics = { path = "../crates/diagnostics" }
 
 [dev-dependencies]
 sys = { path = "../crates/sys" }

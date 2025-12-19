@@ -1,6 +1,6 @@
 use super::{
-    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
-    ReleaseVote, RewardClaimApproval, Runtime, Vote, VoteChoice,
+    registry, ApprovedRelease, CircuitBreaker, ParamKey, Params, Proposal, ProposalStatus,
+    ReleaseBallot, ReleaseVote, RewardClaimApproval, Runtime, Vote, VoteChoice,
 };
 use crate::codec::{
     balance_history_from_json, balance_history_to_json, decode_binary,
@@ -92,6 +92,11 @@ pub struct TreasuryExecutorConfig {
         >,
     >,
     pub nonce_floor: Arc<AtomicU64>,
+    /// Circuit breaker to prevent cascading failures during repeated submission errors
+    pub circuit_breaker: Arc<CircuitBreaker>,
+    /// Optional telemetry callback for circuit breaker state updates
+    pub circuit_breaker_telemetry:
+        Option<Arc<dyn Fn(u8, u64, u64) + Send + Sync>>,
 }
 
 #[derive(Debug)]
@@ -268,6 +273,19 @@ fn run_executor_tick(
     let mut pending_matured = 0u64;
     let mut last_error: Option<String> = None;
 
+    // CIRCUIT BREAKER INTEGRATION: Check if circuit is open before processing batch
+    // If circuit is open, skip this batch to prevent cascading failures
+    if !config.circuit_breaker.allow_request() {
+        let staged_total = store.load_execution_intents()?.len() as u64;
+        snapshot.record_error(
+            format!("circuit_breaker_open state={:?}", config.circuit_breaker.state()),
+            0,
+            staged_total,
+        );
+        store.store_executor_snapshot(snapshot)?;
+        return Ok(());
+    }
+
     // Process the current batch
     for disbursement in batch {
         // Additional dependency check (if configured)
@@ -296,6 +314,8 @@ fn run_executor_tick(
                 config
                     .nonce_floor
                     .store(intent.nonce, AtomicOrdering::SeqCst);
+                // Record success in circuit breaker
+                config.circuit_breaker.record_success();
             }
             Err(err) => {
                 if err.is_storage() {
@@ -304,7 +324,10 @@ fn run_executor_tick(
                 if err.is_cancelled() {
                     store.cancel_disbursement(disbursement.id, err.message())?;
                     let _ = store.remove_execution_intent(disbursement.id);
+                    // Cancelled errors (e.g., insufficient balance) do NOT count against circuit
                 } else {
+                    // Transient submission errors count against the circuit breaker
+                    config.circuit_breaker.record_failure();
                     last_error = Some(err.message().to_string());
                 }
             }
@@ -318,6 +341,15 @@ fn run_executor_tick(
         snapshot.record_success(pending_matured, staged_total);
     }
     store.store_executor_snapshot(snapshot)?;
+
+    // Update telemetry if callback provided
+    if let Some(ref telemetry_fn) = config.circuit_breaker_telemetry {
+        let state = config.circuit_breaker.state() as u8;
+        let failures = config.circuit_breaker.failure_count();
+        let successes = config.circuit_breaker.success_count();
+        telemetry_fn(state, failures, successes);
+    }
+
     Ok(())
 }
 

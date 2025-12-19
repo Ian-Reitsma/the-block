@@ -157,7 +157,7 @@ pub fn validate_receipt_size(bytes: usize) -> Result<(), ValidationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipts::{StorageReceipt, ComputeReceipt};
+    use crate::receipts::StorageReceipt;
 
     #[test]
     fn valid_storage_receipt_passes() {

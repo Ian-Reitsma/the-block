@@ -121,9 +121,11 @@ struct GovernanceWebhookPayload<'a> {
     proposal_id: u64,
 }
 
+pub mod energy;
 pub mod metrics;
 pub mod receipts;
 pub mod summary;
+pub mod treasury;
 
 #[cfg(feature = "telemetry")]
 pub use bridges::{
@@ -7472,10 +7474,10 @@ pub fn update_economics_epoch_metrics(
 
     for prev_metric in metrics::snapshot_from_metrics(prev_metrics) {
         ECONOMICS_PREV_MARKET_UTILIZATION_PPM
-            .with_label_values(&[prev_metric.market])
+            .with_label_values(&[&prev_metric.market])
             .set(prev_metric.utilization_ppm);
         ECONOMICS_PREV_MARKET_MARGIN_PPM
-            .with_label_values(&[prev_metric.market])
+            .with_label_values(&[&prev_metric.market])
             .set(prev_metric.provider_margin_ppm);
     }
 }

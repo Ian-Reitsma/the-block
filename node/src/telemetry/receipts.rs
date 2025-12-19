@@ -7,49 +7,49 @@ use crate::receipts::Receipt;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use foundation_telemetry::{Counter, Gauge, Histogram, IntGauge, Register};
+use runtime::telemetry::{IntCounter, Gauge, Histogram, IntGauge};
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_STORAGE: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPTS_STORAGE: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipts_storage_total",
         "Total storage receipts across all blocks"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_COMPUTE: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPTS_COMPUTE: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipts_compute_total",
         "Total compute receipts across all blocks"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_ENERGY: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPTS_ENERGY: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipts_energy_total",
         "Total energy receipts across all blocks"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 #[cfg(feature = "telemetry")]
-pub static RECEIPTS_AD: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPTS_AD: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipts_ad_total",
         "Total ad receipts across all blocks"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Receipts in current block (gauge - resets per block)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipts_per_block",
         "Number of receipts in current block"
     )
@@ -59,7 +59,7 @@ pub static RECEIPTS_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Storage receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_STORAGE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipts_storage_per_block",
         "Number of storage receipts in current block"
     )
@@ -69,7 +69,7 @@ pub static RECEIPTS_STORAGE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Compute receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_COMPUTE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipts_compute_per_block",
         "Number of compute receipts in current block"
     )
@@ -79,7 +79,7 @@ pub static RECEIPTS_COMPUTE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Energy receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_ENERGY_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipts_energy_per_block",
         "Number of energy receipts in current block"
     )
@@ -89,7 +89,7 @@ pub static RECEIPTS_ENERGY_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Ad receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_AD_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipts_ad_per_block",
         "Number of ad receipts in current block"
     )
@@ -99,7 +99,7 @@ pub static RECEIPTS_AD_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Total serialized bytes of receipts in current block
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_BYTES_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "receipt_bytes_per_block",
         "Total serialized receipt bytes in current block"
     )
@@ -109,7 +109,7 @@ pub static RECEIPT_BYTES_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 /// Settlement amounts by market type (gauges for current block)
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_STORAGE: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    runtime::telemetry::register_gauge!(
         "receipt_settlement_storage_ct",
         "Total storage receipt settlement (CT) in current block"
     )
@@ -118,7 +118,7 @@ pub static RECEIPT_SETTLEMENT_STORAGE: Lazy<Gauge> = Lazy::new(|| {
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_COMPUTE: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    runtime::telemetry::register_gauge!(
         "receipt_settlement_compute_ct",
         "Total compute receipt settlement (CT) in current block"
     )
@@ -127,7 +127,7 @@ pub static RECEIPT_SETTLEMENT_COMPUTE: Lazy<Gauge> = Lazy::new(|| {
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_ENERGY: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    runtime::telemetry::register_gauge!(
         "receipt_settlement_energy_ct",
         "Total energy receipt settlement (CT) in current block"
     )
@@ -136,7 +136,7 @@ pub static RECEIPT_SETTLEMENT_ENERGY: Lazy<Gauge> = Lazy::new(|| {
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_AD: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
+    runtime::telemetry::register_gauge!(
         "receipt_settlement_ad_ct",
         "Total ad receipt settlement (CT) in current block"
     )
@@ -146,7 +146,7 @@ pub static RECEIPT_SETTLEMENT_AD: Lazy<Gauge> = Lazy::new(|| {
 /// Metrics derivation performance
 #[cfg(feature = "telemetry")]
 pub static METRICS_DERIVATION_DURATION_MS: Lazy<Histogram> = Lazy::new(|| {
-    foundation_telemetry::register_histogram!(
+    runtime::telemetry::register_histogram!(
         "metrics_derivation_duration_ms",
         "Time to derive market metrics from receipts (milliseconds)"
     )
@@ -155,38 +155,38 @@ pub static METRICS_DERIVATION_DURATION_MS: Lazy<Histogram> = Lazy::new(|| {
 
 /// Receipt encoding failures (critical metric)
 #[cfg(feature = "telemetry")]
-pub static RECEIPT_ENCODING_FAILURES_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPT_ENCODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipt_encoding_failures_total",
         "Total receipt encoding failures (CRITICAL - indicates data corruption risk)"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Receipt validation failures
 #[cfg(feature = "telemetry")]
-pub static RECEIPT_VALIDATION_FAILURES_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPT_VALIDATION_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipt_validation_failures_total",
         "Total receipt validation failures (malformed receipts)"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Receipt decoding failures (when reading blocks)
 #[cfg(feature = "telemetry")]
-pub static RECEIPT_DECODING_FAILURES_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPT_DECODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipt_decoding_failures_total",
         "Total receipt decoding failures when reading blocks"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Pending receipt depth gauges (per market)
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_STORAGE: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "pending_receipts_storage",
         "Number of pending storage receipts waiting to be included in a block"
     )
@@ -195,7 +195,7 @@ pub static PENDING_RECEIPTS_STORAGE: Lazy<IntGauge> = Lazy::new(|| {
 
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_COMPUTE: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "pending_receipts_compute",
         "Number of pending compute receipts waiting to be included in a block"
     )
@@ -204,7 +204,7 @@ pub static PENDING_RECEIPTS_COMPUTE: Lazy<IntGauge> = Lazy::new(|| {
 
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_ENERGY: Lazy<IntGauge> = Lazy::new(|| {
-    foundation_telemetry::register_int_gauge!(
+    runtime::telemetry::register_int_gauge!(
         "pending_receipts_energy",
         "Number of pending energy receipts waiting to be included in a block"
     )
@@ -213,12 +213,12 @@ pub static PENDING_RECEIPTS_ENERGY: Lazy<IntGauge> = Lazy::new(|| {
 
 /// Receipt drain operations
 #[cfg(feature = "telemetry")]
-pub static RECEIPT_DRAIN_OPERATIONS_TOTAL: Lazy<Counter> = Lazy::new(|| {
-    foundation_telemetry::register_counter!(
+pub static RECEIPT_DRAIN_OPERATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    runtime::telemetry::register_int_counter!(
         "receipt_drain_operations_total",
         "Total number of receipt drain operations across all markets"
     )
-    .unwrap_or_else(|_| Counter::placeholder())
+    .unwrap_or_else(|_| IntCounter::placeholder())
 });
 
 /// Record receipt emission and metrics

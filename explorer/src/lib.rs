@@ -33,6 +33,7 @@ use the_block::{
     transaction::SignedTransaction,
     Block, BlockTreasuryEvent,
 };
+use the_block::governance::treasury::parse_dependency_list;
 pub mod ad_view;
 mod ai_summary;
 pub mod bridge_view;
@@ -874,37 +875,6 @@ pub fn build_executor_report(store_path: &str) -> Result<ExplorerExecutorReport,
         staged_intents: intents,
         dependency_blocks,
     })
-}
-
-fn parse_dependency_list(memo: &str) -> Vec<u64> {
-    let trimmed = memo.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(json_value) = json::from_str::<json::Value>(trimmed) {
-        if let Some(map) = json_value.as_object() {
-            if let Some(json::Value::Array(items)) = map.get("depends_on") {
-                return items
-                    .iter()
-                    .filter_map(|item| match item {
-                        json::Value::Number(num) => num.as_u64(),
-                        json::Value::String(text) => text.trim().parse::<u64>().ok(),
-                        _ => None,
-                    })
-                    .collect();
-            }
-        }
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix("depends_on=")
-        .or_else(|| trimmed.strip_prefix("depends_on:"))
-    {
-        return rest
-            .split(',')
-            .filter_map(|entry| entry.trim().parse::<u64>().ok())
-            .collect();
-    }
-    Vec::new()
 }
 
 async fn network_certs(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {

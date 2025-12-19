@@ -1,0 +1,304 @@
+# Prometheus Recording Rules for The Block
+#
+# Recording rules pre-compute expensive queries and store the results as new time series.
+# This dramatically improves dashboard query performance and reduces Prometheus load.
+#
+# Deploy to Prometheus with:
+#   prometheus --config.file=prometheus.yml --storage.tsdb.path=data/
+
+groups:
+  # =================================
+  # TREASURY METRICS - AGGREGATIONS
+  # =================================
+  - name: treasury_aggregations
+    interval: 30s
+    rules:
+      # Total disbursements by status (aggregated across all labels)
+      - record: treasury:disbursements:total:by_status
+        expr: sum(governance_disbursements_total) by (status)
+
+      # Disbursement backlog by status
+      - record: treasury:backlog:current:by_status
+        expr: sum(treasury_disbursement_backlog) by (status)
+
+      # Total execution errors by reason
+      - record: treasury:errors:total:by_reason
+        expr: sum(treasury_execution_errors_total) by (reason)
+
+      # Dependency failures by type
+      - record: treasury:dependency_failures:total:by_type
+        expr: sum(treasury_dependency_failures_total) by (failure_type)
+
+      # Treasury balance totals (TB equivalent)
+      - record: treasury:balance:ct:total
+        expr: sum(treasury_balance_ct)
+
+      - record: treasury:balance:it:total
+        expr: sum(treasury_balance_it)
+
+  # =================================
+  # TREASURY METRICS - RATES
+  # =================================
+  - name: treasury_rates
+    interval: 1m
+    rules:
+      # Disbursement creation rate (per minute)
+      - record: treasury:disbursements:rate1m
+        expr: rate(governance_disbursements_total[1m])
+
+      # Disbursement creation rate (per hour)
+      - record: treasury:disbursements:rate1h
+        expr: rate(governance_disbursements_total[1h])
+
+      # Execution error rate (per minute)
+      - record: treasury:errors:rate1m
+        expr: rate(treasury_execution_errors_total[1m])
+
+      # Dependency failure rate (per minute)
+      - record: treasury:dependency_failures:rate1m
+        expr: rate(treasury_dependency_failures_total[1m])
+
+  # =================================
+  # TREASURY METRICS - LATENCY
+  # =================================
+  - name: treasury_latency
+    interval: 30s
+    rules:
+      # Disbursement lag percentiles
+      - record: treasury:disbursement_lag:p50
+        expr: histogram_quantile(0.50, sum(rate(treasury_disbursement_lag_seconds_bucket[5m])) by (le))
+
+      - record: treasury:disbursement_lag:p95
+        expr: histogram_quantile(0.95, sum(rate(treasury_disbursement_lag_seconds_bucket[5m])) by (le))
+
+      - record: treasury:disbursement_lag:p99
+        expr: histogram_quantile(0.99, sum(rate(treasury_disbursement_lag_seconds_bucket[5m])) by (le))
+
+      # Executor tick duration percentiles
+      - record: treasury:executor_tick:p50
+        expr: histogram_quantile(0.50, sum(rate(treasury_executor_tick_duration_seconds_bucket[5m])) by (le))
+
+      - record: treasury:executor_tick:p95
+        expr: histogram_quantile(0.95, sum(rate(treasury_executor_tick_duration_seconds_bucket[5m])) by (le))
+
+      - record: treasury:executor_tick:p99
+        expr: histogram_quantile(0.99, sum(rate(treasury_executor_tick_duration_seconds_bucket[5m])) by (le))
+
+  # =================================
+  # ENERGY MARKET - AGGREGATIONS
+  # =================================
+  - name: energy_aggregations
+    interval: 30s
+    rules:
+      # Total energy readings
+      - record: energy:readings:total
+        expr: sum(energy_readings_total)
+
+      # Oracle errors by reason
+      - record: energy:oracle_errors:total:by_reason
+        expr: sum(oracle_submission_errors_total) by (reason)
+
+      # Disputes by type
+      - record: energy:disputes_raised:total:by_type
+        expr: sum(energy_disputes_raised_total) by (dispute_type)
+
+      # Disputes by outcome
+      - record: energy:disputes_resolved:total:by_outcome
+        expr: sum(energy_disputes_resolved_total) by (outcome)
+
+      # Market metrics
+      - record: energy:market_price:current
+        expr: avg(energy_market_price_current)
+
+      - record: energy:market_volume:current
+        expr: sum(energy_market_volume_current)
+
+      # Oracle health
+      - record: energy:oracles:active:total
+        expr: sum(oracle_active_count)
+
+      - record: energy:disputes:pending:total
+        expr: sum(energy_disputes_pending)
+
+  # =================================
+  # ENERGY MARKET - RATES
+  # =================================
+  - name: energy_rates
+    interval: 1m
+    rules:
+      # Reading submission rate
+      - record: energy:readings:rate1m
+        expr: rate(energy_readings_total[1m])
+
+      - record: energy:readings:rate1h
+        expr: rate(energy_readings_total[1h])
+
+      # Oracle error rate
+      - record: energy:oracle_errors:rate1m
+        expr: rate(oracle_submission_errors_total[1m])
+
+      # Dispute rates
+      - record: energy:disputes_raised:rate1m
+        expr: rate(energy_disputes_raised_total[1m])
+
+      - record: energy:disputes_resolved:rate1m
+        expr: rate(energy_disputes_resolved_total[1m])
+
+  # =================================
+  # ENERGY MARKET - LATENCY
+  # =================================
+  - name: energy_latency
+    interval: 30s
+    rules:
+      # Oracle inclusion lag percentiles
+      - record: energy:oracle_inclusion_lag:p50
+        expr: histogram_quantile(0.50, sum(rate(oracle_inclusion_lag_seconds_bucket[5m])) by (le))
+
+      - record: energy:oracle_inclusion_lag:p95
+        expr: histogram_quantile(0.95, sum(rate(oracle_inclusion_lag_seconds_bucket[5m])) by (le))
+
+      - record: energy:oracle_inclusion_lag:p99
+        expr: histogram_quantile(0.99, sum(rate(oracle_inclusion_lag_seconds_bucket[5m])) by (le))
+
+      # Dispute resolution time percentiles
+      - record: energy:dispute_resolution:p50
+        expr: histogram_quantile(0.50, sum(rate(energy_dispute_resolution_seconds_bucket[5m])) by (le))
+
+      - record: energy:dispute_resolution:p95
+        expr: histogram_quantile(0.95, sum(rate(energy_dispute_resolution_seconds_bucket[5m])) by (le))
+
+      - record: energy:dispute_resolution:p99
+        expr: histogram_quantile(0.99, sum(rate(energy_dispute_resolution_seconds_bucket[5m])) by (le))
+
+  # =================================
+  # STORAGE MARKET - AGGREGATIONS
+  # =================================
+  - name: storage_aggregations
+    interval: 30s
+    rules:
+      # Contract creation rate
+      - record: storage:contracts:rate1m
+        expr: rate(storage_contract_created_total[1m])
+
+      # Retrieval success/failure rates
+      - record: storage:retrieval_success:rate1m
+        expr: rate(retrieval_success_total[1m])
+
+      - record: storage:retrieval_failure:rate1m
+        expr: rate(retrieval_failure_total[1m])
+
+      # Retrieval success ratio
+      - record: storage:retrieval:success_ratio
+        expr: |
+          rate(retrieval_success_total[5m]) /
+          (rate(retrieval_success_total[5m]) + rate(retrieval_failure_total[5m]))
+
+  # =================================
+  # RECEIPT PROCESSING - AGGREGATIONS
+  # =================================
+  - name: receipt_aggregations
+    interval: 30s
+    rules:
+      # Receipt drain operations
+      - record: receipts:drain_operations:total
+        expr: sum(receipt_drain_operations_total)
+
+      # Receipt drain rate
+      - record: receipts:drain:rate1m
+        expr: rate(receipt_drain_operations_total[1m])
+
+  # =================================
+  # SYSTEM-WIDE HEALTH INDICATORS
+  # =================================
+  - name: system_health
+    interval: 1m
+    rules:
+      # Treasury health score (0-1)
+      # Based on: low error rate, low backlog, reasonable lag
+      - record: system:treasury:health_score
+        expr: |
+          (
+            (1 - clamp_max(rate(treasury_execution_errors_total[5m]) / 10, 1)) * 0.4 +
+            (1 - clamp_max(sum(treasury_disbursement_backlog) / 100, 1)) * 0.3 +
+            (1 - clamp_max(treasury:disbursement_lag:p95 / 3600, 1)) * 0.3
+          )
+
+      # Energy market health score (0-1)
+      # Based on: oracle availability, low error rate, fast dispute resolution
+      - record: system:energy:health_score
+        expr: |
+          (
+            clamp_max(sum(oracle_active_count) / 10, 1) * 0.4 +
+            (1 - clamp_max(rate(oracle_submission_errors_total[5m]) / 5, 1)) * 0.3 +
+            (1 - clamp_max(energy:dispute_resolution:p95 / 600, 1)) * 0.3
+          )
+
+      # Storage market health score (0-1)
+      # Based on: retrieval success ratio
+      - record: system:storage:health_score
+        expr: clamp_max(storage:retrieval:success_ratio, 1)
+
+      # Overall system health (0-1)
+      - record: system:overall:health_score
+        expr: |
+          (
+            system:treasury:health_score * 0.4 +
+            system:energy:health_score * 0.3 +
+            system:storage:health_score * 0.3
+          )
+
+  # =================================
+  # CAPACITY & SCALING INDICATORS
+  # =================================
+  - name: capacity_indicators
+    interval: 1m
+    rules:
+      # Treasury capacity utilization (disbursements per minute vs. target)
+      - record: treasury:capacity:utilization_ratio
+        expr: treasury:disbursements:rate1m / 100  # Target: 100 disbursements/min
+
+      # Energy capacity utilization (readings per minute vs. target)
+      - record: energy:capacity:utilization_ratio
+        expr: energy:readings:rate1m / 1000  # Target: 1000 readings/min
+
+      # Storage capacity utilization (contracts per minute vs. target)
+      - record: storage:capacity:utilization_ratio
+        expr: storage:contracts:rate1m / 50  # Target: 50 contracts/min
+
+  # =================================
+  # ANOMALY DETECTION THRESHOLDS
+  # =================================
+  - name: anomaly_detection
+    interval: 30s
+    rules:
+      # Treasury error spike detection (3x normal rate)
+      - record: treasury:errors:spike_detected
+        expr: |
+          (
+            rate(treasury_execution_errors_total[1m]) >
+            avg_over_time(rate(treasury_execution_errors_total[1m])[1h:1m]) * 3
+          )
+
+      # Disbursement lag spike (2x normal)
+      - record: treasury:lag:spike_detected
+        expr: |
+          (
+            treasury:disbursement_lag:p95 >
+            avg_over_time(treasury:disbursement_lag:p95[1h:30s]) * 2
+          )
+
+      # Oracle error spike
+      - record: energy:oracle_errors:spike_detected
+        expr: |
+          (
+            rate(oracle_submission_errors_total[1m]) >
+            avg_over_time(rate(oracle_submission_errors_total[1m])[1h:1m]) * 3
+          )
+
+      # Dispute backlog spike
+      - record: energy:disputes:backlog_spike_detected
+        expr: |
+          (
+            sum(energy_disputes_pending) >
+            avg_over_time(sum(energy_disputes_pending)[1h:30s]) * 2
+          )

@@ -23,6 +23,7 @@ use governance_spec::treasury::{
 };
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+    CircuitBreaker,
 };
 use sled::Config;
 use std::collections::HashMap;
@@ -97,6 +98,11 @@ pub struct TreasuryExecutorConfig {
         >,
     >,
     pub nonce_floor: Arc<AtomicU64>,
+    /// Circuit breaker to prevent cascading failures during repeated submission errors
+    pub circuit_breaker: Arc<CircuitBreaker>,
+    /// Optional telemetry callback for circuit breaker state updates
+    pub circuit_breaker_telemetry:
+        Option<Arc<dyn Fn(u8, u64, u64) + Send + Sync>>,
 }
 
 #[derive(Debug)]
@@ -214,6 +220,20 @@ fn run_executor_tick(
     }
 
     let current_epoch = (config.epoch_source)();
+
+    // CIRCUIT BREAKER INTEGRATION: Check if circuit is open before processing disbursements
+    // If circuit is open, skip batch to prevent cascading failures
+    if !config.circuit_breaker.allow_request() {
+        let staged_total = store.load_execution_intents()?.len() as u64;
+        snapshot.record_error(
+            format!("circuit_breaker_open state={:?}", config.circuit_breaker.state()),
+            0,
+            staged_total,
+        );
+        store.store_executor_snapshot(snapshot)?;
+        return Ok(());
+    }
+
     let mut disbursements = store.load_disbursements()?;
     disbursements.sort_by_key(|d| d.id);
     let mut staged_lookup: HashMap<u64, SignedExecutionIntent> = store
@@ -266,6 +286,8 @@ fn run_executor_tick(
                     .nonce_floor
                     .store(intent.nonce, AtomicOrdering::SeqCst);
                 success_total = success_total.saturating_add(1);
+                // Record success in circuit breaker
+                config.circuit_breaker.record_success();
             }
             Err(err) => {
                 if err.is_storage() {
@@ -275,7 +297,10 @@ fn run_executor_tick(
                     store.cancel_disbursement(disbursement.id, err.message())?;
                     let _ = store.remove_execution_intent(disbursement.id);
                     cancelled_total = cancelled_total.saturating_add(1);
+                    // Cancelled errors (e.g., insufficient balance) do NOT count against circuit
                 } else {
+                    // Transient submission errors count against the circuit breaker
+                    config.circuit_breaker.record_failure();
                     last_error = Some(err.message().to_string());
                 }
             }
@@ -289,6 +314,14 @@ fn run_executor_tick(
         snapshot.record_success(pending_matured, staged_total);
     }
     store.store_executor_snapshot(snapshot)?;
+
+    // Update telemetry if callback provided
+    if let Some(ref telemetry_fn) = config.circuit_breaker_telemetry {
+        let state = config.circuit_breaker.state() as u8;
+        let failures = config.circuit_breaker.failure_count();
+        let successes = config.circuit_breaker.success_count();
+        telemetry_fn(state, failures, successes);
+    }
 
     #[cfg(feature = "telemetry")]
     {

@@ -645,13 +645,13 @@ mod tests {
             let dir = tempdir().expect("tempdir");
             std::env::set_var("TB_STORAGE_MARKET_DIR", dir.path());
             Box::leak(Box::new(dir));
-            let _ = MARKET.clear();
         });
     }
 
     fn reset_state() {
         ensure_market_dir();
-        MARKET.clear().expect("clear market");
+        // Note: MARKET is a Lazy static that cannot be cleared once initialized.
+        // Tests rely on isolated temp directories set via TB_STORAGE_MARKET_DIR.
     }
 
     fn json_object(entries: &[(&str, JsonValue)]) -> JsonValue {

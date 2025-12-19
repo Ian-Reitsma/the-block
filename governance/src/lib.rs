@@ -1,4 +1,7 @@
 pub mod bicameral;
+pub mod circuit_breaker;
+#[cfg(test)]
+mod circuit_breaker_integration_test;
 pub mod codec;
 pub mod controller;
 pub mod kalman;
@@ -9,6 +12,7 @@ pub mod reward;
 pub mod state;
 pub mod store;
 pub mod treasury;
+pub mod treasury_deps;
 pub mod variance;
 
 pub use bicameral::{
@@ -35,11 +39,12 @@ pub use store::{
     TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY,
     QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use treasury::{
-    validate_disbursement_payload, DisbursementDetails, DisbursementPayload,
-    DisbursementProposalMetadata, DisbursementStatus, DisbursementValidationError,
-    SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
-    TreasuryExecutorSnapshot,
+    parse_dependency_list, validate_disbursement_payload, DisbursementDetails,
+    DisbursementPayload, DisbursementProposalMetadata, DisbursementStatus,
+    DisbursementValidationError, SignedExecutionIntent, TreasuryBalanceEventKind,
+    TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 
 /// Simplified address type reused across governance records.

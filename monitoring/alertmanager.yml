@@ -1,0 +1,200 @@
+# AlertManager Configuration for The Block
+#
+# Handles alert routing, grouping, and notification delivery.
+# Configure notification channels below for your environment.
+#
+# Start AlertManager with:
+#   alertmanager --config.file=alertmanager.yml --storage.path=data/
+
+global:
+  # Global defaults
+  resolve_timeout: 5m
+
+  # SMTP configuration (update with your mail server)
+  smtp_from: 'alerts@theblock.example.com'
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_auth_username: 'alerts@theblock.example.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'  # Set via environment variable
+  smtp_require_tls: true
+
+# Notification templates
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Alert routing tree
+route:
+  # Default settings for all alerts
+  receiver: 'team-general'
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  # Child routes for specific alert types
+  routes:
+    # CRITICAL - Page immediately
+    - match:
+        severity: critical
+      receiver: 'team-pager'
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+      continue: true  # Also send to general
+
+    # Treasury-specific alerts
+    - match_re:
+        alertname: 'Treasury.*'
+      receiver: 'team-treasury'
+      group_by: ['alertname', 'disbursement_id']
+      group_wait: 1m
+      repeat_interval: 2h
+
+    # Energy market alerts
+    - match_re:
+        alertname: 'Energy.*|Oracle.*'
+      receiver: 'team-energy'
+      group_by: ['alertname', 'oracle_id']
+      repeat_interval: 2h
+
+    # Storage market alerts
+    - match_re:
+        alertname: 'Storage.*'
+      receiver: 'team-storage'
+      group_by: ['alertname', 'provider_id']
+      repeat_interval: 2h
+
+    # Circuit breaker alerts
+    - match:
+        alertname: 'CircuitBreakerOpen'
+      receiver: 'team-sre'
+      group_wait: 30s
+      repeat_interval: 1h
+
+    # System health alerts
+    - match_re:
+        alertname: 'SystemHealth.*'
+      receiver: 'team-sre'
+      group_wait: 2m
+      repeat_interval: 4h
+
+# Alert inhibition rules
+# Prevent notification spam by suppressing less critical alerts when higher ones fire
+inhibit_rules:
+  # If circuit breaker is open, suppress individual execution errors
+  - source_match:
+      alertname: 'CircuitBreakerOpen'
+    target_match_re:
+      alertname: 'TreasuryExecutionErrors.*'
+    equal: ['instance']
+
+  # If system health is critical, suppress component health warnings
+  - source_match:
+      alertname: 'SystemHealthCritical'
+    target_match_re:
+      alertname: '.*HealthWarning'
+    equal: ['instance']
+
+  # If database is down, suppress query errors
+  - source_match:
+      alertname: 'DatabaseDown'
+    target_match_re:
+      alertname: '.*QueryError.*'
+    equal: ['instance']
+
+# Notification receivers
+receivers:
+  # Default receiver - general team notifications
+  - name: 'team-general'
+    email_configs:
+      - to: 'team@theblock.example.com'
+        headers:
+          Subject: '[TheBlock] {{ .GroupLabels.alertname }}'
+        html: |
+          {{ range .Alerts }}
+          <b>Alert:</b> {{ .Labels.alertname }}<br>
+          <b>Severity:</b> {{ .Labels.severity }}<br>
+          <b>Instance:</b> {{ .Labels.instance }}<br>
+          <b>Summary:</b> {{ .Annotations.summary }}<br>
+          <b>Description:</b> {{ .Annotations.description }}<br>
+          <b>Runbook:</b> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a><br>
+          <hr>
+          {{ end }}
+
+    # Slack integration (optional)
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#alerts-general'
+    #     title: '[TheBlock] {{ .GroupLabels.alertname }}'
+    #     text: |
+    #       {{ range .Alerts }}
+    #       {{ .Annotations.description }}
+    #       {{ end }}
+
+  # Critical alerts - page on-call engineer
+  - name: 'team-pager'
+    # PagerDuty integration (configure with your PD integration key)
+    # pagerduty_configs:
+    #   - service_key: '${PAGERDUTY_SERVICE_KEY}'
+    #     description: '{{ .CommonAnnotations.summary }}'
+    #     severity: '{{ .CommonLabels.severity }}'
+
+    # Also send email for critical
+    email_configs:
+      - to: 'oncall@theblock.example.com'
+        headers:
+          Subject: '[CRITICAL] {{ .GroupLabels.alertname }}'
+          Priority: 'urgent'
+
+  # Treasury team
+  - name: 'team-treasury'
+    email_configs:
+      - to: 'treasury-team@theblock.example.com'
+        headers:
+          Subject: '[Treasury] {{ .GroupLabels.alertname }}'
+
+    # Slack channel for treasury
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#treasury-alerts'
+
+  # Energy market team
+  - name: 'team-energy'
+    email_configs:
+      - to: 'energy-team@theblock.example.com'
+        headers:
+          Subject: '[Energy] {{ .GroupLabels.alertname }}'
+
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#energy-alerts'
+
+  # Storage market team
+  - name: 'team-storage'
+    email_configs:
+      - to: 'storage-team@theblock.example.com'
+        headers:
+          Subject: '[Storage] {{ .GroupLabels.alertname }}'
+
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#storage-alerts'
+
+  # SRE team - infrastructure and reliability
+  - name: 'team-sre'
+    email_configs:
+      - to: 'sre@theblock.example.com'
+        headers:
+          Subject: '[SRE] {{ .GroupLabels.alertname }}'
+
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#sre-alerts'
+
+# Time-based muting (for maintenance windows)
+# mute_time_intervals:
+#   - name: 'maintenance-window'
+#     time_intervals:
+#       - times:
+#           - start_time: '02:00'
+#             end_time: '04:00'
+#         weekdays: ['saturday', 'sunday']

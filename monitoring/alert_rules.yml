@@ -1,0 +1,344 @@
+# Prometheus Alert Rules for The Block
+#
+# Define conditions that trigger alerts to AlertManager.
+# These rules use the recording rules defined in prometheus_recording_rules.yml
+# for efficient evaluation.
+#
+# Load with: prometheus --config.file=prometheus.yml
+
+groups:
+  # =================================
+  # TREASURY CRITICAL ALERTS
+  # =================================
+  - name: treasury_critical
+    interval: 30s
+    rules:
+      - alert: TreasuryCircuitBreakerOpen
+        expr: treasury_circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury circuit breaker OPEN"
+          description: "Treasury executor circuit breaker has been open for {{ $value }}s. No disbursements are being processed."
+          impact: "Treasury disbursements are not being executed"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-circuit-breaker"
+
+      - alert: TreasuryExecutorDown
+        expr: up{job="treasury-executor"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury executor is down"
+          description: "Treasury executor on {{ $labels.instance }} has been down for {{ $value }}m"
+          impact: "No disbursements can be processed"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-executor-down"
+
+      - alert: TreasuryBalanceCriticallyLow
+        expr: treasury:balance:ct:total < 1000000  # Less than 1M TB
+        for: 5m
+        labels:
+          severity: critical
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury balance critically low"
+          description: "Treasury balance is {{ $value }} TB, below minimum threshold"
+          impact: "Treasury may be unable to fulfill pending disbursements"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-low-balance"
+
+  # =================================
+  # TREASURY WARNING ALERTS
+  # =================================
+  - name: treasury_warnings
+    interval: 1m
+    rules:
+      - alert: TreasuryHighErrorRate
+        expr: treasury:errors:rate1m > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "High treasury execution error rate"
+          description: "Treasury errors: {{ $value }} errors/min (threshold: 1/min)"
+          impact: "Disbursements may be delayed"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-high-errors"
+
+      - alert: TreasuryBacklogHigh
+        expr: sum(treasury:backlog:current:by_status) > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury disbursement backlog high"
+          description: "{{ $value }} disbursements pending (threshold: 100)"
+          impact: "Disbursement processing may be delayed"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-backlog"
+
+      - alert: TreasuryDisbursementLagHigh
+        expr: treasury:disbursement_lag:p95 > 3600  # 1 hour
+        for: 15m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury disbursement lag high"
+          description: "P95 disbursement lag: {{ $value }}s (threshold: 3600s)"
+          impact: "Disbursements are taking longer than expected"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-lag"
+
+      - alert: TreasuryDependencyFailuresHigh
+        expr: treasury:dependency_failures:rate1m > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "High dependency validation failure rate"
+          description: "Dependency failures: {{ $value }}/min (threshold: 0.5/min)"
+          impact: "Disbursements with dependencies may be blocked"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-dep-failures"
+
+  # =================================
+  # ENERGY MARKET CRITICAL ALERTS
+  # =================================
+  - name: energy_critical
+    interval: 30s
+    rules:
+      - alert: EnergyOracleQuorumLost
+        expr: energy:oracles:active:total < 3
+        for: 2m
+        labels:
+          severity: critical
+          component: energy
+          team: energy
+        annotations:
+          summary: "Energy oracle quorum lost"
+          description: "Only {{ $value }} active oracles (minimum: 3)"
+          impact: "Energy market cannot process readings reliably"
+          runbook_url: "https://docs.theblock.example.com/runbooks/oracle-quorum"
+
+      - alert: EnergyDisputeBacklogCritical
+        expr: energy:disputes:pending:total > 50
+        for: 5m
+        labels:
+          severity: critical
+          component: energy
+          team: energy
+        annotations:
+          summary: "Energy dispute backlog critical"
+          description: "{{ $value }} pending disputes (threshold: 50)"
+          impact: "Dispute resolution severely delayed"
+          runbook_url: "https://docs.theblock.example.com/runbooks/dispute-backlog"
+
+  # =================================
+  # ENERGY MARKET WARNING ALERTS
+  # =================================
+  - name: energy_warnings
+    interval: 1m
+    rules:
+      - alert: EnergyOracleErrorRateHigh
+        expr: energy:oracle_errors:rate1m > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: energy
+          team: energy
+        annotations:
+          summary: "High oracle submission error rate"
+          description: "Oracle errors: {{ $value }}/min (threshold: 5/min)"
+          impact: "Energy readings may be incomplete"
+          runbook_url: "https://docs.theblock.example.com/runbooks/oracle-errors"
+
+      - alert: EnergyDisputeRateHigh
+        expr: energy:disputes_raised:rate1m > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: energy
+          team: energy
+        annotations:
+          summary: "High energy dispute rate"
+          description: "Disputes raised: {{ $value }}/min (threshold: 10/min)"
+          impact: "High dispute rate may indicate oracle issues"
+          runbook_url: "https://docs.theblock.example.com/runbooks/high-disputes"
+
+      - alert: EnergyMarketPriceAnomaly
+        expr: |
+          abs(energy:market_price:current - avg_over_time(energy:market_price:current[1h])) >
+          (stddev_over_time(energy:market_price:current[1h]) * 3)
+        for: 5m
+        labels:
+          severity: warning
+          component: energy
+          team: energy
+        annotations:
+          summary: "Energy market price anomaly detected"
+          description: "Current price {{ $value }} deviates >3σ from 1h average"
+          impact: "Potential market manipulation or oracle malfunction"
+          runbook_url: "https://docs.theblock.example.com/runbooks/price-anomaly"
+
+  # =================================
+  # STORAGE MARKET ALERTS
+  # =================================
+  - name: storage_alerts
+    interval: 1m
+    rules:
+      - alert: StorageRetrievalFailureRateHigh
+        expr: storage:retrieval:success_ratio < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+          team: storage
+        annotations:
+          summary: "Storage retrieval success rate low"
+          description: "Success ratio: {{ $value }} (threshold: 0.95)"
+          impact: "Users experiencing storage retrieval failures"
+          runbook_url: "https://docs.theblock.example.com/runbooks/storage-retrieval"
+
+      - alert: StorageProviderDown
+        expr: storage_provider_heartbeat_age_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+          team: storage
+        annotations:
+          summary: "Storage provider {{ $labels.provider_id }} down"
+          description: "No heartbeat for {{ $value }}s (threshold: 300s)"
+          impact: "Stored data on this provider may be unavailable"
+          runbook_url: "https://docs.theblock.example.com/runbooks/provider-down"
+
+  # =================================
+  # SYSTEM HEALTH ALERTS
+  # =================================
+  - name: system_health
+    interval: 1m
+    rules:
+      - alert: SystemHealthCritical
+        expr: system:overall:health_score < 0.5
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+          team: sre
+        annotations:
+          summary: "Overall system health critical"
+          description: "System health score: {{ $value }} (threshold: 0.5)"
+          impact: "Multiple subsystems experiencing issues"
+          runbook_url: "https://docs.theblock.example.com/runbooks/system-health"
+
+      - alert: SystemHealthDegraded
+        expr: system:overall:health_score < 0.75
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+          team: sre
+        annotations:
+          summary: "System health degraded"
+          description: "System health score: {{ $value }} (threshold: 0.75)"
+          impact: "System performance may be impacted"
+          runbook_url: "https://docs.theblock.example.com/runbooks/system-health"
+
+      - alert: TreasuryHealthWarning
+        expr: system:treasury:health_score < 0.75
+        for: 10m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury subsystem health degraded"
+          description: "Treasury health score: {{ $value }} (threshold: 0.75)"
+          impact: "Treasury operations may be impacted"
+          runbook_url: "https://docs.theblock.example.com/runbooks/treasury-health"
+
+  # =================================
+  # ANOMALY DETECTION ALERTS
+  # =================================
+  - name: anomaly_detection
+    interval: 30s
+    rules:
+      - alert: TreasuryErrorSpike
+        expr: treasury:errors:spike_detected == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury error spike detected"
+          description: "Error rate 3x above normal baseline"
+          impact: "Potential incident in progress"
+          runbook_url: "https://docs.theblock.example.com/runbooks/error-spike"
+
+      - alert: TreasuryLagSpike
+        expr: treasury:lag:spike_detected == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: treasury
+          team: treasury
+        annotations:
+          summary: "Treasury disbursement lag spike"
+          description: "Lag 2x above normal baseline"
+          impact: "Processing slowdown detected"
+          runbook_url: "https://docs.theblock.example.com/runbooks/lag-spike"
+
+      - alert: OracleErrorSpike
+        expr: energy:oracle_errors:spike_detected == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: energy
+          team: energy
+        annotations:
+          summary: "Oracle error spike detected"
+          description: "Oracle error rate 3x above normal"
+          impact: "Oracle reliability degraded"
+          runbook_url: "https://docs.theblock.example.com/runbooks/oracle-spike"
+
+  # =================================
+  # CAPACITY & SCALING ALERTS
+  # =================================
+  - name: capacity_alerts
+    interval: 2m
+    rules:
+      - alert: TreasuryCapacityHigh
+        expr: treasury:capacity:utilization_ratio > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          component: treasury
+          team: sre
+        annotations:
+          summary: "Treasury capacity utilization high"
+          description: "Utilization: {{ $value }} (threshold: 0.8)"
+          impact: "May need to scale treasury executors"
+          runbook_url: "https://docs.theblock.example.com/runbooks/scale-treasury"
+
+      - alert: EnergyCapacityHigh
+        expr: energy:capacity:utilization_ratio > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          component: energy
+          team: sre
+        annotations:
+          summary: "Energy market capacity utilization high"
+          description: "Utilization: {{ $value }} (threshold: 0.8)"
+          impact: "May need to scale oracle infrastructure"
+          runbook_url: "https://docs.theblock.example.com/runbooks/scale-energy"
