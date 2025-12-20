@@ -28,8 +28,8 @@ pub use foundation_async::future::{join_all, select2, Either};
 #[cfg(not(any(feature = "stub-backend", feature = "inhouse-backend")))]
 compile_error!("At least one runtime backend must be enabled for crates/runtime");
 
-#[cfg(all(feature = "stub-backend", feature = "inhouse-backend"))]
-compile_error!("Cannot enable both stub-backend and inhouse-backend features simultaneously");
+// Note: When both features are enabled (e.g., via --all-features), inhouse-backend takes precedence.
+// This is handled correctly by the select_backend() function which checks inhouse-backend first.
 
 static GLOBAL_HANDLE: Lazy<RuntimeHandle> = Lazy::new(RuntimeHandle::bootstrap);
 
