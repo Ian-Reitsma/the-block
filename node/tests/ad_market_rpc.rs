@@ -1,4 +1,11 @@
 #![cfg(feature = "integration-tests")]
+#![allow(
+    clippy::int_plus_one,
+    clippy::get_first,
+    clippy::explicit_auto_deref,
+    clippy::field_reassign_with_default,
+    clippy::clone_on_copy
+)]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

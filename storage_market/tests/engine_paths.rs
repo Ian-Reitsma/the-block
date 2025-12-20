@@ -2,7 +2,7 @@
 
 use std::error::Error;
 
-use storage::StorageContract;
+use storage::{merkle_proof::MerkleTree, StorageContract};
 use storage_market::{ProofOutcome, ReplicaIncentive, StorageMarket};
 use sys::tempfile::tempdir;
 
@@ -14,6 +14,14 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
     let path = dir.path().join("market.db");
 
     let mut market = StorageMarket::open(&path)?;
+    let chunks = vec![
+        b"engine-chunk-0".to_vec(),
+        b"engine-chunk-1".to_vec(),
+        b"engine-chunk-2".to_vec(),
+        b"engine-chunk-3".to_vec(),
+    ];
+    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+    let tree = MerkleTree::build(&chunk_refs).expect("build tree");
     let contract = StorageContract {
         object_id: "obj-1".into(),
         provider_id: "primary".into(),
@@ -26,6 +34,7 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
         accrued: 0,
         total_deposit_ct: 0,
         last_payment_block: None,
+        storage_root: tree.root,
     };
     let replica_a = ReplicaIncentive::new("primary".into(), 8, 10, 100);
     let replica_b = ReplicaIncentive::new("backup".into(), 4, 10, 50);

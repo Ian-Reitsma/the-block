@@ -13,16 +13,20 @@ fn persist_and_prune() {
     let pk = [1u8; 32];
     {
         let store = peer_metrics_store::store().unwrap();
-        let mut m = PeerMetrics::default();
-        m.requests = 1;
+        let m = PeerMetrics {
+            requests: 1,
+            ..Default::default()
+        };
         store.insert(&pk, &m, 1);
         store.flush().unwrap();
     }
     thread::sleep(Duration::from_secs(2));
     {
         let store = peer_metrics_store::store().unwrap();
-        let mut m2 = PeerMetrics::default();
-        m2.requests = 2;
+        let m2 = PeerMetrics {
+            requests: 2,
+            ..Default::default()
+        };
         store.insert(&pk, &m2, 1);
         store.flush().unwrap();
     }
@@ -40,14 +44,13 @@ fn concurrent_inserts() {
     let pk = [2u8; 32];
     let handles: Vec<_> = (0..10)
         .map(|_| {
-            thread::spawn({
-                let pk = pk;
-                move || {
-                    let mut m = PeerMetrics::default();
-                    m.requests = 1;
-                    if let Some(store) = peer_metrics_store::store() {
-                        store.insert(&pk, &m, 60);
-                    }
+            thread::spawn(move || {
+                let m = PeerMetrics {
+                    requests: 1,
+                    ..Default::default()
+                };
+                if let Some(store) = peer_metrics_store::store() {
+                    store.insert(&pk, &m, 60);
                 }
             })
         })

@@ -105,10 +105,10 @@ fn partitions_merge_consistent_fork_choice() {
             .await
         );
 
-        for i in 0..3 {
-            for j in 3..5 {
-                nodes[i].node.remove_peer(nodes[j].addr);
-                nodes[j].node.remove_peer(nodes[i].addr);
+        for node in nodes.iter().take(3) {
+            for peer in nodes.iter().skip(3) {
+                node.node.remove_peer(peer.addr);
+                peer.node.remove_peer(node.addr);
             }
         }
 
@@ -118,8 +118,8 @@ fn partitions_merge_consistent_fork_choice() {
                 bc.mine_block_at("minerA", ts).unwrap();
                 ts += 1;
             }
-            for i in 0..3 {
-                nodes[i].node.broadcast_chain();
+            for node in nodes.iter().take(3) {
+                node.node.broadcast_chain();
             }
             the_block::sleep(Duration::from_millis(50)).await;
         }
@@ -130,16 +130,16 @@ fn partitions_merge_consistent_fork_choice() {
                 bc.mine_block_at("minerB", ts).unwrap();
                 ts += 1;
             }
-            for j in 3..5 {
-                nodes[j].node.broadcast_chain();
+            for peer in nodes.iter().skip(3) {
+                peer.node.broadcast_chain();
             }
             the_block::sleep(Duration::from_millis(50)).await;
         }
 
-        for i in 0..3 {
-            for j in 3..5 {
-                nodes[i].node.add_peer(nodes[j].addr);
-                nodes[j].node.add_peer(nodes[i].addr);
+        for node in nodes.iter().take(3) {
+            for peer in nodes.iter().skip(3) {
+                node.node.add_peer(peer.addr);
+                peer.node.add_peer(node.addr);
             }
         }
 

@@ -9,9 +9,11 @@ use the_block::{
 fn reload_updates_limits() {
     let dir = tempdir().unwrap();
     let path = dir.path().to_str().unwrap();
-    let mut cfg = NodeConfig::default();
-    cfg.p2p_max_per_sec = 50;
-    cfg.peer_reputation_decay = 0.01;
+    let mut cfg = NodeConfig {
+        p2p_max_per_sec: 50,
+        peer_reputation_decay: 0.01,
+        ..Default::default()
+    };
     cfg.save(path).unwrap();
     set_current(cfg.clone());
     watch(path);

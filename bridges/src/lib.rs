@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments, clippy::needless_borrows_for_generic_args)]
 #![forbid(unsafe_code)]
 
 use crypto_suite::hashing::blake3::Hasher;

@@ -15,6 +15,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
+use num_integer::Integer;
 use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
 mod attestation;
@@ -64,12 +65,13 @@ pub fn cohort_selector_version_default() -> u16 {
 
 pub type InterestTagId = String;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DomainTier {
     Premium,
     Reserved,
     Community,
+    #[default]
     Unverified,
 }
 
@@ -104,18 +106,13 @@ impl FromStr for DomainTier {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(crate = "foundation_serialization::serde", rename_all = "snake_case")]
 pub enum PresenceKind {
     LocalNet,
     RangeBoost,
+    #[default]
     Unknown,
-}
-
-impl Default for PresenceKind {
-    fn default() -> Self {
-        PresenceKind::Unknown
-    }
 }
 
 impl PresenceKind {
@@ -704,6 +701,24 @@ struct CohortKey {
     selectors_version: u16,
 }
 
+#[derive(Clone, Debug)]
+struct CohortSelectors {
+    badges: Vec<String>,
+    interest_tags: Vec<InterestTagId>,
+    presence_bucket: Option<PresenceBucketRef>,
+    selectors_version: u16,
+}
+
+impl CohortSelectors {
+    fn normalize(mut self) -> Self {
+        self.badges.sort();
+        self.badges.dedup();
+        self.interest_tags.sort();
+        self.interest_tags.dedup();
+        self
+    }
+}
+
 impl CohortKey {
     #[allow(dead_code)]
     fn new(domain: String, provider: Option<String>, badges: Vec<String>) -> Self {
@@ -712,10 +727,12 @@ impl CohortKey {
             DomainTier::default(),
             None,
             provider,
-            badges,
-            Vec::new(),
-            None,
-            COHORT_SELECTOR_VERSION_V1,
+            CohortSelectors {
+                badges,
+                interest_tags: Vec::new(),
+                presence_bucket: None,
+                selectors_version: COHORT_SELECTOR_VERSION_V1,
+            },
         )
     }
 
@@ -725,10 +742,12 @@ impl CohortKey {
             ctx.domain_tier,
             ctx.domain_owner.clone(),
             ctx.provider.clone(),
-            ctx.badges.clone(),
-            ctx.interest_tags.clone(),
-            ctx.presence_bucket.clone(),
-            ctx.selectors_version,
+            CohortSelectors {
+                badges: ctx.badges.clone(),
+                interest_tags: ctx.interest_tags.clone(),
+                presence_bucket: ctx.presence_bucket.clone(),
+                selectors_version: ctx.selectors_version,
+            },
         )
     }
 
@@ -737,24 +756,18 @@ impl CohortKey {
         domain_tier: DomainTier,
         domain_owner: Option<String>,
         provider: Option<String>,
-        mut badges: Vec<String>,
-        mut interest_tags: Vec<InterestTagId>,
-        presence_bucket: Option<PresenceBucketRef>,
-        selectors_version: u16,
+        selectors: CohortSelectors,
     ) -> Self {
-        badges.sort();
-        badges.dedup();
-        interest_tags.sort();
-        interest_tags.dedup();
+        let selectors = selectors.normalize();
         Self {
             domain,
             domain_tier,
             domain_owner,
             provider,
-            badges,
-            interest_tags,
-            presence_bucket,
-            selectors_version,
+            badges: selectors.badges,
+            interest_tags: selectors.interest_tags,
+            presence_bucket: selectors.presence_bucket,
+            selectors_version: selectors.selectors_version,
         }
     }
 
@@ -1165,17 +1178,12 @@ impl CrmListTargeting {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryChannel {
+    #[default]
     Http,
     Mesh,
-}
-
-impl Default for DeliveryChannel {
-    fn default() -> Self {
-        DeliveryChannel::Http
-    }
 }
 
 impl DeliveryChannel {
@@ -1261,7 +1269,7 @@ pub struct MeshContext {
     pub hop_proofs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct CreativePlacement {
     #[serde(default)]
     pub mesh_enabled: bool,
@@ -1269,16 +1277,6 @@ pub struct CreativePlacement {
     pub mesh_only: bool,
     #[serde(default)]
     pub allowed_channels: Vec<DeliveryChannel>,
-}
-
-impl Default for CreativePlacement {
-    fn default() -> Self {
-        Self {
-            mesh_enabled: false,
-            mesh_only: false,
-            allowed_channels: Vec::new(),
-        }
-    }
 }
 
 impl CreativePlacement {
@@ -4421,21 +4419,19 @@ impl Marketplace for InMemoryMarketplace {
                 let idx = candidates.len();
                 if let Some(best) = best_index {
                     let best_trace = &candidates[best].trace;
-                    if trace.quality_adjusted_bid_usd_micros
+                    let better_quality = trace.quality_adjusted_bid_usd_micros
                         > best_trace.quality_adjusted_bid_usd_micros
                         || (trace.quality_adjusted_bid_usd_micros
                             == best_trace.quality_adjusted_bid_usd_micros
                             && trace.available_budget_usd_micros
-                                > best_trace.available_budget_usd_micros)
-                    {
-                        best_index = Some(idx);
-                    } else if trace.quality_adjusted_bid_usd_micros
+                                > best_trace.available_budget_usd_micros);
+                    let tie_preference = trace.quality_adjusted_bid_usd_micros
                         == best_trace.quality_adjusted_bid_usd_micros
                         && trace.available_budget_usd_micros
                             == best_trace.available_budget_usd_micros
                         && preference_match
-                        && !candidates[best].preference_match
-                    {
+                        && !candidates[best].preference_match;
+                    if better_quality || tie_preference {
                         best_index = Some(idx);
                     }
                 } else {
@@ -4549,9 +4545,7 @@ impl Marketplace for InMemoryMarketplace {
             return None;
         }
         let mut campaigns = self.campaigns.write().unwrap();
-        let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
-            return None;
-        };
+        let state = campaigns.get_mut(&winner_trace.campaign_id)?;
         if !assignment.in_holdout {
             if state.remaining_budget_usd_micros < clearing_price {
                 return None;
@@ -4706,8 +4700,8 @@ impl Marketplace for InMemoryMarketplace {
             unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
-            ct_remainders_usd_micros: tokens.remainders.ct.clone(),
-            it_remainders_usd_micros: tokens.remainders.it.clone(),
+            ct_remainders_usd_micros: tokens.remainders.ct,
+            it_remainders_usd_micros: tokens.remainders.it,
             ct_twap_window_id: oracle.ct_twap_window_id,
             it_twap_window_id: oracle.it_twap_window_id,
             selection_receipt: reservation.selection_receipt,
@@ -5277,21 +5271,19 @@ impl Marketplace for SledMarketplace {
                 let idx = candidates.len();
                 if let Some(best) = best_index {
                     let best_trace = &candidates[best].trace;
-                    if trace.quality_adjusted_bid_usd_micros
+                    let better_quality = trace.quality_adjusted_bid_usd_micros
                         > best_trace.quality_adjusted_bid_usd_micros
                         || (trace.quality_adjusted_bid_usd_micros
                             == best_trace.quality_adjusted_bid_usd_micros
                             && trace.available_budget_usd_micros
-                                > best_trace.available_budget_usd_micros)
-                    {
-                        best_index = Some(idx);
-                    } else if trace.quality_adjusted_bid_usd_micros
+                                > best_trace.available_budget_usd_micros);
+                    let tie_preference = trace.quality_adjusted_bid_usd_micros
                         == best_trace.quality_adjusted_bid_usd_micros
                         && trace.available_budget_usd_micros
                             == best_trace.available_budget_usd_micros
                         && preference_match
-                        && !candidates[best].preference_match
-                    {
+                        && !candidates[best].preference_match;
+                    if better_quality || tie_preference {
                         best_index = Some(idx);
                     }
                 } else {
@@ -5307,9 +5299,7 @@ impl Marketplace for SledMarketplace {
         }
         drop(campaigns);
 
-        let Some(winner_index) = best_index else {
-            return None;
-        };
+        let winner_index = best_index?;
         let runner_up_quality = candidates
             .iter()
             .enumerate()
@@ -5401,9 +5391,7 @@ impl Marketplace for SledMarketplace {
             return None;
         }
         let mut campaigns = self.campaigns.write().unwrap();
-        let Some(state) = campaigns.get_mut(&winner_trace.campaign_id) else {
-            return None;
-        };
+        let state = campaigns.get_mut(&winner_trace.campaign_id)?;
         if !assignment.in_holdout {
             if state.remaining_budget_usd_micros < clearing_price {
                 return None;

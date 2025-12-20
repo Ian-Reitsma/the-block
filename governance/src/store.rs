@@ -1898,6 +1898,11 @@ impl GovStore {
             .open_tree("active_params")
             .unwrap_or_else(|e| panic!("open active_params tree: {e}"))
     }
+
+    pub fn modify_param(&self, key: ParamKey, new_value: i64) -> sled::Result<()> {
+        self.active_params().insert(ser(&key)?, ser(&new_value)?)?;
+        Ok(())
+    }
     fn activation_queue(&self) -> sled::Tree {
         self.db
             .open_tree("activation_queue")

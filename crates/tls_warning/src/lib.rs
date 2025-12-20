@@ -1,3 +1,4 @@
+#![allow(clippy::should_implement_trait, clippy::derivable_impls)]
 #![doc = "Utilities for hashing TLS environment warning payloads and generating stable labels."]
 
 use crypto_suite::hashing::blake3;

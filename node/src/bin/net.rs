@@ -1007,7 +1007,6 @@ fn main() {
                 summary,
                 rpc,
             } => {
-                const DROP_ALERT: f64 = 0.1;
                 let filter_re = filter.as_ref().and_then(|f| Regex::new(f).ok());
                 let do_once = |peer_id: Option<String>| {
                     let now = SystemTime::now()
@@ -1224,7 +1223,6 @@ fn main() {
                                 let bars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
                                 if !summary {
                                     for r in &rows {
-                                        let drop_ratio = ratio(r);
                                         let lat = r["latency"].as_u64().unwrap_or(0) as f64;
                                         let idx = ((lat / max_lat) * 7.0).round() as usize;
                                         let bar = bars[idx.min(7)];
@@ -1243,11 +1241,7 @@ fn main() {
                                         } else {
                                             &line
                                         };
-                                        if drop_ratio > DROP_ALERT {
-                                            println!("{line}");
-                                        } else {
-                                            println!("{line}");
-                                        }
+                                        println!("{line}");
                                     }
                                 }
                                 let total_line = gettext("total_peers={total}")
@@ -1316,22 +1310,13 @@ fn main() {
                                             .as_object()
                                             .map(|o| o.values().filter_map(|v| v.as_u64()).sum())
                                             .unwrap_or(0);
-                                        let drop_ratio = if reqs > 0 {
-                                            drops_total as f64 / reqs as f64
-                                        } else {
-                                            0.0
-                                        };
                                         let thr = res["throttle_reason"].as_str().unwrap_or("");
                                         let until = res["throttled_until"].as_u64().unwrap_or(0);
                                         let line = format!(
                                         "requests={reqs} bytes_sent={bytes} drops={drops_total} reputation={:.2} throttle={} until={}",
                                         rep, thr, until
                                     );
-                                        if drop_ratio > DROP_ALERT {
-                                            println!("{line}");
-                                        } else {
-                                            println!("{line}");
-                                        }
+                                        println!("{line}");
                                         println!(
                                         "total_peers=1 active={} requests={reqs} bytes_sent={bytes} drops={drops_total}",
                                         if reqs > 0 { 1 } else { 0 }
@@ -1539,9 +1524,10 @@ fn main() {
                                 match socket.recv().await {
                                     Ok(Some(WsMessage::Text(txt))) => {
                                         if let Ok(snap) = json::from_str::<Value>(&txt) {
-                                            if peer_id.as_ref().map_or(true, |p| {
-                                                snap["peer_id"].as_str() == Some(p)
-                                            }) {
+                                            if peer_id
+                                                .as_ref()
+                                                .is_none_or(|p| snap["peer_id"].as_str() == Some(p))
+                                            {
                                                 println!("{}", txt);
                                             }
                                         }
@@ -1675,7 +1661,7 @@ fn main() {
         }
         Command::Completions { shell } => match shell {
             CompletionShell::Bash => {
-                println!("{}_completion() {{", "net");
+                println!("net_completion() {{");
                 println!("    local cur prev");
                 println!("    COMPREPLY=()");
                 println!("    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"");
@@ -1688,7 +1674,7 @@ fn main() {
                 println!("    fi");
                 println!("    return 0");
                 println!("}}");
-                println!("complete -F {}_completion net", "net");
+                println!("complete -F net_completion net");
             }
             CompletionShell::Zsh => {
                 println!("#compdef net");

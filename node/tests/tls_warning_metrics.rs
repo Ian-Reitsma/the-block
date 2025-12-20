@@ -1,7 +1,6 @@
 #![cfg(feature = "telemetry")]
 
 use crypto_suite::hashing::blake3;
-use diagnostics;
 use http_env::server_tls_from_env;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -79,7 +78,7 @@ fn tls_env_warning_metrics_increment_on_log() {
     detail_bytes.copy_from_slice(&blake3::hash(expected_detail.as_bytes()).as_bytes()[..8]);
     let expected_detail_fingerprint = i64::from_le_bytes(detail_bytes);
     assert_eq!(detail_fingerprint.get(), expected_detail_fingerprint);
-    let expected_variables = vec![key_var.clone()];
+    let expected_variables = [key_var.clone()];
     let mut fingerprint_bytes = Vec::new();
     for (idx, value) in expected_variables.iter().enumerate() {
         if idx > 0 {

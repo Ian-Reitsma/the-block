@@ -615,7 +615,7 @@ fn verify_constraints_parallel(
         .map(|n| n.get())
         .unwrap_or(1)
         .max(1);
-    let chunk_size = (constraints.len() + workers - 1) / workers;
+    let chunk_size = constraints.len().div_ceil(workers);
     let assignments = Arc::new(assignments.to_vec());
     let shared = Arc::new(constraints.to_vec());
     let mut handles = Vec::new();

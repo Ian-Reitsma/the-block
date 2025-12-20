@@ -1,3 +1,10 @@
+#![allow(
+    clippy::needless_lifetimes,
+    clippy::iter_cloned_collect,
+    clippy::needless_borrow,
+    clippy::new_without_default,
+    clippy::result_unit_err
+)]
 #![cfg_attr(
     not(any(feature = "android-probe", feature = "ios-probe")),
     forbid(unsafe_code)

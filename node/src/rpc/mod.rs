@@ -16,9 +16,14 @@ use crate::{
     Blockchain, SignedTransaction, EPOCH_BLOCKS,
 };
 use ::ad_market::MarketplaceHandle;
-use ::storage::{contract::StorageContract, offer::StorageOffer};
+use ::storage::{
+    contract::StorageContract,
+    merkle_proof::{MerkleProof, MerkleTree},
+    offer::StorageOffer,
+};
 use base64_fp::decode_standard;
 use concurrency::Lazy;
+use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use crypto_suite::ConstantTimeEq;
 use foundation_rpc::{
@@ -89,6 +94,23 @@ fn json_map(pairs: Vec<(&str, Value)>) -> Value {
         map.insert(key.to_string(), value);
     }
     Value::Object(map)
+}
+
+fn deterministic_chunks_for_object(object_id: &str, chunk_count: usize) -> Vec<Vec<u8>> {
+    let count = chunk_count.max(1);
+    (0..count)
+        .map(|idx| {
+            let mut hasher = Hasher::new();
+            hasher.update(object_id.as_bytes());
+            hasher.update(&idx.to_le_bytes());
+            hasher.finalize().as_bytes().to_vec()
+        })
+        .collect()
+}
+
+fn merkle_tree_from_chunks(chunks: &[Vec<u8>]) -> MerkleTree {
+    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+    MerkleTree::build(&chunk_refs).expect("failed to build merkle tree for demo chunks")
 }
 
 fn drop_counts_to_value(counts: &HashMap<DropReason, u64>) -> Value {
@@ -2704,6 +2726,9 @@ fn dispatch(
                 .get("retention_blocks")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
+            let chunk_count = shares.max(1) as usize;
+            let chunks = deterministic_chunks_for_object(&object_id, chunk_count);
+            let tree = merkle_tree_from_chunks(&chunks);
             let contract = StorageContract {
                 object_id: object_id.clone(),
                 provider_id: provider_id.clone(),
@@ -2716,6 +2741,7 @@ fn dispatch(
                 accrued: 0,
                 total_deposit_ct: 0,
                 last_payment_block: None,
+                storage_root: tree.root,
             };
             let offer = StorageOffer::new(
                 provider_id,
@@ -2737,23 +2763,35 @@ fn dispatch(
                 .get("chunk_idx")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let proof = req
+            let chunk_data = req
+                .params
+                .get("chunk_data")
+                .and_then(|v| v.as_str())
+                .map(|s| crypto_suite::hex::decode(s).unwrap_or_default())
+                .unwrap_or_default();
+            let proof_bytes = req
                 .params
                 .get("proof")
                 .and_then(|v| v.as_str())
-                .map(|s| {
-                    let bytes = crypto_suite::hex::decode(s).unwrap_or_default();
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&bytes[..32.min(bytes.len())]);
-                    arr
-                })
-                .unwrap_or([0u8; 32]);
+                .map(|s| crypto_suite::hex::decode(s).unwrap_or_default())
+                .unwrap_or_else(|| vec![0u8; 32]);
+            let proof = match MerkleProof::new(proof_bytes) {
+                Ok(proof) => proof,
+                Err(err) => return Ok(error_value(format!("invalid proof: {err}"))),
+            };
             let current_block = req
                 .params
                 .get("current_block")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            storage::challenge(object_id, provider_id, chunk_idx, proof, current_block)
+            storage::challenge(
+                object_id,
+                provider_id,
+                chunk_idx,
+                chunk_data.as_slice(),
+                &proof,
+                current_block,
+            )
         }
         "storage.manifests" => {
             let limit = req

@@ -1,3 +1,4 @@
+#![allow(clippy::excessive_precision, clippy::needless_range_loop)]
 #![warn(missing_docs)]
 
 //! In-house math primitives and numerical routines used across the codebase.

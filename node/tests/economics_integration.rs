@@ -122,7 +122,7 @@ fn test_economic_convergence_over_100_epochs() {
         inflation_history.push(snapshot.inflation.realized_inflation_bps);
 
         // Compute subsidy variance (should decrease over time as system stabilizes)
-        let subsidy_variance = vec![
+        let subsidy_variance = [
             snapshot.subsidies.storage_share_bps,
             snapshot.subsidies.compute_share_bps,
             snapshot.subsidies.energy_share_bps,

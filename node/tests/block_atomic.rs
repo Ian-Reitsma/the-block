@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+#![allow(clippy::unnecessary_get_then_check)]
 use the_block::{
     blockchain::process::{commit, validate_and_apply},
     transaction::{sign_tx, RawTxPayload},

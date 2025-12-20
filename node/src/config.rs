@@ -1,6 +1,7 @@
 use crate::simple_db::{EngineConfig, EngineKind};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{record_dependency_policy, CONFIG_RELOAD_TOTAL};
+use crate::Blockchain;
 use concurrency::Lazy;
 use diagnostics::anyhow::{anyhow, Result};
 use diagnostics::TbError;
@@ -15,7 +16,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
 use std::time::Duration;
 use sys::paths;
@@ -26,6 +27,13 @@ use runtime::fs::watch::{
 };
 #[cfg(feature = "quic")]
 use transport::{Config as TransportConfig, ProviderKind};
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ReceiptProviderConfig {
+    pub provider_id: String,
+    pub verifying_key_hex: String,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -104,6 +112,8 @@ pub struct NodeConfig {
     pub treasury_account: String,
     #[serde(default = "default_read_ack_privacy")]
     pub read_ack_privacy: ReadAckPrivacyMode,
+    #[serde(default = "default_receipt_providers")]
+    pub receipt_providers: Vec<ReceiptProviderConfig>,
 }
 
 impl Default for NodeConfig {
@@ -149,6 +159,7 @@ impl Default for NodeConfig {
             proof_rebate_rate: default_proof_rebate_rate(),
             treasury_account: default_treasury_account(),
             read_ack_privacy: default_read_ack_privacy(),
+            receipt_providers: default_receipt_providers(),
         }
     }
 }
@@ -159,6 +170,10 @@ fn default_treasury_account() -> String {
 
 fn default_read_ack_privacy() -> ReadAckPrivacyMode {
     ReadAckPrivacyMode::Enforce
+}
+
+fn default_receipt_providers() -> Vec<ReceiptProviderConfig> {
+    Vec::new()
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -947,6 +962,7 @@ pub fn reload() -> bool {
     match load_file(&dir) {
         Ok(cfg) => {
             apply(&cfg);
+            reapply_receipt_providers(&cfg);
             *CURRENT_CONFIG.write().unwrap() = cfg;
             crate::storage::settings::configure_from_dir(&dir);
             #[cfg(feature = "telemetry")]
@@ -1041,6 +1057,39 @@ pub fn watch(dir: &str) {
             crate::gossip::config::reload();
         }
     });
+}
+
+static BLOCKCHAIN_HANDLE: Lazy<RwLock<Option<Weak<Mutex<Blockchain>>>>> =
+    Lazy::new(|| RwLock::new(None));
+
+/// Registers the running blockchain instance so config reloads can update providers.
+pub fn set_blockchain_handle(handle: Arc<Mutex<Blockchain>>) {
+    {
+        let mut guard = BLOCKCHAIN_HANDLE.write().unwrap();
+        *guard = Some(Arc::downgrade(&handle));
+    }
+    let cfg = {
+        let guard = handle.lock().unwrap_or_else(|e| e.into_inner());
+        guard.config.clone()
+    };
+    reapply_receipt_providers(&cfg);
+}
+
+fn upgrade_blockchain_handle() -> Option<Arc<Mutex<Blockchain>>> {
+    let guard = BLOCKCHAIN_HANDLE.read().unwrap();
+    guard.as_ref().and_then(|weak| weak.upgrade())
+}
+
+fn reapply_receipt_providers(cfg: &NodeConfig) {
+    if let Some(blockchain) = upgrade_blockchain_handle() {
+        if let Ok(mut guard) = blockchain.lock() {
+            if let Err(err) = guard.register_receipt_providers(&cfg.receipt_providers) {
+                diagnostics::log::warn!("receipt_provider_config_failed: {}", err);
+            }
+        } else {
+            diagnostics::log::warn!("receipt_provider_config_failed: blockchain lock poisoned");
+        }
+    }
 }
 
 pub fn current() -> NodeConfig {

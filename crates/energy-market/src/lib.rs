@@ -222,7 +222,7 @@ impl BayesianReputation {
         let availability_ratio = (current_available as f64) / (expected_available as f64);
 
         // Stable if within 20% of expected
-        if availability_ratio >= 0.8 && availability_ratio <= 1.2 {
+        if (0.8..=1.2).contains(&availability_ratio) {
             self.capacity_alpha += 1.0;
         } else {
             self.capacity_beta += 1.0;

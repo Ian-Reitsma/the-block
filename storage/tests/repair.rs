@@ -2,6 +2,7 @@ use crypto_suite::hashing::blake3::Hasher;
 use the_block::storage::erasure;
 use the_block::storage::manifest_binary::{decode_manifest, encode_manifest};
 use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest};
+use the_block::storage::settings;
 use the_block::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy};
 use the_block::SimpleDb;
 

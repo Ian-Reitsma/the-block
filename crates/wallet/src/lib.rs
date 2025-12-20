@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_cast, clippy::redundant_closure)]
+
 use crypto_suite::key_derivation::inhouse as kdf_inhouse;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use crypto_suite::ConstantTimeEq;

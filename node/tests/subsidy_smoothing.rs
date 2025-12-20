@@ -6,9 +6,11 @@ use the_block::governance::{retune_multipliers, Params, Utilization};
 fn smoothing_limits_burst_effect() {
     let dir = tempdir().unwrap();
     let base = dir.path();
-    let mut params = Params::default();
-    params.util_var_threshold = 100; // 0.1
-    params.fib_window_base_secs = 4; // 1 epoch
+    let mut params = Params {
+        util_var_threshold: 100,
+        fib_window_base_secs: 4,
+        ..Default::default()
+    };
     let supply = 1_000_000.0;
     let mut util = Utilization {
         bytes_stored: 1000.0,
@@ -32,9 +34,11 @@ fn smoothing_limits_burst_effect() {
 fn steady_usage_stable_multiplier() {
     let dir = tempdir().unwrap();
     let base = dir.path();
-    let mut params = Params::default();
-    params.util_var_threshold = 100;
-    params.fib_window_base_secs = 4;
+    let mut params = Params {
+        util_var_threshold: 100,
+        fib_window_base_secs: 4,
+        ..Default::default()
+    };
     let supply = 1_000_000.0;
     let util = Utilization {
         bytes_stored: 2000.0,

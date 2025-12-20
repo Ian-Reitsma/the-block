@@ -41,6 +41,11 @@ pub struct StorageReceipt {
     pub block_height: u64,
     /// Provider's total escrow balance at settlement
     pub provider_escrow: u64,
+    /// Provider Ed25519 signature over receipt fields (prevents forgery)
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub provider_signature: Vec<u8>,
+    /// Nonce to prevent replay attacks
+    pub signature_nonce: u64,
 }
 
 /// Compute market settlement receipt.
@@ -62,6 +67,11 @@ pub struct ComputeReceipt {
     pub block_height: u64,
     /// SNARK verification success
     pub verified: bool,
+    /// Provider Ed25519 signature over receipt fields (prevents forgery)
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub provider_signature: Vec<u8>,
+    /// Nonce to prevent replay attacks
+    pub signature_nonce: u64,
 }
 
 /// Energy market settlement receipt.
@@ -83,6 +93,11 @@ pub struct EnergyReceipt {
     pub block_height: u64,
     /// Grid verification proof hash
     pub proof_hash: [u8; 32],
+    /// Provider Ed25519 signature over receipt fields (prevents forgery)
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub provider_signature: Vec<u8>,
+    /// Nonce to prevent replay attacks
+    pub signature_nonce: u64,
 }
 
 /// Ad market settlement receipt.
@@ -104,6 +119,11 @@ pub struct AdReceipt {
     pub block_height: u64,
     /// Conversion events recorded
     pub conversions: u32,
+    /// Publisher Ed25519 signature over receipt fields (prevents forgery)
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub publisher_signature: Vec<u8>,
+    /// Nonce to prevent replay attacks
+    pub signature_nonce: u64,
 }
 
 impl Receipt {
@@ -151,6 +171,8 @@ mod tests {
             price_ct: 500,
             block_height: 100,
             provider_escrow: 10000,
+            provider_signature: vec![0u8; 64],
+            signature_nonce: 0,
         });
 
         assert_eq!(receipt.market_name(), "storage");
@@ -167,6 +189,8 @@ mod tests {
             payment_ct: 200,
             block_height: 101,
             verified: true,
+            provider_signature: vec![0u8; 64],
+            signature_nonce: 0,
         });
 
         assert_eq!(receipt.market_name(), "compute");
@@ -183,6 +207,8 @@ mod tests {
             price_ct: 250,
             block_height: 102,
             proof_hash: [0u8; 32],
+            provider_signature: vec![0u8; 64],
+            signature_nonce: 0,
         });
 
         assert_eq!(receipt.market_name(), "energy");
@@ -199,6 +225,8 @@ mod tests {
             spend_ct: 100,
             block_height: 103,
             conversions: 50,
+            publisher_signature: vec![0u8; 64],
+            signature_nonce: 0,
         });
 
         assert_eq!(receipt.market_name(), "ad");

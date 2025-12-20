@@ -418,6 +418,7 @@ name = "governance"
 version = "0.1.0"
 dependencies = [
  "bridge-types",
+ "crypto_suite",
  "diagnostics",
  "foundation_lazy",
  "foundation_math",

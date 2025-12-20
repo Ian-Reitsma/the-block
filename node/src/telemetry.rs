@@ -121,6 +121,9 @@ struct GovernanceWebhookPayload<'a> {
     proposal_id: u64,
 }
 
+pub mod consensus_instrumentation;
+pub mod consensus_integration;
+pub mod consensus_metrics;
 pub mod energy;
 pub mod metrics;
 pub mod receipts;

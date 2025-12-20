@@ -7,6 +7,7 @@
 //! - Memory pressure
 
 use the_block::block_binary::encode_receipts;
+use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
 use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 use the_block::receipts_validation::{
     validate_receipt, validate_receipt_count, validate_receipt_size, MAX_RECEIPTS_PER_BLOCK,
@@ -21,6 +22,8 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             price_ct: 100,
             block_height: id,
             provider_escrow: 1000,
+            provider_signature: vec![0u8; 64],
+            signature_nonce: id,
         }),
         1 => Receipt::Compute(ComputeReceipt {
             job_id: format!("job_{}", id),
@@ -29,6 +32,8 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             payment_ct: 50,
             block_height: id,
             verified: true,
+            provider_signature: vec![0u8; 64],
+            signature_nonce: id,
         }),
         2 => Receipt::Energy(EnergyReceipt {
             contract_id: format!("energy_{}", id),
@@ -37,6 +42,8 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             price_ct: 75,
             block_height: id,
             proof_hash: [0u8; 32],
+            provider_signature: vec![0u8; 64],
+            signature_nonce: id,
         }),
         _ => Receipt::Ad(AdReceipt {
             campaign_id: format!("campaign_{}", id),
@@ -45,6 +52,8 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             spend_ct: 20,
             block_height: id,
             conversions: 10,
+            publisher_signature: vec![0u8; 64],
+            signature_nonce: id,
         }),
     }
 }
@@ -68,7 +77,7 @@ fn stress_max_receipts_per_block() {
         receipts.len(),
         encoded.len()
     );
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
     assert!(validate_receipt_size(encoded.len()).is_ok());
 }
 
@@ -94,6 +103,8 @@ fn stress_large_receipt_payload() {
                 price_ct: u64::MAX / 2,
                 block_height: i,
                 provider_escrow: u64::MAX / 2,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: i,
             })
         })
         .collect();
@@ -104,7 +115,7 @@ fn stress_large_receipt_payload() {
         receipts.len(),
         encoded.len()
     );
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]
@@ -172,7 +183,7 @@ fn stress_mixed_receipt_types_at_scale() {
     // Should encode successfully
     let encoded = encode_receipts(&receipts).expect("Failed to encode mixed types");
     println!("Mixed types encoded size: {} bytes", encoded.len());
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]
@@ -183,8 +194,10 @@ fn stress_validation_at_scale() {
         .collect();
 
     let mut valid_count = 0;
+    let registry = ProviderRegistry::new();
+    let mut nonce_tracker = NonceTracker::new(100);
     for (i, receipt) in receipts.iter().enumerate() {
-        if validate_receipt(receipt, i as u64).is_ok() {
+        if validate_receipt(receipt, i as u64, &registry, &mut nonce_tracker).is_ok() {
             valid_count += 1;
         }
     }
@@ -218,7 +231,7 @@ fn stress_single_receipt() {
     assert!(validate_receipt_count(receipts.len()).is_ok());
 
     let encoded = encode_receipts(&receipts).expect("Failed to encode single");
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]
@@ -233,6 +246,8 @@ fn stress_all_storage_receipts() {
                 price_ct: i * 10,
                 block_height: i,
                 provider_escrow: i * 100,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: i,
             })
         })
         .collect();
@@ -242,7 +257,7 @@ fn stress_all_storage_receipts() {
         "5000 storage receipts encoded size: {} bytes",
         encoded.len()
     );
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]
@@ -312,8 +327,10 @@ fn stress_validation_performance() {
         .collect();
 
     let start = Instant::now();
+    let registry = ProviderRegistry::new();
+    let mut nonce_tracker = NonceTracker::new(100);
     for (i, receipt) in receipts.iter().enumerate() {
-        let _ = validate_receipt(receipt, i as u64);
+        let _ = validate_receipt(receipt, i as u64, &registry, &mut nonce_tracker);
     }
     let duration = start.elapsed();
 

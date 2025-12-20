@@ -15,7 +15,7 @@ pub struct SessionKey {
 impl SessionKey {
     /// Generate a new session key expiring at `expires_at` (UNIX secs).
     pub fn generate(expires_at: u64) -> Result<Self, RngError> {
-        let mut rng = OsRng::default();
+        let mut rng = OsRng;
         let mut secret_bytes = [0u8; SECRET_KEY_LENGTH];
         rng.fill_bytes(&mut secret_bytes)?;
         let secret = SigningKey::from_bytes(&secret_bytes);

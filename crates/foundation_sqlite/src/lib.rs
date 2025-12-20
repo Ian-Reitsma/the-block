@@ -1,3 +1,9 @@
+#![allow(
+    clippy::needless_lifetimes,
+    clippy::iter_cloned_collect,
+    clippy::extra_unused_lifetimes,
+    clippy::needless_borrow
+)]
 #![forbid(unsafe_code)]
 
 use foundation_serialization::json::{

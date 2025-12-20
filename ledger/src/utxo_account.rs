@@ -50,6 +50,12 @@ impl AccountLedger {
     }
 }
 
+impl Default for AccountLedger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OutPoint {
     pub txid: [u8; 32],
@@ -134,6 +140,12 @@ impl UtxoAccountBridge {
             self.accounts.deposit(addr, *val);
         }
         Ok(())
+    }
+}
+
+impl Default for UtxoAccountBridge {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -256,7 +268,7 @@ impl<'a> Decoder<'a> {
         if self
             .position
             .checked_add(len)
-            .map_or(true, |end| end > self.input.len())
+            .is_none_or(|end| end > self.input.len())
         {
             return Err(StorageError::backend("corrupt ledger payload"));
         }

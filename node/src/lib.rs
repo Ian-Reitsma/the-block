@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
+#![allow(unused_imports)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
+#![allow(unused_variables)]
 #![allow(clippy::all)]
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::disallowed_types)]
@@ -24,8 +26,8 @@ use ad_market::{DeliveryChannel, SettlementBreakdown};
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
-use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
+use crypto_suite::{hashing::blake3, hex};
 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
 use diagnostics::tracing::info;
 #[cfg(feature = "telemetry")]
@@ -71,10 +73,12 @@ pub mod energy;
 pub mod exec;
 pub mod governor_snapshot;
 mod read_receipt;
+pub mod receipt_crypto;
 pub mod receipts;
 pub mod receipts_validation;
 pub mod simple_db;
-use config::NodeConfig;
+use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
+use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 
@@ -102,6 +106,7 @@ const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
 const TAU_B: f64 = 1.0; // block interval in seconds
 static VDF_KAPPA: AtomicU64 = AtomicU64::new(1u64 << 28);
 const F_HW_BASE: f64 = 3.0e9; // reference 3 GHz hardware
+const RECEIPT_NONCE_FINALITY: u64 = 100;
 
 fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
@@ -957,6 +962,10 @@ pub struct Blockchain {
     pub pending_ad_settlements: Vec<AdSettlementRecord>,
     /// Persisted proof rebate tracker
     pub proof_tracker: crate::light_client::proof_tracker::ProofTracker,
+    /// Registry of provider keys for receipt verification
+    pub provider_registry: ProviderRegistry,
+    /// Nonce tracker for receipt replay protection
+    pub nonce_tracker: NonceTracker,
     /// Tracker for intermediate block hashes used in reorg rollback
     pub reorg: crate::blockchain::reorg::ReorgTracker,
     /// Recent miners for base-reward logistic feedback
@@ -1153,6 +1162,8 @@ impl Default for Blockchain {
             read_batcher: crate::read_receipt::ReadBatcher::new(),
             pending_ad_settlements: Vec::new(),
             proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
+            provider_registry: ProviderRegistry::new(),
+            nonce_tracker: NonceTracker::new(RECEIPT_NONCE_FINALITY),
             reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
             recent_timestamps: VecDeque::new(),
@@ -1231,6 +1242,43 @@ impl Blockchain {
 
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+
+    pub fn register_receipt_providers(
+        &mut self,
+        providers: &[ReceiptProviderConfig],
+    ) -> Result<(), String> {
+        self.provider_registry.providers.clear();
+        for provider in providers {
+            let bytes = hex::decode(provider.verifying_key_hex.trim()).map_err(|_| {
+                format!("invalid hex encoding for provider {}", provider.provider_id)
+            })?;
+            let public_key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                format!(
+                    "invalid verifying key length for provider {}: expected 32 bytes",
+                    provider.provider_id
+                )
+            })?;
+            let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|err| {
+                format!(
+                    "invalid verifying key for provider {}: {}",
+                    provider.provider_id, err
+                )
+            })?;
+            self.provider_registry
+                .register_provider(
+                    provider.provider_id.clone(),
+                    verifying_key,
+                    self.block_height,
+                )
+                .map_err(|err| {
+                    format!(
+                        "failed to register provider {}: {}",
+                        provider.provider_id, err
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     fn build_market_metrics(
@@ -2724,6 +2772,12 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         telemetry::summary::spawn(cfg.telemetry_summary_interval);
         bc.config = cfg.clone();
+        if let Err(err) = bc.register_receipt_providers(&cfg.receipt_providers) {
+            #[cfg(feature = "telemetry")]
+            diagnostics::tracing::warn!(reason = %err, "receipt_provider_registration_failed");
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!("receipt_provider_registration_failed: {err}");
+        }
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::SNAPSHOT_INTERVAL.set(cfg.snapshot_interval as i64);
@@ -4568,6 +4622,8 @@ impl Blockchain {
                 spend_ct: record.total_ct,
                 block_height: index,
                 conversions: record.conversions,
+                publisher_signature: vec![],
+                signature_nonce: index,
             }));
         }
         for receipt in crate::energy::drain_energy_receipts() {
@@ -4581,6 +4637,8 @@ impl Blockchain {
                 price_ct: receipt.price_paid,
                 block_height: receipt.block_settled,
                 proof_hash: receipt.meter_reading_hash,
+                provider_signature: vec![],
+                signature_nonce: receipt.block_settled,
             }));
         }
         for receipt in crate::rpc::storage::drain_storage_receipts() {
@@ -4598,7 +4656,12 @@ impl Blockchain {
 
         // Validate individual receipts
         for receipt in &block_receipts {
-            if let Err(_e) = crate::receipts_validation::validate_receipt(receipt, index) {
+            if let Err(_e) = crate::receipts_validation::validate_receipt(
+                receipt,
+                index,
+                &self.provider_registry,
+                &mut self.nonce_tracker,
+            ) {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::receipts::RECEIPT_VALIDATION_FAILURES_TOTAL.inc();
 

@@ -385,9 +385,9 @@ fn encode_generalized_time(time: UtcDateTime) -> Result<Vec<u8>, CertificateErro
         .components()
         .map_err(|_| CertificateError::TimestampEncoding)?;
     let mut buf = [0u8; 15];
-    write_four(&mut buf[0..4], comps.year as i32);
-    write_two(&mut buf[4..6], comps.month as u8);
-    write_two(&mut buf[6..8], comps.day as u8);
+    write_four(&mut buf[0..4], comps.year);
+    write_two(&mut buf[4..6], comps.month);
+    write_two(&mut buf[6..8], comps.day);
     write_two(&mut buf[8..10], comps.hour);
     write_two(&mut buf[10..12], comps.minute);
     write_two(&mut buf[12..14], comps.second);
@@ -577,7 +577,7 @@ pub fn ed25519_public_key_from_der(der: &[u8]) -> Result<[u8; 32], CertificateEr
         }
         let (len, consumed) = decode_length(&der[offset..])?;
         offset += consumed;
-        if offset.checked_add(len).map_or(true, |end| end > der.len()) {
+        if offset.checked_add(len).is_none_or(|end| end > der.len()) {
             return Err(CertificateError::InvalidPublicKey);
         }
         let bit_string = &der[offset..offset + len];

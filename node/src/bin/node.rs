@@ -1,5 +1,6 @@
 #![deny(warnings)]
 #![allow(clippy::expect_used)]
+#![allow(clippy::large_enum_variant)]
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
 use foundation_profiler::ProfilerGuard;
@@ -29,7 +30,7 @@ use sys::process;
 use ad_market::{
     DistributionPolicy, MarketplaceConfig, MarketplaceHandle, ReservationKey, SledMarketplace,
 };
-use the_block::config::{OverlayBackend, ReadAckPrivacyMode};
+use the_block::config::{set_blockchain_handle, OverlayBackend, ReadAckPrivacyMode};
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::treasury_executor::{
@@ -1483,6 +1484,7 @@ async fn async_main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+            set_blockchain_handle(Arc::clone(&bc));
             let distribution = {
                 let guard = bc.lock().unwrap();
                 DistributionPolicy::new(

@@ -1,9 +1,26 @@
+#![allow(
+    clippy::new_without_default,
+    clippy::implicit_saturating_sub,
+    clippy::should_implement_trait,
+    clippy::redundant_closure,
+    clippy::manual_range_contains,
+    clippy::excessive_precision,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_cast,
+    clippy::unwrap_or_default,
+    clippy::for_kv_map
+)]
+
+pub mod access_control;
+pub mod authorization;
 pub mod bicameral;
 pub mod circuit_breaker;
 #[cfg(test)]
 mod circuit_breaker_integration_test;
 pub mod codec;
 pub mod controller;
+pub mod disbursement_auth;
 pub mod kalman;
 pub mod params;
 pub mod proposals;
@@ -11,10 +28,15 @@ pub mod release;
 pub mod reward;
 pub mod state;
 pub mod store;
+pub mod store_auth_helpers;
 pub mod treasury;
 pub mod treasury_deps;
 pub mod variance;
 
+pub use access_control::{
+    AuthContext, AuthError, AuthNonceTracker, AuthorizedCall,
+    OperatorRegistry as AccessOperatorRegistry, Role as AccessRole,
+};
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };

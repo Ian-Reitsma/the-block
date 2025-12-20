@@ -1,10 +1,17 @@
 #![cfg(test)]
 
-use storage::StorageContract;
+use storage::{merkle_proof::MerkleTree, StorageContract};
 use storage_market::{ReplicaIncentive, StorageMarket};
 use sys::tempfile::tempdir;
 
 fn test_contract() -> StorageContract {
+    let chunks = vec![
+        b"market-chunk-0".to_vec(),
+        b"market-chunk-1".to_vec(),
+        b"market-chunk-2".to_vec(),
+    ];
+    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+    let tree = MerkleTree::build(&chunk_refs).expect("build tree");
     StorageContract {
         object_id: "obj".into(),
         provider_id: "prov".into(),
@@ -17,6 +24,7 @@ fn test_contract() -> StorageContract {
         accrued: 0,
         total_deposit_ct: 0,
         last_payment_block: None,
+        storage_root: tree.root,
     }
 }
 

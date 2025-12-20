@@ -602,6 +602,7 @@ pub trait MapAccess<'de> {
     /// This returns `Ok(Some((key, value)))` for the next (key-value) pair in
     /// the map using the provided seeds, or `Ok(None)` if there are no more
     /// remaining items.
+    #[allow(clippy::type_complexity)]
     fn next_entry_seed<K, V>(
         &mut self,
         kseed: K,
@@ -779,7 +780,7 @@ pub enum Unexpected<'a> {
     Other(&'a str),
 }
 
-impl<'a> Display for Unexpected<'a> {
+impl Display for Unexpected<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Unexpected::Bool(b) => write!(formatter, "boolean `{}`", b),
@@ -858,6 +859,7 @@ macro_rules! impl_deserialize_num {
             {
                 struct NumVisitor;
 
+                #[allow(clippy::needless_lifetimes)]
                 impl<'de> Visitor<'de> for NumVisitor {
                     type Value = $ty;
 
@@ -902,6 +904,7 @@ impl<'de> Deserialize<'de> for char {
     {
         struct CharVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for CharVisitor {
             type Value = char;
 
@@ -939,6 +942,7 @@ impl<'de> Deserialize<'de> for &'de str {
     {
         struct StrVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for StrVisitor {
             type Value = &'de str;
 
@@ -972,6 +976,7 @@ impl<'de> Deserialize<'de> for String {
     {
         struct StringVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for StringVisitor {
             type Value = String;
 
@@ -1005,6 +1010,7 @@ impl<'de> Deserialize<'de> for Cow<'de, str> {
     {
         struct CowVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for CowVisitor {
             type Value = Cow<'de, str>;
 
@@ -1056,6 +1062,7 @@ impl<'de> Deserialize<'de> for Duration {
             {
                 struct FieldVisitor;
 
+                #[allow(clippy::needless_lifetimes)]
                 impl<'de> Visitor<'de> for FieldVisitor {
                     type Value = Field;
 
@@ -1081,6 +1088,7 @@ impl<'de> Deserialize<'de> for Duration {
 
         struct DurationVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for DurationVisitor {
             type Value = Duration;
 
@@ -1144,6 +1152,7 @@ impl<'de> Deserialize<'de> for Instant {
             {
                 struct FieldVisitor;
 
+                #[allow(clippy::needless_lifetimes)]
                 impl<'de> Visitor<'de> for FieldVisitor {
                     type Value = Field;
 
@@ -1169,6 +1178,7 @@ impl<'de> Deserialize<'de> for Instant {
 
         struct InstantVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for InstantVisitor {
             type Value = Instant;
 
@@ -1227,6 +1237,7 @@ impl<'de> Deserialize<'de> for SystemTime {
             {
                 struct FieldVisitor;
 
+                #[allow(clippy::needless_lifetimes)]
                 impl<'de> Visitor<'de> for FieldVisitor {
                     type Value = Field;
 
@@ -1252,6 +1263,7 @@ impl<'de> Deserialize<'de> for SystemTime {
 
         struct SystemTimeVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for SystemTimeVisitor {
             type Value = SystemTime;
 
@@ -1307,6 +1319,7 @@ impl<'de> Deserialize<'de> for Ipv4Addr {
     {
         struct Ipv4AddrVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for Ipv4AddrVisitor {
             type Value = Ipv4Addr;
 
@@ -1335,6 +1348,7 @@ impl<'de> Deserialize<'de> for Ipv6Addr {
     {
         struct Ipv6AddrVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for Ipv6AddrVisitor {
             type Value = Ipv6Addr;
 
@@ -1363,6 +1377,7 @@ impl<'de> Deserialize<'de> for IpAddr {
     {
         struct IpAddrVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for IpAddrVisitor {
             type Value = IpAddr;
 
@@ -1391,6 +1406,7 @@ impl<'de> Deserialize<'de> for SocketAddrV4 {
     {
         struct SocketAddrV4Visitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for SocketAddrV4Visitor {
             type Value = SocketAddrV4;
 
@@ -1419,6 +1435,7 @@ impl<'de> Deserialize<'de> for SocketAddrV6 {
     {
         struct SocketAddrV6Visitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for SocketAddrV6Visitor {
             type Value = SocketAddrV6;
 
@@ -1447,6 +1464,7 @@ impl<'de> Deserialize<'de> for SocketAddr {
     {
         struct SocketAddrVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for SocketAddrVisitor {
             type Value = SocketAddr;
 
@@ -1771,6 +1789,7 @@ impl<'de> Deserialize<'de> for () {
     {
         struct UnitVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for UnitVisitor {
             type Value = ();
 
@@ -1916,6 +1935,7 @@ impl<'de> Deserialize<'de> for IgnoredAny {
     {
         struct IgnoredAnyVisitor;
 
+        #[allow(clippy::needless_lifetimes)]
         impl<'de> Visitor<'de> for IgnoredAnyVisitor {
             type Value = IgnoredAny;
 
@@ -1990,7 +2010,7 @@ impl<'de> Deserialize<'de> for IgnoredAny {
             where
                 A: SeqAccess<'de>,
             {
-                while let Some(_) = seq.next_element::<IgnoredAny>()? {}
+                while (seq.next_element::<IgnoredAny>()?).is_some() {}
                 Ok(IgnoredAny)
             }
 

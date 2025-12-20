@@ -1,3 +1,4 @@
+#![allow(clippy::needless_lifetimes)]
 //! Terminal user-interface helpers built from first principles.
 //!
 //! Currently exposes ANSI colour styling with environment-aware detection so

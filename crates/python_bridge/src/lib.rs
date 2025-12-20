@@ -1,3 +1,4 @@
+#![allow(clippy::needless_lifetimes)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::env;

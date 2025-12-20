@@ -13,6 +13,7 @@ use crate::{MeterReading, ProviderId};
 use crypto_suite::hashing::blake3::Hasher as Blake3;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -70,7 +71,7 @@ impl SignatureScheme {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Self, VerificationError> {
+    pub fn parse(s: &str) -> Result<Self, VerificationError> {
         match s.to_lowercase().as_str() {
             "ed25519" => Ok(Self::Ed25519),
             #[cfg(feature = "pq-crypto")]
@@ -79,6 +80,14 @@ impl SignatureScheme {
             "dilithium5" => Ok(Self::Dilithium5),
             _ => Err(VerificationError::UnsupportedScheme(s.to_string())),
         }
+    }
+}
+
+impl FromStr for SignatureScheme {
+    type Err = VerificationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        SignatureScheme::parse(s)
     }
 }
 
@@ -322,7 +331,7 @@ mod tests {
     #[test]
     fn scheme_roundtrip() {
         assert_eq!(
-            SignatureScheme::from_str("ed25519").unwrap(),
+            SignatureScheme::parse("ed25519").unwrap(),
             SignatureScheme::Ed25519
         );
         assert_eq!(SignatureScheme::Ed25519.as_str(), "ed25519");

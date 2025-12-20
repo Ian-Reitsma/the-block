@@ -97,7 +97,7 @@ impl KEvent {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn token_to_udata(token: Token) -> *mut c_void {
-    token.0 as usize as *mut c_void
+    token.0 as *mut c_void
 }
 
 #[cfg(any(

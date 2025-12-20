@@ -134,7 +134,7 @@ impl UpliftEstimator {
         hasher.update(impression_seed);
         let digest = hasher.finalize();
         let bytes = digest.as_bytes();
-        let fold = (bytes[0] & 0x01) as u8;
+        let fold = bytes[0] & 0x01;
         let percentile = u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) % 1_000_000;
         let holdout_fraction = self.config.holdout_fraction_ppm as f64 / PPM_SCALE_F64;
         let in_holdout = percentile < self.config.holdout_fraction_ppm;
@@ -276,7 +276,7 @@ impl UpliftEstimator {
         let lift = (treatment_rate - control_rate).clamp(-1.0, 1.0);
         let lift_ppm = ((lift * PPM_SCALE_F64).round()).clamp(-PPM_SCALE_F64, PPM_SCALE_F64) as i64;
         let propensity = rate_with_prior(
-            bucket.treatment_count as u64,
+            bucket.treatment_count,
             bucket.impressions(),
             self.config.propensity_prior,
         )

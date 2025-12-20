@@ -171,7 +171,7 @@ impl DutyRecord {
 }
 
 /// Aggregated accounting metrics maintained per relayer.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct RelayerAccounting {
     pub bond: u64,
@@ -182,21 +182,6 @@ pub struct RelayerAccounting {
     pub duties_assigned: u64,
     pub duties_completed: u64,
     pub duties_failed: u64,
-}
-
-impl Default for RelayerAccounting {
-    fn default() -> Self {
-        Self {
-            bond: 0,
-            rewards_earned: 0,
-            rewards_pending: 0,
-            rewards_claimed: 0,
-            penalties_applied: 0,
-            duties_assigned: 0,
-            duties_completed: 0,
-            duties_failed: 0,
-        }
-    }
 }
 
 impl RelayerAccounting {

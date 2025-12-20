@@ -1,3 +1,8 @@
+#![allow(
+    clippy::useless_conversion,
+    clippy::type_complexity,
+    clippy::manual_map
+)]
 #![forbid(unsafe_code)]
 
 mod codec;

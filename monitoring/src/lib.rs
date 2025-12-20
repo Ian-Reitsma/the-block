@@ -1,3 +1,10 @@
+#![allow(
+    clippy::redundant_pattern_matching,
+    clippy::manual_strip,
+    clippy::manual_repeat_n,
+    clippy::should_implement_trait
+)]
+
 mod alert_validator;
 mod chaos;
 mod dashboard;

@@ -77,9 +77,8 @@ fn impl_deserialize_struct(
                 .iter()
                 .map(|f| f.ident.as_ref().unwrap())
                 .collect();
-            let field_name_strs: Vec<_> = fields.named.iter().map(|f| get_field_name(f)).collect();
-            let field_defaults: Vec<_> =
-                fields.named.iter().map(|f| get_field_default(f)).collect();
+            let field_name_strs: Vec<_> = fields.named.iter().map(get_field_name).collect();
+            let field_defaults: Vec<_> = fields.named.iter().map(get_field_default).collect();
             let field_count = fields.named.len();
 
             let visitor_name = format_ident!("__Visitor");
@@ -279,7 +278,7 @@ fn impl_deserialize_enum(
     data: &syn::DataEnum,
     serde_path: &TokenStream,
 ) -> syn::Result<TokenStream> {
-    let variant_name_strs: Vec<_> = data.variants.iter().map(|v| get_variant_name(v)).collect();
+    let variant_name_strs: Vec<_> = data.variants.iter().map(get_variant_name).collect();
 
     let variant_arms = data.variants.iter().enumerate().map(|(i, variant)| {
         let variant_name = &variant.ident;
@@ -335,7 +334,7 @@ fn impl_deserialize_enum(
                     .map(|f| f.ident.as_ref().unwrap())
                     .collect();
                 let field_name_strs: Vec<_> = fields.named.iter()
-                    .map(|f| get_field_name(f))
+                    .map(get_field_name)
                     .collect();
 
                 quote! {

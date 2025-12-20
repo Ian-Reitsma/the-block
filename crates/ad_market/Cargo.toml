@@ -12,6 +12,7 @@ verifier_selection = { path = "../verifier_selection" }
 zkp = { path = "../zkp" }
 serde = { workspace = true }
 sled = { path = "../../sled" }
+num-integer = "0.1"
 
 [dev-dependencies]
 sys = { path = "../sys" }

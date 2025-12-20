@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+#![allow(clippy::unnecessary_get_then_check)]
 use std::collections::HashSet;
 use std::panic;
 

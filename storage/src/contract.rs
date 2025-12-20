@@ -1,6 +1,8 @@
 use foundation_serialization::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::merkle_proof::{verify_proof as verify_merkle_proof, MerkleProof, MerkleRoot};
+
 /// StorageContract tracks file shards stored with a provider
 /// along with payment schedule and erasure coding metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -30,6 +32,13 @@ pub struct StorageContract {
     /// Last block height where `pay` advanced the schedule
     #[serde(default)]
     pub last_payment_block: Option<u64>,
+    /// Merkle root committing to all encoded chunks for this contract.
+    ///
+    /// This root is computed client-side at contract creation from the
+    /// full set of chunks and stored on-chain. Providers must present
+    /// Merkle proofs against this root to demonstrate actual data
+    /// possession during challenges.
+    pub storage_root: MerkleRoot,
 }
 
 /// Errors related to storage contracts
@@ -51,28 +60,21 @@ impl StorageContract {
         }
     }
 
-    /// Deterministically derive the expected proof for a given chunk index.
-    pub fn expected_proof(&self, chunk_idx: u64) -> [u8; 32] {
-        use crypto_suite::hashing::blake3::Hasher;
-        let mut h = Hasher::new();
-        h.update(self.object_id.as_bytes());
-        h.update(&chunk_idx.to_le_bytes());
-        h.finalize().into()
-    }
-
-    /// Verify a provider-supplied proof-of-retrievability.
+    /// Verify a provider-supplied proof-of-retrievability using Merkle proofs.
+    ///
+    /// The provider must return the actual `chunk_data` alongside a Merkle
+    /// proof that links the chunk to the on-chain `storage_root`. This
+    /// prevents providers from computing proofs from metadata alone.
     pub fn verify_proof(
         &self,
         chunk_idx: u64,
-        proof: [u8; 32],
+        chunk_data: &[u8],
+        proof: &MerkleProof,
         current_block: u64,
     ) -> Result<(), ContractError> {
         self.is_active(current_block)?;
-        if self.expected_proof(chunk_idx) == proof {
-            Ok(())
-        } else {
-            Err(ContractError::ChallengeFailed)
-        }
+        verify_merkle_proof(self.storage_root, chunk_idx, chunk_data, proof)
+            .map_err(|_| ContractError::ChallengeFailed)
     }
 
     /// Accrue payments up to `current_block`, returning the amount due.
@@ -97,6 +99,7 @@ impl StorageContract {
 #[cfg(test)]
 mod tests {
     use super::StorageContract;
+    use crate::merkle_proof::MerkleTree;
 
     #[test]
     fn payment_schedule_advances() {
@@ -112,6 +115,9 @@ mod tests {
             accrued: 0,
             total_deposit_ct: 0,
             last_payment_block: None,
+            storage_root: MerkleTree::build(&[b"chunk0".as_ref()])
+                .expect("build tree")
+                .root(),
         };
         assert_eq!(c.pay(0), 0);
         assert_eq!(c.pay(2), 4); // blocks 1-2

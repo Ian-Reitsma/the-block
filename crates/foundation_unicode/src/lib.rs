@@ -1,3 +1,4 @@
+#![allow(clippy::needless_lifetimes)]
 #![forbid(unsafe_code)]
 
 use std::borrow::Cow;

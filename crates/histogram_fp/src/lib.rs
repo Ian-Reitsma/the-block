@@ -1,3 +1,4 @@
+#![allow(clippy::len_without_is_empty)]
 #![forbid(unsafe_code)]
 use std::error::Error;
 use std::fmt;

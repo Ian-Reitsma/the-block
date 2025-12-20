@@ -165,10 +165,7 @@ fn extract_common_name(der: &[u8]) -> Option<String> {
         if cursor >= der.len() {
             return None;
         }
-        let (len, consumed) = match decode_length(&der[cursor..]) {
-            Some(value) => value,
-            None => return None,
-        };
+        let (len, consumed) = decode_length(&der[cursor..])?;
         cursor += consumed;
         let end = cursor.saturating_add(len);
         if end > der.len() {

@@ -1070,13 +1070,13 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
 | `storage_upload` | `{object_id, provider_id, original_bytes, shares, price_per_block, start_block, retention_blocks}` | Delegates to `storage::upload`, returning manifest receipt (`{status:"ok", contract_id}`) | storage errors bubble up via `rpc_error(-32603,...)` |
-| `storage_challenge` | `{object_id, provider_id?, chunk_idx, proof, current_block}` | `{status:"ok", challenge_id}` if proof accepted | `-32602` invalid inputs; storage errors |
+| `storage_challenge` | `{object_id, provider_id?, chunk_idx, chunk_data, proof, current_block}` | `{status:"ok", challenge_id}` if proof accepted | `-32602` invalid inputs; storage errors |
 | `storage.manifests` | `{limit?}` | `{manifests:[{object_id, provider_id, shares, retention_blocks, status}]}` limited to latest `limit` entries | none |
 | `storage_provider_profiles` | none | `{providers:[{id, capacity_bytes, maintenance, uptime_ppm}]}` | none |
 | `storage_provider_set_maintenance` | `{provider, maintenance:bool}` | `{status:"ok"}` after toggling provider availability | `-32030` unknown provider |
 | `storage_incentives` | none | `{rent_escrow:{credits_ct, debits_ct}, rebate_rates:{lane, ppm}}` | none |
-
-
+ 
+Storage challenges now expect `chunk_data` (hex-encoded bytes for the challenged chunk) and `proof` (hex-encoded `MerkleProof.path`) so providers must present the actual content that links back to `storage_root`.
 
 ### Appendix B · Metric Index
 

@@ -1,3 +1,4 @@
+#![allow(clippy::result_unit_err)]
 #![forbid(unsafe_code)]
 
 use crypto_suite::hashing::blake3::Hasher;

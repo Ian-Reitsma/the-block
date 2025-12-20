@@ -16,7 +16,6 @@
 use diagnostics::{info, warn};
 use foundation_serialization::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Circuit breaker state
@@ -72,20 +71,23 @@ pub struct CircuitBreaker {
     state: AtomicU8,
     failure_count: AtomicU64,
     success_count: AtomicU64,
-    last_failure_time: Arc<Mutex<Option<Instant>>>,
-    last_state_change: Arc<Mutex<Instant>>,
+    last_failure_time: AtomicU64,
+    last_state_change: AtomicU64,
+    start_time: Instant,
 }
 
 impl CircuitBreaker {
     /// Create a new circuit breaker with given configuration
     pub fn new(config: CircuitBreakerConfig) -> Self {
+        let start_time = Instant::now();
         Self {
             config,
             state: AtomicU8::new(CircuitState::Closed as u8),
             failure_count: AtomicU64::new(0),
             success_count: AtomicU64::new(0),
-            last_failure_time: Arc::new(Mutex::new(None)),
-            last_state_change: Arc::new(Mutex::new(Instant::now())),
+            last_failure_time: AtomicU64::new(u64::MAX),
+            last_state_change: AtomicU64::new(0),
+            start_time,
         }
     }
 
@@ -108,9 +110,7 @@ impl CircuitBreaker {
         match current_state {
             CircuitState::Closed => true,
             CircuitState::Open => {
-                // Check if timeout expired - transition to half-open
-                let last_change = *self.last_state_change.lock().unwrap();
-                let elapsed = last_change.elapsed();
+                let elapsed = self.elapsed_since_state_change();
 
                 if elapsed.as_secs() >= self.config.timeout_secs {
                     self.transition_to_half_open();
@@ -152,7 +152,8 @@ impl CircuitBreaker {
 
     /// Record a failed operation
     pub fn record_failure(&self) {
-        *self.last_failure_time.lock().unwrap() = Some(Instant::now());
+        self.last_failure_time
+            .store(self.offset_now(), Ordering::Release);
 
         let current_state = self.state();
 
@@ -177,22 +178,97 @@ impl CircuitBreaker {
         }
     }
 
-    /// Force circuit to open state (for testing or manual intervention)
+    /// Force circuit to open state (REQUIRES AUTHORIZATION - use with authorized_force_open)
+    ///
+    /// # Security
+    /// This method should only be called after verifying authorization via
+    /// `crate::authorization::verify_authorization` with `Role::Operator`.
+    /// Direct calls bypass security and should be limited to tests.
+    #[cfg(test)]
     pub fn force_open(&self) {
         self.transition_to_open();
     }
 
-    /// Force circuit to closed state (for testing or manual intervention)
+    /// Force circuit to closed state (REQUIRES AUTHORIZATION - use with authorized_force_close)
+    ///
+    /// # Security
+    /// This method should only be called after verifying authorization via
+    /// `crate::authorization::verify_authorization` with `Role::Operator`.
+    /// Direct calls bypass security and should be limited to tests.
+    #[cfg(test)]
     pub fn force_close(&self) {
         self.transition_to_closed();
     }
 
-    /// Reset all counters
+    /// Reset all counters (REQUIRES AUTHORIZATION - use with authorized_reset)
+    ///
+    /// # Security
+    /// This method should only be called after verifying authorization via
+    /// `crate::authorization::verify_authorization` with `Role::Operator`.
+    /// Direct calls bypass security and should be limited to tests.
+    #[cfg(test)]
     pub fn reset(&self) {
-        self.failure_count.store(0, Ordering::Release);
-        self.success_count.store(0, Ordering::Release);
-        *self.last_failure_time.lock().unwrap() = None;
+        self.last_failure_time.store(u64::MAX, Ordering::Release);
         self.transition_to_closed();
+    }
+
+    /// Authorized force open - requires valid operator signature
+    pub fn authorized_force_open(
+        &self,
+        auth: &crate::authorization::AuthorizedCall,
+        registry: &mut crate::authorization::OperatorRegistry,
+    ) -> Result<(), crate::authorization::AuthError> {
+        use crate::authorization::{verify_authorization, Operation, Role};
+
+        // Verify this is a ForceCircuitOpen operation
+        if !matches!(auth.operation, Operation::ForceCircuitOpen) {
+            return Err(crate::authorization::AuthError::MalformedSignature {
+                reason: "operation mismatch".into(),
+            });
+        }
+
+        verify_authorization(auth, registry, Role::Operator)?;
+        self.transition_to_open();
+        Ok(())
+    }
+
+    /// Authorized force close - requires valid operator signature
+    pub fn authorized_force_close(
+        &self,
+        auth: &crate::authorization::AuthorizedCall,
+        registry: &mut crate::authorization::OperatorRegistry,
+    ) -> Result<(), crate::authorization::AuthError> {
+        use crate::authorization::{verify_authorization, Operation, Role};
+
+        if !matches!(auth.operation, Operation::ForceCircuitClosed) {
+            return Err(crate::authorization::AuthError::MalformedSignature {
+                reason: "operation mismatch".into(),
+            });
+        }
+
+        verify_authorization(auth, registry, Role::Operator)?;
+        self.transition_to_closed();
+        Ok(())
+    }
+
+    /// Authorized reset - requires valid operator signature
+    pub fn authorized_reset(
+        &self,
+        auth: &crate::authorization::AuthorizedCall,
+        registry: &mut crate::authorization::OperatorRegistry,
+    ) -> Result<(), crate::authorization::AuthError> {
+        use crate::authorization::{verify_authorization, Operation, Role};
+
+        if !matches!(auth.operation, Operation::ResetCircuitBreaker) {
+            return Err(crate::authorization::AuthError::MalformedSignature {
+                reason: "operation mismatch".into(),
+            });
+        }
+
+        verify_authorization(auth, registry, Role::Operator)?;
+        self.last_failure_time.store(u64::MAX, Ordering::Release);
+        self.transition_to_closed();
+        Ok(())
     }
 
     /// Get current failure count
@@ -207,22 +283,43 @@ impl CircuitBreaker {
 
     /// Get time since last failure
     pub fn time_since_last_failure(&self) -> Option<Duration> {
-        self.last_failure_time
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|t| t.elapsed())
+        let stored = self.last_failure_time.load(Ordering::Acquire);
+        if stored == u64::MAX {
+            None
+        } else {
+            Some(self.duration_since_offset(stored))
+        }
     }
 
     /// Get time since last state change
     pub fn time_since_state_change(&self) -> Duration {
-        self.last_state_change.lock().unwrap().elapsed()
+        self.elapsed_since_state_change()
+    }
+
+    fn offset_now(&self) -> u64 {
+        let elapsed = self.start_time.elapsed();
+        elapsed.as_millis().min(u128::from(u64::MAX)) as u64
+    }
+
+    fn duration_since_offset(&self, timestamp: u64) -> Duration {
+        let now = self.offset_now();
+        Duration::from_millis(now.saturating_sub(timestamp))
+    }
+
+    fn elapsed_since_state_change(&self) -> Duration {
+        let stored = self.last_state_change.load(Ordering::Acquire);
+        self.duration_since_offset(stored)
+    }
+
+    fn touch_state_change(&self) {
+        self.last_state_change
+            .store(self.offset_now(), Ordering::Release);
     }
 
     fn transition_to_open(&self) {
         self.state
             .store(CircuitState::Open as u8, Ordering::Release);
-        *self.last_state_change.lock().unwrap() = Instant::now();
+        self.touch_state_change();
         self.success_count.store(0, Ordering::Release);
 
         let failure_count = self.failure_count.load(Ordering::Acquire);
@@ -238,8 +335,8 @@ impl CircuitBreaker {
     fn transition_to_half_open(&self) {
         self.state
             .store(CircuitState::HalfOpen as u8, Ordering::Release);
-        *self.last_state_change.lock().unwrap() = Instant::now();
         self.success_count.store(0, Ordering::Release);
+        self.touch_state_change();
 
         let timeout_secs = self.config.timeout_secs;
         info!(
@@ -252,11 +349,10 @@ impl CircuitBreaker {
     fn transition_to_closed(&self) {
         self.state
             .store(CircuitState::Closed as u8, Ordering::Release);
-        *self.last_state_change.lock().unwrap() = Instant::now();
         self.failure_count.store(0, Ordering::Release);
-        self.success_count.store(0, Ordering::Release);
+        let prev_success_count = self.success_count.swap(0, Ordering::AcqRel);
+        self.touch_state_change();
 
-        let prev_success_count = self.success_count.load(Ordering::Acquire);
         info!(
             target: "governance::circuit_breaker",
             success_count = %prev_success_count,

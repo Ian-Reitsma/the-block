@@ -330,3 +330,4 @@ qwen/
 # Exception: exclude runtime JSON state files even with the !*.json rule above
 node/diff_history/**/*.json
 node/governance/history/**/*.json
+git-starcoder/

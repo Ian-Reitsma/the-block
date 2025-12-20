@@ -17,6 +17,7 @@ rand = { path = "../crates/rand" }
 sled = { path = "../sled" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+crypto_suite = { path = "../crates/crypto_suite" }
 serde = { workspace = true }
 bridge-types = { path = "../crates/bridge-types" }
 diagnostics = { path = "../crates/diagnostics" }
