@@ -29,12 +29,9 @@ groups:
       - record: treasury:dependency_failures:total:by_type
         expr: sum(treasury_dependency_failures_total) by (failure_type)
 
-      # Treasury balance totals (TB equivalent)
-      - record: treasury:balance:ct:total
-        expr: sum(treasury_balance_ct)
-
-      - record: treasury:balance:it:total
-        expr: sum(treasury_balance_it)
+      # Treasury balance totals (BLOCK)
+      - record: treasury:balance:total
+        expr: sum(treasury_balance)
 
   # =================================
   # TREASURY METRICS - RATES

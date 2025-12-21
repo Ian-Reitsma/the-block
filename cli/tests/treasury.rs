@@ -40,7 +40,6 @@ fn treasury_lifecycle_outputs_structured_json() {
             action: GovTreasuryCmd::Schedule {
                 destination: "dest-1".into(),
                 amount: 500,
-                amount_it: 0,
                 memo: Some("ecosystem grant".into()),
                 epoch: 2048,
                 state: state.clone(),
@@ -51,7 +50,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     .expect("schedule disbursement");
     let scheduled = fetch_disbursement(&state, 1);
     assert_eq!(scheduled.destination, "dest-1");
-    assert_eq!(scheduled.amount_ct, 500);
+    assert_eq!(scheduled.amount, 500);
     assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     let first_created_at = scheduled.created_at;
 
@@ -61,7 +60,6 @@ fn treasury_lifecycle_outputs_structured_json() {
             action: GovTreasuryCmd::Schedule {
                 destination: "dest-2".into(),
                 amount: 200,
-                amount_it: 0,
                 memo: None,
                 epoch: 4096,
                 state: state.clone(),
@@ -79,7 +77,7 @@ fn treasury_lifecycle_outputs_structured_json() {
 
     let store = GovStore::open(state.clone());
     store
-        .record_treasury_accrual(1_000, 0)
+        .record_treasury_accrual(1_000)
         .expect("fund treasury before execution");
 
     out.clear();
@@ -246,8 +244,7 @@ fn treasury_fetch_remote_combines_responses() {
         disbursements: vec![TreasuryDisbursement {
             id: 7,
             destination: "remote-dest".into(),
-            amount_ct: 320,
-            amount_it: 45,
+            amount: 320,
             memo: "ops".into(),
             scheduled_epoch: 9000,
             created_at: 1_700_000_000,
@@ -261,14 +258,11 @@ fn treasury_fetch_remote_combines_responses() {
         next_cursor: Some(12),
     };
     let balance_result = RpcTreasuryBalanceResult {
-        balance_ct: 4_400,
-        balance_it: 1_050,
+        balance: 4_400,
         last_snapshot: Some(TreasuryBalanceSnapshot {
             id: 5,
-            balance_ct: 4_400,
-            delta_ct: 200,
-            balance_it: 1_050,
-            delta_it: 80,
+            balance: 4_400,
+            delta: 200,
             recorded_at: 1_700_000_100,
             event: TreasuryBalanceEventKind::Accrual,
             disbursement_id: None,
@@ -278,23 +272,19 @@ fn treasury_fetch_remote_combines_responses() {
     let history_result = RpcTreasuryHistoryResult {
         snapshots: vec![TreasuryBalanceSnapshot {
             id: 6,
-            balance_ct: 4_400,
-            delta_ct: -120,
-            balance_it: 970,
-            delta_it: -90,
+            balance: 4_400,
+            delta: -120,
             recorded_at: 1_700_000_200,
             event: TreasuryBalanceEventKind::Executed,
             disbursement_id: Some(4),
         }],
         next_cursor: None,
-        current_balance_ct: 4_400,
-        current_balance_it: 1_050,
+        current_balance: 4_400,
     };
 
     let output =
         combine_treasury_fetch_results(disbursement_result, balance_result, Some(history_result));
-    assert_eq!(output.balance_ct, 4_400);
-    assert_eq!(output.balance_it, 1_050);
+    assert_eq!(output.balance, 4_400);
     assert_eq!(output.next_cursor, Some(12));
     assert!(output
         .balance_history
@@ -315,8 +305,7 @@ fn treasury_fetch_remote_combines_responses() {
         .as_ref()
         .expect("history included in combined result");
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].delta_ct, -120);
-    assert_eq!(history[0].delta_it, -90);
+    assert_eq!(history[0].delta, -120);
 }
 
 #[test]
@@ -356,15 +345,13 @@ fn treasury_fetch_remote_allows_missing_history() {
         next_cursor: None,
     };
     let balance_result = RpcTreasuryBalanceResult {
-        balance_ct: 0,
-        balance_it: 0,
+        balance: 0,
         last_snapshot: None,
         executor: None,
     };
 
     let output = combine_treasury_fetch_results(disbursement_result, balance_result, None);
-    assert_eq!(output.balance_ct, 0);
-    assert_eq!(output.balance_it, 0);
+    assert_eq!(output.balance, 0);
     assert_eq!(output.next_cursor, None);
     assert!(output.balance_history.is_none());
     assert!(output.disbursements.is_empty());

@@ -15,7 +15,6 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
-use num_integer::Integer;
 use zkp::selection::{self, SelectionProofPublicInputs, SelectionProofVerification};
 
 mod attestation;
@@ -55,6 +54,20 @@ pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
 const BYTES_PER_MIB: u64 = 1_048_576;
 
+trait CeilDiv {
+    fn ceil_div(self, rhs: Self) -> Self;
+}
+
+impl CeilDiv for u64 {
+    fn ceil_div(self, rhs: Self) -> Self {
+        if rhs == 0 {
+            0
+        } else {
+            (self.saturating_add(rhs).saturating_sub(1)) / rhs
+        }
+    }
+}
+
 pub const COHORT_SELECTOR_VERSION_V1: u16 = 1;
 pub const COHORT_SELECTOR_VERSION_V2: u16 = 2;
 pub const CURRENT_COHORT_SELECTOR_VERSION: u16 = COHORT_SELECTOR_VERSION_V2;
@@ -83,12 +96,6 @@ impl DomainTier {
             DomainTier::Community => "community",
             DomainTier::Unverified => "unverified",
         }
-    }
-}
-
-impl Default for DomainTier {
-    fn default() -> Self {
-        DomainTier::Unverified
     }
 }
 
@@ -531,7 +538,7 @@ impl ResourceFloorConfig {
             .filter(|value| *value > 0)
             .unwrap_or(self.expected_impressions_per_proof as u64);
         let committee = self.committee_size.max(1) as u64;
-        let per_proof = (hint + committee - 1) / committee;
+        let per_proof = hint.ceil_div(committee);
         per_proof.max(self.min_impressions_per_proof as u64).max(1)
     }
 
@@ -931,9 +938,7 @@ impl CohortPricingState {
         if self.ema_supply_usd_micros <= 0.0 {
             return;
         }
-        let utilization = (self.ema_demand_usd_micros / self.ema_supply_usd_micros)
-            .min(1.0)
-            .max(0.0);
+        let utilization = (self.ema_demand_usd_micros / self.ema_supply_usd_micros).clamp(0.0, 1.0);
         self.observed_utilization_ppm =
             ((utilization * PPM_SCALE as f64).round() as u64).min(PPM_SCALE) as u32;
         let target =
@@ -4096,7 +4101,7 @@ fn distribution_policy_from_value(
         read_u64(obj, "verifier_percent")?,
         read_u64(obj, "liquidity_percent")?,
     );
-    if let Some(_) = obj.get("liquidity_split_ct_ppm") {
+    if obj.get("liquidity_split_ct_ppm").is_some() {
         policy = policy.with_liquidity_split(read_u32(obj, "liquidity_split_ct_ppm")?);
     }
     if let Some(value) = obj.get("dual_token_settlement_enabled") {
@@ -4784,8 +4789,8 @@ impl Marketplace for InMemoryMarketplace {
         let mean_obs = (sum_obs / n) as u64;
         let mean_tgt = (sum_tgt / n) as u64;
         let ratio = (mean_obs as f64) / (mean_tgt as f64 + f64::EPSILON);
-        let current = self.distribution.read().unwrap().clone();
-        let mut policy = current.clone();
+        let current = *self.distribution.read().unwrap();
+        let mut policy = current;
         let step: i64 = 2; // percentage points per step per role
         if ratio < 0.9 {
             policy.host_percent = (policy.host_percent as i64 + step) as u64;
@@ -5572,8 +5577,8 @@ impl Marketplace for SledMarketplace {
             unsettled_usd_micros: tokens.unsettled_usd_micros,
             ct_price_usd_micros: oracle.ct_price_usd_micros,
             it_price_usd_micros: oracle.it_price_usd_micros,
-            ct_remainders_usd_micros: tokens.remainders.ct.clone(),
-            it_remainders_usd_micros: tokens.remainders.it.clone(),
+            ct_remainders_usd_micros: tokens.remainders.ct,
+            it_remainders_usd_micros: tokens.remainders.it,
             ct_twap_window_id: oracle.ct_twap_window_id,
             it_twap_window_id: oracle.it_twap_window_id,
             selection_receipt: reservation.selection_receipt,
@@ -5600,7 +5605,6 @@ impl Marketplace for SledMarketplace {
                 if let Err(err) = self.persist_campaign(&snapshot) {
                     eprintln!("failed to persist campaign after cancel: {err}");
                 }
-                return;
             }
         }
     }
@@ -5700,8 +5704,8 @@ impl Marketplace for SledMarketplace {
         let mean_obs = (sum_obs / n) as u64;
         let mean_tgt = (sum_tgt / n) as u64;
         let ratio = (mean_obs as f64) / (mean_tgt as f64 + f64::EPSILON);
-        let current = self.distribution.read().unwrap().clone();
-        let mut policy = current.clone();
+        let current = *self.distribution.read().unwrap();
+        let mut policy = current;
         let step: i64 = 2;
         if ratio < 0.9 {
             policy.host_percent = (policy.host_percent as i64 + step) as u64;
@@ -5996,7 +6000,7 @@ fn allocate_usd(total_usd_micros: u64, distribution: DistributionPolicy) -> Role
     let (liquidity_ct, liquidity_it) = split_liquidity_usd(liquidity_total, distribution);
     let distributed_sum = allocations.iter().copied().sum::<u64>();
     RoleUsdParts {
-        viewer: allocations.get(0).copied().unwrap_or(0),
+        viewer: allocations.first().copied().unwrap_or(0),
         host: allocations.get(1).copied().unwrap_or(0),
         hardware: allocations.get(2).copied().unwrap_or(0),
         verifier: allocations.get(3).copied().unwrap_or(0),
@@ -6092,7 +6096,7 @@ fn usd_cost_for_bytes(price_per_mib_usd_micros: u64, bytes: u64) -> u64 {
         return 0;
     }
     let numerator = price_per_mib_usd_micros.saturating_mul(bytes);
-    (numerator + BYTES_PER_MIB - 1) / BYTES_PER_MIB
+    numerator.ceil_div(BYTES_PER_MIB)
 }
 
 fn distribute_scalar(total: u64, weights: &[(usize, u64)]) -> Vec<u64> {

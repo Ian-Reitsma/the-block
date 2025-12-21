@@ -585,7 +585,7 @@ impl<'a> ReservationGuard<'a> {
 pub struct BlockTreasuryEvent {
     pub disbursement_id: u64,
     pub destination: String,
-    pub amount_ct: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub tx_hash: String,
@@ -4745,7 +4745,7 @@ impl Blockchain {
         let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
-            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut, 0) {
+            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
                 diagnostics::log::warn!(format!(
                     "failed to accrue treasury disbursement share: {err}"
                 ));
@@ -4856,7 +4856,7 @@ impl Blockchain {
                         } if tx_hashes.contains(tx_hash) => Some(BlockTreasuryEvent {
                             disbursement_id: record.id,
                             destination: record.destination,
-                            amount_ct: record.amount_ct,
+                            amount: record.amount,
                             memo: record.memo,
                             scheduled_epoch: record.scheduled_epoch,
                             tx_hash: tx_hash.clone(),

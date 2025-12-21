@@ -86,8 +86,8 @@ If you see old names in code, here's what they mean now:
 
 | Old Name | Current Name | Notes |
 |----------|--------------|-------|
-| `amount_it` | Industrial share of CT | Sub-ledger accounting, not a separate token |
-| `payout_it` | Industrial payout | Same as above |
+| `amount_it` | (Removed) | Legacy disbursement field replaced by single `amount` |
+| `payout_it` | (Removed) | Legacy industrial payout label |
 | Various `docs/*.md` that no longer exist | See [`LEGACY_MAPPING.md`](LEGACY_MAPPING.md) | Consolidated into main docs |
 
 See [`LEGACY_MAPPING.md`](LEGACY_MAPPING.md) for the full historical mapping.

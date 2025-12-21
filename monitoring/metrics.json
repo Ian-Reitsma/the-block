@@ -608,7 +608,7 @@
       "labels": [
         "status"
       ],
-      "name": "treasury_disbursement_amount_ct"
+      "name": "treasury_disbursement_amount"
     },
     {
       "deprecated": false,

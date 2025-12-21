@@ -516,9 +516,7 @@ impl StoragePipeline {
     }
 
     fn quota_for(provider: &str) -> u64 {
-        let (ct, industrial) = Settlement::balance_split(provider);
-        ct.saturating_add(industrial)
-            .saturating_mul(QUOTA_BYTES_PER_CREDIT)
+        Settlement::balance(provider).saturating_mul(QUOTA_BYTES_PER_CREDIT)
     }
 
     fn select_chunk_len(states: &[ProviderState], remaining: usize) -> usize {

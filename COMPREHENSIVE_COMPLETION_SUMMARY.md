@@ -519,25 +519,24 @@ PC (Primary)              Mac M1 #1 (Replica)      Mac M1 #2 (Observer)
 
 **Current State** (from codebase search):
 - README.md: References "BLOCK" as canonical token
-- AGENTS.md: Still mentions "CT/IT" terminology
-- Code: Uses `amount_ct`, `amount_it` field names (legacy)
-- Metrics: Uses `_ct` suffixes in metric names
+- AGENTS.md: still mentions CT/IT telemetry labels in a few sections
+- Code: Treasury structs now expose a single `amount` field (aliases remain only in historical codec paths)
+- Metrics: Uses `_ct` suffixes in gauge names while telemetry migrations finish
 
 **Architectural Reality**:
 - **The Block uses a single token**: BLOCK
-- **CT/IT are ledger accounting categories**, not separate tokens
-- Field names (`amount_ct`, `amount_it`) are legacy but maintained for compatibility
+- **CT/IT references are legacy**, retained only in metric names and historical codec aliases until the dashboards migrate
 
 **Documentation Status**:
 - ✅ README updated to use BLOCK terminology
 - ✅ ECONOMIC_SYSTEM_CHANGELOG documents the single-token model
-- ⚠️  Some docs (AGENTS, operations) still use CT/IT terms
-- ℹ️  Code field names intentionally kept as `amount_ct`/`amount_it` for backward compatibility
+- ⚠️  Some docs (AGENTS, operations) still use CT/IT terms for telemetry names
+- ℹ️  Historical codecs accept `amount_ct`/`amount_it` during migration, but the canonical structs now expose `amount` only
 
 **Recommendation**:
 - User-facing docs should say "BLOCK tokens"
 - Technical docs can reference "CT ledger slot" with note that it's BLOCK-denominated
-- Code field names should remain `amount_ct`/`amount_it` (too risky to rename)
+- Code should prefer the new single-field names; remove `_ct/_it` telemetry once dashboards and RPC clients are updated
 
 ---
 

@@ -1001,7 +1001,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | --- | --- | --- | --- |
 | `peer.rebate_status` | `{peer_id}` | `{pending_ct, claimed_ct, receipts[]}` | invalid ID |
 | `peer.rebate_claim` | `{peer_id}` | `{status:"ok", claimed_ct}` once receipts consumed | invalid ID |
-| `rent.escrow.balance` | `{provider}` | `{balance_ct, locked_until}` from `RentEscrow` sled | none |
+| `rent.escrow.balance` | `{provider}` | `{balance, locked_until}` from `RentEscrow` sled | none |
 | `scheduler.stats` | none | Scheduler debug payload `{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}` | none |
 
 #### Governance, treasury, and service badges
@@ -1015,7 +1015,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | `gov.release_signers` | none | `{signers:[{name,pubkey}]} ` | none |
 | `gov.treasury.balance` | none | `{ct, industrial_ct, usd_estimate}` from treasury sled | none |
 | `gov.treasury.balance_history` | `{start?, end?}` | `{entries:[{epoch,ct}], next_cursor?}` | none |
-| `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount_ct, recipient, executed_at}], next_cursor?}` | none |
+| `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}` | none |
 | `service_badge_issue` | `{subject, badge}` (requires signer badge header) | `{status:"ok"}` and records issuance | `-32602` invalid payload, `-32050` when badge invalid |
 | `service_badge_revoke` | `{subject, badge}` | `{status:"ok"}` | same |
 | `service_badge_verify` | `{token}` | `{valid:bool, subject?, expires_at?}` | none |

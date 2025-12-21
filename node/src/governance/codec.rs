@@ -4,250 +4,16 @@ use super::{
     ReleaseVote, Vote, VoteChoice,
 };
 use foundation_serialization::json::{self, Map, Value};
+use governance_spec::codec as governance_codec;
+pub use governance_spec::codec::{BinaryCodec, BinaryReader, BinaryWriter};
 use governance_spec::treasury::{
-    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
-    TreasuryDisbursement, TreasuryExecutorSnapshot,
+    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
-use std::convert::TryInto;
 
 pub type Result<T> = std::result::Result<T, sled::Error>;
 
 fn codec_error(msg: impl Into<String>) -> sled::Error {
     sled::Error::Unsupported(msg.into().into_boxed_str())
-}
-
-#[derive(Default)]
-pub struct BinaryWriter {
-    buf: Vec<u8>,
-}
-
-impl BinaryWriter {
-    pub fn new() -> Self {
-        Self { buf: Vec::new() }
-    }
-
-    pub fn into_inner(self) -> Vec<u8> {
-        self.buf
-    }
-
-    pub fn write_u8(&mut self, value: u8) {
-        self.buf.push(value);
-    }
-
-    pub fn write_bool(&mut self, value: bool) {
-        self.write_u8(if value { 1 } else { 0 });
-    }
-
-    pub fn write_u32(&mut self, value: u32) {
-        self.buf.extend_from_slice(&value.to_le_bytes());
-    }
-
-    pub fn write_u64(&mut self, value: u64) {
-        self.buf.extend_from_slice(&value.to_le_bytes());
-    }
-
-    pub fn write_i64(&mut self, value: i64) {
-        self.buf.extend_from_slice(&value.to_le_bytes());
-    }
-
-    pub fn write_bytes(&mut self, bytes: &[u8]) {
-        self.write_u64(bytes.len() as u64);
-        self.buf.extend_from_slice(bytes);
-    }
-
-    /// Writes raw bytes without a length prefix. Use this when you've already
-    /// written the length manually.
-    pub fn write_raw_bytes(&mut self, bytes: &[u8]) {
-        self.buf.extend_from_slice(bytes);
-    }
-
-    pub fn write_string(&mut self, value: &str) {
-        self.write_bytes(value.as_bytes());
-    }
-}
-
-pub struct BinaryReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> BinaryReader<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-
-    fn remaining(&self) -> usize {
-        self.data.len().saturating_sub(self.pos)
-    }
-
-    fn read_exact(&mut self, len: usize) -> Result<&'a [u8]> {
-        if self.remaining() < len {
-            return Err(codec_error("binary decode: unexpected end of input"));
-        }
-        let start = self.pos;
-        self.pos += len;
-        Ok(&self.data[start..self.pos])
-    }
-
-    pub fn read_u8(&mut self) -> Result<u8> {
-        Ok(self.read_exact(1)?[0])
-    }
-
-    pub fn read_bool(&mut self) -> Result<bool> {
-        match self.read_u8()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            other => Err(codec_error(format!(
-                "binary decode: invalid bool tag {other}"
-            ))),
-        }
-    }
-
-    pub fn read_u32(&mut self) -> Result<u32> {
-        let bytes: [u8; 4] = self
-            .read_exact(4)?
-            .try_into()
-            .expect("slice with exact length");
-        Ok(u32::from_le_bytes(bytes))
-    }
-
-    pub fn read_u64(&mut self) -> Result<u64> {
-        let bytes: [u8; 8] = self
-            .read_exact(8)?
-            .try_into()
-            .expect("slice with exact length");
-        Ok(u64::from_le_bytes(bytes))
-    }
-
-    pub fn read_i64(&mut self) -> Result<i64> {
-        let bytes: [u8; 8] = self
-            .read_exact(8)?
-            .try_into()
-            .expect("slice with exact length");
-        Ok(i64::from_le_bytes(bytes))
-    }
-
-    pub fn read_bytes(&mut self) -> Result<Vec<u8>> {
-        let len = self.read_u64()? as usize;
-        let bytes = self.read_exact(len)?;
-        Ok(bytes.to_vec())
-    }
-
-    pub fn read_string(&mut self) -> Result<String> {
-        let bytes = self.read_bytes()?;
-        String::from_utf8(bytes).map_err(|e| codec_error(format!("utf8: {e}")))
-    }
-
-    pub fn finish(self) -> Result<()> {
-        if self.pos == self.data.len() {
-            Ok(())
-        } else {
-            Err(codec_error("binary decode: trailing bytes"))
-        }
-    }
-}
-
-pub trait BinaryCodec: Sized {
-    fn encode(&self, writer: &mut BinaryWriter);
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self>;
-}
-
-impl BinaryCodec for u8 {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u8(*self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_u8()
-    }
-}
-
-impl BinaryCodec for u32 {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u32(*self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_u32()
-    }
-}
-
-impl BinaryCodec for u64 {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u64(*self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_u64()
-    }
-}
-
-impl BinaryCodec for i64 {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_i64(*self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_i64()
-    }
-}
-
-impl BinaryCodec for bool {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_bool(*self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_bool()
-    }
-}
-
-impl BinaryCodec for String {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_string(self);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        reader.read_string()
-    }
-}
-
-impl<T: BinaryCodec> BinaryCodec for Vec<T> {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u64(self.len() as u64);
-        for item in self {
-            item.encode(writer);
-        }
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        let len = reader.read_u64()? as usize;
-        let mut out = Vec::with_capacity(len);
-        for _ in 0..len {
-            out.push(T::decode(reader)?);
-        }
-        Ok(out)
-    }
-}
-
-impl<T: BinaryCodec> BinaryCodec for Option<T> {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        match self {
-            Some(value) => {
-                writer.write_bool(true);
-                value.encode(writer);
-            }
-            None => writer.write_bool(false),
-        }
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        if reader.read_bool()? {
-            Ok(Some(T::decode(reader)?))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 fn param_key_to_tag(key: ParamKey) -> u8 {
@@ -475,40 +241,6 @@ impl BinaryCodec for VoteChoice {
     }
 }
 
-fn balance_event_to_tag(event: &TreasuryBalanceEventKind) -> u8 {
-    match event {
-        TreasuryBalanceEventKind::Accrual => 0,
-        TreasuryBalanceEventKind::Queued => 1,
-        TreasuryBalanceEventKind::Executed => 2,
-        TreasuryBalanceEventKind::Cancelled => 3,
-    }
-}
-
-fn balance_event_from_tag(tag: u8) -> Result<TreasuryBalanceEventKind> {
-    let event = match tag {
-        0 => TreasuryBalanceEventKind::Accrual,
-        1 => TreasuryBalanceEventKind::Queued,
-        2 => TreasuryBalanceEventKind::Executed,
-        3 => TreasuryBalanceEventKind::Cancelled,
-        other => {
-            return Err(codec_error(format!(
-                "binary decode: unknown TreasuryBalanceEventKind tag {other}"
-            )))
-        }
-    };
-    Ok(event)
-}
-
-impl BinaryCodec for TreasuryBalanceEventKind {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u8(balance_event_to_tag(self));
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        balance_event_from_tag(reader.read_u8()?)
-    }
-}
-
 impl BinaryCodec for Proposal {
     fn encode(&self, writer: &mut BinaryWriter) {
         self.id.encode(writer);
@@ -645,318 +377,6 @@ impl BinaryCodec for ApprovedRelease {
             signature_threshold: u32::decode(reader)?,
             signer_set: Vec::<String>::decode(reader)?,
             install_times: Vec::<u64>::decode(reader)?,
-        })
-    }
-}
-
-fn disbursement_status_to_tag(status: &DisbursementStatus) -> u8 {
-    match status {
-        DisbursementStatus::Draft { .. } => 0,
-        DisbursementStatus::Voting { .. } => 1,
-        DisbursementStatus::Queued { .. } => 2,
-        DisbursementStatus::Timelocked { .. } => 3,
-        DisbursementStatus::Executed { .. } => 4,
-        DisbursementStatus::Finalized { .. } => 5,
-        DisbursementStatus::RolledBack { .. } => 6,
-    }
-}
-
-impl BinaryCodec for DisbursementStatus {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        writer.write_u8(disbursement_status_to_tag(self));
-        match self {
-            DisbursementStatus::Draft { created_at } => {
-                created_at.encode(writer);
-            }
-            DisbursementStatus::Voting {
-                vote_deadline_epoch,
-            } => {
-                vote_deadline_epoch.encode(writer);
-            }
-            DisbursementStatus::Queued {
-                queued_at,
-                activation_epoch,
-            } => {
-                queued_at.encode(writer);
-                activation_epoch.encode(writer);
-            }
-            DisbursementStatus::Timelocked { ready_epoch } => {
-                ready_epoch.encode(writer);
-            }
-            DisbursementStatus::Executed {
-                tx_hash,
-                executed_at,
-            } => {
-                tx_hash.encode(writer);
-                executed_at.encode(writer);
-            }
-            DisbursementStatus::Finalized {
-                tx_hash,
-                executed_at,
-                finalized_at,
-            } => {
-                tx_hash.encode(writer);
-                executed_at.encode(writer);
-                finalized_at.encode(writer);
-            }
-            DisbursementStatus::RolledBack {
-                reason,
-                rolled_back_at,
-                prior_tx,
-            } => {
-                reason.encode(writer);
-                rolled_back_at.encode(writer);
-                prior_tx.encode(writer);
-            }
-        }
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        match reader.read_u8()? {
-            0 => {
-                let created_at = u64::decode(reader)?;
-                Ok(DisbursementStatus::Draft { created_at })
-            }
-            1 => {
-                let vote_deadline_epoch = u64::decode(reader)?;
-                Ok(DisbursementStatus::Voting {
-                    vote_deadline_epoch,
-                })
-            }
-            2 => {
-                let queued_at = u64::decode(reader)?;
-                let activation_epoch = u64::decode(reader)?;
-                Ok(DisbursementStatus::Queued {
-                    queued_at,
-                    activation_epoch,
-                })
-            }
-            3 => {
-                let ready_epoch = u64::decode(reader)?;
-                Ok(DisbursementStatus::Timelocked { ready_epoch })
-            }
-            4 => {
-                let tx_hash = String::decode(reader)?;
-                let executed_at = u64::decode(reader)?;
-                Ok(DisbursementStatus::Executed {
-                    tx_hash,
-                    executed_at,
-                })
-            }
-            5 => {
-                let tx_hash = String::decode(reader)?;
-                let executed_at = u64::decode(reader)?;
-                let finalized_at = u64::decode(reader)?;
-                Ok(DisbursementStatus::Finalized {
-                    tx_hash,
-                    executed_at,
-                    finalized_at,
-                })
-            }
-            6 => {
-                let reason = String::decode(reader)?;
-                let rolled_back_at = u64::decode(reader)?;
-                let prior_tx = Option::<String>::decode(reader)?;
-                Ok(DisbursementStatus::RolledBack {
-                    reason,
-                    rolled_back_at,
-                    prior_tx,
-                })
-            }
-            other => Err(codec_error(format!(
-                "binary decode: unknown DisbursementStatus tag {other}"
-            ))),
-        }
-    }
-}
-
-impl BinaryCodec for TreasuryDisbursement {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        self.id.encode(writer);
-        self.destination.encode(writer);
-        self.amount_ct.encode(writer);
-        self.memo.encode(writer);
-        self.scheduled_epoch.encode(writer);
-        self.created_at.encode(writer);
-        self.status.encode(writer);
-        self.amount_it.encode(writer);
-        // Use serde-based encoding for complex nested types
-        let proposal_bytes =
-            foundation_serialization::binary::encode(&self.proposal).unwrap_or_else(|_| Vec::new());
-        (proposal_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&proposal_bytes);
-
-        let expected_receipts_bytes =
-            foundation_serialization::binary::encode(&self.expected_receipts)
-                .unwrap_or_else(|_| Vec::new());
-        (expected_receipts_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&expected_receipts_bytes);
-
-        let receipts_bytes =
-            foundation_serialization::binary::encode(&self.receipts).unwrap_or_else(|_| Vec::new());
-        (receipts_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&receipts_bytes);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        let id = u64::decode(reader)?;
-        let destination = String::decode(reader)?;
-        let amount_ct = u64::decode(reader)?;
-        let memo = String::decode(reader)?;
-        let scheduled_epoch = u64::decode(reader)?;
-        let created_at = u64::decode(reader)?;
-        let status = DisbursementStatus::decode(reader)?;
-        let amount_it = if reader.remaining() >= 8 {
-            u64::decode(reader)?
-        } else {
-            0
-        };
-        // Decode new fields with backwards compatibility
-        let proposal = if reader.remaining() >= 4 {
-            let len = u32::decode(reader)? as usize;
-            if len > 0 && reader.remaining() >= len {
-                let bytes = reader.read_exact(len)?;
-                foundation_serialization::binary::decode(bytes).ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let expected_receipts = if reader.remaining() >= 4 {
-            let len = u32::decode(reader)? as usize;
-            if len > 0 && reader.remaining() >= len {
-                let bytes = reader.read_exact(len)?;
-                foundation_serialization::binary::decode(bytes).unwrap_or_default()
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        let receipts = if reader.remaining() >= 4 {
-            let len = u32::decode(reader)? as usize;
-            if len > 0 && reader.remaining() >= len {
-                let bytes = reader.read_exact(len)?;
-                foundation_serialization::binary::decode(bytes).unwrap_or_default()
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        Ok(Self {
-            id,
-            destination,
-            amount_ct,
-            amount_it,
-            memo,
-            scheduled_epoch,
-            created_at,
-            status,
-            proposal,
-            expected_receipts,
-            receipts,
-        })
-    }
-}
-
-impl BinaryCodec for SignedExecutionIntent {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        self.disbursement_id.encode(writer);
-        writer.write_bytes(&self.tx_bytes);
-        self.tx_hash.encode(writer);
-        self.staged_at.encode(writer);
-        self.nonce.encode(writer);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        let disbursement_id = u64::decode(reader)?;
-        let tx_bytes = reader.read_bytes()?;
-        let tx_hash = String::decode(reader)?;
-        let staged_at = u64::decode(reader)?;
-        let nonce = if reader.remaining() >= 8 {
-            u64::decode(reader)?
-        } else {
-            0
-        };
-        Ok(Self {
-            disbursement_id,
-            tx_bytes,
-            tx_hash,
-            staged_at,
-            nonce,
-        })
-    }
-}
-
-impl BinaryCodec for TreasuryBalanceSnapshot {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        self.id.encode(writer);
-        self.balance_ct.encode(writer);
-        self.delta_ct.encode(writer);
-        self.recorded_at.encode(writer);
-        self.event.encode(writer);
-        self.disbursement_id.encode(writer);
-        self.balance_it.encode(writer);
-        self.delta_it.encode(writer);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        Ok(Self {
-            id: u64::decode(reader)?,
-            balance_ct: u64::decode(reader)?,
-            delta_ct: i64::decode(reader)?,
-            recorded_at: u64::decode(reader)?,
-            event: TreasuryBalanceEventKind::decode(reader)?,
-            disbursement_id: Option::<u64>::decode(reader)?,
-            balance_it: if reader.remaining() >= 16 {
-                u64::decode(reader)?
-            } else {
-                0
-            },
-            delta_it: if reader.remaining() >= 8 {
-                i64::decode(reader)?
-            } else {
-                0
-            },
-        })
-    }
-}
-
-impl BinaryCodec for TreasuryExecutorSnapshot {
-    fn encode(&self, writer: &mut BinaryWriter) {
-        self.last_tick_at.encode(writer);
-        self.last_success_at.encode(writer);
-        self.last_error_at.encode(writer);
-        self.last_error.encode(writer);
-        self.pending_matured.encode(writer);
-        self.staged_intents.encode(writer);
-        self.lease_holder.encode(writer);
-        self.lease_expires_at.encode(writer);
-        self.lease_renewed_at.encode(writer);
-        self.last_submitted_nonce.encode(writer);
-        self.lease_last_nonce.encode(writer);
-        self.lease_released.encode(writer);
-    }
-
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
-        Ok(Self {
-            last_tick_at: u64::decode(reader)?,
-            last_success_at: Option::<u64>::decode(reader)?,
-            last_error_at: Option::<u64>::decode(reader)?,
-            last_error: Option::<String>::decode(reader)?,
-            pending_matured: u64::decode(reader)?,
-            staged_intents: u64::decode(reader)?,
-            lease_holder: Option::<String>::decode(reader)?,
-            lease_expires_at: Option::<u64>::decode(reader)?,
-            lease_renewed_at: Option::<u64>::decode(reader)?,
-            last_submitted_nonce: Option::<u64>::decode(reader)?,
-            lease_last_nonce: Option::<u64>::decode(reader)?,
-            lease_released: bool::decode(reader).unwrap_or(false),
         })
     }
 }
@@ -1142,16 +562,7 @@ pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
         "destination".into(),
         Value::String(disbursement.destination.clone()),
     );
-    map.insert(
-        "amount_ct".into(),
-        Value::Number(disbursement.amount_ct.into()),
-    );
-    if disbursement.amount_it > 0 {
-        map.insert(
-            "amount_it".into(),
-            Value::Number(disbursement.amount_it.into()),
-        );
-    }
+    map.insert("amount".into(), Value::Number(disbursement.amount.into()));
     map.insert("memo".into(), Value::String(disbursement.memo.clone()));
     map.insert(
         "scheduled_epoch".into(),
@@ -1212,11 +623,10 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         .and_then(Value::as_str)
         .ok_or_else(|| codec_error("treasury JSON: missing destination"))?
         .to_string();
-    let amount_ct = obj
-        .get("amount_ct")
+    let amount = obj
+        .get("amount")
         .and_then(Value::as_u64)
-        .ok_or_else(|| codec_error("treasury JSON: missing amount_ct"))?;
-    let amount_it = obj.get("amount_it").and_then(Value::as_u64).unwrap_or(0);
+        .ok_or_else(|| codec_error("treasury JSON: missing amount"))?;
     let memo = obj
         .get("memo")
         .and_then(Value::as_str)
@@ -1263,8 +673,7 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
     Ok(TreasuryDisbursement {
         id,
         destination,
-        amount_ct,
-        amount_it,
+        amount,
         memo,
         scheduled_epoch,
         created_at,
@@ -1278,16 +687,8 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
 pub fn balance_snapshot_to_json(snapshot: &TreasuryBalanceSnapshot) -> Value {
     let mut map = Map::new();
     map.insert("id".into(), Value::Number(snapshot.id.into()));
-    map.insert(
-        "balance_ct".into(),
-        Value::Number(snapshot.balance_ct.into()),
-    );
-    map.insert("delta_ct".into(), Value::Number(snapshot.delta_ct.into()));
-    map.insert(
-        "balance_it".into(),
-        Value::Number(snapshot.balance_it.into()),
-    );
-    map.insert("delta_it".into(), Value::Number(snapshot.delta_it.into()));
+    map.insert("balance".into(), Value::Number(snapshot.balance.into()));
+    map.insert("delta".into(), Value::Number(snapshot.delta.into()));
     map.insert(
         "recorded_at".into(),
         Value::Number(snapshot.recorded_at.into()),
@@ -1313,16 +714,14 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
         .get("id")
         .and_then(Value::as_u64)
         .ok_or_else(|| codec_error("treasury balance JSON: missing id"))?;
-    let balance_ct = obj
-        .get("balance_ct")
+    let balance = obj
+        .get("balance")
         .and_then(Value::as_u64)
-        .ok_or_else(|| codec_error("treasury balance JSON: missing balance_ct"))?;
-    let delta_ct = obj
-        .get("delta_ct")
+        .ok_or_else(|| codec_error("treasury balance JSON: missing balance"))?;
+    let delta = obj
+        .get("delta")
         .and_then(Value::as_i64)
-        .ok_or_else(|| codec_error("treasury balance JSON: missing delta_ct"))?;
-    let balance_it = obj.get("balance_it").and_then(Value::as_u64).unwrap_or(0);
-    let delta_it = obj.get("delta_it").and_then(Value::as_i64).unwrap_or(0);
+        .ok_or_else(|| codec_error("treasury balance JSON: missing delta"))?;
     let recorded_at = obj
         .get("recorded_at")
         .and_then(Value::as_u64)
@@ -1345,27 +744,12 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
     let disbursement_id = obj.get("disbursement_id").and_then(Value::as_u64);
     Ok(TreasuryBalanceSnapshot {
         id,
-        balance_ct,
-        delta_ct,
-        balance_it,
-        delta_it,
+        balance,
+        delta,
         recorded_at,
         event,
         disbursement_id,
     })
-}
-
-pub fn encode_binary<T: BinaryCodec>(value: &T) -> Result<Vec<u8>> {
-    let mut writer = BinaryWriter::new();
-    value.encode(&mut writer);
-    Ok(writer.into_inner())
-}
-
-pub fn decode_binary<T: BinaryCodec>(bytes: &[u8]) -> Result<T> {
-    let mut reader = BinaryReader::new(bytes);
-    let value = T::decode(&mut reader)?;
-    reader.finish()?;
-    Ok(value)
 }
 
 pub fn disbursements_to_json_array(records: &[TreasuryDisbursement]) -> Value {
@@ -1529,6 +913,14 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "EnergySlashingRateBps" => Ok(ParamKey::EnergySlashingRateBps),
         other => Err(codec_error(format!("param key JSON: unknown key {other}"))),
     }
+}
+
+pub fn encode_binary<T: BinaryCodec>(value: &T) -> Result<Vec<u8>> {
+    governance_codec::encode_binary(value)
+}
+
+pub fn decode_binary<T: BinaryCodec>(bytes: &[u8]) -> Result<T> {
+    governance_codec::decode_binary(bytes)
 }
 
 pub fn json_to_bytes(value: &Value) -> Vec<u8> {

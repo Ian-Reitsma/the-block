@@ -11,7 +11,6 @@ fn cannot_prove_without_data() {
     // Setup: Create a contract with actual chunks
     let chunks = vec![b"chunk0", b"chunk1", b"chunk2", b"chunk3"];
     let chunk_refs: Vec<&[u8]> = chunks.iter().map(|c| c.as_ref()).collect();
-
     let tree = MerkleTree::build(&chunk_refs).expect("build tree");
 
     let contract = StorageContract {
@@ -166,39 +165,19 @@ fn expired_contract_rejects_proofs() {
 #[test]
 fn proof_size_attack_prevented() {
     // Attacker tries to DoS by submitting huge proof
-    use storage::merkle_proof::MerkleProof;
-
-    let chunks = vec![b"chunk0"];
-    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|c| c.as_ref()).collect();
-    let tree = MerkleTree::build(&chunk_refs).expect("build tree");
-
-    let contract = StorageContract {
-        object_id: "object_001".into(),
-        provider_id: "provider_001".into(),
-        original_bytes: 1000,
-        shares: 1,
-        price_per_block: 100,
-        start_block: 0,
-        retention_blocks: 1000,
-        next_payment_block: 1,
-        accrued: 0,
-        total_deposit_ct: 100000,
-        last_payment_block: None,
-        storage_root: tree.root,
-    };
+    use storage::merkle_proof::{MerkleError, MerkleProof};
 
     // Try to create giant proof (10MB of fake siblings)
     let giant_proof_data = vec![0u8; 10_000_000];
     let giant_proof = MerkleProof::new(giant_proof_data);
 
-    // MerkleProof::new validates length is multiple of 32
-    assert!(giant_proof.is_ok());
-
-    let proof = giant_proof.unwrap();
-
-    // Verification should fail (wrong root)
-    let result = contract.verify_proof(0, chunks[0], &proof, 100);
-    assert!(matches!(result, Err(ContractError::ChallengeFailed)));
+    assert!(matches!(
+        giant_proof,
+        Err(MerkleError::InvalidProofLength {
+            expected: _,
+            got: _
+        })
+    ));
 }
 
 #[test]
@@ -236,16 +215,20 @@ fn random_challenges_unpredictable() {
     // Verify each proof only works for its corresponding chunk
     for i in 0..8 {
         // Correct proof passes
-        assert!(contract
-            .verify_proof(i, chunks[i as usize], &proofs[i as usize], 100)
-            .is_ok());
+        assert!(
+            contract
+                .verify_proof(i, chunks[i as usize], &proofs[i as usize], 100)
+                .is_ok()
+        );
 
         // Wrong chunk fails
         if i + 1 < 8 {
             let wrong_idx = (i + 1) % 8;
-            assert!(contract
-                .verify_proof(i, chunks[wrong_idx as usize], &proofs[i as usize], 100)
-                .is_err());
+            assert!(
+                contract
+                    .verify_proof(i, chunks[wrong_idx as usize], &proofs[i as usize], 100)
+                    .is_err()
+            );
         }
     }
 }

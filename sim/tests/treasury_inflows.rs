@@ -1,12 +1,12 @@
 use foundation_serialization::json::{self, Value};
 #[derive(Default)]
 struct TreasuryState {
-    balance_ct: u64,
+    balance: u64,
 }
 
 impl TreasuryState {
     fn collect(&mut self, reward: u64, percent: u64) {
-        self.balance_ct += reward * percent / 100;
+        self.balance += reward * percent / 100;
     }
 }
 
@@ -50,5 +50,5 @@ fn treasury_inflows_scenario_models_outcomes() {
             activated.insert(id);
         }
     }
-    assert_eq!(treasury.balance_ct, 25);
+    assert_eq!(treasury.balance, 25);
 }

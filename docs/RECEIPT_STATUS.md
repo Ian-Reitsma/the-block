@@ -18,7 +18,7 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 ### 1. Receipt Type System
 - ✅ [node/src/receipts.rs](node/src/receipts.rs) - Complete with all 4 market types
 - ✅ Storage, Compute, Energy, Ad receipts defined
-- ✅ Helper methods: `market_name()`, `settlement_amount_ct()`, `block_height()`
+- ✅ Helper methods: `market_name()`, `settlement_amount()`, `block_height()`
 - ✅ Tests validate serialization roundtrip
 
 ### 2. Block Hash Integration
@@ -228,7 +228,7 @@ Follow the pattern in [INSTRUCTIONS.md](INSTRUCTIONS.md):
                Receipt::YourMarket(_) => "your_market",
            }
        }
-       // ... settlement_amount_ct(), block_height()
+       // ... settlement_amount(), block_height()
    }
    ```
 

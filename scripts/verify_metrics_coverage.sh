@@ -48,8 +48,7 @@ declare -a METRICS=(
   "treasury_disbursement_backlog"
   "treasury_disbursement_lag_seconds"
   "treasury_execution_errors_total"
-  "treasury_balance_ct"
-  "treasury_balance_it"
+  "treasury_balance"
   "treasury_executor_tick_duration_seconds"
   "treasury_dependency_failures_total"
   
@@ -82,7 +81,7 @@ declare -a METRICS=(
   "economics_prev_market_metrics_utilization_ppm"
   "economics_prev_market_metrics_provider_margin_ppm"
   "economics_block_reward_per_block"
-  "settlement_audit_balance_ct_total"
+  "settlement_audit_balance_total"
   "settlement_audit_conservation_failures_total"
 )
 

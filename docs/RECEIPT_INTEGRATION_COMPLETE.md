@@ -21,7 +21,7 @@ The receipt system is **fully integrated and production-ready**. All components 
 #### Receipt Type System
 - ✅ [node/src/receipts.rs](node/src/receipts.rs) - All 4 market receipt types defined
 - ✅ Storage, Compute, Energy, Ad receipts with complete field definitions
-- ✅ Helper methods: `market_name()`, `settlement_amount_ct()`, `block_height()`
+- ✅ Helper methods: `market_name()`, `settlement_amount()`, `block_height()`
 - ✅ Serialization/deserialization via `foundation_serialization`
 - ✅ Unit tests pass (8/8 tests in receipts.rs)
 

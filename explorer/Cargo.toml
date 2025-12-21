@@ -22,3 +22,7 @@ sys = { path = "../crates/sys" }
 rand = { path = "../crates/rand" }
 testkit = { path = "../crates/testkit" }
 ad_market = { path = "../crates/ad_market" }
+
+[[bin]]
+name = "explorer-migrate-treasury"
+path = "src/bin/migrate_treasury_db.rs"

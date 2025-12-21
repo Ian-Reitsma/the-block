@@ -42,7 +42,7 @@ The Energy Market RPC provides oracle integration, settlement tracking, and disp
   "capacity_kwh": 1000000,
   "price_per_kwh": 5000,
   "meter_address": "meter_smart_001",
-  "stake_amount_ct": 500000,
+  "stake_amount": 500000,
   "public_key": "base64(ed25519_pubkey)",
   "signature": "base64(ed25519_sig)"
 }
@@ -54,7 +54,7 @@ The Energy Market RPC provides oracle integration, settlement tracking, and disp
   "provider_id": "provider_usa_001",
   "status": "active",
   "registered_at": 1702944000,
-  "stake_amount_ct": 500000,
+  "stake_amount": 500000,
   "reputation_score": 0.5
 }
 ```
@@ -236,7 +236,7 @@ GET /energy/credits?provider_id=provider_usa_001&status=pending&limit=50
       "timestamp": 1702944000,
       "status": "pending_settlement",
       "expires_at": 1702950000,
-      "settlement_amount_ct": 250000
+      "settlement_amount": 250000
     },
     { ... }
   ],

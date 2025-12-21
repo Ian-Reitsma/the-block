@@ -396,7 +396,7 @@ fn write_treasury_events(writer: &mut Writer, events: &[BlockTreasuryEvent]) -> 
         writer.write_struct(|struct_writer| {
             struct_writer.field_u64("disbursement_id", event.disbursement_id);
             struct_writer.field_string("destination", &event.destination);
-            struct_writer.field_u64("amount_ct", event.amount_ct);
+            struct_writer.field_u64("amount", event.amount);
             struct_writer.field_string("memo", &event.memo);
             struct_writer.field_u64("scheduled_epoch", event.scheduled_epoch);
             struct_writer.field_string("tx_hash", &event.tx_hash);
@@ -410,7 +410,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
     read_vec(reader, |reader| {
         let mut disbursement_id = None;
         let mut destination = None;
-        let mut amount_ct = None;
+        let mut amount = None;
         let mut memo = None;
         let mut scheduled_epoch = None;
         let mut tx_hash = None;
@@ -420,7 +420,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
                 assign_once(&mut disbursement_id, reader.read_u64()?, "disbursement_id")
             }
             "destination" => assign_once(&mut destination, reader.read_string()?, "destination"),
-            "amount_ct" => assign_once(&mut amount_ct, reader.read_u64()?, "amount_ct"),
+            "amount" => assign_once(&mut amount, reader.read_u64()?, "amount"),
             "memo" => assign_once(&mut memo, reader.read_string()?, "memo"),
             "scheduled_epoch" => {
                 assign_once(&mut scheduled_epoch, reader.read_u64()?, "scheduled_epoch")
@@ -432,7 +432,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
         Ok(BlockTreasuryEvent {
             disbursement_id: disbursement_id.unwrap_or_default(),
             destination: destination.unwrap_or_default(),
-            amount_ct: amount_ct.unwrap_or_default(),
+            amount: amount.unwrap_or_default(),
             memo: memo.unwrap_or_default(),
             scheduled_epoch: scheduled_epoch.unwrap_or_default(),
             tx_hash: tx_hash.unwrap_or_default(),

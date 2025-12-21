@@ -699,26 +699,16 @@ async fn treasury_disbursements(
         .map(|value| value.parse::<u64>())
         .transpose()
         .map_err(|_| HttpError::Handler("invalid 'max_epoch' query parameter".into()))?;
-    let min_amount_ct = request
-        .query_param("min_amount_ct")
+    let min_amount = request
+        .query_param("min_amount")
         .map(|value| value.parse::<u64>())
         .transpose()
-        .map_err(|_| HttpError::Handler("invalid 'min_amount_ct' query parameter".into()))?;
-    let max_amount_ct = request
-        .query_param("max_amount_ct")
+        .map_err(|_| HttpError::Handler("invalid 'min_amount' query parameter".into()))?;
+    let max_amount = request
+        .query_param("max_amount")
         .map(|value| value.parse::<u64>())
         .transpose()
-        .map_err(|_| HttpError::Handler("invalid 'max_amount_ct' query parameter".into()))?;
-    let min_amount_it = request
-        .query_param("min_amount_it")
-        .map(|value| value.parse::<u64>())
-        .transpose()
-        .map_err(|_| HttpError::Handler("invalid 'min_amount_it' query parameter".into()))?;
-    let max_amount_it = request
-        .query_param("max_amount_it")
-        .map(|value| value.parse::<u64>())
-        .transpose()
-        .map_err(|_| HttpError::Handler("invalid 'max_amount_it' query parameter".into()))?;
+        .map_err(|_| HttpError::Handler("invalid 'max_amount' query parameter".into()))?;
     let min_created_at = request
         .query_param("min_created_at")
         .map(|value| value.parse::<u64>())
@@ -745,10 +735,8 @@ async fn treasury_disbursements(
         destination,
         min_epoch,
         max_epoch,
-        min_amount_ct,
-        max_amount_ct,
-        min_amount_it,
-        max_amount_it,
+        min_amount,
+        max_amount,
         min_created_at,
         max_created_at,
         min_status_ts,
@@ -1275,7 +1263,7 @@ pub struct RolePayoutBreakdown {
 pub struct TreasuryTimelineEvent {
     pub disbursement_id: u64,
     pub destination: String,
-    pub amount_ct: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub tx_hash: String,
@@ -1287,7 +1275,7 @@ impl TreasuryTimelineEvent {
         Self {
             disbursement_id: event.disbursement_id,
             destination: event.destination.clone(),
-            amount_ct: event.amount_ct,
+            amount: event.amount,
             memo: event.memo.clone(),
             scheduled_epoch: event.scheduled_epoch,
             tx_hash: event.tx_hash.clone(),
@@ -1306,8 +1294,8 @@ impl TreasuryTimelineEvent {
             json::Value::String(self.destination.clone()),
         );
         map.insert(
-            "amount_ct".into(),
-            json::Value::Number(json::Number::from(self.amount_ct)),
+            "amount".into(),
+            json::Value::Number(json::Number::from(self.amount)),
         );
         map.insert("memo".into(), json::Value::String(self.memo.clone()));
         map.insert(
@@ -1342,8 +1330,8 @@ impl TreasuryTimelineEvent {
                     .and_then(|value| value.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                amount_ct: map
-                    .get("amount_ct")
+                amount: map
+                    .get("amount")
                     .and_then(|value| value.as_u64())
                     .unwrap_or(0),
                 memo: map
@@ -1788,8 +1776,7 @@ pub struct LightProof {
 pub struct TreasuryDisbursementRow {
     pub id: u64,
     pub destination: String,
-    pub amount_ct: u64,
-    pub amount_it: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub created_at: u64,
@@ -1855,8 +1842,7 @@ impl TreasuryDisbursementRow {
             "destination".into(),
             json::Value::String(self.destination.clone()),
         );
-        map.insert("amount_ct".into(), Self::number(self.amount_ct));
-        map.insert("amount_it".into(), Self::number(self.amount_it));
+        map.insert("amount".into(), Self::number(self.amount));
         map.insert("memo".into(), json::Value::String(self.memo.clone()));
         map.insert("scheduled_epoch".into(), Self::number(self.scheduled_epoch));
         map.insert("created_at".into(), Self::number(self.created_at));
@@ -2002,10 +1988,8 @@ pub struct TreasuryDisbursementFilter {
     pub destination: Option<String>,
     pub min_epoch: Option<u64>,
     pub max_epoch: Option<u64>,
-    pub min_amount_ct: Option<u64>,
-    pub max_amount_ct: Option<u64>,
-    pub min_amount_it: Option<u64>,
-    pub max_amount_it: Option<u64>,
+    pub min_amount: Option<u64>,
+    pub max_amount: Option<u64>,
     pub min_created_at: Option<u64>,
     pub max_created_at: Option<u64>,
     pub min_status_ts: Option<u64>,
@@ -2067,23 +2051,13 @@ impl TreasuryDisbursementFilter {
                 return false;
             }
         }
-        if let Some(min_amount_ct) = self.min_amount_ct {
-            if row.amount_ct < min_amount_ct {
+        if let Some(min_amount) = self.min_amount {
+            if row.amount < min_amount {
                 return false;
             }
         }
-        if let Some(max_amount_ct) = self.max_amount_ct {
-            if row.amount_ct > max_amount_ct {
-                return false;
-            }
-        }
-        if let Some(min_amount_it) = self.min_amount_it {
-            if row.amount_it < min_amount_it {
-                return false;
-            }
-        }
-        if let Some(max_amount_it) = self.max_amount_it {
-            if row.amount_it > max_amount_it {
+        if let Some(max_amount) = self.max_amount {
+            if row.amount > max_amount {
                 return false;
             }
         }
@@ -2280,7 +2254,7 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount_ct INTEGER NOT NULL, amount_it INTEGER NOT NULL DEFAULT 0, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT, status_payload TEXT)",
+            "CREATE TABLE IF NOT EXISTS treasury_disbursements (id INTEGER PRIMARY KEY, destination TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, status_ts INTEGER NOT NULL, tx_hash TEXT, cancel_reason TEXT, status_payload TEXT)",
             params![],
         )?;
         if let Err(err) = conn.execute(
@@ -3239,18 +3213,25 @@ impl Explorer {
             "ALTER TABLE treasury_disbursements ADD COLUMN status_payload TEXT",
             params![],
         );
+        let _ = conn.execute(
+            "ALTER TABLE treasury_disbursements RENAME COLUMN amount_ct TO amount",
+            params![],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE treasury_disbursements DROP COLUMN amount_it",
+            params![],
+        );
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM treasury_disbursements", params![])?;
         for record in records {
             let fields = derive_status_fields(&record.status);
             let status_payload = json::to_string(&record.status).unwrap_or_else(|_| "{}".into());
             tx.execute(
-                "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     record.id as i64,
                     &record.destination,
-                    record.amount_ct as i64,
-                    record.amount_it as i64,
+                    record.amount as i64,
                     &record.memo,
                     record.scheduled_epoch as i64,
                     record.created_at as i64,
@@ -3273,13 +3254,13 @@ impl Explorer {
         filter: TreasuryDisbursementFilter,
     ) -> DbResult<TreasuryDisbursementPage> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare("SELECT id, destination, amount_ct, amount_it, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload FROM treasury_disbursements ORDER BY scheduled_epoch DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, destination, amount, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload FROM treasury_disbursements ORDER BY scheduled_epoch DESC, id DESC")?;
         let rows = stmt.query_map(params![], |row| {
-            let status_text: String = row.get(7)?;
-            let status_ts: i64 = row.get(8)?;
-            let tx_hash: Option<String> = row.get(9)?;
-            let cancel_reason: Option<String> = row.get(10)?;
-            let status_payload: Option<String> = row.get(11)?;
+            let status_text: String = row.get(6)?;
+            let status_ts: i64 = row.get(7)?;
+            let tx_hash: Option<String> = row.get(8)?;
+            let cancel_reason: Option<String> = row.get(9)?;
+            let status_payload: Option<String> = row.get(10)?;
             let status = if let Some(payload) = status_payload {
                 json::from_str(&payload).unwrap_or_else(|_| {
                     legacy_status_from_label(
@@ -3310,11 +3291,10 @@ impl Explorer {
             Ok(TreasuryDisbursementRow {
                 id: row.get::<_, i64>(0)? as u64,
                 destination: row.get(1)?,
-                amount_ct: row.get::<_, i64>(2)? as u64,
-                amount_it: row.get::<_, i64>(3)? as u64,
-                memo: row.get(4)?,
-                scheduled_epoch: row.get::<_, i64>(5)? as u64,
-                created_at: row.get::<_, i64>(6)? as u64,
+                amount: row.get::<_, i64>(2)? as u64,
+                memo: row.get(3)?,
+                scheduled_epoch: row.get::<_, i64>(4)? as u64,
+                created_at: row.get::<_, i64>(5)? as u64,
                 status_label: status_text,
                 status_timestamp: status_ts.max(0) as u64,
                 status,

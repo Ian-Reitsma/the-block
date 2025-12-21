@@ -9,12 +9,11 @@ mod treasury_lifecycle {
     use governance::treasury_deps::{DependencyError, DependencyGraph, DependencyStatus};
 
     /// Helper to create a test disbursement
-    fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursement {
+    fn create_disbursement(id: u64, amount: u64, memo: &str) -> TreasuryDisbursement {
         TreasuryDisbursement::new(
             id,
             format!("ct1qqqqqqqq{}", id),
-            amount_ct,
-            0,
+            amount,
             memo.to_string(),
             1,
         )
@@ -27,7 +26,7 @@ mod treasury_lifecycle {
 
         // Initially should be in draft/voting
         assert_eq!(disb.id, 1001);
-        assert_eq!(disb.amount_ct, 50_000);
+        assert_eq!(disb.amount, 50_000);
     }
 
     #[test]

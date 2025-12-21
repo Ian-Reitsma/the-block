@@ -1239,12 +1239,11 @@ fn dispatch(
                 SettleMode::Armed { .. } => "armed",
             };
             if let Some(p) = provider {
-                let (ct, industrial) = Settlement::balance_split(p);
+                let balance = Settlement::balance(p);
                 json_map(vec![
                     ("mode", Value::String(mode.to_string())),
-                    ("balance", Value::Number(Number::from(ct))),
-                    ("ct", Value::Number(Number::from(ct))),
-                    ("industrial", Value::Number(Number::from(industrial))),
+                    ("balance", Value::Number(Number::from(balance))),
+                    ("ct", Value::Number(Number::from(balance))),
                 ])
             } else {
                 json_map(vec![("mode", Value::String(mode.to_string()))])

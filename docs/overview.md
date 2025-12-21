@@ -14,7 +14,7 @@
 
 The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
 
-> **Legacy labels:** Internally we still refer to `amount_ct`, `amount_it`, `STORAGE_SUB_CT`, etc., so tooling and telemetry preserve those names even though the transferred token is BLOCK. When reading the code or metrics, treat CT/IT as shorthand for BLOCK-ledger buckets (via `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `metrics-aggregator/src/lib.rs`).
+> **Legacy labels:** Internally we still refer to metrics like `STORAGE_SUB_CT` even though the transferred token is BLOCK. Treat any `_ct` identifiers you see in gauges or proto files as BLOCK-denominated ledgers until those names are retired.
 
 ## Mission
 - Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.

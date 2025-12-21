@@ -107,8 +107,7 @@ cat > test_disburse.json << 'EOF'
   },
   "disbursement": {
     "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
-    "amount_ct": 100000,
-    "amount_it": 0,
+    "amount": 100000,
     "memo": "test",
     "scheduled_epoch": 1000,
     "expected_receipts": []
@@ -128,7 +127,7 @@ tb-cli gov treasury show --id $ID
   - [ ] `treasury_disbursement_backlog{status}`
   - [ ] `treasury_disbursement_lag_seconds` (histogram)
   - [ ] `treasury_execution_errors_total{reason}`
-  - [ ] `treasury_balance_ct`, `treasury_balance_it`
+  - [ ] `treasury_balance`
   - [ ] `treasury_executor_tick_duration_seconds`
   - [ ] `treasury_dependency_failures_total`
 
@@ -137,7 +136,7 @@ tb-cli gov treasury show --id $ID
 # Check metrics are emitted
 prometheus_query 'governance_disbursements_total' # Should return data
 prometheus_query 'treasury_disbursement_backlog' # Should return data
-prometheus_query 'treasury_balance_ct' # Should return data
+prometheus_query 'treasury_balance' # Should return data
 ```
 
 ### 1.7 Grafana Dashboard
@@ -513,7 +512,7 @@ comm -23 <(sort /tmp/dashboard_metrics.txt) <(sort /tmp/prom_metrics.txt) | head
 ### Treasury Status
 ```bash
 echo "=== Treasury ==="
-curl -s http://localhost:8000/gov/treasury/balance | jq '{balance_ct, balance_it, executor}'  
+curl -s http://localhost:8000/gov/treasury/balance | jq '{balance, executor}'  
 curl -s http://localhost:8000/gov/treasury/disbursements | jq '.disbursements | length'
 prometheus_query 'treasury_execution_errors_total'
 prometheus_query 'treasury_disbursement_backlog'

@@ -2,9 +2,7 @@
 
 > **Plain-Language Overview**
 >
-> **CT is the single token.** Everything in The Block settles in CT — payments, rewards, fees, treasury disbursements. There's no second currency.
->
-> **What about "IT" in the code?** You'll see variables like `amount_it`, `payout_it`, or `industrial_utilization` in the codebase. These are **legacy names** for "industrial share" — a sub-ledger accounting category that tracks how much of the CT supply is allocated to industrial workloads (compute, storage, energy). **IT is not a separate token you can send or receive.** It's just internal bookkeeping within CT.
+> **BLOCK is the single token.** Everything in The Block settles in BLOCK — payments, rewards, fees, treasury disbursements. There's no second currency. Some telemetry fields still end in `_ct`; treat those as BLOCK-denominated gauges until the rename completes.
 >
 > **How CT moves around:**
 > | Flow | What Happens |
@@ -137,7 +135,7 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 - Governance proposals now carry explicit treasury-disbursement payloads in addition to param updates. Each disbursement advances through the canonical state machine: **draft → voting → queued → timelocked → executed → finalized/rolled-back**. Drafts are local JSON payloads (stored under `examples/governance/`) validated with `foundation_serialization` schemas before the proposer signs and submits. Voting/timelock rules piggyback on the bicameral governance machinery (see `governance/src/bicameral.rs`), so disbursements inherit quorum, snapshot, and activation semantics.
 - Once a disbursement proposal passes, `GovStore` persists the queued entry in sled and snapshots the activation epoch + prior rollbacks to `provenance.json` using first-party encoding (Option A from the task brief). The rollback window remains **block-height bounded** via `governance::store::ROLLBACK_WINDOW_EPOCHS`, guaranteeing deterministic replay on both x86_64 and AArch64.
 - Executions emit CT receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.
-- Metrics wiring tracks both balances and pipeline health: `treasury_balance_ct`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator exposes `/treasury/summary` and `/governance/disbursements` so dashboards can chart backlog age, quorum wait time, and execution throughput alongside existing treasury gauges. Explorer timelines render the same data (proposal metadata, vote outcomes, timelock window, execution tx, affected accounts, receipts, and rollback annotations).
+- Metrics wiring tracks both balances and pipeline health: `treasury_balance`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator exposes `/treasury/summary` and `/governance/disbursements` so dashboards can chart backlog age, quorum wait time, and execution throughput alongside existing treasury gauges. Explorer timelines render the same data (proposal metadata, vote outcomes, timelock window, execution tx, affected accounts, receipts, and rollback annotations).
 - **Implementation checklist (AGENTS.md §15.A)** — The governance crate, CLI, explorer, and telemetry stack must:
   1. Extend DAG schemas with multi-stage approvals and attested release bundles (`governance/`, `node/src/governance`, `cli/src/governance`, explorer dashboards).
   2. Emit `/wrappers` metadata whenever treasury diffs occur so operators can diff governance state without scraping sled stores.

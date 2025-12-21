@@ -274,10 +274,10 @@ static METRIC: Lazy<Counter> = Lazy::new(|| {
 
 **The Danger Zone**:
 ```rust
-fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursement {
+fn create_disbursement(id: u64, amount: u64, memo: &str) -> TreasuryDisbursement {
     TreasuryDisbursement {
         id,
-        amount_ct,
+        amount,
         memo: memo.to_string(),
         // ... other required fields  <-- THIS IS THE PROBLEM
     }
@@ -289,8 +289,7 @@ fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursem
 pub struct TreasuryDisbursement {
     pub id: u64,
     pub destination: String,          // I'm missing this
-    pub amount_ct: u64,
-    pub amount_it: u64,               // I'm missing this
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,         // I'm missing this
     pub created_at: u64,              // I'm missing this
@@ -923,10 +922,10 @@ static METRIC: Lazy<Counter> = Lazy::new(|| {
 
 **Current**:
 ```rust
-fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursement {
+fn create_disbursement(id: u64, amount: u64, memo: &str) -> TreasuryDisbursement {
     TreasuryDisbursement {
         id,
-        amount_ct,
+        amount,
         memo: memo.to_string(),
         // Missing fields!
     }
@@ -935,12 +934,11 @@ fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursem
 
 **Fix**: Use actual constructor
 ```rust
-fn create_disbursement(id: u64, amount_ct: u64, memo: &str) -> TreasuryDisbursement {
+fn create_disbursement(id: u64, amount: u64, memo: &str) -> TreasuryDisbursement {
     TreasuryDisbursement::new(
         id,
         "test_destination".to_string(),
-        amount_ct,
-        0,  // amount_it
+        amount,
         memo.to_string(),
         0,  // scheduled_epoch
     )

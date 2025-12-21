@@ -77,7 +77,7 @@ fn settlement_engine_parity() {
         let balances = Settlement::balances();
         assert!(balances
             .iter()
-            .any(|b| b.provider == "provider-a" && b.ct == 42));
+            .any(|b| b.provider == "provider-a" && b.balance == 42));
         Settlement::shutdown();
     }
     simple_db::configure_engines(EngineConfig::default());

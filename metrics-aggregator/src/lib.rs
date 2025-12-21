@@ -251,17 +251,14 @@ const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
-const METRIC_TREASURY_AMOUNT_CT: &str = "treasury_disbursement_amount_ct";
-const METRIC_TREASURY_AMOUNT_IT: &str = "treasury_disbursement_amount_it";
+const METRIC_TREASURY_AMOUNT_CT: &str = "treasury_disbursement_amount";
 const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_seconds";
 const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds";
 const METRIC_TREASURY_NEXT_EPOCH: &str = "treasury_disbursement_next_epoch";
 const METRIC_TREASURY_LEASE_RELEASED: &str = "treasury_executor_lease_released";
-const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current_ct";
-const METRIC_TREASURY_BALANCE_CURRENT_IT: &str = "treasury_balance_current_it";
-const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta_ct";
-const METRIC_TREASURY_BALANCE_LAST_DELTA_IT: &str = "treasury_balance_last_delta_it";
+const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current";
+const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta";
 const METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT: &str = "treasury_balance_snapshot_count";
 const METRIC_TREASURY_BALANCE_EVENT_AGE: &str = "treasury_balance_last_event_age_seconds";
 const TREASURY_STATUS_LABELS: [&str; 7] = [
@@ -700,19 +697,15 @@ impl AppState {
         now: u64,
     ) {
         for status in TREASURY_STATUS_LABELS {
-            let (count, amount_ct, amount_it) = summary.metrics_for_status(status);
+            let (count, amount) = summary.metrics_for_status(status);
             metrics
                 .treasury_disbursement_count
                 .with_label_values(&[status])
                 .set(count as f64);
             metrics
-                .treasury_disbursement_amount_ct
+                .treasury_disbursement_amount
                 .with_label_values(&[status])
-                .set(amount_ct as f64);
-            metrics
-                .treasury_disbursement_amount_it
-                .with_label_values(&[status])
-                .set(amount_it as f64);
+                .set(amount as f64);
         }
         metrics
             .treasury_disbursement_snapshot_age
@@ -731,21 +724,13 @@ impl AppState {
         balance_override: Option<TreasuryBalances>,
         now: u64,
     ) {
-        let (current_ct, current_it) = match balance_override {
-            Some(balances) => (balances.consumer, balances.industrial),
-            None => history
-                .last()
-                .map(|snap| (snap.balance_ct, snap.balance_it))
-                .unwrap_or((0, 0)),
+        let current_balance = match balance_override {
+            Some(balances) => balances.balance,
+            None => history.last().map(|snap| snap.balance).unwrap_or(0),
         };
-        metrics.treasury_balance_current.set(current_ct as f64);
-        metrics.treasury_balance_current_it.set(current_it as f64);
-        let (last_delta_ct, last_delta_it) = history
-            .last()
-            .map(|snap| (snap.delta_ct as f64, snap.delta_it as f64))
-            .unwrap_or((0.0, 0.0));
-        metrics.treasury_balance_last_delta.set(last_delta_ct);
-        metrics.treasury_balance_last_delta_it.set(last_delta_it);
+        metrics.treasury_balance_current.set(current_balance as f64);
+        let last_delta = history.last().map(|snap| snap.delta as f64).unwrap_or(0.0);
+        metrics.treasury_balance_last_delta.set(last_delta);
         metrics
             .treasury_balance_snapshot_count
             .set(history.len() as f64);
@@ -763,11 +748,7 @@ impl AppState {
                 .with_label_values(&[status])
                 .set(0.0);
             metrics
-                .treasury_disbursement_amount_ct
-                .with_label_values(&[status])
-                .set(0.0);
-            metrics
-                .treasury_disbursement_amount_it
+                .treasury_disbursement_amount
                 .with_label_values(&[status])
                 .set(0.0);
         }
@@ -778,9 +759,7 @@ impl AppState {
 
     fn zero_balance_metrics(metrics: &AggregatorMetrics) {
         metrics.treasury_balance_current.set(0.0);
-        metrics.treasury_balance_current_it.set(0.0);
         metrics.treasury_balance_last_delta.set(0.0);
-        metrics.treasury_balance_last_delta_it.set(0.0);
         metrics.treasury_balance_snapshot_count.set(0.0);
         metrics.treasury_balance_last_event_age.set(0.0);
     }
@@ -1829,16 +1808,13 @@ struct AggregatorMetrics {
     tls_env_warning_detail_unique_fingerprints: IntGaugeVec,
     tls_env_warning_variables_unique_fingerprints: IntGaugeVec,
     treasury_disbursement_count: GaugeVec,
-    treasury_disbursement_amount_ct: GaugeVec,
-    treasury_disbursement_amount_it: GaugeVec,
+    treasury_disbursement_amount: GaugeVec,
     treasury_disbursement_snapshot_age: Gauge,
     treasury_disbursement_scheduled_oldest_age: Gauge,
     treasury_disbursement_next_epoch: Gauge,
     treasury_executor_lease_released: Gauge,
     treasury_balance_current: Gauge,
-    treasury_balance_current_it: Gauge,
     treasury_balance_last_delta: Gauge,
-    treasury_balance_last_delta_it: Gauge,
     treasury_balance_snapshot_count: Gauge,
     treasury_balance_last_event_age: Gauge,
     _bridge_anomaly_total: Counter,
@@ -3350,7 +3326,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_disbursement_count.clone()))
         .expect("register treasury_disbursement_count");
-    let treasury_disbursement_amount_ct = GaugeVec::new(
+    let treasury_disbursement_amount = GaugeVec::new(
         Opts::new(
             METRIC_TREASURY_AMOUNT_CT,
             "Treasury disbursement CT totals grouped by status",
@@ -3358,18 +3334,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &["status"],
     );
     registry
-        .register(Box::new(treasury_disbursement_amount_ct.clone()))
-        .expect("register treasury_disbursement_amount_ct");
-    let treasury_disbursement_amount_it = GaugeVec::new(
-        Opts::new(
-            METRIC_TREASURY_AMOUNT_IT,
-            "Treasury disbursement IT totals grouped by status",
-        ),
-        &["status"],
-    );
-    registry
-        .register(Box::new(treasury_disbursement_amount_it.clone()))
-        .expect("register treasury_disbursement_amount_it");
+        .register(Box::new(treasury_disbursement_amount.clone()))
+        .expect("register treasury_disbursement_amount");
     let treasury_disbursement_snapshot_age = Gauge::new(
         METRIC_TREASURY_SNAPSHOT_AGE,
         "Seconds since the most recent treasury disbursement snapshot",
@@ -3405,13 +3371,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_balance_current.clone()))
         .expect("register treasury_balance_current");
-    let treasury_balance_current_it = Gauge::new(
-        METRIC_TREASURY_BALANCE_CURRENT_IT,
-        "Current treasury balance in IT",
-    );
-    registry
-        .register(Box::new(treasury_balance_current_it.clone()))
-        .expect("register treasury_balance_current_it");
     let treasury_balance_last_delta = Gauge::new(
         METRIC_TREASURY_BALANCE_LAST_DELTA,
         "Most recent treasury balance delta in CT",
@@ -3419,13 +3378,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_balance_last_delta.clone()))
         .expect("register treasury_balance_last_delta");
-    let treasury_balance_last_delta_it = Gauge::new(
-        METRIC_TREASURY_BALANCE_LAST_DELTA_IT,
-        "Most recent treasury balance delta in IT",
-    );
-    registry
-        .register(Box::new(treasury_balance_last_delta_it.clone()))
-        .expect("register treasury_balance_last_delta_it");
     let treasury_balance_snapshot_count = Gauge::new(
         METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT,
         "Number of treasury balance snapshots recorded",
@@ -3862,16 +3814,13 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         tls_env_warning_detail_unique_fingerprints,
         tls_env_warning_variables_unique_fingerprints,
         treasury_disbursement_count,
-        treasury_disbursement_amount_ct,
-        treasury_disbursement_amount_it,
+        treasury_disbursement_amount,
         treasury_disbursement_snapshot_age,
         treasury_disbursement_scheduled_oldest_age,
         treasury_disbursement_next_epoch,
         treasury_executor_lease_released,
         treasury_balance_current,
-        treasury_balance_current_it,
         treasury_balance_last_delta,
-        treasury_balance_last_delta_it,
         treasury_balance_snapshot_count,
         treasury_balance_last_event_age,
         _bridge_anomaly_total,
@@ -8444,10 +8393,13 @@ fn parse_legacy_balance_history(bytes: &[u8]) -> io::Result<Vec<TreasuryBalanceS
             )
         })?;
         let id = parse_u64_field(obj.get("id"), "id")?;
-        let balance_ct = parse_u64_field(obj.get("balance_ct"), "balance_ct")?;
-        let delta_ct = parse_i64_field(obj.get("delta_ct"), "delta_ct")?;
-        let balance_it = obj.get("balance_it").and_then(Value::as_u64).unwrap_or(0);
-        let delta_it = obj.get("delta_it").and_then(Value::as_i64).unwrap_or(0);
+        let balance = parse_u64_field(obj.get("balance"), "balance")?;
+        let delta = obj
+            .get("delta")
+            .or_else(|| obj.get("delta_ct"))
+            .map(|value| parse_i64_field(Some(value), "delta"))
+            .transpose()?
+            .unwrap_or(0);
         let recorded_at = parse_u64_field(obj.get("recorded_at"), "recorded_at")?;
         let event = parse_event_field(obj.get("event"))?;
         let disbursement_id = match obj.get("disbursement_id") {
@@ -8456,10 +8408,8 @@ fn parse_legacy_balance_history(bytes: &[u8]) -> io::Result<Vec<TreasuryBalanceS
         };
         snapshots.push(TreasuryBalanceSnapshot {
             id,
-            balance_ct,
-            delta_ct,
-            balance_it,
-            delta_it,
+            balance,
+            delta,
             recorded_at,
             event,
             disbursement_id,
@@ -8534,19 +8484,17 @@ fn parse_event_field(value: Option<&Value>) -> io::Result<TreasuryBalanceEventKi
 #[derive(Default)]
 struct StatusBucket {
     count: u64,
-    amount_ct: u64,
-    amount_it: u64,
+    amount: u64,
 }
 
 impl StatusBucket {
     fn record(&mut self, record: &TreasuryDisbursement) {
         self.count = self.count.saturating_add(1);
-        self.amount_ct = self.amount_ct.saturating_add(record.amount_ct);
-        self.amount_it = self.amount_it.saturating_add(record.amount_it);
+        self.amount = self.amount.saturating_add(record.amount);
     }
 
-    fn tuple(&self) -> (u64, u64, u64) {
-        (self.count, self.amount_ct, self.amount_it)
+    fn tuple(&self) -> (u64, u64) {
+        (self.count, self.amount)
     }
 }
 
@@ -8612,7 +8560,7 @@ impl TreasurySummary {
         });
     }
 
-    fn metrics_for_status(&self, status: &str) -> (u64, u64, u64) {
+    fn metrics_for_status(&self, status: &str) -> (u64, u64) {
         match status {
             "draft" => self.draft.tuple(),
             "voting" => self.voting.tuple(),
@@ -8621,7 +8569,7 @@ impl TreasurySummary {
             "executed" => self.executed.tuple(),
             "finalized" => self.finalized.tuple(),
             "rolled_back" => self.rolled_back.tuple(),
-            _ => (0, 0, 0),
+            _ => (0, 0),
         }
     }
 

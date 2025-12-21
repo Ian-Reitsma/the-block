@@ -1,12 +1,17 @@
 use foundation_serialization::json::{self, Value};
 use httpd::{BlockingClient, HttpClient, Method};
 use std::io::Write;
-use std::net::TcpListener;
 use std::thread;
+
+mod support;
+use support::{LOCAL_BIND_ADDR, bind_std_listener};
 
 #[test]
 fn async_get_returns_text() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = match bind_std_listener(LOCAL_BIND_ADDR) {
+        Some(listener) => listener,
+        None => return,
+    };
     let addr = listener.local_addr().unwrap();
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
@@ -35,7 +40,10 @@ fn async_get_returns_text() {
 
 #[test]
 fn blocking_client_parses_json() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = match bind_std_listener(LOCAL_BIND_ADDR) {
+        Some(listener) => listener,
+        None => return,
+    };
     let addr = listener.local_addr().unwrap();
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();

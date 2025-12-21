@@ -213,7 +213,7 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     let mut ad_settlement = 0.0;
 
     for receipt in receipts {
-        let settlement_ct = receipt.settlement_amount_ct() as f64;
+        let settlement_ct = receipt.settlement_amount() as f64;
         match receipt {
             Receipt::Storage(_) => {
                 storage_count += 1;

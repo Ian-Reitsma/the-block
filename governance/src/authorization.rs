@@ -22,7 +22,7 @@ const MAX_OPERATION_AGE_SECS: u64 = 600;
 #[serde(crate = "foundation_serialization::serde")]
 pub enum Operation {
     /// Queue a treasury disbursement
-    QueueDisbursement { proposal_id: String, amount_ct: u64 },
+    QueueDisbursement { proposal_id: String, amount: u64 },
     /// Cancel a pending disbursement
     CancelDisbursement { disbursement_id: String },
     /// Force circuit breaker open
@@ -43,11 +43,11 @@ impl Operation {
         match self {
             Operation::QueueDisbursement {
                 proposal_id,
-                amount_ct,
+                amount,
             } => {
                 hasher.update(b"queue_disbursement");
                 hasher.update(proposal_id.as_bytes());
-                hasher.update(&amount_ct.to_le_bytes());
+                hasher.update(&amount.to_le_bytes());
             }
             Operation::CancelDisbursement { disbursement_id } => {
                 hasher.update(b"cancel_disbursement");
@@ -421,7 +421,7 @@ mod tests {
 
         let operation = Operation::QueueDisbursement {
             proposal_id: "prop_001".into(),
-            amount_ct: 10000,
+            amount: 10000,
         };
         let call = create_signed_call(&sk, operator_id, operation, 1);
 

@@ -81,7 +81,7 @@ governance_disbursements_total{status}  → counter per state
 treasury_disbursement_backlog{status}   → current pending count
 treasury_disbursement_lag_seconds       → histogram (queued→executed)
 treasury_execution_errors_total{reason} → counter per error type
-treasury_balance_ct, treasury_balance_it → gauges
+treasury_balance → gauge
 ```
 
 ### Energy System (🔄 90% Complete)

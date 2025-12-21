@@ -460,6 +460,18 @@ impl SimpleDb {
         res
     }
 
+    pub fn delete(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        self.engine.ensure_cf("default").map_err(to_io_error)?;
+        let res = self
+            .engine
+            .delete("default", key.as_bytes())
+            .map_err(to_io_error);
+        if res.is_ok() {
+            self.record_metrics_if_enabled();
+        }
+        res
+    }
+
     pub fn insert(&mut self, key: &str, value: Vec<u8>) -> Option<Vec<u8>> {
         self.try_insert(key, value).ok().flatten()
     }

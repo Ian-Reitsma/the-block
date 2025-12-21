@@ -120,7 +120,7 @@ use governance::authorization::AuthorizedCall;
 let auth = AuthorizedCall {
     operation: Operation::QueueDisbursement { 
         proposal_id: "prop-123".into(),
-        amount_ct: 10_000,
+        amount: 10_000,
     },
     timestamp,
     nonce,
@@ -192,7 +192,7 @@ let disbursement = AuthorizedDisbursementOps::queue_disbursement(
 
 1. **Operator A**: Generate operation
    ```rust
-   let op = Operation::QueueDisbursement { proposal_id, amount_ct };
+   let op = Operation::QueueDisbursement { proposal_id, amount };
    let msg = AuthorizedCall::signing_message(&op, timestamp, nonce);
    ```
 

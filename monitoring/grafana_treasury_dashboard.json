@@ -284,17 +284,12 @@
       },
       "targets": [
         {
-          "expr": "treasury_balance_ct",
-          "legendFormat": "Balance CT",
+          "expr": "treasury_balance",
+          "legendFormat": "Treasury Balance",
           "refId": "A"
-        },
-        {
-          "expr": "treasury_balance_it",
-          "legendFormat": "Balance IT",
-          "refId": "B"
         }
       ],
-      "title": "Balance Trend (CT and IT, 7d)",
+      "title": "Balance Trend (7d)",
       "type": "timeseries"
     },
     {

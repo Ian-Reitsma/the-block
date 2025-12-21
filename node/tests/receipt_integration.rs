@@ -116,8 +116,8 @@ fn receipts_survive_block_serialization_roundtrip() {
             i
         );
         assert_eq!(
-            original.settlement_amount_ct(),
-            decoded.settlement_amount_ct(),
+            original.settlement_amount(),
+            decoded.settlement_amount(),
             "Settlement amount mismatch for receipt #{}",
             i
         );

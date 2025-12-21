@@ -31,8 +31,7 @@
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "balance_ct": 10500000,
-    "balance_it": 2100,
+    "balance": 10500000,
     "executor": {
       "last_error": null,
       "last_success_at": 1671447600,
@@ -91,7 +90,7 @@
       {
         "id": 1001,
         "status": "queued",
-        "amount_ct": 50000,
+        "amount": 50000,
         "recipient": "account_xyz",
         "created_at": 1671441000,
         "updated_at": 1671445800,
@@ -101,7 +100,7 @@
       {
         "id": 1002,
         "status": "queued",
-        "amount_ct": 75000,
+        "amount": 75000,
         "recipient": "account_abc",
         "created_at": 1671442200,
         "updated_at": 1671445900,
@@ -145,7 +144,7 @@
   "result": {
     "id": 1001,
     "status": "queued",
-    "amount_ct": 50000,
+    "amount": 50000,
     "recipient": "account_xyz",
     "created_at": 1671441000,
     "updated_at": 1671445800,
@@ -256,7 +255,7 @@
   "result": {
     "ok": true,
     "message": "Disbursement rolled back successfully",
-    "refunded_amount_ct": 50000,
+    "refunded_amount": 50000,
     "rollback_block": 12851
   }
 }

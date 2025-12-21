@@ -16,15 +16,10 @@
       "type": "string",
       "description": "Detailed description of the disbursement purpose"
     },
-    "amount_ct": {
+    "amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Total CT amount to disburse"
-    },
-    "amount_it": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Industrial ledger share (sub-ledger accounting, not a separate token)"
+      "description": "Total BLOCK amount to disburse"
     },
     "destination": {
       "type": "string",
@@ -33,7 +28,7 @@
     },
     "expected_receipts": {
       "type": "array",
-      "description": "Expected receipt breakdown (must sum to amount_ct/amount_it)",
+      "description": "Expected receipt breakdown (must sum to amount)",
       "items": {
         "type": "object",
         "properties": {
@@ -41,11 +36,7 @@
             "type": "string",
             "pattern": "^ct1[a-zA-Z0-9]+$"
           },
-          "amount_ct": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "amount_it": {
+          "amount": {
             "type": "integer",
             "minimum": 0
           },
@@ -53,7 +44,7 @@
             "type": "string"
           }
         },
-        "required": ["recipient", "amount_ct"]
+        "required": ["recipient", "amount"]
       }
     },
     "timelock_epochs": {
@@ -70,23 +61,22 @@
       "description": "Unix timestamp of proposal creation"
     }
   },
-  "required": ["id", "title", "amount_ct", "destination"],
+  "required": ["id", "title", "amount", "destination"],
   "additionalProperties": true,
   "examples": [
     {
       "id": "disb-2024-001",
       "title": "Q1 Developer Grants",
       "description": "Quarterly grants for ecosystem developers",
-      "amount_ct": 100000,
-      "amount_it": 0,
+      "amount": 100000,
       "destination": "ct1abc123...",
       "expected_receipts": [
-        {"recipient": "ct1abc123...", "amount_ct": 100000, "purpose": "Developer grants"}
+        {"recipient": "ct1abc123...", "amount": 100000, "purpose": "Developer grants"}
       ],
       "timelock_epochs": 3,
       "proposer": "ct1proposer...",
       "created_at": 1710000000
     }
   ],
-  "$comment": "See governance/src/treasury.rs for validation rules. expected_receipts must sum to amount_ct/amount_it."
+  "$comment": "See governance/src/treasury.rs for validation rules. expected_receipts must sum to amount."
 }

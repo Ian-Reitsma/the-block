@@ -36,15 +36,14 @@ treasury_disbursement_backlog{status=~".*"}
 treasury_execution_errors_total{reason=~".*"}
 
 # Balance snapshot
-treasury_balance_ct
-treasury_balance_it
+treasury_balance
 ```
 
 **Grafana Dashboard**: `monitoring/grafana_treasury_dashboard.json`
 - Panel: "Disbursement Pipeline" — Shows state transitions over time
 - Panel: "Queue Depth by Status" — Current backlog distribution
 - Panel: "Execution Errors" — Error types and frequency
-- Panel: "Balance Trend" — Treasury CT/IT over time
+- Panel: "Balance Trend" — Treasury BLOCK balance over time
 
 **CLI Command**:
 ```bash
@@ -128,10 +127,7 @@ tb-cli receipts search --filter 'source_id=42' --limit 5
 ### Q: Is the treasury balance accurate?
 
 **Canonical Metrics**:
-```promql
-treasury_balance_ct
-treasury_balance_it
-```
+`treasury_balance`
 
 **CLI Command**:
 ```bash
@@ -388,7 +384,7 @@ tb-cli economics block-reward --limit 100
 **Canonical Metrics**:
 ```promql
 # Settlement audit results
-settlement_audit_balance_ct_total  # Should equal blockchain
+settlement_audit_balance_total  # Should equal blockchain
 settlement_audit_conservation_failures_total
 ```
 
@@ -401,8 +397,8 @@ cargo test -p the_block --test settlement_audit --release -- --nocapture
 tb-cli ledger verify --sample-size 10000
 
 # Treasury vs ledger
-tb-cli ledger search --filter 'type=treasury_transfer' | jq 'map(.amount_ct) | add'
-tb-cli gov treasury balance | jq .balance_ct
+tb-cli ledger search --filter 'type=treasury_transfer' | jq 'map(.amount) | add'
+tb-cli gov treasury balance | jq .balance
 ```
 
 **Alert**: If these differ: STOP and investigate (data corruption)
@@ -506,7 +502,7 @@ METRICS=(
   "treasury_disbursement_backlog"
   "treasury_disbursement_lag_seconds"
   "treasury_execution_errors_total"
-  "treasury_balance_ct"
+  "treasury_balance"
   "energy_provider_total"
   "energy_pending_credits_total"
   "energy_active_disputes_total"

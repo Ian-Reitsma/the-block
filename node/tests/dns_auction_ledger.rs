@@ -265,7 +265,7 @@ fn stake_registration_and_withdrawal_moves_funds() {
     }
 
     let snapshot = stake_snapshot("stake-ledger").expect("stake snapshot");
-    assert_eq!(snapshot.amount_ct, 1_500);
+    assert_eq!(snapshot.amount, 1_500);
     assert_eq!(snapshot.locked_ct, 0);
 
     clear_ledger_context();
@@ -306,7 +306,7 @@ fn stake_ledger_events_are_persisted() {
         .expect("deposit events");
     assert_eq!(deposit_events.len(), 1);
     assert_eq!(deposit_events[0]["kind"].as_str(), Some("stake_deposit"));
-    assert_eq!(deposit_events[0]["amount_ct"].as_u64(), Some(750));
+    assert_eq!(deposit_events[0]["amount"].as_u64(), Some(750));
 
     let withdraw_response = withdraw_stake(&json_map(vec![
         (
@@ -325,7 +325,7 @@ fn stake_ledger_events_are_persisted() {
         .as_object()
         .expect("stake object");
     assert_eq!(
-        withdraw_stake_view["amount_ct"].as_u64(),
+        withdraw_stake_view["amount"].as_u64(),
         Some(500),
         "partial withdrawal updates balance"
     );
@@ -334,7 +334,7 @@ fn stake_ledger_events_are_persisted() {
         .expect("withdraw events");
     assert_eq!(withdraw_events.len(), 2);
     assert_eq!(withdraw_events[1]["kind"].as_str(), Some("stake_withdraw"));
-    assert_eq!(withdraw_events[1]["amount_ct"].as_u64(), Some(250));
+    assert_eq!(withdraw_events[1]["amount"].as_u64(), Some(250));
 
     let withdraw_all_response = withdraw_stake(&json_map(vec![
         (
@@ -352,13 +352,13 @@ fn stake_ledger_events_are_persisted() {
     let final_stake = withdraw_all_response["stake"]
         .as_object()
         .expect("final stake object");
-    assert_eq!(final_stake["amount_ct"].as_u64(), Some(0));
+    assert_eq!(final_stake["amount"].as_u64(), Some(0));
     let final_events = final_stake["ledger_events"]
         .as_array()
         .expect("final events");
     assert_eq!(final_events.len(), 3);
     assert_eq!(final_events[2]["kind"].as_str(), Some("stake_withdraw"));
-    assert_eq!(final_events[2]["amount_ct"].as_u64(), Some(500));
+    assert_eq!(final_events[2]["amount"].as_u64(), Some(500));
 
     let status = stake_status(&json_map(vec![(
         "reference",
@@ -366,7 +366,7 @@ fn stake_ledger_events_are_persisted() {
     )]))
     .expect("stake status");
     let status_stake = status["stake"].as_object().expect("status stake object");
-    assert_eq!(status_stake["amount_ct"].as_u64(), Some(0));
+    assert_eq!(status_stake["amount"].as_u64(), Some(0));
     let status_events = status_stake["ledger_events"]
         .as_array()
         .expect("status events");

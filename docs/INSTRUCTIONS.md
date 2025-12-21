@@ -100,7 +100,7 @@ impl Receipt {
         }
     }
 
-    pub fn settlement_amount_ct(&self) -> u64 {
+    pub fn settlement_amount(&self) -> u64 {
         match self {
             // ... existing cases
             Receipt::YourMarket(r) => r.payment_ct,
@@ -318,7 +318,7 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     let mut your_market_settlement = 0.0;
 
     for receipt in receipts {
-        let settlement_ct = receipt.settlement_amount_ct() as f64;
+        let settlement_ct = receipt.settlement_amount() as f64;
         match receipt {
             // ... existing cases ...
             Receipt::YourMarket(_) => {
@@ -894,7 +894,7 @@ When adding a new market's receipts, update:
 ├─────────────────────────────────────────────────────────────┤
 │ ☐ Define receipt struct in node/src/receipts.rs           │
 │ ☐ Add variant to Receipt enum                              │
-│ ☐ Implement market_name(), settlement_amount_ct(), etc.    │
+│ ☐ Implement market_name(), settlement_amount(), etc.    │
 │ ☐ Create market-side receipt emission in settlement logic  │
 │ ☐ Add pending_receipts: Vec<Receipt> to market struct      │
 │ ☐ Implement drain_receipts() → Vec<Receipt>                │

@@ -138,7 +138,7 @@ impl Receipt {
     }
 
     /// Get the settlement amount in CT (currency token).
-    pub fn settlement_amount_ct(&self) -> u64 {
+    pub fn settlement_amount(&self) -> u64 {
         match self {
             Receipt::Storage(r) => r.price_ct,
             Receipt::Compute(r) => r.payment_ct,
@@ -176,7 +176,7 @@ mod tests {
         });
 
         assert_eq!(receipt.market_name(), "storage");
-        assert_eq!(receipt.settlement_amount_ct(), 500);
+        assert_eq!(receipt.settlement_amount(), 500);
         assert_eq!(receipt.block_height(), 100);
     }
 
@@ -194,7 +194,7 @@ mod tests {
         });
 
         assert_eq!(receipt.market_name(), "compute");
-        assert_eq!(receipt.settlement_amount_ct(), 200);
+        assert_eq!(receipt.settlement_amount(), 200);
         assert_eq!(receipt.block_height(), 101);
     }
 
@@ -212,7 +212,7 @@ mod tests {
         });
 
         assert_eq!(receipt.market_name(), "energy");
-        assert_eq!(receipt.settlement_amount_ct(), 250);
+        assert_eq!(receipt.settlement_amount(), 250);
         assert_eq!(receipt.block_height(), 102);
     }
 
@@ -230,7 +230,7 @@ mod tests {
         });
 
         assert_eq!(receipt.market_name(), "ad");
-        assert_eq!(receipt.settlement_amount_ct(), 100);
+        assert_eq!(receipt.settlement_amount(), 100);
         assert_eq!(receipt.block_height(), 103);
     }
 }

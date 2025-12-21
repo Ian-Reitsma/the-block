@@ -89,23 +89,10 @@ static TREASURY_EXECUTION_ERRORS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 // TREASURY BALANCE GAUGES
 // ========================================
 
-/// Current treasury balance in CT
+/// Current treasury balance (BLOCK)
 #[cfg(feature = "telemetry")]
-static TREASURY_BALANCE_CT: Lazy<Gauge> = Lazy::new(|| {
-    register_gauge(
-        "treasury_balance_ct",
-        "Current treasury balance in CT (consumer tokens)",
-    )
-});
-
-/// Current treasury balance in IT
-#[cfg(feature = "telemetry")]
-static TREASURY_BALANCE_IT: Lazy<Gauge> = Lazy::new(|| {
-    register_gauge(
-        "treasury_balance_it",
-        "Current treasury balance in IT (industrial tokens)",
-    )
-});
+static TREASURY_BALANCE: Lazy<Gauge> =
+    Lazy::new(|| register_gauge("treasury_balance", "Current treasury balance in BLOCK"));
 
 // ========================================
 // DISBURSEMENT BACKLOG GAUGES
@@ -238,15 +225,14 @@ pub fn increment_dependency_failure(failure_type: &str) {
 #[cfg(not(feature = "telemetry"))]
 pub fn increment_dependency_failure(_failure_type: &str) {}
 
-/// Update treasury balance gauges
+/// Update treasury balance gauge
 #[cfg(feature = "telemetry")]
-pub fn set_treasury_balance(ct: u64, it: u64) {
-    TREASURY_BALANCE_CT.set(ct as f64);
-    TREASURY_BALANCE_IT.set(it as f64);
+pub fn set_treasury_balance(balance: u64) {
+    TREASURY_BALANCE.set(balance as f64);
 }
 
 #[cfg(not(feature = "telemetry"))]
-pub fn set_treasury_balance(_ct: u64, _it: u64) {}
+pub fn set_treasury_balance(_balance: u64) {}
 
 /// Update disbursement backlog gauge for a specific status
 ///
@@ -346,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_set_treasury_balance() {
-        set_treasury_balance(1_000_000, 500_000);
+        set_treasury_balance(1_000_000);
     }
 
     #[test]

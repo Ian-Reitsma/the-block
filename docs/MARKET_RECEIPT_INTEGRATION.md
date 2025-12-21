@@ -450,7 +450,7 @@ Receipt::Ad(AdReceipt { block_height: current_height, ... })
 #[cfg(feature = "telemetry")]
 eprintln!("Created receipt: market={} amount={}", 
     receipt.market_name(), 
-    receipt.settlement_amount_ct()
+    receipt.settlement_amount()
 );
 ```
 

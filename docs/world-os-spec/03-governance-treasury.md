@@ -35,8 +35,8 @@
 6. **Telemetry** — `governance` module increments `governance_proposal_total`, `governance_vote_total`, and `treasury_disbursement_total` metrics. Dashboard references defined under `monitoring/src/dashboard.rs`.
 
 ## 5. Treasury Flow
-- Income: CT from base fee burns diverted to treasury per `node/src/treasury_executor.rs`. Balances tracked as consumer vs industrial buckets (see `governance::store::TreasuryBalances`).
-- Outgoing: Approved disbursements specify `account_id`, `amount_ct`, `amount_it`, `memo`. Executor enforces `nonce_floor` guard and logs to `treasury_balances` history for explorer consumption.
+- Income: BLOCK from base fee burns diverted to treasury per `node/src/treasury_executor.rs`. Balances are tracked as a single BLOCK ledger (see `governance::store::TreasuryBalances`).
+- Outgoing: Approved disbursements specify `account_id`, `amount`, `memo`. Executor enforces `nonce_floor` guard and logs to `treasury_balances` history for explorer consumption.
 - Coinbase integration: `node/src/treasury_executor.rs` hooks into block production so minted CT honors the latest governance-selected treasury split.
 
 ## 6. Governance + Energy Market Integration Hooks

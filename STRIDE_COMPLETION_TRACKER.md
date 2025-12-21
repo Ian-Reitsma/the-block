@@ -70,7 +70,7 @@ This document tracks the completion of three critical workstreams required for m
 - [ ] `treasury_disbursement_backlog{status}`
 - [ ] `treasury_disbursement_lag_seconds` (histogram: queued_at → executed_at)
 - [ ] `treasury_execution_errors_total{reason="insufficient_funds|invalid_target|stale_dep|circular_dep|execution_failed"}`
-- [ ] `treasury_balance_ct`, `treasury_balance_it`
+- [ ] `treasury_balance`
 
 ### 1.5 Readiness Criteria & Tests/CI ⏳ PLANNED
 

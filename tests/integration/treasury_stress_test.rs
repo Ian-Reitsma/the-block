@@ -24,7 +24,6 @@ mod treasury_stress {
             id,
             format!("tb1stress{:08x}", id),
             amount_tb,
-            0,
             memo.to_string(),
             1,
         )

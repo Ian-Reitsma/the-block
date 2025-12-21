@@ -35,7 +35,6 @@ mod treasury_extreme_stress {
             id,
             format!("tb1extreme{:016x}", id),
             amount_tb,
-            0,
             memo.to_string(),
             1,
         )

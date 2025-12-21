@@ -113,15 +113,6 @@ fn signer_closure(
                 .balance
                 .consumer
                 .saturating_sub(account.pending_consumer);
-            let available_industrial = account
-                .balance
-                .industrial
-                .saturating_sub(account.pending_industrial);
-            if available_industrial < disbursement.amount_it {
-                return Err(TreasuryExecutorError::cancelled(
-                    "insufficient treasury IT balance",
-                ));
-            }
             let candidate = next_available_nonce(account);
             let floor = nonce_floor.load(Ordering::SeqCst);
             (
@@ -143,8 +134,8 @@ fn signer_closure(
         let mut payload = RawTxPayload {
             from_: treasury_account.clone(),
             to: disbursement.destination.clone(),
-            amount_consumer: disbursement.amount_ct,
-            amount_industrial: disbursement.amount_it,
+            amount_consumer: disbursement.amount,
+            amount_industrial: 0,
             fee: base_fee,
             pct_ct: 100,
             nonce,
@@ -165,7 +156,7 @@ fn signer_closure(
             payload.fee = required_fee;
         };
         let total_consumer = disbursement
-            .amount_ct
+            .amount
             .checked_add(payload.fee)
             .ok_or_else(|| {
                 TreasuryExecutorError::Signing("treasury disbursement exceeds u64".into())

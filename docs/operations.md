@@ -77,12 +77,12 @@ prometheus_query 'rate(treasury_execution_errors_total[5m])'
 **Step 5**: Check treasury balance
 
 ```bash
-contract-cli gov treasury balance | jq '{balance_ct, balance_it}'
+contract-cli gov treasury balance | jq '{balance}'
 
 # If insufficient, show what's waiting to execute
 echo "=== Pending disbursements (sum of amounts) ==="
 contract-cli gov treasury list --status queued --limit 200 | jq \
-  '.disbursements | map(.amount_ct) | add'
+  '.disbursements | map(.amount) | add'
 ```
 
 ### Resolution Paths
@@ -115,15 +115,15 @@ done
 
 ```bash
 # Check current balance
-current=$(contract-cli gov treasury balance | jq .balance_ct)
-pending=$(contract-cli gov treasury list --status queued | jq '[.disbursements[].amount_ct] | add')
+current=$(contract-cli gov treasury balance | jq .balance)
+pending=$(contract-cli gov treasury list --status queued | jq '[.disbursements[].amount] | add')
 
 echo "Current balance: $current CT"
 echo "Pending disbursements: $pending CT"
 
 if [ $current -lt $pending ]; then
   echo "INSUFFICIENT FUNDS"
-  echo "Wait for accruals: watch -n 30 'contract-cli gov treasury balance | jq .balance_ct'"
+  echo "Wait for accruals: watch -n 30 'contract-cli gov treasury balance | jq .balance'"
   echo "OR request governance approval for fund allocation"
 fi
 ```
@@ -520,6 +520,20 @@ contract-cli receipts validate --from-block $((
 # Monitor
 watch -n 10 'prometheus_query "receipt_validation_errors_total"'
 ```
+
+---
+
+## Explorer Treasury Schema Migration
+
+Run this playbook whenever the explorer SQLite database still contains the legacy `amount_ct`/`amount_it` columns in `treasury_disbursements`.
+
+1. **Stop explorer** so the migration can take an exclusive lock on the DB file.
+2. Run the helper (defaults to `explorer.db` in the current directory):
+   ```bash
+   cargo run -p explorer --bin explorer-migrate-treasury -- /var/lib/explorer/explorer.db
+   ```
+   The tool applies the three `ALTER TABLE` statements (`ADD COLUMN status_payload`, `RENAME COLUMN amount_ct TO amount`, `DROP COLUMN amount_it`). Statements that have already landed are reported as `skipped`.
+3. Restart explorer, then validate `/governance/treasury/disbursements` and the treasury dashboards before announcing completion.
 
 ---
 

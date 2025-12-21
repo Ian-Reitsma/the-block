@@ -45,7 +45,7 @@
     },
     {
       "title": "Balance Trend",
-      "targets": ["treasury_balance_ct", "treasury_balance_it"],
+      "targets": ["treasury_balance"],
       "type": "graph",
       "time_range": "7d",
       "description": "Treasury CT and IT balance over time"
@@ -355,7 +355,7 @@ tb-cli gov treasury rollback --id <STUCK_ID> --reason "Dependency failed"
 **If insufficient funds**:
 ```bash
 # Wait for treasury accruals (check treasury balance)
-watch -n 30 'tb-cli gov treasury balance | jq .balance_ct'
+watch -n 30 'tb-cli gov treasury balance | jq .balance'
 
 # Or request governance approval for fund allocation
 ```
@@ -462,8 +462,8 @@ METRICS=(
   "treasury_disbursement_backlog"
   "treasury_disbursement_lag_seconds"
   "treasury_execution_errors_total"
-  "treasury_balance_ct"
-  "treasury_balance_it"
+  "treasury_balance"
+  "treasury_balance"
   "treasury_executor_tick_duration_seconds"
   "energy_provider_total"
   "energy_pending_credits_total"

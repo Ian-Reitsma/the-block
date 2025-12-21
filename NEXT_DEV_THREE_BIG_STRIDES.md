@@ -875,12 +875,12 @@ echo "Multi-node cluster deployed successfully!"
 for i in {1..1000}; do
     curl -X POST http://${PRIMARY_IP}:9090/treasury/disbursement \
         -H "Content-Type: application/json" \
-        -d "{\"destination\": \"addr_$i\", \"amount_ct\": 100, \"amount_it\": 0}"
+        -d "{\"destination\": \"addr_$i\", \"amount\": 100}"
 done
 
 # Verify all nodes have same treasury state
 for node_ip in $PRIMARY_IP $REPLICA1_IP $REPLICA2_IP; do
-    curl -s http://${node_ip}:9090/treasury/balance | jq '.balance_ct'
+    curl -s http://${node_ip}:9090/treasury/balance | jq '.balance'
 done
 
 # Assert: All nodes return same balance
@@ -894,7 +894,7 @@ ssh user@${PRIMARY_IP} "sudo systemctl stop theblock"
 # Submit disbursements to replica
 curl -X POST http://${REPLICA1_IP}:9090/treasury/disbursement \
     -H "Content-Type: application/json" \
-    -d '{"destination": "addr_failover", "amount_ct": 500, "amount_it": 0}'
+    -d '{"destination": "addr_failover", "amount": 500}'
 
 # Verify executor lease transfers to replica
 curl -s http://${REPLICA1_IP}:9090/treasury/executor/status | jq '.lease_holder'
@@ -904,7 +904,7 @@ ssh user@${PRIMARY_IP} "sudo systemctl start theblock"
 
 # Verify primary syncs state
 sleep 30
-curl -s http://${PRIMARY_IP}:9090/treasury/balance | jq '.balance_ct'
+curl -s http://${PRIMARY_IP}:9090/treasury/balance | jq '.balance'
 ```
 
 **Scenario 3: Network Partition**
@@ -915,10 +915,10 @@ ssh user@${PRIMARY_IP} "sudo iptables -A OUTPUT -d ${REPLICA2_IP} -j DROP"
 
 # Submit disbursements to both partitions
 curl -X POST http://${PRIMARY_IP}:9090/treasury/disbursement \
-    -d '{"destination": "addr_p1", "amount_ct": 100, "amount_it": 0}'
+    -d '{"destination": "addr_p1", "amount": 100}'
 
 curl -X POST http://${REPLICA1_IP}:9090/treasury/disbursement \
-    -d '{"destination": "addr_p2", "amount_ct": 200, "amount_it": 0}'
+    -d '{"destination": "addr_p2", "amount": 200}'
 
 # Heal partition
 ssh user@${PRIMARY_IP} "sudo iptables -D OUTPUT -d ${REPLICA1_IP} -j DROP"
@@ -1013,9 +1013,9 @@ curl -s http://${REPLICA1_IP}:9090/treasury/executor/status | jq '.lease_holder'
 # Assert: Replica1 or Replica2 now holds lease
 
 # 4. Verify disbursements continue processing
-BALANCE_BEFORE=$(curl -s http://${REPLICA1_IP}:9090/treasury/balance | jq '.balance_ct')
+BALANCE_BEFORE=$(curl -s http://${REPLICA1_IP}:9090/treasury/balance | jq '.balance')
 sleep 30
-BALANCE_AFTER=$(curl -s http://${REPLICA1_IP}:9090/treasury/balance | jq '.balance_ct')
+BALANCE_AFTER=$(curl -s http://${REPLICA1_IP}:9090/treasury/balance | jq '.balance')
 # Assert: BALANCE_AFTER != BALANCE_BEFORE (disbursements processed)
 
 # 5. Restart primary executor

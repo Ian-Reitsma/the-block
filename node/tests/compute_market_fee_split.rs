@@ -28,10 +28,7 @@ fn mixed_split_escrow_and_settlement() {
     assert_eq!((ct, it), (5, 15));
     assert_eq!((bal_ct, bal_it), (95, 85));
     settlement::Settlement::accrue_split(&offer.provider, ct, it);
-    assert_eq!(
-        settlement::Settlement::balance_split(&offer.provider),
-        (5, 15)
-    );
+    assert_eq!(settlement::Settlement::balance(&offer.provider), 20);
 }
 
 #[test]
@@ -62,5 +59,5 @@ fn full_ct_split_and_refund() {
     assert_eq!((bal_ct, bal_it), (40, 50));
     // simulate refund of unused escrow
     settlement::Settlement::refund_split("buyer2", ct, it);
-    assert_eq!(settlement::Settlement::balance_split("buyer2"), (10, 0));
+    assert_eq!(settlement::Settlement::balance("buyer2"), 10);
 }
