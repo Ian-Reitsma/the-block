@@ -211,7 +211,7 @@ impl PrivacyBudgetManager {
 
 fn family_for(badge: &str) -> String {
     badge
-        .splitn(2, ':')
+        .split(':')
         .next()
         .map(str::to_lowercase)
         .unwrap_or_else(|| "global".to_string())

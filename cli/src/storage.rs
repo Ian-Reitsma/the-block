@@ -16,6 +16,7 @@ use std::{
     path::{Path, PathBuf},
     process,
 };
+use storage::merkle_proof::MerkleTree;
 use storage::{StorageContract, StorageOffer};
 use storage_market::{
     AuditReport, ChecksumComparison, ChecksumDigest, ChecksumScope, ImportMode, ImportStats,
@@ -942,6 +943,23 @@ fn handle_importer(cmd: StorageImporterCmd) {
     }
 }
 
+fn deterministic_chunks(object_id: &str, chunk_count: usize) -> Vec<Vec<u8>> {
+    let count = chunk_count.max(1);
+    (0..count)
+        .map(|i| {
+            let mut hasher = crypto_suite::hashing::blake3::Hasher::new();
+            hasher.update(object_id.as_bytes());
+            hasher.update(&i.to_le_bytes());
+            hasher.finalize().as_bytes().to_vec()
+        })
+        .collect()
+}
+
+fn build_merkle_tree(chunks: &[Vec<u8>]) -> MerkleTree {
+    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+    MerkleTree::build(&chunk_refs).expect("build Merkle tree")
+}
+
 pub fn handle(cmd: StorageCmd) {
     match cmd {
         StorageCmd::Upload {
@@ -952,6 +970,9 @@ pub fn handle(cmd: StorageCmd) {
             price,
             retention,
         } => {
+            let chunk_count = shares.max(1) as usize;
+            let chunks = deterministic_chunks(&object_id, chunk_count);
+            let tree = build_merkle_tree(&chunks);
             let contract = StorageContract {
                 object_id: object_id.clone(),
                 provider_id: provider_id.clone(),
@@ -964,6 +985,7 @@ pub fn handle(cmd: StorageCmd) {
                 accrued: 0,
                 total_deposit_ct: 0,
                 last_payment_block: None,
+                storage_root: tree.root,
             };
             let total = price * retention;
             let payload = RawTxPayload {
@@ -988,13 +1010,15 @@ pub fn handle(cmd: StorageCmd) {
             chunk,
             block,
         } => {
-            use crypto_suite::hashing::blake3::Hasher;
-            let mut h = Hasher::new();
-            h.update(object_id.as_bytes());
-            h.update(&chunk.to_le_bytes());
-            let mut proof = [0u8; 32];
-            proof.copy_from_slice(h.finalize().as_bytes());
-            let resp = rpc::storage::challenge(&object_id, None, chunk, proof, block);
+            let chunks = deterministic_chunks(&object_id, 4);
+            let tree = build_merkle_tree(&chunks);
+            let chunk_refs: Vec<&[u8]> = chunks.iter().map(|c| c.as_ref()).collect();
+            let tree_idx = (chunk as usize) % chunk_refs.len();
+            let proof = tree
+                .generate_proof(tree_idx as u64, &chunk_refs)
+                .expect("generate proof for demo chunks");
+            let resp =
+                rpc::storage::challenge(&object_id, None, chunk, &chunks[tree_idx], &proof, block);
             println!("{}", resp);
         }
         StorageCmd::Providers { json } => {

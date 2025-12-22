@@ -4,7 +4,6 @@ use std::fs;
 use std::time::Duration;
 
 use foundation_serialization::toml;
-use runtime;
 use sys::tempfile::tempdir;
 use the_block::config::{self, NodeConfig};
 
@@ -15,8 +14,10 @@ fn config_watch_detects_changes() {
     let gossip_path = dir.path().join("gossip.toml");
     let storage_path = dir.path().join("storage.toml");
 
-    let mut initial = NodeConfig::default();
-    initial.snapshot_interval = 5;
+    let initial = NodeConfig {
+        snapshot_interval: 5,
+        ..Default::default()
+    };
     let contents = toml::to_string_pretty(&initial).expect("encode config");
     fs::write(&default_path, contents).expect("write default config");
     fs::write(&gossip_path, "{}").expect("write gossip config");

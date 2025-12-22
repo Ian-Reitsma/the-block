@@ -86,7 +86,7 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
                 {{
                     "disbursement_id": 7,
                     "destination": "treasury-dest",
-                    "amount_ct": 12345,
+                    "amount": 12345,
                     "memo": "dual token audit",
                     "scheduled_epoch": 99,
                     "tx_hash": "0xdeadbeef",
@@ -148,7 +148,7 @@ fn block_payouts_command_prints_breakdown_for_hash_and_height() {
     let timeline = &breakdown.treasury_events[0];
     assert_eq!(timeline.disbursement_id, 7);
     assert_eq!(timeline.destination, "treasury-dest");
-    assert_eq!(timeline.amount_ct, 12_345);
+    assert_eq!(timeline.amount, 12_345);
     assert_eq!(timeline.memo, "dual token audit");
     assert_eq!(timeline.scheduled_epoch, 99);
     assert_eq!(timeline.tx_hash, "0xdeadbeef");

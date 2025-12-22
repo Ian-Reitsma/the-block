@@ -10,61 +10,82 @@ use the_block::{
     Block, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt,
 };
 
+fn block_with_receipts(index: u64, receipts: Vec<Receipt>) -> Block {
+    Block {
+        index,
+        receipts,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn receipts_survive_block_serialization_roundtrip() {
     // Create a block with test receipts
-    let mut block = Block::default();
-
-    block.receipts = vec![
-        Receipt::Storage(StorageReceipt {
-            contract_id: "storage_contract_1".into(),
-            provider: "provider_alice".into(),
-            bytes: 1_000_000,
-            price_ct: 5_000,
-            block_height: 100,
-            provider_escrow: 50_000,
-        }),
-        Receipt::Storage(StorageReceipt {
-            contract_id: "storage_contract_2".into(),
-            provider: "provider_bob".into(),
-            bytes: 2_000_000,
-            price_ct: 10_000,
-            block_height: 100,
-            provider_escrow: 100_000,
-        }),
-        Receipt::Compute(ComputeReceipt {
-            job_id: "job_1".into(),
-            provider: "compute_provider_1".into(),
-            compute_units: 5_000,
-            payment_ct: 2_500,
-            block_height: 100,
-            verified: true,
-        }),
-        Receipt::Compute(ComputeReceipt {
-            job_id: "job_2".into(),
-            provider: "compute_provider_2".into(),
-            compute_units: 3_000,
-            payment_ct: 1_500,
-            block_height: 100,
-            verified: false,
-        }),
-        Receipt::Energy(EnergyReceipt {
-            contract_id: "energy_1".into(),
-            provider: "grid_operator_1".into(),
-            energy_units: 1_000_000,
-            price_ct: 50_000,
-            block_height: 100,
-            proof_hash: [0x42u8; 32],
-        }),
-        Receipt::Ad(AdReceipt {
-            campaign_id: "campaign_xyz".into(),
-            publisher: "pub_1".into(),
-            impressions: 100_000,
-            spend_ct: 5_000,
-            block_height: 100,
-            conversions: 250,
-        }),
-    ];
+    let block = block_with_receipts(
+        0,
+        vec![
+            Receipt::Storage(StorageReceipt {
+                contract_id: "storage_contract_1".into(),
+                provider: "provider_alice".into(),
+                bytes: 1_000_000,
+                price_ct: 5_000,
+                block_height: 100,
+                provider_escrow: 50_000,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+            Receipt::Storage(StorageReceipt {
+                contract_id: "storage_contract_2".into(),
+                provider: "provider_bob".into(),
+                bytes: 2_000_000,
+                price_ct: 10_000,
+                block_height: 100,
+                provider_escrow: 100_000,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+            Receipt::Compute(ComputeReceipt {
+                job_id: "job_1".into(),
+                provider: "compute_provider_1".into(),
+                compute_units: 5_000,
+                payment_ct: 2_500,
+                block_height: 100,
+                verified: true,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+            Receipt::Compute(ComputeReceipt {
+                job_id: "job_2".into(),
+                provider: "compute_provider_2".into(),
+                compute_units: 3_000,
+                payment_ct: 1_500,
+                block_height: 100,
+                verified: false,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+            Receipt::Energy(EnergyReceipt {
+                contract_id: "energy_1".into(),
+                provider: "grid_operator_1".into(),
+                energy_units: 1_000_000,
+                price_ct: 50_000,
+                block_height: 100,
+                proof_hash: [0x42u8; 32],
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+            Receipt::Ad(AdReceipt {
+                campaign_id: "campaign_xyz".into(),
+                publisher: "pub_1".into(),
+                impressions: 100_000,
+                spend_ct: 5_000,
+                block_height: 100,
+                conversions: 250,
+                publisher_signature: vec![0u8; 64],
+                signature_nonce: 100,
+            }),
+        ],
+    );
 
     let original_receipt_count = block.receipts.len();
 
@@ -95,8 +116,8 @@ fn receipts_survive_block_serialization_roundtrip() {
             i
         );
         assert_eq!(
-            original.settlement_amount_ct(),
-            decoded.settlement_amount_ct(),
+            original.settlement_amount(),
+            decoded.settlement_amount(),
             "Settlement amount mismatch for receipt #{}",
             i
         );
@@ -117,76 +138,83 @@ fn receipts_survive_block_serialization_roundtrip() {
 #[test]
 fn deterministic_metrics_from_receipts_chain() {
     // Create a synthetic chain with receipts across 3 blocks (representing part of an epoch)
-    let mut chain = Vec::new();
-
-    // Block 0: Heavy storage activity
-    let mut block0 = Block::default();
-    block0.index = 0;
-    block0.receipts = vec![
-        Receipt::Storage(StorageReceipt {
-            contract_id: "storage_1".into(),
-            provider: "provider_1".into(),
-            bytes: 5_000_000,
-            price_ct: 50_000,
-            block_height: 0,
-            provider_escrow: 500_000,
-        }),
-        Receipt::Storage(StorageReceipt {
-            contract_id: "storage_2".into(),
-            provider: "provider_1".into(),
-            bytes: 5_000_000,
-            price_ct: 50_000,
-            block_height: 0,
-            provider_escrow: 500_000,
-        }),
+    let chain = vec![
+        block_with_receipts(
+            0,
+            vec![
+                Receipt::Storage(StorageReceipt {
+                    contract_id: "storage_1".into(),
+                    provider: "provider_1".into(),
+                    bytes: 5_000_000,
+                    price_ct: 50_000,
+                    block_height: 0,
+                    provider_escrow: 500_000,
+                    provider_signature: vec![0u8; 64],
+                    signature_nonce: 0,
+                }),
+                Receipt::Storage(StorageReceipt {
+                    contract_id: "storage_2".into(),
+                    provider: "provider_1".into(),
+                    bytes: 5_000_000,
+                    price_ct: 50_000,
+                    block_height: 0,
+                    provider_escrow: 500_000,
+                    provider_signature: vec![0u8; 64],
+                    signature_nonce: 0,
+                }),
+            ],
+        ),
+        block_with_receipts(
+            1,
+            vec![
+                Receipt::Compute(ComputeReceipt {
+                    job_id: "job_1".into(),
+                    provider: "compute_1".into(),
+                    compute_units: 10_000,
+                    payment_ct: 5_000,
+                    block_height: 1,
+                    verified: true,
+                    provider_signature: vec![0u8; 64],
+                    signature_nonce: 1,
+                }),
+                Receipt::Compute(ComputeReceipt {
+                    job_id: "job_2".into(),
+                    provider: "compute_2".into(),
+                    compute_units: 5_000,
+                    payment_ct: 2_500,
+                    block_height: 1,
+                    verified: true,
+                    provider_signature: vec![0u8; 64],
+                    signature_nonce: 1,
+                }),
+            ],
+        ),
+        block_with_receipts(
+            2,
+            vec![
+                Receipt::Storage(StorageReceipt {
+                    contract_id: "storage_3".into(),
+                    provider: "provider_2".into(),
+                    bytes: 3_000_000,
+                    price_ct: 30_000,
+                    block_height: 2,
+                    provider_escrow: 300_000,
+                    provider_signature: vec![0u8; 64],
+                    signature_nonce: 2,
+                }),
+                Receipt::Ad(AdReceipt {
+                    campaign_id: "campaign_1".into(),
+                    publisher: "pub_1".into(),
+                    impressions: 50_000,
+                    spend_ct: 2_500,
+                    block_height: 2,
+                    conversions: 125,
+                    publisher_signature: vec![0u8; 64],
+                    signature_nonce: 2,
+                }),
+            ],
+        ),
     ];
-    chain.push(block0);
-
-    // Block 1: Compute activity
-    let mut block1 = Block::default();
-    block1.index = 1;
-    block1.receipts = vec![
-        Receipt::Compute(ComputeReceipt {
-            job_id: "job_1".into(),
-            provider: "compute_1".into(),
-            compute_units: 10_000,
-            payment_ct: 5_000,
-            block_height: 1,
-            verified: true,
-        }),
-        Receipt::Compute(ComputeReceipt {
-            job_id: "job_2".into(),
-            provider: "compute_2".into(),
-            compute_units: 5_000,
-            payment_ct: 2_500,
-            block_height: 1,
-            verified: true,
-        }),
-    ];
-    chain.push(block1);
-
-    // Block 2: Mixed activity
-    let mut block2 = Block::default();
-    block2.index = 2;
-    block2.receipts = vec![
-        Receipt::Storage(StorageReceipt {
-            contract_id: "storage_3".into(),
-            provider: "provider_2".into(),
-            bytes: 3_000_000,
-            price_ct: 30_000,
-            block_height: 2,
-            provider_escrow: 300_000,
-        }),
-        Receipt::Ad(AdReceipt {
-            campaign_id: "campaign_1".into(),
-            publisher: "pub_1".into(),
-            impressions: 50_000,
-            spend_ct: 2_500,
-            block_height: 2,
-            conversions: 125,
-        }),
-    ];
-    chain.push(block2);
 
     // Derive metrics from epoch blocks (0-3, exclusive)
     let metrics = derive_market_metrics_from_chain(&chain, 0, 3);
@@ -229,17 +257,21 @@ fn cross_node_consistency_same_chain_same_metrics() {
     // Simulate two nodes processing the same blocks
 
     let mut chain = Vec::new();
-    for i in 0..5 {
-        let mut block = Block::default();
-        block.index = i;
-        block.receipts = vec![Receipt::Storage(StorageReceipt {
-            contract_id: format!("storage_{}", i),
-            provider: "provider_1".into(),
-            bytes: 1_000_000 * (i + 1) as u64,
-            price_ct: 10_000 * (i + 1) as u64,
-            block_height: i,
-            provider_escrow: 100_000 * (i + 1) as u64,
-        })];
+    for i in 0u64..5 {
+        let scale = i + 1;
+        let block = block_with_receipts(
+            i,
+            vec![Receipt::Storage(StorageReceipt {
+                contract_id: format!("storage_{}", i),
+                provider: "provider_1".into(),
+                bytes: 1_000_000 * scale,
+                price_ct: 10_000 * scale,
+                block_height: i,
+                provider_escrow: 100_000 * scale,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: i,
+            })],
+        );
         chain.push(block);
     }
 
@@ -272,34 +304,41 @@ fn receipt_metrics_integration_pipeline() {
     // End-to-end test: block → serialization → deserialization → metrics → governance
 
     // Create a block with realistic receipts
-    let mut block = Block::default();
-    block.index = 42;
-    block.receipts = vec![
-        Receipt::Storage(StorageReceipt {
-            contract_id: "contract_id_1".into(),
-            provider: "storage_provider_alice".into(),
-            bytes: 10_000_000,
-            price_ct: 100_000,
-            block_height: 42,
-            provider_escrow: 1_000_000,
-        }),
-        Receipt::Compute(ComputeReceipt {
-            job_id: "compute_job_1".into(),
-            provider: "compute_provider_bob".into(),
-            compute_units: 50_000,
-            payment_ct: 25_000,
-            block_height: 42,
-            verified: true,
-        }),
-        Receipt::Ad(AdReceipt {
-            campaign_id: "campaign_id_2".into(),
-            publisher: "publisher_charlie".into(),
-            impressions: 500_000,
-            spend_ct: 50_000,
-            block_height: 42,
-            conversions: 1_250,
-        }),
-    ];
+    let block = block_with_receipts(
+        42,
+        vec![
+            Receipt::Storage(StorageReceipt {
+                contract_id: "contract_id_1".into(),
+                provider: "storage_provider_alice".into(),
+                bytes: 10_000_000,
+                price_ct: 100_000,
+                block_height: 42,
+                provider_escrow: 1_000_000,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 42,
+            }),
+            Receipt::Compute(ComputeReceipt {
+                job_id: "compute_job_1".into(),
+                provider: "compute_provider_bob".into(),
+                compute_units: 50_000,
+                payment_ct: 25_000,
+                block_height: 42,
+                verified: true,
+                provider_signature: vec![0u8; 64],
+                signature_nonce: 42,
+            }),
+            Receipt::Ad(AdReceipt {
+                campaign_id: "campaign_id_2".into(),
+                publisher: "publisher_charlie".into(),
+                impressions: 500_000,
+                spend_ct: 50_000,
+                block_height: 42,
+                conversions: 1_250,
+                publisher_signature: vec![0u8; 64],
+                signature_nonce: 42,
+            }),
+        ],
+    );
 
     // Simulate serialization/transmission/deserialization
     let encoded = block_binary::encode_block(&block).expect("encode failed");

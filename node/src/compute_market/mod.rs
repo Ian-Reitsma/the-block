@@ -358,6 +358,8 @@ impl Market {
                             payment_ct: total_payment,
                             block_height: self.current_block,
                             verified,
+                            provider_signature: vec![],
+                            signature_nonce: self.current_block,
                         });
                     }
                     scheduler::end_job(&resolution.job_id);

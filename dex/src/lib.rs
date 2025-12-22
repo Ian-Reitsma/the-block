@@ -1,3 +1,4 @@
+#![allow(clippy::manual_div_ceil)]
 #![forbid(unsafe_code)]
 
 pub mod amm;

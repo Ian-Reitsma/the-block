@@ -459,7 +459,7 @@ pub mod kqueue {
             let mut change = RawKevent::zeroed();
             change.ident = ident as usize;
             change.filter = EVFILT_VNODE;
-            change.flags = (EV_ADD | EV_ENABLE | EV_CLEAR) as u16;
+            change.flags = EV_ADD | EV_ENABLE | EV_CLEAR;
             change.fflags = flags;
             change.data = 0;
             change.set_udata_null();

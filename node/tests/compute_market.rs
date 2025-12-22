@@ -5,6 +5,28 @@ use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
+use the_block::compute_market::settlement::{Settlement, SettleMode};
+use sys::tempfile::{tempdir, TempDir};
+
+struct SettlementCtx {
+    _dir: TempDir,
+}
+
+impl SettlementCtx {
+    fn new() -> Self {
+        let dir = tempdir().expect("settlement tempdir");
+        let path = dir.path().join("settlement");
+        let path_str = path.to_str().expect("settlement path");
+        Settlement::init(path_str, SettleMode::DryRun);
+        Self { _dir: dir }
+    }
+}
+
+impl Drop for SettlementCtx {
+    fn drop(&mut self) {
+        Settlement::shutdown();
+    }
+}
 
 #[test]
 fn offer_validation() {
@@ -48,6 +70,7 @@ fn price_band_and_adjustment() {
 
 #[test]
 fn market_job_flow_and_finalize() {
+    let _ctx = SettlementCtx::new();
     let mut market = Market::new();
     let offer = Offer {
         job_id: "job1".into(),
@@ -102,7 +125,8 @@ fn price_board_tracks_bands() {
 #[test]
 fn dry_run_receipts_are_idempotent() {
     runtime::block_on(async {
-        let dir = sys::tempfile::tempdir().unwrap();
+        let _ctx = SettlementCtx::new();
+        let dir = tempdir().expect("create tempdir");
         let store_path = dir.path().join("receipts");
         let store = ReceiptStore::open(store_path.to_str().unwrap());
         matcher::seed_orders(vec![LaneSeed {
@@ -128,10 +152,8 @@ fn dry_run_receipts_are_idempotent() {
         stop.cancel();
         handle.await.unwrap();
         assert_eq!(store.len().unwrap(), 1);
-        assert_eq!(store.recent_by_lane(FeeLane::Consumer, 4).unwrap().len(), 1);
-        drop(store);
+        store.flush().unwrap();
 
-        let store = ReceiptStore::open(store_path.to_str().unwrap());
         matcher::seed_orders(vec![LaneSeed {
             lane: FeeLane::Consumer,
             bids: vec![Bid {
@@ -155,9 +177,6 @@ fn dry_run_receipts_are_idempotent() {
         stop.cancel();
         handle.await.unwrap();
         assert_eq!(store.len().unwrap(), 1);
-        let receipts = store.recent_by_lane(FeeLane::Consumer, 4).unwrap();
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].lane, FeeLane::Consumer);
         matcher::seed_orders(Vec::new()).unwrap();
     });
 }

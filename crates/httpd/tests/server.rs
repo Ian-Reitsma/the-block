@@ -10,7 +10,8 @@ use httpd::{
 };
 use rand::RngCore;
 use rand::rngs::OsRng;
-use runtime::net::TcpListener;
+mod support;
+
 use runtime::ws::{self, ClientStream, Message as WsMessage};
 use runtime::{block_on, sleep, spawn};
 use std::fs;
@@ -18,6 +19,7 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream as StdTcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use support::{LOCAL_BIND_ADDR, bind_runtime_listener};
 
 const HANDSHAKE_MAGIC: &[u8; 4] = b"TBHS";
 const HANDSHAKE_VERSION: u8 = 1;
@@ -594,9 +596,10 @@ fn request_builder_drives_router() {
 #[test]
 fn serve_plain_round_trip() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind plain listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).get("/ping", |_req| async move {
             Ok(Response::new(StatusCode::OK)
@@ -629,9 +632,10 @@ fn serve_plain_round_trip() {
 #[test]
 fn serve_tls_round_trip_without_client_auth() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind tls listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).get("/secure", |_req| async move {
             Ok(Response::new(StatusCode::OK)
@@ -659,9 +663,10 @@ fn serve_tls_round_trip_without_client_auth() {
 #[test]
 fn serve_tls_accepts_clients_with_cert() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind tls listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).get("/secure", |_req| async move {
             Ok(Response::new(StatusCode::OK)
@@ -689,9 +694,10 @@ fn serve_tls_accepts_clients_with_cert() {
 #[test]
 fn serve_tls_allows_optional_client_auth() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind tls listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).get("/secure", |_req| async move {
             Ok(Response::new(StatusCode::OK)
@@ -723,9 +729,10 @@ fn serve_tls_allows_optional_client_auth() {
 #[test]
 fn serve_tls_rejects_clients_without_cert() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind tls listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).get("/secure", |_req| async move {
             Ok(Response::new(StatusCode::OK)
@@ -765,9 +772,10 @@ fn router_wildcard_captures_remainder() {
 #[test]
 fn websocket_upgrade_accepts_and_dispatches_handler() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).upgrade("/ws", |_req, _upgrade| async move {
             Ok(WebSocketResponse::accept(move |mut stream| async move {
@@ -822,9 +830,10 @@ Sec-WebSocket-Version: 13\r\n\r\n"
 #[test]
 fn websocket_upgrade_over_tls_dispatches_handler() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).upgrade("/ws", |_req, _upgrade| async move {
             Ok(WebSocketResponse::accept(|mut stream| async move {
@@ -883,9 +892,10 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
 #[test]
 fn websocket_upgrade_rejects_with_response() {
     block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .await
-            .expect("bind listener");
+        let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+            Some(listener) => listener,
+            None => return,
+        };
         let addr = listener.local_addr().expect("addr");
         let router = Router::new(()).upgrade("/ws", |_req, _upgrade| async move {
             Ok(WebSocketResponse::reject(

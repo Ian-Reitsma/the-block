@@ -10,7 +10,3 @@ description = "First-party derive macros for serialization - no runtime dependen
 proc-macro = true
 
 [dependencies]
-# Proc macro dependencies (build-time only, not in final binary)
-syn = { version = "2.0", features = ["full"] }
-quote = "1.0"
-proc-macro2 = "1.0"

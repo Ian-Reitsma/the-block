@@ -1,3 +1,5 @@
+extern crate foundation_serialization as serde;
+
 use crate::parse_utils::{
     parse_optional, parse_positional_u64, parse_u64, parse_u64_required, require_positional,
     take_string,
@@ -9,12 +11,12 @@ use cli_core::{
     parse::Matches,
 };
 use foundation_serialization::binary;
-use foundation_serialization::json::Value;
-use foundation_serialization::{json, Deserialize, Serialize};
+use foundation_serialization::json::{self, Value};
+use foundation_serialization::{Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry,
-    treasury::{ExpectedReceipt, QuorumSpec},
+    treasury::{parse_dependency_list, ExpectedReceipt, QuorumSpec},
     DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
@@ -128,13 +130,13 @@ fn report_rpc_failure(rpc: &str, method: &str, err: &RpcClientError) {
                 match io_err.kind() {
                     io::ErrorKind::ConnectionRefused => {
                         eprintln!(
-                                "hint: the node rejected the connection; verify it is running and TB_RPC_ENDPOINT matches its listen address."
-                            );
+                            "hint: the node rejected the connection; verify it is running and TB_RPC_ENDPOINT matches its listen address."
+                        );
                     }
                     io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {
                         eprintln!(
-                                "hint: the connection dropped mid-request; check network stability or TLS configuration."
-                            );
+                            "hint: the connection dropped mid-request; check network stability or TLS configuration."
+                        );
                     }
                     _ => {}
                 }
@@ -193,9 +195,7 @@ pub struct RpcTreasuryDisbursementsResult {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct RpcTreasuryBalanceResult {
-    pub balance_ct: u64,
-    #[serde(default)]
-    pub balance_it: u64,
+    pub balance: u64,
     #[serde(default)]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
     #[serde(default)]
@@ -209,10 +209,7 @@ pub struct RpcTreasuryHistoryResult {
     #[serde(default)]
     pub next_cursor: Option<u64>,
     #[allow(dead_code)]
-    pub current_balance_ct: u64,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub current_balance_it: u64,
+    pub current_balance: u64,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -221,8 +218,7 @@ pub struct TreasuryFetchOutput {
     pub disbursements: Vec<TreasuryDisbursement>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next_cursor: Option<u64>,
-    pub balance_ct: u64,
-    pub balance_it: u64,
+    pub balance: u64,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -271,75 +267,64 @@ pub struct TreasuryDisbursementQuery {
     pub destination: Option<String>,
     pub min_epoch: Option<u64>,
     pub max_epoch: Option<u64>,
-    pub min_amount_ct: Option<u64>,
-    pub max_amount_ct: Option<u64>,
-    pub min_amount_it: Option<u64>,
-    pub max_amount_it: Option<u64>,
+    pub min_amount: Option<u64>,
+    pub max_amount: Option<u64>,
     pub min_created_at: Option<u64>,
     pub max_created_at: Option<u64>,
     pub min_status_ts: Option<u64>,
     pub max_status_ts: Option<u64>,
 }
 
-pub fn treasury_disbursement_params(query: &TreasuryDisbursementQuery) -> json::Value {
+pub fn treasury_disbursement_params(query: &TreasuryDisbursementQuery) -> Value {
     let mut params = json::Map::new();
     if let Some(filter) = query.status {
-        params.insert("status".into(), json::Value::String(filter.as_str().into()));
+        params.insert("status".into(), Value::String(filter.as_str().into()));
     }
     if let Some(cursor) = query.after_id {
-        params.insert("after_id".into(), json::Value::from(cursor));
+        params.insert("after_id".into(), Value::from(cursor));
     }
     if let Some(max) = query.limit {
-        params.insert("limit".into(), json::Value::from(max as u64));
+        params.insert("limit".into(), Value::from(max as u64));
     }
     if let Some(destination) = &query.destination {
-        params.insert(
-            "destination".into(),
-            json::Value::String(destination.clone()),
-        );
+        params.insert("destination".into(), Value::String(destination.clone()));
     }
     if let Some(min_epoch) = query.min_epoch {
-        params.insert("min_epoch".into(), json::Value::from(min_epoch));
+        params.insert("min_epoch".into(), Value::from(min_epoch));
     }
     if let Some(max_epoch) = query.max_epoch {
-        params.insert("max_epoch".into(), json::Value::from(max_epoch));
+        params.insert("max_epoch".into(), Value::from(max_epoch));
     }
-    if let Some(min_amount_ct) = query.min_amount_ct {
-        params.insert("min_amount_ct".into(), json::Value::from(min_amount_ct));
+    if let Some(min_amount) = query.min_amount {
+        params.insert("min_amount".into(), Value::from(min_amount));
     }
-    if let Some(max_amount_ct) = query.max_amount_ct {
-        params.insert("max_amount_ct".into(), json::Value::from(max_amount_ct));
-    }
-    if let Some(min_amount_it) = query.min_amount_it {
-        params.insert("min_amount_it".into(), json::Value::from(min_amount_it));
-    }
-    if let Some(max_amount_it) = query.max_amount_it {
-        params.insert("max_amount_it".into(), json::Value::from(max_amount_it));
+    if let Some(max_amount) = query.max_amount {
+        params.insert("max_amount".into(), Value::from(max_amount));
     }
     if let Some(min_created_at) = query.min_created_at {
-        params.insert("min_created_at".into(), json::Value::from(min_created_at));
+        params.insert("min_created_at".into(), Value::from(min_created_at));
     }
     if let Some(max_created_at) = query.max_created_at {
-        params.insert("max_created_at".into(), json::Value::from(max_created_at));
+        params.insert("max_created_at".into(), Value::from(max_created_at));
     }
     if let Some(min_status_ts) = query.min_status_ts {
-        params.insert("min_status_ts".into(), json::Value::from(min_status_ts));
+        params.insert("min_status_ts".into(), Value::from(min_status_ts));
     }
     if let Some(max_status_ts) = query.max_status_ts {
-        params.insert("max_status_ts".into(), json::Value::from(max_status_ts));
+        params.insert("max_status_ts".into(), Value::from(max_status_ts));
     }
-    json::Value::Object(params)
+    Value::Object(params)
 }
 
-pub fn treasury_history_params(after_id: Option<u64>, limit: Option<usize>) -> json::Value {
+pub fn treasury_history_params(after_id: Option<u64>, limit: Option<usize>) -> Value {
     let mut params = json::Map::new();
     if let Some(cursor) = after_id {
-        params.insert("after_id".into(), json::Value::from(cursor));
+        params.insert("after_id".into(), Value::from(cursor));
     }
     if let Some(max) = limit {
-        params.insert("limit".into(), json::Value::from(max as u64));
+        params.insert("limit".into(), Value::from(max as u64));
     }
-    json::Value::Object(params)
+    Value::Object(params)
 }
 
 pub fn combine_treasury_fetch_results(
@@ -350,8 +335,7 @@ pub fn combine_treasury_fetch_results(
     let mut output = TreasuryFetchOutput {
         disbursements: disbursement.disbursements,
         next_cursor: disbursement.next_cursor,
-        balance_ct: balance.balance_ct,
-        balance_it: balance.balance_it,
+        balance: balance.balance,
         last_snapshot: balance.last_snapshot,
         balance_history: None,
         balance_next_cursor: None,
@@ -463,7 +447,6 @@ pub enum GovTreasuryCmd {
     Schedule {
         destination: String,
         amount: u64,
-        amount_it: u64,
         memo: Option<String>,
         epoch: u64,
         state: String,
@@ -793,14 +776,6 @@ impl GovTreasuryCmd {
                 "amount",
                 "Amount (in CT) to disburse",
             )))
-            .arg(ArgSpec::Option(
-                OptionSpec::new(
-                    "amount-it",
-                    "amount-it",
-                    "Industrial-token amount to disburse",
-                )
-                .default("0"),
-            ))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "memo",
                 "memo",
@@ -918,16 +893,6 @@ impl GovTreasuryCmd {
                 "Maximum CT amount",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
-                "min-amount-it",
-                "min-amount-it",
-                "Minimum IT amount",
-            )))
-            .arg(ArgSpec::Option(OptionSpec::new(
-                "max-amount-it",
-                "max-amount-it",
-                "Maximum IT amount",
-            )))
-            .arg(ArgSpec::Option(OptionSpec::new(
                 "min-created-at",
                 "min-created-at",
                 "Only include disbursements created at or after this timestamp",
@@ -1018,8 +983,6 @@ impl GovTreasuryCmd {
             "schedule" => {
                 let destination = require_positional(sub_matches, "destination")?;
                 let amount = parse_positional_u64(sub_matches, "amount")?;
-                let amount_it =
-                    parse_u64(take_string(sub_matches, "amount-it"), "amount-it")?.unwrap_or(0);
                 let memo = take_string(sub_matches, "memo");
                 let epoch = parse_u64_required(take_string(sub_matches, "epoch"), "epoch")?;
                 let state =
@@ -1027,7 +990,6 @@ impl GovTreasuryCmd {
                 Ok(GovTreasuryCmd::Schedule {
                     destination,
                     amount,
-                    amount_it,
                     memo,
                     epoch,
                     state,
@@ -1072,14 +1034,10 @@ impl GovTreasuryCmd {
                 query.destination = take_string(sub_matches, "destination");
                 query.min_epoch = parse_u64(take_string(sub_matches, "min-epoch"), "min-epoch")?;
                 query.max_epoch = parse_u64(take_string(sub_matches, "max-epoch"), "max-epoch")?;
-                query.min_amount_ct =
+                query.min_amount =
                     parse_u64(take_string(sub_matches, "min-amount-ct"), "min-amount-ct")?;
-                query.max_amount_ct =
+                query.max_amount =
                     parse_u64(take_string(sub_matches, "max-amount-ct"), "max-amount-ct")?;
-                query.min_amount_it =
-                    parse_u64(take_string(sub_matches, "min-amount-it"), "min-amount-it")?;
-                query.max_amount_it =
-                    parse_u64(take_string(sub_matches, "max-amount-it"), "max-amount-it")?;
                 query.min_created_at =
                     parse_u64(take_string(sub_matches, "min-created-at"), "min-created-at")?;
                 query.max_created_at =
@@ -1632,7 +1590,6 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
         GovTreasuryCmd::Schedule {
             destination,
             amount,
-            amount_it,
             memo,
             epoch,
             state,
@@ -1643,8 +1600,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 proposal: governance::DisbursementProposalMetadata::default(),
                 disbursement: governance::DisbursementDetails {
                     destination,
-                    amount_ct: amount,
-                    amount_it,
+                    amount,
                     memo: memo_value.clone(),
                     scheduled_epoch: epoch,
                     expected_receipts: Vec::new(),
@@ -1713,7 +1669,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 &client,
                 &rpc,
                 "gov.treasury.balance",
-                json::Value::Object(json::Map::new()),
+                Value::Object(json::Map::new()),
             )?;
             let balance_result = unwrap_rpc_result(balance_envelope)?;
 
@@ -1909,8 +1865,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                     writeln!(out, "Title: {}", payload.proposal.title)?;
                     writeln!(out, "Summary: {}", payload.proposal.summary)?;
                     writeln!(out, "Destination: {}", payload.disbursement.destination)?;
-                    writeln!(out, "Amount CT: {}", payload.disbursement.amount_ct)?;
-                    writeln!(out, "Amount IT: {}", payload.disbursement.amount_it)?;
+                    writeln!(out, "Amount CT: {}", payload.disbursement.amount)?;
                     writeln!(
                         out,
                         "Scheduled Epoch: {}",
@@ -1940,14 +1895,12 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                 },
                 disbursement: governance::DisbursementDetails {
                     destination: "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".to_string(),
-                    amount_ct: 100000000,
-                    amount_it: 0,
+                    amount: 100000000,
                     memo: "Example disbursement memo".to_string(),
                     scheduled_epoch: 180000,
                     expected_receipts: vec![ExpectedReceipt {
                         account: "example-account".to_string(),
-                        amount_ct: 100000000,
-                        amount_it: 0,
+                        amount: 100000000,
                     }],
                 },
             };
@@ -2066,8 +2019,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             #[serde(crate = "foundation_serialization::serde")]
             struct ReceiptInput {
                 account: String,
-                amount_ct: u64,
-                amount_it: u64,
+                amount: u64,
             }
 
             #[derive(Serialize)]
@@ -2155,33 +2107,4 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
         }
     }
     Ok(())
-}
-
-fn parse_dependency_list(memo: &str) -> Vec<u64> {
-    let trimmed = memo.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    if let Ok(Value::Object(map)) = json::from_str::<Value>(trimmed) {
-        if let Some(Value::Array(items)) = map.get("depends_on") {
-            return items
-                .iter()
-                .filter_map(|item| match item {
-                    Value::Number(num) => num.as_u64(),
-                    Value::String(text) => text.trim().parse::<u64>().ok(),
-                    _ => None,
-                })
-                .collect();
-        }
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix("depends_on=")
-        .or_else(|| trimmed.strip_prefix("depends_on:"))
-    {
-        return rest
-            .split(',')
-            .filter_map(|entry| entry.trim().parse::<u64>().ok())
-            .collect();
-    }
-    Vec::new()
 }

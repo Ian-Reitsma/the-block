@@ -29,3 +29,9 @@ rustflags = [
   "-Clink-arg=-Wl,--no-keep-memory",
   "-Clink-arg=-Wl,--reduce-memory-overheads",
 ]
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

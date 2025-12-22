@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use httpd::{BlockingClient, HttpClient, ServerTlsConfig, TlsConnectorError};
 use std::env;
 use std::fmt;

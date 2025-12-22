@@ -1378,7 +1378,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>peer.rebate_status</code></td><td><code>{peer_id}</code></td><td><code>{pending_ct, claimed_ct, receipts[]}</code></td><td>invalid ID</td></tr>
 <tr><td><code>peer.rebate_claim</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok", claimed_ct}</code> once receipts consumed</td><td>invalid ID</td></tr>
-<tr><td><code>rent.escrow.balance</code></td><td><code>{provider}</code></td><td><code>{balance_ct, locked_until}</code> from <code>RentEscrow</code> sled</td><td>none</td></tr>
+<tr><td><code>rent.escrow.balance</code></td><td><code>{provider}</code></td><td><code>{balance, locked_until}</code> from <code>RentEscrow</code> sled</td><td>none</td></tr>
 <tr><td><code>scheduler.stats</code></td><td>none</td><td>Scheduler debug payload <code>{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}</code></td><td>none</td></tr>
 </tbody></table>
 </div>
@@ -1392,7 +1392,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>gov.release_signers</code></td><td>none</td><td><code>{signers:[{name,pubkey}]} </code></td><td>none</td></tr>
 <tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{ct, industrial_ct, usd_estimate}</code> from treasury sled</td><td>none</td></tr>
 <tr><td><code>gov.treasury.balance_history</code></td><td><code>{start?, end?}</code></td><td><code>{entries:[{epoch,ct}], next_cursor?}</code></td><td>none</td></tr>
-<tr><td><code>gov.treasury.disbursements</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{proposal_id, amount_ct, recipient, executed_at}], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>gov.treasury.disbursements</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>service_badge_issue</code></td><td><code>{subject, badge}</code> (requires signer badge header)</td><td><code>{status:"ok"}</code> and records issuance</td><td><code>-32602</code> invalid payload, <code>-32050</code> when badge invalid</td></tr>
 <tr><td><code>service_badge_revoke</code></td><td><code>{subject, badge}</code></td><td><code>{status:"ok"}</code></td><td>same</td></tr>
 <tr><td><code>service_badge_verify</code></td><td><code>{token}</code></td><td><code>{valid:bool, subject?, expires_at?}</code></td><td>none</td></tr>

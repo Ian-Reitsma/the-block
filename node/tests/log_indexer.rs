@@ -1,4 +1,9 @@
 #![cfg(feature = "integration-tests")]
+#![allow(
+    clippy::single_component_path_imports,
+    clippy::field_reassign_with_default,
+    clippy::write_literal
+)]
 use sled;
 use std::fs::File;
 use std::io::Write;

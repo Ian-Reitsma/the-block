@@ -1,3 +1,4 @@
+#![allow(clippy::len_without_is_empty)]
 #![forbid(unsafe_code)]
 
 use foundation_lazy::sync::OnceCell;

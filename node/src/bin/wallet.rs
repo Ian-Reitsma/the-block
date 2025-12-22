@@ -532,7 +532,7 @@ fn main() {
                     .first()
                     .expect("remote signer returned no approvals");
                 id = encode(primary.0.to_bytes());
-                sig = primary.1.clone();
+                sig = primary.1;
                 signers_payload = approvals
                     .iter()
                     .map(|(pk, sig)| {
@@ -584,7 +584,7 @@ fn main() {
                 .and_then(|builder| builder.send())
             {
                 Ok(resp) => match resp.json::<Value>() {
-                    Ok(v) => println!("{}", v["result"].to_string()),
+                    Ok(v) => println!("{}", v["result"]),
                     Err(e) => eprintln!("parse error: {e}"),
                 },
                 Err(e) => eprintln!("rpc error: {e}"),

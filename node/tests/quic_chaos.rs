@@ -22,9 +22,11 @@ impl S2nTransportGuard {
         std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
         std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
         std::env::set_var("TB_NET_KEY_PATH", &net_key);
-        let mut cfg = TransportConfig::default();
-        cfg.provider = ProviderKind::S2nQuic;
-        cfg.certificate_cache = Some(cert_store);
+        let cfg = TransportConfig {
+            provider: ProviderKind::S2nQuic,
+            certificate_cache: Some(cert_store.clone()),
+            ..Default::default()
+        };
         the_block::net::configure_transport(&cfg).expect("configure transport");
         Self { _dir: dir }
     }

@@ -28,6 +28,8 @@ pub use governance_spec::{
 pub use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
+// Circuit breaker pattern for executor resilience
+pub use governance_spec::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use release::{

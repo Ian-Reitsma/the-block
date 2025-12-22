@@ -26,7 +26,7 @@ fn relay_status_emits_base58_peers() {
     let mut cfg = GossipConfig::default();
     let dir = tempdir().unwrap();
     cfg.shard_store_path = dir.path().join("shards").to_string_lossy().into_owned();
-    let relay = Relay::with_engine_factory(cfg, |name, path| SimpleDb::open_named(name, path));
+    let relay = Relay::with_engine_factory(cfg, SimpleDb::open_named);
     let peer_bytes = [7u8; 32];
     let peer = net::overlay_peer_from_bytes(&peer_bytes).expect("peer");
     relay.register_peer(9, peer.clone());
@@ -45,7 +45,7 @@ fn relay_broadcast_records_selected_peers() {
     let mut cfg = GossipConfig::default();
     let dir = tempdir().unwrap();
     cfg.shard_store_path = dir.path().join("status").to_string_lossy().into_owned();
-    let relay = Relay::with_engine_factory(cfg, |name, path| SimpleDb::open_named(name, path));
+    let relay = Relay::with_engine_factory(cfg, SimpleDb::open_named);
     let peer = net::overlay_peer_from_bytes(&[5u8; 32]).expect("overlay peer");
     let addr: std::net::SocketAddr = "127.0.0.1:9456".parse().unwrap();
     the_block::net::peer::inject_addr_mapping_for_tests(addr, peer.clone());
@@ -72,7 +72,7 @@ fn shard_affinity_emits_sorted_peers_per_shard() {
     let mut cfg = GossipConfig::default();
     let dir = tempdir().unwrap();
     cfg.shard_store_path = dir.path().join("sorted").to_string_lossy().into_owned();
-    let relay = Relay::with_engine_factory(cfg, |name, path| SimpleDb::open_named(name, path));
+    let relay = Relay::with_engine_factory(cfg, SimpleDb::open_named);
     let relay = Arc::new(relay);
     let _guard = net::scoped_gossip_relay(Arc::clone(&relay));
 
@@ -95,7 +95,7 @@ fn shard_affinity_emits_sorted_peers_per_shard() {
 
     let mut expected = peers
         .iter()
-        .map(|peer| net::overlay_peer_to_base58(peer))
+        .map(net::overlay_peer_to_base58)
         .collect::<Vec<_>>();
     expected.sort();
 

@@ -23,6 +23,7 @@ use governance_spec::treasury::{
 };
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+    CircuitBreaker,
 };
 use sled::Config;
 use std::collections::HashMap;
@@ -49,29 +50,23 @@ const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
-    pub consumer: u64,
-    pub industrial: u64,
+    pub balance: u64,
 }
 
 impl TreasuryBalances {
-    pub const fn new(consumer: u64, industrial: u64) -> Self {
-        Self {
-            consumer,
-            industrial,
-        }
+    pub const fn new(balance: u64) -> Self {
+        Self { balance }
     }
 
-    pub fn checked_add(self, delta_ct: i64, delta_it: i64) -> Result<Self, sled::Error> {
-        let updated_consumer = i128::from(self.consumer) + i128::from(delta_ct);
-        let updated_industrial = i128::from(self.industrial) + i128::from(delta_it);
-        if updated_consumer < 0 || updated_industrial < 0 {
+    pub fn checked_add(self, delta: i64) -> Result<Self, sled::Error> {
+        let updated = i128::from(self.balance) + i128::from(delta);
+        if updated < 0 {
             return Err(sled::Error::Unsupported(
                 "treasury balance underflow".into(),
             ));
         }
         Ok(Self {
-            consumer: updated_consumer as u64,
-            industrial: updated_industrial as u64,
+            balance: updated as u64,
         })
     }
 }
@@ -97,6 +92,10 @@ pub struct TreasuryExecutorConfig {
         >,
     >,
     pub nonce_floor: Arc<AtomicU64>,
+    /// Circuit breaker to prevent cascading failures during repeated submission errors
+    pub circuit_breaker: Arc<CircuitBreaker>,
+    /// Optional telemetry callback for circuit breaker state updates
+    pub circuit_breaker_telemetry: Option<Arc<dyn Fn(u8, u64, u64) + Send + Sync>>,
 }
 
 #[derive(Debug)]
@@ -214,6 +213,23 @@ fn run_executor_tick(
     }
 
     let current_epoch = (config.epoch_source)();
+
+    // CIRCUIT BREAKER INTEGRATION: Check if circuit is open before processing disbursements
+    // If circuit is open, skip batch to prevent cascading failures
+    if !config.circuit_breaker.allow_request() {
+        let staged_total = store.load_execution_intents()?.len() as u64;
+        snapshot.record_error(
+            format!(
+                "circuit_breaker_open state={:?}",
+                config.circuit_breaker.state()
+            ),
+            0,
+            staged_total,
+        );
+        store.store_executor_snapshot(snapshot)?;
+        return Ok(());
+    }
+
     let mut disbursements = store.load_disbursements()?;
     disbursements.sort_by_key(|d| d.id);
     let mut staged_lookup: HashMap<u64, SignedExecutionIntent> = store
@@ -266,6 +282,8 @@ fn run_executor_tick(
                     .nonce_floor
                     .store(intent.nonce, AtomicOrdering::SeqCst);
                 success_total = success_total.saturating_add(1);
+                // Record success in circuit breaker
+                config.circuit_breaker.record_success();
             }
             Err(err) => {
                 if err.is_storage() {
@@ -275,7 +293,10 @@ fn run_executor_tick(
                     store.cancel_disbursement(disbursement.id, err.message())?;
                     let _ = store.remove_execution_intent(disbursement.id);
                     cancelled_total = cancelled_total.saturating_add(1);
+                    // Cancelled errors (e.g., insufficient balance) do NOT count against circuit
                 } else {
+                    // Transient submission errors count against the circuit breaker
+                    config.circuit_breaker.record_failure();
                     last_error = Some(err.message().to_string());
                 }
             }
@@ -289,6 +310,14 @@ fn run_executor_tick(
         snapshot.record_success(pending_matured, staged_total);
     }
     store.store_executor_snapshot(snapshot)?;
+
+    // Update telemetry if callback provided
+    if let Some(ref telemetry_fn) = config.circuit_breaker_telemetry {
+        let state = config.circuit_breaker.state() as u8;
+        let failures = config.circuit_breaker.failure_count();
+        let successes = config.circuit_breaker.success_count();
+        telemetry_fn(state, failures, successes);
+    }
 
     #[cfg(feature = "telemetry")]
     {
@@ -1634,12 +1663,10 @@ impl GovStore {
 
         let state = self.treasury_balance_tree();
         if let Some(last) = trimmed.last() {
-            state.insert(b"current", ser(&last.balance_ct)?)?;
-            state.insert(b"current_it", ser(&last.balance_it)?)?;
+            state.insert(b"current", ser(&last.balance)?)?;
             state.insert(b"next_snapshot_id", ser(&(last.id.saturating_add(1)))?)?;
         } else {
             state.insert(b"current", ser(&0u64)?)?;
-            state.insert(b"current_it", ser(&0u64)?)?;
             state.insert(b"next_snapshot_id", ser(&1u64)?)?;
         }
         Ok(())
@@ -1660,21 +1687,13 @@ impl GovStore {
         &self,
         event: TreasuryBalanceEventKind,
         disbursement_id: Option<u64>,
-        delta_ct: i64,
-        delta_it: i64,
+        delta: i64,
     ) -> sled::Result<TreasuryBalanceSnapshot> {
         let balances = self.treasury_balances()?;
-        let updated = balances.checked_add(delta_ct, delta_it)?;
+        let updated = balances.checked_add(delta)?;
         let id = self.next_balance_snapshot_id()?;
-        let snapshot = TreasuryBalanceSnapshot::new(
-            id,
-            updated.consumer,
-            delta_ct,
-            updated.industrial,
-            delta_it,
-            event,
-            disbursement_id,
-        );
+        let snapshot =
+            TreasuryBalanceSnapshot::new(id, updated.balance, delta, event, disbursement_id);
         let mut history = self.load_balance_history()?;
         history.push(snapshot.clone());
         self.persist_balance_history(&history)?;
@@ -2382,24 +2401,19 @@ impl GovStore {
 
     pub fn treasury_balances(&self) -> sled::Result<TreasuryBalances> {
         let state = self.treasury_balance_tree();
-        let current_ct = state
+        if let Some(current) = state
             .get(b"current")?
             .map(|raw| de::<u64>(&raw))
-            .transpose()?;
-        let current_it = state
-            .get(b"current_it")?
-            .map(|raw| de::<u64>(&raw))
-            .transpose()?;
-        if let (Some(ct), Some(it)) = (current_ct, current_it) {
-            return Ok(TreasuryBalances::new(ct, it));
+            .transpose()?
+        {
+            return Ok(TreasuryBalances::new(current));
         }
         let history = self.load_balance_history()?;
         let balances = history
             .last()
-            .map(|snap| TreasuryBalances::new(snap.balance_ct, snap.balance_it))
+            .map(|snap| TreasuryBalances::new(snap.balance))
             .unwrap_or_default();
-        state.insert(b"current", ser(&balances.consumer)?)?;
-        state.insert(b"current_it", ser(&balances.industrial)?)?;
+        state.insert(b"current", ser(&balances.balance)?)?;
         if state.get(b"next_snapshot_id")?.is_none() {
             state.insert(b"next_snapshot_id", ser(&1u64)?)?;
         }
@@ -2407,26 +2421,20 @@ impl GovStore {
     }
 
     pub fn treasury_balance(&self) -> sled::Result<u64> {
-        self.treasury_balances().map(|b| b.consumer)
+        self.treasury_balances().map(|b| b.balance)
     }
 
     pub fn treasury_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {
         self.load_balance_history()
     }
 
-    pub fn record_treasury_accrual(
-        &self,
-        amount_ct: u64,
-        amount_it: u64,
-    ) -> sled::Result<TreasuryBalanceSnapshot> {
-        if amount_ct == 0 && amount_it == 0 {
-            return self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, 0, 0);
+    pub fn record_treasury_accrual(&self, amount: u64) -> sled::Result<TreasuryBalanceSnapshot> {
+        if amount == 0 {
+            return self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, 0);
         }
-        let delta_ct = i64::try_from(amount_ct)
+        let delta = i64::try_from(amount)
             .map_err(|_| sled::Error::Unsupported("treasury accrual exceeds i64".into()))?;
-        let delta_it = i64::try_from(amount_it)
-            .map_err(|_| sled::Error::Unsupported("treasury accrual exceeds i64".into()))?;
-        self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, delta_ct, delta_it)
+        self.record_balance_event(TreasuryBalanceEventKind::Accrual, None, delta)
     }
 
     pub fn queue_disbursement(
@@ -2443,7 +2451,7 @@ impl GovStore {
         let record = TreasuryDisbursement::from_payload(next_id, payload);
         records.push(record.clone());
         self.persist_disbursements(&records)?;
-        self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0, 0)?;
+        self.record_balance_event(TreasuryBalanceEventKind::Queued, Some(record.id), 0)?;
         Ok(record)
     }
 
@@ -2570,7 +2578,7 @@ impl GovStore {
                     }
                 }
                 let balances = self.treasury_balances()?;
-                if balances.consumer < entry.amount_ct || balances.industrial < entry.amount_it {
+                if balances.balance < entry.amount {
                     return Err(sled::Error::Unsupported(
                         format!("treasury balance insufficient for disbursement {id}").into(),
                     ));
@@ -2586,10 +2594,7 @@ impl GovStore {
             self.record_balance_event(
                 TreasuryBalanceEventKind::Executed,
                 Some(updated.id),
-                -(i64::try_from(updated.amount_ct).map_err(|_| {
-                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
-                })?),
-                -(i64::try_from(updated.amount_it).map_err(|_| {
+                -(i64::try_from(updated.amount).map_err(|_| {
                     sled::Error::Unsupported("treasury disbursement exceeds i64".into())
                 })?),
             )?;
@@ -2621,15 +2626,8 @@ impl GovStore {
         }
         if let Some((updated, executed_before)) = record.clone() {
             self.persist_disbursements(&records)?;
-            let delta_ct = if executed_before {
-                i64::try_from(updated.amount_ct).map_err(|_| {
-                    sled::Error::Unsupported("treasury disbursement exceeds i64".into())
-                })?
-            } else {
-                0
-            };
-            let delta_it = if executed_before {
-                i64::try_from(updated.amount_it).map_err(|_| {
+            let delta = if executed_before {
+                i64::try_from(updated.amount).map_err(|_| {
                     sled::Error::Unsupported("treasury disbursement exceeds i64".into())
                 })?
             } else {
@@ -2638,8 +2636,7 @@ impl GovStore {
             self.record_balance_event(
                 TreasuryBalanceEventKind::Cancelled,
                 Some(updated.id),
-                delta_ct,
-                delta_it,
+                delta,
             )?;
             Ok(updated)
         } else {

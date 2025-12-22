@@ -191,7 +191,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 | [`docs/overview.md`](docs/overview.md) | Mission, design pillars, repo layout, document map. |
 | [`docs/architecture.md`](docs/architecture.md) | Ledger & consensus, networking, storage, compute marketplace, bridges/DEX, gateway, telemetry. |
 | [`docs/architecture.md#launch-governor`](docs/architecture.md#launch-governor) | Launch autopilot, readiness gates, decision snapshots, and configuration. |
-| [`docs/economics_and_governance.md`](docs/economics_and_governance.md) | BLOCK supply, fee lanes, subsidy multipliers, treasury, governance DAG, settlement math; the code still uses `amount_ct/amount_it` ledger labels to describe the same BLOCK flows. |
+| [`docs/economics_and_governance.md`](docs/economics_and_governance.md) | BLOCK supply, fee lanes, subsidy multipliers, treasury, governance DAG, settlement math; older docs may reference legacy `_ct` labels for the same BLOCK flows. |
 | [`docs/operations.md`](docs/operations.md) | Bootstrap, configuration, telemetry wiring, runbooks, probe/diagnostics, WAL/snapshot care, deployments. |
 | [`docs/security_and_privacy.md`](docs/security_and_privacy.md) | Threat model, crypto stack, remote signers, jurisdiction packs, LE portal, supply-chain security. |
 | [`docs/developer_handbook.md`](docs/developer_handbook.md) | Environment setup, coding standards, testing/fuzzing, simulation, dependency policy, WASM/contracts, contribution flow. |
@@ -199,7 +199,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 
 Everything is kept in sync with `mdbook`; CI blocks merges if documentation drifts from the implementation.
 
-> **Note:** The canonical currency name is **BLOCK** and every user-facing surface should use BLOCK, but the ledger still exposes fields like `amount_ct`, `amount_it`, `STORAGE_SUB_CT`, and gauge names ending in `_ct`. Those legacy `CT` labels describe BLOCK-denominated balances—see `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, and `metrics-aggregator/src/lib.rs` for the live encoding so you understand the mapping when the code talks about CT.
+> **Note:** The canonical currency name is **BLOCK** and every user-facing surface should use BLOCK, but the ledger still exposes legacy `_ct` gauge/field names (e.g., `STORAGE_SUB_CT`). Treat those identifiers as BLOCK-denominated ledgers until all telemetry is migrated.
 
 ---
 

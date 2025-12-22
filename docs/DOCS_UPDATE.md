@@ -5,7 +5,7 @@ This backlog catalogues every documentation stretch that is currently out of syn
 ## 1. Naming & terminology drift (CT vs. BLOCK)
 
 ### `README.md:25-47`, `README.md:117-134`, `README.md:170-189`
-- **What’s wrong**: The README introduces BLOCK as the new fixed-supply currency, but the “quick demo” commands and supporting sentences still talk about “sending CT” (see `tb-cli tx send --help` comment and the “docs/economics...” description on lines 170‑179). The README needs to consistently refer to the currency as BLOCK (the codebase still tracks `amount_ct` internally, but `README` is the “public spec” and the place where fresh contributors learn the contract).
+- **What’s wrong**: The README introduces BLOCK as the new fixed-supply currency, but the “quick demo” commands and supporting sentences still talk about “sending CT” (see `tb-cli tx send --help` comment and the “docs/economics...” description on lines 170‑179). The README needs to consistently refer to the currency as BLOCK (the codebase still tracks `amount` internally, but `README` is the “public spec” and the place where fresh contributors learn the contract).
 - **Fix**:
   1. Replace `“sending CT”` and similar comments on lines 129‑132 with “sending BLOCK” (including the CLI help comment and any other quick-start samples that mention CT or CT sub-ledger tokens).
   2. Update the “Documentation guide” text so it briefly notes that the canonical token name is BLOCK but the code still uses historical `CT/IT` field names for traceability (reference `governance/src/treasury.rs` and `node/src/treasury_executor.rs` as proof that only one token is ever moved).
@@ -13,9 +13,9 @@ This backlog catalogues every documentation stretch that is currently out of syn
   - **Status**: ✅ Completed this week—README now uses BLOCK in the quick-start sample, documents the legacy CT labels, and points readers to the BLOCK-focused economics doc (the note references `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, and `metrics-aggregator/src/lib.rs` for context).
 
 ### `AGENTS.md:251-299`, `AGENTS.md:173-185`, `AGENTS.md:269-299`
-- **What’s wrong**: AGENTS is still describing the network as a “single-token (CT)” system, calls the subsidy engine “CT ledger”, and repeatedly cites `CT Supply`/`Fee Lanes` docs (lines 251‑299). This conflicts with README and the glossary that now emphasize BLOCK; we should update the operational bible to say BLOCK everywhere and explicitly note that fields like `amount_ct`, `amount_it` and the `_CT` suffixes are legacy naming conventions for ledger buckets.
+- **What’s wrong**: AGENTS is still describing the network as a “single-token (CT)” system, calls the subsidy engine “CT ledger”, and repeatedly cites `CT Supply`/`Fee Lanes` docs (lines 251‑299). This conflicts with README and the glossary that now emphasize BLOCK; we should update the operational bible to say BLOCK everywhere and explicitly note that fields like `amount`, `amount_it` and the `_CT` suffixes are legacy naming conventions for ledger buckets.
 - **Fix**:
-  1. Change the Project Mission / Economic Model section (lines 251‑299) to call BLOCK the single supply and mention CT/IT as backward-compatible field names in the code (reference `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `node/src/governance/codec.rs` for why `amount_ct`/`amount_it` still exist).
+  1. Change the Project Mission / Economic Model section (lines 251‑299) to call BLOCK the single supply and mention CT/IT as backward-compatible field names in the code (reference `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `node/src/governance/codec.rs` for why `amount`/`amount_it` still exist).
   2. Update every reference to the CT subsidy buckets (`STORAGE_SUB_CT`, etc.) to note that they are **BLOCK-denominated subsidy buckets**; keep the suffix for code clarity but make it clear to readers that BLOCK is the token that flows.
   3. Adjust the governance/fee-floor change walkthrough (lines 119‑144) so the prose says “BLOCK fee floors” rather than “CT fee floors” and links to the `governance` crate and `node/src/fee` for the live policy knobs.
   - **Status**: ✅ Mission section now emphasises BLOCK, includes a legacy CT label note, and the governance walkthrough plus subsidy bullets mention BLOCK explicitly.
@@ -30,9 +30,9 @@ This backlog catalogues every documentation stretch that is currently out of syn
 ### `docs/operations.md:26-27`, `docs/operations.md:166`
 - **What’s wrong**: The quick “Testnet/Mainnet” definitions (lines 26‑27) still talk about “fake CT” versus “real CT”, and later sections (line 166) mention “CT amount” when describing treasury dashboards. Since the operational guidance is the reference for deployers, it must speak in BLOCK and explain that CT is only the ledger nomenclature inside the codebase.
 - **Fix**:
-  1. Replace “fake CT/real CT” with “BLOCK (test versus production)”. Mention that `CT` is the internal field name (`governance`: `amount_ct`, `metrics-aggregator`: `treasury_disbursement_amount_ct`) but operators still think BLOCK.
-  2. In the dashboard paragraph, rename `CT amount` to `BLOCK amount` and note that the metrics aggregator emits `treasury_disbursement_amount_ct` as a BLOCK-denominated gauge.
-  - **Status**: ✅ Updated the testnet/mainnet explainer and treasury dashboard note so both call out BLOCK with a pointer to `treasury_disbursement_amount_ct`.
+  1. Replace “fake CT/real CT” with “BLOCK (test versus production)”. Mention that `CT` is the internal field name (`governance`: `amount`, `metrics-aggregator`: `treasury_disbursement_amount`) but operators still think BLOCK.
+  2. In the dashboard paragraph, rename `CT amount` to `BLOCK amount` and note that the metrics aggregator emits `treasury_disbursement_amount` as a BLOCK-denominated gauge.
+  - **Status**: ✅ Updated the testnet/mainnet explainer and treasury dashboard note so both call out BLOCK with a pointer to `treasury_disbursement_amount`.
 
 ### `docs/security_and_privacy.md:11`
 - **What’s wrong**: The threat-model table starts by saying defenders are protecting “CT” (line 11). This conflicts with README and README‑level messaging and creates unnecessary friction when security reviewers search for BLOCK. 

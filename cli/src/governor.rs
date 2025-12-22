@@ -1,3 +1,5 @@
+extern crate foundation_serialization as serde;
+
 use crate::{
     codec_helpers::{json_to_string, json_to_string_pretty},
     parse_utils::{parse_u64, take_string},
@@ -8,8 +10,8 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::{self, from_value, Value};
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::json::{from_value, Value};
+use foundation_serialization::Deserialize;
 
 const DEFAULT_RPC: &str = "http://127.0.0.1:26657";
 const DEFAULT_LIMIT: u64 = 20;
@@ -248,6 +250,7 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct GovernorStatusView {
     enabled: bool,
@@ -272,6 +275,7 @@ struct GateSnapshotView {
     last_reason: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct EconomicsSampleView {
     #[serde(default)]
@@ -309,6 +313,7 @@ struct EconomicsPrevMetricView {
     provider_margin_ppm: i64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct IntentSummaryView {
     id: String,

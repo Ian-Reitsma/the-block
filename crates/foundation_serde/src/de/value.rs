@@ -290,7 +290,7 @@ pub trait IntoDeserializer<'de, E: Error> {
     fn into_deserializer(self) -> Self::Deserializer;
 }
 
-impl<'de, E> IntoDeserializer<'de, E> for String
+impl<E> IntoDeserializer<'_, E> for String
 where
     E: Error,
 {
@@ -316,7 +316,7 @@ impl<'a, E> StrDeserializer<'a, E> {
     }
 }
 
-impl<'de, 'a, E> Deserializer<'de> for StrDeserializer<'a, E>
+impl<'de, E> Deserializer<'de> for StrDeserializer<'_, E>
 where
     E: Error,
 {
@@ -586,7 +586,7 @@ struct UnitOnlyVariantAccess<'a, E> {
     marker: std::marker::PhantomData<E>,
 }
 
-impl<'de, 'a, E> super::EnumAccess<'de> for UnitOnlyVariantAccess<'a, E>
+impl<'de, E> super::EnumAccess<'de> for UnitOnlyVariantAccess<'_, E>
 where
     E: Error,
 {
@@ -961,7 +961,7 @@ where
     }
 }
 
-impl<'de, E> IntoDeserializer<'de, E> for u32
+impl<E> IntoDeserializer<'_, E> for u32
 where
     E: Error,
 {

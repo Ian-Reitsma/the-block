@@ -3,7 +3,7 @@
 use foundation_serialization::json::{self, Map, Number, Value};
 
 use crate::{ContractRecord, ProofOutcome, ReplicaIncentive, StorageMarketError};
-use storage::StorageContract;
+use storage::{merkle_proof::MerkleRoot, StorageContract};
 
 const CONTRACT_KEY: &str = "contract";
 const REPLICAS_KEY: &str = "replicas";
@@ -86,6 +86,17 @@ fn storage_contract_to_value(contract: &StorageContract) -> Value {
             .map(Value::from)
             .unwrap_or(Value::Null),
     );
+    map.insert(
+        "storage_root".into(),
+        Value::Array(
+            contract
+                .storage_root
+                .as_bytes()
+                .iter()
+                .map(|byte| Value::from(*byte))
+                .collect(),
+        ),
+    );
     Value::Object(map)
 }
 
@@ -102,6 +113,7 @@ fn storage_contract_from_value(value: Value) -> Result<StorageContract, StorageM
     let accrued = take_u64(&mut map, "accrued", "storage contract")?;
     let total_deposit_ct = take_u64_default(&mut map, "total_deposit_ct", "storage contract", 0)?;
     let last_payment_block = take_optional_u64(&mut map, "last_payment_block", "storage contract")?;
+    let storage_root_bytes = take_storage_root_bytes(&mut map, "storage_root", "storage contract")?;
     Ok(StorageContract {
         object_id,
         provider_id,
@@ -114,6 +126,7 @@ fn storage_contract_from_value(value: Value) -> Result<StorageContract, StorageM
         accrued,
         total_deposit_ct,
         last_payment_block,
+        storage_root: MerkleRoot::new(storage_root_bytes),
     })
 }
 
@@ -214,6 +227,45 @@ fn expect_object(value: Value, context: &str) -> Result<Map, StorageMarketError>
 
 fn field_err(field: &str, context: &str) -> StorageMarketError {
     StorageMarketError::Serialization(format!("missing field '{field}' in {context}"))
+}
+
+fn take_storage_root_bytes(
+    map: &mut Map,
+    field: &str,
+    context: &str,
+) -> Result<[u8; 32], StorageMarketError> {
+    let value = map.remove(field).ok_or_else(|| field_err(field, context))?;
+    let array = match value {
+        Value::Array(items) => {
+            if items.len() != 32 {
+                return Err(StorageMarketError::Serialization(format!(
+                    "expected 32-byte storage root for {context}.{field}, found length {}",
+                    items.len()
+                )));
+            }
+            let mut out = [0u8; 32];
+            for (idx, item) in items.into_iter().enumerate() {
+                let byte = item.as_u64().ok_or_else(|| {
+                    StorageMarketError::Serialization(format!(
+                        "storage root byte {idx} for {context}.{field} is not a number"
+                    ))
+                })?;
+                if byte > u8::MAX as u64 {
+                    return Err(StorageMarketError::Serialization(format!(
+                        "storage root byte {idx} for {context}.{field} out of range: {byte}"
+                    )));
+                }
+                out[idx] = byte as u8;
+            }
+            out
+        }
+        other => {
+            return Err(StorageMarketError::Serialization(format!(
+                "expected array for {context}.{field}, found {other:?}"
+            )))
+        }
+    };
+    Ok(array)
 }
 
 fn take_string(map: &mut Map, field: &str, context: &str) -> Result<String, StorageMarketError> {

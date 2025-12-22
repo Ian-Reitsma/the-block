@@ -396,7 +396,7 @@ fn write_treasury_events(writer: &mut Writer, events: &[BlockTreasuryEvent]) -> 
         writer.write_struct(|struct_writer| {
             struct_writer.field_u64("disbursement_id", event.disbursement_id);
             struct_writer.field_string("destination", &event.destination);
-            struct_writer.field_u64("amount_ct", event.amount_ct);
+            struct_writer.field_u64("amount", event.amount);
             struct_writer.field_string("memo", &event.memo);
             struct_writer.field_u64("scheduled_epoch", event.scheduled_epoch);
             struct_writer.field_string("tx_hash", &event.tx_hash);
@@ -410,7 +410,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
     read_vec(reader, |reader| {
         let mut disbursement_id = None;
         let mut destination = None;
-        let mut amount_ct = None;
+        let mut amount = None;
         let mut memo = None;
         let mut scheduled_epoch = None;
         let mut tx_hash = None;
@@ -420,7 +420,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
                 assign_once(&mut disbursement_id, reader.read_u64()?, "disbursement_id")
             }
             "destination" => assign_once(&mut destination, reader.read_string()?, "destination"),
-            "amount_ct" => assign_once(&mut amount_ct, reader.read_u64()?, "amount_ct"),
+            "amount" => assign_once(&mut amount, reader.read_u64()?, "amount"),
             "memo" => assign_once(&mut memo, reader.read_string()?, "memo"),
             "scheduled_epoch" => {
                 assign_once(&mut scheduled_epoch, reader.read_u64()?, "scheduled_epoch")
@@ -432,7 +432,7 @@ fn read_treasury_events(reader: &mut Reader<'_>) -> Result<Vec<BlockTreasuryEven
         Ok(BlockTreasuryEvent {
             disbursement_id: disbursement_id.unwrap_or_default(),
             destination: destination.unwrap_or_default(),
-            amount_ct: amount_ct.unwrap_or_default(),
+            amount: amount.unwrap_or_default(),
             memo: memo.unwrap_or_default(),
             scheduled_epoch: scheduled_epoch.unwrap_or_default(),
             tx_hash: tx_hash.unwrap_or_default(),
@@ -452,6 +452,11 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_u64("price_ct", r.price_ct);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("provider_escrow", r.provider_escrow);
+                struct_writer.field_with("provider_signature", |field_writer| {
+                    write_bytes(field_writer, &r.provider_signature, "provider_signature")
+                        .expect("signature length fits");
+                });
+                struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
             Receipt::Compute(r) => {
                 struct_writer.field_string("type", "compute");
@@ -461,6 +466,11 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_u64("payment_ct", r.payment_ct);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("verified", if r.verified { 1 } else { 0 });
+                struct_writer.field_with("provider_signature", |field_writer| {
+                    write_bytes(field_writer, &r.provider_signature, "provider_signature")
+                        .expect("signature length fits");
+                });
+                struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
             Receipt::Energy(r) => {
                 struct_writer.field_string("type", "energy");
@@ -472,6 +482,11 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_with("proof_hash", |field_writer| {
                     write_fixed(field_writer, &r.proof_hash);
                 });
+                struct_writer.field_with("provider_signature", |field_writer| {
+                    write_bytes(field_writer, &r.provider_signature, "provider_signature")
+                        .expect("signature length fits");
+                });
+                struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
             Receipt::Ad(r) => {
                 struct_writer.field_string("type", "ad");
@@ -481,6 +496,11 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_u64("spend_ct", r.spend_ct);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("conversions", r.conversions as u64);
+                struct_writer.field_with("publisher_signature", |field_writer| {
+                    write_bytes(field_writer, &r.publisher_signature, "publisher_signature")
+                        .expect("signature length fits");
+                });
+                struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
         });
         Ok(())
@@ -507,6 +527,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut verified = None;
         let mut proof_hash = None;
         let mut conversions = None;
+        let mut provider_signature = None;
+        let mut publisher_signature = None;
+        let mut signature_nonce = None;
 
         decode_struct(reader, None, |key, reader| match key {
             "type" => assign_once(&mut receipt_type, reader.read_string()?, "type"),
@@ -529,6 +552,19 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "verified" => assign_once(&mut verified, reader.read_u64()?, "verified"),
             "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
             "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
+            "provider_signature" => assign_once(
+                &mut provider_signature,
+                read_bytes_field(reader, "provider_signature")?,
+                "provider_signature",
+            ),
+            "publisher_signature" => assign_once(
+                &mut publisher_signature,
+                read_bytes_field(reader, "publisher_signature")?,
+                "publisher_signature",
+            ),
+            "signature_nonce" => {
+                assign_once(&mut signature_nonce, reader.read_u64()?, "signature_nonce")
+            }
             other => Err(DecodeError::UnknownField(other.to_string())),
         })?;
 
@@ -542,6 +578,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 provider_escrow: provider_escrow
                     .ok_or(DecodeError::MissingField("provider_escrow"))?,
+                provider_signature: provider_signature
+                    .ok_or(DecodeError::MissingField("provider_signature"))?,
+                signature_nonce: signature_nonce
+                    .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
             "compute" => Ok(Receipt::Compute(ComputeReceipt {
                 job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
@@ -550,6 +590,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 payment_ct: payment_ct.ok_or(DecodeError::MissingField("payment_ct"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
+                provider_signature: provider_signature
+                    .ok_or(DecodeError::MissingField("provider_signature"))?,
+                signature_nonce: signature_nonce
+                    .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
             "energy" => Ok(Receipt::Energy(EnergyReceipt {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
@@ -558,6 +602,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 proof_hash: proof_hash.ok_or(DecodeError::MissingField("proof_hash"))?,
+                provider_signature: provider_signature
+                    .ok_or(DecodeError::MissingField("provider_signature"))?,
+                signature_nonce: signature_nonce
+                    .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
             "ad" => Ok(Receipt::Ad(AdReceipt {
                 campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,
@@ -566,6 +614,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 spend_ct: spend_ct.ok_or(DecodeError::MissingField("spend_ct"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 conversions: conversions.ok_or(DecodeError::MissingField("conversions"))? as u32,
+                publisher_signature: publisher_signature
+                    .ok_or(DecodeError::MissingField("publisher_signature"))?,
+                signature_nonce: signature_nonce
+                    .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
             _ => Err(DecodeError::InvalidFieldValue {
                 field: "type",
@@ -603,6 +655,18 @@ fn write_bytes(writer: &mut Writer, value: &[u8], field: &'static str) -> Encode
     let _ = u64::try_from(value.len()).map_err(|_| EncodeError::LengthOverflow(field))?;
     writer.write_bytes(value);
     Ok(())
+}
+
+fn read_bytes_field(reader: &mut Reader<'_>, field: &'static str) -> Result<Vec<u8>, DecodeError> {
+    let len = reader.read_u64()?;
+    let len_usize = usize::try_from(len).map_err(|_| DecodeError::InvalidFieldValue {
+        field,
+        reason: format!("length overflow {}", len),
+    })?;
+    reader
+        .read_exact(len_usize)
+        .map(|bytes| bytes.to_vec())
+        .map_err(DecodeError::from)
 }
 
 fn write_fixed(writer: &mut Writer, value: &[u8; 32]) {
@@ -688,6 +752,13 @@ pub fn encode_receipts(receipts: &[Receipt]) -> EncodeResult<Vec<u8>> {
     let mut writer = Writer::with_capacity(receipts.len() * 256); // Estimate 256 bytes per receipt
     write_receipts(&mut writer, receipts)?;
     Ok(writer.finish())
+}
+
+pub fn decode_receipts(bytes: &[u8]) -> binary_struct::Result<Vec<Receipt>> {
+    let mut reader = Reader::new(bytes);
+    let receipts = read_receipts(&mut reader)?;
+    ensure_exhausted(&reader)?;
+    Ok(receipts)
 }
 
 #[cfg(test)]

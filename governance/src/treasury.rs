@@ -1,4 +1,4 @@
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::{json, Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::codec::{BinaryCodec, BinaryWriter, Result as CodecResult};
@@ -57,9 +57,7 @@ pub struct ExpectedReceipt {
     #[serde(default)]
     pub account: String,
     #[serde(default)]
-    pub amount_ct: u64,
-    #[serde(default)]
-    pub amount_it: u64,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -89,9 +87,7 @@ pub struct DisbursementDetails {
     #[serde(default)]
     pub destination: String,
     #[serde(default)]
-    pub amount_ct: u64,
-    #[serde(default)]
-    pub amount_it: u64,
+    pub amount: u64,
     #[serde(default)]
     pub memo: String,
     #[serde(default)]
@@ -115,9 +111,7 @@ pub struct DisbursementReceipt {
     #[serde(default)]
     pub account: String,
     #[serde(default)]
-    pub amount_ct: u64,
-    #[serde(default)]
-    pub amount_it: u64,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -160,9 +154,7 @@ pub enum DisbursementStatus {
 pub struct TreasuryDisbursement {
     pub id: u64,
     pub destination: String,
-    pub amount_ct: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub amount_it: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub created_at: u64,
@@ -179,8 +171,7 @@ impl TreasuryDisbursement {
     pub fn new(
         id: u64,
         destination: String,
-        amount_ct: u64,
-        amount_it: u64,
+        amount: u64,
         memo: String,
         scheduled_epoch: u64,
     ) -> Self {
@@ -190,8 +181,7 @@ impl TreasuryDisbursement {
                 proposal: DisbursementProposalMetadata::default(),
                 disbursement: DisbursementDetails {
                     destination,
-                    amount_ct,
-                    amount_it,
+                    amount,
                     memo,
                     scheduled_epoch,
                     expected_receipts: Vec::new(),
@@ -213,8 +203,7 @@ impl TreasuryDisbursement {
         Self {
             id,
             destination: payload.disbursement.destination,
-            amount_ct: payload.disbursement.amount_ct,
-            amount_it: payload.disbursement.amount_it,
+            amount: payload.disbursement.amount,
             memo: payload.disbursement.memo,
             scheduled_epoch: payload.disbursement.scheduled_epoch,
             created_at,
@@ -260,6 +249,14 @@ pub fn mark_rolled_back(disbursement: &mut TreasuryDisbursement, reason: String)
     };
 }
 
+pub fn mark_rolled_back_with_error(
+    disbursement: &mut TreasuryDisbursement,
+    error: DisbursementError,
+) {
+    let reason = format!("{:?}", error);
+    mark_rolled_back(disbursement, reason);
+}
+
 pub fn mark_cancelled(disbursement: &mut TreasuryDisbursement, reason: String) {
     disbursement.status = DisbursementStatus::RolledBack {
         reason,
@@ -280,6 +277,41 @@ pub enum DisbursementValidationError {
     InvalidTimelock,
     InvalidRollbackWindow,
     ExpectedReceiptsMismatch { expected_total: u64, actual: u64 },
+}
+
+/// Explicit error states for treasury execution tracking
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub enum DisbursementError {
+    InsufficientFunds {
+        required_ct: u64,
+        required_it: u64,
+        available_ct: u64,
+        available_it: u64,
+    },
+    InvalidTarget {
+        destination: String,
+        reason: String,
+    },
+    StaleProposal {
+        proposal_id: u64,
+        current_epoch: u64,
+        scheduled_epoch: u64,
+    },
+    DependencyFailed {
+        dependency_id: u64,
+        reason: String,
+    },
+    ExecutorBacklog {
+        queue_depth: usize,
+        threshold: usize,
+    },
+    NetworkError {
+        message: String,
+    },
+    ValidationFailed {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for DisbursementValidationError {
@@ -359,7 +391,7 @@ pub fn validate_disbursement_payload(
         )));
     }
 
-    if payload.disbursement.amount_ct == 0 && payload.disbursement.amount_it == 0 {
+    if payload.disbursement.amount == 0 {
         return Err(DisbursementValidationError::ZeroAmount);
     }
 
@@ -369,25 +401,165 @@ pub fn validate_disbursement_payload(
 
     // Validate expected receipts sum matches disbursement amount
     if !payload.disbursement.expected_receipts.is_empty() {
-        let total_ct: u64 = payload
+        let total: u64 = payload
             .disbursement
             .expected_receipts
             .iter()
-            .map(|r| r.amount_ct)
-            .sum();
-        let total_it: u64 = payload
-            .disbursement
-            .expected_receipts
-            .iter()
-            .map(|r| r.amount_it)
+            .map(|r| r.amount)
             .sum();
 
-        if total_ct != payload.disbursement.amount_ct || total_it != payload.disbursement.amount_it
-        {
+        if total != payload.disbursement.amount {
             return Err(DisbursementValidationError::ExpectedReceiptsMismatch {
-                expected_total: total_ct,
-                actual: payload.disbursement.amount_ct,
+                expected_total: total,
+                actual: payload.disbursement.amount,
             });
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate dependency graph for a disbursement payload
+pub fn validate_dependencies(
+    payload: &DisbursementPayload,
+    existing_disbursements: &[TreasuryDisbursement],
+) -> Result<(), DisbursementError> {
+    for dep_id in &payload.proposal.deps {
+        // Find dependency
+        let dep = existing_disbursements
+            .iter()
+            .find(|d| d.id == *dep_id)
+            .ok_or_else(|| DisbursementError::DependencyFailed {
+                dependency_id: *dep_id,
+                reason: format!("Dependency {} not found", dep_id),
+            })?;
+
+        // Check dependency is in acceptable state
+        match &dep.status {
+            DisbursementStatus::Finalized { .. } => {
+                // Good - dependency completed successfully
+            }
+            DisbursementStatus::RolledBack { reason, .. } => {
+                return Err(DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} rolled back: {}", dep_id, reason),
+                });
+            }
+            _ => {
+                return Err(DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} not yet finalized", dep_id),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse dependency IDs out of a memo string.
+///
+/// The parser supports both JSON and key=value styles so tooling that relies on
+/// Maximum number of dependencies allowed per disbursement to prevent DOS attacks
+const MAX_DEPENDENCIES: usize = 100;
+
+/// memo-based dependency hints can stay in sync. This is the canonical implementation
+/// used by the executor, CLI, and explorer layers.
+///
+/// # Security
+/// - Limits dependency count to MAX_DEPENDENCIES (100) to prevent DOS attacks
+/// - Deduplicates dependency IDs to prevent repeated processing
+/// - Validates memo size before parsing
+pub fn parse_dependency_list(memo: &str) -> Vec<u64> {
+    let trimmed = memo.trim();
+
+    // Security: Reject excessively large memos (potential DOS)
+    if trimmed.is_empty() || trimmed.len() > 8192 {
+        return Vec::new();
+    }
+
+    let mut deps = Vec::new();
+
+    // Try JSON format first
+    if let Ok(json::Value::Object(map)) = json::from_str::<json::Value>(trimmed) {
+        if let Some(json::Value::Array(items)) = map.get("depends_on") {
+            for item in items.iter().take(MAX_DEPENDENCIES) {
+                if let Some(id) = match item {
+                    json::Value::Number(num) => num.as_u64(),
+                    json::Value::String(text) => text.trim().parse::<u64>().ok(),
+                    _ => None,
+                } {
+                    deps.push(id);
+                }
+            }
+        }
+    } else if let Some(rest) = trimmed
+        .strip_prefix("depends_on=")
+        .or_else(|| trimmed.strip_prefix("depends_on:"))
+    {
+        // Try key-value format
+        for entry in rest.split(',').take(MAX_DEPENDENCIES) {
+            if let Ok(id) = entry.trim().parse::<u64>() {
+                deps.push(id);
+            }
+        }
+    }
+
+    // Security: Deduplicate to prevent repeated processing
+    deps.sort_unstable();
+    deps.dedup();
+    deps
+}
+
+/// Check if a disbursement is eligible for execution at the given epoch
+pub fn is_eligible_for_execution(
+    disbursement: &TreasuryDisbursement,
+    current_epoch: u64,
+    existing_disbursements: &[TreasuryDisbursement],
+) -> Result<(), DisbursementError> {
+    // Check state
+    match &disbursement.status {
+        DisbursementStatus::Timelocked { ready_epoch } => {
+            if current_epoch < *ready_epoch {
+                return Err(DisbursementError::StaleProposal {
+                    proposal_id: disbursement.id,
+                    current_epoch,
+                    scheduled_epoch: *ready_epoch,
+                });
+            }
+        }
+        _ => {
+            return Err(DisbursementError::ValidationFailed {
+                reason: format!("Disbursement {} not in Timelocked state", disbursement.id),
+            });
+        }
+    }
+
+    // Check dependencies if proposal metadata exists
+    if let Some(proposal) = &disbursement.proposal {
+        for dep_id in &proposal.deps {
+            let dep = existing_disbursements
+                .iter()
+                .find(|d| d.id == *dep_id)
+                .ok_or_else(|| DisbursementError::DependencyFailed {
+                    dependency_id: *dep_id,
+                    reason: format!("Dependency {} not found", dep_id),
+                })?;
+
+            match &dep.status {
+                DisbursementStatus::Finalized { .. } => {}
+                DisbursementStatus::RolledBack { reason, .. } => {
+                    return Err(DisbursementError::DependencyFailed {
+                        dependency_id: *dep_id,
+                        reason: format!("Dependency {} rolled back: {}", dep_id, reason),
+                    });
+                }
+                _ => {
+                    return Err(DisbursementError::DependencyFailed {
+                        dependency_id: *dep_id,
+                        reason: format!("Dependency {} not finalized", dep_id),
+                    });
+                }
+            }
         }
     }
 
@@ -415,8 +587,7 @@ mod tests {
             },
             disbursement: DisbursementDetails {
                 destination: "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".into(),
-                amount_ct: 100_000,
-                amount_it: 0,
+                amount: 100_000,
                 memo: "Test payment".into(),
                 scheduled_epoch: 1000,
                 expected_receipts: vec![],
@@ -479,8 +650,7 @@ mod tests {
     #[test]
     fn zero_amount_fails_validation() {
         let mut payload = valid_payload();
-        payload.disbursement.amount_ct = 0;
-        payload.disbursement.amount_it = 0;
+        payload.disbursement.amount = 0;
         let err = validate_disbursement_payload(&payload).unwrap_err();
         assert!(matches!(err, DisbursementValidationError::ZeroAmount));
     }
@@ -488,17 +658,15 @@ mod tests {
     #[test]
     fn expected_receipts_mismatch_fails_validation() {
         let mut payload = valid_payload();
-        payload.disbursement.amount_ct = 100_000;
+        payload.disbursement.amount = 100_000;
         payload.disbursement.expected_receipts = vec![
             ExpectedReceipt {
                 account: "acc1".into(),
-                amount_ct: 50_000,
-                amount_it: 0,
+                amount: 50_000,
             },
             ExpectedReceipt {
                 account: "acc2".into(),
-                amount_ct: 40_000, // Total is 90_000, not 100_000
-                amount_it: 0,
+                amount: 40_000, // Total is 90_000, not 100_000
             },
         ];
         let err = validate_disbursement_payload(&payload).unwrap_err();
@@ -511,20 +679,74 @@ mod tests {
     #[test]
     fn expected_receipts_matching_passes_validation() {
         let mut payload = valid_payload();
-        payload.disbursement.amount_ct = 100_000;
+        payload.disbursement.amount = 100_000;
         payload.disbursement.expected_receipts = vec![
             ExpectedReceipt {
                 account: "acc1".into(),
-                amount_ct: 60_000,
-                amount_it: 0,
+                amount: 60_000,
             },
             ExpectedReceipt {
                 account: "acc2".into(),
-                amount_ct: 40_000,
-                amount_it: 0,
+                amount: 40_000,
             },
         ];
         assert!(validate_disbursement_payload(&payload).is_ok());
+    }
+
+    #[test]
+    fn parse_dependency_list_json() {
+        let memo = r#"{"depends_on": [1234, 5678]}"#;
+        assert_eq!(parse_dependency_list(memo), vec![1234, 5678]);
+    }
+
+    #[test]
+    fn parse_dependency_list_key_value() {
+        let memo = "depends_on=111,222";
+        assert_eq!(parse_dependency_list(memo), vec![111, 222]);
+    }
+
+    #[test]
+    fn parse_dependency_list_empty() {
+        assert!(parse_dependency_list("").is_empty());
+        assert!(parse_dependency_list("no deps").is_empty());
+    }
+
+    #[test]
+    fn parse_dependency_list_deduplicates() {
+        // Security: Ensure duplicate IDs are removed
+        let memo = r#"{"depends_on": [123, 456, 123, 789, 456]}"#;
+        let result = parse_dependency_list(memo);
+        assert_eq!(result, vec![123, 456, 789]);
+    }
+
+    #[test]
+    fn parse_dependency_list_limits_count() {
+        // Security: Ensure DOS protection by limiting count
+        let mut deps = Vec::new();
+        for i in 0..150 {
+            deps.push(format!("{}", i));
+        }
+        let memo = format!("depends_on={}", deps.join(","));
+        let result = parse_dependency_list(&memo);
+        // Should be limited to MAX_DEPENDENCIES (100), then deduplicated
+        assert!(result.len() <= 100);
+    }
+
+    #[test]
+    fn parse_dependency_list_rejects_huge_memo() {
+        // Security: Reject excessively large memos (> 8KB)
+        let huge_memo = "depends_on=".to_string() + &"1,".repeat(10000);
+        let result = parse_dependency_list(&huge_memo);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_dependency_list_handles_malformed_json() {
+        // Security: Ensure malformed JSON doesn't panic
+        let memo = r#"{"depends_on": [1, 2, "invalid", null, 3]}"#;
+        let result = parse_dependency_list(memo);
+        // Should parse valid numbers only
+        assert_eq!(result, vec![1, 2, 3]);
     }
 }
 
@@ -687,12 +909,8 @@ pub enum TreasuryBalanceEventKind {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryBalanceSnapshot {
     pub id: u64,
-    pub balance_ct: u64,
-    pub delta_ct: i64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub balance_it: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub delta_it: i64,
+    pub balance: u64,
+    pub delta: i64,
     pub recorded_at: u64,
     pub event: TreasuryBalanceEventKind,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -702,19 +920,15 @@ pub struct TreasuryBalanceSnapshot {
 impl TreasuryBalanceSnapshot {
     pub fn new(
         id: u64,
-        balance_ct: u64,
-        delta_ct: i64,
-        balance_it: u64,
-        delta_it: i64,
+        balance: u64,
+        delta: i64,
         event: TreasuryBalanceEventKind,
         disbursement_id: Option<u64>,
     ) -> Self {
         Self {
             id,
-            balance_ct,
-            delta_ct,
-            balance_it,
-            delta_it,
+            balance,
+            delta,
             recorded_at: now_ts(),
             event,
             disbursement_id,

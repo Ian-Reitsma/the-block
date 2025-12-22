@@ -510,9 +510,11 @@ mod inhouse {
             fn classify(flags: u32) -> WatchEventKind {
                 if flags & kqueue::NOTE_DELETE != 0 {
                     WatchEventKind::Removed
-                } else if flags & kqueue::NOTE_RENAME != 0 {
-                    WatchEventKind::Modified
-                } else if flags & (kqueue::NOTE_WRITE | kqueue::NOTE_EXTEND | kqueue::NOTE_ATTRIB)
+                } else if flags
+                    & (kqueue::NOTE_RENAME
+                        | kqueue::NOTE_WRITE
+                        | kqueue::NOTE_EXTEND
+                        | kqueue::NOTE_ATTRIB)
                     != 0
                 {
                     WatchEventKind::Modified

@@ -449,7 +449,7 @@ fn write_payout_table(
         writeln!(
             writer,
             "{:<14} {:<34} {:>16} {:<12} {}",
-            "disbursement", "destination", "amount_ct", "scheduled", "tx_hash",
+            "disbursement", "destination", "amount", "scheduled", "tx_hash",
         )
         .map_err(|err| format!("failed to write output: {err}"))?;
         for event in &breakdown.treasury_events {
@@ -458,7 +458,7 @@ fn write_payout_table(
                 "{:<14} {:<34} {:>16} {:<12} {}",
                 event.disbursement_id,
                 event.destination,
-                event.amount_ct,
+                event.amount,
                 event.scheduled_epoch,
                 event.tx_hash,
             )

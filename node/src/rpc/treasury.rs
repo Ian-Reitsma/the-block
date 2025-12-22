@@ -27,13 +27,9 @@ pub struct TreasuryDisbursementsRequest {
     #[serde(default)]
     pub max_epoch: Option<u64>,
     #[serde(default)]
-    pub min_amount_ct: Option<u64>,
+    pub min_amount: Option<u64>,
     #[serde(default)]
-    pub max_amount_ct: Option<u64>,
-    #[serde(default)]
-    pub min_amount_it: Option<u64>,
-    #[serde(default)]
-    pub max_amount_it: Option<u64>,
+    pub max_amount: Option<u64>,
     #[serde(default)]
     pub min_created_at: Option<u64>,
     #[serde(default)]
@@ -58,8 +54,7 @@ pub struct TreasuryBalanceHistoryRequest {
 pub struct TreasuryDisbursementRecord {
     pub id: u64,
     pub destination: String,
-    pub amount_ct: u64,
-    pub amount_it: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub created_at: u64,
@@ -77,8 +72,7 @@ pub struct TreasuryDisbursementsResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryBalanceResponse {
-    pub balance_ct: u64,
-    pub balance_it: u64,
+    pub balance: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_snapshot: Option<TreasuryBalanceSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,8 +85,7 @@ pub struct TreasuryBalanceHistoryResponse {
     pub snapshots: Vec<TreasuryBalanceSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<u64>,
-    pub current_balance_ct: u64,
-    pub current_balance_it: u64,
+    pub current_balance: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -173,10 +166,8 @@ impl TreasuryDisbursementStatusFilter {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryBalanceSnapshot {
     pub id: u64,
-    pub balance_ct: u64,
-    pub delta_ct: i64,
-    pub balance_it: u64,
-    pub delta_it: i64,
+    pub balance: u64,
+    pub delta: i64,
     pub recorded_at: u64,
     pub event: TreasuryBalanceEventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,8 +251,7 @@ pub fn balance(store: &GovStore) -> Result<TreasuryBalanceResponse, RpcError> {
         .map_err(storage_error)?
         .map(TreasuryExecutorSnapshot::from);
     Ok(TreasuryBalanceResponse {
-        balance_ct: balances.consumer,
-        balance_it: balances.industrial,
+        balance: balances.balance,
         last_snapshot,
         executor,
     })
@@ -292,8 +282,7 @@ pub fn balance_history(
     Ok(TreasuryBalanceHistoryResponse {
         snapshots: page.drain(..).collect(),
         next_cursor,
-        current_balance_ct: balances.consumer,
-        current_balance_it: balances.industrial,
+        current_balance: balances.balance,
     })
 }
 
@@ -302,8 +291,7 @@ impl From<GovDisbursement> for TreasuryDisbursementRecord {
         Self {
             id: value.id,
             destination: value.destination,
-            amount_ct: value.amount_ct,
-            amount_it: value.amount_it,
+            amount: value.amount,
             memo: value.memo,
             scheduled_epoch: value.scheduled_epoch,
             created_at: value.created_at,
@@ -366,10 +354,8 @@ impl From<GovBalanceSnapshot> for TreasuryBalanceSnapshot {
     fn from(value: GovBalanceSnapshot) -> Self {
         Self {
             id: value.id,
-            balance_ct: value.balance_ct,
-            delta_ct: value.delta_ct,
-            balance_it: value.balance_it,
-            delta_it: value.delta_it,
+            balance: value.balance,
+            delta: value.delta,
             recorded_at: value.recorded_at,
             event: value.event.into(),
             disbursement_id: value.disbursement_id,
@@ -428,23 +414,13 @@ fn matches_request(record: &GovDisbursement, request: &TreasuryDisbursementsRequ
             return false;
         }
     }
-    if let Some(min_amount_ct) = request.min_amount_ct {
-        if record.amount_ct < min_amount_ct {
+    if let Some(min_amount) = request.min_amount {
+        if record.amount < min_amount {
             return false;
         }
     }
-    if let Some(max_amount_ct) = request.max_amount_ct {
-        if record.amount_ct > max_amount_ct {
-            return false;
-        }
-    }
-    if let Some(min_amount_it) = request.min_amount_it {
-        if record.amount_it < min_amount_it {
-            return false;
-        }
-    }
-    if let Some(max_amount_it) = request.max_amount_it {
-        if record.amount_it > max_amount_it {
+    if let Some(max_amount) = request.max_amount {
+        if record.amount > max_amount {
             return false;
         }
     }
@@ -542,8 +518,7 @@ pub struct ExecuteDisbursementRequest {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct DisbursementReceiptInput {
     pub account: String,
-    pub amount_ct: u64,
-    pub amount_it: u64,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -621,8 +596,7 @@ pub fn execute_disbursement(
         .into_iter()
         .map(|r| governance_spec::treasury::DisbursementReceipt {
             account: r.account,
-            amount_ct: r.amount_ct,
-            amount_it: r.amount_it,
+            amount: r.amount,
         })
         .collect();
     let disbursement = store

@@ -1,3 +1,10 @@
+#![allow(
+    clippy::needless_lifetimes,
+    clippy::explicit_auto_deref,
+    clippy::unwrap_or_default,
+    clippy::type_complexity,
+    clippy::redundant_closure
+)]
 #![forbid(unsafe_code)]
 
 //! First-party test harness primitives that replace the previous dependency on

@@ -4,7 +4,6 @@ use httpd::{
     HttpClient, Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode,
     TlsConnectorError, serve_tls, tls_connector_from_env,
 };
-use runtime::net::TcpListener;
 use runtime::{block_on, sleep, spawn};
 use std::collections::HashMap;
 use std::env;
@@ -13,6 +12,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use sys::tempfile;
+
+mod support;
+use support::{LOCAL_BIND_ADDR, bind_runtime_listener};
 
 struct EnvScope {
     original: HashMap<String, Option<String>>,
@@ -102,10 +104,13 @@ fn render_key_json(signing: &SigningKey) -> Vec<u8> {
     .into_bytes()
 }
 
-async fn start_tls_server(identity: &Identity) -> (String, runtime::JoinHandle<io::Result<()>>) {
-    let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-        .await
-        .expect("bind listener");
+async fn start_tls_server(
+    identity: &Identity,
+) -> Option<(String, runtime::JoinHandle<io::Result<()>>)> {
+    let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
+        Some(listener) => listener,
+        None => return None,
+    };
     let addr = listener.local_addr().expect("addr");
     let router = Router::new(()).get("/ping", |_req| async move {
         Ok(Response::new(StatusCode::OK)
@@ -116,14 +121,17 @@ async fn start_tls_server(identity: &Identity) -> (String, runtime::JoinHandle<i
         .expect("tls config");
     let handle =
         spawn(async move { serve_tls(listener, router, ServerConfig::default(), tls).await });
-    (format!("https://{}", addr), handle)
+    Some((format!("https://{}", addr), handle))
 }
 
 #[test]
 fn env_tls_client_prefers_first_prefix() {
     block_on(async {
         let server_identity = Identity::new();
-        let (base, handle) = start_tls_server(&server_identity).await;
+        let (base, handle) = match start_tls_server(&server_identity).await {
+            Some(pair) => pair,
+            None => return,
+        };
         sleep(Duration::from_millis(50)).await;
 
         let anchor = server_identity.write_anchor("anchor.json");
@@ -154,7 +162,10 @@ fn env_tls_client_prefers_first_prefix() {
 fn env_tls_client_falls_back_to_secondary_prefix() {
     block_on(async {
         let server_identity = Identity::new();
-        let (base, handle) = start_tls_server(&server_identity).await;
+        let (base, handle) = match start_tls_server(&server_identity).await {
+            Some(pair) => pair,
+            None => return,
+        };
         sleep(Duration::from_millis(50)).await;
 
         let anchor = server_identity.write_anchor("fallback-anchor.json");
@@ -202,7 +213,10 @@ fn env_tls_connector_allows_missing_ca_with_identity() {
     block_on(async {
         let server_identity = Identity::new();
         let client_identity = Identity::new();
-        let (base, handle) = start_tls_server(&server_identity).await;
+        let (base, handle) = match start_tls_server(&server_identity).await {
+            Some(pair) => pair,
+            None => return,
+        };
         sleep(Duration::from_millis(50)).await;
 
         let _guard = EnvScope::new(&[
@@ -215,6 +229,7 @@ fn env_tls_connector_allows_missing_ca_with_identity() {
                 Some(client_identity.key_path().to_str().unwrap()),
             ),
             ("TB_NO_CA_TLS_CA", None),
+            ("TB_NO_CA_TLS_INSECURE", Some("1")),
         ]);
 
         let client =

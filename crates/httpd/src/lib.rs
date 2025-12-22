@@ -1,3 +1,13 @@
+#![allow(
+    clippy::should_implement_trait,
+    clippy::needless_lifetimes,
+    clippy::unnecessary_lazy_evaluations,
+    clippy::let_and_return,
+    clippy::too_many_arguments,
+    clippy::new_without_default,
+    clippy::op_ref
+)]
+
 use diagnostics::{debug, info};
 use foundation_serialization::de::DeserializeOwned;
 use foundation_serialization::{Error as SerializationError, Serialize, json};

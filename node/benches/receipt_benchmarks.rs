@@ -1,15 +1,29 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use the_block::receipts::{Receipt, StorageReceipt, ComputeReceipt, EnergyReceipt, AdReceipt};
-use the_block::block_binary::{encode_receipts, decode_receipts};
+use std::hint::black_box;
+use std::sync::OnceLock;
+
+use testkit::bench;
+
+use the_block::{
+    block_binary::{decode_receipts, encode_receipts},
+    receipt_crypto::{NonceTracker, ProviderRegistry},
+    receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt},
+    receipts_validation::validate_receipt,
+};
+
+const ENCODING_SIZES: [usize; 5] = [1, 10, 100, 1_000, 10_000];
+const VALIDATION_SIZES: [usize; 4] = [10, 100, 1_000, 10_000];
+const MAX_RECEIPT_POOL_SIZE: usize = 10_000;
 
 fn create_storage_receipt(id: u64) -> Receipt {
     Receipt::Storage(StorageReceipt {
         contract_id: format!("storage_contract_{}", id),
         provider: format!("provider_{}", id),
         bytes: 1024 * 1024, // 1MB
-        price_ct: 1000,
+        price_ct: 1_000,
         block_height: id,
-        provider_escrow: 10000,
+        provider_escrow: 10_000,
+        provider_signature: vec![0u8; 64],
+        signature_nonce: id,
     })
 }
 
@@ -17,10 +31,12 @@ fn create_compute_receipt(id: u64) -> Receipt {
     Receipt::Compute(ComputeReceipt {
         job_id: format!("job_{}", id),
         provider: format!("provider_{}", id),
-        compute_units: 50000,
+        compute_units: 50_000,
         payment_ct: 500,
         block_height: id,
         verified: true,
+        provider_signature: vec![0u8; 64],
+        signature_nonce: id,
     })
 }
 
@@ -28,10 +44,12 @@ fn create_energy_receipt(id: u64) -> Receipt {
     Receipt::Energy(EnergyReceipt {
         contract_id: format!("energy_{}", id),
         provider: format!("provider_{}", id),
-        energy_units: 1000,
+        energy_units: 1_000,
         price_ct: 800,
         block_height: id,
         proof_hash: [0u8; 32],
+        provider_signature: vec![0u8; 64],
+        signature_nonce: id,
     })
 }
 
@@ -39,139 +57,100 @@ fn create_ad_receipt(id: u64) -> Receipt {
     Receipt::Ad(AdReceipt {
         campaign_id: format!("campaign_{}", id),
         publisher: format!("publisher_{}", id),
-        impressions: 10000,
+        impressions: 10_000,
         spend_ct: 200,
         block_height: id,
         conversions: 100,
+        publisher_signature: vec![0u8; 64],
+        signature_nonce: id,
     })
 }
 
-fn bench_receipt_encoding(c: &mut Criterion) {
-    let mut group = c.benchmark_group("receipt_encoding");
-
-    for size in [1, 10, 100, 1000, 10000].iter() {
-        // Mixed receipt types (realistic scenario)
-        let receipts: Vec<Receipt> = (0..*size)
+fn mixed_pool() -> &'static [Receipt] {
+    static POOL: OnceLock<Vec<Receipt>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        (0..MAX_RECEIPT_POOL_SIZE)
             .map(|i| match i % 4 {
-                0 => create_storage_receipt(i),
-                1 => create_compute_receipt(i),
-                2 => create_energy_receipt(i),
-                _ => create_ad_receipt(i),
+                0 => create_storage_receipt(i as u64),
+                1 => create_compute_receipt(i as u64),
+                2 => create_energy_receipt(i as u64),
+                _ => create_ad_receipt(i as u64),
             })
-            .collect();
-
-        group.bench_with_input(BenchmarkId::new("mixed", size), &receipts, |b, receipts| {
-            b.iter(|| {
-                let encoded = encode_receipts(black_box(receipts)).unwrap();
-                black_box(encoded);
-            });
-        });
-
-        // Storage-only receipts (best case)
-        let storage_receipts: Vec<Receipt> = (0..*size)
-            .map(create_storage_receipt)
-            .collect();
-
-        group.bench_with_input(BenchmarkId::new("storage_only", size), &storage_receipts, |b, receipts| {
-            b.iter(|| {
-                let encoded = encode_receipts(black_box(receipts)).unwrap();
-                black_box(encoded);
-            });
-        });
-    }
-
-    group.finish();
+            .collect()
+    })
 }
 
-fn bench_receipt_decoding(c: &mut Criterion) {
-    let mut group = c.benchmark_group("receipt_decoding");
-
-    for size in [1, 10, 100, 1000, 10000].iter() {
-        let receipts: Vec<Receipt> = (0..*size)
-            .map(|i| match i % 4 {
-                0 => create_storage_receipt(i),
-                1 => create_compute_receipt(i),
-                2 => create_energy_receipt(i),
-                _ => create_ad_receipt(i),
-            })
-            .collect();
-
-        let encoded = encode_receipts(&receipts).unwrap();
-
-        group.bench_with_input(BenchmarkId::new("mixed", size), &encoded, |b, encoded| {
-            b.iter(|| {
-                let decoded = decode_receipts(black_box(encoded)).unwrap();
-                black_box(decoded);
-            });
-        });
-    }
-
-    group.finish();
+fn storage_pool() -> &'static [Receipt] {
+    static POOL: OnceLock<Vec<Receipt>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        (0..MAX_RECEIPT_POOL_SIZE)
+            .map(|i| create_storage_receipt(i as u64))
+            .collect()
+    })
 }
 
-fn bench_receipt_roundtrip(c: &mut Criterion) {
-    let mut group = c.benchmark_group("receipt_roundtrip");
-
-    for size in [1, 10, 100, 1000, 10000].iter() {
-        let receipts: Vec<Receipt> = (0..*size)
-            .map(|i| match i % 4 {
-                0 => create_storage_receipt(i),
-                1 => create_compute_receipt(i),
-                2 => create_energy_receipt(i),
-                _ => create_ad_receipt(i),
-            })
-            .collect();
-
-        group.bench_with_input(BenchmarkId::from_parameter(size), &receipts, |b, receipts| {
-            b.iter(|| {
-                let encoded = encode_receipts(black_box(receipts)).unwrap();
-                let decoded = decode_receipts(black_box(&encoded)).unwrap();
-                black_box(decoded);
-            });
-        });
-    }
-
-    group.finish();
-}
-
-fn bench_receipt_validation(c: &mut Criterion) {
-    use the_block::receipts_validation::validate_receipt;
-
-    let mut group = c.benchmark_group("receipt_validation");
-
-    let receipt = create_storage_receipt(100);
-
-    group.bench_function("validate_single", |b| {
-        b.iter(|| {
-            let result = validate_receipt(black_box(&receipt), black_box(100));
-            black_box(result);
-        });
+fn run_encoding_bench(name: &str, receipts: &[Receipt]) {
+    bench::run(name, bench::DEFAULT_ITERATIONS, || {
+        let encoded = encode_receipts(receipts).expect("encode receipts");
+        black_box(encoded);
     });
-
-    // Validate many receipts
-    for size in [10, 100, 1000, 10000].iter() {
-        let receipts: Vec<Receipt> = (0..*size)
-            .map(|i| create_storage_receipt(i))
-            .collect();
-
-        group.bench_with_input(BenchmarkId::from_parameter(size), &receipts, |b, receipts| {
-            b.iter(|| {
-                for (i, receipt) in receipts.iter().enumerate() {
-                    let result = validate_receipt(black_box(receipt), black_box(i as u64));
-                    black_box(result);
-                }
-            });
-        });
-    }
-
-    group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_receipt_encoding,
-    bench_receipt_decoding,
-    bench_receipt_roundtrip,
-    bench_receipt_validation
-);
-criterion_main!(benches);
+fn run_decoding_bench(name: &str, encoded: &[u8]) {
+    bench::run(name, bench::DEFAULT_ITERATIONS, || {
+        let decoded = decode_receipts(black_box(encoded)).expect("decode receipts");
+        black_box(decoded);
+    });
+}
+
+fn run_roundtrip_bench(name: &str, receipts: &[Receipt]) {
+    bench::run(name, bench::DEFAULT_ITERATIONS, || {
+        let encoded = encode_receipts(receipts).expect("encode receipts");
+        let decoded = decode_receipts(black_box(encoded.as_slice())).expect("decode receipts");
+        black_box(decoded);
+    });
+}
+
+fn run_validation_bench(name: &str, receipts: &[Receipt]) {
+    bench::run(name, bench::DEFAULT_ITERATIONS, || {
+        let registry = ProviderRegistry::new();
+        let mut nonce_tracker = NonceTracker::new(100);
+        for (idx, receipt) in receipts.iter().enumerate() {
+            let result = validate_receipt(receipt, idx as u64, &registry, &mut nonce_tracker);
+            let _ = black_box(result);
+        }
+    });
+}
+
+fn main() {
+    for &size in ENCODING_SIZES.iter() {
+        let mixed = &mixed_pool()[..size];
+        let storage = &storage_pool()[..size];
+
+        let name = format!("receipt_encoding_mixed_{size}");
+        run_encoding_bench(&name, mixed);
+
+        let name = format!("receipt_encoding_storage_{size}");
+        run_encoding_bench(&name, storage);
+
+        let encoded = encode_receipts(mixed).expect("encode receipts");
+        let name = format!("receipt_decoding_mixed_{size}");
+        run_decoding_bench(&name, &encoded);
+
+        let encoded = encode_receipts(storage).expect("encode receipts");
+        let name = format!("receipt_decoding_storage_{size}");
+        run_decoding_bench(&name, &encoded);
+
+        let name = format!("receipt_roundtrip_mixed_{size}");
+        run_roundtrip_bench(&name, mixed);
+    }
+
+    let single = &storage_pool()[..1];
+    run_validation_bench("receipt_validation_single", single);
+
+    for &size in VALIDATION_SIZES.iter() {
+        let receipts = &storage_pool()[..size];
+        let name = format!("receipt_validation_storage_{size}");
+        run_validation_bench(&name, receipts);
+    }
+}

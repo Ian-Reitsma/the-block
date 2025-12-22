@@ -413,17 +413,17 @@ pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
     receipts
 }
 
-fn record_treasury_fee(amount_ct: u64) {
-    if amount_ct == 0 {
+fn record_treasury_fee(amount: u64) {
+    if amount == 0 {
         return;
     }
     #[cfg(feature = "telemetry")]
-    ENERGY_TREASURY_FEE_CT_TOTAL.inc_by(amount_ct);
-    if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(amount_ct, 0) {
+    ENERGY_TREASURY_FEE_CT_TOTAL.inc_by(amount);
+    if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(amount) {
         #[cfg(feature = "telemetry")]
-        warn!(amount_ct, ?err, "failed to accrue energy treasury fee");
+        warn!(amount, ?err, "failed to accrue energy treasury fee");
         #[cfg(not(feature = "telemetry"))]
-        let _ = (amount_ct, err);
+        let _ = (amount, err);
     }
 }
 

@@ -47,7 +47,7 @@ impl BadgeGuard {
     }
 
     pub fn record(&self, badges: &[String], population_hint: Option<u64>) {
-        let mut key: Vec<String> = badges.iter().cloned().collect();
+        let mut key = badges.to_vec();
         key.sort();
         let estimate = population_hint
             .unwrap_or(self.config.k_min)
@@ -70,7 +70,7 @@ impl BadgeGuard {
                 proof: None,
             };
         }
-        let mut relaxed: Vec<String> = badges.iter().cloned().collect();
+        let mut relaxed = badges.to_vec();
         relaxed.sort();
         let mut dropped = 0usize;
         let populations = self.populations.read().unwrap();
@@ -130,17 +130,16 @@ fn build_soft_intent(
     context: Option<&BadgeSoftIntentContext>,
     badges: &[String],
 ) -> Option<SoftIntentReceipt> {
-    let Some(ctx) = context else {
-        return None;
-    };
-    let Some(snapshot) = ctx.wallet_index.as_ref() else {
-        return if required { None } else { ctx.proof.clone() };
+    let ctx = context?;
+    let snapshot = match ctx.wallet_index.as_ref() {
+        Some(snapshot) => snapshot,
+        None => return if required { None } else { ctx.proof.clone() },
     };
     if let Some(receipt) = ctx.proof.as_ref() {
         if ann::verify_receipt(snapshot, receipt, badges) {
             return Some(receipt.clone());
         }
-        return if required { None } else { None };
+        return None;
     }
     ann::build_proof(snapshot, badges)
 }

@@ -1,5 +1,7 @@
 #![cfg(feature = "integration-tests")]
+#![allow(clippy::unnecessary_get_then_check)]
 use std::collections::HashSet;
+use std::env;
 use std::panic;
 
 use the_block::{
@@ -8,10 +10,26 @@ use the_block::{
     Account, Blockchain, TokenBalance,
 };
 
+struct PreserveGuard;
+
+impl PreserveGuard {
+    fn set() -> Self {
+        env::set_var("TB_PRESERVE", "1");
+        Self
+    }
+}
+
+impl Drop for PreserveGuard {
+    fn drop(&mut self) {
+        env::remove_var("TB_PRESERVE");
+    }
+}
+
 #[test]
 fn recovers_from_crash_during_import() {
     let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().to_str().unwrap().to_string();
+    let _preserve = PreserveGuard::set();
     {
         let mut bc = Blockchain::new(&path);
         bc.accounts.insert(
@@ -45,9 +63,11 @@ fn recovers_from_crash_during_import() {
             },
         )
         .unwrap();
+        bc.persist_chain().expect("persist initial state");
+        let coinbase = the_block::SignedTransaction::default();
         let block = the_block::Block {
             index: 1,
-            transactions: vec![tx],
+            transactions: vec![coinbase.clone(), tx],
             ..the_block::Block::default()
         };
         let deltas = validate_and_apply(&bc, &block).unwrap();
@@ -58,7 +78,7 @@ fn recovers_from_crash_during_import() {
         }));
     }
     // reopen
-    let bc2 = Blockchain::new(&path);
+    let bc2 = Blockchain::open(&path).expect("reopen blockchain");
     assert_eq!(bc2.accounts["alice"].balance.consumer, 100);
     assert!(bc2.accounts.get("bob").is_none());
 }

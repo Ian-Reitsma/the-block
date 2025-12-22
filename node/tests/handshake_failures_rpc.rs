@@ -85,7 +85,7 @@ fn rpc_reports_handshake_failures() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
         let res = rpc(&addr, "{\"method\":\"net.handshake_failures\"}").await;
-        assert!(res["result"]["failures"].as_array().unwrap().len() >= 1);
+        assert!(!res["result"]["failures"].as_array().unwrap().is_empty());
         handle.abort();
         Settlement::shutdown();
     });

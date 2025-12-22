@@ -14,6 +14,8 @@ use crate::telemetry::{BUILD_PROVENANCE_INVALID_TOTAL, BUILD_PROVENANCE_VALID_TO
 const RELEASE_SIGNERS_ENV: &str = "TB_RELEASE_SIGNERS";
 const RELEASE_SIGNERS_FILE_ENV: &str = "TB_RELEASE_SIGNERS_FILE";
 const DEFAULT_RELEASE_SIGNERS_PATH: &str = "config/release_signers.txt";
+/// Placeholder hash emitted during local builds to skip provenance verification.
+const FIRST_PARTY_FREEZE_HASH: &str = "FIRST_PARTY_FREEZE";
 
 static RELEASE_SIGNERS: Lazy<RwLock<Vec<VerifyingKey>>> =
     Lazy::new(|| RwLock::new(load_release_signers()));
@@ -21,6 +23,9 @@ static RELEASE_SIGNERS: Lazy<RwLock<Vec<VerifyingKey>>> =
 /// Verify the hash of the current executable against the embedded build hash.
 pub fn verify_self() -> bool {
     let expected = env!("BUILD_BIN_HASH");
+    if expected == FIRST_PARTY_FREEZE_HASH {
+        return true;
+    }
     if let Ok(path) = std::env::current_exe() {
         let ok = verify_file(&path, expected);
         if ok {

@@ -21,10 +21,10 @@ fn treasury_metrics_exposed_via_prometheus() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, 20, "memo".into(), 75);
-    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, 15, String::new(), 50);
+    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo".into(), 75);
+    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 50);
     mark_executed(&mut executed, "0xfeed".into());
-    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, 0, String::new(), 60);
+    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 60);
     mark_cancelled(&mut cancelled, "duplicate".into());
 
     let records = vec![scheduled, executed, cancelled];
@@ -34,10 +34,8 @@ fn treasury_metrics_exposed_via_prometheus() {
     let balance_file = dir.path().join("treasury_balance.json");
     let snapshots = vec![TreasuryBalanceSnapshot {
         id: 1,
-        balance_ct: 450,
-        delta_ct: 450,
-        balance_it: 35,
-        delta_it: 35,
+        balance: 450,
+        delta: 450,
         recorded_at: 1,
         event: TreasuryBalanceEventKind::Accrual,
         disbursement_id: None,
@@ -67,17 +65,12 @@ fn treasury_metrics_exposed_via_prometheus() {
         assert!(body.contains("treasury_disbursement_count{status=\"draft\"} 1"));
         assert!(body.contains("treasury_disbursement_count{status=\"executed\"} 1"));
         assert!(body.contains("treasury_disbursement_count{status=\"rolled_back\"} 1"));
-        assert!(body.contains("treasury_disbursement_amount_ct{status=\"executed\"} 200"));
-        assert!(body.contains("treasury_disbursement_amount_ct{status=\"rolled_back\"} 150"));
-        assert!(body.contains("treasury_disbursement_amount_it{status=\"draft\"} 20"));
-        assert!(body.contains("treasury_disbursement_amount_it{status=\"executed\"} 15"));
-        assert!(body.contains("treasury_disbursement_amount_it{status=\"rolled_back\"} 0"));
+        assert!(body.contains("treasury_disbursement_amount{status=\"executed\"} 200"));
+        assert!(body.contains("treasury_disbursement_amount{status=\"rolled_back\"} 150"));
         assert!(body.contains("treasury_disbursement_next_epoch 75"));
-        assert!(body.contains("treasury_balance_current_ct 450"));
-        assert!(body.contains("treasury_balance_current_it 35"));
+        assert!(body.contains("treasury_balance_current 450"));
         assert!(body.contains("treasury_balance_snapshot_count 1"));
-        assert!(body.contains("treasury_balance_last_delta_ct 450"));
-        assert!(body.contains("treasury_balance_last_delta_it 35"));
+        assert!(body.contains("treasury_balance_last_delta 450"));
         assert!(body.contains("treasury_balance_last_event_age_seconds"));
     });
 }
@@ -88,13 +81,12 @@ fn treasury_metrics_from_store_source() {
     let dir = tempfile::tempdir().expect("temp dir");
     let gov_path = dir.path().join("gov.db");
     let store = GovStore::open(&gov_path);
-    store.record_treasury_accrual(600, 120).expect("accrual");
+    store.record_treasury_accrual(600).expect("accrual");
     let queued = store
         .queue_disbursement(DisbursementPayload {
             disbursement: DisbursementDetails {
                 destination: "dest-4".into(),
-                amount_ct: 120,
-                amount_it: 25,
+                amount: 120,
                 memo: "".into(),
                 scheduled_epoch: 400,
                 expected_receipts: Vec::new(),
@@ -125,7 +117,7 @@ fn treasury_metrics_from_store_source() {
             .expect("metrics response");
         assert_eq!(resp.status(), httpd::StatusCode::OK);
         let body = String::from_utf8(resp.body().to_vec()).expect("metrics utf8");
-        assert!(body.contains("treasury_balance_current_ct"));
+        assert!(body.contains("treasury_balance_current"));
         assert!(body.contains("treasury_disbursement_count{status=\"executed\"} 1"));
         assert!(body.contains("treasury_executor_lease_released 0"));
     });
@@ -137,9 +129,8 @@ fn treasury_metrics_accept_legacy_string_fields() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, 0, String::new(), 10);
-    let mut executed =
-        TreasuryDisbursement::new(6, "legacy-dest".into(), 150, 0, String::new(), 11);
+    let scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, String::new(), 10);
+    let mut executed = TreasuryDisbursement::new(6, "legacy-dest".into(), 150, String::new(), 11);
     mark_executed(&mut executed, "0xdead".into());
     let payload = json::to_vec_value(&disbursements_to_json_array(&[scheduled, executed]));
     fs::write(&treasury_file, payload).expect("write treasury file");
@@ -148,7 +139,7 @@ fn treasury_metrics_accept_legacy_string_fields() {
     let legacy_payload = r#"[
         {
             "id": "9",
-            "balance_ct": "450",
+            "balance": "450",
             "delta_ct": "450",
             "recorded_at": "12345",
             "event": "ACCRUAL"
@@ -175,6 +166,6 @@ fn treasury_metrics_accept_legacy_string_fields() {
             .expect("metrics response");
         assert_eq!(resp.status(), httpd::StatusCode::OK);
         let body = String::from_utf8(resp.body().to_vec()).expect("metrics utf8");
-        assert!(body.contains("treasury_balance_current_ct 450"));
+        assert!(body.contains("treasury_balance_current 450"));
     });
 }

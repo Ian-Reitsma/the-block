@@ -350,18 +350,22 @@ fn audit_record_to_value(record: &AuditRecord) -> Value {
         "delta_ct".to_string(),
         Value::Number(Number::from(record.delta_ct)),
     );
+    if let Some(delta_it) = record.delta_it {
+        map.insert(
+            "delta_it".to_string(),
+            Value::Number(Number::from(delta_it)),
+        );
+    }
     map.insert(
-        "delta_it".to_string(),
-        Value::Number(Number::from(record.delta_it)),
+        "balance".to_string(),
+        Value::Number(Number::from(record.balance)),
     );
-    map.insert(
-        "balance_ct".to_string(),
-        Value::Number(Number::from(record.balance_ct)),
-    );
-    map.insert(
-        "balance_it".to_string(),
-        Value::Number(Number::from(record.balance_it)),
-    );
+    if let Some(balance_it) = record.balance_it {
+        map.insert(
+            "balance_it".to_string(),
+            Value::Number(Number::from(balance_it)),
+        );
+    }
     if let Some(anchor) = &record.anchor {
         map.insert("anchor".to_string(), Value::String(anchor.clone()));
     }

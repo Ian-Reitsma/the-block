@@ -1,6 +1,6 @@
 use governance::{
-    DisbursementDetails, DisbursementPayload, DisbursementStatus, GovStore,
-    TreasuryBalanceEventKind, TreasuryDisbursement,
+    circuit_breaker::CircuitBreaker, DisbursementDetails, DisbursementPayload, DisbursementStatus,
+    GovStore, TreasuryBalanceEventKind, TreasuryDisbursement,
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -23,21 +23,13 @@ fn treasury_disbursements_roundtrip() {
     assert_eq!(store.treasury_balance().expect("initial balance"), 0);
 
     let accrual = store
-        .record_treasury_accrual(100, 40)
+        .record_treasury_accrual(100)
         .expect("accrue treasury balance");
-    assert_eq!(accrual.balance_ct, 100);
-    assert_eq!(accrual.balance_it, 40);
+    assert_eq!(accrual.balance, 100);
     assert!(matches!(accrual.event, TreasuryBalanceEventKind::Accrual));
     assert_eq!(
         store.treasury_balance().expect("balance after accrual"),
         100
-    );
-    assert_eq!(
-        store
-            .treasury_balances()
-            .expect("dual balance after accrual")
-            .industrial,
-        40
     );
 
     let scheduled = store
@@ -45,8 +37,7 @@ fn treasury_disbursements_roundtrip() {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
                 destination: "dest-1".into(),
-                amount_ct: 42,
-                amount_it: 12,
+                amount: 42,
                 memo: "initial memo".into(),
                 scheduled_epoch: 100,
                 expected_receipts: Vec::new(),
@@ -56,13 +47,6 @@ fn treasury_disbursements_roundtrip() {
     assert_eq!(scheduled.id, 1);
     assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     assert_eq!(store.treasury_balance().expect("balance after queue"), 100);
-    assert_eq!(
-        store
-            .treasury_balances()
-            .expect("dual balance after queue")
-            .industrial,
-        40
-    );
 
     let list = store.disbursements().expect("list disbursements");
     assert_eq!(list.len(), 1);
@@ -78,13 +62,6 @@ fn treasury_disbursements_roundtrip() {
         other => panic!("unexpected status after execute: {other:?}"),
     }
     assert_eq!(store.treasury_balance().expect("post execute"), 58);
-    assert_eq!(
-        store
-            .treasury_balances()
-            .expect("dual balance post execute")
-            .industrial,
-        28
-    );
 
     // ensure persistence across reopen
     drop(store);
@@ -96,21 +73,13 @@ fn treasury_disbursements_roundtrip() {
         DisbursementStatus::Executed { .. }
     ));
     assert_eq!(store.treasury_balance().expect("reopened balance"), 58);
-    assert_eq!(
-        store
-            .treasury_balances()
-            .expect("reopened dual balance")
-            .industrial,
-        28
-    );
 
     let scheduled_two = store
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
                 destination: "dest-2".into(),
-                amount_ct: 7,
-                amount_it: 0,
+                amount: 7,
                 memo: "".into(),
                 scheduled_epoch: 200,
                 expected_receipts: Vec::new(),
@@ -138,8 +107,7 @@ fn treasury_disbursements_roundtrip() {
         .all(|window| window[0].id <= window[1].id));
 
     let history = store.treasury_balance_history().expect("balance history");
-    assert_eq!(history.last().map(|snap| snap.balance_ct), Some(58));
-    assert_eq!(history.last().map(|snap| snap.balance_it), Some(28));
+    assert_eq!(history.last().map(|snap| snap.balance), Some(58));
     assert!(history
         .iter()
         .any(|snap| matches!(snap.event, TreasuryBalanceEventKind::Executed)));
@@ -156,8 +124,7 @@ fn execute_requires_balance() {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
                 destination: "dest-1".into(),
-                amount_ct: 5,
-                amount_it: 0,
+                amount: 5,
                 memo: "".into(),
                 scheduled_epoch: 0,
                 expected_receipts: Vec::new(),
@@ -174,15 +141,14 @@ fn treasury_executor_stages_and_executes() {
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
     store
-        .record_treasury_accrual(10_000, 0)
+        .record_treasury_accrual(10_000)
         .expect("fund treasury");
     let scheduled = store
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
                 destination: "dest-exec".into(),
-                amount_ct: 1_000,
-                amount_it: 0,
+                amount: 1_000,
                 memo: "intent".into(),
                 scheduled_epoch: 5,
                 expected_receipts: Vec::new(),
@@ -217,6 +183,8 @@ fn treasury_executor_stages_and_executes() {
         },
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
 
@@ -263,16 +231,13 @@ fn treasury_executor_reuses_staged_intents() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
-    store
-        .record_treasury_accrual(5_000, 0)
-        .expect("fund treasury");
+    store.record_treasury_accrual(5_000).expect("fund treasury");
     let disbursement = store
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
                 destination: "reuse".into(),
-                amount_ct: 500,
-                amount_it: 0,
+                amount: 500,
                 memo: "memo".into(),
                 scheduled_epoch: 1,
                 expected_receipts: Vec::new(),
@@ -308,6 +273,8 @@ fn treasury_executor_reuses_staged_intents() {
         submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
     let mut attempts = 0;
@@ -366,13 +333,12 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
     let dir = tempdir()?;
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
-    store.record_treasury_accrual(2_000, 0)?;
+    store.record_treasury_accrual(2_000)?;
     let disbursement = store.queue_disbursement(DisbursementPayload {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
             destination: "omega".into(),
-            amount_ct: 250,
-            amount_it: 0,
+            amount: 250,
             memo: "{}".into(),
             scheduled_epoch: 0,
             expected_receipts: Vec::new(),
@@ -403,6 +369,8 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
         },
         dependency_check: None,
         nonce_floor: Arc::new(AtomicU64::new(0)),
+        circuit_breaker: Arc::new(CircuitBreaker::default()),
+        circuit_breaker_telemetry: None,
     };
     let handle = store.spawn_treasury_executor(config);
     let mut observed_error = None;
@@ -434,14 +402,13 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
     let dir = tempdir()?;
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
-    store.record_treasury_accrual(5_000, 0)?;
+    store.record_treasury_accrual(5_000)?;
 
     let first = store.queue_disbursement(DisbursementPayload {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
             destination: "failover-a".into(),
-            amount_ct: 250,
-            amount_it: 0,
+            amount: 250,
             memo: "".into(),
             scheduled_epoch: 0,
             expected_receipts: Vec::new(),
@@ -451,8 +418,7 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
             destination: "failover-b".into(),
-            amount_ct: 250,
-            amount_it: 0,
+            amount: 250,
             memo: "".into(),
             scheduled_epoch: 0,
             expected_receipts: Vec::new(),
@@ -491,6 +457,8 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
             submitter: Arc::new(|intent| Ok(intent.tx_hash.clone())),
             dependency_check: dependency,
             nonce_floor: gate,
+            circuit_breaker: Arc::new(CircuitBreaker::default()),
+            circuit_breaker_telemetry: None,
         }
     };
 

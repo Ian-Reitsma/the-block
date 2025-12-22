@@ -16,14 +16,13 @@ contract-cli gov disburse create --json disbursement_example.json
 **Key Fields:**
 - `id` - Unique identifier for the disbursement
 - `title` - Human-readable proposal title
-- `amount_ct` - Total CT to disburse
-- `amount_it` - Industrial share (sub-ledger accounting, not a separate token)
+- `amount` - Total BLOCK to disburse
 - `destination` - Recipient address (must start with `ct1`)
-- `expected_receipts` - Breakdown of where funds go (must sum to `amount_ct`/`amount_it`)
+- `expected_receipts` - Breakdown of where funds go (must sum to `amount`)
 - `timelock_epochs` - Waiting period after approval before execution
 
 **Validation Rules:**
-- `expected_receipts` totals must match `amount_ct` and `amount_it`
+- `expected_receipts` totals must match `amount`
 - All addresses must be valid `ct1...` format
 - See `governance/src/treasury.rs::validate_disbursement_payload()` for full validation
 

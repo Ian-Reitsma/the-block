@@ -86,8 +86,8 @@ fn peer_stats_rpc() {
         };
         let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, None, &bc);
-        simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
-        simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
+        simulate_handshake_fail(pk, HandshakeError::Tls);
+        simulate_handshake_fail(pk, HandshakeError::Tls);
 
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();
@@ -700,7 +700,7 @@ fn peer_stats_cli_show_and_reputation() {
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
         let peers = PeerSet::new(Vec::new());
-        let (sk_bytes, pk) = generate_keypair();
+        let (sk_bytes, pk_vec) = generate_keypair();
         let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
         let hello = Hello {
             network_id: [0u8; 4],
@@ -734,10 +734,11 @@ fn peer_stats_cli_show_and_reputation() {
         let addr = expect_timeout(rx).await.unwrap();
 
         net::set_track_handshake_fail(true);
-        simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
+        let pk = pk_vec.as_slice().try_into().unwrap();
+        simulate_handshake_fail(pk, HandshakeError::Tls);
         net::set_track_handshake_fail(false);
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = crypto_suite::hex::encode(pk_vec);
         let peer_id_clone = peer_id.clone();
         let rpc_url = format!("http://{}", addr);
         let output = the_block::spawn_blocking(move || {
@@ -967,7 +968,7 @@ fn peer_stats_cli_sort_filter_snapshot() {
         };
         let msg1 = Message::new(Payload::Handshake(hello1), &sk1).expect("sign message");
         peers.handle_message(msg1, None, &bc);
-        simulate_handshake_fail(pk1.clone().try_into().unwrap(), HandshakeError::Tls);
+        simulate_handshake_fail(pk1, HandshakeError::Tls);
 
         // second peer
         let (sk2_bytes, _pk2_vec) = generate_keypair();

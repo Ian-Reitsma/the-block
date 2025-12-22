@@ -3,7 +3,7 @@
 use concurrency::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
 use std::sync::Arc;
-use storage::{contract::ContractError, StorageContract, StorageOffer};
+use storage::{contract::ContractError, merkle_proof::MerkleProof, StorageContract, StorageOffer};
 use storage_market::{
     ProofOutcome, ProofRecord, ReplicaIncentive, StorageMarket, StorageMarketError,
 };
@@ -266,7 +266,8 @@ pub fn challenge(
     object_id: &str,
     provider_id: Option<&str>,
     chunk_idx: u64,
-    proof: [u8; 32],
+    chunk_data: &[u8],
+    proof: &MerkleProof,
     current_block: u64,
 ) -> foundation_serialization::json::Value {
     let record = match MARKET.guard().load_contract(object_id) {
@@ -276,7 +277,7 @@ pub fn challenge(
     };
     match record
         .contract
-        .verify_proof(chunk_idx, proof, current_block)
+        .verify_proof(chunk_idx, chunk_data, proof, current_block)
     {
         Ok(()) => {
             #[cfg(feature = "telemetry")]
@@ -601,6 +602,8 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
             price_ct: r.price_ct,
             block_height: r.block_height,
             provider_escrow: r.provider_escrow,
+            provider_signature: vec![],
+            signature_nonce: 0,
         })
         .collect();
 
@@ -627,6 +630,7 @@ mod tests {
         Map as JsonMap, Number as JsonNumber, Value as JsonValue,
     };
     use std::sync::Once;
+    use storage::merkle_proof::MerkleTree;
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
 
@@ -645,13 +649,13 @@ mod tests {
             let dir = tempdir().expect("tempdir");
             std::env::set_var("TB_STORAGE_MARKET_DIR", dir.path());
             Box::leak(Box::new(dir));
-            let _ = MARKET.clear();
         });
     }
 
     fn reset_state() {
         ensure_market_dir();
-        MARKET.clear().expect("clear market");
+        // Note: MARKET is a Lazy static that cannot be cleared once initialized.
+        // Tests rely on isolated temp directories set via TB_STORAGE_MARKET_DIR.
     }
 
     fn json_object(entries: &[(&str, JsonValue)]) -> JsonValue {
@@ -662,8 +666,20 @@ mod tests {
         JsonValue::Object(map)
     }
 
-    fn sample_contract() -> StorageContract {
-        StorageContract {
+    fn demo_chunks() -> Vec<Vec<u8>> {
+        vec![
+            b"chunk0".to_vec(),
+            b"chunk1".to_vec(),
+            b"chunk2".to_vec(),
+            b"chunk3".to_vec(),
+        ]
+    }
+
+    fn sample_contract_with_tree() -> (StorageContract, Vec<Vec<u8>>, MerkleTree) {
+        let chunks = demo_chunks();
+        let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+        let tree = MerkleTree::build(&chunk_refs).expect("build tree");
+        let contract = StorageContract {
             object_id: "obj-1".into(),
             provider_id: "prov-a".into(),
             original_bytes: 1_024,
@@ -675,7 +691,9 @@ mod tests {
             accrued: 0,
             total_deposit_ct: 0,
             last_payment_block: None,
-        }
+            storage_root: tree.root,
+        };
+        (contract, chunks, tree)
     }
 
     fn sample_offers() -> Vec<StorageOffer> {
@@ -688,7 +706,7 @@ mod tests {
     #[test]
     fn upload_records_contract_and_replicas() {
         reset_state();
-        let contract = sample_contract();
+        let (contract, _chunks, _tree) = sample_contract_with_tree();
         let response = upload(contract.clone(), sample_offers());
         assert_eq!(response["status"], json_string("ok"));
         let providers_json = response["providers"].as_array().expect("providers array");
@@ -705,25 +723,45 @@ mod tests {
     #[test]
     fn challenge_surfaces_success_and_failures() {
         reset_state();
-        let contract = sample_contract();
+        let (contract, chunks, tree) = sample_contract_with_tree();
         let object_id = contract.object_id.clone();
-        let proof = contract.expected_proof(0);
         upload(contract.clone(), sample_offers());
+        let chunk_idx = 0;
+        let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+        let proof = tree
+            .generate_proof(chunk_idx, &chunk_refs)
+            .expect("generate proof");
+        let chunk_data = &chunks[chunk_idx as usize];
 
-        let ok = challenge(&object_id, None, 0, proof, contract.start_block);
+        let ok = challenge(
+            &object_id,
+            None,
+            chunk_idx,
+            chunk_data,
+            &proof,
+            contract.start_block,
+        );
         assert_eq!(ok["status"], json_string("ok"));
         assert!(ok["proof"].is_object());
 
         let expired = challenge(
             &object_id,
             None,
-            0,
-            proof,
+            chunk_idx,
+            chunk_data,
+            &proof,
             contract.start_block + contract.retention_blocks + 1,
         );
         assert_eq!(expired, json_object(&[("error", json_string("expired"))]));
 
-        let wrong = challenge(&object_id, None, 0, [0u8; 32], contract.start_block);
+        let wrong = challenge(
+            &object_id,
+            None,
+            chunk_idx,
+            b"wrong".as_ref(),
+            &proof,
+            contract.start_block,
+        );
         assert_eq!(
             wrong,
             json_object(&[("error", json_string("challenge_failed"))])

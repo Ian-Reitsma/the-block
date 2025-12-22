@@ -6,7 +6,6 @@ mod ws_shared;
 use ws_shared::*;
 
 use foundation_async::sync::oneshot;
-use rand::RngCore;
 use runtime::net::TcpStream;
 use runtime::ws::{self, Message, ServerStream};
 use runtime::{self, spawn};
@@ -94,43 +93,16 @@ fn server_handles_fragmented_close_payload_from_client() {
             ws::write_server_handshake(&mut stream, &key, &[])
                 .await
                 .expect("handshake resp");
-            runtime::yield_now().await;
-            let mut ready_signal = [0u8; 5];
-            stream
-                .read_exact(&mut ready_signal)
-                .await
-                .expect("read ready signal");
-            assert_eq!(&ready_signal, b"ready");
+            let mut ws = ServerStream::new(stream);
 
-            let code = 4002u16;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(&code.to_be_bytes());
-            payload.extend_from_slice(reason.as_bytes());
-
-            let mut mask = [0u8; 4];
-            rand::thread_rng().fill_bytes(&mut mask);
-            let mut masked = payload.clone();
-            for (idx, byte) in masked.iter_mut().enumerate() {
-                *byte ^= mask[idx % 4];
+            let msg = ws.recv().await.expect("receive message");
+            match msg {
+                Some(Message::Close(Some(frame))) => {
+                    assert_eq!(frame.code, 4002);
+                    assert_eq!(frame.reason, reason);
+                }
+                other => panic!("expected close frame, got: {other:?}"),
             }
-
-            let mut header = Vec::with_capacity(2 + mask.len());
-            header.push(0x80 | 0x8);
-            header.push(0x80 | (masked.len() as u8));
-            header.extend_from_slice(&mask);
-            stream.write_all(&header).await.expect("write close header");
-
-            let split = masked.len() / 2;
-            stream
-                .write_all(&masked[..split])
-                .await
-                .expect("write first chunk");
-            runtime::yield_now().await;
-            stream
-                .write_all(&masked[split..])
-                .await
-                .expect("write second chunk");
-            runtime::yield_now().await;
         });
 
         runtime::yield_now().await;
@@ -147,10 +119,6 @@ fn server_handles_fragmented_close_payload_from_client() {
         ws::read_client_handshake(&mut stream, &expected_accept)
             .await
             .expect("validate handshake");
-        stream
-            .write_all(b"ready")
-            .await
-            .expect("write ready signal");
         write_fragmented_close_payload(&mut stream, 4002, reason).await;
         drop(stream);
         runtime::yield_now().await;

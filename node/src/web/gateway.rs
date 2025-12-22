@@ -188,6 +188,16 @@ impl AckParseError {
     }
 }
 
+fn require_ack_header<'req>(
+    req: &'req Request<GatewayState>,
+    header: &'static str,
+) -> Result<&'req str, AckParseError> {
+    req.header(header)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(AckParseError::Missing(header))
+}
+
 fn ack_error_response(err: AckParseError) -> Response {
     let message = match err {
         AckParseError::Missing(header) => format!("missing {header} header"),
@@ -489,30 +499,18 @@ fn parse_signed_ack(
     path: &str,
     bytes: u64,
 ) -> Result<ReadAck, AckParseError> {
-    let manifest = decode_hex_array::<32>(
-        req.header(HEADER_ACK_MANIFEST)
-            .ok_or(AckParseError::Missing(HEADER_ACK_MANIFEST))?,
-        HEADER_ACK_MANIFEST,
-    )?;
-    let pk = decode_hex_array::<32>(
-        req.header(HEADER_ACK_PUBKEY)
-            .ok_or(AckParseError::Missing(HEADER_ACK_PUBKEY))?,
-        HEADER_ACK_PUBKEY,
-    )?;
-    let sig = decode_hex_vec(
-        req.header(HEADER_ACK_SIGNATURE)
-            .ok_or(AckParseError::Missing(HEADER_ACK_SIGNATURE))?,
-        HEADER_ACK_SIGNATURE,
-        64,
-    )?;
-    let ts = req
-        .header(HEADER_ACK_TIMESTAMP)
-        .ok_or(AckParseError::Missing(HEADER_ACK_TIMESTAMP))?
+    let manifest_hex = require_ack_header(req, HEADER_ACK_MANIFEST)?;
+    let pk_hex = require_ack_header(req, HEADER_ACK_PUBKEY)?;
+    let sig_hex = require_ack_header(req, HEADER_ACK_SIGNATURE)?;
+    let ts_value = require_ack_header(req, HEADER_ACK_TIMESTAMP)?;
+    let bytes_value = require_ack_header(req, HEADER_ACK_BYTES)?;
+    let manifest = decode_hex_array::<32>(manifest_hex, HEADER_ACK_MANIFEST)?;
+    let pk = decode_hex_array::<32>(pk_hex, HEADER_ACK_PUBKEY)?;
+    let sig = decode_hex_vec(sig_hex, HEADER_ACK_SIGNATURE, 64)?;
+    let ts = ts_value
         .parse::<u64>()
         .map_err(|_| AckParseError::ParseInt(HEADER_ACK_TIMESTAMP))?;
-    let declared_bytes = req
-        .header(HEADER_ACK_BYTES)
-        .ok_or(AckParseError::Missing(HEADER_ACK_BYTES))?
+    let declared_bytes = bytes_value
         .parse::<u64>()
         .map_err(|_| AckParseError::ParseInt(HEADER_ACK_BYTES))?;
     if declared_bytes != bytes {
@@ -592,13 +590,14 @@ fn build_read_ack(
     path: &str,
     bytes: u64,
 ) -> Result<ReadAck, Response> {
-    parse_signed_ack(req, domain, path, bytes)
-        .map(|mut ack| {
+    match parse_signed_ack(req, domain, path, bytes) {
+        Ok(mut ack) => {
             attach_campaign_metadata(state, &mut ack);
             attach_readiness_attestation(state, &mut ack);
-            ack
-        })
-        .map_err(ack_error_response)
+            Ok(ack)
+        }
+        Err(err) => Err(ack_error_response(err)),
+    }
 }
 
 #[cfg(feature = "legacy-read-acks")]
@@ -1293,7 +1292,7 @@ mod tests {
                     id: "creative1".to_string(),
                     action_rate_ppm: 500_000,
                     margin_ppm: 800_000,
-                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
+                    value_per_action_usd_micros: 4 * MICROS_PER_DOLLAR,
                     max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
                     lift_ppm: 520_000,
                     badges: Vec::new(),
@@ -1385,8 +1384,8 @@ mod tests {
                     id: "creative-ready".to_string(),
                     action_rate_ppm: 450_000,
                     margin_ppm: 800_000,
-                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
-                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR),
+                    value_per_action_usd_micros: 4 * MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
                     lift_ppm: 470_000,
                     badges: Vec::new(),
                     domains: vec!["signed.test".to_string()],
@@ -1536,8 +1535,8 @@ mod tests {
                     id: "creative-badge".to_string(),
                     action_rate_ppm: 300_000,
                     margin_ppm: 900_000,
-                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
-                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
+                    value_per_action_usd_micros: 5 * MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
                     lift_ppm: 320_000,
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
@@ -1625,8 +1624,8 @@ mod tests {
                     id: "creative-soft".to_string(),
                     action_rate_ppm: 320_000,
                     margin_ppm: 850_000,
-                    value_per_action_usd_micros: MICROS_PER_DOLLAR,
-                    max_cpi_usd_micros: Some(MICROS_PER_DOLLAR / 2),
+                    value_per_action_usd_micros: 5 * MICROS_PER_DOLLAR,
+                    max_cpi_usd_micros: Some(2 * MICROS_PER_DOLLAR),
                     lift_ppm: 410_000,
                     badges: vec!["physical_presence".to_string()],
                     domains: vec!["signed.test".to_string()],
@@ -2246,11 +2245,22 @@ mod tests {
             .path("/file.txt")
             .build();
         let response = runtime::block_on(router.handle(request)).unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(String::from_utf8_lossy(response.body()).contains("missing"));
-        match rx.try_recv() {
-            Err(TryRecvError::Empty) => {}
-            other => panic!("unexpected ack state: {other:?}"),
+        if cfg!(feature = "legacy-read-acks") {
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "legacy mode should synthesize acknowledgements"
+            );
+            let ack = rx.try_recv().expect("synthetic ack should be enqueued");
+            assert_eq!(ack.domain, "unsigned.test");
+            assert_eq!(ack.bytes, 0);
+        } else {
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert!(String::from_utf8_lossy(response.body()).contains("missing"));
+            match rx.try_recv() {
+                Err(TryRecvError::Empty) => {}
+                other => panic!("unexpected ack state: {other:?}"),
+            }
         }
     }
 }

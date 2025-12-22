@@ -21,7 +21,7 @@ use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
-use self::binary::{decode_raw_payload, encode_raw_payload, encode_signed_transaction};
+use self::binary::{decode_raw_payload, encode_raw_payload};
 
 fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
@@ -448,9 +448,50 @@ pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     encode_raw_payload(payload).unwrap_or_else(|err| panic!("failed to encode raw payload: {err}"))
 }
 
-fn canonical_signed_transaction_bytes(tx: &SignedTransaction) -> Vec<u8> {
-    encode_signed_transaction(tx)
-        .unwrap_or_else(|err| panic!("failed to encode signed transaction: {err}"))
+fn lane_byte(lane: FeeLane) -> u8 {
+    match lane {
+        FeeLane::Consumer => 0,
+        FeeLane::Industrial => 1,
+    }
+}
+
+fn version_byte(version: TxVersion) -> u8 {
+    match version {
+        TxVersion::Ed25519Only => 0,
+        TxVersion::Dual => 1,
+        TxVersion::DilithiumOnly => 2,
+    }
+}
+
+fn transaction_cache_key(tx: &SignedTransaction, payload_bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(payload_bytes);
+    hasher.update(&tx.tip.to_le_bytes());
+    hasher.update(&[lane_byte(tx.lane)]);
+    hasher.update(&[version_byte(tx.version)]);
+    hasher.update(&tx.threshold.to_le_bytes());
+    hasher.update(&(tx.public_key.len() as u64).to_le_bytes());
+    hasher.update(&tx.public_key);
+    #[cfg(feature = "quantum")]
+    {
+        hasher.update(&(tx.dilithium_public_key.len() as u64).to_le_bytes());
+        hasher.update(&tx.dilithium_public_key);
+    }
+    hasher.update(&(tx.signature.ed25519.len() as u64).to_le_bytes());
+    hasher.update(&tx.signature.ed25519);
+    #[cfg(feature = "quantum")]
+    {
+        hasher.update(&(tx.signature.dilithium.len() as u64).to_le_bytes());
+        hasher.update(&tx.signature.dilithium);
+    }
+    hasher.update(&(tx.signer_pubkeys.len() as u64).to_le_bytes());
+    for signer in &tx.signer_pubkeys {
+        hasher.update(&(signer.len() as u64).to_le_bytes());
+        hasher.update(signer);
+    }
+    hasher.update(&(tx.aggregate_signature.len() as u64).to_le_bytes());
+    hasher.update(&tx.aggregate_signature);
+    hasher.finalize().into()
 }
 
 /// Determine the shard for a given encoded account address.
@@ -486,17 +527,12 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
-    let key = {
-        let bytes = canonical_signed_transaction_bytes(tx);
-        let mut h = Hasher::new();
-        h.update(&bytes);
-        h.finalize().into()
-    };
+    let payload_bytes = canonical_payload_bytes(&tx.payload);
+    let key = transaction_cache_key(tx, &payload_bytes);
     if let Some(result) = SIG_CACHE.guard().get(&key).copied() {
         return result;
     }
 
-    let payload_bytes = canonical_payload_bytes(&tx.payload);
     let msg = TX_SIGNER.message(&payload_bytes);
     let res = if !tx.signer_pubkeys.is_empty()
         && !tx.aggregate_signature.is_empty()

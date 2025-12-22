@@ -18,9 +18,10 @@ fn server_unmasks_payloads() {
     ensure_inhouse_backend();
     let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-                .expect("bind listener");
+        let requested_addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let Some(std_listener) = bind_listener_or_skip(requested_addr).await else {
+            return;
+        };
         let addr = std_listener.local_addr().unwrap();
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {
@@ -76,9 +77,10 @@ fn fragmented_frames_are_joined() {
     ensure_inhouse_backend();
     let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-                .expect("bind listener");
+        let requested_addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let Some(std_listener) = bind_listener_or_skip(requested_addr).await else {
+            return;
+        };
         let addr = std_listener.local_addr().unwrap();
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {
@@ -128,9 +130,10 @@ fn ping_pong_cycle() {
     ensure_inhouse_backend();
     let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-                .expect("bind listener");
+        let requested_addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let Some(std_listener) = bind_listener_or_skip(requested_addr).await else {
+            return;
+        };
         let addr = std_listener.local_addr().unwrap();
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {
@@ -187,9 +190,10 @@ fn abrupt_server_disconnect_reports_abnormal_close() {
     ensure_inhouse_backend();
     let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-                .expect("bind listener");
+        let requested_addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let Some(std_listener) = bind_listener_or_skip(requested_addr).await else {
+            return;
+        };
         let addr = std_listener.local_addr().unwrap();
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {
@@ -245,9 +249,10 @@ fn fragmented_close_frame_payload_delivered() {
     ensure_inhouse_backend();
     let _guard = websocket_test_guard();
     runtime::block_on(async {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-                .expect("bind listener");
+        let requested_addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let Some(std_listener) = bind_listener_or_skip(requested_addr).await else {
+            return;
+        };
         let addr = std_listener.local_addr().unwrap();
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {

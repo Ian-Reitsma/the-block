@@ -5,28 +5,15 @@ use core::fmt;
 use core::ops::{
     Add, AddAssign, Mul, MulAssign, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
+use foundation_math::numbers::{One, Zero};
 
 const LIMB_BITS: u32 = 32;
 const LIMB_BASE: u64 = 1u64 << LIMB_BITS;
 
-/// Collection of helper traits that mirror the small subset of `num_traits`
-/// required by the crypto suite.  These helpers are intentionally tiny so the
-/// bigint implementation can stand on its own without pulling additional
-/// crates into FIRST_PARTY builds.
+/// Backwards-compatible re-export of the integer helper traits so downstream
+/// crates can migrate to `foundation_math::numbers` without churn.
 pub mod traits {
-    /// Trait exposing a canonical zero value and an `is_zero` predicate.
-    pub trait Zero {
-        /// Return the zero value for the implementing type.
-        fn zero() -> Self;
-        /// Returns `true` when the value equals zero.
-        fn is_zero(&self) -> bool;
-    }
-
-    /// Trait exposing a canonical one value.
-    pub trait One {
-        /// Return the multiplicative identity.
-        fn one() -> Self;
-    }
+    pub use foundation_math::numbers::{One, Zero};
 }
 
 /// Unsigned arbitrary-precision integer backed by base-2^32 limbs stored in
@@ -486,7 +473,7 @@ impl BigUint {
     }
 }
 
-impl traits::Zero for BigUint {
+impl Zero for BigUint {
     fn zero() -> Self {
         Self::zero()
     }
@@ -496,7 +483,7 @@ impl traits::Zero for BigUint {
     }
 }
 
-impl traits::One for BigUint {
+impl One for BigUint {
     fn one() -> Self {
         Self::one()
     }

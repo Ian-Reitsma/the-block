@@ -4,24 +4,13 @@ use std::path::PathBuf;
 
 pub type ContractId = u64;
 
+#[derive(Default)]
 struct Persisted {
     next_id: ContractId,
     code: HashMap<ContractId, Vec<u8>>,
     state: HashMap<ContractId, Vec<u8>>,
     wasm: HashMap<ContractId, Vec<u8>>,
     abi: HashMap<ContractId, Vec<u8>>,
-}
-
-impl Default for Persisted {
-    fn default() -> Self {
-        Self {
-            next_id: 0,
-            code: HashMap::new(),
-            state: HashMap::new(),
-            wasm: HashMap::new(),
-            abi: HashMap::new(),
-        }
-    }
 }
 
 fn write_map(out: &mut Vec<u8>, map: &HashMap<ContractId, Vec<u8>>) {

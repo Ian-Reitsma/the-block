@@ -1,3 +1,18 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::needless_lifetimes,
+    clippy::manual_is_ascii_check,
+    clippy::type_complexity,
+    clippy::field_reassign_with_default,
+    clippy::useless_conversion,
+    clippy::needless_question_mark,
+    clippy::vec_init_then_push,
+    clippy::manual_inspect,
+    clippy::clone_on_copy,
+    clippy::needless_borrows_for_generic_args,
+    clippy::op_ref
+)]
+
 #[cfg(all(feature = "quinn", not(feature = "s2n-quic")))]
 use crypto_suite::hashing::blake3;
 use std::fmt;

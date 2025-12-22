@@ -12,9 +12,11 @@ use the_block::p2p::handshake::validate_quic_certificate;
 use transport::{Config as TransportConfig, ProviderKind};
 
 fn configure_transport(quic_store: &std::path::Path) {
-    let mut cfg = TransportConfig::default();
-    cfg.provider = ProviderKind::S2nQuic;
-    cfg.certificate_cache = Some(quic_store.to_path_buf());
+    let cfg = TransportConfig {
+        provider: ProviderKind::S2nQuic,
+        certificate_cache: Some(quic_store.to_path_buf()),
+        ..Default::default()
+    };
     the_block::net::configure_transport(&cfg).expect("configure transport");
 }
 

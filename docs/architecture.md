@@ -258,6 +258,11 @@ Block {
     receipts,  // Stored in block
     // ... other fields ...
 }
+
+#### Block Validation and Transaction Verification
+
+- `node/src/blockchain/process.rs::validate_and_apply` no longer clones `Blockchain::accounts` wholesale. It copies each account lazily the first time a transaction touches it, records the touched addresses, and emits `StateDelta` entries for only the mutated accounts so block validation keeps working set size proportional to per-block activity rather than the entire universe.
+- `node/src/transaction.rs::verify_signed_tx` reuses the canonical payload bytes when building the domain-separated message, and the cache key now hashes that message plus the signing/public-key material in one pass. Deduplicated hashing removes the redundant BLAKE3 pass that previously serialized and hashed the entire transaction while still mapping each unique signed transaction to a stable `[u8; 32]` cache key.
 ```
 
 ### Receipt Serialization

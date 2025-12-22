@@ -1,3 +1,4 @@
+#![allow(clippy::option_map_unit_fn, clippy::unnecessary_to_owned)]
 #![forbid(unsafe_code)]
 
 use base64_fp::{decode_standard, encode_standard};

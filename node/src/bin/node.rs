@@ -1,5 +1,6 @@
 #![deny(warnings)]
 #![allow(clippy::expect_used)]
+#![allow(clippy::large_enum_variant)]
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
 use foundation_profiler::ProfilerGuard;
@@ -24,12 +25,13 @@ use cli_core::{
 };
 use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
+#[cfg(feature = "quic")]
 use sys::process;
 
 use ad_market::{
     DistributionPolicy, MarketplaceConfig, MarketplaceHandle, ReservationKey, SledMarketplace,
 };
-use the_block::config::{OverlayBackend, ReadAckPrivacyMode};
+use the_block::config::{set_blockchain_handle, OverlayBackend, ReadAckPrivacyMode};
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::treasury_executor::{
@@ -40,9 +42,10 @@ use the_block::{
     gateway::dns::{install_ledger_context, BlockchainLedger},
     generate_keypair, launch_governor,
     rpc::run_rpc_server_with_market,
-    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
-    ShutdownFlag,
+    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ShutdownFlag,
 };
+#[cfg(feature = "telemetry")]
+use the_block::ReadAckError;
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
@@ -1483,6 +1486,7 @@ async fn async_main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+            set_blockchain_handle(Arc::clone(&bc));
             let distribution = {
                 let guard = bc.lock().unwrap();
                 DistributionPolicy::new(

@@ -23,9 +23,9 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, Encoder, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec, IntCounter,
-    IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle, IntGaugeVec, Opts, Registry,
-    TextEncoder,
+    self, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec,
+    IntCounter, IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle, IntGaugeVec, Opts,
+    Registry, TextEncoder,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -121,9 +121,14 @@ struct GovernanceWebhookPayload<'a> {
     proposal_id: u64,
 }
 
+pub mod consensus_instrumentation;
+pub mod consensus_integration;
+pub mod consensus_metrics;
+pub mod energy;
 pub mod metrics;
 pub mod receipts;
 pub mod summary;
+pub mod treasury;
 
 #[cfg(feature = "telemetry")]
 pub use bridges::{
@@ -132,6 +137,73 @@ pub use bridges::{
 };
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_counter(name: &'static str, help: &'static str) -> IntCounter {
+    let counter = IntCounter::new(name, help).unwrap_or_else(|err| panic!("counter {name}: {err}"));
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    counter
+}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_counter_vec(
+    name: &'static str,
+    help: &'static str,
+    labels: &'static [&'static str],
+) -> IntCounterVec {
+    let opts = Opts::new(name, help);
+    let vec =
+        IntCounterVec::new(opts, labels).unwrap_or_else(|err| panic!("counter {name}: {err}"));
+    REGISTRY
+        .register(Box::new(vec.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    vec
+}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_gauge(name: &'static str, help: &'static str) -> Gauge {
+    let gauge = Gauge::new(name, help);
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    gauge
+}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_gauge_vec(
+    name: &'static str,
+    help: &'static str,
+    labels: &'static [&'static str],
+) -> GaugeVec {
+    let opts = Opts::new(name, help);
+    let gauge = GaugeVec::new(opts, labels);
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    gauge
+}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_int_gauge(name: &'static str, help: &'static str) -> IntGauge {
+    let gauge = IntGauge::new(name, help).unwrap_or_else(|err| panic!("int gauge {name}: {err}"));
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    gauge
+}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn register_histogram(name: &'static str, help: &'static str) -> Histogram {
+    let opts = HistogramOpts::new(name, help);
+    let histogram =
+        Histogram::with_opts(opts).unwrap_or_else(|err| panic!("histogram {name}: {err}"));
+    REGISTRY
+        .register(Box::new(histogram.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    histogram
+}
 
 pub const LABEL_REGISTRATION_ERR: &str = "telemetry label set not registered";
 
@@ -7472,10 +7544,10 @@ pub fn update_economics_epoch_metrics(
 
     for prev_metric in metrics::snapshot_from_metrics(prev_metrics) {
         ECONOMICS_PREV_MARKET_UTILIZATION_PPM
-            .with_label_values(&[prev_metric.market])
+            .with_label_values(&[&prev_metric.market])
             .set(prev_metric.utilization_ppm);
         ECONOMICS_PREV_MARKET_MARGIN_PPM
-            .with_label_values(&[prev_metric.market])
+            .with_label_values(&[&prev_metric.market])
             .set(prev_metric.provider_margin_ppm);
     }
 }

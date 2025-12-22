@@ -8,7 +8,7 @@ use crypto_suite::hex;
 use foundation_serialization::json::{
     self, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
 };
-use storage::StorageContract;
+use storage::{merkle_proof::MerkleTree, StorageContract};
 use storage_market::{ContractRecord, ReplicaIncentive};
 use storage_market::{
     ImportMode, ManifestSource, ManifestStatus, StorageImporter, StorageMarket,
@@ -17,6 +17,14 @@ use storage_market::{
 use sys::tempfile::tempdir;
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
+
+fn demo_chunks_for_import() -> Vec<Vec<u8>> {
+    vec![
+        b"import-chunk-0".to_vec(),
+        b"import-chunk-1".to_vec(),
+        b"import-chunk-2".to_vec(),
+    ]
+}
 
 fn write_manifest(dir: &Path, records: &[ContractRecord]) -> TestResult<PathBuf> {
     const LEGACY_TREE_HEX: &str = "6d61726b65742f636f6e747261637473";
@@ -42,6 +50,9 @@ fn write_manifest(dir: &Path, records: &[ContractRecord]) -> TestResult<PathBuf>
 }
 
 fn contract_record(object_id: &str, provider: &str) -> ContractRecord {
+    let chunks = demo_chunks_for_import();
+    let chunk_refs: Vec<&[u8]> = chunks.iter().map(|chunk| chunk.as_ref()).collect();
+    let tree = MerkleTree::build(&chunk_refs).expect("merkle tree");
     let contract = StorageContract {
         object_id: object_id.into(),
         provider_id: provider.into(),
@@ -54,6 +65,7 @@ fn contract_record(object_id: &str, provider: &str) -> ContractRecord {
         accrued: 0,
         total_deposit_ct: 0,
         last_payment_block: None,
+        storage_root: tree.root,
     };
     let replicas = vec![ReplicaIncentive::new(provider.into(), 4, 3, 15)];
     ContractRecord::with_replicas(contract, replicas)
@@ -122,6 +134,17 @@ fn storage_contract_to_value(contract: &StorageContract) -> JsonValue {
             .last_payment_block
             .map(|block| JsonValue::Number(JsonNumber::from(block)))
             .unwrap_or(JsonValue::Null),
+    );
+    map.insert(
+        "storage_root".into(),
+        JsonValue::Array(
+            contract
+                .storage_root
+                .as_bytes()
+                .iter()
+                .map(|byte| JsonValue::Number(JsonNumber::from(*byte)))
+                .collect(),
+        ),
     );
     JsonValue::Object(map)
 }

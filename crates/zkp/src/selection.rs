@@ -21,7 +21,7 @@ pub enum SelectionProofError {
     Semantics,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SelectionProofPublicInputs {
     #[serde(default, with = "foundation_serialization::serde_bytes")]
     pub commitment: Vec<u8>,
@@ -37,20 +37,6 @@ pub struct SelectionProofPublicInputs {
     pub clearing_price_usd_micros: u64,
     #[serde(default)]
     pub candidate_count: u16,
-}
-
-impl Default for SelectionProofPublicInputs {
-    fn default() -> Self {
-        Self {
-            commitment: Vec::new(),
-            winner_index: 0,
-            winner_quality_bid_usd_micros: 0,
-            runner_up_quality_bid_usd_micros: 0,
-            resource_floor_usd_micros: 0,
-            clearing_price_usd_micros: 0,
-            candidate_count: 0,
-        }
-    }
 }
 
 impl SelectionProofPublicInputs {

@@ -7,8 +7,10 @@ fn broadcast_updates() {
     runtime::block_on(async {
         let mut rx = subscribe_peer_metrics();
         let pk = [42u8; 32];
-        let mut pm = PeerMetrics::default();
-        pm.requests = 1;
+        let pm = PeerMetrics {
+            requests: 1,
+            ..Default::default()
+        };
         broadcast_metrics(&pk, &pm);
         let snap = the_block::timeout(Duration::from_secs(1), rx.recv())
             .await

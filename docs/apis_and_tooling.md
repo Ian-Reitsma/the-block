@@ -166,13 +166,12 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   },
   "disbursement": {
     "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
-    "amount_ct": 125_000_000,
-    "amount_it": 0,
+    "amount": 125_000_000,
     "memo": "Core grants Q2",
     "scheduled_epoch": 180_500,
     "expected_receipts": [
-      { "account": "foundation", "amount_ct": 100_000_000 },
-      { "account": "audit-retainer", "amount_ct": 25_000_000 }
+      { "account": "foundation", "amount": 100_000_000 },
+      { "account": "audit-retainer", "amount": 25_000_000 }
     ]
   }
 }

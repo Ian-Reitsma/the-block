@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use crate::{
     ledger_binary, simple_db::DbDelta, transaction::verify_stateless, Account, Block, Blockchain,
@@ -7,6 +8,10 @@ use crate::{
 use ledger::{address, shard::ShardState};
 use state::MerkleTrie;
 
+#[cfg(feature = "telemetry")]
+use crate::telemetry::consensus_instrumentation::{
+    BlockValidationTimer, TransactionProcessingTimer,
+};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BLOCK_APPLY_FAIL_TOTAL;
 
@@ -18,22 +23,86 @@ pub struct StateDelta {
     pub shard: address::ShardId,
 }
 
+fn default_account(address: String) -> Account {
+    Account {
+        address,
+        balance: TokenBalance {
+            consumer: 0,
+            industrial: 0,
+        },
+        nonce: 0,
+        pending_consumer: 0,
+        pending_industrial: 0,
+        pending_nonce: 0,
+        pending_nonces: HashSet::new(),
+        sessions: Vec::new(),
+    }
+}
+
+fn ensure_existing_account_mut<'a>(
+    accounts: &'a mut HashMap<String, Account>,
+    chain_accounts: &HashMap<String, Account>,
+    key: &str,
+) -> Result<&'a mut Account, TxAdmissionError> {
+    let key_owned = key.to_string();
+    match accounts.entry(key_owned.clone()) {
+        Entry::Occupied(entry) => Ok(entry.into_mut()),
+        Entry::Vacant(entry) => {
+            let existing = chain_accounts
+                .get(&key_owned)
+                .cloned()
+                .ok_or(TxAdmissionError::UnknownSender)?;
+            Ok(entry.insert(existing))
+        }
+    }
+}
+
+fn ensure_account_mut<'a>(
+    accounts: &'a mut HashMap<String, Account>,
+    chain_accounts: &HashMap<String, Account>,
+    key: &str,
+) -> &'a mut Account {
+    let key_owned = key.to_string();
+    match accounts.entry(key_owned.clone()) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => {
+            let value = chain_accounts
+                .get(&key_owned)
+                .cloned()
+                .unwrap_or_else(|| default_account(key_owned));
+            entry.insert(value)
+        }
+    }
+}
+
 /// Validate all transactions in `block` against `chain` without
 /// mutating state, returning the updated accounts on success.
 pub fn validate_and_apply(
     chain: &Blockchain,
     block: &Block,
 ) -> Result<Vec<StateDelta>, TxAdmissionError> {
-    let mut accounts = chain.accounts.clone();
+    #[cfg(feature = "telemetry")]
+    let _block_validation_timer = BlockValidationTimer::new();
+
+    let mut accounts = HashMap::new();
     let mut touched: HashSet<String> = HashSet::new();
+    let zero_address = "0".repeat(34);
     for tx in block.transactions.iter().skip(1) {
+        #[cfg(feature = "telemetry")]
+        let _tx_timer = TransactionProcessingTimer::new();
+
         verify_stateless(tx)?;
         let (fee_c, fee_i) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
             .map_err(|_| TxAdmissionError::FeeOverflow)?;
-        if tx.payload.from_ != "0".repeat(34) {
-            let sender = accounts
-                .get_mut(&tx.payload.from_)
-                .ok_or(TxAdmissionError::UnknownSender)?;
+        if tx.payload.from_ != zero_address {
+            let sender_key = tx.payload.from_.clone();
+            let sender = ensure_existing_account_mut(&mut accounts, &chain.accounts, &sender_key)?;
+            let expected_nonce = sender.nonce + 1;
+            match tx.payload.nonce.cmp(&expected_nonce) {
+                Ordering::Less => return Err(TxAdmissionError::Duplicate),
+                Ordering::Greater => return Err(TxAdmissionError::NonceGap),
+                Ordering::Equal => {}
+            }
             let total_c = tx.payload.amount_consumer + fee_c;
             let total_i = tx.payload.amount_industrial + fee_i;
             if sender.balance.consumer < total_c || sender.balance.industrial < total_i {
@@ -44,24 +113,13 @@ pub fn validate_and_apply(
             sender.balance.consumer -= total_c;
             sender.balance.industrial -= total_i;
             sender.nonce = tx.payload.nonce;
-            touched.insert(tx.payload.from_.clone());
+            touched.insert(sender_key);
         }
-        let recv = accounts.entry(tx.payload.to.clone()).or_insert(Account {
-            address: tx.payload.to.clone(),
-            balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
-            },
-            nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
-            pending_nonce: 0,
-            pending_nonces: HashSet::new(),
-            sessions: Vec::new(),
-        });
+        let recv_key = tx.payload.to.clone();
+        let recv = ensure_account_mut(&mut accounts, &chain.accounts, &recv_key);
         recv.balance.consumer += tx.payload.amount_consumer;
         recv.balance.industrial += tx.payload.amount_industrial;
-        touched.insert(tx.payload.to.clone());
+        touched.insert(recv_key);
     }
     let mut deltas = Vec::new();
     for addr in touched {

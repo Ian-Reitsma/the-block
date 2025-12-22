@@ -17,10 +17,10 @@ fn treasury_index_and_filters() {
     let db_path = dir.path().join("explorer.db");
     let explorer = Arc::new(Explorer::open(&db_path).expect("open explorer"));
 
-    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, 25, "memo-1".into(), 5);
-    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, 50, String::new(), 10);
+    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo-1".into(), 5);
+    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 10);
     mark_executed(&mut executed, "0xabc".into());
-    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, 75, String::new(), 2);
+    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 2);
     mark_cancelled(&mut cancelled, "no longer required".into());
 
     explorer

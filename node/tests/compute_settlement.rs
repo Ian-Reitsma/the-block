@@ -18,7 +18,7 @@ fn persists_balances_across_restart() {
     Settlement::accrue_split("provider", 100, 20);
     Settlement::shutdown();
     Settlement::init(path, SettleMode::DryRun);
-    assert_eq!(Settlement::balance_split("provider"), (100, 20));
+    assert_eq!(Settlement::balance("provider"), 120);
     let roots = Settlement::recent_roots(1);
     assert!(!roots.is_empty());
     teardown();
@@ -33,9 +33,9 @@ fn audit_records_split_and_refunds() {
     Settlement::accrue_split("alice", 10, 5);
     Settlement::refund_split("buyer", 4, 2);
     let audit = Settlement::audit();
-    assert!(contains_entry(&audit, "job", 50, 0));
-    assert!(contains_entry(&audit, "accrue_split", 10, 5));
-    assert!(contains_entry(&audit, "refund_split", 4, 2));
+    assert!(contains_entry(&audit, "job", 50, None));
+    assert!(contains_entry(&audit, "accrue_split", 10, Some(5)));
+    assert!(contains_entry(&audit, "refund_split", 4, Some(2)));
     teardown();
 }
 
@@ -53,7 +53,7 @@ fn submit_anchor_appends_audit_log() {
     teardown();
 }
 
-fn contains_entry(records: &[AuditRecord], memo: &str, ct: i64, it: i64) -> bool {
+fn contains_entry(records: &[AuditRecord], memo: &str, ct: i64, it: Option<i64>) -> bool {
     records
         .iter()
         .any(|rec| rec.memo == memo && rec.delta_ct == ct && rec.delta_it == it)

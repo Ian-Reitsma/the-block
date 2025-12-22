@@ -1001,7 +1001,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | --- | --- | --- | --- |
 | `peer.rebate_status` | `{peer_id}` | `{pending_ct, claimed_ct, receipts[]}` | invalid ID |
 | `peer.rebate_claim` | `{peer_id}` | `{status:"ok", claimed_ct}` once receipts consumed | invalid ID |
-| `rent.escrow.balance` | `{provider}` | `{balance_ct, locked_until}` from `RentEscrow` sled | none |
+| `rent.escrow.balance` | `{provider}` | `{balance, locked_until}` from `RentEscrow` sled | none |
 | `scheduler.stats` | none | Scheduler debug payload `{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}` | none |
 
 #### Governance, treasury, and service badges
@@ -1015,7 +1015,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | `gov.release_signers` | none | `{signers:[{name,pubkey}]} ` | none |
 | `gov.treasury.balance` | none | `{ct, industrial_ct, usd_estimate}` from treasury sled | none |
 | `gov.treasury.balance_history` | `{start?, end?}` | `{entries:[{epoch,ct}], next_cursor?}` | none |
-| `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount_ct, recipient, executed_at}], next_cursor?}` | none |
+| `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}` | none |
 | `service_badge_issue` | `{subject, badge}` (requires signer badge header) | `{status:"ok"}` and records issuance | `-32602` invalid payload, `-32050` when badge invalid |
 | `service_badge_revoke` | `{subject, badge}` | `{status:"ok"}` | same |
 | `service_badge_verify` | `{token}` | `{valid:bool, subject?, expires_at?}` | none |
@@ -1070,13 +1070,13 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
 | `storage_upload` | `{object_id, provider_id, original_bytes, shares, price_per_block, start_block, retention_blocks}` | Delegates to `storage::upload`, returning manifest receipt (`{status:"ok", contract_id}`) | storage errors bubble up via `rpc_error(-32603,...)` |
-| `storage_challenge` | `{object_id, provider_id?, chunk_idx, proof, current_block}` | `{status:"ok", challenge_id}` if proof accepted | `-32602` invalid inputs; storage errors |
+| `storage_challenge` | `{object_id, provider_id?, chunk_idx, chunk_data, proof, current_block}` | `{status:"ok", challenge_id}` if proof accepted | `-32602` invalid inputs; storage errors |
 | `storage.manifests` | `{limit?}` | `{manifests:[{object_id, provider_id, shares, retention_blocks, status}]}` limited to latest `limit` entries | none |
 | `storage_provider_profiles` | none | `{providers:[{id, capacity_bytes, maintenance, uptime_ppm}]}` | none |
 | `storage_provider_set_maintenance` | `{provider, maintenance:bool}` | `{status:"ok"}` after toggling provider availability | `-32030` unknown provider |
 | `storage_incentives` | none | `{rent_escrow:{credits_ct, debits_ct}, rebate_rates:{lane, ppm}}` | none |
-
-
+ 
+Storage challenges now expect `chunk_data` (hex-encoded bytes for the challenged chunk) and `proof` (hex-encoded `MerkleProof.path`) so providers must present the actual content that links back to `storage_root`.
 
 ### Appendix B · Metric Index
 

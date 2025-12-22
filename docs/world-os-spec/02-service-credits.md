@@ -23,6 +23,7 @@
 1. Clients call `storage.upload` via RPC. The gateway uses `storage_alloc::allocate` to choose providers.
 2. `storage_market::StorageMarket::register_contract` calculates deposits and writes `ContractRecord`.
 3. Retrieval challenges hit `storage.challenge`, which verifies proofs via `StorageContract::verify_proof`. Success increments EWMA counters; failure slashes deposits and decreases scheduler reputation via `compute_market::scheduler::merge_reputation`.
+   The RPC and `contract-cli storage challenge` now supply `chunk_data` (hex-encoded chunk bytes) and `proof` (hex-encoded `MerkleProof.path`) so the node can verify the leaf against `storage_root`.
 4. Payments accrue as CT in contract state, later withdrawn when contract expires. Ledger entries reference `object_id` for audit.
 5. Telemetry increments `STORAGE_CONTRACT_CREATED_TOTAL`, `RETRIEVAL_SUCCESS_TOTAL`, `RETRIEVAL_FAILURE_TOTAL` in `node/src/telemetry.rs`.
 

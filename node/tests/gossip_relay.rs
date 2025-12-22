@@ -14,9 +14,10 @@ static MEMORY_DB: Once = Once::new();
 
 fn relay_with_config(cfg: GossipConfig) -> (Relay, temp::TempDir) {
     MEMORY_DB.call_once(|| {
-        let mut config = EngineConfig::default();
-        config.default_engine = EngineKind::Memory;
-        simple_db::configure_engines(config);
+        simple_db::configure_engines(EngineConfig {
+            default_engine: EngineKind::Memory,
+            ..Default::default()
+        });
     });
     let dir = temp::tempdir().expect("tempdir");
     let path = dir.path().join("gossip_relay_store");
@@ -29,12 +30,14 @@ fn relay_with_config(cfg: GossipConfig) -> (Relay, temp::TempDir) {
 tb_prop_test!(dedup_entries_expire, |runner| {
     runner
         .add_case("default ttl", || {
-            let mut cfg = GossipConfig::default();
-            cfg.ttl_ms = 500;
-            cfg.dedup_capacity = 128;
-            cfg.min_fanout = 2;
-            cfg.base_fanout = 3;
-            cfg.max_fanout = 6;
+            let cfg = GossipConfig {
+                ttl_ms: 500,
+                dedup_capacity: 128,
+                min_fanout: 2,
+                base_fanout: 3,
+                max_fanout: 6,
+                ..Default::default()
+            };
             let (relay, _dir) = relay_with_config(cfg);
             let sk = SigningKey::from_bytes(&[7u8; 32]);
             let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");
@@ -55,12 +58,14 @@ tb_prop_test!(fanout_respects_configuration, |runner| {
             for &(min, base_delta, max_delta, peers_count) in CASES {
                 let base = min + base_delta;
                 let max = base + max_delta;
-                let mut cfg = GossipConfig::default();
-                cfg.ttl_ms = 5;
-                cfg.dedup_capacity = 256;
-                cfg.min_fanout = min;
-                cfg.base_fanout = base;
-                cfg.max_fanout = max;
+                let cfg = GossipConfig {
+                    ttl_ms: 5,
+                    dedup_capacity: 256,
+                    min_fanout: min,
+                    base_fanout: base,
+                    max_fanout: max,
+                    ..Default::default()
+                };
                 let (relay, _dir) = relay_with_config(cfg);
                 let sk = SigningKey::from_bytes(&[9u8; 32]);
                 let msg = Message::new(Payload::Hello(vec![]), &sk).expect("sign hello");

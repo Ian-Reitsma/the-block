@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unnecessary_map_or,
+    clippy::too_many_arguments,
+    clippy::unnecessary_min_or_max
+)]
 #![forbid(unsafe_code)]
 
 use std::backtrace::Backtrace;

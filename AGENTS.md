@@ -270,7 +270,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 
 ## 1 · Project Mission & Scope — Production-Grade Mandate
 
-**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (BLOCK) proof‑of‑work + proof‑of-service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility. The code still refers to `CT/IT` in field names (`amount_ct`, `amount_it`, `STORAGE_SUB_CT`, etc.), so treat those as legacy ledger labels that describe BLOCK balances.
+**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (BLOCK) proof‑of‑work + proof‑of-service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility. Treasury, governance, and RPC surfaces now expose BLOCK-denominated fields (`amount`, `balance`, `price`, etc.) without the old `_ct`/`_it` suffixes; treat any remaining `*_CT` identifiers (e.g., subsidy counters) as named BLOCK ledgers rather than separate tokens.
 The repository owns exactly four responsibility domains:
 
 | Domain        | In-Scope Artifacts                                                     | Out-of-Scope (must live in sibling repos) |
@@ -1110,7 +1110,7 @@ A trait-based, multi-provider signature verification system for energy market or
    - **Estimated effort**: 2-3 days
 
 3. **Telemetry Metrics for Treasury & Dashboards** (`node/src/telemetry.rs`, `governance/src/treasury.rs`, `monitoring/`)
-   - Treasury: `governance_disbursements_total{status}`, `treasury_balance_ct`, `treasury_disbursement_backlog`
+   - Treasury: `governance_disbursements_total{status}`, `treasury_balance`, `treasury_disbursement_backlog`
    - Wire the newly added energy metrics (`energy_provider_total`, `energy_pending_credits_total`, `energy_active_disputes_total`, `energy_settlement_total{provider}`, etc.) into dashboards + `/wrappers`
    - **Estimated effort**: 1 day (metrics are defined; need dashboards + treasury wiring)
 

@@ -1,3 +1,13 @@
+#![allow(
+    clippy::default_constructed_unit_structs,
+    clippy::manual_repeat_n,
+    clippy::derivable_impls,
+    clippy::needless_range_loop,
+    clippy::manual_div_ceil,
+    clippy::if_same_then_else
+)]
+#![forbid(unsafe_code)]
+
 mod compression;
 mod config;
 mod encrypt;

@@ -306,7 +306,7 @@ impl SelectionAttestationManager {
                         || (metadata.proof_length != 0
                             && metadata.proof_length != verification.proof_len)
                         || !protocols_consistent(&metadata.protocol, &verification.protocol)
-                        || !commitments_consistent(&metadata, &verification)
+                        || !commitments_consistent(metadata, &verification)
                     {
                         return Err(SelectionReceiptError::InvalidAttestation {
                             kind: SelectionAttestationKind::Snark,

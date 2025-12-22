@@ -1,4 +1,9 @@
 #![cfg(feature = "integration-tests")]
+#![allow(
+    clippy::write_literal,
+    clippy::manual_split_once,
+    clippy::useless_format
+)]
 use std::fs::File;
 use std::io::{self, Write};
 use std::net::SocketAddr;

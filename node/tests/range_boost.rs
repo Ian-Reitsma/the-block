@@ -77,7 +77,7 @@ fn range_boost_fault_injection_counts_failures() {
     }
     range_boost::set_forwarder_fault_mode(FaultMode::None);
     range_boost::set_enabled(false);
-    assert!(RANGE_BOOST_FORWARDER_FAIL_TOTAL.value() >= baseline + 1);
+    assert!(RANGE_BOOST_FORWARDER_FAIL_TOTAL.value() > baseline);
 }
 
 #[cfg(feature = "telemetry")]

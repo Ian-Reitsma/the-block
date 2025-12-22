@@ -1,3 +1,4 @@
+#![allow(clippy::while_let_on_iterator)]
 #![forbid(unsafe_code)]
 
 use proc_macro::{Delimiter, Group, TokenStream, TokenTree};

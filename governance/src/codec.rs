@@ -1,6 +1,7 @@
 // Manual binary and JSON codecs for governance data structures.
 use crate::treasury::{
-    DisbursementStatus, TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
+    DisbursementProposalMetadata, DisbursementReceipt, DisbursementStatus, ExpectedReceipt,
+    TreasuryBalanceEventKind, TreasuryBalanceSnapshot, TreasuryDisbursement,
 };
 use crate::{
     ApprovedRelease, ParamKey, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot,
@@ -10,6 +11,9 @@ use foundation_serialization::json::{self, Map, Value};
 use std::convert::TryInto;
 
 pub type Result<T> = std::result::Result<T, sled::Error>;
+
+const TREASURY_DISBURSEMENT_VERSION_TAG: u8 = 0xFF;
+const TREASURY_DISBURSEMENT_VERSION_V1: u8 = 1;
 
 fn codec_error(msg: impl Into<String>) -> sled::Error {
     sled::Error::Unsupported(msg.into().into_boxed_str())
@@ -90,6 +94,10 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_u8(&mut self) -> Result<u8> {
         Ok(self.read_exact(1)?[0])
+    }
+
+    pub fn peek_u8(&self) -> Option<u8> {
+        self.data.get(self.pos).copied()
     }
 
     pub fn read_bool(&mut self) -> Result<bool> {
@@ -881,46 +889,114 @@ impl BinaryCodec for DisbursementStatus {
 
 impl BinaryCodec for TreasuryDisbursement {
     fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(TREASURY_DISBURSEMENT_VERSION_TAG);
+        writer.write_u8(TREASURY_DISBURSEMENT_VERSION_V1);
+        self.encode_v1(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        if reader
+            .peek_u8()
+            .is_some_and(|tag| tag == TREASURY_DISBURSEMENT_VERSION_TAG)
+        {
+            reader.read_u8()?; // tag
+            match reader.read_u8()? {
+                TREASURY_DISBURSEMENT_VERSION_V1 => Self::decode_v1(reader),
+                other => Err(codec_error(format!(
+                    "binary decode: unknown TreasuryDisbursement version {other}"
+                ))),
+            }
+        } else {
+            Self::decode_v0(reader)
+        }
+    }
+}
+
+impl TreasuryDisbursement {
+    fn encode_v1(&self, writer: &mut BinaryWriter) {
         self.id.encode(writer);
         self.destination.encode(writer);
-        self.amount_ct.encode(writer);
+        self.amount.encode(writer);
         self.memo.encode(writer);
         self.scheduled_epoch.encode(writer);
         self.created_at.encode(writer);
         self.status.encode(writer);
-        self.amount_it.encode(writer);
-        // Use serde-based encoding for complex nested types
-        let proposal_bytes =
-            foundation_serialization::binary::encode(&self.proposal).unwrap_or_else(|_| Vec::new());
-        (proposal_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&proposal_bytes);
-
-        let expected_receipts_bytes =
-            foundation_serialization::binary::encode(&self.expected_receipts)
-                .unwrap_or_else(|_| Vec::new());
-        (expected_receipts_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&expected_receipts_bytes);
-
-        let receipts_bytes =
-            foundation_serialization::binary::encode(&self.receipts).unwrap_or_else(|_| Vec::new());
-        (receipts_bytes.len() as u32).encode(writer);
-        writer.write_raw_bytes(&receipts_bytes);
+        self.encode_nested(writer);
     }
 
-    fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+    fn decode_v1(reader: &mut BinaryReader<'_>) -> Result<Self> {
         let id = u64::decode(reader)?;
         let destination = String::decode(reader)?;
-        let amount_ct = u64::decode(reader)?;
+        let amount = u64::decode(reader)?;
         let memo = String::decode(reader)?;
         let scheduled_epoch = u64::decode(reader)?;
         let created_at = u64::decode(reader)?;
         let status = DisbursementStatus::decode(reader)?;
-        let amount_it = if reader.remaining() >= 8 {
-            u64::decode(reader)?
-        } else {
-            0
-        };
-        // Decode new fields with backwards compatibility
+        let (proposal, expected_receipts, receipts) = Self::decode_nested(reader)?;
+        Ok(Self {
+            id,
+            destination,
+            amount,
+            memo,
+            scheduled_epoch,
+            created_at,
+            status,
+            proposal,
+            expected_receipts,
+            receipts,
+        })
+    }
+
+    fn decode_v0(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        let id = u64::decode(reader)?;
+        let destination = String::decode(reader)?;
+        let amount = u64::decode(reader)?;
+        let memo = String::decode(reader)?;
+        let scheduled_epoch = u64::decode(reader)?;
+        let created_at = u64::decode(reader)?;
+        let status = DisbursementStatus::decode(reader)?;
+        if reader.remaining() >= 8 {
+            let _ = u64::decode(reader)?;
+        }
+        let (proposal, expected_receipts, receipts) = Self::decode_nested(reader)?;
+        Ok(Self {
+            id,
+            destination,
+            amount,
+            memo,
+            scheduled_epoch,
+            created_at,
+            status,
+            proposal,
+            expected_receipts,
+            receipts,
+        })
+    }
+
+    fn encode_nested(&self, writer: &mut BinaryWriter) {
+        let proposal_bytes =
+            foundation_serialization::binary::encode(&self.proposal).unwrap_or_default();
+        (proposal_bytes.len() as u32).encode(writer);
+        writer.write_raw_bytes(&proposal_bytes);
+
+        let expected_receipts_bytes =
+            foundation_serialization::binary::encode(&self.expected_receipts).unwrap_or_default();
+        (expected_receipts_bytes.len() as u32).encode(writer);
+        writer.write_raw_bytes(&expected_receipts_bytes);
+
+        let receipts_bytes =
+            foundation_serialization::binary::encode(&self.receipts).unwrap_or_default();
+        (receipts_bytes.len() as u32).encode(writer);
+        writer.write_raw_bytes(&receipts_bytes);
+    }
+
+    fn decode_nested(
+        reader: &mut BinaryReader<'_>,
+    ) -> Result<(
+        Option<DisbursementProposalMetadata>,
+        Vec<ExpectedReceipt>,
+        Vec<DisbursementReceipt>,
+    )> {
         let proposal = if reader.remaining() >= 4 {
             let len = u32::decode(reader)? as usize;
             if len > 0 && reader.remaining() >= len {
@@ -957,52 +1033,28 @@ impl BinaryCodec for TreasuryDisbursement {
             vec![]
         };
 
-        Ok(Self {
-            id,
-            destination,
-            amount_ct,
-            amount_it,
-            memo,
-            scheduled_epoch,
-            created_at,
-            status,
-            proposal,
-            expected_receipts,
-            receipts,
-        })
+        Ok((proposal, expected_receipts, receipts))
     }
 }
 
 impl BinaryCodec for TreasuryBalanceSnapshot {
     fn encode(&self, writer: &mut BinaryWriter) {
         self.id.encode(writer);
-        self.balance_ct.encode(writer);
-        self.delta_ct.encode(writer);
+        self.balance.encode(writer);
+        self.delta.encode(writer);
         self.recorded_at.encode(writer);
         self.event.encode(writer);
         self.disbursement_id.encode(writer);
-        self.balance_it.encode(writer);
-        self.delta_it.encode(writer);
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
         Ok(Self {
             id: u64::decode(reader)?,
-            balance_ct: u64::decode(reader)?,
-            delta_ct: i64::decode(reader)?,
+            balance: u64::decode(reader)?,
+            delta: i64::decode(reader)?,
             recorded_at: u64::decode(reader)?,
             event: TreasuryBalanceEventKind::decode(reader)?,
             disbursement_id: Option::<u64>::decode(reader)?,
-            balance_it: if reader.remaining() >= 16 {
-                u64::decode(reader)?
-            } else {
-                0
-            },
-            delta_it: if reader.remaining() >= 8 {
-                i64::decode(reader)?
-            } else {
-                0
-            },
         })
     }
 }
@@ -1188,16 +1240,7 @@ pub fn disbursement_to_json(disbursement: &TreasuryDisbursement) -> Value {
         "destination".into(),
         Value::String(disbursement.destination.clone()),
     );
-    map.insert(
-        "amount_ct".into(),
-        Value::Number(disbursement.amount_ct.into()),
-    );
-    if disbursement.amount_it > 0 {
-        map.insert(
-            "amount_it".into(),
-            Value::Number(disbursement.amount_it.into()),
-        );
-    }
+    map.insert("amount".into(), Value::Number(disbursement.amount.into()));
     map.insert("memo".into(), Value::String(disbursement.memo.clone()));
     map.insert(
         "scheduled_epoch".into(),
@@ -1258,11 +1301,10 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
         .and_then(Value::as_str)
         .ok_or_else(|| codec_error("treasury JSON: missing destination"))?
         .to_string();
-    let amount_ct = obj
-        .get("amount_ct")
+    let amount = obj
+        .get("amount")
         .and_then(Value::as_u64)
-        .ok_or_else(|| codec_error("treasury JSON: missing amount_ct"))?;
-    let amount_it = obj.get("amount_it").and_then(Value::as_u64).unwrap_or(0);
+        .ok_or_else(|| codec_error("treasury JSON: missing amount"))?;
     let memo = obj
         .get("memo")
         .and_then(Value::as_str)
@@ -1309,8 +1351,7 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
     Ok(TreasuryDisbursement {
         id,
         destination,
-        amount_ct,
-        amount_it,
+        amount,
         memo,
         scheduled_epoch,
         created_at,
@@ -1324,16 +1365,8 @@ pub fn disbursement_from_json(value: &Value) -> Result<TreasuryDisbursement> {
 pub fn balance_snapshot_to_json(snapshot: &TreasuryBalanceSnapshot) -> Value {
     let mut map = Map::new();
     map.insert("id".into(), Value::Number(snapshot.id.into()));
-    map.insert(
-        "balance_ct".into(),
-        Value::Number(snapshot.balance_ct.into()),
-    );
-    map.insert("delta_ct".into(), Value::Number(snapshot.delta_ct.into()));
-    map.insert(
-        "balance_it".into(),
-        Value::Number(snapshot.balance_it.into()),
-    );
-    map.insert("delta_it".into(), Value::Number(snapshot.delta_it.into()));
+    map.insert("balance".into(), Value::Number(snapshot.balance.into()));
+    map.insert("delta".into(), Value::Number(snapshot.delta.into()));
     map.insert(
         "recorded_at".into(),
         Value::Number(snapshot.recorded_at.into()),
@@ -1359,16 +1392,14 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
         .get("id")
         .and_then(Value::as_u64)
         .ok_or_else(|| codec_error("treasury balance JSON: missing id"))?;
-    let balance_ct = obj
-        .get("balance_ct")
+    let balance = obj
+        .get("balance")
         .and_then(Value::as_u64)
-        .ok_or_else(|| codec_error("treasury balance JSON: missing balance_ct"))?;
-    let delta_ct = obj
-        .get("delta_ct")
+        .ok_or_else(|| codec_error("treasury balance JSON: missing balance"))?;
+    let delta = obj
+        .get("delta")
         .and_then(Value::as_i64)
-        .ok_or_else(|| codec_error("treasury balance JSON: missing delta_ct"))?;
-    let balance_it = obj.get("balance_it").and_then(Value::as_u64).unwrap_or(0);
-    let delta_it = obj.get("delta_it").and_then(Value::as_i64).unwrap_or(0);
+        .ok_or_else(|| codec_error("treasury balance JSON: missing delta"))?;
     let recorded_at = obj
         .get("recorded_at")
         .and_then(Value::as_u64)
@@ -1391,10 +1422,8 @@ pub fn balance_snapshot_from_json(value: &Value) -> Result<TreasuryBalanceSnapsh
     let disbursement_id = obj.get("disbursement_id").and_then(Value::as_u64);
     Ok(TreasuryBalanceSnapshot {
         id,
-        balance_ct,
-        delta_ct,
-        balance_it,
-        delta_it,
+        balance,
+        delta,
         recorded_at,
         event,
         disbursement_id,

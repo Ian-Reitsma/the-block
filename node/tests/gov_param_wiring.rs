@@ -214,7 +214,7 @@ fn scheduler_weights_apply_and_record_activation() {
     let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     let initial_weights = current_default_weights();
-    let mut expected_old = initial_weights.clone();
+    let mut expected_old = initial_weights;
 
     let updates = [
         (ParamKey::SchedulerWeightGossip, 5_i64, ServiceClass::Gossip),

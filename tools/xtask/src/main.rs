@@ -1,3 +1,5 @@
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},

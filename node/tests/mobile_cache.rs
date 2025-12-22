@@ -62,12 +62,12 @@ fn mobile_cache_updates_telemetry_counters() {
     let base_hits = MOBILE_CACHE_HIT_TOTAL.value();
     let base_miss = MOBILE_CACHE_MISS_TOTAL.value();
     let _ = cache.get("unknown").expect("cache miss lookup");
-    assert!(MOBILE_CACHE_MISS_TOTAL.value() >= base_miss + 1);
+    assert!(MOBILE_CACHE_MISS_TOTAL.value() > base_miss);
     cache
         .insert("tracked".into(), "value".into())
         .expect("insert tracked");
     let _ = cache.get("tracked").expect("cache hit");
-    assert!(MOBILE_CACHE_HIT_TOTAL.value() >= base_hits + 1);
+    assert!(MOBILE_CACHE_HIT_TOTAL.value() > base_hits);
     assert!(MOBILE_CACHE_ENTRY_TOTAL.value() >= 1);
     cache.queue_tx("queued".into()).expect("queue tx");
     assert!(MOBILE_CACHE_QUEUE_TOTAL.value() >= 1);

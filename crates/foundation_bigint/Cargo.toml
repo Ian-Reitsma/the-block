@@ -7,3 +7,4 @@ license = "MIT OR Apache-2.0"
 description = "First-party arbitrary-precision unsigned integer implementation"
 
 [dependencies]
+foundation_math = { path = "../foundation_math" }

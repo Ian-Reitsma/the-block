@@ -36,8 +36,10 @@ fn gossip_relay_engine_parity() {
         configure_for_engine(engine);
         let dir = tempdir().expect("gossip tempdir");
         let store_dir = dir.path().join(format!("gossip-{}", engine.label()));
-        let mut cfg = GossipConfig::default();
-        cfg.shard_store_path = store_dir.to_string_lossy().into_owned();
+        let cfg = GossipConfig {
+            shard_store_path: store_dir.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
         let relay = Relay::new(cfg.clone());
         let shard: ShardId = 1;
         let mut peer_bytes = [0u8; 32];
@@ -75,7 +77,7 @@ fn settlement_engine_parity() {
         let balances = Settlement::balances();
         assert!(balances
             .iter()
-            .any(|b| b.provider == "provider-a" && b.ct == 42));
+            .any(|b| b.provider == "provider-a" && b.balance == 42));
         Settlement::shutdown();
     }
     simple_db::configure_engines(EngineConfig::default());

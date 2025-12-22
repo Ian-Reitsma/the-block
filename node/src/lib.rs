@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
+#![allow(unused_imports)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
+#![allow(unused_variables)]
 #![allow(clippy::all)]
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::disallowed_types)]
@@ -24,8 +26,8 @@ use ad_market::{DeliveryChannel, SettlementBreakdown};
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
-use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
+use crypto_suite::{hashing::blake3, hex};
 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
 use diagnostics::tracing::info;
 #[cfg(feature = "telemetry")]
@@ -71,10 +73,12 @@ pub mod energy;
 pub mod exec;
 pub mod governor_snapshot;
 mod read_receipt;
+pub mod receipt_crypto;
 pub mod receipts;
 pub mod receipts_validation;
 pub mod simple_db;
-use config::NodeConfig;
+use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
+use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 
@@ -102,6 +106,7 @@ const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
 const TAU_B: f64 = 1.0; // block interval in seconds
 static VDF_KAPPA: AtomicU64 = AtomicU64::new(1u64 << 28);
 const F_HW_BASE: f64 = 3.0e9; // reference 3 GHz hardware
+const RECEIPT_NONCE_FINALITY: u64 = 100;
 
 fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
@@ -580,7 +585,7 @@ impl<'a> ReservationGuard<'a> {
 pub struct BlockTreasuryEvent {
     pub disbursement_id: u64,
     pub destination: String,
-    pub amount_ct: u64,
+    pub amount: u64,
     pub memo: String,
     pub scheduled_epoch: u64,
     pub tx_hash: String,
@@ -957,6 +962,10 @@ pub struct Blockchain {
     pub pending_ad_settlements: Vec<AdSettlementRecord>,
     /// Persisted proof rebate tracker
     pub proof_tracker: crate::light_client::proof_tracker::ProofTracker,
+    /// Registry of provider keys for receipt verification
+    pub provider_registry: ProviderRegistry,
+    /// Nonce tracker for receipt replay protection
+    pub nonce_tracker: NonceTracker,
     /// Tracker for intermediate block hashes used in reorg rollback
     pub reorg: crate::blockchain::reorg::ReorgTracker,
     /// Recent miners for base-reward logistic feedback
@@ -1153,6 +1162,8 @@ impl Default for Blockchain {
             read_batcher: crate::read_receipt::ReadBatcher::new(),
             pending_ad_settlements: Vec::new(),
             proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
+            provider_registry: ProviderRegistry::new(),
+            nonce_tracker: NonceTracker::new(RECEIPT_NONCE_FINALITY),
             reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
             recent_timestamps: VecDeque::new(),
@@ -1231,6 +1242,43 @@ impl Blockchain {
 
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+
+    pub fn register_receipt_providers(
+        &mut self,
+        providers: &[ReceiptProviderConfig],
+    ) -> Result<(), String> {
+        self.provider_registry.providers.clear();
+        for provider in providers {
+            let bytes = hex::decode(provider.verifying_key_hex.trim()).map_err(|_| {
+                format!("invalid hex encoding for provider {}", provider.provider_id)
+            })?;
+            let public_key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                format!(
+                    "invalid verifying key length for provider {}: expected 32 bytes",
+                    provider.provider_id
+                )
+            })?;
+            let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|err| {
+                format!(
+                    "invalid verifying key for provider {}: {}",
+                    provider.provider_id, err
+                )
+            })?;
+            self.provider_registry
+                .register_provider(
+                    provider.provider_id.clone(),
+                    verifying_key,
+                    self.block_height,
+                )
+                .map_err(|err| {
+                    format!(
+                        "failed to register provider {}: {}",
+                        provider.provider_id, err
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     fn build_market_metrics(
@@ -2724,6 +2772,12 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         telemetry::summary::spawn(cfg.telemetry_summary_interval);
         bc.config = cfg.clone();
+        if let Err(err) = bc.register_receipt_providers(&cfg.receipt_providers) {
+            #[cfg(feature = "telemetry")]
+            diagnostics::tracing::warn!(reason = %err, "receipt_provider_registration_failed");
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!("receipt_provider_registration_failed: {err}");
+        }
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::SNAPSHOT_INTERVAL.set(cfg.snapshot_interval as i64);
@@ -4497,9 +4551,10 @@ impl Blockchain {
 
         // Pre-allocate receipt vector with capacity hint (performance optimization)
         // Estimate: ad_settlements + typical counts from other markets
-        let estimated_receipt_count = ad_settlements.len()
+        let estimated_receipt_count = ad_settlements
+            .len()
             .saturating_add(100) // Storage receipts (typical)
-            .saturating_add(50)  // Compute receipts (typical)
+            .saturating_add(50) // Compute receipts (typical)
             .saturating_add(20); // Energy receipts (typical)
         let mut block_receipts: Vec<Receipt> = Vec::with_capacity(estimated_receipt_count);
 
@@ -4567,6 +4622,8 @@ impl Blockchain {
                 spend_ct: record.total_ct,
                 block_height: index,
                 conversions: record.conversions,
+                publisher_signature: vec![],
+                signature_nonce: index,
             }));
         }
         for receipt in crate::energy::drain_energy_receipts() {
@@ -4580,6 +4637,8 @@ impl Blockchain {
                 price_ct: receipt.price_paid,
                 block_height: receipt.block_settled,
                 proof_hash: receipt.meter_reading_hash,
+                provider_signature: vec![],
+                signature_nonce: receipt.block_settled,
             }));
         }
         for receipt in crate::rpc::storage::drain_storage_receipts() {
@@ -4592,15 +4651,17 @@ impl Blockchain {
 
         // Validate receipt count and size (DoS protection)
         if let Err(e) = crate::receipts_validation::validate_receipt_count(block_receipts.len()) {
-            return Err(PyError::value(format!(
-                "Receipt validation failed: {}",
-                e
-            )));
+            return Err(PyError::value(format!("Receipt validation failed: {}", e)));
         }
 
         // Validate individual receipts
         for receipt in &block_receipts {
-            if let Err(_e) = crate::receipts_validation::validate_receipt(receipt, index) {
+            if let Err(_e) = crate::receipts_validation::validate_receipt(
+                receipt,
+                index,
+                &self.provider_registry,
+                &mut self.nonce_tracker,
+            ) {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::receipts::RECEIPT_VALIDATION_FAILURES_TOTAL.inc();
 
@@ -4684,7 +4745,7 @@ impl Blockchain {
         let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
-            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut, 0) {
+            if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
                 diagnostics::log::warn!(format!(
                     "failed to accrue treasury disbursement share: {err}"
                 ));
@@ -4795,7 +4856,7 @@ impl Blockchain {
                         } if tx_hashes.contains(tx_hash) => Some(BlockTreasuryEvent {
                             disbursement_id: record.id,
                             destination: record.destination,
-                            amount_ct: record.amount_ct,
+                            amount: record.amount,
                             memo: record.memo,
                             scheduled_epoch: record.scheduled_epoch,
                             tx_hash: tx_hash.clone(),
@@ -5015,15 +5076,16 @@ impl Blockchain {
         // Validate receipt size before mining (DoS protection)
         // We encode receipts once here and cache the result to avoid double encoding
         // in the hash calculation loop (performance optimization).
-        let receipts_serialized = crate::block_binary::encode_receipts(&block.receipts)
-            .map_err(|e| {
+        let receipts_serialized =
+            crate::block_binary::encode_receipts(&block.receipts).map_err(|e| {
                 PyError::runtime(format!(
                     "Failed to encode receipts for size validation: {:?}",
                     e
                 ))
             })?;
 
-        if let Err(e) = crate::receipts_validation::validate_receipt_size(receipts_serialized.len()) {
+        if let Err(e) = crate::receipts_validation::validate_receipt_size(receipts_serialized.len())
+        {
             return Err(PyError::value(format!(
                 "Receipt size validation failed: {}. Encoded size: {} bytes, Receipt count: {}",
                 e,
@@ -5092,7 +5154,10 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 {
                     // Use cached serialized receipts for telemetry (avoid third encoding)
-                    crate::telemetry::receipts::record_receipts(&block.receipts, receipts_serialized.len());
+                    crate::telemetry::receipts::record_receipts(
+                        &block.receipts,
+                        receipts_serialized.len(),
+                    );
                 }
                 let key = format!("base_fee:{}", block.index);
                 let fee_bytes = block_base_fee.to_le_bytes();
@@ -6939,31 +7004,66 @@ fn calculate_hash(
     receipts: &[Receipt],
 ) -> String {
     // CRITICAL: Receipt encoding must succeed for consensus integrity.
-    let receipts_bytes = crate::block_binary::encode_receipts(receipts)
-        .unwrap_or_else(|e| {
-            #[cfg(feature = "telemetry")]
-            crate::telemetry::receipts::RECEIPT_ENCODING_FAILURES_TOTAL.inc();
+    let receipts_bytes = crate::block_binary::encode_receipts(receipts).unwrap_or_else(|e| {
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::receipts::RECEIPT_ENCODING_FAILURES_TOTAL.inc();
 
-            panic!(
-                "CRITICAL: Receipt encoding failed during hash calculation. \
+        panic!(
+            "CRITICAL: Receipt encoding failed during hash calculation. \
                  This indicates a serious bug that will corrupt consensus. \
                  Error: {:?}, Receipt count: {}",
-                e, receipts.len()
-            );
-        });
+            e,
+            receipts.len()
+        );
+    });
 
     calculate_hash_with_cached_receipts(
-        index, prev, timestamp, nonce, difficulty, base_fee,
-        coin_c, coin_i, storage_sub, read_sub, read_sub_viewer,
-        read_sub_host, read_sub_hardware, read_sub_verifier, read_sub_liquidity,
-        ad_viewer, ad_host, ad_hardware, ad_verifier, ad_liquidity, ad_miner,
-        ad_host_it, ad_hardware_it, ad_verifier_it, ad_liquidity_it, ad_miner_it,
-        ad_total_usd_micros, ad_settlement_count,
-        ad_oracle_ct_price_usd_micros, ad_oracle_it_price_usd_micros,
-        compute_sub, proof_rebate, storage_sub_it, read_sub_it, compute_sub_it,
-        read_root, fee_checksum, txs, state_root,
-        l2_roots, l2_sizes, vdf_commit, vdf_output, vdf_proof,
-        retune_hint, &receipts_bytes
+        index,
+        prev,
+        timestamp,
+        nonce,
+        difficulty,
+        base_fee,
+        coin_c,
+        coin_i,
+        storage_sub,
+        read_sub,
+        read_sub_viewer,
+        read_sub_host,
+        read_sub_hardware,
+        read_sub_verifier,
+        read_sub_liquidity,
+        ad_viewer,
+        ad_host,
+        ad_hardware,
+        ad_verifier,
+        ad_liquidity,
+        ad_miner,
+        ad_host_it,
+        ad_hardware_it,
+        ad_verifier_it,
+        ad_liquidity_it,
+        ad_miner_it,
+        ad_total_usd_micros,
+        ad_settlement_count,
+        ad_oracle_ct_price_usd_micros,
+        ad_oracle_it_price_usd_micros,
+        compute_sub,
+        proof_rebate,
+        storage_sub_it,
+        read_sub_it,
+        compute_sub_it,
+        read_root,
+        fee_checksum,
+        txs,
+        state_root,
+        l2_roots,
+        l2_sizes,
+        vdf_commit,
+        vdf_output,
+        vdf_proof,
+        retune_hint,
+        &receipts_bytes,
     )
 }
 

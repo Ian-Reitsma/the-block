@@ -859,15 +859,18 @@ impl CohortKeySnapshot {
         } else {
             self.selectors_version
         };
+        let selectors = crate::CohortSelectors {
+            badges: self.badges,
+            interest_tags: self.interest_tags,
+            presence_bucket: self.presence_bucket,
+            selectors_version: version,
+        };
         CohortKey::with_selectors(
             self.domain,
             self.domain_tier,
             self.domain_owner,
             self.provider,
-            self.badges,
-            self.interest_tags,
-            self.presence_bucket,
-            version,
+            selectors,
         )
     }
 }

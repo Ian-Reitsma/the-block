@@ -1,7 +1,6 @@
 #![cfg(all(feature = "integration-tests", feature = "quic"))]
 
 use crypto_suite::signatures::ed25519::SigningKey;
-use runtime;
 use std::time::Duration;
 use sys::tempfile::tempdir;
 use the_block::net::{
@@ -18,9 +17,11 @@ fn setup_env(dir: &sys::tempfile::TempDir) {
     std::env::set_var("TB_NET_CERT_STORE_PATH", &quic_store);
     // ensure the in-memory cache points at the new path
     let _ = refresh_peer_cert_store_from_disk();
-    let mut cfg = TransportConfig::default();
-    cfg.provider = ProviderKind::S2nQuic;
-    cfg.certificate_cache = Some(quic_store);
+    let cfg = TransportConfig {
+        provider: ProviderKind::S2nQuic,
+        certificate_cache: Some(quic_store.clone()),
+        ..Default::default()
+    };
     the_block::net::configure_transport(&cfg).expect("configure transport");
 }
 
