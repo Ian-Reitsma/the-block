@@ -25,6 +25,7 @@ use cli_core::{
 };
 use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
+#[cfg(feature = "quic")]
 use sys::process;
 
 use ad_market::{
@@ -41,9 +42,10 @@ use the_block::{
     gateway::dns::{install_ledger_context, BlockchainLedger},
     generate_keypair, launch_governor,
     rpc::run_rpc_server_with_market,
-    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ReadAckError,
-    ShutdownFlag,
+    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ShutdownFlag,
 };
+#[cfg(feature = "telemetry")]
+use the_block::ReadAckError;
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};

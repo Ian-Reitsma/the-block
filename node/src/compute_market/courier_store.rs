@@ -88,4 +88,8 @@ impl ReceiptStore {
         }
         Ok(receipts)
     }
+
+    pub fn flush(&self) -> Result<(), sled::Error> {
+        self.tree.flush()
+    }
 }
