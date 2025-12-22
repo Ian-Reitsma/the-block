@@ -5,6 +5,8 @@ use concurrency::Lazy;
 use rand::RngCore;
 use runtime;
 use runtime::net::TcpStream;
+use std::io;
+use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::sync::{Mutex, MutexGuard};
 
 pub fn ensure_inhouse_backend() {
@@ -20,6 +22,28 @@ pub fn websocket_test_guard() -> MutexGuard<'static, ()> {
     GUARD
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub async fn bind_listener(addr: SocketAddr) -> io::Result<StdTcpListener> {
+    match StdTcpListener::bind(addr) {
+        Ok(listener) => Ok(listener),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            let runtime_listener = runtime::net::TcpListener::bind(addr).await?;
+            runtime_listener.into_std()
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn bind_listener_or_skip(addr: SocketAddr) -> Option<StdTcpListener> {
+    match bind_listener(addr).await {
+        Ok(listener) => Some(listener),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            eprintln!("Skipping websocket test because binding {addr} is not permitted: {err}");
+            None
+        }
+        Err(err) => panic!("bind listener: {err}"),
+    }
 }
 
 pub async fn read_handshake_request(stream: &mut TcpStream) -> String {

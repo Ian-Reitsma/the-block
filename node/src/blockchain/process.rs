@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use crate::{
@@ -96,6 +97,12 @@ pub fn validate_and_apply(
         if tx.payload.from_ != zero_address {
             let sender_key = tx.payload.from_.clone();
             let sender = ensure_existing_account_mut(&mut accounts, &chain.accounts, &sender_key)?;
+            let expected_nonce = sender.nonce + 1;
+            match tx.payload.nonce.cmp(&expected_nonce) {
+                Ordering::Less => return Err(TxAdmissionError::Duplicate),
+                Ordering::Greater => return Err(TxAdmissionError::NonceGap),
+                Ordering::Equal => {}
+            }
             let total_c = tx.payload.amount_consumer + fee_c;
             let total_i = tx.payload.amount_industrial + fee_i;
             if sender.balance.consumer < total_c || sender.balance.industrial < total_i {

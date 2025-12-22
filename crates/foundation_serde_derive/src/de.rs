@@ -1,568 +1,684 @@
-//! Deserialize derive implementation.
+use crate::ast::{Data, DeriveInput, Field, Fields, Variant};
+use crate::attr::FieldDefault;
+use crate::error::Error;
+use crate::generics::{Generics, ParamKind};
+use std::fmt::Write;
 
-use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::spanned::Spanned;
-use syn::{Data, DeriveInput, Fields, Ident};
-
-pub fn expand_derive_deserialize(input: &DeriveInput) -> syn::Result<TokenStream> {
-    let name = &input.ident;
-    let generics = &input.generics;
-
-    // Get the serde crate path from attributes or default to foundation_serde
-    let serde_path = get_serde_path(&input.attrs);
-
-    // Get the original type generics (without 'de lifetime) BEFORE calling impl functions
-    let (_, ty_generics, _) = generics.split_for_impl();
-
-    // Collect type parameters for visitor
-    let type_params: Vec<_> = generics.type_params().map(|param| &param.ident).collect();
-
-    let deserialize_impl = match &input.data {
-        Data::Struct(data) => {
-            impl_deserialize_struct(name, &ty_generics, &type_params, &data.fields, &serde_path)?
-        }
-        Data::Enum(data) => {
-            impl_deserialize_enum(name, &ty_generics, &type_params, data, &serde_path)?
-        }
-        Data::Union(_) => {
-            return Err(syn::Error::new(
-                input.span(),
-                "Deserialize cannot be derived for unions",
-            ))
-        }
+pub fn expand(input: &DeriveInput) -> Result<String, Error> {
+    let serde_path = input
+        .container_attr
+        .crate_path
+        .clone()
+        .unwrap_or_else(|| "foundation_serialization::serde".to_string());
+    let (impl_generics, ty_generics, where_clause) =
+        split_generics_for_deserialize(&input.generics, &serde_path);
+    let type_params: Vec<String> = input
+        .generics
+        .type_params()
+        .map(|param| param.name.clone())
+        .collect();
+    let body = match &input.data {
+        Data::Struct(struct_data) => deserialize_struct(
+            &input.name,
+            &ty_generics,
+            struct_data,
+            &serde_path,
+            &type_params,
+        ),
+        Data::Enum(variants) => deserialize_enum(
+            &input.name,
+            &ty_generics,
+            variants,
+            &serde_path,
+            &type_params,
+        ),
     };
-
-    // Add 'de lifetime and Deserialize trait bounds to generics for impl block
-    let mut impl_generics = generics.clone();
-    impl_generics.params.insert(0, syn::parse_quote!('de));
-
-    // Collect all type parameters
-    let type_params: Vec<_> = generics.type_params().map(|param| &param.ident).collect();
-
-    // Add Deserialize bounds to where clause
-    let where_clause = impl_generics.make_where_clause();
-    for type_param in type_params {
-        where_clause
-            .predicates
-            .push(syn::parse_quote!(#type_param: #serde_path::Deserialize<'de>));
-    }
-
-    let (impl_generics, _, where_clause) = impl_generics.split_for_impl();
-
-    Ok(quote! {
-        #[automatically_derived]
-        impl #impl_generics #serde_path::Deserialize<'de> for #name #ty_generics #where_clause {
-            fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
-            where
-                D: #serde_path::Deserializer<'de>,
-            {
-                #deserialize_impl
-            }
-        }
-    })
+    let impl_block = format!(
+        "#[automatically_derived]\nimpl{impl_generics} {serde_path}::Deserialize<'de> for {name}{ty_generics} {where_clause} {{\n    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>\n    where\n        D: {serde_path}::Deserializer<'de>,\n    {{\n        {body}\n    }}\n}}",
+        impl_generics = impl_generics,
+        serde_path = serde_path,
+        name = input.name,
+        ty_generics = ty_generics,
+        where_clause = where_clause,
+        body = body,
+    );
+    Ok(impl_block)
 }
 
-fn impl_deserialize_struct(
-    name: &Ident,
-    ty_generics: &syn::TypeGenerics,
-    type_params: &[&Ident],
-    fields: &Fields,
-    serde_path: &TokenStream,
-) -> syn::Result<TokenStream> {
-    match fields {
-        Fields::Named(fields) => {
-            let field_names: Vec<_> = fields
-                .named
+fn split_generics_for_deserialize(
+    generics: &Generics,
+    serde_path: &str,
+) -> (String, String, String) {
+    let (impl_generics, ty_generics, mut where_clause) = generics.split_for_impl();
+    let mut impl_generics = impl_generics;
+    let has_de_lifetime = generics
+        .params
+        .iter()
+        .any(|param| matches!(param.kind, ParamKind::Lifetime) && param.name == "'de");
+    if !has_de_lifetime {
+        if impl_generics.is_empty() {
+            impl_generics = "<'de>".to_string();
+        } else {
+            let inner = impl_generics
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .trim();
+            if inner.is_empty() {
+                impl_generics = "<'de>".to_string();
+            } else {
+                impl_generics = format!("<'de, {inner}>");
+            }
+        }
+    }
+    let mut bounds = Vec::new();
+    for param in generics.type_params() {
+        bounds.push(format!("{}: {}::Deserialize<'de>", param.name, serde_path));
+    }
+    if !bounds.is_empty() {
+        if where_clause.is_empty() {
+            where_clause = format!(" where {}", bounds.join(", "));
+        } else {
+            where_clause.push_str(", ");
+            where_clause.push_str(&bounds.join(", "));
+        }
+    }
+    (impl_generics, ty_generics, where_clause)
+}
+
+fn visitor_generics(type_params: &[String]) -> String {
+    if type_params.is_empty() {
+        "<'de>".to_string()
+    } else {
+        format!("<'de, {}>", type_params.join(", "))
+    }
+}
+
+fn visitor_phantom(type_params: &[String]) -> String {
+    if type_params.is_empty() {
+        "::core::marker::PhantomData<fn(&'de ())>".to_string()
+    } else {
+        format!(
+            "::core::marker::PhantomData<fn(&'de (), ({}))>",
+            type_params.join(", ")
+        )
+    }
+}
+
+fn visitor_where_clause(type_params: &[String], serde_path: &str) -> String {
+    if type_params.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " where {}",
+            type_params
                 .iter()
-                .map(|f| f.ident.as_ref().unwrap())
-                .collect();
-            let field_name_strs: Vec<_> = fields.named.iter().map(get_field_name).collect();
-            let field_defaults: Vec<_> = fields.named.iter().map(get_field_default).collect();
-            let field_count = fields.named.len();
+                .map(|param| format!(
+                    "{param}: {serde_path}::Deserialize<'de>",
+                    param = param,
+                    serde_path = serde_path
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
 
-            let visitor_name = format_ident!("__Visitor");
-
-            let field_enum_variants: Vec<_> = (0..field_count)
-                .map(|i| format_ident!("Field{}", i))
-                .collect();
-
-            let field_matches =
-                field_name_strs
-                    .iter()
-                    .zip(&field_enum_variants)
-                    .map(|(field_str, variant)| {
-                        quote! { #field_str => Ok(__Field::#variant) }
-                    });
-
-            // Create zipped iteration for match arms
-            let field_match_arms: Vec<_> = field_enum_variants.iter()
-                .zip(&field_names)
-                .zip(&field_name_strs)
-                .map(|((variant, field_name), field_name_str)| {
-                    quote! {
-                        __Field::#variant => {
-                            if #field_name.is_some() {
-                                return Err(#serde_path::de::Error::duplicate_field(#field_name_str));
-                            }
-                            #field_name = Some(map.next_value()?);
-                        }
-                    }
-                })
-                .collect();
-
-            // Build field initializers that either use defaults or error if missing
-            let field_inits: Vec<_> = field_names.iter()
-                .zip(&field_defaults)
-                .zip(&field_name_strs)
-                .map(|((field_name, default), field_name_str)| {
-                    match default {
-                        Some(default_expr) => {
-                            quote! {
-                                #field_name: #field_name.unwrap_or_else(|| #default_expr)
-                            }
-                        }
-                        None => {
-                            quote! {
-                                #field_name: #field_name.ok_or_else(|| #serde_path::de::Error::missing_field(#field_name_str))?
-                            }
-                        }
-                    }
-                })
-                .collect();
-
-            Ok(quote! {
-                #[allow(non_camel_case_types)]
-                enum __Field {
-                    #(#field_enum_variants,)*
-                    __Ignore,
-                }
-
-                impl<'de> #serde_path::Deserialize<'de> for __Field {
-                    fn deserialize<D>(deserializer: D) -> ::core::result::Result<__Field, D::Error>
-                    where
-                        D: #serde_path::Deserializer<'de>,
-                    {
-                        struct __FieldVisitor;
-
-                        impl<'de> #serde_path::de::Visitor<'de> for __FieldVisitor {
-                            type Value = __Field;
-
-                            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                                formatter.write_str("field identifier")
-                            }
-
-                            fn visit_str<E>(self, value: &str) -> ::core::result::Result<__Field, E>
-                            where
-                                E: #serde_path::de::Error,
-                            {
-                                match value {
-                                    #(#field_matches,)*
-                                    _ => Ok(__Field::__Ignore),
-                                }
-                            }
-                        }
-
-                        deserializer.deserialize_identifier(__FieldVisitor)
-                    }
-                }
-
-                struct #visitor_name<#(#type_params),*>(::core::marker::PhantomData<(#(#type_params,)*)>);
-
-                impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for #visitor_name<#(#type_params),*>
-                where
-                    #(#type_params: #serde_path::Deserialize<'de>),*
-                {
-                    type Value = #name #ty_generics;
-
-                    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                        formatter.write_str(concat!("struct ", stringify!(#name)))
-                    }
-
-                    fn visit_map<A>(self, mut map: A) -> ::core::result::Result<Self::Value, A::Error>
-                    where
-                        A: #serde_path::de::MapAccess<'de>,
-                    {
-                        #(let mut #field_names = None;)*
-
-                        while let Some(__field) = map.next_key::<__Field>()? {
-                            match __field {
-                                #(#field_match_arms)*
-                                __Field::__Ignore => {
-                                    let _ = map.next_value::<#serde_path::de::IgnoredAny>()?;
-                                }
-                            }
-                        }
-
-                        Ok(#name {
-                            #(#field_inits,)*
-                        })
-                    }
-                }
-
-                const FIELDS: &[&str] = &[#(#field_name_strs),*];
-                deserializer.deserialize_struct(stringify!(#name), FIELDS, #visitor_name(::core::marker::PhantomData))
-            })
+fn deserialize_struct(
+    name: &str,
+    ty_generics: &str,
+    data: &crate::ast::Struct,
+    serde_path: &str,
+    type_params: &[String],
+) -> String {
+    match &data.fields {
+        Fields::Named(fields) => {
+            deserialize_struct_named(name, ty_generics, fields, serde_path, type_params)
         }
         Fields::Unnamed(fields) => {
-            let field_count = fields.unnamed.len();
-            let field_vars: Vec<_> = (0..field_count)
-                .map(|i| format_ident!("__field{}", i))
-                .collect();
-            let field_indices: Vec<_> = (0..field_count).collect();
-            let visitor_name = format_ident!("__Visitor");
-
-            Ok(quote! {
-                struct #visitor_name<#(#type_params),*>(::core::marker::PhantomData<(#(#type_params,)*)>);
-
-                impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for #visitor_name<#(#type_params),*>
-                where
-                    #(#type_params: #serde_path::Deserialize<'de>),*
-                {
-                    type Value = #name #ty_generics;
-
-                    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                        formatter.write_str(concat!("tuple struct ", stringify!(#name)))
-                    }
-
-                    fn visit_seq<A>(self, mut seq: A) -> ::core::result::Result<Self::Value, A::Error>
-                    where
-                        A: #serde_path::de::SeqAccess<'de>,
-                    {
-                        #(
-                            let #field_vars = seq.next_element()?
-                                .ok_or_else(|| #serde_path::de::Error::invalid_length(#field_indices, &self))?;
-                        )*
-
-                        Ok(#name(#(#field_vars),*))
-                    }
-                }
-
-                deserializer.deserialize_tuple_struct(stringify!(#name), #field_count, #visitor_name(::core::marker::PhantomData))
-            })
+            deserialize_struct_tuple(name, ty_generics, fields, serde_path, type_params)
         }
-        Fields::Unit => {
-            let visitor_name = format_ident!("__Visitor");
-
-            Ok(quote! {
-                struct #visitor_name<#(#type_params),*>(::core::marker::PhantomData<(#(#type_params,)*)>);
-
-                impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for #visitor_name<#(#type_params),*>
-                where
-                    #(#type_params: #serde_path::Deserialize<'de>),*
-                {
-                    type Value = #name #ty_generics;
-
-                    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                        formatter.write_str(concat!("unit struct ", stringify!(#name)))
-                    }
-
-                    fn visit_unit<E>(self) -> ::core::result::Result<Self::Value, E>
-                    where
-                        E: #serde_path::de::Error,
-                    {
-                        Ok(#name)
-                    }
-                }
-
-                deserializer.deserialize_unit_struct(stringify!(#name), #visitor_name(::core::marker::PhantomData))
-            })
-        }
+        Fields::Unit => format!(
+            "struct __Visitor{visitor_generics}({phantom});\nimpl{visitor_generics} {serde_path}::de::Visitor<'de> for __Visitor{visitor_generics} {visitor_where} {{\n    type Value = {name}{ty_generics};\n    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n        formatter.write_str(\"unit struct {name}\")\n    }}\n    fn visit_unit<E>(self) -> ::core::result::Result<Self::Value, E>\n    where\n        E: {serde_path}::de::Error,\n    {{\n        Ok({name})\n    }}\n}}\ndeserializer.deserialize_unit_struct(stringify!({name}), __Visitor(::core::marker::PhantomData))",
+            serde_path = serde_path,
+            name = name,
+            ty_generics = ty_generics,
+            visitor_generics = visitor_generics(type_params),
+            visitor_where = visitor_where_clause(type_params, serde_path),
+            phantom = visitor_phantom(type_params)
+        ),
     }
 }
 
-fn impl_deserialize_enum(
-    name: &Ident,
-    ty_generics: &syn::TypeGenerics,
-    type_params: &[&Ident],
-    data: &syn::DataEnum,
-    serde_path: &TokenStream,
-) -> syn::Result<TokenStream> {
-    let variant_name_strs: Vec<_> = data.variants.iter().map(get_variant_name).collect();
+fn deserialize_struct_named(
+    name: &str,
+    ty_generics: &str,
+    fields: &[Field],
+    serde_path: &str,
+    type_params: &[String],
+) -> String {
+    let mut out = String::new();
 
-    let variant_arms = data.variants.iter().enumerate().map(|(i, variant)| {
-        let variant_name = &variant.ident;
-        let variant_index = format_ident!("Variant{}", i);
+    writeln!(out, "#[allow(non_camel_case_types)]").unwrap();
+    writeln!(out, "enum __Field {{").unwrap();
+    for idx in 0..fields.len() {
+        writeln!(out, "    Field{idx},").unwrap();
+    }
+    writeln!(out, "    __Ignore,").unwrap();
+    writeln!(out, "}}").unwrap();
 
-        match &variant.fields {
-            Fields::Unit => {
-                quote! {
-                    __Variant::#variant_index => {
-                        variant.unit_variant()?;
-                        Ok(#name::#variant_name)
-                    }
-                }
+    writeln!(
+        out,
+        "impl<'de> {serde_path}::Deserialize<'de> for __Field {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>"
+    )
+    .unwrap();
+    writeln!(out, "    where").unwrap();
+    writeln!(out, "        D: {serde_path}::Deserializer<'de>,").unwrap();
+    writeln!(out, "    {{").unwrap();
+    writeln!(out, "        struct __FieldVisitor;").unwrap();
+    writeln!(
+        out,
+        "        impl<'de> {serde_path}::de::Visitor<'de> for __FieldVisitor {{"
+    )
+    .unwrap();
+    writeln!(out, "            type Value = __Field;").unwrap();
+    writeln!(
+        out,
+        "            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                formatter.write_str(\"field identifier\")"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(
+        out,
+        "            fn visit_str<E>(self, value: &str) -> ::core::result::Result<__Field, E>"
+    )
+    .unwrap();
+    writeln!(out, "            where").unwrap();
+    writeln!(out, "                E: {serde_path}::de::Error,").unwrap();
+    writeln!(out, "            {{").unwrap();
+    writeln!(out, "                match value {{").unwrap();
+    for (idx, field) in fields.iter().enumerate() {
+        let key = field
+            .attr
+            .rename
+            .clone()
+            .unwrap_or_else(|| format!("\"{}\"", field.name.as_ref().unwrap()));
+        writeln!(
+            out,
+            "                    {key} => Ok(__Field::Field{idx}),",
+            key = key,
+            idx = idx
+        )
+        .unwrap();
+    }
+    writeln!(out, "                    _ => Ok(__Field::__Ignore),").unwrap();
+    writeln!(out, "                }}").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        deserializer.deserialize_identifier(__FieldVisitor)"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+
+    let field_names: Vec<String> = fields
+        .iter()
+        .map(|field| {
+            field
+                .attr
+                .rename
+                .clone()
+                .unwrap_or_else(|| format!("\"{}\"", field.name.as_ref().unwrap()))
+        })
+        .collect();
+    writeln!(
+        out,
+        "const FIELDS: &[&str] = &[{}];",
+        field_names.join(", ")
+    )
+    .unwrap();
+
+    let visitor_generics = visitor_generics(type_params);
+    let visitor_where = visitor_where_clause(type_params, serde_path);
+    let visitor_phantom = visitor_phantom(type_params);
+    writeln!(
+        out,
+        "struct __Visitor{visitor_generics}({visitor_phantom});",
+        visitor_generics = visitor_generics,
+        visitor_phantom = visitor_phantom
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "impl{visitor_generics} {serde_path}::de::Visitor<'de> for __Visitor{visitor_generics} {visitor_where} {{",
+        visitor_generics = visitor_generics,
+        serde_path = serde_path,
+        visitor_where = visitor_where
+    )
+    .unwrap();
+    writeln!(out, "    type Value = {name}{ty_generics};").unwrap();
+    writeln!(
+        out,
+        "    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{"
+    )
+    .unwrap();
+    writeln!(out, "        formatter.write_str(\"struct {name}\")").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn visit_map<A>(self, mut map: A) -> ::core::result::Result<Self::Value, A::Error>"
+    )
+    .unwrap();
+    writeln!(out, "    where").unwrap();
+    writeln!(out, "        A: {serde_path}::de::MapAccess<'de>,").unwrap();
+    writeln!(out, "    {{").unwrap();
+    for field in fields {
+        let ident = field.name.as_ref().unwrap();
+        writeln!(out, "        let mut {ident} = None;").unwrap();
+    }
+    writeln!(
+        out,
+        "        while let Some(__field) = map.next_key::<__Field>()? {{"
+    )
+    .unwrap();
+    writeln!(out, "            match __field {{").unwrap();
+    for (idx, field) in fields.iter().enumerate() {
+        let ident = field.name.as_ref().unwrap();
+        let key = field
+            .attr
+            .rename
+            .clone()
+            .unwrap_or_else(|| format!("\"{ident}\""));
+        writeln!(out, "                __Field::Field{idx} => {{").unwrap();
+        writeln!(out, "                    if {ident}.is_some() {{").unwrap();
+        writeln!(
+            out,
+            "                        return Err({serde_path}::de::Error::duplicate_field({key}));",
+            serde_path = serde_path,
+            key = key
+        )
+        .unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(
+            out,
+            "                    {ident} = Some(map.next_value()?);"
+        )
+        .unwrap();
+        writeln!(out, "                }},").unwrap();
+    }
+    writeln!(
+        out,
+        "                __Field::__Ignore => {{ let _ = map.next_value::<{serde_path}::de::IgnoredAny>()?; }},",
+        serde_path = serde_path
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok({name} {{").unwrap();
+    for field in fields {
+        let ident = field.name.as_ref().unwrap();
+        let key = field
+            .attr
+            .rename
+            .clone()
+            .unwrap_or_else(|| format!("\"{ident}\""));
+        match &field.attr.default {
+            FieldDefault::None => {
+                writeln!(
+                    out,
+                    "            {ident}: {ident}.ok_or_else(|| {serde_path}::de::Error::missing_field({key}))?,",
+                    ident = ident,
+                    serde_path = serde_path,
+                    key = key
+                )
+                .unwrap();
             }
-            Fields::Unnamed(fields) => {
-                let field_count = fields.unnamed.len();
-                let field_vars: Vec<_> = (0..field_count)
-                    .map(|i| format_ident!("__field{}", i))
-                    .collect();
-
-                quote! {
-                    __Variant::#variant_index => {
-                        struct __Visitor<'de, #(#type_params),*>(::core::marker::PhantomData<(&'de (), #(#type_params,)*)>);
-
-                        impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for __Visitor<'de, #(#type_params),*>
-                        where
-                            #(#type_params: #serde_path::Deserialize<'de>),*
-                        {
-                            type Value = #name #ty_generics;
-
-                            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                                formatter.write_str("tuple variant")
-                            }
-
-                            fn visit_seq<A>(self, mut seq: A) -> ::core::result::Result<Self::Value, A::Error>
-                            where
-                                A: #serde_path::de::SeqAccess<'de>,
-                            {
-                                #(
-                                    let #field_vars = seq.next_element()?
-                                        .ok_or_else(|| #serde_path::de::Error::invalid_length(0, &self))?;
-                                )*
-                                Ok(#name::#variant_name(#(#field_vars),*))
-                            }
-                        }
-
-                        variant.tuple_variant(#field_count, __Visitor(::core::marker::PhantomData))
-                    }
-                }
+            FieldDefault::Default => {
+                writeln!(
+                    out,
+                    "            {ident}: {ident}.unwrap_or_else(::core::default::Default::default),",
+                    ident = ident
+                )
+                .unwrap();
             }
-            Fields::Named(fields) => {
-                let field_names: Vec<_> = fields.named.iter()
-                    .map(|f| f.ident.as_ref().unwrap())
-                    .collect();
-                let field_name_strs: Vec<_> = fields.named.iter()
-                    .map(get_field_name)
-                    .collect();
-
-                quote! {
-                    __Variant::#variant_index => {
-                        struct __Visitor<'de, #(#type_params),*>(::core::marker::PhantomData<(&'de (), #(#type_params,)*)>);
-
-                        impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for __Visitor<'de, #(#type_params),*>
-                        where
-                            #(#type_params: #serde_path::Deserialize<'de>),*
-                        {
-                            type Value = #name #ty_generics;
-
-                            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                                formatter.write_str("struct variant")
-                            }
-
-                            fn visit_map<A>(self, mut map: A) -> ::core::result::Result<Self::Value, A::Error>
-                            where
-                                A: #serde_path::de::MapAccess<'de>,
-                            {
-                                #(let mut #field_names = None;)*
-
-                                while let Some(key) = map.next_key::<String>()? {
-                                    match key.as_str() {
-                                        #(
-                                            #field_name_strs => {
-                                                if #field_names.is_some() {
-                                                    return Err(#serde_path::de::Error::duplicate_field(#field_name_strs));
-                                                }
-                                                #field_names = Some(map.next_value()?);
-                                            }
-                                        )*
-                                        _ => { let _ = map.next_value::<#serde_path::de::IgnoredAny>()?; }
-                                    }
-                                }
-
-                                #(
-                                    let #field_names = #field_names.ok_or_else(|| #serde_path::de::Error::missing_field(#field_name_strs))?;
-                                )*
-
-                                Ok(#name::#variant_name { #(#field_names),* })
-                            }
-                        }
-
-                        const FIELDS: &[&str] = &[#(#field_name_strs),*];
-                        variant.struct_variant(FIELDS, __Visitor(::core::marker::PhantomData))
-                    }
-                }
-            }
-        }
-    });
-
-    let variant_indices = (0..data.variants.len()).map(|i| format_ident!("Variant{}", i));
-    let variant_matches = variant_name_strs.iter().enumerate().map(|(i, name)| {
-        let idx = format_ident!("Variant{}", i);
-        quote! { #name => Ok(__Variant::#idx) }
-    });
-
-    Ok(quote! {
-        #[allow(non_camel_case_types)]
-        enum __Variant {
-            #(#variant_indices,)*
-        }
-
-        impl<'de> #serde_path::Deserialize<'de> for __Variant {
-            fn deserialize<D>(deserializer: D) -> ::core::result::Result<__Variant, D::Error>
-            where
-                D: #serde_path::Deserializer<'de>,
-            {
-                struct __VariantVisitor;
-
-                impl<'de> #serde_path::de::Visitor<'de> for __VariantVisitor {
-                    type Value = __Variant;
-
-                    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                        formatter.write_str("variant identifier")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> ::core::result::Result<__Variant, E>
-                    where
-                        E: #serde_path::de::Error,
-                    {
-                        match value {
-                            #(#variant_matches,)*
-                            _ => Err(#serde_path::de::Error::unknown_variant(value, VARIANTS)),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_identifier(__VariantVisitor)
-            }
-        }
-
-        struct __Visitor<#(#type_params),*>(::core::marker::PhantomData<(#(#type_params,)*)>);
-
-        impl<'de, #(#type_params),*> #serde_path::de::Visitor<'de> for __Visitor<#(#type_params),*>
-        where
-            #(#type_params: #serde_path::Deserialize<'de>),*
-        {
-            type Value = #name #ty_generics;
-
-            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                formatter.write_str(concat!("enum ", stringify!(#name)))
-            }
-
-            fn visit_enum<A>(self, data: A) -> ::core::result::Result<Self::Value, A::Error>
-            where
-                A: #serde_path::de::EnumAccess<'de>,
-            {
-                let (variant_tag, variant) = data.variant()?;
-
-                #[allow(unused_imports)]
-                use #serde_path::de::VariantAccess;
-
-                match variant_tag {
-                    #(#variant_arms)*
-                }
-            }
-        }
-
-        const VARIANTS: &[&str] = &[#(#variant_name_strs),*];
-        deserializer.deserialize_enum(stringify!(#name), VARIANTS, __Visitor(::core::marker::PhantomData))
-    })
-}
-
-fn get_serde_path(attrs: &[syn::Attribute]) -> TokenStream {
-    for attr in attrs {
-        if attr.path().is_ident("serde") {
-            if let Ok(meta_list) = attr.meta.require_list() {
-                // Parse as comma-separated nested meta items
-                let parsed = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                );
-
-                if let Ok(nested) = parsed {
-                    for meta in nested {
-                        if let syn::Meta::NameValue(nv) = meta {
-                            if nv.path.is_ident("crate") {
-                                if let syn::Expr::Lit(lit) = &nv.value {
-                                    if let syn::Lit::Str(lit_str) = &lit.lit {
-                                        let path_str = lit_str.value();
-                                        if let Ok(path) = syn::parse_str::<syn::Path>(&path_str) {
-                                            return quote! { #path };
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            FieldDefault::Function(func) => {
+                writeln!(
+                    out,
+                    "            {ident}: {ident}.unwrap_or_else(|| {func}()),",
+                    ident = ident,
+                    func = func
+                )
+                .unwrap();
             }
         }
     }
-    // Default to foundation_serialization::serde (the public facade)
-    quote! { foundation_serialization::serde }
+    writeln!(out, "        }})").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(
+        out,
+        "deserializer.deserialize_struct(stringify!({name}), FIELDS, __Visitor(::core::marker::PhantomData))"
+    )
+    .unwrap();
+
+    out
 }
 
-fn get_field_name(field: &syn::Field) -> String {
-    for attr in &field.attrs {
-        if attr.path().is_ident("serde") {
-            if let Ok(meta_list) = attr.meta.require_list() {
-                let tokens = &meta_list.tokens;
-                let tokens_str = tokens.to_string();
-                if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str
-                        .trim_start_matches("rename = ")
-                        .trim_matches('"')
-                        .trim();
-                    return name.to_string();
-                }
-            }
-        }
+fn deserialize_struct_tuple(
+    name: &str,
+    ty_generics: &str,
+    fields: &[Field],
+    serde_path: &str,
+    type_params: &[String],
+) -> String {
+    let len = fields.len();
+    let mut seq_lines = Vec::new();
+    for idx in 0..len {
+        seq_lines.push(format!(
+            "let value{idx} = seq.next_element()?.ok_or_else(|| {serde_path}::de::Error::invalid_length({idx}, &self))?;",
+            idx = idx,
+            serde_path = serde_path
+        ));
     }
-    field.ident.as_ref().unwrap().to_string()
+    let result = (0..len)
+        .map(|idx| format!("value{idx}", idx = idx))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "struct __Visitor{visitor_generics}({phantom});\nimpl{visitor_generics} {serde_path}::de::Visitor<'de> for __Visitor{visitor_generics} {visitor_where} {{\n    type Value = {name}{ty_generics};\n    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n        formatter.write_str(\"tuple struct {name}\")\n    }}\n    fn visit_seq<A>(self, mut seq: A) -> ::core::result::Result<Self::Value, A::Error>\n    where\n        A: {serde_path}::de::SeqAccess<'de>,\n    {{\n        {seq_lines}\n        Ok({name}({result}))\n    }}\n}}\ndeserializer.deserialize_tuple_struct(stringify!({name}), {len}, __Visitor(::core::marker::PhantomData))",
+        serde_path = serde_path,
+        name = name,
+        ty_generics = ty_generics,
+        seq_lines = seq_lines.join("\n        "),
+        result = result,
+        len = len,
+        visitor_generics = visitor_generics(type_params),
+        visitor_where = visitor_where_clause(type_params, serde_path),
+        phantom = visitor_phantom(type_params)
+    )
 }
 
-fn get_field_default(field: &syn::Field) -> Option<TokenStream> {
-    for attr in &field.attrs {
-        if attr.path().is_ident("serde") {
-            if let Ok(meta_list) = attr.meta.require_list() {
-                // Parse the nested meta items properly
-                let nested = meta_list
-                    .parse_args_with(
-                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                    )
-                    .ok()?;
-
-                for meta in nested {
-                    match &meta {
-                        // Handle #[serde(default)]
-                        syn::Meta::Path(path) if path.is_ident("default") => {
-                            return Some(quote! { ::core::default::Default::default() });
-                        }
-                        // Handle #[serde(default = "path")]
-                        syn::Meta::NameValue(nv) if nv.path.is_ident("default") => {
-                            if let syn::Expr::Lit(expr_lit) = &nv.value {
-                                if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                                    let path_str = lit_str.value();
-                                    if let Ok(path) = syn::parse_str::<syn::Path>(&path_str) {
-                                        return Some(quote! { #path() });
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+fn deserialize_enum(
+    name: &str,
+    ty_generics: &str,
+    variants: &[Variant],
+    serde_path: &str,
+    type_params: &[String],
+) -> String {
+    let variant_names: Vec<String> = variants
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| format!("Variant{idx}"))
+        .collect();
+    let mut ident_matches = Vec::new();
+    let mut variant_match_arms = Vec::new();
+    let mut names = Vec::new();
+    for (idx, variant) in variants.iter().enumerate() {
+        let key = variant
+            .attr
+            .rename
+            .clone()
+            .unwrap_or_else(|| format!("\"{}\"", variant.name));
+        ident_matches.push(format!(
+            "{key} => Ok(__Variant::Variant{idx})",
+            key = key,
+            idx = idx
+        ));
+        names.push(key.clone());
+        variant_match_arms.push(deserialize_variant(
+            name,
+            ty_generics,
+            idx,
+            variant,
+            serde_path,
+            type_params,
+        ));
     }
-    None
+    let variants_const = format!("const VARIANTS: &[&str] = &[{}];", names.join(", "));
+    let visitor_generics = visitor_generics(type_params);
+    let visitor_where = visitor_where_clause(type_params, serde_path);
+    let visitor_phantom = visitor_phantom(type_params);
+    format!(
+        "#[allow(non_camel_case_types)]\nenum __Variant {{\n{variants}\n}}\nimpl<'de> {serde_path}::Deserialize<'de> for __Variant {{\n    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>\n    where\n        D: {serde_path}::Deserializer<'de>,\n    {{\n        struct __VariantVisitor;\n        impl<'de> {serde_path}::de::Visitor<'de> for __VariantVisitor {{\n            type Value = __Variant;\n            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n                formatter.write_str(\"variant identifier\")\n            }}\n            fn visit_str<E>(self, value: &str) -> ::core::result::Result<__Variant, E>\n            where\n                E: {serde_path}::de::Error,\n            {{\n                match value {{\n                    {ident_matches},\n                    _ => Err({serde_path}::de::Error::unknown_variant(value, VARIANTS)),\n                }}\n            }}\n        }}\n        deserializer.deserialize_identifier(__VariantVisitor)\n    }}\n}}\n{variants_const}\nstruct __Visitor{visitor_generics}({visitor_phantom});\nimpl{visitor_generics} {serde_path}::de::Visitor<'de> for __Visitor{visitor_generics} {visitor_where} {{\n    type Value = {name}{ty_generics};\n    fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n        formatter.write_str(\"enum {name}\")\n    }}\n    fn visit_enum<A>(self, data: A) -> ::core::result::Result<Self::Value, A::Error>\n    where\n        A: {serde_path}::de::EnumAccess<'de>,\n    {{\n                use {serde_path}::de::VariantAccess;
+        let (variant, access) = data.variant()?;\n        match variant {{\n            {variant_match_arms}\n        }}\n    }}\n}}\ndeserializer.deserialize_enum(stringify!({name}), VARIANTS, __Visitor(::core::marker::PhantomData))",
+        variants = variant_names
+            .iter()
+            .map(|v| format!("{v},"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        serde_path = serde_path,
+        name = name,
+        ty_generics = ty_generics,
+        ident_matches = ident_matches.join(",\n                    "),
+        variant_match_arms = variant_match_arms.join("\n            "),
+        variants_const = variants_const,
+        visitor_generics = visitor_generics,
+        visitor_where = visitor_where,
+        visitor_phantom = visitor_phantom
+    )
 }
 
-fn get_variant_name(variant: &syn::Variant) -> String {
-    for attr in &variant.attrs {
-        if attr.path().is_ident("serde") {
-            if let Ok(meta_list) = attr.meta.require_list() {
-                let tokens = &meta_list.tokens;
-                let tokens_str = tokens.to_string();
-                if tokens_str.starts_with("rename = ") {
-                    let name = tokens_str
-                        .trim_start_matches("rename = ")
-                        .trim_matches('"')
-                        .trim();
-                    return name.to_string();
-                }
+fn deserialize_variant(
+    name: &str,
+    ty_generics: &str,
+    index: usize,
+    variant: &Variant,
+    serde_path: &str,
+    type_params: &[String],
+) -> String {
+    match &variant.fields {
+        Fields::Unit => format!(
+            "__Variant::Variant{idx} => {{\n                    access.unit_variant()?;\n                    Ok({name}::{variant})\n                }},",
+            idx = index,
+            name = name,
+            variant = variant.name
+        ),
+        Fields::Unnamed(fields) => {
+            let len = fields.len();
+            let bindings: Vec<String> = (0..len).map(|i| format!("value{i}")).collect();
+            let mut seq_lines = Vec::new();
+            for i in 0..len {
+                seq_lines.push(format!(
+                    "let {binding} = seq.next_element()?.ok_or_else(|| {serde_path}::de::Error::invalid_length({i}, &self))?;",
+                    binding = bindings[i],
+                    serde_path = serde_path,
+                    i = i
+                ));
             }
+            let result = bindings.join(", ");
+            let visitor_generics = visitor_generics(type_params);
+            let visitor_where = visitor_where_clause(type_params, serde_path);
+            let visitor_phantom = visitor_phantom(type_params);
+            format!(
+"__Variant::Variant{idx} => {{\n                    struct __VisitorTuple{visitor_generics}({visitor_phantom});\n                    impl{visitor_generics} {serde_path}::de::Visitor<'de> for __VisitorTuple{visitor_generics} {visitor_where} {{\n                        type Value = {name}{ty_generics};\n                        fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n                            formatter.write_str(\"tuple variant\")\n                        }}\n                        fn visit_seq<A>(self, mut seq: A) -> ::core::result::Result<Self::Value, A::Error>\n                        where\n                            A: {serde_path}::de::SeqAccess<'de>,\n                        {{\n                            {seq_lines}\n                            Ok({name}::{variant}({result}))\n                        }}\n                    }}\n                    <A::Variant as {serde_path}::de::VariantAccess>::tuple_variant(access, {len}, __VisitorTuple(::core::marker::PhantomData))\n                }},",
+                idx = index,
+                serde_path = serde_path,
+                name = name,
+                ty_generics = ty_generics,
+                variant = variant.name,
+                len = len,
+                seq_lines = seq_lines.join("\n                            "),
+                result = result,
+                visitor_generics = visitor_generics,
+                visitor_where = visitor_where,
+                visitor_phantom = visitor_phantom
+            )
+        }
+        Fields::Named(fields) => {
+            let mut field_enum = String::new();
+            writeln!(field_enum, "#[allow(non_camel_case_types)]").unwrap();
+            writeln!(field_enum, "enum __Field {{").unwrap();
+            for idx in 0..fields.len() {
+                writeln!(field_enum, "    Field{idx},").unwrap();
+            }
+            writeln!(field_enum, "    __Ignore,").unwrap();
+            writeln!(field_enum, "}}").unwrap();
+            writeln!(
+                field_enum,
+                "impl<'de> {serde_path}::Deserialize<'de> for __Field {{",
+                serde_path = serde_path
+            )
+            .unwrap();
+            writeln!(
+                field_enum,
+                "    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>"
+            )
+            .unwrap();
+            writeln!(field_enum, "    where").unwrap();
+            writeln!(
+                field_enum,
+                "        D: {serde_path}::Deserializer<'de>,",
+                serde_path = serde_path
+            )
+            .unwrap();
+            writeln!(field_enum, "    {{").unwrap();
+            writeln!(field_enum, "        struct __FieldVisitor;").unwrap();
+            writeln!(
+                field_enum,
+                "        impl<'de> {serde_path}::de::Visitor<'de> for __FieldVisitor {{",
+                serde_path = serde_path
+            )
+            .unwrap();
+            writeln!(field_enum, "            type Value = __Field;").unwrap();
+            writeln!(
+                field_enum,
+                "            fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{"
+            )
+            .unwrap();
+            writeln!(
+                field_enum,
+                "                formatter.write_str(\"field identifier\")"
+            )
+            .unwrap();
+            writeln!(field_enum, "            }}").unwrap();
+            writeln!(
+                field_enum,
+                "            fn visit_str<E>(self, value: &str) -> ::core::result::Result<__Field, E>"
+            )
+            .unwrap();
+            writeln!(field_enum, "            where").unwrap();
+            writeln!(
+                field_enum,
+                "                E: {serde_path}::de::Error,",
+                serde_path = serde_path
+            )
+            .unwrap();
+            writeln!(field_enum, "            {{").unwrap();
+            writeln!(field_enum, "                match value {{").unwrap();
+            for (field_index, field) in fields.iter().enumerate() {
+                let field_name = field.name.as_ref().unwrap();
+                let key = field
+                    .attr
+                    .rename
+                    .clone()
+                    .unwrap_or_else(|| format!("\"{field_name}\""));
+                writeln!(
+                    field_enum,
+                    "                    {key} => Ok(__Field::Field{field_index}),",
+                    key = key,
+                    field_index = field_index
+                )
+                .unwrap();
+            }
+            writeln!(
+                field_enum,
+                "                    _ => Ok(__Field::__Ignore),"
+            )
+            .unwrap();
+            writeln!(field_enum, "                }}").unwrap();
+            writeln!(field_enum, "            }}").unwrap();
+            writeln!(field_enum, "        }}").unwrap();
+            writeln!(
+                field_enum,
+                "        deserializer.deserialize_identifier(__FieldVisitor)"
+            )
+            .unwrap();
+            writeln!(field_enum, "    }}").unwrap();
+            writeln!(field_enum, "}}").unwrap();
+
+            let mut map_lines = Vec::new();
+            for field in fields {
+                map_lines.push(format!(
+                    "let mut {name} = None;",
+                    name = field.name.as_ref().unwrap()
+                ));
+            }
+            let mut match_arms = Vec::new();
+            for (idx, field) in fields.iter().enumerate() {
+                let ident = field.name.as_ref().unwrap();
+                let key = field
+                    .attr
+                    .rename
+                    .clone()
+                    .unwrap_or_else(|| format!("\"{ident}\""));
+                match_arms.push(format!(
+                    "                    __Field::Field{idx} => {{\n                        if {ident}.is_some() {{\n                            return Err({serde_path}::de::Error::duplicate_field({key}));\n                        }}\n                        {ident} = Some(map.next_value()?);\n                    }},",
+                    idx = idx,
+                    ident = ident,
+                    serde_path = serde_path,
+                    key = key
+                ));
+            }
+            match_arms.push(format!(
+                "                    __Field::__Ignore => {{ let _ = map.next_value::<{serde_path}::de::IgnoredAny>()?; }},",
+                serde_path = serde_path
+            ));
+            let mut inits = Vec::new();
+            for field in fields {
+                let name_ident = field.name.as_ref().unwrap();
+                inits.push(format!(
+                    "let {name_ident} = {name_ident}.ok_or_else(|| {serde_path}::de::Error::missing_field(\"{name_ident}\"))?;",
+                    name_ident = name_ident,
+                    serde_path = serde_path
+                ));
+            }
+            let field_names = fields
+                .iter()
+                .map(|f| {
+                    f.attr
+                        .rename
+                        .clone()
+                        .unwrap_or_else(|| format!("\"{}\"", f.name.as_ref().unwrap()))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let struct_init = fields
+                .iter()
+                .map(|f| f.name.as_ref().unwrap())
+                .map(|name| format!("{name}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let visitor_generics = visitor_generics(type_params);
+            let visitor_where = visitor_where_clause(type_params, serde_path);
+            let visitor_phantom = visitor_phantom(type_params);
+            format!(
+"__Variant::Variant{idx} => {{\n                    {field_enum}\n                    struct __StructVisitor{visitor_generics}({visitor_phantom});\n                    impl{visitor_generics} {serde_path}::de::Visitor<'de> for __StructVisitor{visitor_generics} {visitor_where} {{\n                        type Value = {name}{ty_generics};\n                        fn expecting(&self, formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {{\n                            formatter.write_str(\"struct variant\")\n                        }}\n                        fn visit_map<A>(self, mut map: A) -> ::core::result::Result<Self::Value, A::Error>\n                        where\n                            A: {serde_path}::de::MapAccess<'de>,\n                        {{\n                            {map_lines}\n                            while let Some(__field) = map.next_key::<__Field>()? {{\n                                match __field {{\n{match_arms}\n                                }}\n                            }}\n                            {inits}\n                            Ok({name}::{variant} {{ {struct_init} }})\n                        }}\n                    }}\n                    <A::Variant as {serde_path}::de::VariantAccess>::struct_variant(access, &[{field_names}], __StructVisitor(::core::marker::PhantomData))\n                }},",
+                idx = index,
+                serde_path = serde_path,
+                name = name,
+                ty_generics = ty_generics,
+                variant = variant.name,
+                map_lines = map_lines.join("\n                            "),
+                match_arms = match_arms.join("\n"),
+                inits = inits.join("\n                            "),
+                struct_init = struct_init,
+                field_names = field_names,
+                visitor_generics = visitor_generics,
+                visitor_where = visitor_where,
+                visitor_phantom = visitor_phantom,
+                field_enum = field_enum
+            )
         }
     }
-    variant.ident.to_string()
 }

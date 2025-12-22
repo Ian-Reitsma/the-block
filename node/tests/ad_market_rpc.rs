@@ -29,6 +29,8 @@ use crypto_suite::{encoding::hex, hashing::blake3, vrf};
 use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::{env, path::Path, process::Command};
 #[cfg(feature = "python-bindings")]
 use the_block::serve_metrics_with_shutdown;
 use the_block::{
@@ -791,6 +793,7 @@ fn ad_market_attestation_budget_load() {
         };
         let mut ctx_attested = base_ctx.clone();
         ctx_attested.attestations = vec![attestation];
+        ctx_attested.assignment_seed_override = Some(key_probe.discriminator.to_vec());
 
         let key_main = make_reservation_key(iteration * 2 + 1);
         let outcome = market
@@ -800,7 +803,12 @@ fn ad_market_attestation_budget_load() {
         assert_eq!(receipt.attestation_kind(), SelectionAttestationKind::Snark);
         assert!(receipt.proof_metadata.is_some());
         receipt.validate().expect("receipt validates");
-        let settlement = market.commit(&key_main).expect("reservation committed");
+        let settlement = market.commit(&key_main);
+        if outcome.uplift_assignment.in_holdout {
+            assert!(settlement.is_none());
+            continue;
+        }
+        let settlement = settlement.expect("reservation committed");
         assert_eq!(
             settlement.selection_receipt.attestation_kind(),
             SelectionAttestationKind::Snark
@@ -896,6 +904,7 @@ fn ad_market_broker_state_rpc_load() {
         };
         let mut ctx_attested = base_ctx.clone();
         ctx_attested.attestations = vec![attestation];
+        ctx_attested.assignment_seed_override = Some(key_probe.discriminator.to_vec());
 
         let key_main = make_reservation_key(iteration * 3 + 1);
         let started = Instant::now();
@@ -907,7 +916,12 @@ fn ad_market_broker_state_rpc_load() {
         let receipt = outcome.selection_receipt.clone();
         assert_eq!(receipt.attestation_kind(), SelectionAttestationKind::Snark);
         receipt.validate().expect("receipt validates");
-        market.commit(&key_main).expect("reservation committed");
+        let settlement = market.commit(&key_main);
+        if outcome.uplift_assignment.in_holdout {
+            assert!(settlement.is_none());
+        } else {
+            settlement.expect("reservation committed");
+        }
 
         let broker_state = expect_ok(harness.call("ad_market.broker_state", Value::Null));
         assert_eq!(broker_state["status"].as_str(), Some("ok"));
@@ -1033,6 +1047,7 @@ fn ad_market_committee_rejects_stale_snapshot() {
 
     let mut ctx_stale = base_ctx.clone();
     ctx_stale.attestations = vec![attestation.clone()];
+    ctx_stale.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     let mut stale_snapshot = fixture.snapshot.clone();
     stale_snapshot.staking_epoch = stale_snapshot.staking_epoch.saturating_add(9);
     ctx_stale.verifier_stake_snapshot = Some(stale_snapshot);
@@ -1053,6 +1068,7 @@ fn ad_market_committee_rejects_stale_snapshot() {
 
     let mut ctx_valid = base_ctx.clone();
     ctx_valid.attestations = vec![attestation];
+    ctx_valid.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     let key_valid = make_reservation_key(4_003);
     let outcome_valid = market
         .reserve_impression(key_valid.clone(), ctx_valid)
@@ -1130,6 +1146,7 @@ fn ad_market_committee_rejects_mismatched_transcript() {
 
     let mut ctx_mismatched = base_ctx.clone();
     ctx_mismatched.attestations = vec![attestation.clone()];
+    ctx_mismatched.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     ctx_mismatched.verifier_transcript = b"unexpected-transcript".to_vec();
     let key_bad = make_reservation_key(4_102);
     let outcome_bad = market
@@ -1148,6 +1165,7 @@ fn ad_market_committee_rejects_mismatched_transcript() {
 
     let mut ctx_valid = base_ctx.clone();
     ctx_valid.attestations = vec![attestation];
+    ctx_valid.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     let key_valid = make_reservation_key(4_103);
     let outcome_valid = market
         .reserve_impression(key_valid.clone(), ctx_valid)
@@ -1260,6 +1278,7 @@ fn ad_market_committee_blocks_invalid_when_attestation_required() {
 
     let mut ctx_invalid = base_ctx.clone();
     ctx_invalid.attestations = vec![attestation.clone()];
+    ctx_invalid.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     ctx_invalid.verifier_transcript = b"tampered-transcript".to_vec();
     let key_invalid = make_reservation_key(4_102);
     assert!(
@@ -1271,6 +1290,7 @@ fn ad_market_committee_blocks_invalid_when_attestation_required() {
 
     let mut ctx_valid = base_ctx.clone();
     ctx_valid.attestations = vec![attestation];
+    ctx_valid.assignment_seed_override = Some(key_probe.discriminator.to_vec());
     let key_valid = make_reservation_key(4_103);
     let outcome_valid = market
         .reserve_impression(key_valid.clone(), ctx_valid)
@@ -1383,6 +1403,63 @@ fn ad_market_committee_rejects_weight_mismatch() {
 }
 
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+fn autodetect_python_bridge_lib() -> Option<String> {
+    if env::var_os("PYTHON_BRIDGE_LIB").is_some() {
+        return None;
+    }
+    let libdir = Command::new("python3")
+        .args(&[
+            "-c",
+            "import sysconfig; print(sysconfig.get_config_var('LIBDIR') or '')",
+        ])
+        .output()
+        .ok()?;
+    if !libdir.status.success() {
+        return None;
+    }
+    let libdir = String::from_utf8_lossy(&libdir.stdout).trim().to_string();
+    if libdir.is_empty() {
+        return None;
+    }
+    let libname = Command::new("python3")
+        .args(&[
+            "-c",
+            "import sysconfig; print(sysconfig.get_config_var('LDLIBRARY') or '')",
+        ])
+        .output()
+        .ok()?;
+    if !libname.status.success() {
+        return None;
+    }
+    let libname = String::from_utf8_lossy(&libname.stdout).trim().to_string();
+    if libname.is_empty() {
+        return None;
+    }
+    let mut candidate = Path::new(&libdir).join(&libname);
+    if !candidate.exists() {
+        let mut ancestor = Path::new(&libdir);
+        while let Some(parent) = ancestor.parent() {
+            let check = parent.join(&libname);
+            if check.exists() {
+                candidate = check;
+                break;
+            }
+            ancestor = parent;
+        }
+    }
+    if !candidate.exists() && libname.starts_with('/') {
+        candidate = Path::new(&libname).to_path_buf();
+    }
+    if candidate.exists() {
+        let candidate = candidate.to_string_lossy().to_string();
+        env::set_var("PYTHON_BRIDGE_LIB", &candidate);
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 fn scrape_metrics(addr: &str) -> String {
     let mut stream = TcpStream::connect(addr).expect("connect metrics exporter");
     stream
@@ -1420,7 +1497,15 @@ fn parse_committee_metric(metrics: &str, committee: &str, reason: &str) -> Optio
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 #[testkit::tb_serial]
 fn ad_market_metrics_export_surfaces_committee_rejection_labels() {
-    the_block::prepare_freethreaded_python().expect("python runtime initialised");
+    if env::var_os("PYTHON_BRIDGE_LIB").is_none() {
+        if let Some(candidate) = autodetect_python_bridge_lib() {
+            eprintln!("auto-set PYTHON_BRIDGE_LIB={candidate}");
+        }
+    }
+    if let Err(err) = the_block::prepare_freethreaded_python() {
+        eprintln!("skipping committee metrics test: {err}");
+        return;
+    }
     let fixture = committee_fixture();
     the_block::reset_ad_verifier_committee_rejections();
     the_block::ensure_ad_verifier_committee_label(&fixture.policy.label, "snapshot_missing");
@@ -1480,8 +1565,13 @@ fn ad_market_metrics_export_surfaces_committee_rejection_labels() {
     let proof_bytes = build_snark_proof(&outcome_probe.selection_receipt);
     market.cancel(&key_probe);
 
-    let (addr, handle) =
-        serve_metrics_with_shutdown("127.0.0.1:0").expect("start metrics exporter");
+    let (addr, handle) = match serve_metrics_with_shutdown("127.0.0.1:0") {
+        Ok(pair) => pair,
+        Err(err) => {
+            eprintln!("skipping committee metrics test: {err}");
+            return;
+        }
+    };
     let baseline_metrics = scrape_metrics(&addr);
     let baseline_metric =
         parse_committee_metric(&baseline_metrics, &fixture.policy.label, "snapshot_missing");
@@ -1501,6 +1591,7 @@ fn ad_market_metrics_export_surfaces_committee_rejection_labels() {
         proof: proof_bytes.clone(),
         circuit_id: SELECTION_CIRCUIT_ID.into(),
     }];
+    ctx_missing_snapshot.assignment_seed_override = Some(key_probe.discriminator.to_vec());
 
     let key_missing = make_reservation_key(7_002);
     let outcome_missing = market

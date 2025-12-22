@@ -3,7 +3,7 @@ use crate::ad_readiness::AdReadinessConfig;
 use crate::energy::{self, GovernanceEnergyParams};
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
-use ad_market::MarketplaceHandle;
+use ad_market::{DistributionPolicy, MarketplaceHandle};
 use bridge_types::BridgeIncentiveParameters;
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::info;
@@ -89,12 +89,18 @@ impl<'a> Runtime<'a> {
             Some(handle) => handle,
             None => return,
         };
-        // Preserve current live distribution weights (possibly adapted from utilization),
-        // but ensure the dual-token flag reflects governance.
-        let mut policy = market.distribution();
-        policy =
-            policy.with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
-        market.update_distribution(policy);
+        let current = market.distribution();
+        let clamp_percent = |value: i64| value.clamp(0, 100) as u64;
+        let policy = DistributionPolicy::new(
+            clamp_percent(self.bc.params.read_subsidy_viewer_percent),
+            clamp_percent(self.bc.params.read_subsidy_host_percent),
+            clamp_percent(self.bc.params.read_subsidy_hardware_percent),
+            clamp_percent(self.bc.params.read_subsidy_verifier_percent),
+            clamp_percent(self.bc.params.read_subsidy_liquidity_percent),
+        )
+        .with_liquidity_split(current.liquidity_split_ct_ppm)
+        .with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
+        market.update_distribution(policy.normalize());
     }
 
     fn sync_ad_readiness(&self) {

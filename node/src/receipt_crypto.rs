@@ -114,6 +114,11 @@ impl NonceTracker {
     }
 
     /// Check if nonce has been used; record if not seen
+    pub fn has_seen_nonce(&self, provider_id: &str, nonce: u64) -> bool {
+        self.seen_nonces
+            .contains_key(&NonceKey::new(provider_id, nonce))
+    }
+
     pub fn check_and_record_nonce(
         &mut self,
         provider_id: &str,

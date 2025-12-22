@@ -1547,6 +1547,12 @@ pub struct ImpressionContext {
     pub delivery_channel: DeliveryChannel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<MeshContext>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "foundation_serialization::serde_bytes"
+    )]
+    pub assignment_seed_override: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug)]
@@ -4477,7 +4483,11 @@ impl Marketplace for InMemoryMarketplace {
             return None;
         }
         let mut assignment_seed = Vec::new();
-        assignment_seed.extend_from_slice(&key.discriminator);
+        if let Some(seed) = ctx.assignment_seed_override.as_ref() {
+            assignment_seed.extend_from_slice(seed);
+        } else {
+            assignment_seed.extend_from_slice(&key.discriminator);
+        }
         assignment_seed.extend_from_slice(ctx.domain.as_bytes());
         if let Some(provider_id) = ctx.provider.as_ref() {
             assignment_seed.extend_from_slice(provider_id.as_bytes());
@@ -5327,7 +5337,11 @@ impl Marketplace for SledMarketplace {
             return None;
         }
         let mut assignment_seed = Vec::new();
-        assignment_seed.extend_from_slice(&key.discriminator);
+        if let Some(seed) = ctx.assignment_seed_override.as_ref() {
+            assignment_seed.extend_from_slice(seed);
+        } else {
+            assignment_seed.extend_from_slice(&key.discriminator);
+        }
         assignment_seed.extend_from_slice(ctx.domain.as_bytes());
         if let Some(provider_id) = ctx.provider.as_ref() {
             assignment_seed.extend_from_slice(provider_id.as_bytes());

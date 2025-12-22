@@ -196,6 +196,15 @@ impl ReceiptRegistry {
     }
 }
 
+fn receipt_provider_and_nonce(receipt: &Receipt) -> (&str, u64) {
+    match receipt {
+        Receipt::Storage(r) => (r.provider.as_str(), r.signature_nonce),
+        Receipt::Compute(r) => (r.provider.as_str(), r.signature_nonce),
+        Receipt::Energy(r) => (r.provider.as_str(), r.signature_nonce),
+        Receipt::Ad(r) => (r.publisher.as_str(), r.signature_nonce),
+    }
+}
+
 /// Validate receipt with full cryptographic checks
 pub fn validate_receipt(
     receipt: &Receipt,
@@ -203,6 +212,14 @@ pub fn validate_receipt(
     provider_registry: &ProviderRegistry,
     nonce_tracker: &mut NonceTracker,
 ) -> Result<(), ValidationError> {
+    let (provider_id, nonce) = receipt_provider_and_nonce(receipt);
+    if nonce_tracker.has_seen_nonce(provider_id, nonce) {
+        return Err(ValidationError::ReplayedNonce {
+            provider_id: provider_id.to_string(),
+            nonce,
+        });
+    }
+
     // Check block height
     if receipt.block_height() != block_height {
         return Err(ValidationError::BlockHeightMismatch {

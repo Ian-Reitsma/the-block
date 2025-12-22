@@ -68,9 +68,10 @@ fn block_application_is_atomic() {
     };
     let tx2 = sign_tx(&sk, &payload2).unwrap();
 
+    let coinbase = the_block::SignedTransaction::default();
     let mut block = the_block::Block {
         index: 1,
-        transactions: vec![tx1.clone(), tx2.clone()],
+        transactions: vec![coinbase.clone(), tx1.clone(), tx2.clone()],
         ..the_block::Block::default()
     };
 
@@ -80,7 +81,7 @@ fn block_application_is_atomic() {
     assert!(bc.accounts.get("carol").is_none());
 
     // Remove invalid tx and reapply
-    block.transactions = vec![tx1];
+    block.transactions = vec![coinbase.clone(), tx1];
     let deltas = validate_and_apply(&bc, &block).expect("valid block");
     commit(&mut bc, deltas).unwrap();
     assert_eq!(bc.accounts["alice"].balance.consumer, 90);

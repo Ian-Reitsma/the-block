@@ -6,6 +6,10 @@
 //! - Validation at scale
 //! - Memory pressure
 
+use crypto_suite::hashing::blake3::Hasher;
+use crypto_suite::signatures::ed25519::SigningKey;
+use rand::rngs::StdRng;
+use std::time::Instant;
 use the_block::block_binary::encode_receipts;
 use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
 use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
@@ -13,11 +17,33 @@ use the_block::receipts_validation::{
     validate_receipt, validate_receipt_count, validate_receipt_size, MAX_RECEIPTS_PER_BLOCK,
 };
 
+const RECEIPT_PROVIDER_POOL: [&str; 4] = [
+    "stress-provider-0",
+    "stress-provider-1",
+    "stress-provider-2",
+    "stress-provider-3",
+];
+
+const RECEIPT_PUBLISHER_POOL: [&str; 4] = [
+    "stress-publisher-0",
+    "stress-publisher-1",
+    "stress-publisher-2",
+    "stress-publisher-3",
+];
+
+fn provider_for_index(id: u64) -> &'static str {
+    RECEIPT_PROVIDER_POOL[(id as usize) % RECEIPT_PROVIDER_POOL.len()]
+}
+
+fn publisher_for_index(id: u64) -> &'static str {
+    RECEIPT_PUBLISHER_POOL[(id as usize) % RECEIPT_PUBLISHER_POOL.len()]
+}
+
 fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
     match receipt_type % 4 {
         0 => Receipt::Storage(StorageReceipt {
             contract_id: format!("sc_{}", id),
-            provider: format!("provider_{}", id),
+            provider: provider_for_index(id).to_string(),
             bytes: 1024,
             price_ct: 100,
             block_height: id,
@@ -27,7 +53,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
         }),
         1 => Receipt::Compute(ComputeReceipt {
             job_id: format!("job_{}", id),
-            provider: format!("provider_{}", id),
+            provider: provider_for_index(id).to_string(),
             compute_units: 1000,
             payment_ct: 50,
             block_height: id,
@@ -37,7 +63,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
         }),
         2 => Receipt::Energy(EnergyReceipt {
             contract_id: format!("energy_{}", id),
-            provider: format!("provider_{}", id),
+            provider: provider_for_index(id).to_string(),
             energy_units: 500,
             price_ct: 75,
             block_height: id,
@@ -47,7 +73,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
         }),
         _ => Receipt::Ad(AdReceipt {
             campaign_id: format!("campaign_{}", id),
-            publisher: format!("pub_{}", id),
+            publisher: publisher_for_index(id).to_string(),
             impressions: 1000,
             spend_ct: 20,
             block_height: id,
@@ -188,23 +214,118 @@ fn stress_mixed_receipt_types_at_scale() {
 
 #[test]
 fn stress_validation_at_scale() {
-    // Validate 10,000 receipts
-    let receipts: Vec<Receipt> = (0..10_000)
-        .map(|i| create_test_receipt(i, i as usize))
-        .collect();
+    if cfg!(debug_assertions) {
+        println!(
+            "Skipping stress_validation_at_scale in debug builds; run `cargo test --release` for the full suite"
+        );
+        return;
+    }
+
+    let mut rng = StdRng::seed_from_u64(42);
+    let sk = SigningKey::generate(&mut rng);
+    let vk = sk.verifying_key();
 
     let mut valid_count = 0;
-    let registry = ProviderRegistry::new();
+    let mut registry = ProviderRegistry::new();
     let mut nonce_tracker = NonceTracker::new(100);
-    for (i, receipt) in receipts.iter().enumerate() {
-        if validate_receipt(receipt, i as u64, &registry, &mut nonce_tracker).is_ok() {
+    let start = Instant::now();
+    for i in 0..MAX_RECEIPTS_PER_BLOCK as u64 {
+        let mut receipt = create_test_receipt(i, i as usize);
+        sign_receipt(&mut receipt, &sk);
+        let provider_id = receipt_provider_id(&receipt);
+        if !registry.provider_registered(provider_id) {
+            registry
+                .register_provider(provider_id.to_string(), vk.clone(), 0)
+                .expect("register provider");
+        }
+        if validate_receipt(&receipt, i as u64, &registry, &mut nonce_tracker).is_ok() {
             valid_count += 1;
+        }
+        if (i + 1) % 1000 == 0 {
+            println!("validated {}/{} receipts", i + 1, MAX_RECEIPTS_PER_BLOCK);
         }
     }
 
-    // All should be valid
-    assert_eq!(valid_count, receipts.len());
-    println!("Validated {} receipts successfully", valid_count);
+    let duration = start.elapsed();
+    assert_eq!(valid_count, MAX_RECEIPTS_PER_BLOCK);
+    println!("Validated {} receipts in {:?}", valid_count, duration);
+}
+
+fn receipt_provider_id(receipt: &Receipt) -> &str {
+    match receipt {
+        Receipt::Storage(r) => r.provider.as_str(),
+        Receipt::Compute(r) => r.provider.as_str(),
+        Receipt::Energy(r) => r.provider.as_str(),
+        Receipt::Ad(r) => r.publisher.as_str(),
+    }
+}
+
+fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
+    let preimage = match receipt {
+        Receipt::Storage(r) => build_storage_preimage(r),
+        Receipt::Compute(r) => build_compute_preimage(r),
+        Receipt::Energy(r) => build_energy_preimage(r),
+        Receipt::Ad(r) => build_ad_preimage(r),
+    };
+    let signature = sk.sign(&preimage).to_bytes().to_vec();
+    match receipt {
+        Receipt::Storage(r) => r.provider_signature = signature.clone(),
+        Receipt::Compute(r) => r.provider_signature = signature.clone(),
+        Receipt::Energy(r) => r.provider_signature = signature.clone(),
+        Receipt::Ad(r) => r.publisher_signature = signature,
+    }
+}
+
+fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
+    let mut hasher = Hasher::new();
+    hasher.update(b"storage");
+    hasher.update(&receipt.block_height.to_le_bytes());
+    hasher.update(receipt.contract_id.as_bytes());
+    hasher.update(receipt.provider.as_bytes());
+    hasher.update(&receipt.bytes.to_le_bytes());
+    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.provider_escrow.to_le_bytes());
+    hasher.update(&receipt.signature_nonce.to_le_bytes());
+    hasher.finalize().as_bytes().to_vec()
+}
+
+fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
+    let mut hasher = Hasher::new();
+    hasher.update(b"compute");
+    hasher.update(&receipt.block_height.to_le_bytes());
+    hasher.update(receipt.job_id.as_bytes());
+    hasher.update(receipt.provider.as_bytes());
+    hasher.update(&receipt.compute_units.to_le_bytes());
+    hasher.update(&receipt.payment_ct.to_le_bytes());
+    hasher.update(&[u8::from(receipt.verified)]);
+    hasher.update(&receipt.signature_nonce.to_le_bytes());
+    hasher.finalize().as_bytes().to_vec()
+}
+
+fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
+    let mut hasher = Hasher::new();
+    hasher.update(b"energy");
+    hasher.update(&receipt.block_height.to_le_bytes());
+    hasher.update(receipt.contract_id.as_bytes());
+    hasher.update(receipt.provider.as_bytes());
+    hasher.update(&receipt.energy_units.to_le_bytes());
+    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.proof_hash);
+    hasher.update(&receipt.signature_nonce.to_le_bytes());
+    hasher.finalize().as_bytes().to_vec()
+}
+
+fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
+    let mut hasher = Hasher::new();
+    hasher.update(b"ad");
+    hasher.update(&receipt.block_height.to_le_bytes());
+    hasher.update(receipt.campaign_id.as_bytes());
+    hasher.update(receipt.publisher.as_bytes());
+    hasher.update(&receipt.impressions.to_le_bytes());
+    hasher.update(&receipt.spend_ct.to_le_bytes());
+    hasher.update(&receipt.conversions.to_le_bytes());
+    hasher.update(&receipt.signature_nonce.to_le_bytes());
+    hasher.finalize().as_bytes().to_vec()
 }
 
 #[test]

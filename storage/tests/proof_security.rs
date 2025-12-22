@@ -215,20 +215,16 @@ fn random_challenges_unpredictable() {
     // Verify each proof only works for its corresponding chunk
     for i in 0..8 {
         // Correct proof passes
-        assert!(
-            contract
-                .verify_proof(i, chunks[i as usize], &proofs[i as usize], 100)
-                .is_ok()
-        );
+        assert!(contract
+            .verify_proof(i, chunks[i as usize], &proofs[i as usize], 100)
+            .is_ok());
 
         // Wrong chunk fails
         if i + 1 < 8 {
             let wrong_idx = (i + 1) % 8;
-            assert!(
-                contract
-                    .verify_proof(i, chunks[wrong_idx as usize], &proofs[i as usize], 100)
-                    .is_err()
-            );
+            assert!(contract
+                .verify_proof(i, chunks[wrong_idx as usize], &proofs[i as usize], 100)
+                .is_err());
         }
     }
 }

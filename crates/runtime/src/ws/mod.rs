@@ -134,26 +134,26 @@ where
     I: WebSocketIo,
 {
     let mut buf = Vec::with_capacity(512);
-    let mut tmp = [0u8; 64];
-    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-        let n = stream.read(&mut tmp).await?;
+    let mut byte = [0u8; 1];
+    while buf.len() < 8192 {
+        let n = stream.read(&mut byte).await?;
         if n == 0 {
             return Err(io::Error::new(
                 ErrorKind::UnexpectedEof,
                 "websocket handshake ended prematurely",
             ));
         }
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.len() > 8192 {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "websocket handshake headers too large",
-            ));
+        buf.extend_from_slice(&byte[..n]);
+        if buf.ends_with(b"\r\n\r\n") {
+            break;
         }
     }
 
-    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-        buf.truncate(pos + 4);
+    if buf.len() >= 8192 && !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "websocket handshake headers too large",
+        ));
     }
 
     let headers = std::str::from_utf8(&buf)
