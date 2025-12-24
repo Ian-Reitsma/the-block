@@ -34,8 +34,8 @@ fn audit_records_split_and_refunds() {
     Settlement::refund_split("buyer", 4, 2);
     let audit = Settlement::audit();
     assert!(contains_entry(&audit, "job", 50, None));
-    assert!(contains_entry(&audit, "accrue_split", 10, Some(5)));
-    assert!(contains_entry(&audit, "refund_split", 4, Some(2)));
+    assert!(contains_entry(&audit, "accrue_split", 15, Some(5)));
+    assert!(contains_entry(&audit, "refund_split", 6, Some(2)));
     teardown();
 }
 

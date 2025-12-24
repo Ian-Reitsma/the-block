@@ -1,9 +1,14 @@
 #![cfg(feature = "integration-tests")]
+mod util;
 use crypto_suite::hashing::blake3::Hasher;
-use testkit::tb_prop_test;
+use testkit::prop::Runner;
 use the_block::compute_market::{scheduler, *};
+use util::settlement::SettlementCtx;
 
-tb_prop_test!(match_and_finalize_payout, |runner| {
+#[test]
+fn match_and_finalize_payout() {
+    let _ctx = SettlementCtx::new();
+    let mut runner = Runner::default();
     runner
         .add_random_case("market executions", 20, |rng| {
             let slices = rng.range_usize(1..=8);
@@ -49,4 +54,8 @@ tb_prop_test!(match_and_finalize_payout, |runner| {
             assert_eq!(market.finalize_job(&job_id).unwrap(), (1, 1));
         })
         .expect("register random case");
-});
+
+    if let Err(failure) = runner.run() {
+        panic!("{}", failure.render("match_and_finalize_payout"));
+    }
+}

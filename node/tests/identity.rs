@@ -4,7 +4,7 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_unicode::{NormalizationAccuracy, Normalizer};
 use sys::tempfile::tempdir;
 use the_block::generate_keypair;
-use the_block::identity::handle_registry::{HandleError, HandleRegistry};
+use the_block::identity::handle_registry::{HandleError, HandleRegistry, RegistrationOutcome};
 
 fn sign_msg(handle: &str, sk: &SigningKey, nonce: u64) -> (Vec<u8>, Vec<u8>) {
     let normalizer = Normalizer;
@@ -20,6 +20,28 @@ fn sign_msg(handle: &str, sk: &SigningKey, nonce: u64) -> (Vec<u8>, Vec<u8>) {
     (pk.to_bytes().to_vec(), sig.to_bytes().to_vec())
 }
 
+#[cfg(feature = "pq-crypto")]
+fn register_handle_with_nonce(
+    reg: &mut HandleRegistry,
+    handle: &str,
+    pk: &[u8],
+    sig: &[u8],
+    nonce: u64,
+) -> Result<RegistrationOutcome, HandleError> {
+    reg.register_handle(handle, pk, None, sig, nonce)
+}
+
+#[cfg(not(feature = "pq-crypto"))]
+fn register_handle_with_nonce(
+    reg: &mut HandleRegistry,
+    handle: &str,
+    pk: &[u8],
+    sig: &[u8],
+    nonce: u64,
+) -> Result<RegistrationOutcome, HandleError> {
+    reg.register_handle(handle, pk, sig, nonce)
+}
+
 #[test]
 fn register_persists() {
     let dir = tempdir().unwrap();
@@ -29,7 +51,7 @@ fn register_persists() {
     let (pk, sig) = sign_msg("alice", &sk, 1);
     {
         let mut reg = HandleRegistry::open(path);
-        let outcome = reg.register_handle("alice", &pk, None, &sig, 1).unwrap();
+        let outcome = register_handle_with_nonce(&mut reg, "alice", &pk, &sig, 1).unwrap();
         assert_eq!(outcome.normalized_handle, "alice");
         assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
     }
@@ -53,9 +75,8 @@ fn duplicate_rejected() {
     let (pk1, sig1) = sign_msg("bob", &sk1, 1);
     let (pk2, sig2) = sign_msg("bob", &sk2, 1);
     let mut reg = HandleRegistry::open(path);
-    reg.register_handle("bob", &pk1, None, &sig1, 1).unwrap();
-    let err = reg
-        .register_handle("bob", &pk2, None, &sig2, 1)
+    register_handle_with_nonce(&mut reg, "bob", &pk1, &sig1, 1).unwrap();
+    let err = register_handle_with_nonce(&mut reg, "bob", &pk2, &sig2, 1)
         .err()
         .expect("duplicate registration should fail");
     assert!(matches!(err, HandleError::Duplicate));
@@ -69,14 +90,14 @@ fn replay_and_higher_nonce() {
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
     let (pk, sig1) = sign_msg("carol", &sk, 1);
     let mut reg = HandleRegistry::open(path);
-    reg.register_handle("carol", &pk, None, &sig1, 1).unwrap();
+    register_handle_with_nonce(&mut reg, "carol", &pk, &sig1, 1).unwrap();
     let (_, sig1r) = sign_msg("carol", &sk, 1);
     assert!(matches!(
-        reg.register_handle("carol", &pk, None, &sig1r, 1),
+        register_handle_with_nonce(&mut reg, "carol", &pk, &sig1r, 1),
         Err(HandleError::LowNonce)
     ));
     let (_, sig2) = sign_msg("carol", &sk, 2);
-    let outcome = reg.register_handle("carol", &pk, None, &sig2, 2).unwrap();
+    let outcome = register_handle_with_nonce(&mut reg, "carol", &pk, &sig2, 2).unwrap();
     assert_eq!(outcome.normalized_handle, "carol");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
 }
@@ -90,11 +111,11 @@ fn reserved_and_case_conflict() {
     let (pk, sig) = sign_msg("Sys/Admin", &sk, 1);
     let mut reg = HandleRegistry::open(path);
     assert!(matches!(
-        reg.register_handle("sys/root", &pk, None, &sig, 1),
+        register_handle_with_nonce(&mut reg, "sys/root", &pk, &sig, 1),
         Err(HandleError::Reserved)
     ));
     let (pk2, sig2) = sign_msg("Alice", &sk, 2);
-    let outcome = reg.register_handle("Alice", &pk2, None, &sig2, 2).unwrap();
+    let outcome = register_handle_with_nonce(&mut reg, "Alice", &pk2, &sig2, 2).unwrap();
     assert_eq!(outcome.normalized_handle, "alice");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Exact);
     assert!(reg.resolve_handle("alice").is_some());
@@ -108,7 +129,7 @@ fn approximate_handles_report_accuracy() {
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
     let (pk, sig) = sign_msg("École", &sk, 1);
     let mut reg = HandleRegistry::open(path);
-    let outcome = reg.register_handle("École", &pk, None, &sig, 1).unwrap();
+    let outcome = register_handle_with_nonce(&mut reg, "École", &pk, &sig, 1).unwrap();
     assert_eq!(outcome.normalized_handle, "ecole");
     assert_eq!(outcome.accuracy, NormalizationAccuracy::Approximate);
 }

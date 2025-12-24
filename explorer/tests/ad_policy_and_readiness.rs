@@ -7,11 +7,31 @@ use crypto_suite::{
 use explorer::{router, Explorer, ExplorerHttpState};
 use foundation_serialization::json::{self, Value as JsonValue};
 use httpd::StatusCode;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use sys::tempfile::TempDir;
 use the_block::ad_policy_snapshot::persist_snapshot;
+
+/// RAII guard for setting and cleaning up environment variables in tests.
+/// Automatically removes the variable when dropped, even if the test panics.
+struct EnvGuard {
+    key: &'static str,
+}
+
+impl EnvGuard {
+    fn new(key: &'static str, value: String) -> Self {
+        env::set_var(key, value);
+        EnvGuard { key }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        env::remove_var(self.key);
+    }
+}
 
 fn tmp_path(dir: &TempDir, name: &str) -> PathBuf {
     dir.path().join(name)
@@ -66,9 +86,9 @@ fn ad_policy_snapshot_with_attestation() {
             Arc::new(InMemoryMarketplace::new(MarketplaceConfig::default()));
         // fixed 32-byte hex key (0x07 repeated)
         let key_hex = hex::encode([7u8; 32]);
-        std::env::set_var("TB_NODE_KEY_HEX", key_hex);
+        // Use RAII guard to ensure environment variable is cleaned up even if test panics
+        let _key_guard = EnvGuard::new("TB_NODE_KEY_HEX", key_hex);
         persist_snapshot(&base, &market, 42).expect("persist snapshot");
-        std::env::remove_var("TB_NODE_KEY_HEX");
 
         // Fetch detail endpoint
         let url = format!(
