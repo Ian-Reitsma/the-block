@@ -1065,8 +1065,13 @@ pub mod serial {
     static SERIAL_MUTEX: Mutex<()> = Mutex::new(());
 
     /// Locks the global mutex guarding serial tests.
+    /// Recovers from poisoned mutex to prevent cascading test failures when one test panics.
     pub fn lock() -> MutexGuard<'static, ()> {
-        SERIAL_MUTEX.lock().expect("serial test mutex poisoned")
+        SERIAL_MUTEX.lock().unwrap_or_else(|poisoned| {
+            // Recover from poisoned mutex - when one test panics, subsequent tests should still run
+            // This prevents cascading failures where all tests fail due to mutex poisoning
+            poisoned.into_inner()
+        })
     }
 }
 

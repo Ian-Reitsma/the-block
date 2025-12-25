@@ -72,7 +72,17 @@ impl Watcher {
 
 #[cfg(feature = "inhouse-backend")]
 mod inhouse {
-    use super::{io, RecursiveMode, WatchEvent, WatchEventKind};
+    use super::{RecursiveMode, WatchEvent, WatchEventKind};
+
+    // Reactor-based waiting is used by platforms that integrate file watching with the async reactor
+    // Currently: Linux (inotify), but future platforms can enable this via feature flags
+    #[cfg(any(
+        target_os = "linux",
+        feature = "reactor-based-fs-watching"
+    ))]
+    use super::io;
+    // BaseWatcher provides shared functionality for event-based file watching
+    // Available on Unix-like platforms and any future platform with reactor-based-fs-watching feature
     #[cfg(any(
         target_os = "linux",
         target_os = "macos",
@@ -80,7 +90,8 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     use crate::inhouse::{IoRegistration, ReactorRaw};
     #[cfg(any(
@@ -90,7 +101,8 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     use std::collections::VecDeque;
     #[cfg(any(
@@ -100,10 +112,13 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     use sys::reactor::Interest as ReactorInterest;
 
+    /// Shared base watcher for platforms with event-based file watching (e.g., inotify, kqueue)
+    /// Future platforms can use this by enabling the `reactor-based-fs-watching` feature
     #[cfg(any(
         target_os = "linux",
         target_os = "macos",
@@ -111,7 +126,8 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     pub(super) struct BaseWatcher {
         registration: IoRegistration,
@@ -125,7 +141,8 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     impl BaseWatcher {
         fn new(registration: IoRegistration) -> Self {
@@ -135,6 +152,13 @@ mod inhouse {
             }
         }
 
+        // Reactor-based waiting: polls the reactor for file descriptor readiness
+        // Used by: Linux (inotify), and any future platform with `reactor-based-fs-watching` feature
+        // Not used by: kqueue (macOS/BSD) which polls directly to work around reactor scheduling issues
+        #[cfg(any(
+            target_os = "linux",
+            feature = "reactor-based-fs-watching"
+        ))]
         async fn wait_ready(&self) -> io::Result<()> {
             ReadReadyFuture {
                 registration: &self.registration,
@@ -158,14 +182,11 @@ mod inhouse {
         }
     }
 
+    // Future for reactor-based file descriptor readiness waiting
+    // Enables async integration with the reactor's polling mechanism
     #[cfg(any(
         target_os = "linux",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
+        feature = "reactor-based-fs-watching"
     ))]
     struct ReadReadyFuture<'a> {
         registration: &'a IoRegistration,
@@ -173,12 +194,7 @@ mod inhouse {
 
     #[cfg(any(
         target_os = "linux",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
+        feature = "reactor-based-fs-watching"
     ))]
     impl std::future::Future for ReadReadyFuture<'_> {
         type Output = io::Result<()>;
@@ -194,6 +210,8 @@ mod inhouse {
         }
     }
 
+    /// Helper to register a file descriptor with the reactor for async polling
+    /// Available for Unix-like platforms and future platforms with reactor-based-fs-watching feature
     #[cfg(any(
         target_os = "linux",
         target_os = "macos",
@@ -201,7 +219,8 @@ mod inhouse {
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        feature = "reactor-based-fs-watching"
     ))]
     fn register_fd(
         runtime: &crate::inhouse::InHouseRuntime,
@@ -212,6 +231,7 @@ mod inhouse {
         IoRegistration::new(reactor, fd, interest)
     }
 
+    // Linux inotify implementation: Kernel-level file notifications with reactor integration
     #[cfg(target_os = "linux")]
     mod linux {
         use super::{register_fd, BaseWatcher, RecursiveMode, WatchEvent, WatchEventKind};
@@ -381,6 +401,7 @@ mod inhouse {
             }
         }
     }
+    // kqueue implementation: BSD/macOS kernel event notification with direct polling
     #[cfg(any(
         target_os = "macos",
         target_os = "ios",
@@ -406,12 +427,49 @@ mod inhouse {
             | kqueue::NOTE_RENAME
             | kqueue::NOTE_DELETE;
 
+        /// Track file snapshots to detect which files changed in a directory.
+        /// When kqueue reports a directory modification, we compare snapshots to find
+        /// which specific files were added, removed, or modified.
+        /// Uses content hashing (first 8KB) for reliable change detection,
+        /// mirroring the polling backend's approach.
+        #[derive(Clone)]
+        struct FileSnapshot {
+            len: u64,
+            modified: Option<std::time::SystemTime>,
+            /// Content hash of first 8KB for reliable change detection
+            content_hash: Option<u64>,
+        }
+
+        /// Compute FNV-1a hash of file's first 8KB for content-based change detection
+        fn compute_file_hash(path: &Path) -> Option<u64> {
+            if let Ok(mut file) = std::fs::File::open(path) {
+                use std::io::Read;
+                let mut buf = [0u8; 8192];
+                match file.read(&mut buf) {
+                    Ok(n) => {
+                        // FNV-1a algorithm
+                        let mut hash = 0xcbf29ce484222325u64;
+                        for &byte in &buf[..n] {
+                            hash ^= byte as u64;
+                            hash = hash.wrapping_mul(0x100000001b3);
+                        }
+                        Some(hash)
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        }
+
         pub(crate) struct Watcher {
             base: BaseWatcher,
             queue: Kqueue,
             handles: HashMap<RawFd, File>,
             paths: HashMap<RawFd, PathBuf>,
             recursive: bool,
+            /// Store file snapshots for directories to detect which files changed
+            dir_snapshots: HashMap<PathBuf, HashMap<PathBuf, FileSnapshot>>,
         }
 
         impl Watcher {
@@ -429,23 +487,37 @@ mod inhouse {
                     handles: HashMap::new(),
                     paths: HashMap::new(),
                     recursive: matches!(recursive, RecursiveMode::Recursive),
+                    dir_snapshots: HashMap::new(),
                 };
                 watcher.register_path(&path)?;
+                // Take initial snapshot of all watched directories for change detection
+                watcher.snapshot_directory_contents(&path)?;
                 Ok(watcher)
             }
 
             pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
+                use std::time::Duration;
                 loop {
                     if let Some(event) = self.base.pop_event() {
+                        eprintln!("[kqueue] next_event() returning queued event");
                         return Ok(event);
                     }
 
-                    self.base.wait_ready().await?;
+                    // Poll kqueue directly instead of waiting for reactor readiness
+                    // This works around reactor scheduling issues where the reactor
+                    // doesn't poll kqueue frequently enough during busy async loops
+                    eprintln!("[kqueue] next_event() polling events directly...");
                     let events = self.read_events()?;
-                    if events.is_empty() {
+                    if !events.is_empty() {
+                        eprintln!("[kqueue] next_event() found {} events", events.len());
+                        self.base.push_events(events);
                         continue;
                     }
-                    self.base.push_events(events);
+
+                    // No events ready, yield and wait a bit before polling again
+                    eprintln!("[kqueue] next_event() no events, yielding...");
+                    crate::yield_now().await;
+                    crate::sleep(Duration::from_millis(10)).await;
                 }
             }
 
@@ -475,23 +547,31 @@ mod inhouse {
 
             fn add_descriptor(&mut self, path: &Path) -> io::Result<()> {
                 if self.paths.values().any(|existing| existing == path) {
+                    eprintln!("[kqueue] Skipping add_descriptor for {:?} (already registered)", path);
                     return Ok(());
                 }
 
                 let file = File::open(path)?;
                 let fd = file.as_raw_fd();
+                eprintln!("[kqueue] Registering fd {} for {:?} with flags {:x}", fd, path, WATCH_FLAGS);
                 self.queue.register(fd, WATCH_FLAGS)?;
                 self.paths.insert(fd, path.to_path_buf());
                 self.handles.insert(fd, file);
+                eprintln!("[kqueue] Successfully registered fd {} for {:?}", fd, path);
                 Ok(())
             }
 
             fn read_events(&mut self) -> io::Result<Vec<WatchEvent>> {
                 let events = self.queue.poll_events(64)?;
+                if !events.is_empty() {
+                    eprintln!("[kqueue] poll_events returned {} events", events.len());
+                }
                 let mut ready = Vec::new();
                 for event in events {
+                    eprintln!("[kqueue] Processing kqueue event: fd={}, flags={:x}", event.fd, event.flags);
                     if let Some(path) = self.paths.get(&event.fd).cloned() {
                         let kind = Self::classify(event.flags);
+                        eprintln!("[kqueue] Event on {:?}, kind: {:?}, flags: {:x}", path, kind, event.flags);
                         if self.recursive && path.is_dir() {
                             let _ = self.register_path(&path);
                         }
@@ -499,10 +579,149 @@ mod inhouse {
                             self.paths.remove(&event.fd);
                             self.handles.remove(&event.fd);
                         }
-                        ready.push(WatchEvent::new(kind, vec![path]));
+
+                        // When a directory is modified, scan it to detect which specific files changed
+                        // Uses content hashing for reliable change detection, mirroring the polling backend.
+                        // This ensures kqueue reports file-level changes instead of just directory modifications.
+                        if path.is_dir() && matches!(kind, WatchEventKind::Modified) {
+                            eprintln!("[kqueue] Directory modified, detecting file changes...");
+                            let file_changes = self.detect_file_changes(&path)?;
+                            eprintln!("[kqueue] Detected {} file changes", file_changes.len());
+                            for fc in &file_changes {
+                                eprintln!("[kqueue]   - {:?}: {:?}", fc.kind, fc.paths);
+                            }
+                            ready.extend(file_changes);
+                        } else {
+                            ready.push(WatchEvent::new(kind, vec![path]));
+                        }
                     }
                 }
                 Ok(ready)
+            }
+
+            /// Snapshot the contents of a directory for change detection
+            fn snapshot_directory_contents(&mut self, path: &Path) -> io::Result<()> {
+                if path.is_dir() {
+                    let mut snapshot = HashMap::new();
+                    if let Ok(entries) = fs::read_dir(path) {
+                        for entry in entries.flatten() {
+                            let entry_path = entry.path();
+                            if let Ok(metadata) = entry.metadata() {
+                                // For files, compute content hash for reliable change detection
+                                let content_hash = if metadata.is_file() {
+                                    compute_file_hash(&entry_path)
+                                } else {
+                                    None
+                                };
+                                eprintln!("[kqueue] Initial snapshot: {:?} (len={}, hash={:?})",
+                                    entry_path.file_name().unwrap_or_default(), metadata.len(), content_hash);
+                                snapshot.insert(
+                                    entry_path,
+                                    FileSnapshot {
+                                        len: metadata.len(),
+                                        modified: metadata.modified().ok(),
+                                        content_hash,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    eprintln!("[kqueue] Stored snapshot for {:?} with {} entries", path, snapshot.len());
+                    self.dir_snapshots.insert(path.to_path_buf(), snapshot);
+
+                    // Recursively snapshot subdirectories
+                    if self.recursive {
+                        if let Ok(entries) = fs::read_dir(path) {
+                            for entry in entries.flatten() {
+                                let entry_path = entry.path();
+                                if entry_path.is_dir() {
+                                    let _ = self.snapshot_directory_contents(&entry_path);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+
+            /// Detect which files changed in a directory by comparing with previous snapshot
+            fn detect_file_changes(&mut self, dir_path: &Path) -> io::Result<Vec<WatchEvent>> {
+                eprintln!("[kqueue] detect_file_changes for {:?}", dir_path);
+                let mut current = HashMap::new();
+                if let Ok(entries) = fs::read_dir(dir_path) {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if let Ok(metadata) = entry.metadata() {
+                            // For files, compute content hash for reliable change detection
+                            let content_hash = if metadata.is_file() {
+                                compute_file_hash(&entry_path)
+                            } else {
+                                None
+                            };
+                            eprintln!("[kqueue]   Current: {:?} (len={}, hash={:?})",
+                                entry_path.file_name().unwrap_or_default(), metadata.len(), content_hash);
+                            current.insert(
+                                entry_path,
+                                FileSnapshot {
+                                    len: metadata.len(),
+                                    modified: metadata.modified().ok(),
+                                    content_hash,
+                                },
+                            );
+                        }
+                    }
+                }
+
+                let mut changes = Vec::new();
+                let old_snapshot = self.dir_snapshots.get(dir_path).cloned().unwrap_or_default();
+                eprintln!("[kqueue] Comparing {} current files against {} old snapshot entries",
+                    current.len(), old_snapshot.len());
+
+                // Detect modified and created files
+                for (path, meta) in &current {
+                    match old_snapshot.get(path) {
+                        Some(old) => {
+                            // File exists in both snapshots; check if it changed using multiple indicators:
+                            // 1. File size changed
+                            // 2. Content hash changed (more reliable than timestamp alone)
+                            // 3. Modified time changed (for directories)
+                            let is_changed = if old.len != meta.len {
+                                eprintln!("[kqueue]   {:?} size changed: {} -> {}", path.file_name().unwrap_or_default(), old.len, meta.len);
+                                true
+                            } else if old.content_hash.is_some() && old.content_hash != meta.content_hash {
+                                eprintln!("[kqueue]   {:?} hash changed: {:?} -> {:?}", path.file_name().unwrap_or_default(), old.content_hash, meta.content_hash);
+                                true
+                            } else if old.modified != meta.modified {
+                                eprintln!("[kqueue]   {:?} mtime changed: {:?} -> {:?}", path.file_name().unwrap_or_default(), old.modified, meta.modified);
+                                true
+                            } else {
+                                false
+                            };
+
+                            if is_changed {
+                                changes.push(WatchEvent::new(WatchEventKind::Modified, vec![path.clone()]));
+                            }
+                        }
+                        None => {
+                            // New file
+                            eprintln!("[kqueue]   {:?} is new", path.file_name().unwrap_or_default());
+                            changes.push(WatchEvent::new(WatchEventKind::Created, vec![path.clone()]));
+                        }
+                    }
+                }
+
+                // Detect removed files
+                for path in old_snapshot.keys() {
+                    if !current.contains_key(path) {
+                        eprintln!("[kqueue]   {:?} was removed", path.file_name().unwrap_or_default());
+                        changes.push(WatchEvent::new(WatchEventKind::Removed, vec![path.clone()]));
+                    }
+                }
+
+                // Update snapshot for next comparison
+                self.dir_snapshots.insert(dir_path.to_path_buf(), current);
+
+                Ok(changes)
             }
         }
 
@@ -530,6 +749,7 @@ mod inhouse {
             }
         }
     }
+    // Windows implementation: Directory change notifications
     #[cfg(target_os = "windows")]
     mod windows {
         use super::{RecursiveMode, WatchEvent, WatchEventKind};
@@ -698,6 +918,7 @@ mod inhouse {
             path.as_os_str().to_string_lossy().to_ascii_lowercase()
         }
     }
+    // Polling implementation: Periodic filesystem scanning fallback for platforms without native file watching
     #[cfg(not(any(
         target_os = "linux",
         target_os = "macos",
@@ -722,6 +943,31 @@ mod inhouse {
             modified: Option<SystemTime>,
             len: u64,
             is_dir: bool,
+            // For regular files, compute a quick hash of first 8KB to detect content changes
+            // This provides more reliable change detection than timestamps alone
+            content_hash: Option<u64>,
+        }
+
+        fn compute_content_hash(path: &Path) -> Option<u64> {
+            // Only compute hash for files, not directories
+            if let Ok(mut file) = fs::File::open(path) {
+                use std::io::Read;
+                let mut buf = [0u8; 8192]; // First 8KB is usually sufficient
+                match file.read(&mut buf) {
+                    Ok(n) => {
+                        // Simple hash using FNV-1a algorithm
+                        let mut hash = 0xcbf29ce484222325u64;
+                        for &byte in &buf[..n] {
+                            hash ^= byte as u64;
+                            hash = hash.wrapping_mul(0x100000001b3);
+                        }
+                        Some(hash)
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
         }
 
         pub(super) struct Watcher {
@@ -767,25 +1013,29 @@ mod inhouse {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
                             let metadata = entry.metadata()?;
+                            let is_dir = metadata.is_dir();
                             let record = EntryMeta {
                                 modified: metadata.modified().ok(),
                                 len: metadata.len(),
-                                is_dir: metadata.is_dir(),
+                                is_dir,
+                                content_hash: if !is_dir { compute_content_hash(&entry_path) } else { None },
                             };
                             self.snapshot.insert(entry_path.clone(), record.clone());
-                            if self.recursive && metadata.is_dir() {
+                            if self.recursive && is_dir {
                                 self.record_initial(&entry_path)?;
                             }
                         }
                     }
                 } else if path.exists() {
                     let metadata = fs::metadata(path)?;
+                    let is_dir = metadata.is_dir();
                     self.snapshot.insert(
                         path.to_path_buf(),
                         EntryMeta {
                             modified: metadata.modified().ok(),
                             len: metadata.len(),
-                            is_dir: metadata.is_dir(),
+                            is_dir,
+                            content_hash: if !is_dir { compute_content_hash(path) } else { None },
                         },
                     );
                 }
@@ -800,10 +1050,22 @@ mod inhouse {
                 for (path, meta) in current.iter() {
                     match self.snapshot.get(path) {
                         Some(existing) => {
-                            if existing.is_dir != meta.is_dir
-                                || existing.len != meta.len
-                                || existing.modified != meta.modified
-                            {
+                            // Detect changes using multiple indicators:
+                            // 1. Directory status changed (file became directory or vice versa)
+                            // 2. File size changed
+                            // 3. File content hash changed (more reliable than timestamp)
+                            // 4. For dirs: metadata.modified changed
+                            let is_changed = if existing.is_dir != meta.is_dir {
+                                true
+                            } else if !meta.is_dir {
+                                // For regular files, check size and content hash
+                                existing.len != meta.len || existing.content_hash != meta.content_hash
+                            } else {
+                                // For directories, check timestamp
+                                existing.modified != meta.modified
+                            };
+
+                            if is_changed {
                                 events.push(WatchEvent::new(
                                     WatchEventKind::Modified,
                                     vec![path.clone()],
@@ -837,27 +1099,31 @@ mod inhouse {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
                             let metadata = entry.metadata()?;
+                            let is_dir = metadata.is_dir();
                             out.insert(
                                 entry_path.clone(),
                                 EntryMeta {
                                     modified: metadata.modified().ok(),
                                     len: metadata.len(),
-                                    is_dir: metadata.is_dir(),
+                                    is_dir,
+                                    content_hash: if !is_dir { compute_content_hash(&entry_path) } else { None },
                                 },
                             );
-                            if self.recursive && metadata.is_dir() {
+                            if self.recursive && is_dir {
                                 self.collect(&entry_path, out)?;
                             }
                         }
                     }
                 } else if path.exists() {
                     let metadata = fs::metadata(path)?;
+                    let is_dir = metadata.is_dir();
                     out.insert(
                         path.to_path_buf(),
                         EntryMeta {
                             modified: metadata.modified().ok(),
                             len: metadata.len(),
-                            is_dir: metadata.is_dir(),
+                            is_dir,
+                            content_hash: if !is_dir { compute_content_hash(path) } else { None },
                         },
                     );
                 }
@@ -866,6 +1132,8 @@ mod inhouse {
         }
     }
 
+    // Export the appropriate Watcher implementation based on platform
+    // Custom platforms should implement their own module following one of these patterns
     #[cfg(any(
         target_os = "macos",
         target_os = "ios",

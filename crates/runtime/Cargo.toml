@@ -10,6 +10,27 @@ inhouse-backend = ["dep:foundation_metrics"]
 # When using --all-features, inhouse-backend takes precedence
 stub-backend = ["dep:foundation_metrics"]
 
+# ============================================================================
+# FILE WATCHING ARCHITECTURE FOR 200+ YEAR EXTENSIBILITY
+# ============================================================================
+# These features define CAPABILITIES, not implementations. They allow future
+# platforms to signal which architectural patterns they support, enabling
+# The Block to remain adaptable for centuries without code changes.
+#
+# Built-in platforms (Linux, macOS, Windows) automatically get the right
+# capabilities based on target_os. Custom platforms explicitly enable the
+# capabilities their implementation supports.
+#
+# IMPORTANT: These features are mutually exclusive for implementation selection.
+# Enable only ONE at build time. Multiple enables will cause compilation errors.
+# ============================================================================
+
+# Reactor-integrated file watching: Platform integrates file notifications with async reactor
+# - Built-in: Linux (via inotify)
+# - Custom platforms: Enable if you provide reactor-integrated file watching
+# - Requires: IoRegistration, async reactor polling
+reactor-based-fs-watching = []
+
 [dependencies]
 concurrency = { path = "../concurrency" }
 foundation_async = { path = "../foundation_async" }
