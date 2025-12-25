@@ -34,9 +34,9 @@ def _load_the_block():
     try:
         return importlib.import_module("the_block")
     except ModuleNotFoundError as exc:
-        raise SystemExit(
-            "the first-party python bridge is not yet available; rerun the demo once the `python-bindings` feature ships"
-        ) from exc
+        # Print to stdout so the user and tests can see the message
+        print("the first-party python bridge is not yet available; rerun the demo once the `python-bindings` feature ships")
+        raise SystemExit(1) from exc
 
 
 the_block = _load_the_block()

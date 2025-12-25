@@ -220,6 +220,7 @@ struct EngineInner {
     cfs: RwLock<HashMap<String, Arc<CfHandle>>>,
     memtable_limit: RwLock<Option<usize>>,
     cache: Mutex<SstCache>,
+    sync_on_write: bool,
 }
 
 struct CfHandle {
@@ -381,6 +382,10 @@ impl KeyValueBatch for InhouseBatch {
 
 impl InhouseEngine {
     pub fn open(path: &str) -> StorageResult<Self> {
+        Self::open_with_config(path, true)
+    }
+
+    pub fn open_with_config(path: &str, sync_on_write: bool) -> StorageResult<Self> {
         let root = PathBuf::from(path);
         fs::create_dir_all(&root).map_err(StorageError::from)?;
         let manifest = Manifest::load(&root)?;
@@ -389,6 +394,7 @@ impl InhouseEngine {
             cfs: RwLock::new(HashMap::new()),
             memtable_limit: RwLock::new(Some(DEFAULT_MEMTABLE_LIMIT)),
             cache: Mutex::new(SstCache::new(DEFAULT_CACHE_CAPACITY)),
+            sync_on_write,
         };
         let engine = InhouseEngine {
             root: Arc::new(root),
@@ -523,7 +529,7 @@ impl CfState {
         self.manifest.sequence
     }
 
-    fn append_wal(&mut self, cf_path: &Path, record: &WalRecord) -> StorageResult<()> {
+    fn append_wal(&mut self, cf_path: &Path, record: &WalRecord, engine: &EngineInner) -> StorageResult<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -533,7 +539,12 @@ impl CfState {
         file.write_all(line.as_bytes())
             .map_err(StorageError::from)?;
         file.write_all(b"\n").map_err(StorageError::from)?;
-        file.sync_all().map_err(StorageError::from)
+        // Check both the config flag and environment variable (for tests)
+        let should_sync = engine.sync_on_write && std::env::var("STORAGE_DISABLE_SYNC").is_err();
+        if should_sync {
+            file.sync_all().map_err(StorageError::from)?;
+        }
+        Ok(())
     }
 
     fn maybe_flush(
@@ -946,7 +957,7 @@ impl KeyValue for InhouseEngine {
                     value: value.to_vec(),
                 },
             };
-            state.append_wal(path, &record)?;
+            state.append_wal(path, &record, engine)?;
             state.apply_record(record);
             state.maybe_flush(path, engine, limit)
         })
@@ -962,7 +973,7 @@ impl KeyValue for InhouseEngine {
                 sequence,
                 kind: WalKind::Delete,
             };
-            state.append_wal(path, &record)?;
+            state.append_wal(path, &record, engine)?;
             state.apply_record(record);
             state.maybe_flush(path, engine, limit)
         })?;

@@ -1014,21 +1014,33 @@ pub fn watch(dir: &str) {
                                 | WatchEventKind::Removed
                         ) =>
                     {
+                        eprintln!("[config] Received event: {:?} with {} paths", event.kind, event.paths.len());
                         let mut reload_node = false;
                         let mut reload_gossip = false;
                         let mut reload_storage = false;
                         for changed in &event.paths {
+                            eprintln!("[config]   Path: {:?}", changed);
                             if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
+                                eprintln!("[config]   File name: {:?}", name);
                                 match name {
-                                    "default.toml" => reload_node = true,
+                                    "default.toml" => {
+                                        eprintln!("[config]   Matched default.toml, will reload");
+                                        reload_node = true;
+                                    }
                                     "gossip.toml" => reload_gossip = true,
                                     "storage.toml" => reload_storage = true,
-                                    _ => {}
+                                    _ => {
+                                        eprintln!("[config]   No match for {:?}", name);
+                                    }
                                 }
+                            } else {
+                                eprintln!("[config]   Could not extract file name from {:?}", changed);
                             }
                         }
                         if reload_node {
+                            eprintln!("[config] Calling reload()...");
                             let _ = reload();
+                            eprintln!("[config] reload() completed");
                         }
                         if reload_gossip {
                             crate::gossip::config::reload();

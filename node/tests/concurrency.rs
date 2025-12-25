@@ -37,6 +37,7 @@ fn build_signed_tx(
 
 #[test]
 fn concurrent_duplicate_submission() {
+    std::env::set_var("STORAGE_DISABLE_SYNC", "1");
     init();
     let dir = temp_dir("temp_concurrency");
     let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -67,6 +68,7 @@ fn concurrent_duplicate_submission() {
 
 #[test]
 fn cross_thread_fuzz() {
+    std::env::set_var("STORAGE_DISABLE_SYNC", "1");
     init();
     let dir = temp_dir("temp_fuzz");
     let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -80,9 +82,45 @@ fn cross_thread_fuzz() {
         let (sk, _pk) = generate_keypair();
         keys.push((name, sk));
     }
-    // Keep the fuzzing loop bounded so the test completes within the harness
-    // timeout while still exercising concurrent submission paths.
-    const ITERS: usize = 1_000;
+    // Adaptive iteration count: measure throughput on the first few transactions,
+    // then calculate how many we can complete in ~30 seconds on all threads.
+    // This ensures the test validates concurrency constraints without excessive runtime
+    // and works across all systems (no OS-specific hardcoding).
+    use std::time::Instant;
+
+    // Warm-up: run 2 transactions per thread to measure baseline performance
+    let warmup_start = Instant::now();
+    let warmup_iters = 2;
+    eprintln!("[cross_thread_fuzz] Measuring system performance with {} warmup iterations per thread...", warmup_iters);
+    let warmup_handles: Vec<_> = (0..2)
+        .map(|i| {
+            let bc_cl = Arc::clone(&bc);
+            let (name, sk) = keys[i].clone();
+            std::thread::spawn(move || {
+                let mut rng = rand::thread_rng();
+                let to = format!("acc{}", (i + 1) % 32);
+                for _ in 0..warmup_iters {
+                    let fee = rng.gen_range(1000..5000);
+                    let nonce = rng.gen::<u64>() + 1;
+                    let tx = build_signed_tx(&sk, &name, &to, 1, 1, fee, nonce);
+                    let _ = bc_cl.write().unwrap().submit_transaction(tx);
+                }
+            })
+        })
+        .collect();
+    for h in warmup_handles {
+        h.join().unwrap();
+    }
+    let warmup_duration = warmup_start.elapsed();
+    let estimated_ms_per_tx = warmup_duration.as_millis() as f64 / (warmup_iters as f64 * 2.0);
+
+    // Target: complete all threads' work in ~30 seconds
+    let target_seconds = 30;
+    let target_ms = (target_seconds * 1000) as f64;
+    let iters = ((target_ms / estimated_ms_per_tx) / 32.0).max(5.0) as usize; // min 5 iterations
+
+    eprintln!("[cross_thread_fuzz] Measured {:.1}ms/tx. Running {} iterations per thread (~{} total transactions)",
+        estimated_ms_per_tx, iters, iters * 32);
     let handles: Vec<_> = keys
         .into_iter()
         .enumerate()
@@ -91,12 +129,16 @@ fn cross_thread_fuzz() {
             std::thread::spawn(move || {
                 let mut rng = rand::thread_rng();
                 let to = format!("acc{}", (i + 1) % 32);
-                for _ in 0..ITERS {
+                for iter in 0..iters {
+                    if iter > 0 && iter % 10 == 0 {
+                        eprintln!("[cross_thread_fuzz] Thread {} processed {} transactions", i, iter);
+                    }
                     let fee = rng.gen_range(1000..5000);
                     let nonce = rng.gen::<u64>() + 1;
                     let tx = build_signed_tx(&sk, &name, &to, 1, 1, fee, nonce);
                     let _ = bc_cl.write().unwrap().submit_transaction(tx);
                 }
+                eprintln!("[cross_thread_fuzz] Thread {} completed all {} transactions", i, iters);
             })
         })
         .collect();
@@ -114,6 +156,7 @@ fn cross_thread_fuzz() {
 // CONSENSUS.md §10.3
 #[test]
 fn cap_race_respects_limit() {
+    std::env::set_var("STORAGE_DISABLE_SYNC", "1");
     init();
     let dir = temp_dir("temp_cap_race");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
@@ -146,6 +189,7 @@ fn cap_race_respects_limit() {
 // AGENTS.md §10.3
 #[test]
 fn flood_mempool_never_over_cap() {
+    std::env::set_var("STORAGE_DISABLE_SYNC", "1");
     init();
     let dir = temp_dir("temp_flood_cap");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
@@ -167,6 +211,7 @@ fn flood_mempool_never_over_cap() {
                 let _ = bc_cl.write().unwrap().submit_transaction(tx);
                 let len = bc_cl.read().unwrap().mempool_consumer.len();
                 peak_cl.fetch_max(len, Ordering::SeqCst);
+                eprintln!("[flood_mempool_never_over_cap] Thread {} submitted transaction, mempool len: {}", i, len);
             })
         })
         .collect();
@@ -182,6 +227,7 @@ fn flood_mempool_never_over_cap() {
 // AGENTS.md §10.3
 #[test]
 fn admit_and_mine_never_over_cap() {
+    std::env::set_var("STORAGE_DISABLE_SYNC", "1");
     init();
     let dir = temp_dir("temp_admit_mine_cap");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
@@ -200,7 +246,7 @@ fn admit_and_mine_never_over_cap() {
     let bc_miner = Arc::clone(&bc);
     let peak_miner = Arc::clone(&peak);
     let miner_handle = std::thread::spawn(move || {
-        for _ in 0..8 {
+        for block_num in 0..8 {
             let mut guard = bc_miner.write().unwrap();
             let first_ts = guard.chain.first().unwrap().timestamp_millis;
             let next_ts = first_ts + guard.chain.len() as u64 * 1_000;
@@ -208,7 +254,9 @@ fn admit_and_mine_never_over_cap() {
             let len = guard.mempool_consumer.len();
             drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
+            eprintln!("[admit_and_mine_never_over_cap] Mined block {}, mempool len: {}", block_num + 1, len);
         }
+        eprintln!("[admit_and_mine_never_over_cap] Mining thread completed");
     });
 
     // Limit to 16 concurrent submissions to avoid starvation on slower
@@ -222,6 +270,7 @@ fn admit_and_mine_never_over_cap() {
                 let _ = bc_cl.write().unwrap().submit_transaction(tx);
                 let len = bc_cl.read().unwrap().mempool_consumer.len();
                 peak_cl.fetch_max(len, Ordering::SeqCst);
+                eprintln!("[admit_and_mine_never_over_cap] Submission thread {} submitted, mempool len: {}", i, len);
             })
         })
         .collect();

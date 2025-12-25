@@ -4,3 +4,4 @@ pub mod rpc;
 pub mod seed;
 pub mod temp;
 pub mod timeout;
+pub mod settlement;

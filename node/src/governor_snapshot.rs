@@ -8,6 +8,28 @@ use std::fs;
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+/// RAII guard for setting and cleaning up environment variables in tests.
+/// Automatically removes the variable when dropped, even if the test panics.
+#[cfg(test)]
+struct EnvGuard {
+    key: &'static str,
+}
+
+#[cfg(test)]
+impl EnvGuard {
+    fn new(key: &'static str, value: String) -> Self {
+        env::set_var(key, value);
+        EnvGuard { key }
+    }
+}
+
+#[cfg(test)]
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        env::remove_var(self.key);
+    }
+}
+
 fn snapshot_dir(base: &str) -> PathBuf {
     Path::new(base).join("governor").join("decisions")
 }
@@ -126,8 +148,8 @@ mod tests {
     fn signing_sidecar_round_trip() {
         let tmp = TempDir::new().expect("tempdir");
         let path = tmp.path().to_str().unwrap();
-        env::set_var("TB_GOVERNOR_SIGN", "1");
-        env::set_var("TB_NODE_KEY_HEX", hex::encode([5u8; 32]));
+        let _gov_guard = EnvGuard::new("TB_GOVERNOR_SIGN", "1".to_string());
+        let _key_guard = EnvGuard::new("TB_NODE_KEY_HEX", hex::encode([5u8; 32]));
         let payload = sample_payload();
         let digest = persist_snapshot(path, &payload, payload.epoch).expect("snapshot");
         let loaded = load_snapshot(path, payload.epoch).expect("load snapshot");
@@ -145,8 +167,7 @@ mod tests {
             attestation.get("payload_hash_hex").and_then(|v| v.as_str()),
             Some(digest_hex.as_str())
         );
-        env::remove_var("TB_GOVERNOR_SIGN");
-        env::remove_var("TB_NODE_KEY_HEX");
+        // Guards automatically clean up environment variables when dropped
     }
 
     #[test]

@@ -1218,6 +1218,7 @@ mod tests {
 
     #[test]
     fn static_read_requires_signed_ack() {
+        let _guard = pipeline::PipelineTestGuard::new();
         let (state, mut rx) = state_with_domains(&["signed.test"]);
         let router = Router::new(state.clone()).route(Method::Get, "/*path", handle_static);
         let remote: SocketAddr = "127.0.0.1:9200".parse().unwrap();
@@ -1227,8 +1228,6 @@ mod tests {
         let path = "/index.html";
         let bytes = 0u64;
         let ts = 1_696_969_696u64;
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
         pipeline::override_manifest_providers_for_test(
             manifest,
             vec!["gateway-nyc-01".to_string()],
@@ -1273,11 +1272,11 @@ mod tests {
         assert_eq!(ack.provider, "gateway-nyc-01");
         assert!(ack.campaign_id.is_none());
         assert!(ack.creative_id.is_none());
-        pipeline::clear_test_manifest_providers();
     }
 
     #[test]
     fn static_read_attaches_campaign_metadata() {
+        let _guard = pipeline::PipelineTestGuard::new();
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
         let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig {
             distribution,
@@ -1320,8 +1319,6 @@ mod tests {
         let path = "/creative.html";
         let bytes = 1_048_576u64;
         let ts = 1_777_777_777u64;
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
         pipeline::override_manifest_providers_for_test(
             manifest,
             vec!["gateway-sfo-01".to_string()],
@@ -1359,16 +1356,13 @@ mod tests {
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp1"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative1"));
         assert_eq!(ack.provider, "gateway-sfo-01");
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
         // The reservation should clear once the worker commits; ensure metadata persisted on ack.
     }
 
     #[test]
     fn static_read_respects_ad_readiness() {
+        let _guard = pipeline::PipelineTestGuard::new();
         service_badge::clear_badges();
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
 
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
         let market: MarketplaceHandle = Arc::new(InMemoryMarketplace::new(MarketplaceConfig {
@@ -1509,16 +1503,12 @@ mod tests {
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp-ready"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative-ready"));
         assert_eq!(ack.provider, "gateway-sfo-01");
-
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
     }
 
     #[test]
     fn static_read_matches_badge_targeted_campaign() {
+        let _guard = pipeline::PipelineTestGuard::new();
         service_badge::clear_badges();
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
         service_badge::set_physical_presence("gateway-ldn-01", true);
 
         let distribution = DistributionPolicy::new(40, 30, 20, 5, 5);
@@ -1599,17 +1589,12 @@ mod tests {
         assert_eq!(ack.campaign_id.as_deref(), Some("cmp-badge"));
         assert_eq!(ack.creative_id.as_deref(), Some("creative-badge"));
         assert_eq!(ack.provider, "gateway-ldn-01");
-
-        service_badge::clear_badges();
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
     }
 
     #[test]
     fn static_read_attaches_soft_intent_receipt() {
+        let _guard = pipeline::PipelineTestGuard::new();
         service_badge::clear_badges();
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
         service_badge::set_physical_presence("gateway-ldn-01", true);
 
         let mut config = MarketplaceConfig::default();
@@ -1711,10 +1696,6 @@ mod tests {
         assert_eq!(receipt_snapshot.fingerprint, snapshot.fingerprint);
         assert_eq!(receipt_snapshot.bucket_hashes, snapshot.bucket_hashes);
         assert_eq!(receipt_snapshot.dimensions, snapshot.dimensions);
-
-        service_badge::clear_badges();
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
     }
 
     #[test]
@@ -2145,7 +2126,7 @@ mod tests {
 
     #[test]
     fn static_read_selects_provider_from_multiple_candidates() {
-        pipeline::clear_test_manifest_providers();
+        let _guard = pipeline::PipelineTestGuard::new();
 
         let manifest = [0x42u8; 32];
         let providers = vec![
@@ -2230,9 +2211,6 @@ mod tests {
             let observed = send_signed(path, 1_700_000_001 + idx as u64, &provider);
             assert_eq!(observed, provider);
         }
-
-        pipeline::clear_test_manifest_providers();
-        pipeline::clear_test_static_blobs();
     }
 
     #[test]

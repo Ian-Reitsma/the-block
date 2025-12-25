@@ -1,58 +1,69 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use std::collections::HashSet;
+use std::env;
+use std::fs;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-use foundation_serialization::json::Value;
-use runtime::io::read_to_end;
-use runtime::net::TcpStream;
-use std::net::SocketAddr;
-use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
-use util::timeout::expect_timeout;
+use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
+use foundation_serialization::json::{Map, Value};
+use the_block::{
+    identity::{did::DidRegistry, handle_registry::HandleRegistry},
+    rpc::{fuzz_dispatch_request, fuzz_runtime_config},
+    Blockchain,
+};
+use util::settlement::SettlementCtx;
+use util::temp::temp_dir;
 
 mod util;
 
-fn rpc(addr: &str, body: &str) -> Value {
-    runtime::block_on(async {
-        let addr: SocketAddr = addr.parse().unwrap();
-        let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
-        let req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        expect_timeout(stream.write_all(req.as_bytes()))
-            .await
-            .unwrap();
-        let mut resp = Vec::with_capacity(1024);
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap()
-    })
-}
-
 #[testkit::tb_serial]
 fn price_board_no_data_errors() {
-    runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_market_err");
-        let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-        let mining = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = runtime::sync::oneshot::channel();
-        let handle = the_block::spawn(run_rpc_server(
-            Arc::clone(&bc),
-            Arc::clone(&mining),
-            "127.0.0.1:0".to_string(),
-            RpcConfig::default(),
-            tx,
-        ));
-        let addr = expect_timeout(rx).await.unwrap();
+    let _ctx = SettlementCtx::new();
+    let dir = temp_dir("rpc_market_err");
+    let bc = Arc::new(Mutex::new(Blockchain::new(
+        dir.path().to_str().expect("blockchain path"),
+    )));
+    let handles_dir = dir.path().join("handles");
+    fs::create_dir_all(&handles_dir).expect("create handles dir");
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handles_dir.to_str().expect("handles path"),
+    )));
 
-        let req = r#"{"method":"price_board_get"}"#;
-        let val = rpc(&addr, req);
-        assert_eq!(val["error"]["code"].as_i64(), Some(-33000));
-        assert_eq!(val["error"]["message"].as_str(), Some("no price data"));
-        handle.abort();
-        let _ = handle.await;
-    });
+    let did_dir = dir.path().join("did_db");
+    fs::create_dir_all(&did_dir).expect("create did dir");
+    env::set_var("TB_DID_DB_PATH", did_dir.to_str().expect("did path"));
+    let dids = Arc::new(Mutex::new(DidRegistry::open(
+        &DidRegistry::default_path(),
+    )));
+    env::remove_var("TB_DID_DB_PATH");
+
+    let mining = Arc::new(AtomicBool::new(false));
+    let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
+    let runtime_cfg = fuzz_runtime_config();
+    let mut params = Map::new();
+    params.insert("lane".to_string(), Value::String("consumer".into()));
+    let request = RpcRequest::new("price_board_get", Value::Object(params));
+
+    let response = fuzz_dispatch_request(
+        bc,
+        mining,
+        nonces,
+        handles,
+        dids,
+        runtime_cfg,
+        None,
+        None,
+        request,
+        None,
+        None,
+    );
+
+    match response {
+        RpcResponse::Error { error, .. } => {
+            assert_eq!(error.code, -33000);
+            assert_eq!(error.message, "no price data");
+        }
+        other => panic!("expected rpc error, got {other:?}"),
+    }
 }

@@ -1,8 +1,11 @@
 #![cfg(feature = "integration-tests")]
+mod util;
+use util::settlement::SettlementCtx;
 use the_block::compute_market::{admission, settlement, Offer};
 
 #[test]
 fn mixed_split_escrow_and_settlement() {
+    let _ctx = SettlementCtx::new();
     let mut bal_ct = 100;
     let mut bal_it = 100;
     let offer = Offer {
@@ -33,6 +36,7 @@ fn mixed_split_escrow_and_settlement() {
 
 #[test]
 fn full_ct_split_and_refund() {
+    let _ctx = SettlementCtx::new();
     let mut bal_ct = 50;
     let mut bal_it = 50;
     let offer = Offer {

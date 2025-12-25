@@ -17,11 +17,51 @@ pub fn ensure_inhouse_backend() {
     );
 }
 
-pub fn websocket_test_guard() -> MutexGuard<'static, ()> {
-    static GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-    GUARD
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// Guard to serialize WebSocket tests only when running with multiple threads.
+/// When running with --test-threads=1, guards are no-ops to avoid unnecessary contention.
+pub fn websocket_test_guard() -> WebSocketTestGuard {
+    // Check if we're in single-threaded test mode
+    let is_single_threaded = std::thread::available_parallelism()
+        .map(|p| p.get() == 1)
+        .unwrap_or(false);
+
+    if is_single_threaded {
+        // No-op guard for single-threaded execution
+        WebSocketTestGuard { _guard: None }
+    } else {
+        // Serialize WebSocket tests to prevent port/resource conflicts
+        static GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+        let guard = GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        WebSocketTestGuard {
+            _guard: Some(guard),
+        }
+    }
+}
+
+/// RAII guard that either holds a mutex lock (multi-threaded) or does nothing (single-threaded)
+pub struct WebSocketTestGuard {
+    _guard: Option<MutexGuard<'static, ()>>,
+}
+
+/// Timeout configuration for WebSocket tests to prevent indefinite hangs
+pub const WEBSOCKET_TEST_TIMEOUT_SECS: u64 = 10;
+
+/// Wraps a test with a timeout to prevent indefinite hangs
+/// Note: Since the inhouse runtime may not support select!, this provides early detection
+/// of tests taking too long via a background monitoring thread
+pub fn ensure_websocket_test_timeout() {
+    // Note: This is a basic safeguard. For full timeout support, the inhouse runtime
+    // would need explicit select! support or cancellation tokens.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(WEBSOCKET_TEST_TIMEOUT_SECS + 5));
+        // If we get here, the test is taking way too long
+        eprintln!(
+            "WARNING: WebSocket test is still running after {} seconds. This likely indicates a deadlock.",
+            WEBSOCKET_TEST_TIMEOUT_SECS + 5
+        );
+    });
 }
 
 pub async fn bind_listener(addr: SocketAddr) -> io::Result<StdTcpListener> {

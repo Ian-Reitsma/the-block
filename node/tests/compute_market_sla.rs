@@ -1,10 +1,13 @@
 #![cfg(feature = "integration-tests")]
+mod util;
+use util::settlement::SettlementCtx;
 use the_block::compute_market::scheduler::Capability;
 use the_block::compute_market::{scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
 
 #[test]
 fn job_timeout_and_resubmit_penalizes() {
     scheduler::reset_for_test();
+    let _ctx = SettlementCtx::new();
     let mut market = Market::new();
     let offer = Offer {
         job_id: "job1".into(),

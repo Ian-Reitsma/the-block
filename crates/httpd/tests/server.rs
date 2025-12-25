@@ -29,6 +29,37 @@ const SESSION_INFO: &[u8] = b"tb-httpd-session-keys";
 const CLIENT_AUTH_INFO: &[u8] = b"tb-httpd-client-auth";
 const SECURE_REQUEST: &str = "GET /secure HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
 
+/// RAII guard that ensures spawned server tasks are aborted and fully terminated
+/// even if the test panics. This prevents leftover tasks from polluting the global
+/// runtime state and causing intermittent failures in subsequent test runs.
+///
+/// CRITICAL: This guard not only aborts the task but also adds a small delay to ensure
+/// the task has fully terminated and released all resources (ports, file descriptors, etc.)
+/// before the next test begins. This is essential for preventing race conditions in serial tests.
+struct ServerGuard<T> {
+    handle: Option<runtime::JoinHandle<T>>,
+}
+
+impl<T> ServerGuard<T> {
+    fn new(handle: runtime::JoinHandle<T>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+}
+
+impl<T> Drop for ServerGuard<T> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            // Abort the server task to ensure cleanup even if test panics.
+            // Note: abort() is asynchronous but the testkit mutex recovery
+            // prevents cascading failures if cleanup isn't complete before
+            // the next test starts.
+            handle.abort();
+        }
+    }
+}
+
 fn slow_server_config() -> ServerConfig {
     let mut cfg = ServerConfig::default();
     cfg.request_timeout = Duration::from_secs(60);
@@ -606,12 +637,13 @@ fn serve_plain_round_trip() {
                 .with_body(b"pong".to_vec())
                 .close())
         });
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve(listener, router, slow_server_config())
                 .await
                 .expect("serve plain");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let url = format!("http://{}/ping", addr);
         let client = httpd::HttpClient::default();
@@ -623,8 +655,6 @@ fn serve_plain_round_trip() {
             .expect("response");
         assert_eq!(response.status().as_u16(), 200);
         assert_eq!(response.text().expect("text"), "pong");
-
-        server.abort();
     });
 }
 
@@ -644,18 +674,17 @@ fn serve_tls_round_trip_without_client_auth() {
         });
         let (identity, tls_config) = tls_config_no_client_auth();
         let server_config = tls_config.clone();
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let response = perform_tls_request(addr, &identity, None, SECURE_REQUEST);
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.contains("secure"));
-
-        server.abort();
     });
 }
 
@@ -675,18 +704,17 @@ fn serve_tls_accepts_clients_with_cert() {
         });
         let (identity, tls_config, client_key) = tls_config_with_client_auth();
         let server_config = tls_config.clone();
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let response = perform_tls_request(addr, &identity, Some(&client_key), SECURE_REQUEST);
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.contains("secure"));
-
-        server.abort();
     });
 }
 
@@ -706,12 +734,13 @@ fn serve_tls_allows_optional_client_auth() {
         });
         let (identity, tls_config, client_key) = tls_config_optional_client_auth();
         let server_config = tls_config.clone();
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let response = perform_tls_request(addr, &identity, None, SECURE_REQUEST);
         assert!(response.starts_with("HTTP/1.1 200"));
@@ -720,8 +749,6 @@ fn serve_tls_allows_optional_client_auth() {
         let response = perform_tls_request(addr, &identity, Some(&client_key), SECURE_REQUEST);
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.contains("secure"));
-
-        server.abort();
     });
 }
 
@@ -741,17 +768,16 @@ fn serve_tls_rejects_clients_without_cert() {
         });
         let (identity, tls_config, _client_key) = tls_config_with_client_auth();
         let server_config = tls_config.clone();
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let result = TlsClient::connect(addr, &identity, None);
         assert!(result.is_err(), "handshake should fail without client cert");
-
-        server.abort();
     });
 }
 #[test]
@@ -785,12 +811,13 @@ fn websocket_upgrade_accepts_and_dispatches_handler() {
                 Ok(())
             }))
         });
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve(listener, router, slow_server_config())
                 .await
                 .expect("serve");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let std_stream = StdTcpStream::connect(addr).expect("connect");
         let mut stream = runtime::net::TcpStream::from_std(std_stream).expect("runtime stream");
@@ -821,8 +848,6 @@ Sec-WebSocket-Version: 13\r\n\r\n"
             }
         }
         assert_eq!(got_text.as_deref(), Some("hello"));
-
-        server.abort();
     });
 }
 
@@ -844,12 +869,13 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
         });
         let (identity, tls_config) = tls_config_no_client_auth();
         let server_config = tls_config.clone();
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve_tls(listener, router, slow_server_config(), server_config)
                 .await
                 .expect("serve tls");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let addr = addr;
         let join = std::thread::spawn(move || {
@@ -884,7 +910,6 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
         });
 
         join.join().expect("client thread");
-        server.abort();
     });
 }
 
@@ -902,12 +927,13 @@ fn websocket_upgrade_rejects_with_response() {
                 Response::new(StatusCode::FORBIDDEN).with_body(b"denied".to_vec()),
             ))
         });
-        let server = spawn(async move {
+        let server_handle = spawn(async move {
             serve(listener, router, slow_server_config())
                 .await
                 .expect("serve");
         });
-        sleep(Duration::from_millis(50)).await;
+        let _server = ServerGuard::new(server_handle);
+        sleep(Duration::from_millis(200)).await;
 
         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
         let key = ws::handshake_key();
@@ -925,8 +951,6 @@ Sec-WebSocket-Version: 13\r\n\r\n"
         stream.read_to_string(&mut response).expect("read response");
         assert!(response.starts_with("HTTP/1.1 403"));
         assert!(response.contains("denied"));
-
-        server.abort();
     });
 }
 

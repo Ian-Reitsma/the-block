@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 
-use std::fs;
+use std::fs::{self, File};
 use std::time::Duration;
 
 use foundation_serialization::toml;
@@ -33,13 +33,28 @@ fn config_watch_detects_changes() {
     let mut updated = initial.clone();
     updated.snapshot_interval = 9;
     let contents = toml::to_string_pretty(&updated).expect("encode config");
-    fs::write(&default_path, contents).expect("update default config");
+    fs::write(&default_path, &contents).expect("update default config");
+    // Force filesystem to flush so kqueue sees the change immediately
+    File::open(&default_path)
+        .and_then(|f| f.sync_all())
+        .expect("sync file");
+
+    // Touch the directory to force kqueue notification on macOS (APFS doesn't immediately
+    // update directory mtime when files change, so we manually trigger it)
+    use std::os::unix::fs::PermissionsExt;
+    let dir_meta = fs::metadata(dir.path()).expect("get dir metadata");
+    let mut perms = dir_meta.permissions();
+    let mode = perms.mode();
+    perms.set_mode(mode); // Set to same value to trigger mtime update
+    fs::set_permissions(dir.path(), perms).expect("touch directory");
 
     runtime::block_on(async {
-        for _ in 0..40 {
+        // Wait up to 5 seconds for config reload (kqueue + async scheduling can be slow)
+        for _ in 0..100 {
             if config::current().snapshot_interval == 9 {
                 return;
             }
+            runtime::yield_now().await;
             runtime::sleep(Duration::from_millis(50)).await;
         }
         panic!("config watcher failed to reload default config");

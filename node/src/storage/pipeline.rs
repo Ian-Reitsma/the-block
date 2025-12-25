@@ -1637,3 +1637,39 @@ pub fn override_manifest_providers_for_test(manifest: [u8; 32], providers: Vec<S
 pub fn clear_test_manifest_providers() {
     TEST_MANIFEST_PROVIDERS.lock().unwrap().clear();
 }
+
+/// RAII guard to automatically clear pipeline test state on drop.
+/// Ensures test isolation by cleaning up even if a test panics.
+#[cfg(test)]
+pub struct PipelineTestGuard;
+
+#[cfg(test)]
+impl Drop for PipelineTestGuard {
+    fn drop(&mut self) {
+        clear_test_manifest_providers();
+        #[cfg(feature = "gateway")]
+        {
+            clear_test_static_blobs();
+            clear_test_wasm();
+        }
+    }
+}
+
+#[cfg(test)]
+impl PipelineTestGuard {
+    /// Create a new guard that will clean up test state on drop.
+    pub fn new() -> Self {
+        // Clear any existing state before starting the test
+        Self::cleanup();
+        PipelineTestGuard
+    }
+
+    fn cleanup() {
+        clear_test_manifest_providers();
+        #[cfg(feature = "gateway")]
+        {
+            clear_test_static_blobs();
+            clear_test_wasm();
+        }
+    }
+}

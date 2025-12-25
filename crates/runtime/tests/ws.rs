@@ -105,6 +105,7 @@ fn fragmented_frames_are_joined() {
             ws.send(Message::Close(None)).await.expect("close");
         });
 
+        runtime::yield_now().await;
         let mut stream = TcpStream::connect(addr).await.expect("connect");
         let key = ws::handshake_key();
         let request = format!(
@@ -158,6 +159,7 @@ fn ping_pong_cycle() {
             ws.close().await.expect("close");
         });
 
+        runtime::yield_now().await;
         let mut stream = TcpStream::connect(addr).await.expect("connect");
         let key = ws::handshake_key();
         let request = format!(
@@ -254,12 +256,12 @@ fn fragmented_close_frame_payload_delivered() {
             return;
         };
         let addr = std_listener.local_addr().unwrap();
+        let reason = "fragmented reason";
         let (conn_tx, conn_rx) = oneshot::channel();
         thread::spawn(move || {
             let (stream, _) = std_listener.accept().expect("accept");
             let _ = conn_tx.send(stream);
         });
-        let reason = "fragmented reason";
 
         let server = spawn(async move {
             let std_stream = conn_rx.await.expect("accepted stream");
