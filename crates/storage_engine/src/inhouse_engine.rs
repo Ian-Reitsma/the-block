@@ -529,7 +529,12 @@ impl CfState {
         self.manifest.sequence
     }
 
-    fn append_wal(&mut self, cf_path: &Path, record: &WalRecord, engine: &EngineInner) -> StorageResult<()> {
+    fn append_wal(
+        &mut self,
+        cf_path: &Path,
+        record: &WalRecord,
+        engine: &EngineInner,
+    ) -> StorageResult<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)

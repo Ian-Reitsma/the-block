@@ -91,7 +91,10 @@ fn cross_thread_fuzz() {
     // Warm-up: run 2 transactions per thread to measure baseline performance
     let warmup_start = Instant::now();
     let warmup_iters = 2;
-    eprintln!("[cross_thread_fuzz] Measuring system performance with {} warmup iterations per thread...", warmup_iters);
+    eprintln!(
+        "[cross_thread_fuzz] Measuring system performance with {} warmup iterations per thread...",
+        warmup_iters
+    );
     let warmup_handles: Vec<_> = (0..2)
         .map(|i| {
             let bc_cl = Arc::clone(&bc);
@@ -131,14 +134,20 @@ fn cross_thread_fuzz() {
                 let to = format!("acc{}", (i + 1) % 32);
                 for iter in 0..iters {
                     if iter > 0 && iter % 10 == 0 {
-                        eprintln!("[cross_thread_fuzz] Thread {} processed {} transactions", i, iter);
+                        eprintln!(
+                            "[cross_thread_fuzz] Thread {} processed {} transactions",
+                            i, iter
+                        );
                     }
                     let fee = rng.gen_range(1000..5000);
                     let nonce = rng.gen::<u64>() + 1;
                     let tx = build_signed_tx(&sk, &name, &to, 1, 1, fee, nonce);
                     let _ = bc_cl.write().unwrap().submit_transaction(tx);
                 }
-                eprintln!("[cross_thread_fuzz] Thread {} completed all {} transactions", i, iters);
+                eprintln!(
+                    "[cross_thread_fuzz] Thread {} completed all {} transactions",
+                    i, iters
+                );
             })
         })
         .collect();
@@ -254,7 +263,11 @@ fn admit_and_mine_never_over_cap() {
             let len = guard.mempool_consumer.len();
             drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
-            eprintln!("[admit_and_mine_never_over_cap] Mined block {}, mempool len: {}", block_num + 1, len);
+            eprintln!(
+                "[admit_and_mine_never_over_cap] Mined block {}, mempool len: {}",
+                block_num + 1,
+                len
+            );
         }
         eprintln!("[admit_and_mine_never_over_cap] Mining thread completed");
     });

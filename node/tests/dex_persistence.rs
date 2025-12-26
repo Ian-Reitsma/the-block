@@ -21,6 +21,7 @@ fn order_book_persists() {
     let mut book = OrderBook::default();
     let mut ledger = TrustLedger::default();
     ledger.establish("alice".into(), "bob".into(), 100);
+    ledger.establish("bob".into(), "alice".into(), 100);
     ledger.authorize("alice", "bob");
     ledger.authorize("bob", "alice");
     let buy = Order {

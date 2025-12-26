@@ -72,15 +72,7 @@ impl Watcher {
 
 #[cfg(feature = "inhouse-backend")]
 mod inhouse {
-    use super::{RecursiveMode, WatchEvent, WatchEventKind};
-
-    // Reactor-based waiting is used by platforms that integrate file watching with the async reactor
-    // Currently: Linux (inotify), but future platforms can enable this via feature flags
-    #[cfg(any(
-        target_os = "linux",
-        feature = "reactor-based-fs-watching"
-    ))]
-    use super::io;
+    use super::{io, RecursiveMode, WatchEvent, WatchEventKind};
     // BaseWatcher provides shared functionality for event-based file watching
     // Available on Unix-like platforms and any future platform with reactor-based-fs-watching feature
     #[cfg(any(
@@ -153,12 +145,7 @@ mod inhouse {
         }
 
         // Reactor-based waiting: polls the reactor for file descriptor readiness
-        // Used by: Linux (inotify), and any future platform with `reactor-based-fs-watching` feature
-        // Not used by: kqueue (macOS/BSD) which polls directly to work around reactor scheduling issues
-        #[cfg(any(
-            target_os = "linux",
-            feature = "reactor-based-fs-watching"
-        ))]
+        // Used by all Unix-like platforms with event-based file watching
         async fn wait_ready(&self) -> io::Result<()> {
             ReadReadyFuture {
                 registration: &self.registration,
@@ -184,8 +171,15 @@ mod inhouse {
 
     // Future for reactor-based file descriptor readiness waiting
     // Enables async integration with the reactor's polling mechanism
+    // Used by all Unix-like platforms with event-based file watching
     #[cfg(any(
         target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
         feature = "reactor-based-fs-watching"
     ))]
     struct ReadReadyFuture<'a> {
@@ -194,6 +188,12 @@ mod inhouse {
 
     #[cfg(any(
         target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
         feature = "reactor-based-fs-watching"
     ))]
     impl std::future::Future for ReadReadyFuture<'_> {
@@ -298,6 +298,9 @@ mod inhouse {
             pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
                 loop {
                     if let Some(event) = self.base.pop_event() {
+                        // Critical: yield to allow other async tasks (like RPC servers) to run
+                        // even when processing bursts of file events (e.g., during Settlement::init)
+                        crate::yield_now().await;
                         return Ok(event);
                     }
 
@@ -496,28 +499,20 @@ mod inhouse {
             }
 
             pub(crate) async fn next_event(&mut self) -> io::Result<WatchEvent> {
-                use std::time::Duration;
                 loop {
                     if let Some(event) = self.base.pop_event() {
-                        eprintln!("[kqueue] next_event() returning queued event");
+                        // Critical: yield to allow other async tasks (like RPC servers) to run
+                        // even when processing bursts of file events (e.g., during Settlement::init)
+                        crate::yield_now().await;
                         return Ok(event);
                     }
 
-                    // Poll kqueue directly instead of waiting for reactor readiness
-                    // This works around reactor scheduling issues where the reactor
-                    // doesn't poll kqueue frequently enough during busy async loops
-                    eprintln!("[kqueue] next_event() polling events directly...");
+                    self.base.wait_ready().await?;
                     let events = self.read_events()?;
-                    if !events.is_empty() {
-                        eprintln!("[kqueue] next_event() found {} events", events.len());
-                        self.base.push_events(events);
+                    if events.is_empty() {
                         continue;
                     }
-
-                    // No events ready, yield and wait a bit before polling again
-                    eprintln!("[kqueue] next_event() no events, yielding...");
-                    crate::yield_now().await;
-                    crate::sleep(Duration::from_millis(10)).await;
+                    self.base.push_events(events);
                 }
             }
 
@@ -547,31 +542,23 @@ mod inhouse {
 
             fn add_descriptor(&mut self, path: &Path) -> io::Result<()> {
                 if self.paths.values().any(|existing| existing == path) {
-                    eprintln!("[kqueue] Skipping add_descriptor for {:?} (already registered)", path);
                     return Ok(());
                 }
 
                 let file = File::open(path)?;
                 let fd = file.as_raw_fd();
-                eprintln!("[kqueue] Registering fd {} for {:?} with flags {:x}", fd, path, WATCH_FLAGS);
                 self.queue.register(fd, WATCH_FLAGS)?;
                 self.paths.insert(fd, path.to_path_buf());
                 self.handles.insert(fd, file);
-                eprintln!("[kqueue] Successfully registered fd {} for {:?}", fd, path);
                 Ok(())
             }
 
             fn read_events(&mut self) -> io::Result<Vec<WatchEvent>> {
                 let events = self.queue.poll_events(64)?;
-                if !events.is_empty() {
-                    eprintln!("[kqueue] poll_events returned {} events", events.len());
-                }
                 let mut ready = Vec::new();
                 for event in events {
-                    eprintln!("[kqueue] Processing kqueue event: fd={}, flags={:x}", event.fd, event.flags);
                     if let Some(path) = self.paths.get(&event.fd).cloned() {
                         let kind = Self::classify(event.flags);
-                        eprintln!("[kqueue] Event on {:?}, kind: {:?}, flags: {:x}", path, kind, event.flags);
                         if self.recursive && path.is_dir() {
                             let _ = self.register_path(&path);
                         }
@@ -584,12 +571,7 @@ mod inhouse {
                         // Uses content hashing for reliable change detection, mirroring the polling backend.
                         // This ensures kqueue reports file-level changes instead of just directory modifications.
                         if path.is_dir() && matches!(kind, WatchEventKind::Modified) {
-                            eprintln!("[kqueue] Directory modified, detecting file changes...");
                             let file_changes = self.detect_file_changes(&path)?;
-                            eprintln!("[kqueue] Detected {} file changes", file_changes.len());
-                            for fc in &file_changes {
-                                eprintln!("[kqueue]   - {:?}: {:?}", fc.kind, fc.paths);
-                            }
                             ready.extend(file_changes);
                         } else {
                             ready.push(WatchEvent::new(kind, vec![path]));
@@ -613,8 +595,6 @@ mod inhouse {
                                 } else {
                                     None
                                 };
-                                eprintln!("[kqueue] Initial snapshot: {:?} (len={}, hash={:?})",
-                                    entry_path.file_name().unwrap_or_default(), metadata.len(), content_hash);
                                 snapshot.insert(
                                     entry_path,
                                     FileSnapshot {
@@ -626,7 +606,6 @@ mod inhouse {
                             }
                         }
                     }
-                    eprintln!("[kqueue] Stored snapshot for {:?} with {} entries", path, snapshot.len());
                     self.dir_snapshots.insert(path.to_path_buf(), snapshot);
 
                     // Recursively snapshot subdirectories
@@ -646,7 +625,6 @@ mod inhouse {
 
             /// Detect which files changed in a directory by comparing with previous snapshot
             fn detect_file_changes(&mut self, dir_path: &Path) -> io::Result<Vec<WatchEvent>> {
-                eprintln!("[kqueue] detect_file_changes for {:?}", dir_path);
                 let mut current = HashMap::new();
                 if let Ok(entries) = fs::read_dir(dir_path) {
                     for entry in entries.flatten() {
@@ -658,8 +636,6 @@ mod inhouse {
                             } else {
                                 None
                             };
-                            eprintln!("[kqueue]   Current: {:?} (len={}, hash={:?})",
-                                entry_path.file_name().unwrap_or_default(), metadata.len(), content_hash);
                             current.insert(
                                 entry_path,
                                 FileSnapshot {
@@ -673,9 +649,11 @@ mod inhouse {
                 }
 
                 let mut changes = Vec::new();
-                let old_snapshot = self.dir_snapshots.get(dir_path).cloned().unwrap_or_default();
-                eprintln!("[kqueue] Comparing {} current files against {} old snapshot entries",
-                    current.len(), old_snapshot.len());
+                let old_snapshot = self
+                    .dir_snapshots
+                    .get(dir_path)
+                    .cloned()
+                    .unwrap_or_default();
 
                 // Detect modified and created files
                 for (path, meta) in &current {
@@ -685,27 +663,22 @@ mod inhouse {
                             // 1. File size changed
                             // 2. Content hash changed (more reliable than timestamp alone)
                             // 3. Modified time changed (for directories)
-                            let is_changed = if old.len != meta.len {
-                                eprintln!("[kqueue]   {:?} size changed: {} -> {}", path.file_name().unwrap_or_default(), old.len, meta.len);
-                                true
-                            } else if old.content_hash.is_some() && old.content_hash != meta.content_hash {
-                                eprintln!("[kqueue]   {:?} hash changed: {:?} -> {:?}", path.file_name().unwrap_or_default(), old.content_hash, meta.content_hash);
-                                true
-                            } else if old.modified != meta.modified {
-                                eprintln!("[kqueue]   {:?} mtime changed: {:?} -> {:?}", path.file_name().unwrap_or_default(), old.modified, meta.modified);
-                                true
-                            } else {
-                                false
-                            };
+                            let is_changed = old.len != meta.len
+                                || (old.content_hash.is_some()
+                                    && old.content_hash != meta.content_hash)
+                                || old.modified != meta.modified;
 
                             if is_changed {
-                                changes.push(WatchEvent::new(WatchEventKind::Modified, vec![path.clone()]));
+                                changes.push(WatchEvent::new(
+                                    WatchEventKind::Modified,
+                                    vec![path.clone()],
+                                ));
                             }
                         }
                         None => {
                             // New file
-                            eprintln!("[kqueue]   {:?} is new", path.file_name().unwrap_or_default());
-                            changes.push(WatchEvent::new(WatchEventKind::Created, vec![path.clone()]));
+                            changes
+                                .push(WatchEvent::new(WatchEventKind::Created, vec![path.clone()]));
                         }
                     }
                 }
@@ -713,7 +686,6 @@ mod inhouse {
                 // Detect removed files
                 for path in old_snapshot.keys() {
                     if !current.contains_key(path) {
-                        eprintln!("[kqueue]   {:?} was removed", path.file_name().unwrap_or_default());
                         changes.push(WatchEvent::new(WatchEventKind::Removed, vec![path.clone()]));
                     }
                 }
@@ -1018,7 +990,11 @@ mod inhouse {
                                 modified: metadata.modified().ok(),
                                 len: metadata.len(),
                                 is_dir,
-                                content_hash: if !is_dir { compute_content_hash(&entry_path) } else { None },
+                                content_hash: if !is_dir {
+                                    compute_content_hash(&entry_path)
+                                } else {
+                                    None
+                                },
                             };
                             self.snapshot.insert(entry_path.clone(), record.clone());
                             if self.recursive && is_dir {
@@ -1035,7 +1011,11 @@ mod inhouse {
                             modified: metadata.modified().ok(),
                             len: metadata.len(),
                             is_dir,
-                            content_hash: if !is_dir { compute_content_hash(path) } else { None },
+                            content_hash: if !is_dir {
+                                compute_content_hash(path)
+                            } else {
+                                None
+                            },
                         },
                     );
                 }
@@ -1059,7 +1039,8 @@ mod inhouse {
                                 true
                             } else if !meta.is_dir {
                                 // For regular files, check size and content hash
-                                existing.len != meta.len || existing.content_hash != meta.content_hash
+                                existing.len != meta.len
+                                    || existing.content_hash != meta.content_hash
                             } else {
                                 // For directories, check timestamp
                                 existing.modified != meta.modified
@@ -1106,7 +1087,11 @@ mod inhouse {
                                     modified: metadata.modified().ok(),
                                     len: metadata.len(),
                                     is_dir,
-                                    content_hash: if !is_dir { compute_content_hash(&entry_path) } else { None },
+                                    content_hash: if !is_dir {
+                                        compute_content_hash(&entry_path)
+                                    } else {
+                                        None
+                                    },
                                 },
                             );
                             if self.recursive && is_dir {
@@ -1123,7 +1108,11 @@ mod inhouse {
                             modified: metadata.modified().ok(),
                             len: metadata.len(),
                             is_dir,
-                            content_hash: if !is_dir { compute_content_hash(path) } else { None },
+                            content_hash: if !is_dir {
+                                compute_content_hash(path)
+                            } else {
+                                None
+                            },
                         },
                     );
                 }

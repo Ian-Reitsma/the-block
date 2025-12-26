@@ -14,9 +14,7 @@ impl SettlementCtx {
     pub fn with_mode(mode: SettleMode) -> Self {
         let dir = tempdir().expect("settlement tempdir");
         let path = dir.path().join("settlement");
-        let path_str = path
-            .to_str()
-            .expect("settlement path must be valid UTF-8");
+        let path_str = path.to_str().expect("settlement path must be valid UTF-8");
         settlement::Settlement::init(path_str, mode);
         Self { _dir: dir }
     }

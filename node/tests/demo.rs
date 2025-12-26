@@ -17,7 +17,7 @@ fn demo_exits_when_bridge_disabled() {
     }
 
     let output = Command::new(&python)
-        .arg("../demo.py")  // demo.py is in workspace root, one level up from node/
+        .arg("../demo.py") // demo.py is in workspace root, one level up from node/
         .arg("--max-runtime")
         .arg("5")
         .env("PYTHONUNBUFFERED", "1")

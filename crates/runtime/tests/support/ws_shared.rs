@@ -55,7 +55,9 @@ pub fn ensure_websocket_test_timeout() {
     // Note: This is a basic safeguard. For full timeout support, the inhouse runtime
     // would need explicit select! support or cancellation tokens.
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(WEBSOCKET_TEST_TIMEOUT_SECS + 5));
+        std::thread::sleep(std::time::Duration::from_secs(
+            WEBSOCKET_TEST_TIMEOUT_SECS + 5,
+        ));
         // If we get here, the test is taking way too long
         eprintln!(
             "WARNING: WebSocket test is still running after {} seconds. This likely indicates a deadlock.",

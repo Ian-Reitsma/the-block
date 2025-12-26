@@ -96,6 +96,20 @@ fn json_map(pairs: Vec<(&str, Value)>) -> Value {
     Value::Object(map)
 }
 
+fn strip_null_last_claim_height(value: &mut Value) {
+    if let Value::Object(map) = value {
+        if let Some(Value::Array(relayers)) = map.get_mut("relayers") {
+            for relayer in relayers {
+                if let Value::Object(rel_map) = relayer {
+                    if matches!(rel_map.get("last_claim_height"), Some(Value::Null)) {
+                        rel_map.remove("last_claim_height");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn deterministic_chunks_for_object(object_id: &str, chunk_count: usize) -> Vec<Vec<u8>> {
     let count = chunk_count.max(1);
     (0..count)
@@ -2066,7 +2080,7 @@ fn dispatch(
                 let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
                 light::rebate_status(&guard)
             };
-            match foundation_serialization::json::to_value(status) {
+            let mut val = match foundation_serialization::json::to_value(status) {
                 Ok(val) => val,
                 Err(e) => {
                     #[cfg(feature = "telemetry")]
@@ -2079,7 +2093,9 @@ fn dispatch(
                     let _ = e;
                     return Err(rpc_error(-32603, "serialization error".into()));
                 }
-            }
+            };
+            strip_null_last_claim_height(&mut val);
+            val
         }
         "light_client.rebate_history" => {
             let relayer = if let Some(hex) = req.params.get("relayer").and_then(|v| v.as_str()) {

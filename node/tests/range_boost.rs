@@ -6,7 +6,9 @@ use std::thread;
 #[cfg(feature = "telemetry")]
 use std::time::Duration;
 
-use the_block::range_boost::{self, FaultMode, HopProof, RangeBoost};
+#[cfg(feature = "telemetry")]
+use the_block::range_boost::{self as range_boost, FaultMode};
+use the_block::range_boost::{HopProof, RangeBoost};
 
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{

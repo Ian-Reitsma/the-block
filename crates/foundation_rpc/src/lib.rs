@@ -47,9 +47,21 @@ impl std::fmt::Display for RpcError {
 impl std::error::Error for RpcError {}
 
 /// Parameters embedded in an RPC request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(transparent)]
 pub struct Params(Value);
+
+// Custom Deserialize implementation to handle all JSON value types correctly
+// This works around potential issues with #[serde(transparent)] in foundation_serde
+impl<'de> Deserialize<'de> for Params {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: foundation_serialization::de::Deserializer<'de>,
+    {
+        // Deserialize as a Value first, which handles all JSON types
+        Value::deserialize(deserializer).map(Params)
+    }
+}
 
 impl Params {
     /// Construct parameters from a JSON value.
@@ -176,7 +188,7 @@ impl Request {
                 limit: max_body,
             });
         }
-        Ok(Self::from_slice(body)?)
+        Self::from_slice(body).map_err(Into::into)
     }
 }
 

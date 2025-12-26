@@ -20,6 +20,12 @@ pub fn retune(prev: u64, timestamps: &[u64], hint: i8, params: &Params) -> (u64,
     if timestamps.len() < 2 {
         return (prev.max(1), 0);
     }
+    // Validate monotonicity: reject non-increasing timestamps (clock skew, malicious input)
+    for window in timestamps.windows(2) {
+        if window[1] <= window[0] {
+            return (prev.max(1), 0);
+        }
+    }
     let intervals: Vec<f64> = timestamps
         .windows(2)
         .map(|w| w[1].saturating_sub(w[0]) as f64)

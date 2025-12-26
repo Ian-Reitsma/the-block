@@ -58,6 +58,12 @@ pub fn retarget(prev: u64, timestamps: &[u64], target_spacing_ms: u64) -> u64 {
     if timestamps.len() < 2 {
         return prev.max(1);
     }
+    // Validate monotonicity before processing
+    for window in timestamps.windows(2) {
+        if window[1] <= window[0] {
+            return prev.max(1);
+        }
+    }
     let params = Params::default();
     let spacing = if target_spacing_ms == 0 {
         TARGET_SPACING_MS

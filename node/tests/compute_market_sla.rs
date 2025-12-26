@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
 mod util;
-use util::settlement::SettlementCtx;
+use settlement_util::SettlementCtx;
 use the_block::compute_market::scheduler::Capability;
 use the_block::compute_market::{scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
 

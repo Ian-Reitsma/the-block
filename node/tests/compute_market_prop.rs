@@ -1,9 +1,10 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
 mod util;
 use crypto_suite::hashing::blake3::Hasher;
+use settlement_util::SettlementCtx;
 use testkit::prop::Runner;
 use the_block::compute_market::{scheduler, *};
-use util::settlement::SettlementCtx;
 
 #[test]
 fn match_and_finalize_payout() {

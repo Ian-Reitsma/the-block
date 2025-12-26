@@ -295,7 +295,7 @@ impl AuthContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::rngs::StdRng;
 
     fn create_test_keypair() -> (SigningKey, VerifyingKey) {
         let mut rng = StdRng::seed_from_u64(42);

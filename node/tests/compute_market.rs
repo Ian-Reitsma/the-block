@@ -1,32 +1,14 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
+
 use crypto_suite::hashing::blake3;
 use runtime::sync::CancellationToken;
+use settlement_util::SettlementCtx;
+use sys::tempfile::tempdir;
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
-use the_block::compute_market::settlement::{Settlement, SettleMode};
-use sys::tempfile::{tempdir, TempDir};
-
-struct SettlementCtx {
-    _dir: TempDir,
-}
-
-impl SettlementCtx {
-    fn new() -> Self {
-        let dir = tempdir().expect("settlement tempdir");
-        let path = dir.path().join("settlement");
-        let path_str = path.to_str().expect("settlement path");
-        Settlement::init(path_str, SettleMode::DryRun);
-        Self { _dir: dir }
-    }
-}
-
-impl Drop for SettlementCtx {
-    fn drop(&mut self) {
-        Settlement::shutdown();
-    }
-}
 
 #[test]
 fn offer_validation() {

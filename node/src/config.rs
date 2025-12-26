@@ -1014,33 +1014,21 @@ pub fn watch(dir: &str) {
                                 | WatchEventKind::Removed
                         ) =>
                     {
-                        eprintln!("[config] Received event: {:?} with {} paths", event.kind, event.paths.len());
                         let mut reload_node = false;
                         let mut reload_gossip = false;
                         let mut reload_storage = false;
                         for changed in &event.paths {
-                            eprintln!("[config]   Path: {:?}", changed);
                             if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
-                                eprintln!("[config]   File name: {:?}", name);
                                 match name {
-                                    "default.toml" => {
-                                        eprintln!("[config]   Matched default.toml, will reload");
-                                        reload_node = true;
-                                    }
+                                    "default.toml" => reload_node = true,
                                     "gossip.toml" => reload_gossip = true,
                                     "storage.toml" => reload_storage = true,
-                                    _ => {
-                                        eprintln!("[config]   No match for {:?}", name);
-                                    }
+                                    _ => {}
                                 }
-                            } else {
-                                eprintln!("[config]   Could not extract file name from {:?}", changed);
                             }
                         }
                         if reload_node {
-                            eprintln!("[config] Calling reload()...");
                             let _ = reload();
-                            eprintln!("[config] reload() completed");
                         }
                         if reload_gossip {
                             crate::gossip::config::reload();
@@ -1048,8 +1036,13 @@ pub fn watch(dir: &str) {
                         if reload_storage {
                             crate::storage::settings::configure_from_dir(&cfg_dir);
                         }
+                        // Yield to prevent starving other async tasks when processing bursts of file events
+                        runtime::yield_now().await;
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        // Yield even for non-matching events to prevent task starvation
+                        runtime::yield_now().await;
+                    }
                     Err(err) => {
                         diagnostics::log::warn!("config_watch_error: {err}");
                         runtime::sleep(Duration::from_secs(1)).await;
