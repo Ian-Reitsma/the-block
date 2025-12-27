@@ -616,26 +616,26 @@ pub struct Block {
     /// Canonical industrial reward recorded in the header. Must match tx[0].
     pub coinbase_industrial: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for storage operations in this block
-    pub storage_sub_ct: TokenAmount,
+    /// Subsidy minted for storage operations in this block
+    pub storage_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for read delivery in this block
-    pub read_sub_ct: TokenAmount,
+    /// Subsidy minted for read delivery in this block
+    pub read_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to viewers in this block
-    pub read_sub_viewer_ct: TokenAmount,
+    pub read_sub_viewer: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to hosts in this block
-    pub read_sub_host_ct: TokenAmount,
+    pub read_sub_host: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to hardware providers in this block
-    pub read_sub_hardware_ct: TokenAmount,
+    pub read_sub_hardware: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to verifiers in this block
-    pub read_sub_verifier_ct: TokenAmount,
+    pub read_sub_verifier: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy routed to the liquidity pool in this block
-    pub read_sub_liquidity_ct: TokenAmount,
+    pub read_sub_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens paid out from advertising campaigns to viewers
     pub ad_viewer: TokenAmount,
@@ -667,11 +667,11 @@ pub struct Block {
     /// Oracle price snapshot (CT) used for advertising settlements in this block
     pub ad_oracle_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for compute in this block
-    pub compute_sub_ct: TokenAmount,
+    /// Subsidy minted for compute in this block
+    pub compute_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT rebates paid to proof relayers in this block
-    pub proof_rebate_ct: TokenAmount,
+    /// Rebates paid to proof relayers in this block
+    pub proof_rebate: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
@@ -728,13 +728,13 @@ impl Default for Block {
             hash: String::new(),
             coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
-            storage_sub_ct: TokenAmount::new(0),
-            read_sub_ct: TokenAmount::new(0),
-            read_sub_viewer_ct: TokenAmount::new(0),
-            read_sub_host_ct: TokenAmount::new(0),
-            read_sub_hardware_ct: TokenAmount::new(0),
-            read_sub_verifier_ct: TokenAmount::new(0),
-            read_sub_liquidity_ct: TokenAmount::new(0),
+            storage_sub: TokenAmount::new(0),
+            read_sub: TokenAmount::new(0),
+            read_sub_viewer: TokenAmount::new(0),
+            read_sub_host: TokenAmount::new(0),
+            read_sub_hardware: TokenAmount::new(0),
+            read_sub_verifier: TokenAmount::new(0),
+            read_sub_liquidity: TokenAmount::new(0),
             ad_viewer: TokenAmount::new(0),
             ad_host: TokenAmount::new(0),
             ad_hardware: TokenAmount::new(0),
@@ -745,8 +745,8 @@ impl Default for Block {
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
             ad_oracle_price_usd_micros: 0,
-            compute_sub_ct: TokenAmount::new(0),
-            proof_rebate_ct: TokenAmount::new(0),
+            compute_sub: TokenAmount::new(0),
+            proof_rebate: TokenAmount::new(0),
             read_root: [0u8; 32],
             fee_checksum: String::new(),
             state_root: String::new(),
@@ -1984,13 +1984,13 @@ impl Blockchain {
                                 b.base_fee,
                                 b.coinbase_block,
                                 b.coinbase_industrial,
-                                b.storage_sub_ct,
-                                b.read_sub_ct,
-                                b.read_sub_viewer_ct,
-                                b.read_sub_host_ct,
-                                b.read_sub_hardware_ct,
-                                b.read_sub_verifier_ct,
-                                b.read_sub_liquidity_ct,
+                                b.storage_sub,
+                                b.read_sub,
+                                b.read_sub_viewer,
+                                b.read_sub_host,
+                                b.read_sub_hardware,
+                                b.read_sub_verifier,
+                                b.read_sub_liquidity,
                                 b.ad_viewer,
                                 b.ad_host,
                                 b.ad_hardware,
@@ -2000,8 +2000,8 @@ impl Blockchain {
                                 b.ad_total_usd_micros,
                                 b.ad_settlement_count,
                                 b.ad_oracle_price_usd_micros,
-                                b.compute_sub_ct,
-                                b.proof_rebate_ct,
+                                b.compute_sub,
+                                b.proof_rebate,
                                 b.read_root,
                                 &b.fee_checksum,
                                 &b.transactions,
@@ -2140,13 +2140,13 @@ impl Blockchain {
                                     b.base_fee,
                                     b.coinbase_block,
                                     b.coinbase_industrial,
-                                    b.storage_sub_ct,
-                                    b.read_sub_ct,
-                                    b.read_sub_viewer_ct,
-                                    b.read_sub_host_ct,
-                                    b.read_sub_hardware_ct,
-                                    b.read_sub_verifier_ct,
-                                    b.read_sub_liquidity_ct,
+                                    b.storage_sub,
+                                    b.read_sub,
+                                    b.read_sub_viewer,
+                                    b.read_sub_host,
+                                    b.read_sub_hardware,
+                                    b.read_sub_verifier,
+                                    b.read_sub_liquidity,
                                     b.ad_viewer,
                                     b.ad_host,
                                     b.ad_hardware,
@@ -2156,8 +2156,8 @@ impl Blockchain {
                                     b.ad_total_usd_micros,
                                     b.ad_settlement_count,
                                     b.ad_oracle_price_usd_micros,
-                                    b.compute_sub_ct,
-                                    b.proof_rebate_ct,
+                                    b.compute_sub,
+                                    b.proof_rebate,
                                     b.read_root,
                                     &b.fee_checksum,
                                     &b.transactions,
@@ -2312,13 +2312,13 @@ impl Blockchain {
                             b.base_fee,
                             b.coinbase_block,
                             b.coinbase_industrial,
-                            b.storage_sub_ct,
-                            b.read_sub_ct,
-                            b.read_sub_viewer_ct,
-                            b.read_sub_host_ct,
-                            b.read_sub_hardware_ct,
-                            b.read_sub_verifier_ct,
-                            b.read_sub_liquidity_ct,
+                            b.storage_sub,
+                            b.read_sub,
+                            b.read_sub_viewer,
+                            b.read_sub_host,
+                            b.read_sub_hardware,
+                            b.read_sub_verifier,
+                            b.read_sub_liquidity,
                             b.ad_viewer,
                             b.ad_host,
                             b.ad_hardware,
@@ -2328,8 +2328,8 @@ impl Blockchain {
                             b.ad_total_usd_micros,
                             b.ad_settlement_count,
                             b.ad_oracle_price_usd_micros,
-                            b.compute_sub_ct,
-                            b.proof_rebate_ct,
+                            b.compute_sub,
+                            b.proof_rebate,
                             b.read_root,
                             &b.fee_checksum,
                             &b.transactions,
@@ -2962,13 +2962,13 @@ impl Blockchain {
             // genesis carries zero reward; fields included for stable hashing
             coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
-            storage_sub_ct: TokenAmount::new(0),
-            read_sub_ct: TokenAmount::new(0),
-            read_sub_viewer_ct: TokenAmount::new(0),
-            read_sub_host_ct: TokenAmount::new(0),
-            read_sub_hardware_ct: TokenAmount::new(0),
-            read_sub_verifier_ct: TokenAmount::new(0),
-            read_sub_liquidity_ct: TokenAmount::new(0),
+            storage_sub: TokenAmount::new(0),
+            read_sub: TokenAmount::new(0),
+            read_sub_viewer: TokenAmount::new(0),
+            read_sub_host: TokenAmount::new(0),
+            read_sub_hardware: TokenAmount::new(0),
+            read_sub_verifier: TokenAmount::new(0),
+            read_sub_liquidity: TokenAmount::new(0),
             ad_viewer: TokenAmount::new(0),
             ad_host: TokenAmount::new(0),
             ad_hardware: TokenAmount::new(0),
@@ -4870,13 +4870,13 @@ impl Blockchain {
             hash: String::new(),
             coinbase_block: TokenAmount::new(base_coinbase_block),
             coinbase_industrial: TokenAmount::new(coinbase_industrial_total),
-            storage_sub_ct: storage_sub_token,
-            read_sub_ct: read_sub_token,
-            read_sub_viewer_ct: read_sub_viewer_token,
-            read_sub_host_ct: read_sub_host_token,
-            read_sub_hardware_ct: read_sub_hardware_token,
-            read_sub_verifier_ct: read_sub_verifier_token,
-            read_sub_liquidity_ct: read_sub_liquidity_token,
+            storage_sub: storage_sub_token,
+            read_sub: read_sub_token,
+            read_sub_viewer: read_sub_viewer_token,
+            read_sub_host: read_sub_host_token,
+            read_sub_hardware: read_sub_hardware_token,
+            read_sub_verifier: read_sub_verifier_token,
+            read_sub_liquidity: read_sub_liquidity_token,
             ad_viewer: ad_viewer_token,
             ad_host: ad_host_token,
             ad_hardware: ad_hardware_token,
@@ -4887,8 +4887,8 @@ impl Blockchain {
             ad_total_usd_micros,
             ad_settlement_count,
             ad_oracle_price_usd_micros: ad_last_price_usd_micros,
-            compute_sub_ct: compute_sub_token,
-            proof_rebate_ct: TokenAmount::new(0),
+            compute_sub: compute_sub_token,
+            proof_rebate: TokenAmount::new(0),
             read_root: batch.root,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
@@ -4939,13 +4939,13 @@ impl Blockchain {
                 block_base_fee,
                 block.coinbase_block,
                 block.coinbase_industrial,
-                block.storage_sub_ct,
-                block.read_sub_ct,
-                block.read_sub_viewer_ct,
-                block.read_sub_host_ct,
-                block.read_sub_hardware_ct,
-                block.read_sub_verifier_ct,
-                block.read_sub_liquidity_ct,
+                block.storage_sub,
+                block.read_sub,
+                block.read_sub_viewer,
+                block.read_sub_host,
+                block.read_sub_hardware,
+                block.read_sub_verifier,
+                block.read_sub_liquidity,
                 block.ad_viewer,
                 block.ad_host,
                 block.ad_hardware,
@@ -4955,8 +4955,8 @@ impl Blockchain {
                 block.ad_total_usd_micros,
                 block.ad_settlement_count,
                 block.ad_oracle_price_usd_micros,
-                block.compute_sub_ct,
-                block.proof_rebate_ct,
+                block.compute_sub,
+                block.proof_rebate,
                 block.read_root,
                 &fee_checksum,
                 &txs,
@@ -5478,13 +5478,13 @@ impl Blockchain {
             block.base_fee,
             block.coinbase_block,
             block.coinbase_industrial,
-            block.storage_sub_ct,
-            block.read_sub_ct,
-            block.read_sub_viewer_ct,
-            block.read_sub_host_ct,
-            block.read_sub_hardware_ct,
-            block.read_sub_verifier_ct,
-            block.read_sub_liquidity_ct,
+            block.storage_sub,
+            block.read_sub,
+            block.read_sub_viewer,
+            block.read_sub_host,
+            block.read_sub_hardware,
+            block.read_sub_verifier,
+            block.read_sub_liquidity,
             block.ad_viewer,
             block.ad_host,
             block.ad_hardware,
@@ -5494,8 +5494,8 @@ impl Blockchain {
             block.ad_total_usd_micros,
             block.ad_settlement_count,
             block.ad_oracle_price_usd_micros,
-            block.compute_sub_ct,
-            block.proof_rebate_ct,
+            block.compute_sub,
+            block.proof_rebate,
             block.read_root,
             &block.fee_checksum,
             &block.transactions,
@@ -5571,20 +5571,20 @@ impl Blockchain {
         {
             return Ok(false);
         }
-        let read_role_sum = block.read_sub_viewer_ct.0 as u128
-            + block.read_sub_host_ct.0 as u128
-            + block.read_sub_hardware_ct.0 as u128
-            + block.read_sub_verifier_ct.0 as u128
-            + block.read_sub_liquidity_ct.0 as u128;
-        if read_role_sum > block.read_sub_ct.0 as u128 {
+        let read_role_sum = block.read_sub_viewer.0 as u128
+            + block.read_sub_host.0 as u128
+            + block.read_sub_hardware.0 as u128
+            + block.read_sub_verifier.0 as u128
+            + block.read_sub_liquidity.0 as u128;
+        if read_role_sum > block.read_sub.0 as u128 {
             return Ok(false);
         }
-        let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
+        let read_miner_share = block.read_sub.0 as u128 - read_role_sum;
         let expected_consumer = self.block_reward.0 as u128
-            + block.storage_sub_ct.0 as u128
+            + block.storage_sub.0 as u128
             + read_miner_share
-            + block.compute_sub_ct.0 as u128
-            + block.proof_rebate_ct.0 as u128
+            + block.compute_sub.0 as u128
+            + block.proof_rebate.0 as u128
             + fee_tot_consumer
             + fee_tot_industrial;
         let expected_industrial = 0u128;
@@ -5726,22 +5726,22 @@ impl Blockchain {
                 return Err(py_value_err("Fee mismatch"));
             }
             // Validate read subsidy role splits
-            let read_role_sum = block.read_sub_viewer_ct.0 as u128
-                + block.read_sub_host_ct.0 as u128
-                + block.read_sub_hardware_ct.0 as u128
-                + block.read_sub_verifier_ct.0 as u128
-                + block.read_sub_liquidity_ct.0 as u128;
-            if read_role_sum > block.read_sub_ct.0 as u128 {
+            let read_role_sum = block.read_sub_viewer.0 as u128
+                + block.read_sub_host.0 as u128
+                + block.read_sub_hardware.0 as u128
+                + block.read_sub_verifier.0 as u128
+                + block.read_sub_liquidity.0 as u128;
+            if read_role_sum > block.read_sub.0 as u128 {
                 return Err(py_value_err("Read subsidy role sum exceeds total"));
             }
-            let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
+            let read_miner_share = block.read_sub.0 as u128 - read_role_sum;
             // Use REPLAYED economics from the incoming chain, not local self.block_reward
             // This is consensus-critical: chain economics must be deterministic
             let expected_consumer = replayed_econ.block_reward_per_block as u128
-                + block.storage_sub_ct.0 as u128
+                + block.storage_sub.0 as u128
                 + read_miner_share
-                + block.compute_sub_ct.0 as u128
-                + block.proof_rebate_ct.0 as u128
+                + block.compute_sub.0 as u128
+                + block.proof_rebate.0 as u128
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
@@ -5888,13 +5888,13 @@ impl Blockchain {
                 b.base_fee,
                 b.coinbase_block,
                 b.coinbase_industrial,
-                b.storage_sub_ct,
-                b.read_sub_ct,
-                b.read_sub_viewer_ct,
-                b.read_sub_host_ct,
-                b.read_sub_hardware_ct,
-                b.read_sub_verifier_ct,
-                b.read_sub_liquidity_ct,
+                b.storage_sub,
+                b.read_sub,
+                b.read_sub_viewer,
+                b.read_sub_host,
+                b.read_sub_hardware,
+                b.read_sub_verifier,
+                b.read_sub_liquidity,
                 b.ad_viewer,
                 b.ad_host,
                 b.ad_hardware,
@@ -5904,8 +5904,8 @@ impl Blockchain {
                 b.ad_total_usd_micros,
                 b.ad_settlement_count,
                 b.ad_oracle_price_usd_micros,
-                b.compute_sub_ct,
-                b.proof_rebate_ct,
+                b.compute_sub,
+                b.proof_rebate,
                 b.read_root,
                 &b.fee_checksum,
                 &b.transactions,
@@ -5994,22 +5994,22 @@ impl Blockchain {
                 return false;
             }
             // Validate read subsidy role splits
-            let read_role_sum = b.read_sub_viewer_ct.0 as u128
-                + b.read_sub_host_ct.0 as u128
-                + b.read_sub_hardware_ct.0 as u128
-                + b.read_sub_verifier_ct.0 as u128
-                + b.read_sub_liquidity_ct.0 as u128;
-            if read_role_sum > b.read_sub_ct.0 as u128 {
+            let read_role_sum = b.read_sub_viewer.0 as u128
+                + b.read_sub_host.0 as u128
+                + b.read_sub_hardware.0 as u128
+                + b.read_sub_verifier.0 as u128
+                + b.read_sub_liquidity.0 as u128;
+            if read_role_sum > b.read_sub.0 as u128 {
                 return false;
             }
-            let read_miner_share = b.read_sub_ct.0 as u128 - read_role_sum;
+            let read_miner_share = b.read_sub.0 as u128 - read_role_sum;
             // Use REPLAYED economics state, not local self.block_reward
             // This is consensus-critical: two nodes must agree on expected rewards
             let expected_consumer = replayed_econ.block_reward_per_block as u128
-                + b.storage_sub_ct.0 as u128
+                + b.storage_sub.0 as u128
                 + read_miner_share
-                + b.compute_sub_ct.0 as u128
-                + b.proof_rebate_ct.0 as u128
+                + b.compute_sub.0 as u128
+                + b.proof_rebate.0 as u128
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
@@ -6403,12 +6403,12 @@ mod tests {
         bc.add_account(miner.to_string(), 0, 0).unwrap();
         let block = bc.mine_block_at(miner, 1).expect("mined");
 
-        assert_eq!(block.read_sub_ct.0, 100);
-        assert_eq!(block.read_sub_viewer_ct.0, 40);
-        assert_eq!(block.read_sub_host_ct.0, 30);
-        assert_eq!(block.read_sub_hardware_ct.0, 15);
-        assert_eq!(block.read_sub_verifier_ct.0, 10);
-        assert_eq!(block.read_sub_liquidity_ct.0, 5);
+        assert_eq!(block.read_sub.0, 100);
+        assert_eq!(block.read_sub_viewer.0, 40);
+        assert_eq!(block.read_sub_host.0, 30);
+        assert_eq!(block.read_sub_hardware.0, 15);
+        assert_eq!(block.read_sub_verifier.0, 10);
+        assert_eq!(block.read_sub_liquidity.0, 5);
         assert_eq!(block.ad_viewer.0, 0);
         assert_eq!(block.ad_host.0, 0);
         assert_eq!(block.ad_hardware.0, 0);

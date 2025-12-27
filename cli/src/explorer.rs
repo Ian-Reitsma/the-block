@@ -371,73 +371,65 @@ fn write_payout_table(
     .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(
         writer,
-        "{:<12} {:>16} {:>16} {:>16}",
-        "role", "read_ct", "ad_ct", "ad_it"
+        "{:<12} {:>16} {:>16}",
+        "role", "read", "ad"
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
-    writeln!(writer, "{:-<12} {:-<16} {:-<16} {:-<16}", "", "", "", "")
+    writeln!(writer, "{:-<12} {:-<16} {:-<16}", "", "", "")
         .map_err(|err| format!("failed to write output: {err}"))?;
-    for role in [
+    for (role, read, ad) in [
         (
             "viewer",
-            breakdown.read_subsidy.viewer_ct,
-            breakdown.advertising.viewer_ct,
-            breakdown.advertising.viewer_it,
+            breakdown.read_subsidy.viewer,
+            breakdown.advertising.viewer,
         ),
         (
             "host",
-            breakdown.read_subsidy.host_ct,
-            breakdown.advertising.host_ct,
-            breakdown.advertising.host_it,
+            breakdown.read_subsidy.host,
+            breakdown.advertising.host,
         ),
         (
             "hardware",
-            breakdown.read_subsidy.hardware_ct,
-            breakdown.advertising.hardware_ct,
-            breakdown.advertising.hardware_it,
+            breakdown.read_subsidy.hardware,
+            breakdown.advertising.hardware,
         ),
         (
             "verifier",
-            breakdown.read_subsidy.verifier_ct,
-            breakdown.advertising.verifier_ct,
-            breakdown.advertising.verifier_it,
+            breakdown.read_subsidy.verifier,
+            breakdown.advertising.verifier,
         ),
         (
             "liquidity",
-            breakdown.read_subsidy.liquidity_ct,
-            breakdown.advertising.liquidity_ct,
-            breakdown.advertising.liquidity_it,
+            breakdown.read_subsidy.liquidity,
+            breakdown.advertising.liquidity,
         ),
         (
             "miner",
-            breakdown.read_subsidy.miner_ct,
-            breakdown.advertising.miner_ct,
-            breakdown.advertising.miner_it,
+            breakdown.read_subsidy.miner,
+            breakdown.advertising.miner,
         ),
     ] {
         writeln!(
             writer,
-            "{:<12} {:>16} {:>16} {:>16}",
-            role.0, role.1, role.2, role.3
+            "{:<12} {:>16} {:>16}",
+            role, read, ad
         )
         .map_err(|err| format!("failed to write output: {err}"))?;
     }
     writeln!(
         writer,
-        "{:<12} {:>16} {:>16} {:>16}",
+        "{:<12} {:>16} {:>16}",
         "total",
-        breakdown.read_subsidy.total_ct,
-        breakdown.advertising.total_ct,
-        breakdown.advertising.total_it,
+        breakdown.read_subsidy.total,
+        breakdown.advertising.total,
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(
         writer,
-        "    ad_total_usd_micros: {} (settlements: {}, ct_price: {}, it_price: {})",
+        "    ad_total_usd_micros: {} (settlements: {}, price: {})",
         breakdown.total_usd_micros,
         breakdown.settlement_count,
-        breakdown.price_usd_micros,
-        breakdown.it_price_usd_micros
+        breakdown.price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     if breakdown.treasury_events.is_empty() {
@@ -478,42 +470,36 @@ fn write_prometheus_payload(
         breakdown.hash, breakdown.height
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
-    for (role, read, ad_ct, ad_it) in [
+    for (role, read, ad) in [
         (
             "viewer",
-            breakdown.read_subsidy.viewer_ct,
-            breakdown.advertising.viewer_ct,
-            breakdown.advertising.viewer_it,
+            breakdown.read_subsidy.viewer,
+            breakdown.advertising.viewer,
         ),
         (
             "host",
-            breakdown.read_subsidy.host_ct,
-            breakdown.advertising.host_ct,
-            breakdown.advertising.host_it,
+            breakdown.read_subsidy.host,
+            breakdown.advertising.host,
         ),
         (
             "hardware",
-            breakdown.read_subsidy.hardware_ct,
-            breakdown.advertising.hardware_ct,
-            breakdown.advertising.hardware_it,
+            breakdown.read_subsidy.hardware,
+            breakdown.advertising.hardware,
         ),
         (
             "verifier",
-            breakdown.read_subsidy.verifier_ct,
-            breakdown.advertising.verifier_ct,
-            breakdown.advertising.verifier_it,
+            breakdown.read_subsidy.verifier,
+            breakdown.advertising.verifier,
         ),
         (
             "liquidity",
-            breakdown.read_subsidy.liquidity_ct,
-            breakdown.advertising.liquidity_ct,
-            breakdown.advertising.liquidity_it,
+            breakdown.read_subsidy.liquidity,
+            breakdown.advertising.liquidity,
         ),
         (
             "miner",
-            breakdown.read_subsidy.miner_ct,
-            breakdown.advertising.miner_ct,
-            breakdown.advertising.miner_it,
+            breakdown.read_subsidy.miner,
+            breakdown.advertising.miner,
         ),
     ] {
         writeln!(
@@ -525,13 +511,7 @@ fn write_prometheus_payload(
         writeln!(
             writer,
             "explorer_block_payout_ad_total{{role=\"{role}\"}} {}",
-            ad_ct
-        )
-        .map_err(|err| format!("failed to write output: {err}"))?;
-        writeln!(
-            writer,
-            "explorer_block_payout_ad_it_total{{role=\"{role}\"}} {}",
-            ad_it
+            ad
         )
         .map_err(|err| format!("failed to write output: {err}"))?;
     }
@@ -551,12 +531,6 @@ fn write_prometheus_payload(
         writer,
         "explorer_block_payout_ad_price_usd_micros {}",
         breakdown.price_usd_micros
-    )
-    .map_err(|err| format!("failed to write output: {err}"))?;
-    writeln!(
-        writer,
-        "explorer_block_payout_ad_it_price_usd_micros {}",
-        breakdown.it_price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     Ok(())

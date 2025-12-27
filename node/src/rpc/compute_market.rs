@@ -266,12 +266,12 @@ fn sla_resolution_to_value(resolution: &SlaResolution) -> Value {
         map.insert("outcome_reason".to_string(), Value::String(reason.clone()));
     }
     map.insert(
-        "burned_ct".to_string(),
-        Value::Number(Number::from(resolution.burned_ct)),
+        "burned".to_string(),
+        Value::Number(Number::from(resolution.burned)),
     );
     map.insert(
-        "refunded_ct".to_string(),
-        Value::Number(Number::from(resolution.refunded_ct)),
+        "refunded".to_string(),
+        Value::Number(Number::from(resolution.refunded)),
     );
     map.insert(
         "deadline".to_string(),

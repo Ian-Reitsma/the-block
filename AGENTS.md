@@ -422,7 +422,7 @@ Public chains excel in different slices—monetary credibility (Bitcoin), progra
 
 Already in‑repo:
 - 1‑second L1 kernel (Rust), difficulty retarget, mempool validation
-- dual‑token model, decay‑based emissions, fee selectors
+- single‑token (BLOCK) model with consumer/industrial lanes, decay‑based emissions, fee selectors
 - purge loops (TTL/orphan) with telemetry
 - minimal gossip + JSON‑RPC node
 - cross‑language determinism tests, Python demo

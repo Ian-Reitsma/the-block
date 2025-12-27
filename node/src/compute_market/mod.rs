@@ -564,13 +564,13 @@ impl Market {
         let resolution = settlement::Settlement::resolve_sla(job_id, outcome);
         let mut provider_refund = state.provider_bond;
         let mut consumer_refund = state.job.consumer_bond;
-        let refunded_by_resolution = resolution.as_ref().map_or(0, |res| res.refunded_ct);
+        let refunded_by_resolution = resolution.as_ref().map_or(0, |res| res.refunded);
         if let Some(res) = &resolution {
             if let SlaResolutionKind::Violated { .. } = res.outcome {
-                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+                provider_refund = provider_refund.saturating_sub(res.burned);
             }
-            if res.refunded_ct > 0 {
-                consumer_refund = res.refunded_ct;
+            if res.refunded > 0 {
+                consumer_refund = res.refunded;
             }
         }
         if provider_refund > 0 {
@@ -727,10 +727,10 @@ impl Market {
         };
         if let Some(res) = &resolution {
             if let SlaResolutionKind::Violated { .. } = res.outcome {
-                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+                provider_refund = provider_refund.saturating_sub(res.burned);
             }
-            if res.refunded_ct > 0 {
-                consumer_refund = res.refunded_ct;
+            if res.refunded > 0 {
+                consumer_refund = res.refunded;
             }
         }
         scheduler::record_success(&state.provider);
@@ -742,7 +742,7 @@ impl Market {
         if provider_refund > 0 {
             settlement::Settlement::accrue(&provider_id, "bond_refund", provider_refund);
         }
-        if resolution.as_ref().map_or(true, |res| res.refunded_ct == 0) && consumer_refund > 0 {
+        if resolution.as_ref().map_or(true, |res| res.refunded == 0) && consumer_refund > 0 {
             settlement::Settlement::refund_split(&buyer_id, consumer_refund, 0);
         }
         Some((provider_refund, consumer_refund))
@@ -1378,7 +1378,7 @@ mod tests {
             resolution.outcome,
             SlaResolutionKind::Violated { .. }
         ));
-        assert!(resolution.burned_ct >= 200);
+        assert!(resolution.burned >= 200);
         assert!(settlement::Settlement::balance("prov") <= 800);
 
         // second sweep should be idempotent once the queue is empty

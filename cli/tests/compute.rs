@@ -494,11 +494,11 @@ fn mock_sla_history_response(bundle: &ProofBundle) -> String {
         JsonValue::String("completed".to_string()),
     );
     entry.insert(
-        "burned_ct".to_string(),
+        "burned".to_string(),
         JsonValue::Number(JsonNumber::from(0)),
     );
     entry.insert(
-        "refunded_ct".to_string(),
+        "refunded".to_string(),
         JsonValue::Number(JsonNumber::from(0)),
     );
     entry.insert(

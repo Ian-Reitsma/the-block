@@ -336,9 +336,9 @@ pub fn write_sla_history_from_str(text: &str, out: &mut dyn Write) -> io::Result
                     .get("outcome_reason")
                     .and_then(|v| v.as_str())
                     .unwrap_or("-");
-                let burned = entry.get("burned_ct").and_then(|v| v.as_u64()).unwrap_or(0);
+                let burned = entry.get("burned").and_then(|v| v.as_u64()).unwrap_or(0);
                 let refunded = entry
-                    .get("refunded_ct")
+                    .get("refunded")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 let deadline = entry.get("deadline").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -348,7 +348,7 @@ pub fn write_sla_history_from_str(text: &str, out: &mut dyn Write) -> io::Result
                     .unwrap_or(0);
                 writeln!(
                     out,
-                    "job {job} provider {provider} outcome {outcome} reason {reason} burned_ct {burned} refunded_ct {refunded} deadline {deadline} resolved_at {resolved_at}"
+                    "job {job} provider {provider} outcome {outcome} reason {reason} burned {burned} refunded {refunded} deadline {deadline} resolved_at {resolved_at}"
                 )?;
                 if let Some(proofs) = entry.get("proofs").and_then(|v| v.as_array()) {
                     for proof in proofs {
@@ -408,8 +408,8 @@ pub fn parse_sla_history_from_str(text: &str) -> Result<Vec<SlaResolution>, Stri
         let job_id = expect_str(entry, "job_id")?.to_string();
         let provider = expect_str(entry, "provider")?.to_string();
         let buyer = expect_str(entry, "buyer")?.to_string();
-        let burned_ct = expect_u64(entry, "burned_ct")?;
-        let refunded_ct = expect_u64(entry, "refunded_ct")?;
+        let burned = expect_u64(entry, "burned")?;
+        let refunded = expect_u64(entry, "refunded")?;
         let deadline = expect_u64(entry, "deadline")?;
         let resolved_at = expect_u64(entry, "resolved_at")?;
         let outcome = parse_outcome(entry)?;
@@ -419,8 +419,8 @@ pub fn parse_sla_history_from_str(text: &str) -> Result<Vec<SlaResolution>, Stri
             provider,
             buyer,
             outcome,
-            burned_ct,
-            refunded_ct,
+            burned,
+            refunded,
             deadline,
             resolved_at,
             proofs,

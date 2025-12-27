@@ -161,7 +161,7 @@ impl<'a> Runtime<'a> {
         crate::compute_market::admission::set_burst_refill_rate(v);
     }
     pub fn set_rent_rate(&mut self, v: i64) {
-        self.bc.params.rent_rate_ct_per_byte = v;
+        self.bc.params.rent_rate_per_byte = v;
     }
     pub fn set_badge_expiry(&mut self, v: u64) {
         crate::service_badge::set_badge_ttl_secs(v);
@@ -284,10 +284,10 @@ pub struct Params {
     pub industrial_admission_min_capacity: i64,
     pub fairshare_global_max_ppm: i64,
     pub burst_refill_rate_per_s_ppm: i64,
-    pub beta_storage_sub_ct: i64,
-    pub gamma_read_sub_ct: i64,
-    pub kappa_cpu_sub_ct: i64,
-    pub lambda_bytes_out_sub_ct: i64,
+    pub beta_storage_sub: i64,
+    pub gamma_read_sub: i64,
+    pub kappa_cpu_sub: i64,
+    pub lambda_bytes_out_sub: i64,
     #[serde(default = "default_read_subsidy_viewer_percent")]
     pub read_subsidy_viewer_percent: i64,
     #[serde(default = "default_read_subsidy_host_percent")]
@@ -315,10 +315,10 @@ pub struct Params {
     #[serde(default = "default_ad_readiness_min_provider_count")]
     pub ad_readiness_min_provider_count: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub treasury_percent_ct: i64,
-    #[serde(default = "default_proof_rebate_limit_ct")]
-    pub proof_rebate_limit_ct: i64,
-    pub rent_rate_ct_per_byte: i64,
+    pub treasury_percent: i64,
+    #[serde(default = "default_proof_rebate_limit")]
+    pub proof_rebate_limit: i64,
+    pub rent_rate_per_byte: i64,
     pub kill_switch_subsidy_reduction: i64,
     pub miner_reward_logistic_target: i64,
     pub logistic_slope_milli: i64,
@@ -496,10 +496,10 @@ impl Default for Params {
             industrial_admission_min_capacity: 10,
             fairshare_global_max_ppm: 250_000,
             burst_refill_rate_per_s_ppm: ((30.0 / 60.0) * 1_000_000.0) as i64,
-            beta_storage_sub_ct: 50,
-            gamma_read_sub_ct: 20,
-            kappa_cpu_sub_ct: 10,
-            lambda_bytes_out_sub_ct: 5,
+            beta_storage_sub: 50,
+            gamma_read_sub: 20,
+            kappa_cpu_sub: 10,
+            lambda_bytes_out_sub: 5,
             read_subsidy_viewer_percent: default_read_subsidy_viewer_percent(),
             read_subsidy_host_percent: default_read_subsidy_host_percent(),
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
@@ -513,9 +513,9 @@ impl Default for Params {
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
             ad_readiness_min_provider_count: default_ad_readiness_min_provider_count(),
-            treasury_percent_ct: 0,
-            proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
-            rent_rate_ct_per_byte: 0,
+            treasury_percent: 0,
+            proof_rebate_limit: default_proof_rebate_limit(),
+            rent_rate_per_byte: 0,
             kill_switch_subsidy_reduction: 0,
             miner_reward_logistic_target: 100,
             logistic_slope_milli: (99f64.ln() / (0.1 * 100.0) * 1000.0) as i64,
@@ -645,20 +645,20 @@ impl Params {
             Value::Number(self.burst_refill_rate_per_s_ppm.into()),
         );
         map.insert(
-            "beta_storage_sub_ct".into(),
-            Value::Number(self.beta_storage_sub_ct.into()),
+            "beta_storage_sub".into(),
+            Value::Number(self.beta_storage_sub.into()),
         );
         map.insert(
-            "gamma_read_sub_ct".into(),
-            Value::Number(self.gamma_read_sub_ct.into()),
+            "gamma_read_sub".into(),
+            Value::Number(self.gamma_read_sub.into()),
         );
         map.insert(
-            "kappa_cpu_sub_ct".into(),
-            Value::Number(self.kappa_cpu_sub_ct.into()),
+            "kappa_cpu_sub".into(),
+            Value::Number(self.kappa_cpu_sub.into()),
         );
         map.insert(
-            "lambda_bytes_out_sub_ct".into(),
-            Value::Number(self.lambda_bytes_out_sub_ct.into()),
+            "lambda_bytes_out_sub".into(),
+            Value::Number(self.lambda_bytes_out_sub.into()),
         );
         map.insert(
             "read_subsidy_viewer_percent".into(),
@@ -709,16 +709,16 @@ impl Params {
             Value::Number(self.ad_readiness_min_provider_count.into()),
         );
         map.insert(
-            "treasury_percent_ct".into(),
-            Value::Number(self.treasury_percent_ct.into()),
+            "treasury_percent".into(),
+            Value::Number(self.treasury_percent.into()),
         );
         map.insert(
-            "proof_rebate_limit_ct".into(),
-            Value::Number(self.proof_rebate_limit_ct.into()),
+            "proof_rebate_limit".into(),
+            Value::Number(self.proof_rebate_limit.into()),
         );
         map.insert(
-            "rent_rate_ct_per_byte".into(),
-            Value::Number(self.rent_rate_ct_per_byte.into()),
+            "rent_rate_per_byte".into(),
+            Value::Number(self.rent_rate_per_byte.into()),
         );
         map.insert(
             "kill_switch_subsidy_reduction".into(),
@@ -940,10 +940,10 @@ impl Params {
             industrial_admission_min_capacity: take_i64("industrial_admission_min_capacity")?,
             fairshare_global_max_ppm: take_i64("fairshare_global_max_ppm")?,
             burst_refill_rate_per_s_ppm: take_i64("burst_refill_rate_per_s_ppm")?,
-            beta_storage_sub_ct: take_i64("beta_storage_sub_ct")?,
-            gamma_read_sub_ct: take_i64("gamma_read_sub_ct")?,
-            kappa_cpu_sub_ct: take_i64("kappa_cpu_sub_ct")?,
-            lambda_bytes_out_sub_ct: take_i64("lambda_bytes_out_sub_ct")?,
+            beta_storage_sub: take_i64("beta_storage_sub")?,
+            gamma_read_sub: take_i64("gamma_read_sub")?,
+            kappa_cpu_sub: take_i64("kappa_cpu_sub")?,
+            lambda_bytes_out_sub: take_i64("lambda_bytes_out_sub")?,
             read_subsidy_viewer_percent: obj
                 .get("read_subsidy_viewer_percent")
                 .and_then(Value::as_i64)
@@ -996,9 +996,9 @@ impl Params {
                 .get("ad_readiness_min_provider_count")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_ad_readiness_min_provider_count),
-            treasury_percent_ct: take_i64("treasury_percent_ct")?,
-            proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
-            rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
+            treasury_percent: take_i64("treasury_percent")?,
+            proof_rebate_limit: take_i64("proof_rebate_limit")?,
+            rent_rate_per_byte: take_i64("rent_rate_per_byte")?,
             kill_switch_subsidy_reduction: take_i64("kill_switch_subsidy_reduction")?,
             miner_reward_logistic_target: take_i64("miner_reward_logistic_target")?,
             logistic_slope_milli: take_i64("logistic_slope_milli")?,
@@ -1270,7 +1270,7 @@ impl Params {
     }
 }
 
-const fn default_proof_rebate_limit_ct() -> i64 {
+const fn default_proof_rebate_limit() -> i64 {
     1
 }
 
@@ -1616,12 +1616,12 @@ fn apply_burst_refill_rate(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 fn apply_beta_storage_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.beta_storage_sub_ct = v;
+    p.beta_storage_sub = v;
     Ok(())
 }
 
 fn apply_gamma_read_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.gamma_read_sub_ct = v;
+    p.gamma_read_sub = v;
     Ok(())
 }
 
@@ -1701,12 +1701,12 @@ fn apply_ad_rehearsal_stability_windows(v: i64, p: &mut Params) -> Result<(), ()
 }
 
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.kappa_cpu_sub_ct = v;
+    p.kappa_cpu_sub = v;
     Ok(())
 }
 
 fn apply_lambda_bytes_out_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.lambda_bytes_out_sub_ct = v;
+    p.lambda_bytes_out_sub = v;
     Ok(())
 }
 
@@ -1714,7 +1714,7 @@ fn apply_treasury_percent(v: i64, p: &mut Params) -> Result<(), ()> {
     if v < 0 || v > 100 {
         return Err(());
     }
-    p.treasury_percent_ct = v;
+    p.treasury_percent = v;
     Ok(())
 }
 
@@ -1722,12 +1722,12 @@ fn apply_proof_rebate_limit(v: i64, p: &mut Params) -> Result<(), ()> {
     if v < 0 {
         return Err(());
     }
-    p.proof_rebate_limit_ct = v;
+    p.proof_rebate_limit = v;
     Ok(())
 }
 
 fn apply_rent_rate(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.rent_rate_ct_per_byte = v;
+    p.rent_rate_per_byte = v;
     Ok(())
 }
 
@@ -2276,7 +2276,7 @@ pub fn registry() -> &'static [ParamSpec] {
         },
         ParamSpec {
             key: ParamKey::ProofRebateLimitCt,
-            default: default_proof_rebate_limit_ct(),
+            default: default_proof_rebate_limit(),
             min: 0,
             max: 1_000_000,
             unit: "nCT per proof",
@@ -2863,10 +2863,10 @@ pub fn retune_multipliers(
     let mut state: KalmanState = if let Ok(bytes) = fs::read(&state_path) {
         json::from_slice(&bytes).unwrap_or(KalmanState {
             x: [
-                params.beta_storage_sub_ct as f64,
-                params.gamma_read_sub_ct as f64,
-                params.kappa_cpu_sub_ct as f64,
-                params.lambda_bytes_out_sub_ct as f64,
+                params.beta_storage_sub as f64,
+                params.gamma_read_sub as f64,
+                params.kappa_cpu_sub as f64,
+                params.lambda_bytes_out_sub as f64,
                 0.0,
                 0.0,
                 0.0,
@@ -2877,10 +2877,10 @@ pub fn retune_multipliers(
     } else {
         KalmanState {
             x: [
-                params.beta_storage_sub_ct as f64,
-                params.gamma_read_sub_ct as f64,
-                params.kappa_cpu_sub_ct as f64,
-                params.lambda_bytes_out_sub_ct as f64,
+                params.beta_storage_sub as f64,
+                params.gamma_read_sub as f64,
+                params.kappa_cpu_sub as f64,
+                params.lambda_bytes_out_sub as f64,
                 0.0,
                 0.0,
                 0.0,
@@ -3025,10 +3025,10 @@ pub fn retune_multipliers(
         };
         (v as f64 + noise).round() as i64
     });
-    params.beta_storage_sub_ct = noisy[0];
-    params.gamma_read_sub_ct = noisy[1];
-    params.kappa_cpu_sub_ct = noisy[2];
-    params.lambda_bytes_out_sub_ct = noisy[3];
+    params.beta_storage_sub = noisy[0];
+    params.gamma_read_sub = noisy[1];
+    params.kappa_cpu_sub = noisy[2];
+    params.lambda_bytes_out_sub = noisy[3];
 
     let _ = json::to_vec(&state).map(|bytes| fs::write(&state_path, bytes));
     let _ = json::to_vec(&hist).map(|bytes| fs::write(&hist_path, bytes));
@@ -3053,11 +3053,11 @@ pub fn retune_multipliers(
                 current_epoch, rolling_inflation
             );
         }
-        params.beta_storage_sub_ct = (params.beta_storage_sub_ct as f64 * 0.95).round() as i64;
-        params.gamma_read_sub_ct = (params.gamma_read_sub_ct as f64 * 0.95).round() as i64;
-        params.kappa_cpu_sub_ct = (params.kappa_cpu_sub_ct as f64 * 0.95).round() as i64;
-        params.lambda_bytes_out_sub_ct =
-            (params.lambda_bytes_out_sub_ct as f64 * 0.95).round() as i64;
+        params.beta_storage_sub = (params.beta_storage_sub as f64 * 0.95).round() as i64;
+        params.gamma_read_sub = (params.gamma_read_sub as f64 * 0.95).round() as i64;
+        params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * 0.95).round() as i64;
+        params.lambda_bytes_out_sub =
+            (params.lambda_bytes_out_sub as f64 * 0.95).round() as i64;
     }
     if params.kill_switch_subsidy_reduction > 0 {
         #[cfg(feature = "telemetry")]
@@ -3080,11 +3080,11 @@ pub fn retune_multipliers(
             );
         }
         let factor = 1.0 - (params.kill_switch_subsidy_reduction as f64 / 100.0);
-        params.beta_storage_sub_ct = (params.beta_storage_sub_ct as f64 * factor).round() as i64;
-        params.gamma_read_sub_ct = (params.gamma_read_sub_ct as f64 * factor).round() as i64;
-        params.kappa_cpu_sub_ct = (params.kappa_cpu_sub_ct as f64 * factor).round() as i64;
-        params.lambda_bytes_out_sub_ct =
-            (params.lambda_bytes_out_sub_ct as f64 * factor).round() as i64;
+        params.beta_storage_sub = (params.beta_storage_sub as f64 * factor).round() as i64;
+        params.gamma_read_sub = (params.gamma_read_sub as f64 * factor).round() as i64;
+        params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * factor).round() as i64;
+        params.lambda_bytes_out_sub =
+            (params.lambda_bytes_out_sub as f64 * factor).round() as i64;
     }
     if let Ok(mut f) = OpenOptions::new()
         .create(true)
@@ -3095,10 +3095,10 @@ pub fn retune_multipliers(
             f,
             "{} retune {} {} {} {}",
             current_epoch,
-            params.beta_storage_sub_ct,
-            params.gamma_read_sub_ct,
-            params.kappa_cpu_sub_ct,
-            params.lambda_bytes_out_sub_ct,
+            params.beta_storage_sub,
+            params.gamma_read_sub,
+            params.kappa_cpu_sub,
+            params.lambda_bytes_out_sub,
         );
     }
     let snap_path = hist_dir.join(format!("inflation_{}.json", current_epoch));
@@ -3112,19 +3112,19 @@ pub fn retune_multipliers(
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["storage"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.beta_storage_sub_ct);
+            .set(params.beta_storage_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["read"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.gamma_read_sub_ct);
+            .set(params.gamma_read_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["cpu"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.kappa_cpu_sub_ct);
+            .set(params.kappa_cpu_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["bytes_out"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.lambda_bytes_out_sub_ct);
+            .set(params.lambda_bytes_out_sub);
         SUBSIDY_MULTIPLIER_RAW
             .ensure_handle_for_label_values(&["storage"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)

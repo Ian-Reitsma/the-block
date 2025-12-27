@@ -25,7 +25,7 @@
         <p>
             Explorer ingests now stream the USD totals and oracle prices that back each advertising block.
             Scraped Prometheus metrics expose the latest conversion inputs so dashboards and CI artefacts can
-            graph the dual-token flows without parsing JSON payloads.
+            graph settlement flows without parsing JSON payloads.
         </p>
         <ul>
             <li>
@@ -37,8 +37,8 @@
                 settlements folded into the USD tally, enabling rate panels in CI.
             </li>
             <li>
-                <code>explorer_block_payout_ad_price_usd_micros</code> / <code>..._ad_it_price_usd_micros</code>
-                – the CT and IT oracle snapshots that priced the block.
+                <code>explorer_block_payout_ad_price_usd_micros</code>
+                – the BLOCK oracle snapshot that priced the settlement.
             </li>
         </ul>
         <p>

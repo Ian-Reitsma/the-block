@@ -231,20 +231,15 @@ const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_a
 const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL: &str = "explorer_block_payout_ad_it_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL: &str = "explorer_block_payout_ad_usd_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_SETTLEMENT_COUNT: &str =
     "explorer_block_payout_ad_settlement_count";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS: &str =
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS: &str =
     "explorer_block_payout_ad_price_usd_micros";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS: &str =
-    "explorer_block_payout_ad_it_price_usd_micros";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN: &str =
     "explorer_block_payout_read_last_seen_timestamp";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
     "explorer_block_payout_ad_last_seen_timestamp";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN: &str =
-    "explorer_block_payout_ad_it_last_seen_timestamp";
 const METRIC_EXPLORER_COMPUTE_SLA_OUTCOME_TOTAL: &str = "explorer_compute_sla_outcome_total";
 const METRIC_EXPLORER_COMPUTE_SLA_LAST_SEEN: &str = "explorer_compute_sla_last_seen_timestamp";
 const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla_poll_error_total";
@@ -466,7 +461,6 @@ pub struct AppState {
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     explorer_read_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     explorer_ad_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
-    explorer_ad_it_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     bridge_hooks: BridgeRemediationHooks,
@@ -551,7 +545,6 @@ impl AppState {
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_read_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_ad_payout_counters: Arc::new(Mutex::new(HashMap::new())),
-            explorer_ad_it_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             bridge_hooks: BridgeRemediationHooks::from_env(),
@@ -1638,14 +1631,6 @@ impl AppState {
             &registry.explorer_block_payout_ad_total,
             &registry.explorer_block_payout_ad_last_seen,
         );
-        self.record_explorer_payout_metric(
-            peer_id,
-            metrics,
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
-            &self.explorer_ad_it_payout_counters,
-            &registry.explorer_block_payout_ad_it_total,
-            &registry.explorer_block_payout_ad_it_last_seen,
-        );
         self.record_explorer_payout_summary(peer_id, metrics);
     }
 
@@ -1760,21 +1745,11 @@ impl AppState {
             }
         }
         if let Some(value) =
-            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS)
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS)
         {
             if value.is_finite() {
                 registry
                     .explorer_block_payout_ad_price_usd_micros
-                    .with_label_values(&[peer_id])
-                    .set(value);
-            }
-        }
-        if let Some(value) =
-            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS)
-        {
-            if value.is_finite() {
-                registry
-                    .explorer_block_payout_ad_it_price_usd_micros
                     .with_label_values(&[peer_id])
                     .set(value);
             }
@@ -1828,14 +1803,11 @@ struct AggregatorMetrics {
     bridge_remediation_spool_artifacts: Gauge,
     explorer_block_payout_read_total: CounterVec,
     explorer_block_payout_ad_total: CounterVec,
-    explorer_block_payout_ad_it_total: CounterVec,
     explorer_block_payout_ad_usd_total: GaugeVec,
     explorer_block_payout_ad_settlement_count: GaugeVec,
     explorer_block_payout_ad_price_usd_micros: GaugeVec,
-    explorer_block_payout_ad_it_price_usd_micros: GaugeVec,
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
-    explorer_block_payout_ad_it_last_seen: GaugeVec,
     explorer_compute_sla_outcome_total: GaugeVec,
     explorer_compute_sla_last_seen: Gauge,
     explorer_compute_sla_poll_error_total: Counter,
@@ -3480,21 +3452,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         &explorer_block_payout_ad_total,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
     );
-    let explorer_block_payout_ad_it_total = CounterVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
-            "Advertising IT routed to each role from finalized blocks",
-        ),
-        &LABEL_ROLE,
-    )
-    .expect("build explorer_block_payout_ad_it_total counter vec");
-    registry
-        .register(Box::new(explorer_block_payout_ad_it_total.clone()))
-        .expect("register explorer_block_payout_ad_it_total");
-    seed_role_counter(
-        &explorer_block_payout_ad_it_total,
-        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
-    );
     let explorer_block_payout_ad_usd_total = GaugeVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL,
@@ -3517,26 +3474,14 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         .expect("register explorer_block_payout_ad_settlement_count");
     let explorer_block_payout_ad_price_usd_micros = GaugeVec::new(
         Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS,
-            "Explorer-reported CT oracle price used for advertising settlements",
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS,
+            "Explorer-reported oracle price used for advertising settlements",
         ),
         &LABEL_PEER,
     );
     registry
         .register(Box::new(explorer_block_payout_ad_price_usd_micros.clone()))
         .expect("register explorer_block_payout_ad_price_usd_micros");
-    let explorer_block_payout_ad_it_price_usd_micros = GaugeVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS,
-            "Explorer-reported IT oracle price used for advertising settlements",
-        ),
-        &LABEL_PEER,
-    );
-    registry
-        .register(Box::new(
-            explorer_block_payout_ad_it_price_usd_micros.clone(),
-        ))
-        .expect("register explorer_block_payout_ad_it_price_usd_micros");
     let explorer_block_payout_read_last_seen = GaugeVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
@@ -3564,20 +3509,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     seed_role_gauge(
         &explorer_block_payout_ad_last_seen,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
-    );
-    let explorer_block_payout_ad_it_last_seen = GaugeVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
-            "Unix timestamp of the most recent advertising IT payout per role",
-        ),
-        &LABEL_ROLE,
-    );
-    registry
-        .register(Box::new(explorer_block_payout_ad_it_last_seen.clone()))
-        .expect("register explorer_block_payout_ad_it_last_seen");
-    seed_role_gauge(
-        &explorer_block_payout_ad_it_last_seen,
-        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
     );
     let explorer_compute_sla_outcome_total = GaugeVec::new(
         Opts::new(
@@ -3792,14 +3723,11 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_spool_artifacts,
         explorer_block_payout_read_total,
         explorer_block_payout_ad_total,
-        explorer_block_payout_ad_it_total,
         explorer_block_payout_ad_usd_total,
         explorer_block_payout_ad_settlement_count,
         explorer_block_payout_ad_price_usd_micros,
-        explorer_block_payout_ad_it_price_usd_micros,
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
-        explorer_block_payout_ad_it_last_seen,
         explorer_compute_sla_outcome_total,
         explorer_compute_sla_last_seen,
         explorer_compute_sla_poll_error_total,
