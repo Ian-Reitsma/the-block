@@ -193,7 +193,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 ## HTTP client and TLS diagnostics
 - Outbound clients live in `crates/httpd::{client.rs,blocking.rs}`. `httpd::Client` wraps the runtime `TcpStream`, supports HTTPS via the in-house TLS connector, and exposes:
-  - `ClientConfig { connect_timeout, request_timeout, max_response_bytes, tls }`.
+  - `ClientConfig { connect_timeout, request_timeout, read_timeout?, max_response_bytes, tls }`.
   - `Client::with_tls_from_env(&["TB_NODE_TLS","TB_HTTP_TLS"])` to reuse the same certs as RPC/gateway surfaces.
   - `RequestBuilder::json(value)` for canonical JSON encoding and `send()` for async execution. Blocking variants offer the same API for CLI tools.
 - TLS rotation:

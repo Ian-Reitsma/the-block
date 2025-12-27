@@ -28,6 +28,7 @@ pub fn blocking_client() -> BlockingClient {
         let config = httpd::ClientConfig {
             connect_timeout: std::time::Duration::from_secs(5),
             request_timeout: std::time::Duration::from_secs(15),
+            read_timeout: Some(std::time::Duration::from_secs(15)),
             max_response_bytes: 16 * 1024 * 1024,
             tls: None, // Explicitly disable TLS
         };
