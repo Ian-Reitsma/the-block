@@ -9,13 +9,13 @@ mod util;
 
 #[test]
 fn splits_pct_cases() {
-    // 0% CT -> full industrial
+    // 0% consumer -> full industrial
     assert_eq!(decompose(0, 10).unwrap(), (0, 10));
-    // 37% CT -> ceil rounding for consumer share
-    let (ct, it) = decompose(37, 10).unwrap();
-    assert_eq!((ct, it), (4, 6));
-    assert_eq!(ct + it, 10);
-    // 100% CT -> full consumer
+    // 37% consumer -> ceil rounding for consumer share
+    let (consumer, industrial) = decompose(37, 10).unwrap();
+    assert_eq!((consumer, industrial), (4, 6));
+    assert_eq!(consumer + industrial, 10);
+    // 100% consumer -> full consumer lane
     assert_eq!(decompose(100, 5).unwrap(), (5, 0));
 }
 

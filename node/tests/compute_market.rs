@@ -36,8 +36,7 @@ fn slice_proof_verification() {
     let proof = ExecutionReceipt {
         reference: hash,
         output: hash,
-        payout_ct: 1,
-        payout_it: 0,
+        payout: 1,
         proof: None,
     };
     assert!(proof.verify(&Workload::Transcode(data.to_vec())));
@@ -86,8 +85,7 @@ fn market_job_flow_and_finalize() {
     let proof = ExecutionReceipt {
         reference: ref_hash,
         output: ref_hash,
-        payout_ct: 5,
-        payout_it: 0,
+        payout: 5,
         proof: None,
     };
     let payout = market.submit_slice("job1", proof).unwrap();

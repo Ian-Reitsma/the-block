@@ -1272,7 +1272,6 @@ fn dispatch(
                 json_map(vec![
                     ("mode", Value::String(mode.to_string())),
                     ("balance", Value::Number(Number::from(balance))),
-                    ("ct", Value::Number(Number::from(balance))),
                 ])
             } else {
                 json_map(vec![("mode", Value::String(mode.to_string()))])

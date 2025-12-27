@@ -819,7 +819,7 @@ impl AdReadinessState {
         let ready = blockers.is_empty();
         let total_usd_micros: u64 = self.settlements.iter().map(|obs| obs.usd_micros).sum();
         let settlement_count = self.settlements.len() as u64;
-        let ct_price = self
+        let price = self
             .settlements
             .back()
             .map(|obs| obs.price_usd_micros)
@@ -839,7 +839,7 @@ impl AdReadinessState {
             zk_proof: None,
             total_usd_micros,
             settlement_count,
-            price_usd_micros: ct_price,
+            price_usd_micros: price,
             market_price_usd_micros: self.market_price_usd_micros,
             cohort_utilization: self.cohort_utilization.clone(),
             utilization_summary: self.utilization_summary.clone(),

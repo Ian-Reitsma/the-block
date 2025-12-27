@@ -2373,8 +2373,8 @@ impl GovStore {
                                 ParamKey::ReadSubsidyLiquidityPercent => {
                                     params.read_subsidy_liquidity_percent
                                 }
-                                ParamKey::DualTokenSettlementEnabled => {
-                                    params.dual_token_settlement_enabled
+                                ParamKey::LaneBasedSettlementEnabled => {
+                                    params.lane_based_settlement_enabled
                                 }
                                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                                 ParamKey::AdReadinessMinUniqueViewers => {
@@ -2627,7 +2627,7 @@ impl GovStore {
                 ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
                 ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
                 ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
-                ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+                ParamKey::LaneBasedSettlementEnabled => params.lane_based_settlement_enabled,
                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                 ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
                 ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
@@ -2739,7 +2739,7 @@ impl GovStore {
             ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
             ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
             ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
-            ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+            ParamKey::LaneBasedSettlementEnabled => params.lane_based_settlement_enabled,
             ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
             ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
             ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,

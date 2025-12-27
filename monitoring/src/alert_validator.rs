@@ -49,7 +49,7 @@ const EXPECTED_CONSUMER_FEE_EXPR: &str = "max_over_time(CONSUMER_FEE_P90[10m])>o
 const EXPECTED_DEFERRAL_EXPR: &str = "(increase(INDUSTRIAL_DEFERRED_TOTAL[10m])/clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m])+increase(INDUSTRIAL_DEFERRED_TOTAL[10m]),1))>0.3";
 const EXPECTED_SUBSIDY_EXPR: &str =
     "increase(subsidy_cpu_ms_total[10m])>1e9orincrease(subsidy_bytes_total[10m])>1e12";
-const EXPECTED_RENT_EXPR: &str = "increase(rent_escrow_locked_ct_total[10m])>1e6";
+const EXPECTED_RENT_EXPR: &str = "increase(rent_escrow_locked_total[10m])>1e6";
 const EXPECTED_PAYOUT_READ_EXPR: &str =
     "(time()-explorer_block_payout_read_last_seen_timestamp{role!=\"\"})>1800andon(role)(explorer_block_payout_read_total{role!=\"\"}>0)";
 const EXPECTED_PAYOUT_AD_EXPR: &str =

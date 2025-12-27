@@ -7,8 +7,8 @@ use the_block::compute_market::{admission, settlement, Offer};
 #[test]
 fn mixed_split_escrow_and_settlement() {
     let _ctx = SettlementCtx::new();
-    let mut bal_ct = 100;
-    let mut bal_it = 100;
+    let mut bal_consumer = 100;
+    let mut bal_industrial = 100;
     let offer = Offer {
         job_id: "job1".into(),
         provider: "prov1".into(),
@@ -22,24 +22,24 @@ fn mixed_split_escrow_and_settlement() {
         reputation_multiplier: 1.0,
     };
     offer.validate().unwrap();
-    let (ct, it) = admission::reserve(
-        &mut bal_ct,
-        &mut bal_it,
+    let (consumer, industrial) = admission::reserve(
+        &mut bal_consumer,
+        &mut bal_industrial,
         offer.price_per_unit,
         offer.fee_pct,
     )
     .unwrap();
-    assert_eq!((ct, it), (5, 15));
-    assert_eq!((bal_ct, bal_it), (95, 85));
-    settlement::Settlement::accrue_split(&offer.provider, ct, it);
+    assert_eq!((consumer, industrial), (5, 15));
+    assert_eq!((bal_consumer, bal_industrial), (95, 85));
+    settlement::Settlement::accrue_split(&offer.provider, consumer, industrial);
     assert_eq!(settlement::Settlement::balance(&offer.provider), 20);
 }
 
 #[test]
-fn full_ct_split_and_refund() {
+fn full_consumer_split_and_refund() {
     let _ctx = SettlementCtx::new();
-    let mut bal_ct = 50;
-    let mut bal_it = 50;
+    let mut bal_consumer = 50;
+    let mut bal_industrial = 50;
     let offer = Offer {
         job_id: "job2".into(),
         provider: "prov2".into(),
@@ -53,16 +53,16 @@ fn full_ct_split_and_refund() {
         reputation_multiplier: 1.0,
     };
     offer.validate().unwrap();
-    let (ct, it) = admission::reserve(
-        &mut bal_ct,
-        &mut bal_it,
+    let (consumer, industrial) = admission::reserve(
+        &mut bal_consumer,
+        &mut bal_industrial,
         offer.price_per_unit,
         offer.fee_pct,
     )
     .unwrap();
-    assert_eq!((ct, it), (10, 0));
-    assert_eq!((bal_ct, bal_it), (40, 50));
+    assert_eq!((consumer, industrial), (10, 0));
+    assert_eq!((bal_consumer, bal_industrial), (40, 50));
     // simulate refund of unused escrow
-    settlement::Settlement::refund_split("buyer2", ct, it);
+    settlement::Settlement::refund_split("buyer2", consumer, industrial);
     assert_eq!(settlement::Settlement::balance("buyer2"), 10);
 }

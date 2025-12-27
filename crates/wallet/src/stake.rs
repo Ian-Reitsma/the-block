@@ -6,8 +6,8 @@ use std::f64::consts::PI;
 /// Return recommended Kelly fraction and CVaR_{0.999} for a validator stake.
 ///
 /// * `p` – probability of winning the block reward.
-/// * `reward` – reward in CT if the block is won.
-/// * `loss` – loss in CT if slashed.
+/// * `reward` – reward in BLOCK if the block is won.
+/// * `loss` – loss in BLOCK if slashed.
 /// * `sigma` – standard deviation of returns.
 /// * `skew`/`kurt` – skewness and kurtosis of the return distribution.
 pub fn stake_advice(

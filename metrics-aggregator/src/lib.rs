@@ -3610,14 +3610,14 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let ad_readiness_price_usd_micros = registry
         .register_gauge(
             "ad_readiness_price_usd_micros",
-            "Most recent consumer-token oracle price used for advertising settlements",
+            "Most recent oracle price used for advertising settlements",
         )
         .expect("register ad_readiness_price_usd_micros");
     ad_readiness_price_usd_micros.set(0.0);
     let ad_readiness_market_price_usd_micros = registry
         .register_gauge(
             "ad_readiness_market_price_usd_micros",
-            "Current marketplace consumer-token oracle price",
+            "Current marketplace oracle price",
         )
         .expect("register ad_readiness_market_price_usd_micros");
     ad_readiness_market_price_usd_micros.set(0.0);

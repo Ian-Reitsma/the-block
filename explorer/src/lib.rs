@@ -1236,7 +1236,7 @@ fn decode_hex_array<const N: usize>(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderSettlementRecord {
     pub provider: String,
-    pub ct: u64,
+    pub consumer: u64,
     pub industrial: u64,
     pub updated_at: i64,
 }
@@ -1494,7 +1494,7 @@ impl BlockPayoutBreakdown {
             .max(Self::field_u64(map, "ad_total_usd_micros"));
         let settlement_count = Self::field_u64(map, "settlement_count")
             .max(Self::field_u64(map, "ad_settlement_count"));
-        let ct_price = Self::field_u64(map, "price_usd_micros")
+        let price = Self::field_u64(map, "price_usd_micros")
             .max(Self::field_u64(map, "ad_oracle_price_usd_micros"));
 
         Some(Self {
@@ -1504,7 +1504,7 @@ impl BlockPayoutBreakdown {
             advertising: ad_breakdown,
             total_usd_micros: total_usd,
             settlement_count,
-            price_usd_micros: ct_price,
+            price_usd_micros: price,
             treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
         })
     }
@@ -2092,7 +2092,7 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS compute_settlement (provider TEXT PRIMARY KEY, ct INTEGER, industrial INTEGER, updated_at INTEGER)",
+            "CREATE TABLE IF NOT EXISTS compute_settlement (provider TEXT PRIMARY KEY, consumer INTEGER, industrial INTEGER, updated_at INTEGER)",
             params![],
         )?;
         conn.execute(
@@ -2690,11 +2690,11 @@ impl Explorer {
         let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         for bal in balances {
-            let ct = i64::try_from(bal.ct).unwrap_or(i64::MAX);
+            let consumer = i64::try_from(bal.consumer).unwrap_or(i64::MAX);
             let industrial = i64::try_from(bal.industrial).unwrap_or(i64::MAX);
             tx.execute(
-                "INSERT OR REPLACE INTO compute_settlement (provider, ct, industrial, updated_at) VALUES (?1, ?2, ?3, ?4)",
-                params![&bal.provider, ct, industrial, bal.updated_at],
+                "INSERT OR REPLACE INTO compute_settlement (provider, consumer, industrial, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![&bal.provider, consumer, industrial, bal.updated_at],
             )?;
         }
         tx.commit()?;
@@ -2704,13 +2704,13 @@ impl Explorer {
     pub fn settlement_balances(&self) -> DbResult<Vec<ProviderSettlementRecord>> {
         let conn = self.conn()?;
         let mut stmt =
-            conn.prepare("SELECT provider, ct, industrial, updated_at FROM compute_settlement")?;
+            conn.prepare("SELECT provider, consumer, industrial, updated_at FROM compute_settlement")?;
         let rows = stmt.query_map(params![], |row| {
-            let ct: i64 = row.get(1)?;
+            let consumer: i64 = row.get(1)?;
             let industrial: i64 = row.get(2)?;
             Ok(ProviderSettlementRecord {
                 provider: row.get(0)?,
-                ct: ct.max(0) as u64,
+                consumer: consumer.max(0) as u64,
                 industrial: industrial.max(0) as u64,
                 updated_at: row.get(3)?,
             })
@@ -3103,16 +3103,9 @@ impl Explorer {
 
     pub fn index_treasury_disbursements(&self, records: &[TreasuryDisbursement]) -> DbResult<()> {
         let mut conn = self.conn()?;
+        // Ensure status_payload column exists (added in later schema version)
         let _ = conn.execute(
             "ALTER TABLE treasury_disbursements ADD COLUMN status_payload TEXT",
-            params![],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE treasury_disbursements RENAME COLUMN amount_ct TO amount",
-            params![],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE treasury_disbursements DROP COLUMN amount_it",
             params![],
         );
         let tx = conn.transaction()?;

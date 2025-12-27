@@ -283,12 +283,7 @@ pub enum DisbursementValidationError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub enum DisbursementError {
-    InsufficientFunds {
-        required: u64,
-        required_it: u64,
-        available: u64,
-        available_it: u64,
-    },
+    InsufficientFunds { required: u64, available: u64 },
     InvalidTarget {
         destination: String,
         reason: String,

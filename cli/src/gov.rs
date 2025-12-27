@@ -774,7 +774,7 @@ impl GovTreasuryCmd {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "amount",
-                "Amount (in CT) to disburse",
+                "Amount to disburse",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "memo",
@@ -883,14 +883,14 @@ impl GovTreasuryCmd {
                 "Only include disbursements scheduled at or before this epoch",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
-                "min-amount-ct",
-                "min-amount-ct",
-                "Minimum CT amount",
+                "min-amount",
+                "min-amount",
+                "Minimum amount",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
-                "max-amount-ct",
-                "max-amount-ct",
-                "Maximum CT amount",
+                "max-amount",
+                "max-amount",
+                "Maximum amount",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "min-created-at",
@@ -1035,9 +1035,9 @@ impl GovTreasuryCmd {
                 query.min_epoch = parse_u64(take_string(sub_matches, "min-epoch"), "min-epoch")?;
                 query.max_epoch = parse_u64(take_string(sub_matches, "max-epoch"), "max-epoch")?;
                 query.min_amount =
-                    parse_u64(take_string(sub_matches, "min-amount-ct"), "min-amount-ct")?;
+                    parse_u64(take_string(sub_matches, "min-amount"), "min-amount")?;
                 query.max_amount =
-                    parse_u64(take_string(sub_matches, "max-amount-ct"), "max-amount-ct")?;
+                    parse_u64(take_string(sub_matches, "max-amount"), "max-amount")?;
                 query.min_created_at =
                     parse_u64(take_string(sub_matches, "min-created-at"), "min-created-at")?;
                 query.max_created_at =
@@ -1865,7 +1865,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                     writeln!(out, "Title: {}", payload.proposal.title)?;
                     writeln!(out, "Summary: {}", payload.proposal.summary)?;
                     writeln!(out, "Destination: {}", payload.disbursement.destination)?;
-                    writeln!(out, "Amount CT: {}", payload.disbursement.amount)?;
+                    writeln!(out, "Amount: {}", payload.disbursement.amount)?;
                     writeln!(
                         out,
                         "Scheduled Epoch: {}",

@@ -94,7 +94,7 @@ pub fn derive_market_metrics_from_chain(
         for receipt in &block.receipts {
             match receipt {
                 Receipt::Storage(r) => {
-                    storage_state.revenue_ct = storage_state.revenue_ct.saturating_add(r.price);
+                    storage_state.revenue = storage_state.revenue.saturating_add(r.price);
                     storage_state.capacity = storage_state.capacity.saturating_add(r.bytes);
                     storage_state.provider_escrow = storage_state
                         .provider_escrow
@@ -103,7 +103,7 @@ pub fn derive_market_metrics_from_chain(
                     storage_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Compute(r) => {
-                    compute_state.revenue_ct = compute_state.revenue_ct.saturating_add(r.payment);
+                    compute_state.revenue = compute_state.revenue.saturating_add(r.payment);
                     compute_state.capacity = compute_state.capacity.saturating_add(r.compute_units);
                     if r.verified {
                         compute_state.verified_count += 1;
@@ -112,13 +112,13 @@ pub fn derive_market_metrics_from_chain(
                     compute_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Energy(r) => {
-                    energy_state.revenue_ct = energy_state.revenue_ct.saturating_add(r.price);
+                    energy_state.revenue = energy_state.revenue.saturating_add(r.price);
                     energy_state.capacity = energy_state.capacity.saturating_add(r.energy_units);
                     energy_state.settlement_count += 1;
                     energy_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Ad(r) => {
-                    ad_state.revenue_ct = ad_state.revenue_ct.saturating_add(r.spend);
+                    ad_state.revenue = ad_state.revenue.saturating_add(r.spend);
                     ad_state.impressions = ad_state.impressions.saturating_add(r.impressions);
                     ad_state.conversions =
                         ad_state.conversions.saturating_add(r.conversions as u64);
@@ -140,8 +140,8 @@ pub fn derive_market_metrics_from_chain(
 
 /// Market state accumulated during epoch window scan.
 struct MarketState {
-    /// Total settlement revenue in CT
-    revenue_ct: u64,
+    /// Total settlement revenue
+    revenue: u64,
     /// Total capacity (bytes, compute units, energy units, impressions)
     capacity: u64,
     /// Provider escrow (for storage margin calculation)
@@ -161,7 +161,7 @@ struct MarketState {
 impl Default for MarketState {
     fn default() -> Self {
         Self {
-            revenue_ct: 0,
+            revenue: 0,
             capacity: 0,
             provider_escrow: 0,
             conversions: 0,
@@ -182,7 +182,7 @@ fn compute_market_metric(state: &MarketState, is_storage: bool) -> MarketMetric 
     let utilization = if state.capacity > 0 {
         if is_storage {
             // Storage: revenue indicates utilized capacity
-            (state.revenue_ct as f64 / state.capacity as f64).clamp(0.0, 1.0)
+            (state.revenue as f64 / state.capacity as f64).clamp(0.0, 1.0)
         } else {
             // Compute/Energy: direct capacity tracking
             (state.settlement_count as f64 / state.capacity as f64).clamp(0.0, 1.0)
@@ -194,13 +194,13 @@ fn compute_market_metric(state: &MarketState, is_storage: bool) -> MarketMetric 
     // Provider margin: revenue / escrow or revenue / costs as proxy
     let provider_margin = if is_storage && state.provider_escrow > 0 {
         // Storage: ROI = revenue / escrow
-        (state.revenue_ct as f64 / state.provider_escrow as f64).clamp(0.0, 1.0)
-    } else if state.revenue_ct > 0 {
+        (state.revenue as f64 / state.provider_escrow as f64).clamp(0.0, 1.0)
+    } else if state.revenue > 0 {
         // Compute/Energy: use default margins if no escrow data
         // These will be refined as receipt structures mature
         match state.settlement_count {
             0 => 0.5,                                                             // Default 50%
-            count => ((state.revenue_ct as f64 / count as f64) / 100.0).min(0.8), // Cap at 80%
+            count => ((state.revenue as f64 / count as f64) / 100.0).min(0.8), // Cap at 80%
         }
     } else {
         0.5 // Default 50% margin
@@ -208,13 +208,13 @@ fn compute_market_metric(state: &MarketState, is_storage: bool) -> MarketMetric 
 
     // Estimate average costs and payouts based on revenue
     let average_cost_block = if state.settlement_count > 0 {
-        (state.revenue_ct as f64 / state.settlement_count as f64) * (1.0 - provider_margin)
+        (state.revenue as f64 / state.settlement_count as f64) * (1.0 - provider_margin)
     } else {
         0.0
     };
 
     let effective_payout_block = if state.settlement_count > 0 {
-        state.revenue_ct as f64 / state.settlement_count as f64
+        state.revenue as f64 / state.settlement_count as f64
     } else {
         0.0
     };
@@ -240,20 +240,20 @@ fn compute_ad_metric(state: &MarketState) -> MarketMetric {
     let provider_margin = if state.settlement_count > 0 {
         // Ad margin = revenue / settlement count (simplified)
         // In practice: (spend - platform_costs) / spend
-        let margin = (state.revenue_ct as f64 / state.settlement_count as f64) / 100.0;
+        let margin = (state.revenue as f64 / state.settlement_count as f64) / 100.0;
         margin.min(0.8).max(0.2) // Clamp between 20% and 80%
     } else {
         0.6 // Default 60% for publishers
     };
 
     let average_cost_block = if state.settlement_count > 0 {
-        (state.revenue_ct as f64 / state.settlement_count as f64) * (1.0 - provider_margin)
+        (state.revenue as f64 / state.settlement_count as f64) * (1.0 - provider_margin)
     } else {
         0.0
     };
 
     let effective_payout_block = if state.settlement_count > 0 {
-        state.revenue_ct as f64 / state.settlement_count as f64
+        state.revenue as f64 / state.settlement_count as f64
     } else {
         0.0
     };
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn storage_metrics_computed_correctly() {
         let mut state = MarketState::default();
-        state.revenue_ct = 1000;
+        state.revenue = 1000;
         state.capacity = 10000;
         state.provider_escrow = 5000;
         state.settlement_count = 1;
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn compute_metrics_computed_correctly() {
         let mut state = MarketState::default();
-        state.revenue_ct = 500;
+        state.revenue = 500;
         state.capacity = 1000;
         state.settlement_count = 10;
         state.verified_count = 9;
@@ -303,7 +303,7 @@ mod tests {
         let mut state = MarketState::default();
         state.impressions = 10000;
         state.conversions = 100;
-        state.revenue_ct = 500;
+        state.revenue = 500;
         state.settlement_count = 1;
 
         let metric = compute_ad_metric(&state);

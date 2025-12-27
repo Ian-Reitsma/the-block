@@ -1,7 +1,7 @@
 use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    RENT_ESCROW_BURNED_CT_TOTAL, RENT_ESCROW_LOCKED_CT_TOTAL, RENT_ESCROW_REFUNDED_CT_TOTAL,
+    RENT_ESCROW_BURNED_TOTAL, RENT_ESCROW_LOCKED_TOTAL, RENT_ESCROW_REFUNDED_TOTAL,
 };
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted};
 use foundation_serialization::binary_cursor::{Reader, Writer};
@@ -48,21 +48,21 @@ impl RentEscrow {
         let bytes = encode_escrow(&e);
         let _ = self.db.try_insert(&key, bytes);
         #[cfg(feature = "telemetry")]
-        RENT_ESCROW_LOCKED_CT_TOTAL.add(amount as i64);
+        RENT_ESCROW_LOCKED_TOTAL.add(amount as i64);
     }
     pub fn release(&mut self, id: &str) -> Option<(String, u64, u64)> {
         let key = format!("escrow/{id}");
         if let Some(bytes) = self.db.get(&key) {
             if let Ok(e) = decode_escrow(&bytes) {
                 #[cfg(feature = "telemetry")]
-                RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);
+                RENT_ESCROW_LOCKED_TOTAL.sub(e.amount as i64);
                 let _ = self.db.remove(&key);
                 let refund = e.amount * 9 / 10;
                 let burn = e.amount - refund;
                 #[cfg(feature = "telemetry")]
                 {
-                    RENT_ESCROW_REFUNDED_CT_TOTAL.inc_by(refund as u64);
-                    RENT_ESCROW_BURNED_CT_TOTAL.inc_by(burn as u64);
+                    RENT_ESCROW_REFUNDED_TOTAL.inc_by(refund as u64);
+                    RENT_ESCROW_BURNED_TOTAL.inc_by(burn as u64);
                 }
                 return Some((e.depositor, refund, burn));
             }
@@ -99,14 +99,14 @@ impl RentEscrow {
                 if let Ok(e) = decode_escrow(&bytes) {
                     if e.expiry > 0 && e.expiry <= now {
                         #[cfg(feature = "telemetry")]
-                        RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);
+                        RENT_ESCROW_LOCKED_TOTAL.sub(e.amount as i64);
                         let _ = self.db.remove(&key);
                         let refund = e.amount * 9 / 10;
                         let burn = e.amount - refund;
                         #[cfg(feature = "telemetry")]
                         {
-                            RENT_ESCROW_REFUNDED_CT_TOTAL.inc_by(refund as u64);
-                            RENT_ESCROW_BURNED_CT_TOTAL.inc_by(burn as u64);
+                            RENT_ESCROW_REFUNDED_TOTAL.inc_by(refund as u64);
+                            RENT_ESCROW_BURNED_TOTAL.inc_by(burn as u64);
                         }
                         out.push((e.depositor.clone(), refund, burn));
                     }

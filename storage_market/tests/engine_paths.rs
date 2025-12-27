@@ -48,14 +48,14 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
 
     let success = market.record_proof_outcome("obj-1", Some("primary"), 5, true)?;
     assert_eq!(success.outcome, ProofOutcome::Success);
-    assert_eq!(success.amount_accrued_ct, 40);
+    assert_eq!(success.amount_accrued, 40);
     assert_eq!(success.remaining_deposit, 100);
 
     let failure = market.record_proof_outcome("obj-1", Some("backup"), 6, false)?;
     assert_eq!(failure.outcome, ProofOutcome::Failure);
-    assert_eq!(failure.slashed_ct, 10);
+    assert_eq!(failure.slashed, 10);
     assert_eq!(failure.remaining_deposit, 40);
-    assert_eq!(failure.amount_accrued_ct, 40);
+    assert_eq!(failure.amount_accrued, 40);
 
     drop(market);
 

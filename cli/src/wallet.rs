@@ -411,8 +411,7 @@ pub fn handle(cmd: WalletCmd) {
         WalletCmd::Balances => {
             println!(
                 "token balances:
-  CT: 0
-  IT: 0"
+  BLOCK: 0"
             );
         }
         WalletCmd::Send {

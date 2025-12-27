@@ -215,12 +215,12 @@ impl DomainAction {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "min_bid",
-                "Minimum bid (CT)",
+                "Minimum bid (BLOCK)",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "stake-requirement",
                 "stake-requirement",
-                "Stake requirement (CT)",
+                "Stake requirement (BLOCK)",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "duration",
@@ -269,7 +269,7 @@ impl DomainAction {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "bid",
-                "Bid amount (CT)",
+                "Bid amount (BLOCK)",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "bidder",
@@ -345,7 +345,7 @@ impl DomainAction {
             CommandBuilder::new(
                 CommandId("gateway.domain.stake_register"),
                 "stake-register",
-                "Deposit CT into a stake reference",
+                "Deposit BLOCK into a stake reference",
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "reference",
@@ -353,7 +353,7 @@ impl DomainAction {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "deposit",
-                "Deposit amount (CT)",
+                "Deposit amount (BLOCK)",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "owner",
@@ -374,7 +374,7 @@ impl DomainAction {
             CommandBuilder::new(
                 CommandId("gateway.domain.stake_withdraw"),
                 "stake-withdraw",
-                "Withdraw CT from an unlocked stake reference",
+                "Withdraw BLOCK from an unlocked stake reference",
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "reference",
@@ -382,7 +382,7 @@ impl DomainAction {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "amount",
-                "Withdrawal amount (CT)",
+                "Withdrawal amount (BLOCK)",
             )))
             .arg(ArgSpec::Option(OptionSpec::new(
                 "owner",

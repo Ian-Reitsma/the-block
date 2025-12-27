@@ -614,7 +614,7 @@ impl StorageCmd {
                 )))
                 .arg(ArgSpec::Positional(PositionalSpec::new(
                     "price",
-                    "Price per block in CT",
+                    "Price per block in BLOCK",
                 )))
                 .arg(ArgSpec::Positional(PositionalSpec::new(
                     "retention",
@@ -1003,7 +1003,7 @@ pub fn handle(cmd: StorageCmd) {
             let offer = StorageOffer::new(provider_id, bytes, price, retention);
             let resp = rpc::storage::upload(contract, vec![offer]);
             println!("{}", resp);
-            println!("reserved {} CT", total);
+            println!("reserved {} BLOCK", total);
         }
         StorageCmd::Challenge {
             object_id,

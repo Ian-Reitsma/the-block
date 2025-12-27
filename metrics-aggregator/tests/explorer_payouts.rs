@@ -334,13 +334,13 @@ fn explorer_payout_summary_metrics_exposed() {
         )
         .expect("settlement count metric");
         assert_eq!(settlement_count, 8.0);
-        let ct_price = scrape_peer_metric(
+        let price = scrape_peer_metric(
             &body,
             "explorer_block_payout_ad_price_usd_micros",
             "explorer-node",
         )
         .expect("price metric");
-        assert_eq!(ct_price, 25_000.0);
+        assert_eq!(price, 25_000.0);
     })
 }
 

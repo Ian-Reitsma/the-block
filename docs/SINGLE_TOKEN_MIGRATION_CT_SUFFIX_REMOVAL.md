@@ -189,40 +189,70 @@ proof_rebate_ct → proof_rebate
 
 - The treasury fee counter now emits as `energy_treasury_fee_total` in telemetry (`node/src/telemetry.rs`, `node/src/energy.rs`) and the associated docs (`docs/architecture.md`, `docs/developer_handbook.md`), keeping dashboards/operators on the BLOCK-denominated label without the `_ct` suffix.
 
+### 17. Compute Settlement Ledger
+
+- `node/src/compute_market/settlement.rs` renamed the ledger key from `ledger_ct` to `ledger`, with legacy migration for old keys.
+- `AuditRecord` struct now uses `delta: i64` instead of `delta_ct: i64` / `delta_it: Option<i64>`.
+- Internal struct field `ct: AccountLedger` renamed to `ledger: AccountLedger`.
+- `record_event` function signature simplified to 3 parameters (removed `delta_it`).
+- `accrue_split` and `refund_split` parameter names changed from `ct`/`it` to `consumer`/`industrial` (lane-based).
+- All usages updated in `node/src/rpc/compute_market.rs` (JSON keys) and test files.
+
+### 18. Telemetry Metric Renames
+
+- `BASE_REWARD_CT` → `BASE_REWARD`, metric name `base_reward_ct` → `base_reward`
+- `DNS_AUCTION_SETTLEMENT_CT` → `DNS_AUCTION_SETTLEMENT`, metric name `dns_auction_settlement_ct` → `dns_auction_settlement`
+- `DNS_STAKE_LOCKED_CT` → `DNS_STAKE_LOCKED`, metric name `dns_stake_locked_ct` → `dns_stake_locked`
+- Receipt settlement metrics renamed: `receipt_settlement_*_ct` → `receipt_settlement_*` for storage, compute, energy, ad markets
+- Function parameters renamed: `settlement_ct` → `settlement`, `delta_ct` → `delta`
+
+### 19. Governance Treasury Error
+
+- `DisbursementError::InsufficientFunds` simplified from `{required, required_it, available, available_it}` to `{required, available}` for single BLOCK balance.
+
+### 20. Test File Updates
+
+- `node/tests/compute_settlement.rs` - Updated `contains_entry` helper and assertions for simplified `AuditRecord`
+- `node/tests/compute_market_fee_split.rs` - Renamed `bal_ct`/`bal_it` to `bal_consumer`/`bal_industrial` for clarity
+
 ---
 
 ## REMAINING WORK
-## REMAINING WORK
 
-### 1. Misc Test & Telemetry Fixtures
+### 1. mdBook Artifacts
 
-- Rebuild/publish the mdBook artifacts (`docs/book/**/*.html`, search index) so the generated pages pick up the new subsidy/metric names; any `_ct` references left after the rebuild should be patched manually before tagging.
+- Rebuild/publish the mdBook artifacts (`docs/book/**/*.html`, search index) so the generated pages pick up the new subsidy/metric names.
 
 ### Outstanding Files
-- `docs/book/system_reference.html`, `docs/book/print.html`, `docs/book/searchindex.js` (subsidy multiplier table still lists `_ct` names)
-- Any remaining doc references surfaced by the grep commands below
+- `docs/book/system_reference.html`, `docs/book/print.html`, `docs/book/searchindex.js` (may contain stale `_ct` names until rebuilt)
+
+---
+
+## LEGITIMATE LEGACY REFERENCES
+
+The following `_ct`/`_it` references in the codebase are intentional migration code and should NOT be removed:
+
+1. **SQL Migrations** (`explorer/src/lib.rs`, `explorer/src/bin/migrate_treasury_db.rs`):
+   - `RENAME COLUMN amount_ct TO amount` - renaming old column to new name
+   - `DROP COLUMN amount_it` - removing deprecated column
+
+2. **Legacy Key Migration** (`node/src/compute_market/settlement.rs`):
+   - `KEY_LEDGER_LEGACY_CT` and `KEY_LEDGER_LEGACY_IT` - constants for loading old database keys
+   - `legacy_ct` and `legacy_it` local variables - only used to migrate old data into new format
 
 ---
 
 ## GREP COMMANDS FOR FINDING REMAINING ISSUES
 
 ```bash
-# Find all _ct suffixed field/variable names
+# Find all _ct suffixed field/variable names (should only show migration code)
 grep -rn "_ct[^a-z]" --include="*.rs" .
 
-# Find specific patterns
-grep -rn "storage_sub_ct" --include="*.rs" .
-grep -rn "read_sub_ct" --include="*.rs" .
-grep -rn "compute_sub_ct" --include="*.rs" .
-grep -rn "proof_rebate_ct" --include="*.rs" .
-grep -rn "burned_ct" --include="*.rs" .
-grep -rn "refunded_ct" --include="*.rs" .
-
-# Find IT token references (should be removed)
+# Find IT token references (should only show migration code)
 grep -rn "_it[^a-z]" --include="*.rs" .
 ```
 
 ---
 
 *Last updated: 2025-12-27*
-*Current status: Core structs, DEX pool, and aggregator completed; focus shifts to sims/tests + telemetry fixtures.*
+*Current status: Rust codebase migration COMPLETE. All `_ct`/`_it` suffixes removed from active code. Only migration/legacy loading code retains these references.*

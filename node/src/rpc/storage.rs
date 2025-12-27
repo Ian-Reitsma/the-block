@@ -77,8 +77,8 @@ fn proof_record_value(record: &ProofRecord) -> Value {
         Value::Number(Number::from(record.remaining_deposit)),
     );
     map.insert(
-        "accrued_ct".into(),
-        Value::Number(Number::from(record.amount_accrued_ct)),
+        "accrued".into(),
+        Value::Number(Number::from(record.amount_accrued)),
     );
     map.insert(
         "proof_successes".into(),
@@ -93,8 +93,8 @@ fn proof_record_value(record: &ProofRecord) -> Value {
         Value::String(outcome_to_string(&record.outcome).to_string()),
     );
     map.insert(
-        "slashed_ct".into(),
-        Value::Number(Number::from(record.slashed_ct)),
+        "slashed".into(),
+        Value::Number(Number::from(record.slashed)),
     );
     Value::Object(map)
 }
@@ -127,7 +127,7 @@ fn replica_value(object_id: &str, contract: &StorageContract, replica: &ReplicaI
         Value::Number(Number::from(replica.proof_failures)),
     );
     map.insert(
-        "contract_accrued_ct".into(),
+        "contract_accrued".into(),
         Value::Number(Number::from(contract.accrued)),
     );
     map.insert(

@@ -49,8 +49,7 @@ fn job_timeout_and_resubmit_penalizes() {
     let proof = ExecutionReceipt {
         reference: [0u8; 32],
         output: [0u8; 32],
-        payout_ct: 0,
-        payout_it: 1,
+        payout: 1,
         proof: None,
     };
     assert!(market.submit_slice("job1", proof).is_err());

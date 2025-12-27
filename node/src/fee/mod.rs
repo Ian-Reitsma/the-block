@@ -31,9 +31,9 @@ impl std::error::Error for FeeError {}
 /// Split a raw fee into consumer and industrial components based on a
 /// consumer percentage.
 ///
-/// `pct` expresses the fraction of `fee` paid in consumer tokens. It must be
-/// within `0..=100`, where `0` routes the entire fee to industrial tokens and
-/// `100` routes it entirely to consumer tokens.
+/// `pct` expresses the fraction of `fee` routed to the consumer lane. It must be
+/// within `0..=100`, where `0` routes the entire fee to the industrial lane and
+/// `100` routes it entirely to the consumer lane.
 ///
 /// Returns `(fee_consumer, fee_industrial)` on success.
 pub fn decompose(pct: u8, fee: u64) -> Result<(u64, u64), FeeError> {

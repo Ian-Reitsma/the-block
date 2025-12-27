@@ -12,7 +12,7 @@ use crate::simple_db::{names, SimpleDb, SimpleDbBatch};
 use crate::telemetry::{
     COMPUTE_SLA_AUTOMATED_SLASH_TOTAL, COMPUTE_SLA_NEXT_DEADLINE_TS, COMPUTE_SLA_PENDING_TOTAL,
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
-    SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_CT_TOTAL,
+    SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_TOTAL,
 };
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
@@ -26,8 +26,7 @@ use ledger::utxo_account::AccountLedger;
 const AUDIT_CAP: usize = 256;
 const ROOT_HISTORY: usize = 32;
 
-const KEY_LEDGER_CT: &str = "ledger_ct";
-const KEY_LEDGER_IT: &str = "ledger_it";
+const KEY_LEDGER: &str = "ledger";
 const KEY_MODE: &str = "mode";
 const KEY_METADATA: &str = "metadata";
 const KEY_AUDIT: &str = "audit_log";
@@ -71,18 +70,8 @@ pub struct AuditRecord {
     pub timestamp: u64,
     pub entity: String,
     pub memo: String,
-    pub delta_ct: i64,
-    #[serde(
-        default,
-        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-    )]
-    pub delta_it: Option<i64>,
+    pub delta: i64,
     pub balance: u64,
-    #[serde(
-        default,
-        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-    )]
-    pub balance_it: Option<u64>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub anchor: Option<String>,
 }
@@ -150,7 +139,7 @@ struct SettlementState {
     base: PathBuf,
     mode: SettleMode,
     metadata: Metadata,
-    ct: AccountLedger,
+    ledger: AccountLedger,
     audit: VecDeque<AuditRecord>,
     roots: VecDeque<[u8; 32]>,
     next_seq: u64,
@@ -159,16 +148,8 @@ struct SettlementState {
 }
 
 impl SettlementState {
-    fn new(base: PathBuf, mut mode: SettleMode, mut db: SimpleDb) -> Self {
-        let mut ct = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_CT, AccountLedger::new);
-        let legacy_it = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_IT, AccountLedger::new);
-        if !legacy_it.balances.is_empty() {
-            for (provider, amount) in legacy_it.balances {
-                let entry = ct.balances.entry(provider).or_insert(0);
-                *entry = entry.saturating_add(amount);
-            }
-            let _ = db.delete(KEY_LEDGER_IT);
-        }
+    fn new(base: PathBuf, mut mode: SettleMode, db: SimpleDb) -> Self {
+        let ledger = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
         mode = stored_mode;
         let metadata = load_or_default::<Metadata, _>(&db, KEY_METADATA, Metadata::default);
@@ -183,7 +164,7 @@ impl SettlementState {
             base,
             mode,
             metadata,
-            ct,
+            ledger,
             audit,
             roots,
             next_seq,
@@ -192,7 +173,7 @@ impl SettlementState {
         }
     }
 
-    fn record_event(&mut self, entity: &str, memo: &str, delta_ct: i64, delta_it: Option<i64>) {
+    fn record_event(&mut self, entity: &str, memo: &str, delta: i64) {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -203,10 +184,8 @@ impl SettlementState {
             timestamp,
             entity: entity.to_string(),
             memo: memo.to_string(),
-            delta_ct,
-            delta_it,
+            delta,
             balance,
-            balance_it: None,
             anchor: None,
         };
         self.next_seq = self.next_seq.wrapping_add(1);
@@ -227,10 +206,8 @@ impl SettlementState {
             timestamp,
             entity: "__anchor__".to_string(),
             memo: "anchor".to_string(),
-            delta_ct: 0,
-            delta_it: None,
+            delta: 0,
             balance: 0,
-            balance_it: None,
             anchor: Some(hash_hex),
         };
         self.next_seq = self.next_seq.wrapping_add(1);
@@ -241,7 +218,7 @@ impl SettlementState {
     }
 
     fn update_root(&mut self) {
-        let root = compute_root(&self.ct);
+        let root = compute_root(&self.ledger);
         if self.roots.back().copied() == Some(root) {
             return;
         }
@@ -252,11 +229,11 @@ impl SettlementState {
     }
 
     fn balance(&self, provider: &str) -> u64 {
-        self.ct.balances.get(provider).copied().unwrap_or(0)
+        self.ledger.balances.get(provider).copied().unwrap_or(0)
     }
 
     fn balances(&self) -> Vec<BalanceSnapshot> {
-        let providers: BTreeSet<&str> = self.ct.balances.keys().map(|s| s.as_str()).collect();
+        let providers: BTreeSet<&str> = self.ledger.balances.keys().map(|s| s.as_str()).collect();
         providers
             .into_iter()
             .map(|provider| BalanceSnapshot {
@@ -270,7 +247,7 @@ impl SettlementState {
         self.refresh_sla_metrics();
         let mut batch = self.db.batch();
         let mut encode = || -> io::Result<()> {
-            enqueue_value(&mut batch, KEY_LEDGER_CT, &self.ct)?;
+            enqueue_value(&mut batch, KEY_LEDGER, &self.ledger)?;
             enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
             enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
             enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
@@ -347,13 +324,13 @@ impl SettlementState {
         let mut refunded = 0;
         let outcome_kind = match outcome {
             SlaOutcome::Completed => {
-                self.record_event(&record.provider, "sla_completed", 0, None);
+                self.record_event(&record.provider, "sla_completed", 0);
                 self.metadata.last_sla_violation = None;
                 SlaResolutionKind::Completed
             }
             SlaOutcome::Cancelled { reason } => {
                 let memo = format!("sla_cancelled_{reason}");
-                self.record_event(&record.provider, &memo, 0, None);
+                self.record_event(&record.provider, &memo, 0);
                 self.metadata.last_cancel_reason = Some(reason.to_string());
                 SlaResolutionKind::Cancelled {
                     reason: reason.to_string(),
@@ -363,18 +340,17 @@ impl SettlementState {
                 #[cfg(not(feature = "telemetry"))]
                 let _ = automated;
                 let memo = format!("sla_violation_{reason}");
-                match self.ct.debit(&record.provider, record.provider_bond) {
+                match self.ledger.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {
                         burned = record.provider_bond;
                         self.record_event(
                             &record.provider,
                             &memo,
                             -(record.provider_bond as i64),
-                            None,
                         );
                         #[cfg(feature = "telemetry")]
                         {
-                            SLASHING_BURN_CT_TOTAL.inc_by(burned);
+                            SLASHING_BURN_TOTAL.inc_by(burned);
                             COMPUTE_SLA_VIOLATIONS_TOTAL
                                 .ensure_handle_for_label_values(&[record.provider.as_str()])
                                 .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
@@ -390,17 +366,16 @@ impl SettlementState {
                             .ensure_handle_for_label_values(&["penalize"])
                             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
-                        self.record_event(&record.provider, &format!("{memo}_failed"), 0, None);
+                        self.record_event(&record.provider, &format!("{memo}_failed"), 0);
                     }
                 }
                 if record.consumer_bond > 0 {
-                    self.ct.deposit(&record.buyer, record.consumer_bond);
+                    self.ledger.deposit(&record.buyer, record.consumer_bond);
                     refunded = record.consumer_bond;
                     self.record_event(
                         &record.buyer,
                         "sla_consumer_refund",
                         record.consumer_bond as i64,
-                        None,
                     );
                 }
                 self.metadata.last_sla_violation = Some(format!(
@@ -568,12 +543,12 @@ impl Settlement {
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
         #[cfg(feature = "telemetry")]
         let _span = crate::log_context!(provider = provider);
-        with_state_mut(|state| match state.ct.debit(provider, amount) {
+        with_state_mut(|state| match state.ledger.debit(provider, amount) {
             Ok(_) => {
-                state.record_event(provider, "penalize_sla", -(amount as i64), None);
+                state.record_event(provider, "penalize_sla", -(amount as i64));
                 #[cfg(feature = "telemetry")]
                 {
-                    SLASHING_BURN_CT_TOTAL.inc_by(amount);
+                    SLASHING_BURN_TOTAL.inc_by(amount);
                     COMPUTE_SLA_VIOLATIONS_TOTAL
                         .ensure_handle_for_label_values(&[provider])
                         .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
@@ -652,20 +627,21 @@ impl Settlement {
 
     pub fn accrue(provider: &str, event: &str, amount: u64) {
         with_state_mut(|state| {
-            state.ct.deposit(provider, amount);
-            state.record_event(provider, event, amount as i64, None);
+            state.ledger.deposit(provider, amount);
+            state.record_event(provider, event, amount as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();
         });
     }
 
-    pub fn accrue_split(provider: &str, ct: u64, it: u64) {
+    /// Accrue split amounts from consumer and industrial lanes.
+    /// Both amounts are combined into a single BLOCK balance.
+    pub fn accrue_split(provider: &str, consumer: u64, industrial: u64) {
         with_state_mut(|state| {
-            let total = ct.saturating_add(it);
-            state.ct.deposit(provider, total);
-            let legacy = if it > 0 { Some(it as i64) } else { None };
-            state.record_event(provider, "accrue_split", total as i64, legacy);
+            let total = consumer.saturating_add(industrial);
+            state.ledger.deposit(provider, total);
+            state.record_event(provider, "accrue_split", total as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();
@@ -709,9 +685,9 @@ impl Settlement {
     }
 
     pub fn spend(provider: &str, event: &str, amount: u64) -> Result<(), ()> {
-        with_state_mut(|state| match state.ct.debit(provider, amount) {
+        with_state_mut(|state| match state.ledger.debit(provider, amount) {
             Ok(_) => {
-                state.record_event(provider, event, -(amount as i64), None);
+                state.record_event(provider, event, -(amount as i64));
                 #[cfg(feature = "telemetry")]
                 SETTLE_APPLIED_TOTAL.inc();
                 state.persist_all();
@@ -728,12 +704,13 @@ impl Settlement {
         })
     }
 
-    pub fn refund_split(buyer: &str, ct: u64, it: u64) {
+    /// Refund split amounts from consumer and industrial lanes.
+    /// Both amounts are combined into a single BLOCK balance.
+    pub fn refund_split(buyer: &str, consumer: u64, industrial: u64) {
         with_state_mut(|state| {
-            let total = ct.saturating_add(it);
-            state.ct.deposit(buyer, total);
-            let legacy = if it > 0 { Some(it as i64) } else { None };
-            state.record_event(buyer, "refund_split", total as i64, legacy);
+            let total = consumer.saturating_add(industrial);
+            state.ledger.deposit(buyer, total);
+            state.record_event(buyer, "refund_split", total as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();

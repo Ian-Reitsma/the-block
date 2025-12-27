@@ -14,7 +14,7 @@ fn provider_balances_round_trip() {
     let explorer = Explorer::open(&db_path).expect("open explorer");
     let records = vec![ProviderSettlementRecord {
         provider: "alice".to_string(),
-        ct: 42,
+        consumer: 42,
         industrial: 7,
         updated_at: 123,
     }];

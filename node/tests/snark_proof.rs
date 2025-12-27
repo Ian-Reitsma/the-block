@@ -38,8 +38,7 @@ fn invalid_proof_rejected() {
     let receipt = ExecutionReceipt {
         reference: expected,
         output: expected,
-        payout_ct: 5,
-        payout_it: 0,
+        payout: 5,
         proof: Some(bundle),
     };
     assert!(market.submit_slice("job1", receipt).is_err());

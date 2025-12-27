@@ -3355,64 +3355,21 @@ fn token_remainders_from_value(
     let map = value
         .as_object()
         .ok_or_else(|| invalid("token remainders must be an object"))?;
-    fn read_token_role(
-        map: &JsonMap,
-        new_key: &str,
-        ct_key: &str,
-        it_key: Option<&str>,
-    ) -> Result<u64, PersistenceError> {
-        if let Some(value) = map.get(new_key) {
-            return value
+    fn read_token_role(map: &JsonMap, key: &str) -> Result<u64, PersistenceError> {
+        map.get(key).map_or(Ok(0), |value| {
+            value
                 .as_u64()
-                .ok_or_else(|| invalid(format!("{new_key} must be an integer")));
-        }
-        if let Some(value) = map.get(ct_key) {
-            let ct_val = value
-                .as_u64()
-                .ok_or_else(|| invalid(format!("{ct_key} must be an integer")))?;
-            let it_val = if let Some(key) = it_key {
-                map.get(key).map_or(Ok(0), |value| {
-                    value
-                        .as_u64()
-                        .ok_or_else(|| invalid(format!("{key} must be an integer")))
-                })?
-            } else {
-                0
-            };
-            return Ok(ct_val.saturating_add(it_val));
-        }
-        if let Some(key) = it_key {
-            if let Some(value) = map.get(key) {
-                return value
-                    .as_u64()
-                    .ok_or_else(|| invalid(format!("{key} must be an integer")));
-            }
-        }
-        Ok(0)
+                .ok_or_else(|| invalid(format!("{key} must be an integer")))
+        })
     }
 
     Ok(TokenRemainderLedger {
-        viewer_usd: read_token_role(map, "viewer_usd", "ct_viewer_usd", None)?,
-        host_usd: read_token_role(map, "host_usd", "ct_host_usd", Some("it_host_usd"))?,
-        hardware_usd: read_token_role(
-            map,
-            "hardware_usd",
-            "ct_hardware_usd",
-            Some("it_hardware_usd"),
-        )?,
-        verifier_usd: read_token_role(
-            map,
-            "verifier_usd",
-            "ct_verifier_usd",
-            Some("it_verifier_usd"),
-        )?,
-        liquidity_usd: read_token_role(
-            map,
-            "liquidity_usd",
-            "ct_liquidity_usd",
-            Some("it_liquidity_usd"),
-        )?,
-        miner_usd: read_token_role(map, "miner_usd", "ct_miner_usd", Some("it_miner_usd"))?,
+        viewer_usd: read_token_role(map, "viewer_usd")?,
+        host_usd: read_token_role(map, "host_usd")?,
+        hardware_usd: read_token_role(map, "hardware_usd")?,
+        verifier_usd: read_token_role(map, "verifier_usd")?,
+        liquidity_usd: read_token_role(map, "liquidity_usd")?,
+        miner_usd: read_token_role(map, "miner_usd")?,
     })
 }
 

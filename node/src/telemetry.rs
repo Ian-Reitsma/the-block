@@ -1392,8 +1392,8 @@ pub static BASE_FEE: Lazy<IntGaugeHandle> = Lazy::new(|| {
     g.handle()
 });
 
-pub static BASE_REWARD_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
-    let g = IntGauge::new("base_reward_ct", "base reward after logistic factor").unwrap();
+pub static BASE_REWARD: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new("base_reward", "base reward after logistic factor").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g.handle()
 });
@@ -2512,10 +2512,10 @@ pub static DIFFICULTY_WINDOW_LONG: Lazy<IntGaugeHandle> = Lazy::new(|| {
     g.handle()
 });
 
-pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
+pub static RENT_ESCROW_LOCKED_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
-        "rent_escrow_locked_ct_total",
-        "Total CT locked in rent escrow",
+        "rent_escrow_locked_total",
+        "Total BLOCK locked in rent escrow",
     )
     .unwrap_or_else(|e| panic!("gauge rent escrow: {e}"));
     REGISTRY
@@ -2524,10 +2524,10 @@ pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     g.handle()
 });
 
-pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+pub static RENT_ESCROW_REFUNDED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
-        "rent_escrow_refunded_ct_total",
-        "Total CT refunded from rent escrow",
+        "rent_escrow_refunded_total",
+        "Total BLOCK refunded from rent escrow",
     )
     .unwrap_or_else(|e| panic!("counter rent escrow refunded: {e}"));
     REGISTRY
@@ -2536,10 +2536,10 @@ pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| 
     c.handle()
 });
 
-pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+pub static RENT_ESCROW_BURNED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
-        "rent_escrow_burned_ct_total",
-        "Total CT burned from rent escrow",
+        "rent_escrow_burned_total",
+        "Total BLOCK burned from rent escrow",
     )
     .unwrap_or_else(|e| panic!("counter rent escrow burned: {e}"));
     REGISTRY
@@ -2548,10 +2548,10 @@ pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     c.handle()
 });
 
-pub static SLASHING_BURN_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+pub static SLASHING_BURN_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
-        "slashing_burn_ct_total",
-        "Total CT burned from slashing penalties",
+        "slashing_burn_total",
+        "Total BLOCK burned from slashing penalties",
     )
     .unwrap_or_else(|e| panic!("counter slashing burn: {e}"));
     REGISTRY
@@ -3028,18 +3028,18 @@ pub static AD_BIDDING_LATENCY_MICROS: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static AD_CONVERSION_VALUE_CT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub static AD_CONVERSION_VALUE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
-            "ad_conversion_value_ct_total",
-            "Aggregated conversion value in CT per selector",
+            "ad_conversion_value_total",
+            "Aggregated conversion value in BLOCK per selector",
         ),
         &["selector"],
     )
-    .unwrap_or_else(|e| panic!("counter ad conversion value ct: {e}"));
+    .unwrap_or_else(|e| panic!("counter ad conversion value: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
-        .unwrap_or_else(|e| panic!("registry ad conversion value ct: {e}"));
+        .unwrap_or_else(|e| panic!("registry ad conversion value: {e}"));
     c
 });
 
@@ -4809,31 +4809,31 @@ pub fn update_ad_auction_win_rate(selector: &str, win_rate_ppm: u32) {
     }
 }
 
-pub fn add_ad_conversion_ct_value(selector: &str, value_ct_micros: u64) {
+pub fn add_ad_conversion_value(selector: &str, value_micros: u64) {
     #[cfg(feature = "telemetry")]
     {
-        AD_CONVERSION_VALUE_CT_TOTAL
+        AD_CONVERSION_VALUE_TOTAL
             .with_label_values(&[selector])
-            .inc_by(value_ct_micros);
+            .inc_by(value_micros);
     }
     #[cfg(not(feature = "telemetry"))]
     {
-        let _ = (selector, value_ct_micros);
+        let _ = (selector, value_micros);
     }
 }
 
-pub fn record_dns_auction_completed(duration_secs: u64, settlement_ct: u64) {
+pub fn record_dns_auction_completed(duration_secs: u64, settlement: u64) {
     #[cfg(feature = "telemetry")]
     {
         DNS_AUCTION_OUTCOME_TOTAL
             .with_label_values(&["settled"])
             .inc();
         DNS_AUCTION_DURATION_SECONDS.observe(duration_secs as f64);
-        DNS_AUCTION_SETTLEMENT_CT.observe(settlement_ct as f64);
+        DNS_AUCTION_SETTLEMENT.observe(settlement as f64);
     }
     #[cfg(not(feature = "telemetry"))]
     {
-        let _ = (duration_secs, settlement_ct);
+        let _ = (duration_secs, settlement);
     }
 }
 
@@ -4846,14 +4846,14 @@ pub fn record_dns_auction_cancelled() {
     }
 }
 
-pub fn adjust_dns_stake_locked(delta_ct: i64) {
+pub fn adjust_dns_stake_locked(delta: i64) {
     #[cfg(feature = "telemetry")]
     {
-        DNS_STAKE_LOCKED_CT.add(delta_ct);
+        DNS_STAKE_LOCKED.add(delta);
     }
     #[cfg(not(feature = "telemetry"))]
     {
-        let _ = delta_ct;
+        let _ = delta;
     }
 }
 
@@ -6295,29 +6295,29 @@ pub static DNS_AUCTION_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
-pub static DNS_AUCTION_SETTLEMENT_CT: Lazy<Histogram> = Lazy::new(|| {
+pub static DNS_AUCTION_SETTLEMENT: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
-        "dns_auction_settlement_ct",
-        "DNS auction settlement amounts denominated in CT",
+        "dns_auction_settlement",
+        "DNS auction settlement amounts denominated in BLOCK",
     )
     .buckets(telemetry::exponential_buckets(1.0, 2.0, 18));
     let h = Histogram::with_opts(opts)
-        .unwrap_or_else(|e| panic!("histogram dns auction settlement ct: {e}"));
+        .unwrap_or_else(|e| panic!("histogram dns auction settlement: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
-        .unwrap_or_else(|e| panic!("registry dns auction settlement ct: {e}"));
+        .unwrap_or_else(|e| panic!("registry dns auction settlement: {e}"));
     h
 });
 
-pub static DNS_STAKE_LOCKED_CT: Lazy<IntGaugeHandle> = Lazy::new(|| {
+pub static DNS_STAKE_LOCKED: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
-        "dns_stake_locked_ct",
-        "Total CT currently locked in DNS stake escrows",
+        "dns_stake_locked",
+        "Total BLOCK currently locked in DNS stake escrows",
     )
-    .unwrap_or_else(|e| panic!("gauge dns stake locked ct: {e}"));
+    .unwrap_or_else(|e| panic!("gauge dns stake locked: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
-        .unwrap_or_else(|e| panic!("registry dns stake locked ct: {e}"));
+        .unwrap_or_else(|e| panic!("registry dns stake locked: {e}"));
     g.handle()
 });
 

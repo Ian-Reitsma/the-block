@@ -76,8 +76,8 @@ pub struct Offer {
     pub units: u64,
     /// Price quoted per compute unit.
     pub price_per_unit: u64,
-    /// Percentage of `price` paid in consumer tokens. `0` routes the entire
-    /// amount to industrial tokens, `100` routes it all to consumer tokens.
+    /// Percentage of `price` routed to the consumer lane. `0` routes the entire
+    /// amount to the industrial lane, `100` routes it all to the consumer lane.
     pub fee_pct: u8,
     /// Hardware capability advertised by the provider.
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -134,10 +134,8 @@ fn default_multiplier() -> f64 {
 pub struct ExecutionReceipt {
     pub reference: [u8; 32],
     pub output: [u8; 32],
-    #[serde(default, alias = "payout")]
-    pub payout_ct: u64,
     #[serde(default)]
-    pub payout_it: u64,
+    pub payout: u64,
     #[serde(
         default = "foundation_serialization::defaults::default",
         skip_serializing_if = "foundation_serialization::skip::option_is_none"
@@ -162,7 +160,7 @@ impl ExecutionReceipt {
     }
 
     pub fn total(&self) -> u64 {
-        self.payout_ct.saturating_add(self.payout_it)
+        self.payout
     }
 }
 
@@ -586,7 +584,7 @@ impl Market {
     pub fn submit_slice(
         &mut self,
         job_id: &str,
-        mut proof: ExecutionReceipt,
+        proof: ExecutionReceipt,
     ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
         self.sweep_overdue_jobs();
@@ -655,18 +653,7 @@ impl Market {
         let total_expected = slice_units
             .checked_mul(state.price_per_unit)
             .ok_or("payout overflow")?;
-        let (expected_ct, expected_it) =
-            crate::fee::decompose(state.fee_pct, total_expected).map_err(|_| "payout split")?;
-        if proof.payout_ct == 0 && proof.payout_it == 0 {
-            // Legacy receipts send total payout through alias field
-            proof.payout_ct = proof.total();
-        }
-        if proof.payout_it == 0 && proof.payout_ct == total_expected && expected_it > 0 {
-            // Upgrade legacy receipts to the expected split automatically.
-            proof.payout_ct = expected_ct;
-            proof.payout_it = expected_it;
-        }
-        if proof.payout_ct != expected_ct || proof.payout_it != expected_it {
+        if proof.payout != total_expected {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
@@ -676,7 +663,7 @@ impl Market {
             return Err("payout mismatch");
         }
         record_units_processed(slice_units);
-        settlement::Settlement::accrue_split(&state.provider, proof.payout_ct, proof.payout_it);
+        settlement::Settlement::accrue(&state.provider, "payout", proof.payout);
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -783,8 +770,7 @@ impl Market {
             let receipt = ExecutionReceipt {
                 reference: expected,
                 output,
-                payout_ct: units * price_per_unit,
-                payout_it: 0,
+                payout: units * price_per_unit,
                 proof: proof_bundle,
             };
             total += self.submit_slice(job_id, receipt)?;
@@ -1006,8 +992,7 @@ mod tests {
         let receipt = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 1,
-            payout_it: 0,
+            payout: 1,
             proof: None,
         };
         assert!(receipt.verify(&Workload::Transcode(data.to_vec())));
@@ -1084,8 +1069,7 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 5,
-            payout_it: 0,
+            payout: 5,
             proof: None,
         };
         assert_eq!(
@@ -1251,8 +1235,7 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 5,
-            payout_it: 0,
+            payout: 5,
             proof: None,
         };
         market

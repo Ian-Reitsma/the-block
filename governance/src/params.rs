@@ -123,7 +123,7 @@ pub trait RuntimeAdapter {
     fn set_badge_revoke_uptime(&mut self, _v: u64) {}
     fn set_jurisdiction_region(&mut self, _v: i64) {}
     fn set_ai_diagnostics_enabled(&mut self, _v: bool) {}
-    fn set_dual_token_settlement_enabled(&mut self, _v: bool) {}
+    fn set_lane_based_settlement_enabled(&mut self, _v: bool) {}
     fn set_scheduler_weight(&mut self, _class: ServiceClass, _weight: u64) {}
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
@@ -214,8 +214,8 @@ impl<'a> Runtime<'a> {
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.adapter.set_ai_diagnostics_enabled(v);
     }
-    pub fn set_dual_token_settlement_enabled(&mut self, v: bool) {
-        self.adapter.set_dual_token_settlement_enabled(v);
+    pub fn set_lane_based_settlement_enabled(&mut self, v: bool) {
+        self.adapter.set_lane_based_settlement_enabled(v);
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         self.adapter.set_scheduler_weight(class, weight);
@@ -581,7 +581,7 @@ pub struct Params {
     #[serde(default = "default_read_subsidy_liquidity_percent")]
     pub read_subsidy_liquidity_percent: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub dual_token_settlement_enabled: i64,
+    pub lane_based_settlement_enabled: i64,
     #[serde(default = "default_ad_readiness_window_secs")]
     pub ad_readiness_window_secs: i64,
     #[serde(default = "default_ad_readiness_min_unique_viewers")]
@@ -770,7 +770,7 @@ impl Default for Params {
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
-            dual_token_settlement_enabled: 0,
+            lane_based_settlement_enabled: 0,
             ad_readiness_window_secs: default_ad_readiness_window_secs(),
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
@@ -938,8 +938,8 @@ impl Params {
             Value::Number(self.read_subsidy_liquidity_percent.into()),
         );
         map.insert(
-            "dual_token_settlement_enabled".into(),
-            Value::Number(self.dual_token_settlement_enabled.into()),
+            "lane_based_settlement_enabled".into(),
+            Value::Number(self.lane_based_settlement_enabled.into()),
         );
         map.insert(
             "ad_readiness_window_secs".into(),
@@ -1178,8 +1178,8 @@ impl Params {
             read_subsidy_hardware_percent: take_i64("read_subsidy_hardware_percent")?,
             read_subsidy_verifier_percent: take_i64("read_subsidy_verifier_percent")?,
             read_subsidy_liquidity_percent: take_i64("read_subsidy_liquidity_percent")?,
-            dual_token_settlement_enabled: obj
-                .get("dual_token_settlement_enabled")
+            lane_based_settlement_enabled: obj
+                .get("lane_based_settlement_enabled")
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
             ad_readiness_window_secs: obj
@@ -1598,8 +1598,8 @@ fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()
     Ok(())
 }
 
-fn apply_dual_token_settlement(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.dual_token_settlement_enabled = if v > 0 { 1 } else { 0 };
+fn apply_lane_based_settlement(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.lane_based_settlement_enabled = if v > 0 { 1 } else { 0 };
     Ok(())
 }
 
@@ -2068,7 +2068,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 50,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_beta_storage_sub,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2078,7 +2078,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 20,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_gamma_read_sub,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2149,15 +2149,15 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::DualTokenSettlementEnabled,
+            key: ParamKey::LaneBasedSettlementEnabled,
             default: 0,
             min: 0,
             max: 1,
             unit: "bool",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
-            apply: apply_dual_token_settlement,
+            apply: apply_lane_based_settlement,
             apply_runtime: |v, rt| {
-                rt.set_dual_token_settlement_enabled(v != 0);
+                rt.set_lane_based_settlement_enabled(v != 0);
                 Ok(())
             },
         },
@@ -2226,7 +2226,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 10,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per ms",
+            unit: "nBLOCK per ms",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_kappa_cpu_sub,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2236,7 +2236,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 5,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_lambda_bytes_out_sub,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2256,7 +2256,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: default_proof_rebate_limit(),
             min: 0,
             max: 1_000_000,
-            unit: "nCT per proof",
+            unit: "nBLOCK per proof",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_proof_rebate_limit,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2266,7 +2266,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 0,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_rent_rate,
             apply_runtime: |v, rt| {
@@ -2685,7 +2685,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: default_energy_min_stake(),
             min: 0,
             max: 1_000_000,
-            unit: "ct",
+            unit: "block",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_energy_min_stake,
             apply_runtime: apply_runtime_energy_min_stake,

@@ -312,13 +312,12 @@ pub fn write_provider_balances_from_str(text: &str, out: &mut dyn Write) -> io::
         {
             for entry in providers {
                 let provider = entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
-                let ct = entry.get("ct").and_then(|v| v.as_u64()).unwrap_or(0);
+                let consumer = entry.get("consumer").and_then(|v| v.as_u64()).unwrap_or(0);
                 let industrial = entry
                     .get("industrial")
-                    .or_else(|| entry.get("it"))
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                writeln!(out, "provider: {provider} ct: {ct} it: {industrial}")?;
+                writeln!(out, "provider: {provider} consumer: {consumer} industrial: {industrial}")?;
             }
         }
     }

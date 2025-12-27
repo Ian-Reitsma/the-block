@@ -95,7 +95,7 @@ pub enum ParamKey {
     ReadSubsidyHardwarePercent,
     ReadSubsidyVerifierPercent,
     ReadSubsidyLiquidityPercent,
-    DualTokenSettlementEnabled,
+    LaneBasedSettlementEnabled,
     AdReadinessWindowSecs,
     AdReadinessMinUniqueViewers,
     AdReadinessMinHostCount,

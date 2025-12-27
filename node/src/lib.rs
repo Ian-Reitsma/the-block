@@ -11,7 +11,7 @@
 //!
 //! This crate is the civic-grade kernel for a one-second Layer 1 that
 //! notarizes sub-second micro-shards and enforces service-based governance
-//! through dual Consumer/Industrial tokens and inflation-funded subsidies. See
+//! through dual Consumer/Industrial lanes and inflation-funded subsidies. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
 use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, process};
@@ -637,22 +637,22 @@ pub struct Block {
     /// Portion of the read subsidy routed to the liquidity pool in this block
     pub read_sub_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to viewers
+    /// BLOCK paid out from advertising campaigns to viewers
     pub ad_viewer: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to hosts
+    /// BLOCK paid out from advertising campaigns to hosts
     pub ad_host: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to hardware providers
+    /// BLOCK paid out from advertising campaigns to hardware providers
     pub ad_hardware: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to verifiers
+    /// BLOCK paid out from advertising campaigns to verifiers
     pub ad_verifier: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens routed to the liquidity pool from advertising campaigns
+    /// BLOCK routed to the liquidity pool from advertising campaigns
     pub ad_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens routed to the miner from advertising campaigns
+    /// BLOCK routed to the miner from advertising campaigns
     pub ad_miner: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Executed treasury disbursements surfaced alongside settlement payouts
@@ -4224,7 +4224,7 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::ACTIVE_MINERS.set(active_eff.round() as i64);
-            crate::telemetry::BASE_REWARD_CT.set(reward.0 as i64);
+            crate::telemetry::BASE_REWARD.set(reward.0 as i64);
         }
         if self.emission + reward.0 > MAX_SUPPLY_BLOCK {
             reward = TokenAmount::new(MAX_SUPPLY_BLOCK - self.emission);
@@ -4576,7 +4576,7 @@ impl Blockchain {
         let ad_verifier_token = TokenAmount::new(ad_verifier_total);
         let ad_liquidity_token = TokenAmount::new(ad_liquidity_total);
         let ad_miner_token = TokenAmount::new(ad_miner_total);
-        let ad_total_ct = ad_viewer_total
+        let ad_total = ad_viewer_total
             .saturating_add(ad_host_total)
             .saturating_add(ad_hardware_total)
             .saturating_add(ad_verifier_total)
@@ -4584,7 +4584,7 @@ impl Blockchain {
             .saturating_add(ad_miner_total);
         self.economics_epoch_ad_payout_block = self
             .economics_epoch_ad_payout_block
-            .saturating_add(ad_total_ct);
+            .saturating_add(ad_total);
 
         self.settled_read_bytes = self.settled_read_bytes.saturating_add(delta_read_bytes);
         for (addr, total) in &self.epoch_viewer_bytes {
